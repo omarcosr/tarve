@@ -1,11 +1,12 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "pressable" | "icon" | "slider";
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
 export interface Style {
   width?: Length; height?: Length; minWidth?: Length; minHeight?: Length;
   maxWidth?: Length; maxHeight?: Length; flex?: number; shrink?: number;
+  position?: "relative" | "absolute"; top?: Length; right?: Length; bottom?: Length; left?: Length;
   direction?: "row" | "column"; wrap?: boolean; gap?: number;
   padding?: Insets; margin?: Insets; align?: "start" | "center" | "end" | "stretch";
   justify?: "start" | "center" | "end" | "between";
@@ -14,7 +15,7 @@ export interface Style {
   radius?: number; fontSize?: number; fontWeight?: number; fontFamily?: string;
   lineHeight?: number; textAlign?: "start" | "center" | "end";
   hoverBackground?: string; activeBackground?: string; focusColor?: string;
-  strokeWidth?: number;
+  strokeWidth?: number; pointerEvents?: "auto" | "block";
 }
 export interface Control {
   role: "button" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "slider";
@@ -27,6 +28,7 @@ export interface NativeNode {
   text?: string; src?: string; fit?: "cover" | "contain"; disabled?: boolean;
   value?: string; placeholder?: string;
   control?: Control;
+  modal?: boolean; focusable?: boolean;
 }
 export interface WindowOptions {
   title: string; width: number; height: number; minWidth: number; minHeight: number;
@@ -55,6 +57,7 @@ export interface Snapshot {
 }
 export type NativeEvent =
   | { type: "ready" | "closed" }
+  | { type: "escape" }
   | { type: "click"; id: string }
   | { type: "change"; id: string; value: string }
   | { type: "valueChange"; id: string; value: number }

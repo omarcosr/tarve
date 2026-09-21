@@ -2,7 +2,7 @@ import { PROTOCOL_VERSION, type NativeNode, type SceneDocument, type WindowOptio
 import { Fragment, type Child, type VNode } from "./jsx-runtime";
 import { theme } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
-export interface Handlers { onClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void }
+export interface Handlers { onClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onEscape?: () => void }
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode> }
 const kinds = new Set(["window", "view", "row", "column", "text", "button", "image", "scroll", "input", "pressable", "icon", "slider"]);
 function textContent(value: Child): string {
@@ -41,7 +41,7 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
       windowOptions = { title: p.title ?? "Tarve", width: p.width ?? 1120, height: p.height ?? 820,
         minWidth: p.minWidth ?? 780, minHeight: p.minHeight ?? 580, background: p.style?.background ?? theme.colors.background, debug };
     }
-    handlers.set(id, { onClick: p.onClick, onHover: p.onHover, onChange: p.onChange, onValueChange: p.onValueChange });
+    handlers.set(id, { onClick: p.onClick, onHover: p.onHover, onChange: p.onChange, onValueChange: p.onValueChange, onEscape: p.onEscape });
     const control = p.control ? { ...p.control } : undefined;
     const childGroup = control?.role === "radiogroup" || control?.role === "tablist" ? id : group;
     if (control && (control.role === "radio" || control.role === "tab")) control.group = group;
@@ -59,6 +59,8 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
       ...(p.value !== undefined ? { value: p.value } : {}),
       ...(p.placeholder !== undefined ? { placeholder: p.placeholder } : {}),
       ...(p.disabled !== undefined ? { disabled: p.disabled } : {}),
+      ...(p.modal !== undefined ? { modal: p.modal } : {}),
+      ...(p.focusable !== undefined ? { focusable: p.focusable } : {}),
     };
     nodes.set(id, node);
     return [node];
@@ -90,6 +92,7 @@ export function diffTrees(previous: CompiledTree, next: CompiledTree): NativeNod
       || old.children.some((child, index) => child.id !== node.children[index].id)) return null;
     if (old.text !== node.text || old.src !== node.src || old.fit !== node.fit
       || old.value !== node.value || old.placeholder !== node.placeholder || old.disabled !== node.disabled
+      || old.modal !== node.modal || old.focusable !== node.focusable
       || !sameFields(old.control ?? {}, node.control ?? {})
       || !sameStyle(old.style, node.style)) {
       changed.push({ ...node, children: [] });

@@ -3,7 +3,10 @@ use crate::{
     text::{TEXT_KEYS, TextEngine},
 };
 use serde_json::{Value, json};
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use taffy::prelude::*;
 use unicode_segmentation::UnicodeSegmentation;
 use vello::{
@@ -31,6 +34,11 @@ const LAYOUT_KEYS: &[&str] = &[
     "display",
     "columns",
     "borderWidth",
+    "position",
+    "top",
+    "right",
+    "bottom",
+    "left",
 ];
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -130,6 +138,7 @@ impl Tree {
                     .strip_suffix("::caret")
                     .is_some_and(|id| self.entries.contains_key(id))
         });
+        self.prune_images();
         self.prune_interaction();
     }
     fn insert(&mut self, mut node: Node, old: &mut HashMap<String, Entry>, parent: Option<&str>) {
@@ -240,8 +249,18 @@ impl Tree {
             let children = previous.children.clone();
             self.reconcile_node(node, children, Some(previous));
         }
+        self.prune_images();
         self.prune_interaction();
         Ok(())
+    }
+    fn prune_images(&mut self) {
+        let used: HashSet<String> = self
+            .entries
+            .values()
+            .filter(|entry| entry.node.kind == "image" && !entry.node.src.is_empty())
+            .map(|entry| entry.node.src.clone())
+            .collect();
+        self.images.retain(|src, _| used.contains(src));
     }
     pub fn compute(&mut self, width: f32, height: f32) -> Result<(), String> {
         if !self.dirty.layout && !self.dirty.text {
@@ -619,10 +638,13 @@ impl Tree {
                 return Some(id);
             }
         }
+        let blocks_pointer = entry.node.string("pointerEvents", "auto") == "block";
         let eligible = if scroll_only {
-            entry.node.kind == "scroll" && entry.scroll_max > 0.0
+            (entry.node.kind == "scroll" && entry.scroll_max > 0.0)
+                || blocks_pointer
+                || entry.node.modal
         } else {
-            entry.node.interactive()
+            entry.node.interactive() || blocks_pointer
         };
         (eligible && rect.contains(self.mouse)).then(|| id.to_string())
     }
@@ -646,14 +668,24 @@ impl Tree {
         true
     }
     fn focus_order(&self) -> Vec<String> {
+        let modal = self.active_modal();
         self.order
             .iter()
-            .filter(|id| self.interactive(id))
+            .filter(|id| {
+                self.interactive(id)
+                    && self.entries[*id].node.focusable
+                    && modal.is_none_or(|modal| self.is_descendant_of(id, modal))
+            })
             .cloned()
             .collect()
     }
     pub fn focus(&mut self, id: &str) {
-        if !self.interactive(id) || self.focused.as_deref() == Some(id) {
+        let modal = self.active_modal();
+        if !self.interactive(id)
+            || !self.entries[id].node.focusable
+            || modal.is_some_and(|modal| !self.is_descendant_of(id, modal))
+            || self.focused.as_deref() == Some(id)
+        {
             return;
         }
         self.focused = Some(id.to_string());
@@ -666,10 +698,14 @@ impl Tree {
             .hovered
             .as_deref()
             .is_some_and(|id| self.interactive(id));
-        let keep_focused = self
-            .focused
-            .as_deref()
-            .is_some_and(|id| self.interactive(id));
+        let modal = self.active_modal().map(str::to_string);
+        let keep_focused = self.focused.as_deref().is_some_and(|id| {
+            self.interactive(id)
+                && self.entries[id].node.focusable
+                && modal
+                    .as_deref()
+                    .is_none_or(|modal| self.is_descendant_of(id, modal))
+        });
         let keep_pressed = self
             .pressed
             .as_deref()
@@ -684,6 +720,11 @@ impl Tree {
             self.focused = None;
             self.caret = 0;
             self.select_all = false;
+            if modal.is_some()
+                && let Some(id) = self.focus_order().into_iter().next()
+            {
+                self.focused = Some(id);
+            }
         }
         if !keep_pressed {
             self.pressed = None;
@@ -691,6 +732,28 @@ impl Tree {
         if changed {
             self.dirty.paint = true;
         }
+    }
+
+    fn active_modal(&self) -> Option<&str> {
+        self.order
+            .iter()
+            .rev()
+            .find(|id| self.entries[*id].node.modal)
+            .map(String::as_str)
+    }
+
+    fn is_descendant_of(&self, id: &str, ancestor: &str) -> bool {
+        let mut current = Some(id);
+        while let Some(current_id) = current {
+            if current_id == ancestor {
+                return true;
+            }
+            current = self
+                .entries
+                .get(current_id)
+                .and_then(|entry| entry.parent.as_deref());
+        }
+        false
     }
     fn visible_rect(&self, id: &str) -> Option<BoxRect> {
         let entry = self.entries.get(id)?;
@@ -974,6 +1037,10 @@ impl Tree {
     pub fn layout_node_count(&self) -> usize {
         self.layout.total_node_count()
     }
+    #[cfg(test)]
+    pub(crate) fn image_cache_len(&self) -> usize {
+        self.images.len()
+    }
 }
 
 fn floor_boundary(value: &str, position: usize) -> usize {
@@ -1064,6 +1131,17 @@ fn layout_style(node: &Node) -> Style {
             FlexWrap::Wrap
         } else {
             FlexWrap::NoWrap
+        },
+        position: if node.string("position", "relative") == "absolute" {
+            Position::Absolute
+        } else {
+            Position::Relative
+        },
+        inset: Rect {
+            top: limit(&node.style["top"]),
+            right: limit(&node.style["right"]),
+            bottom: limit(&node.style["bottom"]),
+            left: limit(&node.style["left"]),
         },
         size: Size {
             width: dimension(&node.style["width"]),

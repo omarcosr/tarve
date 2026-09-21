@@ -60,6 +60,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (!started) rejectReady(error);
       if (options.onError) options.onError(error); else console.error(`[tarve] ${error.message}`);
     }
+    if (event.type === "escape") {
+      const handler = [...compiled.handlers.values()].reverse().find(item => item.onEscape)?.onEscape;
+      if (handler) { handler(); update(); }
+    }
     if ("requestId" in event) {
       const item = pending.get(event.requestId);
       if (item) { clearTimeout(item.timer); pending.delete(event.requestId); item.resolve(event); }

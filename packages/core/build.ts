@@ -1,6 +1,7 @@
 import type { BunPlugin } from "bun";
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nativePath, workerPath } from "#tarve/runtime";
 
@@ -23,12 +24,19 @@ export async function build(options: BuildOptions): Promise<string> {
   const outfile = resolve(options.outfile ?? `dist/${name}.exe`);
   const library = resolve(options.nativeLibrary ?? nativePath());
   const assetsModule = fileURLToPath(import.meta.resolve("#tarve/assets"));
+  const sourceDirectory = join(import.meta.dir, "src");
+  const repositorySource = existsSync(join(sourceDirectory, "index.ts"));
   const worker = await Bun.build({ entrypoints: [workerPath()], target: "bun", minify: true });
   if (!worker.success) throw new AggregateError(worker.logs, "Could not bundle the Tarve event Worker");
   const workerBytes = new Uint8Array(await worker.outputs[0].arrayBuffer());
   const runtime: BunPlugin = {
     name: "tarve-native-runtime",
     setup(builder) {
+      if (repositorySource) {
+        builder.onResolve({ filter: /^tarve$/ }, () => ({ path: join(sourceDirectory, "index.ts") }));
+        builder.onResolve({ filter: /^tarve\/jsx-runtime$/ }, () => ({ path: join(sourceDirectory, "jsx-runtime.ts") }));
+        builder.onResolve({ filter: /^tarve\/jsx-dev-runtime$/ }, () => ({ path: join(sourceDirectory, "jsx-dev-runtime.ts") }));
+      }
       builder.onResolve({ filter: /^#tarve\/runtime$/ }, () => ({ path: "runtime", namespace: "tarve" }));
       builder.onLoad({ filter: /^runtime$/, namespace: "tarve" }, () => ({
         loader: "ts",

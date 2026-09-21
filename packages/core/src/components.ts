@@ -1,5 +1,5 @@
 import type { Control, Style } from "../../protocol/src/index";
-import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
+import { Fragment, jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
 import { theme, buttonVariants, type ButtonVariant } from "./theme";
 export interface ViewProps extends BaseProps { gap?: number; padding?: Style["padding"]; flex?: number; align?: Style["align"]; justify?: Style["justify"] }
 function container(kind: string, props: ViewProps, defaults: Style = {}): VNode {
@@ -14,6 +14,7 @@ export function Row(props: ViewProps): VNode { return container("row", props, { 
 export function Column(props: ViewProps): VNode { return container("column", props, { direction: "column" }); }
 export interface PressableProps extends ViewProps {
   disabled?: boolean; onClick?: () => void; onHover?: (hovered: boolean) => void; control?: Control;
+  focusable?: boolean; onEscape?: () => void; modal?: boolean;
 }
 export function Pressable(props: PressableProps): VNode {
   return container("pressable", props, { radius: theme.radius.sm, focusColor: theme.colors.ring });
@@ -45,3 +46,80 @@ export function TextInput({ style, ...props }: TextInputProps): VNode {
     radius: theme.radius.sm, borderWidth: 1, borderColor: theme.colors.border, background: "#ffffff",
     foreground: theme.colors.foreground, fontFamily: theme.font.family, lineHeight: theme.font.lineHeight, fontSize: theme.font.size, focusColor: theme.colors.ring, ...style } });
 }
+
+export interface ModalProps extends BaseProps {
+  open: boolean;
+  onOpenChange?: (open: boolean) => void;
+  title?: string;
+  description?: string;
+  footer?: Child;
+  width?: number;
+  closeOnOverlay?: boolean;
+  closeOnEscape?: boolean;
+  showClose?: boolean;
+}
+
+export function Modal({
+  open,
+  onOpenChange,
+  title,
+  description,
+  footer,
+  width = 480,
+  closeOnOverlay = true,
+  closeOnEscape = true,
+  showClose = true,
+  children,
+  style,
+  ...props
+}: ModalProps): VNode {
+  if (!open) return jsx(Fragment, {});
+  const close = () => onOpenChange?.(false);
+  const modalId = props.id;
+  const header = title || description ? jsx(Column, {
+    gap: 6,
+    style: { padding: { right: showClose ? 28 : 0 } },
+    children: [
+      title ? jsx(Text, { size: 18, weight: 600, children: title }) : null,
+      description ? jsx(Text, { size: 14, color: theme.colors.mutedForeground, children: description }) : null,
+    ],
+  }) : null;
+  const closeButton = showClose ? jsx(Pressable, {
+    ...(modalId ? { id: `${modalId}-close` } : {}),
+    onClick: close,
+    control: { role: "button", label: "Close dialog" },
+    style: {
+      position: "absolute", top: 14, right: 14, width: 30, height: 30,
+      radius: theme.radius.sm, align: "center", justify: "center",
+      background: "#00000000", hoverBackground: theme.colors.muted,
+      activeBackground: theme.colors.border, focusColor: theme.colors.ring,
+    },
+    children: jsx(Icon, { name: "x", size: 16, color: theme.colors.mutedForeground }),
+  }) : null;
+  const footerNode = footer ? jsx(Row, { gap: 8, justify: "end", children: footer }) : null;
+  const panel = jsx(Column, {
+    ...(modalId ? { id: `${modalId}-content` } : {}),
+    style: {
+      position: "relative", width, maxWidth: "90%", background: theme.colors.card,
+      borderWidth: 1, borderColor: theme.colors.border, radius: theme.radius.lg,
+      padding: 24, gap: 20, pointerEvents: "block", ...style,
+    },
+    children: [header, closeButton, children, footerNode],
+  });
+  return jsx(Pressable, {
+    ...props,
+    modal: true,
+    focusable: false,
+    onClick: closeOnOverlay ? close : undefined,
+    onEscape: closeOnEscape ? close : undefined,
+    style: {
+      position: "absolute", top: 0, right: 0, bottom: 0, left: 0,
+      padding: 24, align: "center", justify: "center", background: "#00000066",
+      pointerEvents: "block",
+    },
+    children: panel,
+  });
+}
+
+export const Dialog = Modal;
+export type DialogProps = ModalProps;

@@ -2,12 +2,14 @@ import { strict as assert } from "node:assert";
 import { mkdir, mkdtemp, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { build } from "../packages/core/build";
+import { buildNative } from "./native";
 
 const root = resolve(import.meta.dir, "..");
 await mkdir(join(root, "work"), { recursive: true });
 const directory = await mkdtemp(join(root, "work/exe smoke "));
 const executable = join(directory, "Tarve.exe");
-await build({ entrypoint: join(root, "scripts/exe-smoke-entry.ts"), outfile: executable, nativeLibrary: join(root, "native/target/release/tarve_native.dll"), name: "Tarve verification" });
+const nativeLibrary = await buildNative(true);
+await build({ entrypoint: join(root, "scripts/exe-smoke-entry.ts"), outfile: executable, nativeLibrary, name: "Tarve verification" });
 assert.deepEqual(await readdir(directory), ["Tarve.exe"], "The distribution must contain only the EXE");
 const reportPath = join(directory, "report.json");
 const cache = join(directory, "runtime-cache");

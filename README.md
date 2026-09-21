@@ -34,6 +34,39 @@ Configure `tsconfig.json` com `"jsx": "react-jsx"`, `"jsxImportSource": "tarve"`
 
 `examples/counter.tsx` mostra o app mínimo e `examples/basic.tsx` reúne os componentes iniciais. Exemplos usam a mesma API instalada, sem configurar a DLL ou o Worker.
 
+`examples/` também funciona como uma pasta executável independente durante o desenvolvimento:
+
+```powershell
+cd A:\tarve\examples
+bun run counter.tsx
+bun run basic.tsx
+
+# Builds standalone de produção a partir da própria pasta de exemplos:
+bun run build:counter
+bun run build:basic
+```
+
+Os executáveis são gerados em `examples/dist/`. O `tsconfig.json` local apenas herda a configuração do projeto; os arquivos `.tsx` continuam sendo exemplos normais que importam a API pública `tarve`.
+
+### Modal / Dialog
+
+`Modal` segue o visual padrão do shadcn e também é exportado como `Dialog`. Ele usa overlay nativo, posicionamento absoluto, focus trap, bloqueio de scroll do conteúdo de fundo e dismiss por `Escape`, backdrop ou botão de fechar.
+
+```tsx
+let open = false;
+
+<Button onClick={() => { open = true; }}>Open dialog</Button>
+<Modal
+  open={open}
+  onOpenChange={(value) => { open = value; }}
+  title="Create project"
+  description="Start a new project in your workspace."
+  footer={<Button onClick={() => { open = false; }}>Create project</Button>}
+>
+  <TextInput placeholder="Project name" />
+</Modal>
+```
+
 ```powershell
 bun run check           # TypeScript
 bun run test            # TSX/protocolo, layout, dirty flags e input

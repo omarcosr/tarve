@@ -1,77 +1,145 @@
-use std::sync::Arc;
-use vello::{
-    AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene,
-    util::{RenderContext, RenderSurface},
-    wgpu,
-};
+use std::{num::NonZeroUsize, sync::Arc};
+use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene, wgpu};
 use winit::window::Window;
 
 pub struct Graphics {
-    // Drop the surface before the context; the surface itself owns an Arc<Window>.
-    surface: RenderSurface<'static>,
+    // Keep surface before instance so it is dropped first.
+    surface: wgpu::Surface<'static>,
+    config: wgpu::SurfaceConfiguration,
+    target_texture: wgpu::Texture,
+    target_view: wgpu::TextureView,
+    blitter: wgpu::util::TextureBlitter,
     renderer: Renderer,
-    context: RenderContext,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    _instance: wgpu::Instance,
     pub frames: u64,
 }
 impl Graphics {
     pub fn new(window: Arc<Window>) -> Result<Self, String> {
-        let mut context = RenderContext::new();
+        if std::env::var_os("WGPU_BACKEND").is_some() {
+            return Self::new_with_backends(window, None);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            return Self::new_with_backends(window.clone(), Some(wgpu::Backends::VULKAN))
+                .or_else(|vulkan_error| {
+                    Self::new_with_backends(window, Some(wgpu::Backends::DX12))
+                        .map_err(|dx12_error| format!("Vulkan renderer failed: {vulkan_error}; DX12 renderer failed: {dx12_error}"))
+                });
+        }
+        #[cfg(not(target_os = "windows"))]
+        Self::new_with_backends(window, None)
+    }
+
+    fn new_with_backends(
+        window: Arc<Window>,
+        backends: Option<wgpu::Backends>,
+    ) -> Result<Self, String> {
+        let backends = backends.unwrap_or_else(|| wgpu::Backends::from_env().unwrap_or_default());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            display: None,
+            backends,
+            flags: wgpu::InstanceFlags::from_build_config().with_env(),
+            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+            backend_options: wgpu::BackendOptions::from_env_or_default(),
+        });
         let size = window.inner_size();
-        let surface = pollster::block_on(context.create_surface(
-            window,
-            size.width.max(1),
-            size.height.max(1),
-            wgpu::PresentMode::AutoVsync,
+        let surface = instance.create_surface(window).map_err(|e| e.to_string())?;
+        let adapter = pollster::block_on(wgpu::util::initialize_adapter_from_env_or_default(
+            &instance,
+            Some(&surface),
         ))
         .map_err(|e| e.to_string())?;
-        let device = &context.devices[surface.dev_id].device;
+        let optional_features = wgpu::Features::CLEAR_TEXTURE | wgpu::Features::PIPELINE_CACHE;
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: None,
+            required_features: adapter.features() & optional_features,
+            required_limits: wgpu::Limits::default(),
+            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            ..Default::default()
+        }))
+        .map_err(|e| e.to_string())?;
+        let capabilities = surface.get_capabilities(&adapter);
+        let format = capabilities
+            .formats
+            .into_iter()
+            .find(|format| {
+                matches!(
+                    format,
+                    wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Bgra8Unorm
+                )
+            })
+            .ok_or("No supported surface format")?;
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: size.width.max(1),
+            height: size.height.max(1),
+            present_mode: wgpu::PresentMode::AutoVsync,
+            desired_maximum_frame_latency: 2,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![],
+        };
+        let (target_texture, target_view) = create_targets(config.width, config.height, &device);
+        let blitter = wgpu::util::TextureBlitter::new(&device, format);
+        surface.configure(&device, &config);
         let renderer = Renderer::new(
-            device,
+            &device,
             RendererOptions {
                 antialiasing_support: AaSupport::area_only(),
+                num_init_threads: NonZeroUsize::new(1),
                 ..Default::default()
             },
         )
         .map_err(|e| e.to_string())?;
         Ok(Self {
             surface,
+            config,
+            target_texture,
+            target_view,
+            blitter,
             renderer,
-            context,
+            device,
+            queue,
+            _instance: instance,
             frames: 0,
         })
     }
-    pub fn resize(&mut self, width: u32, height: u32) {
-        if width > 0 && height > 0 {
-            self.context
-                .resize_surface(&mut self.surface, width, height);
+    pub fn resize(&mut self, width: u32, height: u32) -> bool {
+        if width > 0 && height > 0 && (self.config.width != width || self.config.height != height) {
+            (self.target_texture, self.target_view) = create_targets(width, height, &self.device);
+            self.config.width = width;
+            self.config.height = height;
+            self.surface.configure(&self.device, &self.config);
+            return true;
         }
+        false
     }
     pub fn render(
         &mut self,
         scene: &Scene,
         background: vello::peniko::Color,
     ) -> Result<(), String> {
-        let surface = &self.surface;
-        let device = &self.context.devices[surface.dev_id];
         self.renderer
             .render_to_texture(
-                &device.device,
-                &device.queue,
+                &self.device,
+                &self.queue,
                 scene,
-                &surface.target_view,
+                &self.target_view,
                 &RenderParams {
                     base_color: background,
-                    width: surface.config.width,
-                    height: surface.config.height,
+                    width: self.config.width,
+                    height: self.config.height,
                     antialiasing_method: AaConfig::Area,
                 },
             )
             .map_err(|e| e.to_string())?;
-        let frame = match surface.surface.get_current_texture() {
+        let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
             wgpu::CurrentSurfaceTexture::Outdated => {
-                self.context.configure_surface(surface);
+                self.surface.configure(&self.device, &self.config);
                 return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
@@ -82,11 +150,10 @@ impl Graphics {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder = device.device.create_command_encoder(&Default::default());
-        surface
-            .blitter
-            .copy(&device.device, &mut encoder, &surface.target_view, &view);
-        device.queue.submit([encoder.finish()]);
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        self.blitter
+            .copy(&self.device, &mut encoder, &self.target_view, &view);
+        self.queue.submit([encoder.finish()]);
         frame.present();
         self.frames += 1;
         Ok(())
@@ -98,9 +165,8 @@ impl Graphics {
         background: vello::peniko::Color,
         path: &str,
     ) -> Result<(), String> {
-        let device = &self.context.devices[self.surface.dev_id];
-        let (width, height) = (self.surface.config.width, self.surface.config.height);
-        let texture = device.device.create_texture(&wgpu::TextureDescriptor {
+        let (width, height) = (self.config.width, self.config.height);
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("tarve-capture"),
             size: wgpu::Extent3d {
                 width,
@@ -116,8 +182,8 @@ impl Graphics {
         });
         self.renderer
             .render_to_texture(
-                &device.device,
-                &device.queue,
+                &self.device,
+                &self.queue,
                 scene,
                 &texture.create_view(&Default::default()),
                 &RenderParams {
@@ -129,13 +195,13 @@ impl Graphics {
             )
             .map_err(|e| e.to_string())?;
         let pitch = (width * 4).div_ceil(256) * 256;
-        let buffer = device.device.create_buffer(&wgpu::BufferDescriptor {
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("tarve-readback"),
             size: (pitch * height) as u64,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
-        let mut encoder = device.device.create_command_encoder(&Default::default());
+        let mut encoder = self.device.create_command_encoder(&Default::default());
         encoder.copy_texture_to_buffer(
             texture.as_image_copy(),
             wgpu::TexelCopyBufferInfo {
@@ -152,15 +218,14 @@ impl Graphics {
                 depth_or_array_layers: 1,
             },
         );
-        device.queue.submit([encoder.finish()]);
+        self.queue.submit([encoder.finish()]);
         let (tx, rx) = std::sync::mpsc::channel();
         buffer
             .slice(..)
             .map_async(wgpu::MapMode::Read, move |result| {
                 let _ = tx.send(result);
             });
-        device
-            .device
+        self.device
             .poll(wgpu::PollType::wait_indefinitely())
             .map_err(|e| e.to_string())?;
         rx.recv()
@@ -177,4 +242,27 @@ impl Graphics {
         buffer.unmap();
         Ok(())
     }
+}
+
+fn create_targets(
+    width: u32,
+    height: u32,
+    device: &wgpu::Device,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
 }

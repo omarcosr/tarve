@@ -1,4 +1,4 @@
-import { App } from "../examples/basic";
+import { App } from "../examples/basic-view";
 import { createApp } from "@tarve/core";
 import { verifyExecutable } from "./verify-executable";
 

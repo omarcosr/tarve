@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { App } from "../examples/basic";
+import { App } from "../examples/basic-view";
 import { createApp } from "@tarve/core";
 import type { Snapshot, NodeSnapshot, NativeEvent } from "@tarve/protocol";
 
@@ -45,6 +45,23 @@ try {
   for (const [id, expected] of [["variant-default", "Primary"], ["variant-secondary", "Secondary"], ["variant-outline", "Outline"], ["variant-ghost", "Ghost"], ["variant-destructive", "Destructive"]]) {
     assert(node(await click(id), "save-status").text.startsWith(expected), `${id} must dispatch click`);
   }
+  const modal = await click("open-modal");
+  assert(node(modal, "demo-modal").width > 800, "Modal overlay must cover the window");
+  assert(node(modal, "demo-modal-content").width <= 480, "Modal content must keep its shadcn-sized panel");
+  assert.equal(modal.focused, "demo-modal-close", "Opening a modal must move focus into the dialog");
+  await app.capture(resolve("work/modal.png"));
+  app.debug({ type: "input", action: "key", text: "Escape" });
+  const escaped = await settle();
+  assert(!escaped.nodes.some(item => item.id === "demo-modal"), "Escape must close the modal");
+  await click("open-modal");
+  const closeButton = await click("demo-modal-close");
+  assert(!closeButton.nodes.some(item => item.id === "demo-modal"), "Close button must dismiss the modal");
+  await click("open-modal");
+  app.debug({ type: "input", action: "move", x: 8, y: 8 });
+  app.debug({ type: "input", action: "down" });
+  app.debug({ type: "input", action: "up" });
+  const backdropClosed = await settle();
+  assert(!backdropClosed.nodes.some(item => item.id === "demo-modal"), "Backdrop click must close the modal");
   const beforeDisabled = events.filter(e => e.type === "click").length;
   await click("disabled-button");
   assert.equal(events.filter(e => e.type === "click").length, beforeDisabled, "Disabled button must ignore click");
@@ -90,7 +107,7 @@ try {
   assert.equal(idleAfter.layouts, idleBefore.layouts);
   assert.equal(idleAfter.paints, idleBefore.paints);
   assert.deepEqual(errors, [], "Native runtime must not report errors");
-  console.log(JSON.stringify({ result: "PASS", initialFrames: initial.frames, nodes: initial.nodes.length, layouts: idleAfter.layouts, paints: idleAfter.paints, idleFrames: idleAfter.frames - idleBefore.frames, verified: ["FFI Worker", "Vello GPU", "Parley shaping", "Taffy Flex/Grid", "hover paint-only", "all button variants", "disabled button", "Bun state roundtrip", "Unicode input", "scroll clipping", "resize", "idle event loop", "local PNG"], captures: "work/*.png" }, null, 2));
+  console.log(JSON.stringify({ result: "PASS", initialFrames: initial.frames, nodes: initial.nodes.length, layouts: idleAfter.layouts, paints: idleAfter.paints, idleFrames: idleAfter.frames - idleBefore.frames, verified: ["FFI Worker", "Vello GPU", "Parley shaping", "Taffy Flex/Grid", "hover paint-only", "all button variants", "shadcn modal", "modal focus trap", "Escape/backdrop dismiss", "disabled button", "Bun state roundtrip", "Unicode input", "scroll clipping", "resize", "idle event loop", "local PNG"], captures: "work/*.png" }, null, 2));
 } finally {
   app.close();
   await app.closed;

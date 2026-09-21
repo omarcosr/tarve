@@ -107,6 +107,17 @@ impl App {
             window.request_redraw();
         }
     }
+    fn present(&mut self) -> Result<(), String> {
+        self.graphics
+            .as_mut()
+            .ok_or("Renderer not ready".to_string())?
+            .render(&self.scene, color(&self.document.window.background))?;
+        if self.document.window.debug {
+            self.events
+                .push(json!({"type":"frame", "frames":self.graphics.as_ref().unwrap().frames}));
+        }
+        Ok(())
+    }
     fn prepare(&mut self) -> Result<(), String> {
         let Some(window) = &self.window else {
             return Ok(());
@@ -164,16 +175,35 @@ impl ApplicationHandler<Command> for App {
             .with_title(&options.title)
             .with_inner_size(LogicalSize::new(options.width, options.height))
             .with_min_inner_size(LogicalSize::new(options.min_width, options.min_height))
-            .with_resizable(true);
+            .with_resizable(true)
+            .with_visible(false);
         match event_loop.create_window(attributes) {
             Ok(window) => {
                 let window = Arc::new(window);
                 match Graphics::new(window.clone()) {
                     Ok(graphics) => {
                         self.graphics = Some(graphics);
-                        self.window = Some(window);
+                        self.window = Some(window.clone());
+                        if let Err(error) = self.prepare() {
+                            self.fail(event_loop, error);
+                            return;
+                        }
+                        // Keep the HWND hidden while WGPU, layout, text and the first scene are
+                        // prepared. Making it visible immediately before the synchronous present
+                        // prevents Windows from compositing an empty client area on startup.
+                        window.set_visible(true);
+                        if let Err(error) = self.present() {
+                            self.fail(event_loop, error);
+                            return;
+                        }
                         self.events.push(json!({"type":"ready"}));
-                        self.redraw();
+                        if self
+                            .graphics
+                            .as_ref()
+                            .is_some_and(|graphics| graphics.frames == 0)
+                        {
+                            self.redraw();
+                        }
                     }
                     Err(error) => self.fail(event_loop, error),
                 }
@@ -247,6 +277,9 @@ impl ApplicationHandler<Command> for App {
                         vec![]
                     }
                     "text" => self.tree.type_text(text.as_deref().unwrap_or("")),
+                    "key" if text.as_deref() == Some("Escape") => {
+                        vec![json!({"type":"escape"})]
+                    }
                     "key" => self.tree.key(text.as_deref().unwrap_or("")),
                     _ => vec![],
                 };
@@ -264,11 +297,14 @@ impl ApplicationHandler<Command> for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
-                if let Some(graphics) = &mut self.graphics {
-                    graphics.resize(size.width, size.height);
+                if self
+                    .graphics
+                    .as_mut()
+                    .is_some_and(|graphics| graphics.resize(size.width, size.height))
+                {
+                    self.tree.dirty.layout = true;
+                    self.tree.dirty.paint = true;
                 }
-                self.tree.dirty.layout = true;
-                self.tree.dirty.paint = true;
             }
             WindowEvent::ScaleFactorChanged { .. } => {
                 self.tree.dirty.layout = true;
@@ -282,18 +318,9 @@ impl ApplicationHandler<Command> for App {
                 {
                     return;
                 }
-                let result = self.prepare().and_then(|_| {
-                    self.graphics
-                        .as_mut()
-                        .ok_or("Renderer not ready".to_string())?
-                        .render(&self.scene, color(&self.document.window.background))
-                });
+                let result = self.prepare().and_then(|_| self.present());
                 if let Err(error) = result {
                     self.fail(event_loop, error);
-                } else if self.document.window.debug {
-                    self.events.push(
-                        json!({"type":"frame", "frames":self.graphics.as_ref().unwrap().frames}),
-                    );
                 }
                 return;
             }
@@ -341,6 +368,10 @@ impl ApplicationHandler<Command> for App {
                     Key::Named(NamedKey::ArrowRight) => Some("ArrowRight"),
                     Key::Named(NamedKey::Home) => Some("Home"),
                     Key::Named(NamedKey::End) => Some("End"),
+                    Key::Named(NamedKey::Escape) => {
+                        events.push(json!({"type":"escape"}));
+                        None
+                    }
                     Key::Character(value)
                         if self.modifiers.control_key() && value.eq_ignore_ascii_case("a") =>
                     {

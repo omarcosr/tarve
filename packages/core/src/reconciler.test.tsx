@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Window, Column, Text, Button, TextInput } from "./components";
+import { Window, Column, Text, Button, TextInput, Modal } from "./components";
 import { compileTree, diffTrees } from "./reconciler";
 
 describe("native TSX protocol", () => {
@@ -38,5 +38,27 @@ describe("native TSX protocol", () => {
     const before = view();
     padding.left = 20;
     expect(diffTrees(before, view())?.map(node => node.id)).toEqual(["column"]);
+  });
+  test("modal compiles as an absolute focus scope with dismiss handlers", () => {
+    let open = true;
+    const tree = compileTree(
+      <Window>
+        <Button id="behind">Behind</Button>
+        <Modal id="dialog" open={open} title="Dialog" onOpenChange={(value) => { open = value; }}>
+          <TextInput id="dialog-input" />
+        </Modal>
+      </Window>,
+    );
+    const dialog = tree.nodes.get("dialog")!;
+    expect(dialog.kind).toBe("pressable");
+    expect(dialog.modal).toBe(true);
+    expect(dialog.focusable).toBe(false);
+    expect(dialog.style.position).toBe("absolute");
+    expect(dialog.style.top).toBe(0);
+    expect(dialog.style.right).toBe(0);
+    expect(dialog.style.bottom).toBe(0);
+    expect(dialog.style.left).toBe(0);
+    tree.handlers.get("dialog")?.onEscape?.();
+    expect(open).toBe(false);
   });
 });

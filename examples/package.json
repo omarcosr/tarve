@@ -1,0 +1,11 @@
+{
+  "name": "@tarve/examples",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "basic": "bun basic.tsx",
+    "counter": "bun counter.tsx",
+    "build:basic": "bun ../scripts/build.ts --exe --entry basic.tsx --outfile dist/Basic.exe",
+    "build:counter": "bun ../scripts/build.ts --exe --entry counter.tsx --outfile dist/Counter.exe"
+  }
+}

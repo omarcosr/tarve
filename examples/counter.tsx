@@ -13,4 +13,4 @@ export function Counter() {
     </Column>
   </Window>;
 }
-if (import.meta.main) await render(Counter);
+await render(Counter);

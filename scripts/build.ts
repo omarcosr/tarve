@@ -9,11 +9,13 @@ import { buildNative } from "./native";
 const root = resolve(import.meta.dir, "..");
 const { values } = parseArgs({ args: process.argv.slice(2), options: {
   exe: { type: "boolean" }, release: { type: "boolean" },
-  entry: { type: "string", default: "examples/basic.tsx" },
-  outfile: { type: "string", default: "dist/Tarve.exe" },
+  entry: { type: "string" },
+  outfile: { type: "string" },
 } });
 const executable = values.exe;
 const release = !!(executable || values.release);
+const entrypoint = values.entry ? resolve(process.cwd(), values.entry) : join(root, "examples/basic.tsx");
+const outfile = values.outfile ? resolve(process.cwd(), values.outfile) : join(root, "dist/Tarve.exe");
 if (executable && (process.platform !== "win32" || process.arch !== "x64")) {
   throw new Error("The production executable currently targets Windows x64. Build it on Windows x64.");
 }
@@ -32,8 +34,8 @@ if (!release) {
 } else if (executable) {
   await mkdir(join(root, "dist"), { recursive: true });
   const metadata = await Bun.file(join(root, "package.json")).json();
-  const outfile = await build({ entrypoint: resolve(root, values.entry), outfile: resolve(root, values.outfile), name: "Tarve", version: metadata.version, nativeLibrary: nativeArtifact });
-  console.log(`Standalone Windows executable: ${outfile}`);
+  const result = await build({ entrypoint, outfile, name: parse(outfile).name, version: metadata.version, nativeLibrary: nativeArtifact });
+  console.log(`Standalone Windows executable: ${result}`);
 } else {
   await mkdir(join(root, "dist/assets"), { recursive: true });
   for (const [entry, naming] of [["examples/basic.tsx", "basic.js"], ["packages/core/src/bridge/event-worker.ts", "event-worker.js"]]) {

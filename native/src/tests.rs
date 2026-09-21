@@ -204,3 +204,96 @@ fn property_patches_preserve_children_and_reject_invalid_batches_atomically() {
     assert_eq!(tree.layout_nodes_created, created);
     assert_eq!(tree.layout_node_count(), 3);
 }
+
+#[test]
+fn removed_images_are_released_from_cache() {
+    let path = std::env::temp_dir().join(format!("tarve-image-cache-{}.png", std::process::id()));
+    image::RgbaImage::new(4, 4).save(&path).unwrap();
+    let mut image = node("image", "image", json!({"width":4,"height":4}), vec![]);
+    image.src = path.to_string_lossy().into_owned();
+    let mut tree = Tree::new(root(vec![image]));
+    assert_eq!(tree.image_cache_len(), 1);
+    tree.update(root(vec![]));
+    assert_eq!(tree.image_cache_len(), 0);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn modal_overlay_is_absolute_blocks_background_and_traps_focus() {
+    let trigger = node("trigger", "button", json!({"height":36}), vec![]);
+    let background_scroll = node(
+        "background-scroll",
+        "scroll",
+        json!({"height":264}),
+        vec![node(
+            "tall",
+            "view",
+            json!({"height":600,"shrink":0}),
+            vec![],
+        )],
+    );
+    let close = node(
+        "close",
+        "button",
+        json!({"position":"absolute","top":8,"right":8,"width":30,"height":30}),
+        vec![],
+    );
+    let panel = node(
+        "panel",
+        "column",
+        json!({"width":200,"height":120,"pointerEvents":"block"}),
+        vec![close],
+    );
+    let mut modal = node(
+        "modal",
+        "pressable",
+        json!({
+            "position":"absolute","top":0,"right":0,"bottom":0,"left":0,
+            "align":"center","justify":"center"
+        }),
+        vec![panel],
+    );
+    modal.modal = true;
+    modal.focusable = false;
+    let mut tree = Tree::new(root(vec![trigger, background_scroll, modal]));
+    tree.compute(400.0, 300.0).unwrap();
+    assert_eq!(tree.entries["modal"].rect.width(), 400.0);
+    assert_eq!(tree.entries["modal"].rect.height(), 300.0);
+    assert_eq!(
+        tree.entries["trigger"].rect.y0, 0.0,
+        "absolute modal must not move page content"
+    );
+    assert_eq!(
+        tree.focused.as_deref(),
+        Some("close"),
+        "modal should focus its first control"
+    );
+    tree.key("Tab");
+    assert_eq!(
+        tree.focused.as_deref(),
+        Some("close"),
+        "Tab must not escape the active modal"
+    );
+
+    tree.pointer_move(200.0, 150.0);
+    assert_eq!(
+        tree.hovered.as_deref(),
+        Some("panel"),
+        "blank panel area must block the backdrop"
+    );
+    tree.pointer_down();
+    assert!(tree.pointer_up().is_empty());
+
+    tree.pointer_move(10.0, 10.0);
+    tree.pointer_down();
+    let events = tree.pointer_up();
+    assert_eq!(events[0]["type"], "click");
+    assert_eq!(events[0]["id"], "modal");
+
+    tree.pointer_move(10.0, 250.0);
+    tree.wheel(120.0);
+    assert_eq!(
+        tree.entries["background-scroll"].scroll, 0.0,
+        "wheel input must not reach scroll containers behind a modal"
+    );
+}

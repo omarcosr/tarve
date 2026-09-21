@@ -1,5 +1,5 @@
-export { Window, View, Row, Column, Text, Button, Image, Scroll, TextInput } from "./components";
-export type { WindowProps, ViewProps, TextProps, ButtonProps, ImageProps, TextInputProps } from "./components";
+export { Window, View, Row, Column, Text, Button, Image, Scroll, TextInput, Modal, Dialog } from "./components";
+export type { WindowProps, ViewProps, TextProps, ButtonProps, ImageProps, TextInputProps, ModalProps, DialogProps } from "./components";
 export { createApp, render } from "./app";
 export type { AppHandle, AppOptions } from "./app";
 export { theme, buttonVariants } from "./theme";

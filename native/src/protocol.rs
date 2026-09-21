@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
 fn range_max() -> f64 {
     100.0
@@ -53,6 +53,14 @@ pub struct Node {
     #[serde(default)]
     pub placeholder: String,
     pub control: Option<Control>,
+    #[serde(default)]
+    pub modal: bool,
+    #[serde(default = "default_true")]
+    pub focusable: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Node {

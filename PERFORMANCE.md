@@ -14,7 +14,18 @@ Windows x64, Bun 1.4.1, AMD Ryzen 7 9800X3D. The workload contains 2,000 rows / 
 | Scroll, p95 | 1.97 ms | 1.28 ms |
 | New frames while idle | 0 | 0 |
 
-These are input/update dispatch to native frame-notification times, including Bun/FFI and presentation scheduling. They are not photon latency, universal FPS guarantees, or results from other hardware. The first window took about 932 ms to initialize in the latest run.
+These are input/update dispatch to native frame-notification times, including Bun/FFI and presentation scheduling. They are not photon latency, universal FPS guarantees, or results from other hardware. After hiding the HWND until its first populated frame and preferring Vulkan with DX12 fallback on Windows, the first window took about 432–451 ms across the latest three release runs. With the lower-memory wgpu device configuration, warmed startup is about 476–481 ms.
+
+## Memory
+
+Windows x64 measurements after 1.8 s idle, using the standalone release executables and Vulkan:
+
+| Example | Working set | Private bytes |
+| --- | ---: | ---: |
+| Counter | ~203 MB | ~537 MB |
+| Basic | ~207–215 MB | ~597 MB |
+
+Before requesting wgpu's memory-oriented allocation strategy and limiting Vello shader initialization to one thread, the Counter executable measured about 266 MB working set / 842 MB private bytes. The Bun event Worker itself adds roughly 16 MB working set and 40 MB private bytes in an isolated process test; removing it would require a different native event-delivery mechanism rather than polling.
 
 ## Implemented
 
@@ -24,6 +35,8 @@ These are input/update dispatch to native frame-notification times, including Bu
 - Layout, text and paint invalidation remain separate; hover and scrolling do not recalculate layout.
 - Paint and hit testing discard subtrees outside the current clipping region.
 - Local asset extraction is cached per process. No filesystem reads are required for those assets during subsequent tree updates.
+- Decoded image cache entries are released when the corresponding image nodes leave the retained tree.
+- The Windows renderer requests wgpu's memory-oriented allocation strategy and uses one Vello shader-initialization thread.
 - The event loop sleeps when idle. The event Worker waits on a native condition variable.
 
 ## Remaining work
