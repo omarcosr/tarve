@@ -2226,6 +2226,7 @@ dependencies = [
  "taffy",
  "unicode-segmentation",
  "vello",
+ "windows-sys 0.61.2",
  "winit",
 ]
 

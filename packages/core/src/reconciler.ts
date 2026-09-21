@@ -4,7 +4,7 @@ import { theme } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
 export interface Handlers { onClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onEscape?: () => void }
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode> }
-const kinds = new Set(["window", "view", "row", "column", "text", "button", "image", "scroll", "input", "pressable", "icon", "slider"]);
+const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "button", "image", "scroll", "input", "pressable", "icon", "slider"]);
 function textContent(value: Child): string {
   if (Array.isArray(value)) return value.map(textContent).join("");
   if (value == null || typeof value === "boolean") return "";
@@ -39,7 +39,8 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
     if (child.type === "window") {
       if (windowOptions) throw new Error("This bootstrap supports one Window per app.");
       windowOptions = { title: p.title ?? "Tarve", width: p.width ?? 1120, height: p.height ?? 820,
-        minWidth: p.minWidth ?? 780, minHeight: p.minHeight ?? 580, background: p.style?.background ?? theme.colors.background, debug };
+        minWidth: p.minWidth ?? 780, minHeight: p.minHeight ?? 580, background: p.style?.background ?? theme.colors.background,
+        decorations: true, resizable: p.resizable ?? true, debug };
     }
     handlers.set(id, { onClick: p.onClick, onHover: p.onHover, onChange: p.onChange, onValueChange: p.onValueChange, onEscape: p.onEscape });
     const control = p.control ? { ...p.control } : undefined;
@@ -61,12 +62,22 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
       ...(p.disabled !== undefined ? { disabled: p.disabled } : {}),
       ...(p.modal !== undefined ? { modal: p.modal } : {}),
       ...(p.focusable !== undefined ? { focusable: p.focusable } : {}),
+      ...(p.dragRegion !== undefined ? { dragRegion: p.dragRegion } : {}),
+      ...(p.windowAction !== undefined ? { windowAction: p.windowAction } : {}),
     };
     nodes.set(id, node);
     return [node];
   }
   const roots = visit(element, "root");
   if (roots.length !== 1 || roots[0].kind !== "window" || !windowOptions) throw new Error("render() requires one Window root.");
+  const titleBars = [...nodes.values()].filter(node => node.kind === "titlebar");
+  if (titleBars.length > 1) throw new Error("Window can contain only one TitleBar.");
+  if (titleBars.length === 1) {
+    windowOptions.decorations = false;
+    roots[0].style.borderWidth ??= 1;
+    roots[0].style.borderColor ??= theme.colors.border;
+    roots[0].style.radius ??= theme.radius.md;
+  }
   return { document: { version: PROTOCOL_VERSION, window: windowOptions, root: roots[0] }, handlers, nodes };
 }
 
@@ -93,6 +104,7 @@ export function diffTrees(previous: CompiledTree, next: CompiledTree): NativeNod
     if (old.text !== node.text || old.src !== node.src || old.fit !== node.fit
       || old.value !== node.value || old.placeholder !== node.placeholder || old.disabled !== node.disabled
       || old.modal !== node.modal || old.focusable !== node.focusable
+      || old.dragRegion !== node.dragRegion || old.windowAction !== node.windowAction
       || !sameFields(old.control ?? {}, node.control ?? {})
       || !sameStyle(old.style, node.style)) {
       changed.push({ ...node, children: [] });

@@ -7,6 +7,7 @@ import {
   Scroll,
   Text,
   TextInput,
+  TitleBar,
   View,
   Window,
   theme,
@@ -65,6 +66,7 @@ export function App() {
       minWidth={860}
       minHeight={640}
     >
+      <TitleBar title="Tarve — Native workspace" />
       <Row
         style={{
           height: 70,

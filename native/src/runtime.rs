@@ -5,15 +5,68 @@ use crate::{
     tree::{Tree, color},
 };
 use serde_json::json;
-use std::sync::{Arc, mpsc::SyncSender};
+use std::{
+    sync::{Arc, mpsc::SyncSender},
+    time::{Duration, Instant},
+};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalPosition, LogicalSize},
     event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     keyboard::{Key, ModifiersState, NamedKey},
-    window::{CursorIcon, Window, WindowId},
+    window::{CursorIcon, ResizeDirection, Window, WindowId},
 };
+
+#[cfg(target_os = "windows")]
+fn configure_custom_window_chrome(window: &Window) -> Result<(), String> {
+    use std::{ffi::c_void, mem::size_of};
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
+    };
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let handle = window.window_handle().map_err(|error| error.to_string())?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return Err("Expected a Win32 window handle".into());
+    };
+    let hwnd = handle.hwnd.get() as *mut c_void;
+    let corner = DWMWCP_ROUND;
+    // COLORREF is 0x00BBGGRR. This is shadcn/zinc's #e4e4e7 border color.
+    let border_color: u32 = 0x00E7E4E4;
+    unsafe {
+        let corner_result = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            (&corner as *const _) as *const c_void,
+            size_of_val(&corner) as u32,
+        );
+        if corner_result < 0 {
+            return Err(format!(
+                "DwmSetWindowAttribute(corner) failed: 0x{:08x}",
+                corner_result as u32
+            ));
+        }
+        let border_result = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR as u32,
+            (&border_color as *const _) as *const c_void,
+            size_of::<u32>() as u32,
+        );
+        if border_result < 0 {
+            return Err(format!(
+                "DwmSetWindowAttribute(border) failed: 0x{:08x}",
+                border_result as u32
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn configure_custom_window_chrome(_: &Window) -> Result<(), String> {
+    Ok(())
+}
 
 pub fn run(
     document: Document,
@@ -47,6 +100,7 @@ pub fn run(
         scene: vello::Scene::new(),
         fatal: None,
         ime_preedit: false,
+        last_titlebar_click: None,
     };
     event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
     if let Some(error) = app.fatal {
@@ -65,6 +119,7 @@ struct App {
     scene: vello::Scene,
     fatal: Option<String>,
     ime_preedit: bool,
+    last_titlebar_click: Option<(Instant, (f64, f64))>,
 }
 impl App {
     fn clipboard_shortcut(&mut self, key: &Key) -> Vec<serde_json::Value> {
@@ -139,13 +194,17 @@ impl App {
     }
     fn sync_cursor(&self) {
         if let Some(window) = &self.window {
+            if let Some(direction) = self.resize_direction() {
+                window.set_cursor(CursorIcon::from(direction));
+                return;
+            }
             let kind = self
                 .tree
                 .hovered
                 .as_ref()
                 .map(|id| self.tree.entries[id].node.kind.as_str());
             window.set_cursor(match kind {
-                Some("button") => CursorIcon::Pointer,
+                Some("button" | "pressable") => CursorIcon::Pointer,
                 Some("input") => CursorIcon::Text,
                 _ => CursorIcon::Default,
             });
@@ -164,6 +223,89 @@ impl App {
             }
         }
     }
+    fn resize_direction(&self) -> Option<ResizeDirection> {
+        if self.document.window.decorations || !self.document.window.resizable {
+            return None;
+        }
+        let window = self.window.as_ref()?;
+        if window.is_maximized() {
+            return None;
+        }
+        let size = window.inner_size().to_logical::<f64>(window.scale_factor());
+        let (x, y) = self.tree.mouse;
+        if x < 0.0 || y < 0.0 || x > size.width || y > size.height {
+            return None;
+        }
+        let edge = 6.0;
+        let left = x <= edge;
+        let right = x >= size.width - edge;
+        let top = y <= edge;
+        let bottom = y >= size.height - edge;
+        match (left, right, top, bottom) {
+            (true, _, true, _) => Some(ResizeDirection::NorthWest),
+            (_, true, true, _) => Some(ResizeDirection::NorthEast),
+            (true, _, _, true) => Some(ResizeDirection::SouthWest),
+            (_, true, _, true) => Some(ResizeDirection::SouthEast),
+            (true, _, _, _) => Some(ResizeDirection::West),
+            (_, true, _, _) => Some(ResizeDirection::East),
+            (_, _, true, _) => Some(ResizeDirection::North),
+            (_, _, _, true) => Some(ResizeDirection::South),
+            _ => None,
+        }
+    }
+    fn titlebar_pressed(&mut self) {
+        let Some(window) = &self.window else {
+            return;
+        };
+        if let Some(direction) = self.resize_direction() {
+            let _ = window.drag_resize_window(direction);
+            return;
+        }
+        let Some(id) = self.tree.hovered.as_deref() else {
+            return;
+        };
+        if !self.tree.entries[id].node.drag_region {
+            return;
+        }
+        let now = Instant::now();
+        let position = self.tree.mouse;
+        let double_click = self.last_titlebar_click.is_some_and(|(at, previous)| {
+            now.duration_since(at) <= Duration::from_millis(500)
+                && (position.0 - previous.0).abs() <= 4.0
+                && (position.1 - previous.1).abs() <= 4.0
+        });
+        if double_click {
+            window.set_maximized(!window.is_maximized());
+            self.last_titlebar_click = None;
+        } else {
+            self.last_titlebar_click = Some((now, position));
+            let _ = window.drag_window();
+        }
+    }
+    fn handle_window_actions(&self, event_loop: &ActiveEventLoop, events: &[serde_json::Value]) {
+        let Some(window) = &self.window else {
+            return;
+        };
+        for event in events {
+            if event["type"] != "click" {
+                continue;
+            }
+            let Some(id) = event["id"].as_str() else {
+                continue;
+            };
+            match self
+                .tree
+                .entries
+                .get(id)
+                .map(|entry| entry.node.window_action.as_str())
+            {
+                Some("minimize") => window.set_minimized(true),
+                Some("toggleMaximize") => window.set_maximized(!window.is_maximized()),
+                Some("close") => event_loop.exit(),
+                _ => {}
+            }
+        }
+    }
 }
 impl ApplicationHandler<Command> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -175,11 +317,18 @@ impl ApplicationHandler<Command> for App {
             .with_title(&options.title)
             .with_inner_size(LogicalSize::new(options.width, options.height))
             .with_min_inner_size(LogicalSize::new(options.min_width, options.min_height))
-            .with_resizable(true)
+            .with_resizable(options.resizable)
+            .with_decorations(options.decorations)
             .with_visible(false);
         match event_loop.create_window(attributes) {
             Ok(window) => {
                 let window = Arc::new(window);
+                if !options.decorations
+                    && let Err(chrome_error) = configure_custom_window_chrome(&window)
+                {
+                    self.events
+                        .push(error(format!("Custom window chrome: {chrome_error}")));
+                }
                 match Graphics::new(window.clone()) {
                     Ok(graphics) => {
                         self.graphics = Some(graphics);
@@ -338,8 +487,10 @@ impl ApplicationHandler<Command> for App {
             } => {
                 if state == ElementState::Pressed {
                     events = self.tree.pointer_down();
+                    self.titlebar_pressed();
                 } else {
                     events = self.tree.pointer_up();
+                    self.handle_window_actions(event_loop, &events);
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {

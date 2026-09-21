@@ -18,6 +18,9 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 unicode-segmentation = "1.12"
 arboard = { version = "3.6", default-features = false }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+
 [profile.dev]
 opt-level = 1
 

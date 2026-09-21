@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 6;
 
 fn range_max() -> f64 {
     100.0
@@ -57,6 +57,10 @@ pub struct Node {
     pub modal: bool,
     #[serde(default = "default_true")]
     pub focusable: bool,
+    #[serde(default)]
+    pub drag_region: bool,
+    #[serde(default)]
+    pub window_action: String,
 }
 
 fn default_true() -> bool {
@@ -115,6 +119,10 @@ pub struct WindowOptions {
     pub min_width: f64,
     pub min_height: f64,
     pub background: String,
+    #[serde(default = "default_true")]
+    pub decorations: bool,
+    #[serde(default = "default_true")]
+    pub resizable: bool,
     #[serde(default)]
     pub debug: bool,
 }
@@ -170,6 +178,7 @@ pub fn validate(root: &Node) -> Result<(), String> {
         }
         if ![
             "window",
+            "titlebar",
             "view",
             "row",
             "column",

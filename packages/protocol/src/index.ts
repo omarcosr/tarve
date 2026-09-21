@@ -1,7 +1,7 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 6;
 export type Length = number | `${number}%` | "auto";
-export type NodeKind = "window" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "pressable" | "icon" | "slider";
+export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "pressable" | "icon" | "slider";
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
 export interface Style {
   width?: Length; height?: Length; minWidth?: Length; minHeight?: Length;
@@ -29,10 +29,12 @@ export interface NativeNode {
   value?: string; placeholder?: string;
   control?: Control;
   modal?: boolean; focusable?: boolean;
+  dragRegion?: boolean;
+  windowAction?: "minimize" | "toggleMaximize" | "close";
 }
 export interface WindowOptions {
   title: string; width: number; height: number; minWidth: number; minHeight: number;
-  background: string; debug?: boolean;
+  background: string; decorations: boolean; resizable: boolean; debug?: boolean;
 }
 export interface SceneDocument { version: number; window: WindowOptions; root: NativeNode }
 export type NativeCommand =

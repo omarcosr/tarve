@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Window, Column, Text, Button, TextInput, Modal } from "./components";
+import { Window, Column, Text, Button, TextInput, TitleBar, Modal } from "./components";
 import { compileTree, diffTrees } from "./reconciler";
 
 describe("native TSX protocol", () => {
@@ -60,5 +60,32 @@ describe("native TSX protocol", () => {
     expect(dialog.style.left).toBe(0);
     tree.handlers.get("dialog")?.onEscape?.();
     expect(open).toBe(false);
+  });
+  test("TitleBar automatically selects custom chrome and emits native window actions", () => {
+    const tree = compileTree(
+      <Window title="App" resizable>
+        <TitleBar id="titlebar" title="App" />
+      </Window>,
+    );
+    expect(tree.document.window.decorations).toBe(false);
+    expect(tree.document.window.resizable).toBe(true);
+    expect(tree.document.root.style.borderWidth).toBe(1);
+    expect(tree.document.root.style.borderColor).toBe("#e4e4e7");
+    expect(tree.document.root.style.radius).toBe(8);
+    expect(tree.nodes.get("titlebar")?.dragRegion).toBe(true);
+    const actions = [...tree.nodes.values()].map(node => node.windowAction).filter(Boolean);
+    expect(actions).toEqual(["minimize", "toggleMaximize", "close"]);
+  });
+  test("Window keeps native chrome when no TitleBar is present", () => {
+    const tree = compileTree(<Window title="Native"><Text>Hello</Text></Window>);
+    expect(tree.document.window.decorations).toBe(true);
+    expect(tree.document.root.style.borderWidth).toBeUndefined();
+    expect(tree.document.root.style.radius).toBeUndefined();
+  });
+  test("TitleBar is detected through component composition", () => {
+    const Shell = () => <Column><TitleBar title="Nested" /><Text>Body</Text></Column>;
+    const tree = compileTree(<Window><Shell /></Window>);
+    expect(tree.document.window.decorations).toBe(false);
+    expect([...tree.nodes.values()].filter(node => node.kind === "titlebar")).toHaveLength(1);
   });
 });

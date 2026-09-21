@@ -67,6 +67,19 @@ let open = false;
 </Modal>
 ```
 
+### Custom title bar
+
+`TitleBar` is declarative: simply render it inside `Window`. Tarve resolves the component tree before creating the native window, detects the title bar, and automatically selects custom window chrome. Without `TitleBar`, the operating-system title bar remains native. On Windows 11 Tarve asks DWM to keep the native rounded window corners and compositor border while the title bar remains fully custom. The root also draws a 1 px shadcn/zinc border with an 8 px radius as a visual fallback. Native drag, minimize/maximize/close and the 6 px resize hit area remain available.
+
+```tsx
+<Window title="My app" width={1000} height={700}>
+  <TitleBar title="My app" />
+  <View flex={1}>{/* app */}</View>
+</Window>
+```
+
+`TitleBar` accepts normal `style` overrides and custom `children`, plus `showMinimize`, `showMaximize`, `showClose` and `height`. Double-clicking its draggable area toggles maximize/restore.
+
 ```powershell
 bun run check           # TypeScript
 bun run test            # TSX/protocolo, layout, dirty flags e input

@@ -32,6 +32,11 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       queued = false;
       if (ended) return;
       const next = compileTree(view(), options.debug);
+      if (compiled.document.window.decorations !== next.document.window.decorations) {
+        const error = new Error("Adding or removing TitleBar after the native window has been created is not supported. Recreate the Window instead.");
+        if (options.onError) options.onError(error); else console.error(`[tarve] ${error.message}`);
+        return;
+      }
       const nodes = diffTrees(compiled, next);
       compiled = next;
       if (nodes === null) bridge.send({ type: "update", root: compiled.document.root });
