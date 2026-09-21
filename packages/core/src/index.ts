@@ -2,8 +2,8 @@ export { Window, View, Row, Column, Text, Button, Image, Scroll, TextInput, Titl
 export type { WindowProps, ViewProps, TextProps, ButtonProps, ImageProps, TextInputProps, TitleBarProps, ModalProps, DialogProps } from "./components";
 export { createApp, render } from "./app";
 export type { AppHandle, AppOptions } from "./app";
-export { theme, buttonVariants } from "./theme";
-export type { ButtonVariant } from "./theme";
+export { theme, lightTheme, darkTheme, createTheme, buttonVariants } from "./theme";
+export type { ThemeColors, ThemeDefinition, ThemeOverrides, ButtonVariant } from "./theme";
 export type { Style } from "../../protocol/src/index";
 export type { VNode, Child } from "./jsx-runtime";
 export { BunFfiBridge } from "./bridge";

@@ -19,7 +19,7 @@ use winit::{
 };
 
 #[cfg(target_os = "windows")]
-fn configure_custom_window_chrome(window: &Window) -> Result<(), String> {
+fn configure_custom_window_chrome(window: &Window, border: &str) -> Result<(), String> {
     use std::{ffi::c_void, mem::size_of};
     use windows_sys::Win32::Graphics::Dwm::{
         DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
@@ -32,8 +32,10 @@ fn configure_custom_window_chrome(window: &Window) -> Result<(), String> {
     };
     let hwnd = handle.hwnd.get() as *mut c_void;
     let corner = DWMWCP_ROUND;
-    // COLORREF is 0x00BBGGRR. This is shadcn/zinc's #e4e4e7 border color.
-    let border_color: u32 = 0x00E7E4E4;
+    // COLORREF is 0x00BBGGRR.
+    let hex = border.trim_start_matches('#');
+    let rgb = u32::from_str_radix(hex.get(..6).unwrap_or("e4e4e7"), 16).unwrap_or(0x00e4e4e7);
+    let border_color = ((rgb & 0xff) << 16) | (rgb & 0x00ff00) | ((rgb >> 16) & 0xff);
     unsafe {
         let corner_result = DwmSetWindowAttribute(
             hwnd,
@@ -64,7 +66,7 @@ fn configure_custom_window_chrome(window: &Window) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn configure_custom_window_chrome(_: &Window) -> Result<(), String> {
+fn configure_custom_window_chrome(_: &Window, _: &str) -> Result<(), String> {
     Ok(())
 }
 
@@ -122,6 +124,27 @@ struct App {
     last_titlebar_click: Option<(Instant, (f64, f64))>,
 }
 impl App {
+    fn root_color(&self, key: &str, fallback: &str) -> String {
+        self.tree
+            .entries
+            .get(&self.tree.root)
+            .map(|entry| entry.node.string(key, fallback).to_string())
+            .unwrap_or_else(|| fallback.to_string())
+    }
+    fn sync_custom_window_chrome(&self) {
+        if self.document.window.decorations {
+            return;
+        }
+        let Some(window) = &self.window else {
+            return;
+        };
+        if let Err(chrome_error) =
+            configure_custom_window_chrome(window, &self.root_color("borderColor", "#e4e4e7"))
+        {
+            self.events
+                .push(error(format!("Custom window chrome: {chrome_error}")));
+        }
+    }
     fn clipboard_shortcut(&mut self, key: &Key) -> Vec<serde_json::Value> {
         if !self.modifiers.control_key() {
             return vec![];
@@ -163,10 +186,11 @@ impl App {
         }
     }
     fn present(&mut self) -> Result<(), String> {
+        let background = self.root_color("background", &self.document.window.background);
         self.graphics
             .as_mut()
             .ok_or("Renderer not ready".to_string())?
-            .render(&self.scene, color(&self.document.window.background))?;
+            .render(&self.scene, color(&background))?;
         if self.document.window.debug {
             self.events
                 .push(json!({"type":"frame", "frames":self.graphics.as_ref().unwrap().frames}));
@@ -323,16 +347,11 @@ impl ApplicationHandler<Command> for App {
         match event_loop.create_window(attributes) {
             Ok(window) => {
                 let window = Arc::new(window);
-                if !options.decorations
-                    && let Err(chrome_error) = configure_custom_window_chrome(&window)
-                {
-                    self.events
-                        .push(error(format!("Custom window chrome: {chrome_error}")));
-                }
                 match Graphics::new(window.clone()) {
                     Ok(graphics) => {
                         self.graphics = Some(graphics);
                         self.window = Some(window.clone());
+                        self.sync_custom_window_chrome();
                         if let Err(error) = self.prepare() {
                             self.fail(event_loop, error);
                             return;
@@ -363,11 +382,19 @@ impl ApplicationHandler<Command> for App {
     fn user_event(&mut self, event_loop: &ActiveEventLoop, command: Command) {
         match command {
             Command::Patch { nodes } => {
+                let chrome_changed = nodes.iter().any(|node| {
+                    node.id == self.tree.root && node.style.get("borderColor").is_some()
+                });
                 if let Err(error) = self.tree.patch(nodes) {
                     self.events.push(crate::protocol::error(error));
+                } else if chrome_changed {
+                    self.sync_custom_window_chrome();
                 }
             }
-            Command::Update { root } => self.tree.update(root),
+            Command::Update { root } => {
+                self.tree.update(root);
+                self.sync_custom_window_chrome();
+            }
             Command::Close => event_loop.exit(),
             Command::Focus { id } => self.tree.focus(&id),
             Command::Inspect { request_id } => {
@@ -397,11 +424,12 @@ impl ApplicationHandler<Command> for App {
                 }
             }
             Command::Capture { path, request_id } if self.document.window.debug => {
+                let background = self.root_color("background", &self.document.window.background);
                 let result = self.prepare().and_then(|_| {
                     self.graphics
                         .as_mut()
                         .ok_or("Window is not ready".to_string())?
-                        .capture(&self.scene, color(&self.document.window.background), &path)
+                        .capture(&self.scene, color(&background), &path)
                 });
                 match result {
                     Ok(()) => self

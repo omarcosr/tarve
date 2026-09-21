@@ -10,6 +10,8 @@ import {
   TitleBar,
   View,
   Window,
+  darkTheme,
+  lightTheme,
   theme,
   type Child,
   type Style
@@ -32,6 +34,7 @@ let email = "alex@example.com";
 let status = "All changes saved";
 let selected = "Overview";
 let modalOpen = false;
+let darkMode = false;
 function Card({
   title,
   description,
@@ -61,6 +64,7 @@ export function App() {
   return (
     <Window
       title="Tarve — Native workspace"
+      theme={darkMode ? darkTheme : lightTheme}
       width={1140}
       height={870}
       minWidth={860}
@@ -88,7 +92,7 @@ export function App() {
               align: "center",
             }}
           >
-            <Text color="#ffffff" weight={700} size={18}>
+            <Text color={c.primaryForeground} weight={700} size={18}>
               t
             </Text>
           </View>
@@ -101,6 +105,16 @@ export function App() {
           <Text color={c.mutedForeground}>Personal workspace</Text>
         </Row>
         <Row gap={10}>
+          <Button
+            id="theme-toggle"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              darkMode = !darkMode;
+            }}
+          >
+            Theme
+          </Button>
           <View
             style={{
               background: c.successMuted,
@@ -147,7 +161,7 @@ export function App() {
               + New project
             </Button>
           </Row>
-          <Row gap={4} style={{ padding: 4, background: "#f0f0f1", radius: 8, width: 316 }}>
+          <Row gap={4} style={{ padding: 4, background: c.muted, radius: 8, width: 316 }}>
             {["Overview", "Activity", "Settings"].map((tab) => (
               <Button
                 key={tab}
@@ -156,7 +170,7 @@ export function App() {
                 variant="ghost"
                 style={{
                   flex: 1,
-                  background: selected === tab ? "#ffffff" : "#00000000",
+                  background: selected === tab ? c.card : "#00000000",
                   foreground: selected === tab ? c.foreground : c.mutedForeground,
                 }}
                 onClick={() => {

@@ -512,7 +512,7 @@ impl Tree {
             }
             let foreground =
                 if node.kind == "input" && node.value.as_deref().unwrap_or("").is_empty() {
-                    "#a1a1aa"
+                    node.string("placeholderColor", "#a1a1aa")
                 } else {
                     node.string("foreground", "#18181b")
                 };
@@ -521,7 +521,7 @@ impl Tree {
                 scene.fill(
                     Fill::NonZero,
                     transform,
-                    color("#dbeafe"),
+                    color(node.string("selectionColor", "#dbeafe")),
                     None,
                     &BoxRect::new(x, y, x + tw as f64, y + th as f64),
                 );
@@ -548,7 +548,7 @@ impl Tree {
                 scene.fill(
                     Fill::NonZero,
                     transform,
-                    color("#18181b"),
+                    color(node.string("caretColor", "#18181b")),
                     None,
                     &BoxRect::new(cx, y + 3.0, cx + 1.0, y + th as f64 - 3.0),
                 );
@@ -585,7 +585,13 @@ impl Tree {
                     transform * Affine::translate((tx, ty)) * Affine::scale(factor),
                 );
             } else {
-                scene.fill(Fill::NonZero, transform, color("#f4f4f5"), None, &shape);
+                scene.fill(
+                    Fill::NonZero,
+                    transform,
+                    color(node.string("placeholderBackground", "#f4f4f5")),
+                    None,
+                    &shape,
+                );
             }
             scene.pop_layer();
         }
@@ -609,7 +615,7 @@ impl Tree {
                 scene.fill(
                     Fill::NonZero,
                     transform,
-                    color("#d4d4d8"),
+                    color(node.string("scrollbarColor", "#d4d4d8")),
                     None,
                     &RoundedRect::new(rect.x1 - 7.0, top, rect.x1 - 3.0, top + thumb, 2.0),
                 );

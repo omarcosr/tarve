@@ -1,6 +1,6 @@
 import { PROTOCOL_VERSION, type NativeNode, type SceneDocument, type WindowOptions } from "../../protocol/src/index";
 import { Fragment, type Child, type VNode } from "./jsx-runtime";
-import { theme } from "./theme";
+import { lightTheme, resolveThemeColor, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
 export interface Handlers { onClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onEscape?: () => void }
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode> }
@@ -16,6 +16,7 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
   const ids = new Set<string>();
   const nodes = new Map<string, NativeNode>();
   let windowOptions: WindowOptions | undefined;
+  let selectedTheme: ThemeDefinition = lightTheme;
   function visit(child: Child, path: string, group?: string): NativeNode[] {
     if (child == null || typeof child === "boolean") return [];
     if (Array.isArray(child)) return child.flatMap((item, index) => {
@@ -38,8 +39,10 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
     ids.add(id);
     if (child.type === "window") {
       if (windowOptions) throw new Error("This bootstrap supports one Window per app.");
+      selectedTheme = p.theme ?? lightTheme;
       windowOptions = { title: p.title ?? "Tarve", width: p.width ?? 1120, height: p.height ?? 820,
-        minWidth: p.minWidth ?? 780, minHeight: p.minHeight ?? 580, background: p.style?.background ?? theme.colors.background,
+        minWidth: p.minWidth ?? 780, minHeight: p.minHeight ?? 580,
+        background: resolveThemeColor(p.style?.background ?? theme.colors.background, selectedTheme),
         decorations: true, resizable: p.resizable ?? true, debug };
     }
     handlers.set(id, { onClick: p.onClick, onHover: p.onHover, onChange: p.onChange, onValueChange: p.onValueChange, onEscape: p.onEscape });
@@ -47,7 +50,7 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
     const childGroup = control?.role === "radiogroup" || control?.role === "tablist" ? id : group;
     if (control && (control.role === "radio" || control.role === "tab")) control.group = group;
     const isText = child.type === "text" || child.type === "button";
-    const style = { ...p.style };
+    const style = resolveThemeStyle({ ...p.style }, selectedTheme);
     for (const key of ["padding", "margin"] as const) {
       if (style[key] && typeof style[key] === "object") style[key] = { ...style[key] };
     }
@@ -75,7 +78,7 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
   if (titleBars.length === 1) {
     windowOptions.decorations = false;
     roots[0].style.borderWidth ??= 1;
-    roots[0].style.borderColor ??= theme.colors.border;
+    roots[0].style.borderColor ??= selectedTheme.colors.border;
     roots[0].style.radius ??= theme.radius.md;
   }
   return { document: { version: PROTOCOL_VERSION, window: windowOptions, root: roots[0] }, handlers, nodes };

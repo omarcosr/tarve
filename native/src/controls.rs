@@ -51,7 +51,7 @@ pub fn slider(scene: &mut Scene, node: &Node, rect: Rect, scale: f64) {
     scene.fill(
         Fill::NonZero,
         transform,
-        color("#ffffff"),
+        color(node.string("thumbColor", "#ffffff")),
         None,
         &Circle::new(center, 7.0),
     );

@@ -32,12 +32,21 @@ try {
   assert(image.width > 100 && image.height === 144, "Local image must have a real layout");
   await app.capture(resolve("work/basic.png"));
   await Bun.write(resolve("work/initial-layout.json"), JSON.stringify(initial, null, 2));
-  const button = node(initial, "new-project");
+  const beforeTheme = await app.inspect();
+  const dark = await click("theme-toggle");
+  assert.equal(dark.layouts, beforeTheme.layouts, "Theme switching must not recompute layout");
+  assert.equal(dark.shapes, beforeTheme.shapes, "Theme switching must not reshape text");
+  assert(dark.paints > beforeTheme.paints, "Theme switching must repaint");
+  await app.capture(resolve("work/dark.png"));
+  const light = await click("theme-toggle");
+  assert.equal(light.layouts, beforeTheme.layouts, "Switching back to light must remain paint-only");
+  assert.equal(light.shapes, beforeTheme.shapes, "Switching back to light must not reshape text");
+  const button = node(light, "new-project");
   app.debug({ type: "input", action: "move", x: button.x + 10, y: button.y + 10 });
   const hover = await settle();
   assert.equal(hover.hovered, "new-project");
-  assert.equal(hover.layouts, initial.layouts, "Hover must not recompute layout");
-  assert.equal(hover.shapes, initial.shapes, "Hover must not reshape text");
+  assert.equal(hover.layouts, light.layouts, "Hover must not recompute layout");
+  assert.equal(hover.shapes, light.shapes, "Hover must not reshape text");
   await app.capture(resolve("work/hover.png"));
   const clicked = await click("new-project");
   assert.equal(node(clicked, "save-status").text, "Project 1 created", "Click must roundtrip through Bun and update Rust");
@@ -107,7 +116,7 @@ try {
   assert.equal(idleAfter.layouts, idleBefore.layouts);
   assert.equal(idleAfter.paints, idleBefore.paints);
   assert.deepEqual(errors, [], "Native runtime must not report errors");
-  console.log(JSON.stringify({ result: "PASS", initialFrames: initial.frames, nodes: initial.nodes.length, layouts: idleAfter.layouts, paints: idleAfter.paints, idleFrames: idleAfter.frames - idleBefore.frames, verified: ["FFI Worker", "Vello GPU", "Parley shaping", "Taffy Flex/Grid", "hover paint-only", "all button variants", "shadcn modal", "modal focus trap", "Escape/backdrop dismiss", "disabled button", "Bun state roundtrip", "Unicode input", "scroll clipping", "resize", "idle event loop", "local PNG"], captures: "work/*.png" }, null, 2));
+  console.log(JSON.stringify({ result: "PASS", initialFrames: initial.frames, nodes: initial.nodes.length, layouts: idleAfter.layouts, paints: idleAfter.paints, idleFrames: idleAfter.frames - idleBefore.frames, verified: ["FFI Worker", "Vello GPU", "Parley shaping", "Taffy Flex/Grid", "light/dark theme switch", "hover paint-only", "all button variants", "shadcn modal", "modal focus trap", "Escape/backdrop dismiss", "disabled button", "Bun state roundtrip", "Unicode input", "scroll clipping", "resize", "idle event loop", "local PNG"], captures: "work/*.png" }, null, 2));
 } finally {
   app.close();
   await app.closed;

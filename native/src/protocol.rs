@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 
 fn range_max() -> f64 {
     100.0

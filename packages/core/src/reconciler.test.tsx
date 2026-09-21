@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Window, Column, Text, Button, TextInput, TitleBar, Modal } from "./components";
 import { compileTree, diffTrees } from "./reconciler";
+import { createTheme, darkTheme, lightTheme, theme } from "./theme";
 
 describe("native TSX protocol", () => {
   test("compiles function components, flattens children, and keeps callbacks outside JSON", () => {
@@ -87,5 +88,54 @@ describe("native TSX protocol", () => {
     const tree = compileTree(<Window><Shell /></Window>);
     expect(tree.document.window.decorations).toBe(false);
     expect([...tree.nodes.values()].filter(node => node.kind === "titlebar")).toHaveLength(1);
+  });
+  test("dark theme resolves semantic component colors without changing component code", () => {
+    const light = compileTree(
+      <Window theme={lightTheme}>
+        <Column>
+          <Text id="label">Hello</Text>
+          <TextInput id="input" placeholder="Name" />
+          <Button id="button">Save</Button>
+        </Column>
+      </Window>,
+    );
+    const dark = compileTree(
+      <Window theme={darkTheme}>
+        <Column>
+          <Text id="label">Hello</Text>
+          <TextInput id="input" placeholder="Name" />
+          <Button id="button">Save</Button>
+        </Column>
+      </Window>,
+    );
+    expect(light.document.root.style.background).toBe("#fafafa");
+    expect(dark.document.root.style.background).toBe("#09090b");
+    expect(dark.nodes.get("label")?.style.foreground).toBe("#fafafa");
+    expect(dark.nodes.get("input")?.style.background).toBe("#18181b");
+    expect(dark.nodes.get("input")?.style.placeholderColor).toBe("#71717a");
+    expect(dark.nodes.get("button")?.style.background).toBe("#fafafa");
+    expect(diffTrees(light, dark)?.length).toBeGreaterThan(0);
+  });
+  test("custom themes inherit a base palette and resolve theme tokens in user styles", () => {
+    const midnight = createTheme({ colors: { primary: "#8b5cf6", border: "#3f3f46" } }, darkTheme);
+    const tree = compileTree(
+      <Window theme={midnight}>
+        <TitleBar />
+        <Button id="accent">Accent</Button>
+        <Column id="panel" style={{ background: theme.colors.card, borderColor: theme.colors.border }} />
+      </Window>,
+    );
+    expect(tree.nodes.get("accent")?.style.background).toBe("#8b5cf6");
+    expect(tree.nodes.get("panel")?.style.background).toBe(darkTheme.colors.card);
+    expect(tree.nodes.get("panel")?.style.borderColor).toBe("#3f3f46");
+    expect(tree.document.root.style.borderColor).toBe("#3f3f46");
+  });
+  test("literal colors remain literal when a theme is active", () => {
+    const tree = compileTree(
+      <Window theme={darkTheme}>
+        <Column id="literal" style={{ background: "#123456" }} />
+      </Window>,
+    );
+    expect(tree.nodes.get("literal")?.style.background).toBe("#123456");
   });
 });

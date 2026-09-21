@@ -80,6 +80,40 @@ let open = false;
 
 `TitleBar` accepts normal `style` overrides and custom `children`, plus `showMinimize`, `showMaximize`, `showClose` and `height`. Double-clicking its draggable area toggles maximize/restore.
 
+### Light, dark and custom themes
+
+Tarve components use semantic shadcn-style color tokens. `Window` resolves those tokens against `lightTheme` by default, or against the theme you pass. Switching the `theme` prop at runtime repaints the existing native window; it does not recreate the HWND.
+
+```tsx
+import { Window, darkTheme, lightTheme } from "tarve";
+
+let dark = true;
+
+<Window theme={dark ? darkTheme : lightTheme}>
+  {/* every Tarve component follows the selected palette */}
+</Window>
+```
+
+Create a branded theme by inheriting either built-in palette and overriding only the semantic colors you need:
+
+```tsx
+import { createTheme, darkTheme, theme } from "tarve";
+
+const midnight = createTheme({
+  colors: {
+    primary: "#8b5cf6",
+    primaryHover: "#7c3aed",
+    border: "#3f3f46",
+  },
+}, darkTheme);
+
+<Window theme={midnight}>
+  <View style={{ background: theme.colors.card, borderColor: theme.colors.border }} />
+</Window>
+```
+
+`theme.colors.*` values are semantic references, so application styles using them automatically follow the active palette. Literal colors such as `#ff00aa` remain literal and are never rewritten. Inputs, selection, caret, scrollbar, modal overlay, disabled states and titlebar controls all use the same palette.
+
 ```powershell
 bun run check           # TypeScript
 bun run test            # TSX/protocolo, layout, dirty flags e input
