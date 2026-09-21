@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "target": "ESNext", "module": "ESNext", "moduleResolution": "Bundler",
+    "strict": true, "noEmit": true, "skipLibCheck": true,
+    "jsx": "react-jsx", "jsxImportSource": "tarve",
+    "types": ["bun"], "allowImportingTsExtensions": true,
+    "paths": { "tarve": ["./packages/core/src/index.ts"], "tarve/*": ["./packages/core/src/*"], "@tarve/core": ["./packages/core/src/index.ts"], "@tarve/core/*": ["./packages/core/src/*"], "@tarve/protocol": ["./packages/protocol/src/index.ts"] }
+  },
+  "include": ["packages", "examples", "scripts"]
+}

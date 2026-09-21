@@ -1,0 +1,107 @@
+# Tarve
+
+GUI nativa para **Bun + TypeScript/TSX**, com **Taffy** (Flex/Grid), **Parley** (shaping, medição e quebra de texto) e **Vello/WGPU** (GPU). Janela Win32 via Winit. O tema padrão usa a linguagem visual shadcn: zinc, superfícies claras, bordas discretas, raios de 6–12 px e Segoe UI.
+
+## Rodar no Windows
+
+Pré-requisitos: Bun 1.4+, Rust estável com target `x86_64-pc-windows-msvc`, Visual Studio Build Tools com C++/Windows SDK e GPU com suporte a compute shaders (DirectX 12 ou Vulkan).
+
+```powershell
+cd A:\tarve
+bun install
+bun run dev
+```
+
+`dev` compila a DLL e inicia o exemplo com reinício ao editar TS/TSX. Após editar Rust, compile novamente e reinicie o app. Cada build de desenvolvimento tem um nome de DLL próprio, permitindo compilar enquanto a janela anterior ainda está aberta. Para abrir sem recompilar: `bun run start`.
+
+## Usar como pacote npm
+
+O pacote para Windows x64 inclui a DLL em release; quem instala precisa somente do Bun e de um driver de GPU compatível. A publicação no registry ainda é uma etapa separada. Para gerar e instalar o artefato local:
+
+```powershell
+# No repositório Tarve:
+bun run pack
+bun run smoke:package
+
+# Em outro projeto Bun:
+bun add A:/tarve/dist/tarve-0.1.0.tgz
+bun add -d typescript @types/bun
+bun app.tsx
+bun run tarve build app.tsx --outfile dist/MeuApp.exe
+```
+
+Configure `tsconfig.json` com `"jsx": "react-jsx"`, `"jsxImportSource": "tarve"`, `"moduleResolution": "Bundler"` e `"types": ["bun", "tarve/assets"]`. A API pública é importada de `tarve`; o build também está disponível como `import { build } from "tarve/build"`.
+
+`examples/counter.tsx` mostra o app mínimo e `examples/basic.tsx` reúne os componentes iniciais. Exemplos usam a mesma API instalada, sem configurar a DLL ou o Worker.
+
+```powershell
+bun run check           # TypeScript
+bun run test            # TSX/protocolo, layout, dirty flags e input
+bun run smoke           # janela real, GPU, FFI, cliques, edição, scroll e resize
+bun run bench           # latência em uma janela com 2.000 linhas (após build release)
+bun run build           # DLL release + app/worker/assets em dist/
+bun dist/basic.js
+```
+
+## Executável de produção
+
+```powershell
+bun run build:exe
+.\dist\Tarve.exe
+
+# Compila e verifica o app com um ponto de entrada de testes, sem Bun no PATH:
+bun run smoke:exe
+```
+
+Distribua apenas **`dist/Tarve.exe`**. O build compila Rust em release e incorpora o runtime Bun, o app, o Worker de eventos, a DLL e a imagem. O runtime C da DLL usa link estático: o destinatário não precisa instalar Bun, Node, Rust ou o redistribuível do Visual C++. O executável Windows x64 abre diretamente a janela, sem console; continua precisando de GPU/driver compatível com Vello/WGPU. Os pré-requisitos de compilação acima são necessários apenas na máquina de build.
+
+Na inicialização, a DLL, o Worker e as imagens usadas são extraídos para `%TEMP%\tarve-assets`, em diretórios identificados e verificados por SHA-256. Isso dá ao carregador do Windows e ao backend Rust caminhos físicos para os arquivos incorporados. Os caminhos ficam em cache durante a execução.
+
+O ponto de entrada é o próprio app, `examples/basic.tsx`. O exemplo contém apenas interface, estado e execução normal. O comando de build incorpora o runtime nativo automaticamente. Para compilar outro app: `bun run build:exe --entry examples/meu-app.tsx --outfile dist/MeuApp.exe`. A versão vem de `package.json`.
+
+Importe imagens com `import image from "./image.png" with { type: "file" }` e use `<Image src={image} />`; o core cuida da extração quando necessário. Caminhos relativos de imagens são resolvidos em relação ao arquivo de entrada. Testes de distribuição ficam em `scripts/`, fora do executável de produção.
+
+## API
+
+```tsx
+import { render, Window, Column, Text, Button } from "tarve";
+
+let count = 0;
+await render(() => (
+  <Window title="Hello Tarve" width={800} height={600}>
+    <Column gap={16} padding={24}>
+      <Text size={24}>Count: {count}</Text>
+      <Button onClick={() => count++}>Increment</Button>
+    </Column>
+  </Window>
+));
+```
+
+Callbacks de clique/change atualizam a árvore automaticamente. Para alterações assíncronas, use `const app = createApp(App)` e `app.update()`. `id` explícito ou `key` preserva identidade ao reordenar. `style` usa pixels lógicos, números, `"auto"` ou porcentagens para tamanhos; `View style={{ display: "grid", columns: 3 }}` cria um grid. Veja `examples/basic.tsx` para todos os componentes e variantes.
+
+## Organização
+
+```text
+packages/core/src/       componentes, JSX runtime, tema, reconciliação, app
+  bridge/                bun:ffi e Worker bloqueante de eventos
+packages/core/build.ts   empacotador reutilizável para apps
+packages/core/cli.ts     comando tarve build
+packages/protocol/src/   contrato TypeScript versionado
+native/src/              bridge C, protocolo Rust, árvore/layout/input, texto, renderer, janela
+native/include/tarve.h   contrato C e ownership dos buffers
+examples/basic.tsx       demonstração interativa
+examples/counter.tsx     exemplo mínimo
+scripts/package.ts      distribuição npm com tipos e binário nativo
+```
+
+Bun envia a árvore inicial em UTF-8 JSON pela ABI C. Atualizações de propriedades enviam apenas os nós alterados; mudanças de estrutura enviam a árvore e preservam os IDs. Rust mantém os nós e caches do Taffy, preserva scroll/foco e invalida apenas os estágios necessários. A cena Vello inclui apenas as subárvores visíveis. As APIs das crates ficam internas ao backend; as fronteiras são `NativeBridge` e o protocolo versionado.
+
+Rust usa `ControlFlow::Wait`. Um Worker Bun espera numa condition variable e entrega eventos à thread do app; não há polling, timer de frames ou game loop. Hover/scroll pintam; conteúdo/tipografia invalidam texto e layout; redimensionamento reutiliza o shaping e recalcula quebras/layout. Texturas de imagem e layouts de texto ficam em cache. A escala de DPI é aplicada na renderização e no hit testing.
+
+Medições e limites do benchmark estão em `PERFORMANCE.md`. O acompanhamento do trabalho restante está em `PRODUCTION.md`.
+
+## Escopo do bootstrap
+
+Uma janela por processo. `TextInput` oferece foco, entrada Unicode, backspace/delete por grapheme, setas, Home/End, Ctrl+A, copiar/colar/recortar e commit de IME; seleção por mouse, undo, preedit visual, edição bidi avançada e acessibilidade via AccessKit ficam para a próxima etapa. Botões aceitam Tab/Shift+Tab e Enter/Espaço. Scroll vertical tem clipping e indicador. Imagens locais PNG/JPEG usam `cover` ou `contain`. `Text` e `Button` recebem texto simples; composição rica pode ser adicionada ao protocolo.
+
+`bun:ffi` é o transporte escolhido para este projeto Bun. Sua API ainda é marcada experimental pelo Bun; a ABI explícita, buffers do chamador e Worker sem callbacks nativos reduzem a superfície de integração. Referências: [Bun FFI](https://bun.com/docs/runtime/ffi), [Taffy](https://docs.rs/taffy/0.14.0), [Parley](https://docs.rs/parley/0.11.1), [Vello](https://docs.rs/vello/0.10.0).

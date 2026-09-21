@@ -1,0 +1,7 @@
+node_modules/
+native/target/
+native/bin/
+native/win32-x64/
+dist/
+work/
+*.log
