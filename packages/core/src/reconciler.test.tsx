@@ -74,6 +74,7 @@ describe("native TSX protocol", () => {
     expect(tree.document.root.style.borderColor).toBe("#e4e4e7");
     expect(tree.document.root.style.radius).toBe(8);
     expect(tree.nodes.get("titlebar")?.dragRegion).toBe(true);
+    expect(tree.nodes.get("titlebar")?.style.borderWidth).toEqual({ bottom: 1 });
     const actions = [...tree.nodes.values()].map(node => node.windowAction).filter(Boolean);
     expect(actions).toEqual(["minimize", "toggleMaximize", "close"]);
   });
@@ -137,5 +138,13 @@ describe("native TSX protocol", () => {
       </Window>,
     );
     expect(tree.nodes.get("literal")?.style.background).toBe("#123456");
+  });
+  test("borderWidth supports independent widths on all four sides", () => {
+    const tree = compileTree(
+      <Window>
+        <Column id="panel" style={{ borderWidth: { top: 1, right: 2, bottom: 3, left: 4 } }} />
+      </Window>,
+    );
+    expect(tree.nodes.get("panel")?.style.borderWidth).toEqual({ top: 1, right: 2, bottom: 3, left: 4 });
   });
 });

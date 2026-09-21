@@ -76,7 +76,9 @@ export function App() {
           height: 70,
           padding: { left: 32, right: 32 },
           background: c.card,
-          borderWidth: 1,
+          borderWidth: {
+            bottom: 1,
+          },
           borderColor: c.border,
         }}
         justify="between"
@@ -156,6 +158,7 @@ export function App() {
               onClick={() => {
                 clicks++;
                 status = `Project ${clicks} created`;
+                modalOpen = true;
               }}
             >
               + New project

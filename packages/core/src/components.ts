@@ -125,7 +125,7 @@ export function TitleBar({
       shrink: 0,
       padding: { left: 12 },
       background: theme.colors.card,
-      borderWidth: 1,
+      borderWidth: { bottom: 1 },
       borderColor: theme.colors.border,
       justify: "between",
       align: "center",

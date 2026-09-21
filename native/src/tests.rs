@@ -36,6 +36,34 @@ fn taffy_grid_and_parley_measurement_reflow_on_resize() {
         "resize should rebreak cached text without reshaping"
     );
 }
+
+#[test]
+fn per_side_border_width_affects_layout_independently() {
+    let child = node(
+        "child",
+        "view",
+        json!({"width":"100%","height":"100%"}),
+        vec![],
+    );
+    let panel = node(
+        "panel",
+        "view",
+        json!({
+            "width":120,
+            "height":100,
+            "borderWidth":{"top":3,"right":11,"bottom":13,"left":7}
+        }),
+        vec![child],
+    );
+    let mut tree = Tree::new(root(vec![panel]));
+    tree.compute(300.0, 200.0).unwrap();
+    let panel = tree.entries["panel"].rect;
+    let child = tree.entries["child"].rect;
+    assert!((child.x0 - (panel.x0 + 7.0)).abs() < 0.1);
+    assert!((child.y0 - (panel.y0 + 3.0)).abs() < 0.1);
+    assert!((child.width() - (panel.width() - 7.0 - 11.0)).abs() < 0.1);
+    assert!((child.height() - (panel.height() - 3.0 - 13.0)).abs() < 0.1);
+}
 #[test]
 fn hover_and_color_update_do_not_invalidate_layout_or_text() {
     let mut button = node(

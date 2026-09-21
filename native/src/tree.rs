@@ -467,18 +467,86 @@ impl Tree {
         if bg != "#00000000" {
             scene.fill(Fill::NonZero, transform, color(bg), None, &shape);
         }
-        let border = node.number("borderWidth", 0.0) as f64;
-        if border > 0.0 {
-            scene.stroke(
-                &Stroke::new(border),
-                transform,
-                color(node.string("borderColor", "#e4e4e7")),
-                None,
-                &RoundedRect::from_rect(
-                    rect.inset(-border / 2.0),
-                    (radius - border / 2.0).max(0.0),
-                ),
-            );
+        let border = node
+            .insets("borderWidth")
+            .map(|value| value.max(0.0) as f64);
+        if border.iter().any(|width| *width > 0.0) {
+            let border_color = color(node.string("borderColor", "#e4e4e7"));
+            let uniform = border
+                .iter()
+                .all(|width| (*width - border[0]).abs() < f64::EPSILON);
+            if uniform {
+                let width = border[0];
+                scene.stroke(
+                    &Stroke::new(width),
+                    transform,
+                    border_color,
+                    None,
+                    &RoundedRect::from_rect(
+                        rect.inset(-width / 2.0),
+                        (radius - width / 2.0).max(0.0),
+                    ),
+                );
+            } else {
+                scene.push_clip_layer(Fill::NonZero, transform, &shape);
+                if border[0] > 0.0 {
+                    scene.fill(
+                        Fill::NonZero,
+                        transform,
+                        border_color,
+                        None,
+                        &BoxRect::new(
+                            rect.x0,
+                            rect.y0,
+                            rect.x1,
+                            (rect.y0 + border[0]).min(rect.y1),
+                        ),
+                    );
+                }
+                if border[1] > 0.0 {
+                    scene.fill(
+                        Fill::NonZero,
+                        transform,
+                        border_color,
+                        None,
+                        &BoxRect::new(
+                            (rect.x1 - border[1]).max(rect.x0),
+                            rect.y0,
+                            rect.x1,
+                            rect.y1,
+                        ),
+                    );
+                }
+                if border[2] > 0.0 {
+                    scene.fill(
+                        Fill::NonZero,
+                        transform,
+                        border_color,
+                        None,
+                        &BoxRect::new(
+                            rect.x0,
+                            (rect.y1 - border[2]).max(rect.y0),
+                            rect.x1,
+                            rect.y1,
+                        ),
+                    );
+                }
+                if border[3] > 0.0 {
+                    scene.fill(
+                        Fill::NonZero,
+                        transform,
+                        border_color,
+                        None,
+                        &BoxRect::new(
+                            rect.x0,
+                            rect.y0,
+                            (rect.x0 + border[3]).min(rect.x1),
+                            rect.y1,
+                        ),
+                    );
+                }
+                scene.pop_layer();
+            }
         }
         if self.focused.as_deref() == Some(id) {
             scene.stroke(
@@ -492,7 +560,8 @@ impl Tree {
         if node.is_text() {
             let pad = node.insets("padding");
             let available_width =
-                (rect.width() - pad[1] as f64 - pad[3] as f64 - border * 2.0).max(0.0) as f32;
+                (rect.width() - pad[1] as f64 - pad[3] as f64 - border[1] - border[3]).max(0.0)
+                    as f32;
             let (tw, th) = self.text.measure(
                 id,
                 if node.kind == "text" {
@@ -501,9 +570,9 @@ impl Tree {
                     None
                 },
             );
-            let mut x = rect.x0 + pad[3] as f64 + border;
+            let mut x = rect.x0 + pad[3] as f64 + border[3];
             let y = if node.kind == "text" {
-                rect.y0 + pad[0] as f64 + border
+                rect.y0 + pad[0] as f64 + border[0]
             } else {
                 rect.y0 + (rect.height() - th as f64) / 2.0
             };
@@ -1117,7 +1186,7 @@ fn limit(v: &Value) -> LengthPercentageAuto {
 fn layout_style(node: &Node) -> Style {
     let pad = node.insets("padding");
     let margin = node.insets("margin");
-    let border = node.number("borderWidth", 0.0);
+    let border = node.insets("borderWidth").map(|value| value.max(0.0));
     let mut style = Style {
         display: match node.string("display", "flex") {
             "grid" => Display::Grid,
@@ -1174,10 +1243,10 @@ fn layout_style(node: &Node) -> Style {
             left: length(margin[3]),
         },
         border: Rect {
-            top: length(border),
-            right: length(border),
-            bottom: length(border),
-            left: length(border),
+            top: length(border[0]),
+            right: length(border[1]),
+            bottom: length(border[2]),
+            left: length(border[3]),
         },
         gap: Size {
             width: length(node.number("gap", 0.0)),

@@ -1,5 +1,5 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "pressable" | "icon" | "slider";
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
@@ -11,7 +11,7 @@ export interface Style {
   padding?: Insets; margin?: Insets; align?: "start" | "center" | "end" | "stretch";
   justify?: "start" | "center" | "end" | "between";
   display?: "flex" | "grid" | "none"; columns?: number;
-  background?: string; foreground?: string; borderColor?: string; borderWidth?: number;
+  background?: string; foreground?: string; borderColor?: string; borderWidth?: Insets;
   radius?: number; fontSize?: number; fontWeight?: number; fontFamily?: string;
   lineHeight?: number; textAlign?: "start" | "center" | "end";
   hoverBackground?: string; activeBackground?: string; focusColor?: string;

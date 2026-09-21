@@ -114,6 +114,19 @@ const midnight = createTheme({
 
 `theme.colors.*` values are semantic references, so application styles using them automatically follow the active palette. Literal colors such as `#ff00aa` remain literal and are never rewritten. Inputs, selection, caret, scrollbar, modal overlay, disabled states and titlebar controls all use the same palette.
 
+Borders can use one width for every side or independent widths, using the same inset shape as `padding` and `margin`:
+
+```tsx
+<View style={{ borderWidth: 1, borderColor: theme.colors.border }} />
+
+<View style={{
+  borderWidth: { top: 1, right: 2, bottom: 4, left: 0 },
+  borderColor: theme.colors.border,
+}} />
+```
+
+Per-side border widths participate in Taffy layout as well as Vello painting, so child content is inset by the corresponding side rather than treating the border as a purely visual stroke.
+
 ```powershell
 bun run check           # TypeScript
 bun run test            # TSX/protocolo, layout, dirty flags e input
