@@ -45,6 +45,24 @@ describe("form and visual controls", () => {
     expect(tree.nodes.get("otp")?.style.width).toBe(168);
     expect(tree.nodes.get("otp-slot-0")?.children[0]?.text).toBe("1");
     expect(Array.from({ length: 4 }, (_, index) => tree.nodes.get(`otp-slot-${index}`)?.style.width)).toEqual([36, 36, 36, 36]);
+    expect(Array.from({ length: 4 }, (_, index) => ({
+      width: tree.nodes.get(`otp-slot-${index}`)?.style.borderWidth,
+      color: tree.nodes.get(`otp-slot-${index}`)?.style.borderColor,
+    }))).toEqual([
+      { width: 1, color: "#aeaeb6" },
+      { width: 1, color: "#aeaeb6" },
+      { width: 1, color: "#e4e4e7" },
+      { width: 1, color: "#e4e4e7" },
+    ]);
+    expect(tree.nodes.get("otp-slot-0")?.control).toEqual({ role: "otpSlot", group: "otp-input", value: 0, max: 3 });
+    expect(tree.nodes.get("otp-slot-2")?.style.focus).toMatchObject({
+      outlineWidth: 2,
+      outlineOffset: 2,
+      outlineStyle: "solid",
+      outlineColor: "#a1a1aa",
+    });
+    expect(tree.nodes.get("otp-slot-0")?.children[0]?.style.fontSize).toBe(16);
+    expect(tree.nodes.get("otp-slot-0")?.children[0]?.style.fontWeight).toBe(500);
     tree.handlers.get("otp-input")?.onChange?.("12a34");
     expect(values).toEqual(["1234"]);
 

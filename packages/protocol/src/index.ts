@@ -1,5 +1,5 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const PROTOCOL_VERSION = 21;
+export const PROTOCOL_VERSION = 22;
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "textarea" | "pressable" | "icon" | "slider" | "splitter";
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
@@ -26,7 +26,7 @@ export interface Style extends StateStyle {
   strokeWidth?: number; pointerEvents?: "auto" | "block";
 }
 export interface Control {
-  role: "button" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "navigation" | "menuitem" | "toggle" | "togglegroup" | "slider" | "progress" | "virtualList" | "select" | "group" | "alert" | "status" | "label" | "option";
+  role: "button" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "navigation" | "menuitem" | "toggle" | "togglegroup" | "slider" | "progress" | "virtualList" | "select" | "group" | "alert" | "status" | "label" | "option" | "otpSlot";
   label?: string; checked?: boolean; group?: string;
   orientation?: "horizontal" | "vertical";
   value?: number; min?: number; max?: number; step?: number;

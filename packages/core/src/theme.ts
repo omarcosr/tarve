@@ -21,6 +21,7 @@ export interface ThemeColors {
   destructiveHover: string;
   destructiveActive: string;
   ring: string;
+  ringSoft: string;
   success: string;
   successMuted: string;
   disabled: string;
@@ -78,6 +79,7 @@ export const lightTheme: ThemeDefinition = {
     destructiveHover: "#b91c1c",
     destructiveActive: "#991b1b",
     ring: "#a1a1aa",
+    ringSoft: "#aeaeb6",
     success: "#15803d",
     successMuted: "#f0fdf4",
     disabled: "#e4e4e7",
@@ -116,6 +118,7 @@ export const darkTheme: ThemeDefinition = {
     destructiveHover: "#991b1b",
     destructiveActive: "#b91c1c",
     ring: "#d4d4d8",
+    ringSoft: "#b1b1b5",
     success: "#4ade80",
     successMuted: "#052e16",
     disabled: "#27272a",

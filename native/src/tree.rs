@@ -641,6 +641,33 @@ impl Tree {
         self.dirty.paint = false;
         scene
     }
+    fn visual_state_for(&self, id: &str, node: &Node) -> VisualState {
+        let otp_slot_focused = node.control.as_ref().is_some_and(|control| {
+            if control.role != "otpSlot" || control.group.is_empty() {
+                return false;
+            }
+            let Some(focused) = self.focused.as_deref() else {
+                return false;
+            };
+            if focused != control.group {
+                return false;
+            }
+            let Some(input) = self.entries.get(focused) else {
+                return false;
+            };
+            let value = input.node.value.as_deref().unwrap_or("");
+            let caret = floor_boundary(value, self.caret.min(value.len()));
+            let caret_slot = value[..caret].graphemes(true).count();
+            let max_slot = control.max.max(0.0) as usize;
+            control.value.max(0.0) as usize == caret_slot.min(max_slot)
+        });
+        VisualState {
+            hovered: self.hovered.as_deref() == Some(id),
+            active: self.pressed.as_deref() == Some(id) && self.hovered.as_deref() == Some(id),
+            focused: self.focused.as_deref() == Some(id) || otp_slot_focused,
+            disabled: node.disabled,
+        }
+    }
     fn paint_node(&mut self, id: &str, offset: f64, scale: f64, clip: BoxRect, scene: &mut Scene) {
         let entry = &self.entries[id];
         let bounds = entry.bounds + Vec2::new(0.0, -offset);
@@ -668,12 +695,7 @@ impl Tree {
         });
         self.painted_nodes += 1;
         let transform = Affine::scale(scale);
-        let state = VisualState {
-            hovered: self.hovered.as_deref() == Some(id),
-            active: self.pressed.as_deref() == Some(id) && self.hovered.as_deref() == Some(id),
-            focused: self.focused.as_deref() == Some(id),
-            disabled: node.disabled,
-        };
+        let state = self.visual_state_for(id, &node);
         let suppress_root_chrome = self.window_chrome_suppressed && id == self.root;
         let radius = if suppress_root_chrome {
             0.0
@@ -1909,13 +1931,14 @@ impl Tree {
     #[cfg(test)]
     pub(crate) fn resolved_visual_string(&self, id: &str, key: &str, fallback: &str) -> String {
         let entry = &self.entries[id];
-        let state = VisualState {
-            hovered: self.hovered.as_deref() == Some(id),
-            active: self.pressed.as_deref() == Some(id) && self.hovered.as_deref() == Some(id),
-            focused: self.focused.as_deref() == Some(id),
-            disabled: entry.node.disabled,
-        };
+        let state = self.visual_state_for(id, &entry.node);
         visual_string(&entry.node, key, fallback, state).to_string()
+    }
+    #[cfg(test)]
+    pub(crate) fn resolved_visual_number(&self, id: &str, key: &str, fallback: f32) -> f32 {
+        let entry = &self.entries[id];
+        let state = self.visual_state_for(id, &entry.node);
+        visual_number(&entry.node, key, fallback, state)
     }
 }
 

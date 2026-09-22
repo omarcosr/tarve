@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { strict as assert } from "node:assert";
-import { createApp } from "tarve";
+import { createApp } from "../examples/node_modules/tarve/dist/npm/index.js";
 import { App as ShowcaseApp } from "../examples/components-view";
 
 const app = createApp(ShowcaseApp, { debug: true });
@@ -61,6 +61,8 @@ try {
   const visibleOtp = byId.get("demo-otp");
   assert(visibleOtp && visibleOtp.y >= 0 && visibleOtp.y < initial.height,
     "OTP did not become visible after scroll: y=" + visibleOtp?.y);
+  const visibleSlots = Array.from({ length: 6 }, (_, index) => byId.get("demo-otp-slot-" + index));
+  assert(visibleSlots.every(Boolean));
   assert.equal((await app.inspect()).focused, "demo-otp-input");
   await app.capture(resolve(out, "components-otp-real.png"));
 
@@ -99,6 +101,7 @@ try {
       totalWidth: otp.width,
       gaps: gaps.map(value => Number(value.toFixed(1))),
       focused: "demo-otp-input",
+      rects: visibleSlots.map(slot => ({ x: slot!.x, y: slot!.y, width: slot!.width, height: slot!.height })),
     },
     resizable: {
       kind: splitter.kind,

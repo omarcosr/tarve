@@ -52,7 +52,7 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
     if (control && (control.role === "radio" || control.role === "tab" || control.role === "menuitem" || control.role === "toggle")) control.group = group;
     const isText = child.type === "text" || child.type === "button";
     const rawStyle = { ...p.style };
-    if (interactiveKinds.has(child.type) && p.focusable !== false) {
+    if ((interactiveKinds.has(child.type) && p.focusable !== false) || control?.role === "otpSlot") {
       rawStyle.focus = {
         outlineColor: theme.colors.ring,
         ...lightTheme.focusOutline,

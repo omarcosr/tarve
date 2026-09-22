@@ -249,6 +249,59 @@ fn hover_and_color_update_do_not_invalidate_layout_or_text() {
 }
 
 #[test]
+fn otp_slot_focus_follows_the_native_input_caret() {
+    let mut input = node(
+        "otp-input",
+        "input",
+        json!({"width":168,"height":42,"position":"absolute"}),
+        vec![],
+    );
+    input.value = Some("12".into());
+    let slots = (0..4)
+        .map(|index| {
+            let mut slot = node(
+                &format!("slot-{index}"),
+                "view",
+                json!({
+                    "width":36,
+                    "height":42,
+                    "focus":{
+                        "outlineWidth":2,
+                        "outlineOffset":2,
+                        "outlineColor":"#a1a1aa",
+                        "outlineStyle":"solid"
+                    }
+                }),
+                vec![],
+            );
+            slot.control = Some(
+                serde_json::from_value(json!({
+                    "role":"otpSlot",
+                    "group":"otp-input",
+                    "value":index,
+                    "max":3
+                }))
+                .unwrap(),
+            );
+            slot
+        })
+        .collect();
+    let mut tree = Tree::new(root(vec![input, node("slots", "row", json!({"gap":8}), slots)]));
+    tree.compute(320.0, 120.0).unwrap();
+
+    let _ = tree.focus("otp-input");
+    assert_eq!(tree.resolved_visual_number("slot-2", "outlineWidth", 0.0), 2.0);
+    assert_eq!(tree.resolved_visual_number("slot-1", "outlineWidth", 0.0), 0.0);
+
+    tree.key("ArrowLeft");
+    assert_eq!(tree.resolved_visual_number("slot-1", "outlineWidth", 0.0), 2.0);
+    assert_eq!(tree.resolved_visual_number("slot-2", "outlineWidth", 0.0), 0.0);
+
+    tree.key("Home");
+    assert_eq!(tree.resolved_visual_number("slot-0", "outlineWidth", 0.0), 2.0);
+}
+
+#[test]
 fn disabled_state_overrides_other_visual_states() {
     let mut button = node(
         "disabled",
