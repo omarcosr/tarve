@@ -69,19 +69,143 @@ fn hover_and_color_update_do_not_invalidate_layout_or_text() {
     let mut button = node(
         "button",
         "button",
-        json!({"width":100,"height":36,"hoverBackground":"#eeeeee"}),
+        json!({
+            "width":100,
+            "height":36,
+            "background":"#111111",
+            "hover":{"background":"#eeeeee"},
+            "active":{"background":"#22c55e"},
+            "focus":{"outlineColor":"#8b5cf6","outlineWidth":2}
+        }),
         vec![],
     );
     button.text = "Click".into();
     let mut tree = Tree::new(root(vec![button.clone()]));
     tree.compute(300.0, 200.0).unwrap();
     tree.scene(1.0);
+    assert_eq!(
+        tree.resolved_visual_string("button", "background", "#00000000"),
+        "#111111"
+    );
     tree.pointer_move(20.0, 15.0);
+    assert_eq!(
+        tree.resolved_visual_string("button", "background", "#00000000"),
+        "#eeeeee"
+    );
     assert!(tree.dirty.paint && !tree.dirty.layout && !tree.dirty.text);
+    tree.pointer_down();
+    assert_eq!(
+        tree.resolved_visual_string("button", "background", "#00000000"),
+        "#22c55e"
+    );
+    assert_eq!(
+        tree.resolved_visual_string("button", "outlineColor", "#a1a1aa"),
+        "#8b5cf6"
+    );
     tree.scene(1.0);
     button.style["background"] = json!("#ffffff");
     tree.update(root(vec![button]));
     assert!(tree.dirty.paint && !tree.dirty.layout && !tree.dirty.text);
+}
+
+#[test]
+fn disabled_state_overrides_other_visual_states() {
+    let mut button = node(
+        "disabled",
+        "button",
+        json!({
+            "background":"#111111",
+            "hover":{"background":"#eeeeee"},
+            "active":{"background":"#22c55e"},
+            "disabled":{"background":"#71717a","foreground":"#a1a1aa"}
+        }),
+        vec![],
+    );
+    button.disabled = true;
+    let mut tree = Tree::new(root(vec![button]));
+    tree.compute(300.0, 200.0).unwrap();
+    assert_eq!(
+        tree.resolved_visual_string("disabled", "background", "#00000000"),
+        "#71717a"
+    );
+    assert_eq!(
+        tree.resolved_visual_string("disabled", "foreground", "#18181b"),
+        "#a1a1aa"
+    );
+}
+
+#[test]
+fn outline_updates_are_paint_only_and_do_not_affect_layout() {
+    let panel = node(
+        "panel",
+        "view",
+        json!({
+            "width":120,
+            "height":80,
+            "radius":8,
+            "outlineWidth":2,
+            "outlineColor":"#8b5cf6",
+            "outlineOffset":3
+        }),
+        vec![],
+    );
+    let mut tree = Tree::new(root(vec![panel.clone()]));
+    tree.compute(300.0, 200.0).unwrap();
+    tree.scene(1.0);
+    let before = tree.entries["panel"].rect;
+    let mut changed = panel;
+    changed.style["outlineWidth"] = json!(5);
+    changed.style["outlineOffset"] = json!(6);
+    changed.style["outlineColor"] = json!("#22c55e");
+    changed.style["outlineStyle"] = json!("dashed");
+    tree.update(root(vec![changed]));
+    assert!(tree.dirty.paint);
+    assert!(!tree.dirty.layout);
+    assert!(!tree.dirty.text);
+    tree.compute(300.0, 200.0).unwrap();
+    assert_eq!(tree.entries["panel"].rect, before);
+}
+
+#[test]
+fn every_outline_style_renders_without_affecting_layout() {
+    let styles = [
+        "dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset", "none",
+        "hidden",
+    ];
+    let children = styles
+        .iter()
+        .enumerate()
+        .map(|(index, style)| {
+            node(
+                &format!("outline-{style}"),
+                "view",
+                json!({
+                    "width":80,
+                    "height":30,
+                    "margin":{"bottom":8},
+                    "radius":6,
+                    "outlineWidth":4,
+                    "outlineOffset":2,
+                    "outlineColor":"#71717a",
+                    "outlineStyle":style,
+                    "background": if index % 2 == 0 { "#ffffff" } else { "#f4f4f5" }
+                }),
+                vec![],
+            )
+        })
+        .collect();
+    let mut tree = Tree::new(root(children));
+    tree.compute(300.0, 500.0).unwrap();
+    let before: Vec<_> = styles
+        .iter()
+        .map(|style| tree.entries[&format!("outline-{style}")].rect)
+        .collect();
+    tree.scene(1.0);
+    let after: Vec<_> = styles
+        .iter()
+        .map(|style| tree.entries[&format!("outline-{style}")].rect)
+        .collect();
+    assert_eq!(before, after);
 }
 #[test]
 fn scroll_clamps_and_hit_test_respects_viewport() {

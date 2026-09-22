@@ -11,7 +11,7 @@ use taffy::prelude::*;
 use unicode_segmentation::UnicodeSegmentation;
 use vello::{
     Scene,
-    kurbo::{Affine, Rect as BoxRect, RoundedRect, Stroke, Vec2},
+    kurbo::{Affine, Cap, Rect as BoxRect, RoundedRect, Stroke, Vec2},
     peniko::{Blob, Color, Fill, ImageAlphaType, ImageBrush, ImageData, ImageFormat},
 };
 
@@ -56,6 +56,68 @@ impl Dirty {
         }
     }
 }
+
+#[derive(Clone, Copy)]
+struct VisualState {
+    hovered: bool,
+    active: bool,
+    focused: bool,
+    disabled: bool,
+}
+
+fn visual_value<'a>(node: &'a Node, key: &str, state: VisualState) -> &'a Value {
+    let mut value = &node.style[key];
+
+    if state.hovered && !state.disabled {
+        if let Some(candidate) = node.style.get("hover").and_then(|style| style.get(key))
+            && !candidate.is_null()
+        {
+            value = candidate;
+        }
+    }
+
+    if state.active && !state.disabled {
+        if let Some(candidate) = node.style.get("active").and_then(|style| style.get(key))
+            && !candidate.is_null()
+        {
+            value = candidate;
+        }
+    }
+
+    if state.focused {
+        if let Some(candidate) = node.style.get("focus").and_then(|style| style.get(key))
+            && !candidate.is_null()
+        {
+            value = candidate;
+        }
+    }
+
+    if state.disabled
+        && let Some(candidate) = node.style.get("disabled").and_then(|style| style.get(key))
+        && !candidate.is_null()
+    {
+        value = candidate;
+    }
+
+    value
+}
+
+fn visual_string<'a>(node: &'a Node, key: &str, fallback: &'a str, state: VisualState) -> &'a str {
+    visual_value(node, key, state).as_str().unwrap_or(fallback)
+}
+
+fn visual_number(node: &Node, key: &str, fallback: f32, state: VisualState) -> f32 {
+    visual_value(node, key, state)
+        .as_f64()
+        .map(|value| value as f32)
+        .filter(|value| value.is_finite())
+        .unwrap_or(fallback)
+}
+
+fn visual_optional_number(node: &Node, key: &str, state: VisualState) -> Option<f64> {
+    visual_value(node, key, state).as_f64()
+}
+
 pub struct Entry {
     pub node: Node,
     children: Vec<String>,
@@ -455,15 +517,15 @@ impl Tree {
         let children = entry.children.clone();
         self.painted_nodes += 1;
         let transform = Affine::scale(scale);
-        let radius = node.number("radius", 0.0) as f64;
+        let state = VisualState {
+            hovered: self.hovered.as_deref() == Some(id),
+            active: self.pressed.as_deref() == Some(id) && self.hovered.as_deref() == Some(id),
+            focused: self.focused.as_deref() == Some(id),
+            disabled: node.disabled,
+        };
+        let radius = visual_number(&node, "radius", 0.0, state) as f64;
         let shape = RoundedRect::from_rect(rect, radius);
-        let mut bg = node.string("background", "#00000000");
-        if self.hovered.as_deref() == Some(id) && !node.disabled {
-            bg = node.string("hoverBackground", bg);
-        }
-        if self.pressed.as_deref() == Some(id) && self.hovered.as_deref() == Some(id) {
-            bg = node.string("activeBackground", bg);
-        }
+        let bg = visual_string(&node, "background", "#00000000", state);
         if bg != "#00000000" {
             scene.fill(Fill::NonZero, transform, color(bg), None, &shape);
         }
@@ -471,7 +533,7 @@ impl Tree {
             .insets("borderWidth")
             .map(|value| value.max(0.0) as f64);
         if border.iter().any(|width| *width > 0.0) {
-            let border_color = color(node.string("borderColor", "#e4e4e7"));
+            let border_color = color(visual_string(&node, "borderColor", "#e4e4e7", state));
             let uniform = border
                 .iter()
                 .all(|width| (*width - border[0]).abs() < f64::EPSILON);
@@ -548,13 +610,18 @@ impl Tree {
                 scene.pop_layer();
             }
         }
-        if self.focused.as_deref() == Some(id) {
-            scene.stroke(
-                &Stroke::new(2.0),
+        let outline_width = visual_number(&node, "outlineWidth", 0.0, state).max(0.0) as f64;
+        if outline_width > 0.0 {
+            paint_outline(
+                scene,
                 transform,
-                color(node.string("focusColor", "#a1a1aa")),
-                None,
-                &RoundedRect::from_rect(rect.inset(2.0), radius + 2.0),
+                rect,
+                radius,
+                outline_width,
+                visual_number(&node, "outlineOffset", 0.0, state) as f64,
+                visual_optional_number(&node, "outlineRadius", state),
+                visual_string(&node, "outlineColor", "#a1a1aa", state),
+                visual_string(&node, "outlineStyle", "solid", state),
             );
         }
         if node.is_text() {
@@ -581,16 +648,16 @@ impl Tree {
             }
             let foreground =
                 if node.kind == "input" && node.value.as_deref().unwrap_or("").is_empty() {
-                    node.string("placeholderColor", "#a1a1aa")
+                    visual_string(&node, "placeholderColor", "#a1a1aa", state)
                 } else {
-                    node.string("foreground", "#18181b")
+                    visual_string(&node, "foreground", "#18181b", state)
                 };
             scene.push_clip_layer(Fill::NonZero, transform, &shape);
             if node.kind == "input" && self.focused.as_deref() == Some(id) && self.select_all {
                 scene.fill(
                     Fill::NonZero,
                     transform,
-                    color(node.string("selectionColor", "#dbeafe")),
+                    color(visual_string(&node, "selectionColor", "#dbeafe", state)),
                     None,
                     &BoxRect::new(x, y, x + tw as f64, y + th as f64),
                 );
@@ -617,7 +684,7 @@ impl Tree {
                 scene.fill(
                     Fill::NonZero,
                     transform,
-                    color(node.string("caretColor", "#18181b")),
+                    color(visual_string(&node, "caretColor", "#18181b", state)),
                     None,
                     &BoxRect::new(cx, y + 3.0, cx + 1.0, y + th as f64 - 3.0),
                 );
@@ -629,13 +696,26 @@ impl Tree {
                 scene,
                 &node.text,
                 rect,
-                color(node.string("foreground", "#18181b")),
+                color(visual_string(&node, "foreground", "#18181b", state)),
                 node.number("strokeWidth", 1.75) as f64,
                 scale,
             );
         }
         if node.kind == "slider" {
-            crate::controls::slider(scene, &node, rect, scale);
+            crate::controls::slider(
+                scene,
+                &node,
+                rect,
+                scale,
+                color(visual_string(
+                    &node,
+                    "foreground",
+                    if node.disabled { "#a1a1aa" } else { "#18181b" },
+                    state,
+                )),
+                color(visual_string(&node, "borderColor", "#e4e4e7", state)),
+                color(visual_string(&node, "thumbColor", "#ffffff", state)),
+            );
         }
         if node.kind == "image" {
             scene.push_clip_layer(Fill::NonZero, transform, &shape);
@@ -657,7 +737,12 @@ impl Tree {
                 scene.fill(
                     Fill::NonZero,
                     transform,
-                    color(node.string("placeholderBackground", "#f4f4f5")),
+                    color(visual_string(
+                        &node,
+                        "placeholderBackground",
+                        "#f4f4f5",
+                        state,
+                    )),
                     None,
                     &shape,
                 );
@@ -684,7 +769,7 @@ impl Tree {
                 scene.fill(
                     Fill::NonZero,
                     transform,
-                    color(node.string("scrollbarColor", "#d4d4d8")),
+                    color(visual_string(&node, "scrollbarColor", "#d4d4d8", state)),
                     None,
                     &RoundedRect::new(rect.x1 - 7.0, top, rect.x1 - 3.0, top + thumb, 2.0),
                 );
@@ -1116,6 +1201,17 @@ impl Tree {
     pub(crate) fn image_cache_len(&self) -> usize {
         self.images.len()
     }
+    #[cfg(test)]
+    pub(crate) fn resolved_visual_string(&self, id: &str, key: &str, fallback: &str) -> String {
+        let entry = &self.entries[id];
+        let state = VisualState {
+            hovered: self.hovered.as_deref() == Some(id),
+            active: self.pressed.as_deref() == Some(id) && self.hovered.as_deref() == Some(id),
+            focused: self.focused.as_deref() == Some(id),
+            disabled: entry.node.disabled,
+        };
+        visual_string(&entry.node, key, fallback, state).to_string()
+    }
 }
 
 fn floor_boundary(value: &str, position: usize) -> usize {
@@ -1156,6 +1252,290 @@ pub fn color(hex: &str) -> Color {
     } else {
         Color::from_rgb8((number >> 16) as u8, (number >> 8) as u8, number as u8)
     }
+}
+
+fn paint_outline(
+    scene: &mut Scene,
+    transform: Affine,
+    rect: BoxRect,
+    base_radius: f64,
+    width: f64,
+    offset: f64,
+    radius_override: Option<f64>,
+    outline_color: &str,
+    outline_style: &str,
+) {
+    if width <= 0.0 || matches!(outline_style, "none" | "hidden") {
+        return;
+    }
+    match outline_style {
+        "dashed" => paint_outline_stroke(
+            scene,
+            transform,
+            rect,
+            base_radius,
+            width,
+            offset,
+            radius_override,
+            color(outline_color),
+            Stroke::new(width).with_dashes(0.0, [width * 3.0, width * 2.0]),
+            width,
+            offset,
+        ),
+        "dotted" => paint_outline_stroke(
+            scene,
+            transform,
+            rect,
+            base_radius,
+            width,
+            offset,
+            radius_override,
+            color(outline_color),
+            Stroke::new(width)
+                .with_caps(Cap::Round)
+                .with_dashes(0.0, [0.01, width * 2.0]),
+            width,
+            offset,
+        ),
+        "double" => {
+            let band = width / 3.0;
+            paint_outline_stroke(
+                scene,
+                transform,
+                rect,
+                base_radius,
+                band,
+                offset,
+                radius_override,
+                color(outline_color),
+                Stroke::new(band),
+                width,
+                offset,
+            );
+            paint_outline_stroke(
+                scene,
+                transform,
+                rect,
+                base_radius,
+                band,
+                offset + band * 2.0,
+                radius_override,
+                color(outline_color),
+                Stroke::new(band),
+                width,
+                offset,
+            );
+        }
+        "inset" | "outset" => {
+            let light = shade_hex(outline_color, 0.35);
+            let dark = shade_hex(outline_color, -0.35);
+            let top_left = if outline_style == "inset" {
+                &dark
+            } else {
+                &light
+            };
+            let bottom_right = if outline_style == "inset" {
+                &light
+            } else {
+                &dark
+            };
+            paint_directional_outline(
+                scene,
+                transform,
+                rect,
+                base_radius,
+                width,
+                offset,
+                radius_override,
+                top_left,
+                bottom_right,
+                width,
+                offset,
+            );
+        }
+        "groove" | "ridge" => {
+            let light = shade_hex(outline_color, 0.35);
+            let dark = shade_hex(outline_color, -0.35);
+            let band = width / 2.0;
+            let outer_is_inset = outline_style == "groove";
+            let (outer_tl, outer_br) = if outer_is_inset {
+                (&dark, &light)
+            } else {
+                (&light, &dark)
+            };
+            let (inner_tl, inner_br) = if outer_is_inset {
+                (&light, &dark)
+            } else {
+                (&dark, &light)
+            };
+            paint_directional_outline(
+                scene,
+                transform,
+                rect,
+                base_radius,
+                band,
+                offset,
+                radius_override,
+                inner_tl,
+                inner_br,
+                width,
+                offset,
+            );
+            paint_directional_outline(
+                scene,
+                transform,
+                rect,
+                base_radius,
+                band,
+                offset + band,
+                radius_override,
+                outer_tl,
+                outer_br,
+                width,
+                offset,
+            );
+        }
+        _ => paint_outline_stroke(
+            scene,
+            transform,
+            rect,
+            base_radius,
+            width,
+            offset,
+            radius_override,
+            color(outline_color),
+            Stroke::new(width),
+            width,
+            offset,
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_outline_stroke(
+    scene: &mut Scene,
+    transform: Affine,
+    rect: BoxRect,
+    base_radius: f64,
+    band_width: f64,
+    band_offset: f64,
+    radius_override: Option<f64>,
+    outline_color: Color,
+    stroke: Stroke,
+    total_width: f64,
+    total_offset: f64,
+) {
+    if band_width <= 0.0 {
+        return;
+    }
+    let max_inset = (rect.width().min(rect.height()) / 2.0 - 0.01).max(0.0);
+    let expansion = (band_offset + band_width / 2.0).max(-max_inset);
+    let outline_rect = BoxRect::new(
+        rect.x0 - expansion,
+        rect.y0 - expansion,
+        rect.x1 + expansion,
+        rect.y1 + expansion,
+    );
+    let base_expansion = total_offset + total_width / 2.0;
+    let outline_radius = radius_override
+        .map(|radius| radius + expansion - base_expansion)
+        .unwrap_or(base_radius + expansion)
+        .max(0.0);
+    scene.stroke(
+        &stroke,
+        transform,
+        outline_color,
+        None,
+        &RoundedRect::from_rect(outline_rect, outline_radius),
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_directional_outline(
+    scene: &mut Scene,
+    transform: Affine,
+    rect: BoxRect,
+    base_radius: f64,
+    band_width: f64,
+    band_offset: f64,
+    radius_override: Option<f64>,
+    top_left_color: &str,
+    bottom_right_color: &str,
+    total_width: f64,
+    total_offset: f64,
+) {
+    paint_outline_stroke(
+        scene,
+        transform,
+        rect,
+        base_radius,
+        band_width,
+        band_offset,
+        radius_override,
+        color(bottom_right_color),
+        Stroke::new(band_width),
+        total_width,
+        total_offset,
+    );
+
+    let outer = (band_offset + band_width).max(0.0);
+    let clip_rect = BoxRect::new(
+        rect.x0 - outer,
+        rect.y0 - outer,
+        rect.x1 + outer,
+        rect.y1 + outer,
+    );
+    let center_x = (rect.x0 + rect.x1) / 2.0;
+    let center_y = (rect.y0 + rect.y1) / 2.0;
+    for clip in [
+        BoxRect::new(clip_rect.x0, clip_rect.y0, clip_rect.x1, center_y),
+        BoxRect::new(clip_rect.x0, clip_rect.y0, center_x, clip_rect.y1),
+    ] {
+        scene.push_clip_layer(Fill::NonZero, transform, &clip);
+        paint_outline_stroke(
+            scene,
+            transform,
+            rect,
+            base_radius,
+            band_width,
+            band_offset,
+            radius_override,
+            color(top_left_color),
+            Stroke::new(band_width),
+            total_width,
+            total_offset,
+        );
+        scene.pop_layer();
+    }
+}
+
+fn shade_hex(hex: &str, amount: f64) -> String {
+    let raw = hex.trim_start_matches('#');
+    let parsed = u32::from_str_radix(raw, 16).unwrap_or(0);
+    let (r, g, b, a) = if raw.len() == 8 {
+        (
+            (parsed >> 24) as u8,
+            (parsed >> 16) as u8,
+            (parsed >> 8) as u8,
+            parsed as u8,
+        )
+    } else {
+        ((parsed >> 16) as u8, (parsed >> 8) as u8, parsed as u8, 255)
+    };
+    let adjust = |channel: u8| -> u8 {
+        if amount >= 0.0 {
+            (channel as f64 + (255.0 - channel as f64) * amount.clamp(0.0, 1.0)).round() as u8
+        } else {
+            (channel as f64 * (1.0 + amount.clamp(-1.0, 0.0))).round() as u8
+        }
+    };
+    format!(
+        "#{:02x}{:02x}{:02x}{:02x}",
+        adjust(r),
+        adjust(g),
+        adjust(b),
+        a
+    )
 }
 fn dimension(v: &Value) -> Dimension {
     if let Some(n) = v.as_f64() {

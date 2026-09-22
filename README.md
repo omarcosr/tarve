@@ -127,6 +127,55 @@ Borders can use one width for every side or independent widths, using the same i
 
 Per-side border widths participate in Taffy layout as well as Vello painting, so child content is inset by the corresponding side rather than treating the border as a purely visual stroke.
 
+`outline` is separate from `border`: it paints outside the component and never consumes Taffy layout space. Width, color, offset and radius are independently configurable:
+
+```tsx
+<Button
+  style={{
+    outlineWidth: 2,
+    outlineColor: theme.colors.ring,
+    outlineOffset: 2,
+    outlineRadius: 10,
+    outlineStyle: "dashed",
+  }}
+>
+  Save
+</Button>
+```
+
+`outlineStyle` supports `dotted`, `dashed`, `solid`, `double`, `groove`, `ridge`, `inset`, `outset`, `none` and `hidden`. `dotted`/`dashed` use native kurbo dash patterns; `double` paints two separated outline bands; the four 3D styles derive light/dark edge tones from `outlineColor`.
+
+Interactive states are nested inside `style`, so the normal visual properties are reused instead of creating `hoverX`, `focusX` and `activeX` variants:
+
+```tsx
+<Button
+  style={{
+    background: theme.colors.primary,
+    foreground: theme.colors.primaryForeground,
+    hover: {
+      background: theme.colors.primaryHover,
+    },
+    active: {
+      background: theme.colors.primaryActive,
+    },
+    focus: {
+      outlineWidth: 2,
+      outlineColor: theme.colors.ring,
+      outlineOffset: 2,
+      outlineStyle: "solid",
+    },
+    disabled: {
+      background: theme.colors.disabled,
+      foreground: theme.colors.disabledForeground,
+    },
+  }}
+>
+  Save
+</Button>
+```
+
+The visual cascade is `base → hover → active → focus → disabled`. States are paint-only: layout properties such as `width`, `padding` and `borderWidth` stay on the base style.
+
 ```powershell
 bun run check           # TypeScript
 bun run test            # TSX/protocolo, layout, dirty flags e input

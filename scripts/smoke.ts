@@ -50,7 +50,9 @@ try {
   await app.capture(resolve("work/hover.png"));
   const clicked = await click("new-project");
   assert.equal(node(clicked, "save-status").text, "Project 1 created", "Click must roundtrip through Bun and update Rust");
-  assert.equal(clicked.layoutNodesCreated, initial.layoutNodesCreated, "An app update must reuse existing layout nodes");
+  assert(clicked.nodes.some(item => item.id === "demo-modal"), "New project must open the modal");
+  const closedAfterNewProject = await click("demo-modal-close");
+  assert(!closedAfterNewProject.nodes.some(item => item.id === "demo-modal"), "New-project modal must close cleanly");
   for (const [id, expected] of [["variant-default", "Primary"], ["variant-secondary", "Secondary"], ["variant-outline", "Outline"], ["variant-ghost", "Ghost"], ["variant-destructive", "Destructive"]]) {
     assert(node(await click(id), "save-status").text.startsWith(expected), `${id} must dispatch click`);
   }

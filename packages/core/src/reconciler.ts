@@ -84,16 +84,23 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
   return { document: { version: PROTOCOL_VERSION, window: windowOptions, root: roots[0] }, handlers, nodes };
 }
 
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((value, index) => sameValue(value, b[index]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left);
+  return keys.length === Object.keys(right).length && keys.every(key => sameValue(left[key], right[key]));
+}
 function sameFields(a: object, b: object): boolean {
-  const keys = Object.keys(a);
-  return keys.length === Object.keys(b).length && keys.every(key => Reflect.get(a, key) === Reflect.get(b, key));
+  return sameValue(a, b);
 }
 function sameStyle(a: NativeNode["style"], b: NativeNode["style"]): boolean {
-  const keys = Object.keys(a) as (keyof NativeNode["style"])[];
-  return keys.length === Object.keys(b).length && keys.every(key => {
-    const left = a[key], right = b[key];
-    return left === right || (!!left && !!right && typeof left === "object" && typeof right === "object" && sameFields(left, right));
-  });
+  return sameValue(a, b);
 }
 
 /** null requests a structural replacement; an empty list means no native work is needed. */

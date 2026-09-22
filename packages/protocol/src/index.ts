@@ -1,9 +1,16 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 12;
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "pressable" | "icon" | "slider";
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
-export interface Style {
+export type OutlineStyle = "dotted" | "dashed" | "solid" | "double" | "groove" | "ridge" | "inset" | "outset" | "none" | "hidden";
+export interface StateStyle {
+  background?: string; foreground?: string; borderColor?: string; radius?: number;
+  outlineWidth?: number; outlineColor?: string; outlineOffset?: number; outlineRadius?: number; outlineStyle?: OutlineStyle;
+  placeholderColor?: string; selectionColor?: string; caretColor?: string;
+  scrollbarColor?: string; placeholderBackground?: string; thumbColor?: string;
+}
+export interface Style extends StateStyle {
   width?: Length; height?: Length; minWidth?: Length; minHeight?: Length;
   maxWidth?: Length; maxHeight?: Length; flex?: number; shrink?: number;
   position?: "relative" | "absolute"; top?: Length; right?: Length; bottom?: Length; left?: Length;
@@ -11,12 +18,10 @@ export interface Style {
   padding?: Insets; margin?: Insets; align?: "start" | "center" | "end" | "stretch";
   justify?: "start" | "center" | "end" | "between";
   display?: "flex" | "grid" | "none"; columns?: number;
-  background?: string; foreground?: string; borderColor?: string; borderWidth?: Insets;
+  borderWidth?: Insets;
   radius?: number; fontSize?: number; fontWeight?: number; fontFamily?: string;
   lineHeight?: number; textAlign?: "start" | "center" | "end";
-  hoverBackground?: string; activeBackground?: string; focusColor?: string;
-  placeholderColor?: string; selectionColor?: string; caretColor?: string;
-  scrollbarColor?: string; placeholderBackground?: string; thumbColor?: string;
+  hover?: StateStyle; focus?: StateStyle; active?: StateStyle; disabled?: StateStyle;
   strokeWidth?: number; pointerEvents?: "auto" | "block";
 }
 export interface Control {

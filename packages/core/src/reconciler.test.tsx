@@ -147,4 +147,74 @@ describe("native TSX protocol", () => {
     );
     expect(tree.nodes.get("panel")?.style.borderWidth).toEqual({ top: 1, right: 2, bottom: 3, left: 4 });
   });
+  test("nested states are stylable and resolve theme colors", () => {
+    const tree = compileTree(
+      <Window theme={darkTheme}>
+        <Column
+          id="panel"
+          style={{
+            outlineWidth: 3,
+            outlineColor: theme.colors.ring,
+            outlineOffset: 4,
+            outlineRadius: 12,
+            outlineStyle: "dashed",
+            hover: { background: theme.colors.muted, borderColor: theme.colors.border },
+            active: { background: theme.colors.secondaryActive },
+            focus: {
+              outlineWidth: 2,
+              outlineColor: theme.colors.primary,
+              outlineOffset: 2,
+              outlineRadius: 10,
+              outlineStyle: "dotted",
+            },
+            disabled: { background: theme.colors.disabled, foreground: theme.colors.disabledForeground },
+          }}
+        />
+      </Window>,
+    );
+    const style = tree.nodes.get("panel")?.style;
+    expect(style?.outlineWidth).toBe(3);
+    expect(style?.outlineColor).toBe(darkTheme.colors.ring);
+    expect(style?.outlineOffset).toBe(4);
+    expect(style?.outlineRadius).toBe(12);
+    expect(style?.outlineStyle).toBe("dashed");
+    expect(style?.hover).toEqual({ background: darkTheme.colors.muted, borderColor: darkTheme.colors.border });
+    expect(style?.active).toEqual({ background: darkTheme.colors.secondaryActive });
+    expect(style?.focus).toEqual({
+      outlineWidth: 2,
+      outlineColor: darkTheme.colors.primary,
+      outlineOffset: 2,
+      outlineRadius: 10,
+      outlineStyle: "dotted",
+    });
+    expect(style?.disabled).toEqual({
+      background: darkTheme.colors.disabled,
+      foreground: darkTheme.colors.disabledForeground,
+    });
+  });
+  test("nested state objects compare deeply and do not create spurious patches", () => {
+    const view = () => compileTree(
+      <Window>
+        <Button id="button" style={{ hover: { background: theme.colors.muted }, focus: { outlineWidth: 2 } }}>
+          Save
+        </Button>
+      </Window>,
+    );
+    expect(diffTrees(view(), view())).toEqual([]);
+  });
+  test("supports every outlineStyle value", () => {
+    const styles = ["dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset", "none", "hidden"] as const;
+    const tree = compileTree(
+      <Window>
+        <Column>
+          {styles.map((outlineStyle) => (
+            <Column key={outlineStyle} id={`outline-${outlineStyle}`} style={{ outlineWidth: 3, outlineStyle }} />
+          ))}
+        </Column>
+      </Window>,
+    );
+    for (const outlineStyle of styles) {
+      expect(tree.nodes.get(`outline-${outlineStyle}`)?.style.outlineStyle).toBe(outlineStyle);
+    }
+  });
 });

@@ -25,7 +25,15 @@ export interface PressableProps extends ViewProps {
   focusable?: boolean; onEscape?: () => void; modal?: boolean;
 }
 export function Pressable(props: PressableProps): VNode {
-  return container("pressable", props, { radius: theme.radius.sm, focusColor: theme.colors.ring });
+  return container("pressable", props, {
+    radius: theme.radius.sm,
+    focus: {
+      outlineColor: theme.colors.ring,
+      outlineWidth: 2,
+      outlineOffset: 2,
+      outlineStyle: "solid",
+    },
+  });
 }
 export type IconName = "check" | "x" | "plus" | "minus" | "chevron-down" | "chevron-up" | "chevron-right" | "chevron-left" | "search" | "info";
 export interface IconProps extends BaseProps { name: IconName; size?: number; color?: string; strokeWidth?: number }
@@ -41,12 +49,13 @@ export function Button({ variant = "default", size = "default", style, disabled,
   const height = { sm: 32, default: 36, lg: 40 }[size];
   return jsx("button", { ...props, disabled, style: {
     height, padding: { left: 14, right: 14 }, radius: theme.radius.sm, fontSize: 14,
-    fontFamily: theme.font.family, lineHeight: theme.font.lineHeight, fontWeight: 500, align: "center", justify: "center", focusColor: theme.colors.ring,
-    shrink: 0, ...buttonVariants[variant], ...(disabled ? {
+    fontFamily: theme.font.family, lineHeight: theme.font.lineHeight, fontWeight: 500, align: "center", justify: "center",
+    focus: { outlineColor: theme.colors.ring, outlineWidth: 2, outlineOffset: 2, outlineStyle: "solid" },
+    disabled: {
       background: theme.colors.disabled,
       foreground: theme.colors.disabledForeground,
-      hoverBackground: theme.colors.disabled,
-    } : {}), ...style,
+    },
+    shrink: 0, ...buttonVariants[variant], ...style,
   } });
 }
 export interface ImageProps extends BaseProps { src: string; width?: number; height?: number; fit?: "cover" | "contain" }
@@ -65,7 +74,7 @@ export function TextInput({ style, ...props }: TextInputProps): VNode {
     foreground: theme.colors.foreground, placeholderColor: theme.colors.placeholder,
     selectionColor: theme.colors.selection, caretColor: theme.colors.foreground,
     fontFamily: theme.font.family, lineHeight: theme.font.lineHeight, fontSize: theme.font.size,
-    focusColor: theme.colors.ring, ...style } });
+    focus: { outlineColor: theme.colors.ring, outlineWidth: 2, outlineOffset: 2, outlineStyle: "solid" }, ...style } });
 }
 
 export interface TitleBarProps extends ViewProps {
@@ -88,8 +97,8 @@ function titleBarButton(action: "minimize" | "toggleMaximize" | "close", child: 
       align: "center",
       justify: "center",
       background: "#00000000",
-      hoverBackground: close ? theme.colors.windowCloseHover : theme.colors.muted,
-      activeBackground: close ? theme.colors.windowCloseActive : theme.colors.border,
+      hover: { background: close ? theme.colors.windowCloseHover : theme.colors.muted },
+      active: { background: close ? theme.colors.windowCloseActive : theme.colors.border },
     },
     children: child,
   });
@@ -180,8 +189,10 @@ export function Modal({
     style: {
       position: "absolute", top: 14, right: 14, width: 30, height: 30,
       radius: theme.radius.sm, align: "center", justify: "center",
-      background: "#00000000", hoverBackground: theme.colors.muted,
-      activeBackground: theme.colors.border, focusColor: theme.colors.ring,
+      background: "#00000000",
+      hover: { background: theme.colors.muted },
+      active: { background: theme.colors.border },
+      focus: { outlineColor: theme.colors.ring, outlineWidth: 2, outlineOffset: 2, outlineStyle: "solid" },
     },
     children: jsx(Icon, { name: "x", size: 16, color: theme.colors.mutedForeground }),
   }) : null;

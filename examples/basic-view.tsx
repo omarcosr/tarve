@@ -175,6 +175,8 @@ export function App() {
                   flex: 1,
                   background: selected === tab ? c.card : "#00000000",
                   foreground: selected === tab ? c.foreground : c.mutedForeground,
+                  outlineStyle: "none",
+                  focus: { outlineStyle: "none" },
                 }}
                 onClick={() => {
                   selected = tab;

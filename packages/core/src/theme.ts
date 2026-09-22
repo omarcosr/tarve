@@ -145,6 +145,18 @@ export function resolveThemeStyle(style: Style, selected: ThemeDefinition): Styl
     const value = resolved[key];
     if (typeof value === "string") (resolved as Record<string, unknown>)[key] = resolveThemeColor(value, selected);
   }
+  for (const state of ["hover", "focus", "active", "disabled"] as const) {
+    const value = style[state];
+    if (!value) continue;
+    const next = { ...value };
+    for (const key of Object.keys(next) as (keyof typeof next)[]) {
+      const stateValue = next[key];
+      if (typeof stateValue === "string") {
+        (next as Record<string, unknown>)[key] = resolveThemeColor(stateValue, selected);
+      }
+    }
+    resolved[state] = next;
+  }
   return resolved;
 }
 
@@ -153,33 +165,33 @@ export const buttonVariants: Record<ButtonVariant, Style> = {
   default: {
     background: theme.colors.primary,
     foreground: theme.colors.primaryForeground,
-    hoverBackground: theme.colors.primaryHover,
-    activeBackground: theme.colors.primaryActive,
+    hover: { background: theme.colors.primaryHover },
+    active: { background: theme.colors.primaryActive },
   },
   secondary: {
     background: theme.colors.secondary,
     foreground: theme.colors.secondaryForeground,
-    hoverBackground: theme.colors.secondaryHover,
-    activeBackground: theme.colors.secondaryActive,
+    hover: { background: theme.colors.secondaryHover },
+    active: { background: theme.colors.secondaryActive },
   },
   outline: {
     background: theme.colors.input,
     foreground: theme.colors.foreground,
     borderColor: theme.colors.border,
     borderWidth: 1,
-    hoverBackground: theme.colors.muted,
-    activeBackground: theme.colors.secondaryActive,
+    hover: { background: theme.colors.muted },
+    active: { background: theme.colors.secondaryActive },
   },
   ghost: {
     background: "#00000000",
     foreground: theme.colors.foreground,
-    hoverBackground: theme.colors.muted,
-    activeBackground: theme.colors.secondaryActive,
+    hover: { background: theme.colors.muted },
+    active: { background: theme.colors.secondaryActive },
   },
   destructive: {
     background: theme.colors.destructive,
     foreground: theme.colors.destructiveForeground,
-    hoverBackground: theme.colors.destructiveHover,
-    activeBackground: theme.colors.destructiveActive,
+    hover: { background: theme.colors.destructiveHover },
+    active: { background: theme.colors.destructiveActive },
   },
 };

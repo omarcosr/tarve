@@ -1,11 +1,19 @@
-use crate::{protocol::Node, tree::color};
+use crate::protocol::Node;
 use vello::{
     Scene,
     kurbo::{Affine, Circle, Rect, RoundedRect, Stroke},
-    peniko::Fill,
+    peniko::{Color, Fill},
 };
 
-pub fn slider(scene: &mut Scene, node: &Node, rect: Rect, scale: f64) {
+pub fn slider(
+    scene: &mut Scene,
+    node: &Node,
+    rect: Rect,
+    scale: f64,
+    accent: Color,
+    border_color: Color,
+    thumb_color: Color,
+) {
     let Some(control) = &node.control else {
         return;
     };
@@ -30,14 +38,10 @@ pub fn slider(scene: &mut Scene, node: &Node, rect: Rect, scale: f64) {
         )
     };
     let transform = Affine::scale(scale);
-    let accent = color(node.string(
-        "foreground",
-        if node.disabled { "#a1a1aa" } else { "#18181b" },
-    ));
     scene.fill(
         Fill::NonZero,
         transform,
-        color(node.string("borderColor", "#e4e4e7")),
+        border_color,
         None,
         &RoundedRect::from_rect(track, 2.0),
     );
@@ -51,7 +55,7 @@ pub fn slider(scene: &mut Scene, node: &Node, rect: Rect, scale: f64) {
     scene.fill(
         Fill::NonZero,
         transform,
-        color(node.string("thumbColor", "#ffffff")),
+        thumb_color,
         None,
         &Circle::new(center, 7.0),
     );
