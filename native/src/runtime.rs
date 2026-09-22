@@ -228,7 +228,7 @@ impl App {
                 .as_ref()
                 .map(|id| self.tree.entries[id].node.kind.as_str());
             window.set_cursor(match kind {
-                Some("button" | "pressable") => CursorIcon::Pointer,
+                Some("button" | "pressable" | "slider") => CursorIcon::Pointer,
                 Some("input") => CursorIcon::Text,
                 _ => CursorIcon::Default,
             });
@@ -392,7 +392,7 @@ impl ApplicationHandler<Command> for App {
                 }
             }
             Command::Update { root } => {
-                self.tree.update(root);
+                self.tree.update(*root);
                 self.sync_custom_window_chrome();
             }
             Command::Close => event_loop.exit(),
@@ -449,10 +449,7 @@ impl ApplicationHandler<Command> for App {
                     "move" => self.tree.pointer_move(x.unwrap_or(0.0), y.unwrap_or(0.0)),
                     "down" => self.tree.pointer_down(),
                     "up" => self.tree.pointer_up(),
-                    "wheel" => {
-                        self.tree.wheel(delta.unwrap_or(0.0));
-                        vec![]
-                    }
+                    "wheel" => self.tree.wheel(delta.unwrap_or(0.0)),
                     "text" => self.tree.type_text(text.as_deref().unwrap_or("")),
                     "key" if text.as_deref() == Some("Escape") => {
                         vec![json!({"type":"escape"})]
@@ -507,7 +504,7 @@ impl ApplicationHandler<Command> for App {
                     .tree
                     .pointer_move(position.x / scale, position.y / scale);
             }
-            WindowEvent::CursorLeft { .. } => events = self.tree.pointer_move(-1.0, -1.0),
+            WindowEvent::CursorLeft { .. } => events = self.tree.pointer_leave(),
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
@@ -528,7 +525,7 @@ impl ApplicationHandler<Command> for App {
                         -p.y / self.window.as_ref().unwrap().scale_factor()
                     }
                 };
-                self.tree.wheel(dy);
+                events = self.tree.wheel(dy);
             }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
@@ -545,6 +542,8 @@ impl ApplicationHandler<Command> for App {
                     Key::Named(NamedKey::Delete) => Some("Delete"),
                     Key::Named(NamedKey::ArrowLeft) => Some("ArrowLeft"),
                     Key::Named(NamedKey::ArrowRight) => Some("ArrowRight"),
+                    Key::Named(NamedKey::ArrowUp) => Some("ArrowUp"),
+                    Key::Named(NamedKey::ArrowDown) => Some("ArrowDown"),
                     Key::Named(NamedKey::Home) => Some("Home"),
                     Key::Named(NamedKey::End) => Some("End"),
                     Key::Named(NamedKey::Escape) => {
@@ -576,8 +575,7 @@ impl ApplicationHandler<Command> for App {
                 events = self.tree.type_text(&text);
             }
             WindowEvent::Focused(false) => {
-                self.tree.focused = None;
-                self.tree.dirty.paint = true;
+                self.tree.blur();
             }
             _ => {}
         }

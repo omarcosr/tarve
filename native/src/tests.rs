@@ -449,3 +449,124 @@ fn modal_overlay_is_absolute_blocks_background_and_traps_focus() {
         "wheel input must not reach scroll containers behind a modal"
     );
 }
+
+#[test]
+fn focusing_an_offscreen_control_scrolls_it_into_view() {
+    let rows = (0..5)
+        .map(|index| {
+            node(
+                &format!("row-{index}"),
+                "button",
+                json!({"height":30,"shrink":0}),
+                vec![],
+            )
+        })
+        .collect();
+    let scroll = node("scroll", "scroll", json!({"height":60}), rows);
+    let mut tree = Tree::new(root(vec![scroll]));
+    tree.compute(200.0, 100.0).unwrap();
+    assert_eq!(tree.entries["scroll"].scroll, 0.0);
+    tree.focus("row-4");
+    assert_eq!(tree.focused.as_deref(), Some("row-4"));
+    assert!(tree.entries["scroll"].scroll > 0.0);
+    let row = tree
+        .snapshots()
+        .into_iter()
+        .find(|item| item["id"] == "row-4")
+        .unwrap();
+    assert!(row["y"].as_f64().unwrap() + row["height"].as_f64().unwrap() <= 60.0);
+    assert!(!tree.dirty.layout && tree.dirty.paint);
+}
+
+#[test]
+fn leaving_the_window_while_dragging_does_not_reset_a_slider() {
+    let mut slider = node("slider", "slider", json!({"width":120,"height":24}), vec![]);
+    slider.control = Some(
+        serde_json::from_value(json!({
+            "role":"slider","value":50,"min":0,"max":100,"step":1
+        }))
+        .unwrap(),
+    );
+    let mut tree = Tree::new(root(vec![slider]));
+    tree.compute(200.0, 100.0).unwrap();
+    tree.pointer_move(60.0, 12.0);
+    tree.pointer_down();
+    tree.pointer_move(100.0, 12.0);
+    let before = tree.entries["slider"].node.control.as_ref().unwrap().value;
+    assert!(before > 50.0);
+    tree.pointer_leave();
+    assert_eq!(
+        tree.entries["slider"].node.control.as_ref().unwrap().value,
+        before
+    );
+    assert_eq!(tree.hovered, None);
+    tree.pointer_up();
+}
+
+#[test]
+fn radio_groups_use_one_tab_stop_and_arrows_move_between_enabled_choices() {
+    let mut radios = Vec::new();
+    for (name, checked, disabled) in [
+        ("first", false, false),
+        ("second", true, false),
+        ("third", false, true),
+    ] {
+        let mut radio = node(name, "pressable", json!({"height":28}), vec![]);
+        radio.control = Some(
+            serde_json::from_value(json!({
+                "role":"radio","group":"choices","label":name,"checked":checked
+            }))
+            .unwrap(),
+        );
+        radio.disabled = disabled;
+        radios.push(radio);
+    }
+    let group = node("choices", "column", json!({}), radios);
+    let mut tree = Tree::new(root(vec![group]));
+    tree.compute(200.0, 100.0).unwrap();
+    tree.key("Tab");
+    assert_eq!(tree.focused.as_deref(), Some("second"));
+    let events = tree.key("ArrowRight");
+    assert_eq!(events[0]["id"], "first");
+    assert_eq!(tree.focused.as_deref(), Some("first"));
+    tree.key("Tab");
+    assert_eq!(
+        tree.focused.as_deref(),
+        Some("first"),
+        "only the focused radio belongs in the tab order"
+    );
+}
+
+#[test]
+fn virtual_scroll_waits_for_new_rows_before_painting() {
+    let mut scroll = node(
+        "list",
+        "scroll",
+        json!({"height":60}),
+        vec![node(
+            "content",
+            "view",
+            json!({"height":600,"shrink":0}),
+            vec![],
+        )],
+    );
+    scroll.control = Some(serde_json::from_value(json!({"role":"virtualList","value":0})).unwrap());
+    let mut tree = Tree::new(root(vec![scroll.clone()]));
+    tree.compute(200.0, 100.0).unwrap();
+    tree.scene(1.0);
+    tree.pointer_move(20.0, 20.0);
+    tree.scene(1.0);
+    let events = tree.wheel(36.0);
+    assert_eq!(events[0]["offset"], 36.0);
+    assert!(
+        !tree.dirty.paint,
+        "old rows must not paint at the new scroll offset"
+    );
+    scroll.control.as_mut().unwrap().value = 36.0;
+    scroll.children.clear();
+    tree.patch(vec![scroll]).unwrap();
+    assert!(
+        tree.dirty.paint,
+        "the matching virtual rows must schedule the frame"
+    );
+}

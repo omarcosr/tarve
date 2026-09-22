@@ -6,15 +6,17 @@ Run `bun run build:exe` followed by `bun run bench` on Windows x64. The benchmar
 
 Windows x64, Bun 1.4.1, AMD Ryzen 7 9800X3D. The workload contains 2,000 rows / 6,005 native nodes; 67 nodes are visible. Each row contains text and an interactive button. The benchmark discards five warm-up samples and collects 60 samples for each operation.
 
-| Operation | Full-tree updates | Property patches |
+| Operation | Original full-tree update | Current property patch |
 | --- | ---: | ---: |
-| State update, median | 35.92 ms | 8.57 ms |
-| State update, p95 | 42.41 ms | 11.06 ms |
-| Scroll, median | 1.13 ms | 0.94 ms |
-| Scroll, p95 | 1.97 ms | 1.28 ms |
+| State update, median | 35.92 ms | 11.96 ms |
+| State update, p95 | 42.41 ms | 14.51 ms |
+| Scroll, median | 1.13 ms | 0.92 ms |
+| Scroll, p95 | 1.97 ms | 1.09 ms |
 | New frames while idle | 0 | 0 |
 
-These are input/update dispatch to native frame-notification times, including Bun/FFI and presentation scheduling. They are not photon latency, universal FPS guarantees, or results from other hardware. After hiding the HWND until its first populated frame and preferring Vulkan with DX12 fallback on Windows, the first window took about 432–451 ms across the latest three release runs. With the lower-memory wgpu device configuration, warmed startup is about 476–481 ms.
+These are input/update dispatch to native frame-notification times, including Bun/FFI and presentation scheduling. They are not photon latency, universal FPS guarantees, or results from other hardware. Recent update runs on the same machine have ranged from 11.79 to 15.37 ms median, so the current value is one run rather than a fixed performance promise. In that run, TSX tree construction took 5.78 ms median and diffing took 1.54 ms median. The first window took 562 ms. The earlier patch implementation once measured 8.57 ms median; repeatability across machines remains unverified.
+
+The fixed-height `VirtualList` example has 50,000 records and kept at most 97 native layout nodes during initial view, mid-list scroll and bottom-list interaction in the real-window smoke test. Native scroll events trigger updates for virtual lists; ordinary `Scroll` elements paint directly without rebuilding the TSX tree. A virtual list waits for the updated visible rows before scheduling its next frame.
 
 ## Memory
 
@@ -41,4 +43,4 @@ Before requesting wgpu's memory-oriented allocation strategy and limiting Vello 
 
 ## Remaining work
 
-Virtualized data sets, timed scrolling/transitions, complex input/overlays, and sustained interaction with those components need their own measurements and regression gates before the overall production-readiness objective is complete.
+Timed scrolling/transitions, complex input/overlays, sustained virtual-list interaction latency and multiple Windows/GPU configurations need their own measurements and regression gates before the overall production-readiness objective is complete.

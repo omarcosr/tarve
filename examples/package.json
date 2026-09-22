@@ -5,7 +5,16 @@
   "scripts": {
     "basic": "bun basic.tsx",
     "counter": "bun counter.tsx",
-    "build:basic": "bun ../scripts/build.ts --exe --entry basic.tsx --outfile dist/Basic.exe",
-    "build:counter": "bun ../scripts/build.ts --exe --entry counter.tsx --outfile dist/Counter.exe"
+    "forms": "bun forms.tsx",
+    "large-list": "bun large-list.tsx",
+    "check": "tsc --noEmit",
+    "build:basic": "bun run tarve build basic.tsx --outfile dist/Basic.exe",
+    "build:counter": "bun run tarve build counter.tsx --outfile dist/Counter.exe",
+    "build:forms": "bun run tarve build forms.tsx --outfile dist/Forms.exe",
+    "build:large-list": "bun run tarve build large-list.tsx --outfile dist/LargeList.exe"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^5.9.3"
   }
 }

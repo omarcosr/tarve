@@ -12,7 +12,7 @@ bun install
 bun run dev
 ```
 
-`dev` compila a DLL e inicia o exemplo com reinício ao editar TS/TSX. Após editar Rust, compile novamente e reinicie o app. Cada build de desenvolvimento tem um nome de DLL próprio, permitindo compilar enquanto a janela anterior ainda está aberta. Para abrir sem recompilar: `bun run start`.
+`dev` gera o pacote npm local, instala o tarball nos exemplos e reinicia o app ao editar TS/TSX. Após editar o Tarve ou o backend Rust, reinicie `dev` para gerar e instalar um pacote atualizado. Para abrir o exemplo usando o último tarball instalado: `bun run start`.
 
 ## Usar como pacote npm
 
@@ -32,21 +32,23 @@ bun run tarve build app.tsx --outfile dist/MeuApp.exe
 
 Configure `tsconfig.json` com `"jsx": "react-jsx"`, `"jsxImportSource": "tarve"`, `"moduleResolution": "Bundler"` e `"types": ["bun", "tarve/assets"]`. A API pública é importada de `tarve`; o build também está disponível como `import { build } from "tarve/build"`.
 
-`examples/counter.tsx` mostra o app mínimo e `examples/basic.tsx` reúne os componentes iniciais. Exemplos usam a mesma API instalada, sem configurar a DLL ou o Worker.
+`examples/counter.tsx` mostra o app mínimo, `examples/basic.tsx` reúne os componentes iniciais, `examples/forms.tsx` demonstra controles de formulário e `examples/large-list.tsx` mostra 50.000 registros com lista virtual. Exemplos usam a mesma API instalada, sem configurar a DLL ou o Worker.
 
-`examples/` também funciona como uma pasta executável independente durante o desenvolvimento:
+`examples/` é um projeto Bun consumidor: tem `package.json` e `tsconfig.json` próprios e importa somente a API pública. Após publicar `tarve@0.1.0` no registry, instale o pacote:
 
 ```powershell
 cd A:\tarve\examples
-bun run counter.tsx
-bun run basic.tsx
-
-# Builds standalone de produção a partir da própria pasta de exemplos:
-bun run build:counter
-bun run build:basic
+bun add tarve@0.1.0
+bun run check
+bun run counter
+bun run basic
+bun run forms
+bun run large-list
+bun run tarve build counter.tsx --outfile dist/Counter.exe
+bun run tarve build basic.tsx --outfile dist/Basic.exe
 ```
 
-Os executáveis são gerados em `examples/dist/`. O `tsconfig.json` local apenas herda a configuração do projeto; os arquivos `.tsx` continuam sendo exemplos normais que importam a API pública `tarve`.
+Antes da publicação, `bun run smoke:package` copia os exemplos para uma pasta temporária fora do repositório, instala o tarball npm local, verifica o `tsconfig.json` independente e compila os quatro `.exe` com o CLI instalado. Para trabalhar na árvore de desenvolvimento, `bun run setup:examples` instala esse tarball em `examples/node_modules` sem registrar um caminho local no manifesto. Uma cópia própria dos exemplos pode instalar `A:/tarve/dist/tarve-0.1.0.tgz` com `bun add`; o código continua igual.
 
 ### Modal / Dialog
 
@@ -66,6 +68,12 @@ let open = false;
   <TextInput placeholder="Project name" />
 </Modal>
 ```
+
+### Controles de aplicação
+
+`Checkbox`, `Switch`, `RadioGroup`, `Slider`, `Card`, `Badge`, `Separator`, `Progress`, `Tabs` e `Accordion` estão disponíveis em `tarve`. Os controles de seleção recebem o valor atual e notificam alterações por callback; o app guarda esse valor em seu estado. `Pressable` e `Icon` permitem compor controles próprios. Consulte `examples/forms-view.tsx` para um formulário com clique, foco e teclado.
+
+`VirtualList` usa linhas de altura fixa. Passe `items`, `itemHeight`, `height`, `offset`, `renderItem` e `onScroll`; armazene o novo offset no callback. Apenas as linhas visíveis e uma pequena margem de segurança entram na árvore nativa. O exemplo de 50.000 registros mantém menos de 100 nós de layout durante o scroll.
 
 ### Custom title bar
 
@@ -178,8 +186,12 @@ The visual cascade is `base → hover → active → focus → disabled`. States
 
 ```powershell
 bun run check           # TypeScript
+bun run lint            # Clippy rigoroso para o backend Rust
 bun run test            # TSX/protocolo, layout, dirty flags e input
 bun run smoke           # janela real, GPU, FFI, cliques, edição, scroll e resize
+bun run smoke:controls  # checkbox, switch, slider, tabs, radio e teclado em janela real
+bun run smoke:virtual-list # 50.000 linhas com scroll/clique e menos de 120 nós nativos
+bun run verify          # checa código, janela real, tarball e EXE isolado
 bun run bench           # latência em uma janela com 2.000 linhas (após build release)
 bun run build           # DLL release + app/worker/assets em dist/
 bun dist/basic.js
@@ -199,7 +211,7 @@ Distribua apenas **`dist/Tarve.exe`**. O build compila Rust em release e incorpo
 
 Na inicialização, a DLL, o Worker e as imagens usadas são extraídos para `%TEMP%\tarve-assets`, em diretórios identificados e verificados por SHA-256. Isso dá ao carregador do Windows e ao backend Rust caminhos físicos para os arquivos incorporados. Os caminhos ficam em cache durante a execução.
 
-O ponto de entrada é o próprio app, `examples/basic.tsx`. O exemplo contém apenas interface, estado e execução normal. O comando de build incorpora o runtime nativo automaticamente. Para compilar outro app: `bun run build:exe --entry examples/meu-app.tsx --outfile dist/MeuApp.exe`. A versão vem de `package.json`.
+O ponto de entrada é o próprio app, `examples/basic.tsx`. O exemplo contém apenas interface, estado e execução normal. O CLI do pacote incorpora o runtime nativo automaticamente. `bun run build:exe --entry examples/basic.tsx --outfile dist/Basic.exe` é o comando de manutenção equivalente neste repositório; em um projeto consumidor, use `bun run tarve build basic.tsx --outfile dist/Basic.exe`.
 
 Importe imagens com `import image from "./image.png" with { type: "file" }` e use `<Image src={image} />`; o core cuida da extração quando necessário. Caminhos relativos de imagens são resolvidos em relação ao arquivo de entrada. Testes de distribuição ficam em `scripts/`, fora do executável de produção.
 
@@ -233,6 +245,8 @@ native/src/              bridge C, protocolo Rust, árvore/layout/input, texto, 
 native/include/tarve.h   contrato C e ownership dos buffers
 examples/basic.tsx       demonstração interativa
 examples/counter.tsx     exemplo mínimo
+examples/forms.tsx       controles de formulário
+examples/large-list.tsx  lista virtual de 50.000 registros
 scripts/package.ts      distribuição npm com tipos e binário nativo
 ```
 

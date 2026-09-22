@@ -1,5 +1,5 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "pressable" | "icon" | "slider";
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
@@ -25,7 +25,7 @@ export interface Style extends StateStyle {
   strokeWidth?: number; pointerEvents?: "auto" | "block";
 }
 export interface Control {
-  role: "button" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "slider";
+  role: "button" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "slider" | "progress" | "virtualList";
   label?: string; checked?: boolean; group?: string;
   orientation?: "horizontal" | "vertical";
   value?: number; min?: number; max?: number; step?: number;
@@ -34,7 +34,7 @@ export interface NativeNode {
   id: string; kind: NodeKind; style: Style; children: NativeNode[];
   text?: string; src?: string; fit?: "cover" | "contain"; disabled?: boolean;
   value?: string; placeholder?: string;
-  control?: Control;
+  control?: Control | null;
   modal?: boolean; focusable?: boolean;
   dragRegion?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "close";
@@ -56,7 +56,7 @@ export type NativeCommand =
 export interface NodeSnapshot {
   id: string; kind: NodeKind; x: number; y: number; width: number; height: number;
   scroll: number; scrollMax: number; text: string;
-  control?: Control;
+  control?: Control | null;
 }
 export interface Snapshot {
   layoutNodes: number; layoutNodesCreated: number; measureCalls: number; paintedNodes: number;
@@ -70,6 +70,7 @@ export type NativeEvent =
   | { type: "click"; id: string }
   | { type: "change"; id: string; value: string }
   | { type: "valueChange"; id: string; value: number }
+  | { type: "scroll"; id: string; offset: number; max: number }
   | { type: "hover"; id: string; entered: boolean }
   | { type: "error"; message: string }
   | { type: "inspect"; requestId: string; snapshot: Snapshot }

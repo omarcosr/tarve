@@ -64,7 +64,8 @@ export function Image({ width, height, style, ...props }: ImageProps): VNode {
     width, height, radius: theme.radius.md, placeholderBackground: theme.colors.imagePlaceholder, ...style,
   } });
 }
-export function Scroll(props: ViewProps): VNode {
+export interface ScrollProps extends ViewProps { onScroll?: (offset: number, max: number) => void }
+export function Scroll(props: ScrollProps): VNode {
   return container("scroll", props, { minHeight: 0, shrink: 1, scrollbarColor: theme.colors.scrollbar });
 }
 export interface TextInputProps extends BaseProps { value?: string; placeholder?: string; disabled?: boolean; onChange?: (value: string) => void }

@@ -9,6 +9,12 @@ const directory = await mkdtemp(join(tmpdir(), "tarve-npm-consumer-"));
 await copyFile(join(root, `dist/tarve-${metadata.version}.tgz`), join(directory, "tarve.tgz"));
 await copyFile(join(root, "tests/fixtures/consumer.tsx"), join(directory, "app.tsx"));
 await copyFile(join(root, "examples/assets/studio.png"), join(directory, "fixture.png"));
+const examples = join(directory, "examples");
+await mkdir(join(examples, "assets"), { recursive: true });
+for (const file of ["package.json", "tsconfig.json", "basic.tsx", "basic-view.tsx", "counter.tsx", "forms.tsx", "forms-view.tsx", "large-list.tsx", "large-list-view.tsx"]) {
+  await copyFile(join(root, "examples", file), join(examples, file));
+}
+await copyFile(join(root, "examples/assets/studio.png"), join(examples, "assets/studio.png"));
 await Bun.write(join(directory, "package.json"), JSON.stringify({ name: "tarve-consumer-test", private: true, type: "module" }));
 await Bun.write(join(directory, "tsconfig.json"), JSON.stringify({ compilerOptions: {
   target: "ESNext", module: "ESNext", moduleResolution: "Bundler", strict: true, noEmit: true,
@@ -35,12 +41,18 @@ const bunTypes = await Bun.file(join(root, "node_modules/@types/bun/package.json
 const typescript = await Bun.file(join(root, "node_modules/typescript/package.json")).json();
 await run([process.execPath, "add", "--dev", `@types/bun@${bunTypes.version}`, `typescript@${typescript.version}`]);
 await run([process.execPath, join(directory, "node_modules/typescript/bin/tsc"), "--noEmit"]);
+await run([process.execPath, join(directory, "node_modules/typescript/bin/tsc"), "-p", join(examples, "tsconfig.json"), "--noEmit"]);
 const isolatedEnv = { ...env, PATH: join(process.env.SystemRoot ?? "C:/Windows", "System32") };
 await run([process.execPath, "app.tsx"], directory, isolatedEnv);
 const source = await Bun.file(join(directory, "result.json")).json();
 assert.equal(source.result, "PASS");
 assert.equal(source.executable, false);
+assert.equal(source.nativeControls, true);
+assert.equal(source.virtualList, true);
 await run([process.execPath, "run", "tarve", "build", "app.tsx", "--outfile", "App.exe"]);
+for (const [entry, outfile] of [["counter.tsx", "Counter.exe"], ["basic.tsx", "Basic.exe"], ["forms.tsx", "Forms.exe"], ["large-list.tsx", "LargeList.exe"]]) {
+  await run([process.execPath, "run", "tarve", "build", entry, "--outfile", join(directory, "example-build", outfile)], examples);
+}
 const portable = join(directory, "portable");
 await mkdir(portable);
 await copyFile(join(directory, "App.exe"), join(portable, "App.exe"));
@@ -51,4 +63,6 @@ await run([join(portable, "App.exe")], portable, { ...isolatedEnv, TEMP: cache, 
 const executable = await Bun.file(join(portable, "result.json")).json();
 assert.equal(executable.result, "PASS");
 assert.equal(executable.executable, true);
-console.log(JSON.stringify({ result: "PASS", directory, checks: ["npm tarball install", "public TypeScript and JSX declarations", "source execution without Rust", "installed tarve build CLI", "standalone EXE with empty cache", "native callbacks and local images", "zero idle frames"], source, executable }, null, 2));
+assert.equal(executable.nativeControls, true);
+assert.equal(executable.virtualList, true);
+console.log(JSON.stringify({ result: "PASS", directory, checks: ["npm tarball install", "independent example TypeScript configuration", "all four examples compile from an external directory", "source execution without Rust", "installed tarve build CLI", "standalone EXE with empty cache", "native callbacks, controls, virtual list and local images", "zero idle frames"], source, executable }, null, 2));

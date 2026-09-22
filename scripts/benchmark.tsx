@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { cpus } from "node:os";
 import { resolve } from "node:path";
 import { Button, Column, Row, Scroll, Text, Window, createApp, BunFfiBridge } from "tarve";
+import { compileTree, diffTrees } from "../packages/core/src/reconciler";
 
 const rows = 2000;
 const samples = 60;
@@ -71,10 +72,25 @@ try {
   assert.equal(after.layoutNodesCreated, initial.layoutNodesCreated, "Updates must retain Taffy nodes");
   assert(after.paintedNodes < 100, "Only the viewport should be encoded");
   assert.deepEqual(errors, []);
+  let previous = compileTree(App());
+  const compile: number[] = [];
+  const diff: number[] = [];
+  for (let i = 0; i < samples; i++) {
+    revision++;
+    const began = performance.now();
+    const next = compileTree(App());
+    const compiled = performance.now();
+    const patch = diffTrees(previous, next);
+    assert(patch && patch.length === 1, "A revision update must patch only one node");
+    compile.push(compiled - began);
+    diff.push(performance.now() - compiled);
+    previous = next;
+  }
   const report = {
     cpu: cpus()[0]?.model, bun: Bun.version, platform: `${process.platform}-${process.arch}`,
     workload: { rows, nodes: after.nodes.length, visibleNodes: after.paintedNodes },
     startupMs: +startupMs.toFixed(2), scroll: stats(scroll), updates: stats(updates),
+    reconciliation: { compile: stats(compile), diff: stats(diff) },
     layoutNodesCreated: after.layoutNodesCreated, measureCalls: after.measureCalls, idleFrames: after.frames - before.frames,
     measurement: "Bun input/update dispatch to native frame notification; includes bridge and presentation scheduling, not photon latency. First five samples discarded.",
   };

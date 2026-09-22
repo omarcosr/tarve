@@ -1,4 +1,14 @@
 {
-  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "tarve",
+    "types": ["bun", "tarve/assets"]
+  },
   "include": ["*.ts", "*.tsx"]
 }

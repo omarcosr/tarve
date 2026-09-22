@@ -22,11 +22,11 @@ impl Graphics {
         }
         #[cfg(target_os = "windows")]
         {
-            return Self::new_with_backends(window.clone(), Some(wgpu::Backends::VULKAN))
+            Self::new_with_backends(window.clone(), Some(wgpu::Backends::VULKAN))
                 .or_else(|vulkan_error| {
                     Self::new_with_backends(window, Some(wgpu::Backends::DX12))
                         .map_err(|dx12_error| format!("Vulkan renderer failed: {vulkan_error}; DX12 renderer failed: {dx12_error}"))
-                });
+                })
         }
         #[cfg(not(target_os = "windows"))]
         Self::new_with_backends(window, None)

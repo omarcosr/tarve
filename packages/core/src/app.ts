@@ -75,10 +75,11 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
     if ("id" in event) {
       const handlers = compiled.handlers.get(event.id);
-      if (event.type === "click") { handlers?.onClick?.(); update(); }
-      if (event.type === "change") { handlers?.onChange?.(event.value); update(); }
-      if (event.type === "valueChange") { handlers?.onValueChange?.(event.value); update(); }
-      if (event.type === "hover") handlers?.onHover?.(event.entered);
+      if (event.type === "click" && handlers?.onClick) { handlers.onClick(); update(); }
+      if (event.type === "change" && handlers?.onChange) { handlers.onChange(event.value); update(); }
+      if (event.type === "valueChange" && handlers?.onValueChange) { handlers.onValueChange(event.value); update(); }
+      if (event.type === "scroll" && handlers?.onScroll) { handlers.onScroll(event.offset, event.max); update(); }
+      if (event.type === "hover" && handlers?.onHover) { handlers.onHover(event.entered); update(); }
     }
     for (const listener of listeners) listener(event);
   });

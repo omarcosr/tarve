@@ -68,28 +68,27 @@ struct VisualState {
 fn visual_value<'a>(node: &'a Node, key: &str, state: VisualState) -> &'a Value {
     let mut value = &node.style[key];
 
-    if state.hovered && !state.disabled {
-        if let Some(candidate) = node.style.get("hover").and_then(|style| style.get(key))
-            && !candidate.is_null()
-        {
-            value = candidate;
-        }
+    if state.hovered
+        && !state.disabled
+        && let Some(candidate) = node.style.get("hover").and_then(|style| style.get(key))
+        && !candidate.is_null()
+    {
+        value = candidate;
     }
 
-    if state.active && !state.disabled {
-        if let Some(candidate) = node.style.get("active").and_then(|style| style.get(key))
-            && !candidate.is_null()
-        {
-            value = candidate;
-        }
+    if state.active
+        && !state.disabled
+        && let Some(candidate) = node.style.get("active").and_then(|style| style.get(key))
+        && !candidate.is_null()
+    {
+        value = candidate;
     }
 
-    if state.focused {
-        if let Some(candidate) = node.style.get("focus").and_then(|style| style.get(key))
-            && !candidate.is_null()
-        {
-            value = candidate;
-        }
+    if state.focused
+        && let Some(candidate) = node.style.get("focus").and_then(|style| style.get(key))
+        && !candidate.is_null()
+    {
+        value = candidate;
     }
 
     if state.disabled
@@ -617,11 +616,13 @@ impl Tree {
                 transform,
                 rect,
                 radius,
-                outline_width,
-                visual_number(&node, "outlineOffset", 0.0, state) as f64,
-                visual_optional_number(&node, "outlineRadius", state),
-                visual_string(&node, "outlineColor", "#a1a1aa", state),
-                visual_string(&node, "outlineStyle", "solid", state),
+                Outline {
+                    width: outline_width,
+                    offset: visual_number(&node, "outlineOffset", 0.0, state) as f64,
+                    radius_override: visual_optional_number(&node, "outlineRadius", state),
+                    color: visual_string(&node, "outlineColor", "#a1a1aa", state),
+                    style: visual_string(&node, "outlineStyle", "solid", state),
+                },
             );
         }
         if node.is_text() {
@@ -829,12 +830,48 @@ impl Tree {
     }
     fn focus_order(&self) -> Vec<String> {
         let modal = self.active_modal();
+        let mut group_choice = HashMap::<String, String>::new();
+        for id in &self.order {
+            if !self.interactive(id)
+                || !self.entries[id].node.focusable
+                || modal.is_some_and(|modal| !self.is_descendant_of(id, modal))
+            {
+                continue;
+            }
+            if let Some(control) = &self.entries[id].node.control
+                && matches!(control.role.as_str(), "radio" | "tab")
+                && !control.group.is_empty()
+            {
+                let choice = group_choice
+                    .entry(control.group.clone())
+                    .or_insert_with(|| id.clone());
+                if control.checked {
+                    *choice = id.clone();
+                }
+            }
+        }
+        if let Some(id) = &self.focused
+            && let Some(control) = self.entries[id].node.control.as_ref()
+            && matches!(control.role.as_str(), "radio" | "tab")
+            && group_choice.contains_key(&control.group)
+        {
+            group_choice.insert(control.group.clone(), id.clone());
+        }
         self.order
             .iter()
             .filter(|id| {
                 self.interactive(id)
                     && self.entries[*id].node.focusable
                     && modal.is_none_or(|modal| self.is_descendant_of(id, modal))
+                    && self.entries[*id]
+                        .node
+                        .control
+                        .as_ref()
+                        .is_none_or(|control| {
+                            !matches!(control.role.as_str(), "radio" | "tab")
+                                || control.group.is_empty()
+                                || group_choice.get(&control.group) == Some(*id)
+                        })
             })
             .cloned()
             .collect()
@@ -844,14 +881,37 @@ impl Tree {
         if !self.interactive(id)
             || !self.entries[id].node.focusable
             || modal.is_some_and(|modal| !self.is_descendant_of(id, modal))
-            || self.focused.as_deref() == Some(id)
         {
             return;
         }
-        self.focused = Some(id.to_string());
-        self.select_all = false;
-        self.caret = self.entries[id].node.value.as_deref().map_or(0, str::len);
-        self.dirty.paint = true;
+        if self.focused.as_deref() != Some(id) {
+            self.focused = Some(id.to_string());
+            self.select_all = false;
+            self.caret = self.entries[id].node.value.as_deref().map_or(0, str::len);
+            self.dirty.paint = true;
+        }
+        let mut ancestor = self.entries[id].parent.clone();
+        while let Some(parent_id) = ancestor {
+            if self.entries[&parent_id].node.kind == "scroll"
+                && let (Some(target), Some(viewport)) =
+                    (self.visible_rect(id), self.visible_rect(&parent_id))
+            {
+                let delta = if target.y0 < viewport.y0 {
+                    target.y0 - viewport.y0
+                } else if target.y1 > viewport.y1 {
+                    target.y1 - viewport.y1
+                } else {
+                    0.0
+                };
+                let entry = self.entries.get_mut(&parent_id).unwrap();
+                let next = (entry.scroll + delta).clamp(0.0, entry.scroll_max);
+                if next != entry.scroll {
+                    entry.scroll = next;
+                    self.dirty.paint = true;
+                }
+            }
+            ancestor = self.entries[&parent_id].parent.clone();
+        }
     }
     fn prune_interaction(&mut self) {
         let keep_hovered = self
@@ -991,6 +1051,22 @@ impl Tree {
         }
         events
     }
+    pub fn pointer_leave(&mut self) -> Vec<Value> {
+        self.mouse = (-1.0, -1.0);
+        if let Some(id) = self.hovered.take() {
+            self.dirty.paint = true;
+            vec![json!({"type":"hover", "id":id, "entered":false})]
+        } else {
+            vec![]
+        }
+    }
+    pub fn blur(&mut self) {
+        if self.focused.take().is_some() || self.pressed.take().is_some() {
+            self.caret = 0;
+            self.select_all = false;
+            self.dirty.paint = true;
+        }
+    }
     pub fn pointer_down(&mut self) -> Vec<Value> {
         self.hovered = self.hit(&self.root, 0.0, self.entries[&self.root].rect, false);
         self.pressed = self.hovered.clone();
@@ -1025,15 +1101,26 @@ impl Tree {
         }
         out
     }
-    pub fn wheel(&mut self, delta: f64) {
+    pub fn wheel(&mut self, delta: f64) -> Vec<Value> {
         if let Some(id) = self.hit(&self.root, 0.0, self.entries[&self.root].rect, true) {
             let entry = self.entries.get_mut(&id).unwrap();
             let next = (entry.scroll + delta).clamp(0.0, entry.scroll_max);
             if next != entry.scroll {
                 entry.scroll = next;
-                self.dirty.paint = true;
+                if !entry
+                    .node
+                    .control
+                    .as_ref()
+                    .is_some_and(|control| control.role == "virtualList")
+                {
+                    self.dirty.paint = true;
+                }
+                return vec![
+                    json!({"type":"scroll", "id":id, "offset":next, "max":entry.scroll_max}),
+                ];
             }
         }
+        vec![]
     }
     pub fn selected_text(&self) -> Option<String> {
         self.focused
@@ -1099,6 +1186,9 @@ impl Tree {
                 })
                 .cloned()
                 .collect();
+            if choices.is_empty() {
+                return vec![];
+            }
             let index = choices
                 .iter()
                 .position(|candidate| candidate == &id)
@@ -1254,17 +1344,28 @@ pub fn color(hex: &str) -> Color {
     }
 }
 
+struct Outline<'a> {
+    width: f64,
+    offset: f64,
+    radius_override: Option<f64>,
+    color: &'a str,
+    style: &'a str,
+}
+
 fn paint_outline(
     scene: &mut Scene,
     transform: Affine,
     rect: BoxRect,
     base_radius: f64,
-    width: f64,
-    offset: f64,
-    radius_override: Option<f64>,
-    outline_color: &str,
-    outline_style: &str,
+    outline: Outline<'_>,
 ) {
+    let Outline {
+        width,
+        offset,
+        radius_override,
+        color: outline_color,
+        style: outline_style,
+    } = outline;
     if width <= 0.0 || matches!(outline_style, "none" | "hidden") {
         return;
     }
