@@ -143,6 +143,50 @@ const midnight = createTheme({
 
 `theme.colors.*` values are semantic references, so application styles using them automatically follow the active palette. Literal colors such as `#ff00aa` remain literal and are never rewritten. Inputs, selection, caret, scrollbar, modal overlay, disabled states and titlebar controls all use the same palette.
 
+The default focus outline is also part of the active theme. `focusOutline` is applied to every focusable native control, while a component's own `style.focus` overrides only the fields it specifies. Prefer `Theme.create(base, overrides)` when deriving from a light/dark theme:
+
+```tsx
+import { Theme, darkTheme, lightTheme } from "tarve";
+
+const appTheme = Theme.create(darkMode ? darkTheme : lightTheme, {
+  focusOutline: {
+    outlineWidth: 1,
+    outlineOffset: 1,
+    outlineRadius: 6,
+    outlineStyle: "dashed",
+    outlineColor: "#8b5cf6",
+  },
+});
+
+<Window theme={appTheme}>
+  <Button>Uses the theme outline</Button>
+  <Button style={{ focus: { outlineWidth: 3 } }}>Overrides only the width</Button>
+</Window>
+```
+
+To disable the default focus outline for an entire theme, set its width to zero:
+
+```tsx
+const noFocusOutline = createTheme({
+  focusOutline: { outlineWidth: 0 },
+});
+```
+
+`Style.create()` is available separately for typed reusable style declarations, and `Style.merge()` preserves nested interactive states instead of replacing the whole `focus`/`hover` object:
+
+```tsx
+const styles = Style.create({
+  button: {
+    height: 36,
+    focus: { outlineWidth: 2 },
+  },
+});
+
+const noOutline = Style.merge(styles.button, {
+  focus: { outlineWidth: 0, outlineStyle: "none" },
+});
+```
+
 Borders can use one width for every side or independent widths, using the same inset shape as `padding` and `margin`:
 
 ```tsx

@@ -1,4 +1,4 @@
-import type { Style } from "../../protocol/src/index";
+import type { StateStyle, Style } from "../../protocol/src/index";
 
 export interface ThemeColors {
   background: string;
@@ -37,13 +37,26 @@ export interface ThemeColors {
 
 export interface ThemeDefinition {
   colors: ThemeColors;
+  focusOutline?: ThemeFocusOutline;
 }
 
 export interface ThemeOverrides {
   colors?: Partial<ThemeColors>;
+  focusOutline?: Partial<ThemeFocusOutline>;
 }
 
+export type ThemeFocusOutline = Pick<StateStyle,
+  "outlineWidth" | "outlineColor" | "outlineOffset" | "outlineRadius" | "outlineStyle"
+>;
+
+const defaultFocusOutline: ThemeFocusOutline = {
+  outlineWidth: 2,
+  outlineOffset: 2,
+  outlineStyle: "solid",
+};
+
 export const lightTheme: ThemeDefinition = {
+  focusOutline: { ...defaultFocusOutline },
   colors: {
     background: "#fafafa",
     card: "#ffffff",
@@ -81,6 +94,7 @@ export const lightTheme: ThemeDefinition = {
 };
 
 export const darkTheme: ThemeDefinition = {
+  focusOutline: { ...defaultFocusOutline },
   colors: {
     background: "#09090b",
     card: "#09090b",
@@ -118,8 +132,18 @@ export const darkTheme: ThemeDefinition = {
 };
 
 export function createTheme(overrides: ThemeOverrides = {}, base: ThemeDefinition = lightTheme): ThemeDefinition {
-  return { colors: { ...base.colors, ...overrides.colors } };
+  return {
+    colors: { ...base.colors, ...overrides.colors },
+    focusOutline: { ...defaultFocusOutline, ...base.focusOutline, ...overrides.focusOutline },
+  };
 }
+
+/** Theme composition with base-first argument order, useful for conditional light/dark themes. */
+export const Theme = {
+  create(base: ThemeDefinition = lightTheme, overrides: ThemeOverrides = {}): ThemeDefinition {
+    return createTheme(overrides, base);
+  },
+} as const;
 
 const names = Object.keys(lightTheme.colors) as (keyof ThemeColors)[];
 const cssName = (name: string) => name.replace(/[A-Z]/g, value => `-${value.toLowerCase()}`);

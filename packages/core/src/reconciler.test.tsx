@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Window, Column, Text, Button, TextInput, TitleBar, Modal } from "./components";
+import { Window, Column, Text, Button, TextInput, TitleBar, Modal, Pressable } from "./components";
 import { compileTree, diffTrees } from "./reconciler";
-import { createTheme, darkTheme, lightTheme, theme } from "./theme";
+import { createTheme, darkTheme, lightTheme, Theme, theme } from "./theme";
 
 describe("native TSX protocol", () => {
   test("compiles function components, flattens children, and keeps callbacks outside JSON", () => {
@@ -131,6 +131,19 @@ describe("native TSX protocol", () => {
     expect(tree.nodes.get("panel")?.style.borderColor).toBe("#3f3f46");
     expect(tree.document.root.style.borderColor).toBe("#3f3f46");
   });
+  test("Theme.create composes a conditional base theme without spreading ThemeDefinition", () => {
+    const noOutlineDark = Theme.create(darkTheme, {
+      focusOutline: { outlineWidth: 0, outlineStyle: "none" },
+    });
+    const tree = compileTree(
+      <Window theme={noOutlineDark}>
+        <Button id="button">Save</Button>
+      </Window>,
+    );
+    expect(tree.document.root.style.background).toBe(darkTheme.colors.background);
+    expect(tree.nodes.get("button")?.style.focus?.outlineWidth).toBe(0);
+    expect(tree.nodes.get("button")?.style.focus?.outlineStyle).toBe("none");
+  });
   test("literal colors remain literal when a theme is active", () => {
     const tree = compileTree(
       <Window theme={darkTheme}>
@@ -138,6 +151,43 @@ describe("native TSX protocol", () => {
       </Window>,
     );
     expect(tree.nodes.get("literal")?.style.background).toBe("#123456");
+  });
+  test("focus outline defaults are configurable per theme and merge with local focus styles", () => {
+    const custom = createTheme({ focusOutline: {
+      outlineWidth: 1,
+      outlineColor: "#8b5cf6",
+      outlineOffset: 0,
+      outlineRadius: 4,
+      outlineStyle: "dashed",
+    } });
+    const tree = compileTree(
+      <Window theme={custom}>
+        <Button id="themed-focus">Save</Button>
+        <TextInput id="local-focus" style={{ focus: { outlineWidth: 3 } }} />
+        <Pressable id="not-focusable" focusable={false}>No focus</Pressable>
+      </Window>,
+    );
+    expect(tree.nodes.get("themed-focus")?.style.focus).toEqual({
+      outlineWidth: 1,
+      outlineColor: "#8b5cf6",
+      outlineOffset: 0,
+      outlineRadius: 4,
+      outlineStyle: "dashed",
+    });
+    expect(tree.nodes.get("local-focus")?.style.focus).toEqual({
+      outlineWidth: 3,
+      outlineColor: "#8b5cf6",
+      outlineOffset: 0,
+      outlineRadius: 4,
+      outlineStyle: "dashed",
+    });
+    expect(tree.nodes.get("not-focusable")?.style.focus).toBeUndefined();
+  });
+  test("focus outline can be disabled globally by the theme", () => {
+    const noOutline = createTheme({ focusOutline: { outlineWidth: 0, outlineStyle: "none" } });
+    const tree = compileTree(<Window theme={noOutline}><Button id="button">Save</Button></Window>);
+    expect(tree.nodes.get("button")?.style.focus?.outlineWidth).toBe(0);
+    expect(tree.nodes.get("button")?.style.focus?.outlineStyle).toBe("none");
   });
   test("borderWidth supports independent widths on all four sides", () => {
     const tree = compileTree(

@@ -10,6 +10,7 @@ import {
   TitleBar,
   View,
   Window,
+  Theme,
   darkTheme,
   lightTheme,
   theme,
@@ -60,11 +61,19 @@ function Card({
     </Column>
   );
 }
+
+
 export function App() {
+  const appTheme = Theme.create(darkMode ? darkTheme : lightTheme, {
+    focusOutline: {
+      outlineWidth: 0,
+      outlineStyle: "none",
+    },
+  });
   return (
     <Window
       title="Tarve — Native workspace"
-      theme={darkMode ? darkTheme : lightTheme}
+      theme={appTheme}
       width={1140}
       height={870}
       minWidth={860}

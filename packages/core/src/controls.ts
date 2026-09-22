@@ -95,7 +95,7 @@ export function Slider({ value, min = 0, max = 100, step = 1, label, orientation
     style: { width: orientation === "horizontal" ? 160 : 24, height: orientation === "horizontal" ? 24 : 160,
       shrink: 0, foreground: disabled ? c.disabledForeground : c.primary,
       borderColor: c.border, thumbColor: c.sliderThumb,
-      focus: { outlineColor: c.ring, outlineWidth: 2, outlineOffset: 2, outlineStyle: "solid" }, ...style },
+      ...style },
   });
 }
 

@@ -56,12 +56,6 @@ export interface PressableProps extends ViewProps {
 export function Pressable(props: PressableProps): VNode {
   return container("pressable", props, {
     radius: theme.radius.sm,
-    focus: {
-      outlineColor: theme.colors.ring,
-      outlineWidth: 2,
-      outlineOffset: 2,
-      outlineStyle: "solid",
-    },
   });
 }
 export type IconName =
@@ -140,12 +134,6 @@ export function Button({
       fontWeight: 500,
       align: "center",
       justify: "center",
-      focus: {
-        outlineColor: theme.colors.ring,
-        outlineWidth: 2,
-        outlineOffset: 2,
-        outlineStyle: "solid",
-      },
       disabled: {
         background: theme.colors.disabled,
         foreground: theme.colors.disabledForeground,
@@ -208,12 +196,6 @@ export function TextInput({ style, ...props }: TextInputProps): VNode {
       fontFamily: theme.font.family,
       lineHeight: theme.font.lineHeight,
       fontSize: theme.font.size,
-      focus: {
-        outlineColor: theme.colors.ring,
-        outlineWidth: 2,
-        outlineOffset: 2,
-        outlineStyle: "solid",
-      },
       ...style,
     },
   });
@@ -244,12 +226,6 @@ export function TextArea({ style, ...props }: TextAreaProps): VNode {
       fontFamily: theme.font.family,
       lineHeight: theme.font.lineHeight,
       fontSize: theme.font.size,
-      focus: {
-        outlineColor: theme.colors.ring,
-        outlineWidth: 2,
-        outlineOffset: 2,
-        outlineStyle: "solid",
-      },
       ...style,
     },
   });
@@ -387,12 +363,6 @@ export function Modal({
           background: "#00000000",
           hover: { background: theme.colors.muted },
           active: { background: theme.colors.border },
-          focus: {
-            outlineColor: theme.colors.ring,
-            outlineWidth: 2,
-            outlineOffset: 2,
-            outlineStyle: "solid",
-          },
         },
         children: jsx(Icon, {
           name: "x",

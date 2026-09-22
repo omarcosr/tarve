@@ -3,23 +3,56 @@
   "version": "0.1.0",
   "description": "Native Bun/TSX GUI with Taffy layout, Parley text and Vello rendering",
   "license": "UNLICENSED",
+  "bin": {
+    "tarve": "./dist/npm/cli.js"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "files": [
+    "dist/npm",
+    "dist/types",
+    "native/win32-x64",
+    "README.md",
+    "PERFORMANCE.md"
+  ],
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
   "type": "module",
-  "engines": { "bun": ">=1.4.0" },
-  "os": ["win32"],
-  "cpu": ["x64"],
-  "files": ["dist/npm", "dist/types", "native/win32-x64", "README.md", "PERFORMANCE.md"],
-  "bin": { "tarve": "./dist/npm/cli.js" },
+  "imports": {
+    "#tarve/runtime": "./dist/npm/runtime.js",
+    "#tarve/assets": "./dist/npm/embedded-assets.js"
+  },
   "exports": {
-    ".": { "types": "./dist/types/core/src/index.d.ts", "default": "./dist/npm/index.js" },
-    "./jsx-runtime": { "types": "./dist/types/core/src/jsx-runtime.d.ts", "default": "./dist/npm/jsx-runtime.js" },
-    "./jsx-dev-runtime": { "types": "./dist/types/core/src/jsx-dev-runtime.d.ts", "default": "./dist/npm/jsx-dev-runtime.js" },
-    "./build": { "types": "./dist/types/core/build.d.ts", "default": "./dist/npm/build.js" },
-    "./protocol": { "types": "./dist/types/protocol/src/index.d.ts", "default": "./dist/npm/protocol.js" },
-    "./assets": { "types": "./dist/types/core/src/assets.d.ts" },
+    ".": {
+      "types": "./dist/types/core/src/index.d.ts",
+      "default": "./dist/npm/index.js"
+    },
+    "./jsx-runtime": {
+      "types": "./dist/types/core/src/jsx-runtime.d.ts",
+      "default": "./dist/npm/jsx-runtime.js"
+    },
+    "./jsx-dev-runtime": {
+      "types": "./dist/types/core/src/jsx-dev-runtime.d.ts",
+      "default": "./dist/npm/jsx-dev-runtime.js"
+    },
+    "./build": {
+      "types": "./dist/types/core/build.d.ts",
+      "default": "./dist/npm/build.js"
+    },
+    "./protocol": {
+      "types": "./dist/types/protocol/src/index.d.ts",
+      "default": "./dist/npm/protocol.js"
+    },
+    "./assets": {
+      "types": "./dist/types/core/src/assets.d.ts"
+    },
     "./package.json": "./package.json"
   },
-  "imports": { "#tarve/runtime": "./dist/npm/runtime.js", "#tarve/assets": "./dist/npm/embedded-assets.js" },
-  "workspaces": ["packages/*"],
   "scripts": {
     "dev": "bun scripts/dev.ts",
     "build": "bun scripts/build.ts --release",
@@ -41,5 +74,11 @@
     "smoke:package": "bun scripts/smoke-package.ts",
     "bench": "bun scripts/benchmark.tsx"
   },
-  "devDependencies": { "@types/bun": "^1.3.0", "typescript": "^5.9.0" }
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "bun": ">=1.4.0"
+  }
 }

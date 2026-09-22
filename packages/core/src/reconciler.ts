@@ -5,6 +5,7 @@ import { nativeAssetPath } from "#tarve/assets";
 export interface Handlers { onClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void }
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode> }
 const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "button", "image", "scroll", "input", "textarea", "pressable", "icon", "slider"]);
+const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider"]);
 function textContent(value: Child): string {
   if (Array.isArray(value)) return value.map(textContent).join("");
   if (value == null || typeof value === "boolean") return "";
@@ -50,7 +51,16 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
     const childGroup = control?.role === "radiogroup" || control?.role === "tablist" ? id : group;
     if (control && (control.role === "radio" || control.role === "tab")) control.group = group;
     const isText = child.type === "text" || child.type === "button";
-    const style = resolveThemeStyle({ ...p.style }, selectedTheme);
+    const rawStyle = { ...p.style };
+    if (interactiveKinds.has(child.type) && p.focusable !== false) {
+      rawStyle.focus = {
+        outlineColor: theme.colors.ring,
+        ...lightTheme.focusOutline,
+        ...selectedTheme.focusOutline,
+        ...p.style?.focus,
+      };
+    }
+    const style = resolveThemeStyle(rawStyle, selectedTheme);
     for (const key of ["padding", "margin"] as const) {
       if (style[key] && typeof style[key] === "object") style[key] = { ...style[key] };
     }
