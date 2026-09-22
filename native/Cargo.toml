@@ -19,7 +19,7 @@ unicode-segmentation = "1.12"
 arboard = { version = "3.6", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi"] }
 
 [profile.dev]
 opt-level = 1

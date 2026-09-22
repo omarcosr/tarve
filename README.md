@@ -98,7 +98,7 @@ let open = false;
 
 ### Custom title bar
 
-`TitleBar` is declarative: simply render it inside `Window`. Tarve resolves the component tree before creating the native window, detects the title bar, and automatically selects custom window chrome. Without `TitleBar`, the operating-system title bar remains native. On Windows 11 Tarve asks DWM to keep the native rounded window corners and compositor border while the title bar remains fully custom. The root also draws a 1 px shadcn/zinc border with an 8 px radius as a visual fallback. Native drag, minimize/maximize/close and the 6 px resize hit area remain available.
+`TitleBar` is declarative: simply render it inside `Window`. Tarve resolves the component tree before creating the native window, detects the title bar, and automatically selects custom window chrome. Without `TitleBar`, the operating-system title bar remains native. On Windows 11 Tarve asks DWM to keep the native rounded window corners and compositor border while the title bar remains fully custom. The root also draws a 1 px shadcn/zinc border with an 8 px radius as a visual fallback. When maximized/fullscreen, both borders and the corner radius are suppressed and restored when the window returns to its normal state. Native drag, minimize/maximize/close and the 6 px resize hit area remain available.
 
 ```tsx
 <Window title="My app" width={1000} height={700}>
@@ -108,6 +108,24 @@ let open = false;
 ```
 
 `TitleBar` accepts normal `style` overrides and custom `children`, plus `showMinimize`, `showMaximize`, `showClose` and `height`. Double-clicking its draggable area toggles maximize/restore.
+
+`Window.position` configures the initial window position before the first visible frame. The default is `"center"`. Presets anchor to the monitor's usable work area (excluding the Windows taskbar). You can also use one of the other anchors (`"top-left"`, `"top"`, `"top-right"`, `"left"`, `"right"`, `"bottom-left"`, `"bottom"`, `"bottom-right"`) or provide logical desktop coordinates. Negative coordinates are valid for monitors positioned to the left or above the primary display.
+
+```tsx
+<Window title="Centered" width={900} height={640} position="center">
+  {/* ... */}
+</Window>
+
+<Window title="Bottom right" position="bottom-right">
+  {/* ... */}
+</Window>
+
+<Window title="Exact position" position={{ x: 120, y: 80 }}>
+  {/* ... */}
+</Window>
+```
+
+`position` is an initial creation option; changing it after the native window has been created does not move an existing window.
 
 ### Light, dark and custom themes
 

@@ -1,6 +1,6 @@
 use crate::{
     bridge::Events,
-    protocol::{Command, Document, error},
+    protocol::{Command, Document, WindowPosition, WindowPositionPreset, error},
     renderer::Graphics,
     tree::{Tree, color},
 };
@@ -11,12 +11,87 @@ use std::{
 };
 use winit::{
     application::ApplicationHandler,
-    dpi::{LogicalPosition, LogicalSize},
+    dpi::{LogicalPosition, LogicalSize, PhysicalPosition},
     event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     keyboard::{Key, ModifiersState, NamedKey},
     window::{CursorIcon, ResizeDirection, Window, WindowId},
 };
+
+pub(crate) fn anchored_window_position(
+    preset: &WindowPositionPreset,
+    monitor_position: PhysicalPosition<i32>,
+    monitor_size: winit::dpi::PhysicalSize<u32>,
+    window_size: winit::dpi::PhysicalSize<u32>,
+) -> PhysicalPosition<i32> {
+    let remaining_x = monitor_size.width as i64 - window_size.width as i64;
+    let remaining_y = monitor_size.height as i64 - window_size.height as i64;
+    let x_offset = match preset {
+        WindowPositionPreset::TopLeft
+        | WindowPositionPreset::Left
+        | WindowPositionPreset::BottomLeft => 0,
+        WindowPositionPreset::Top | WindowPositionPreset::Center | WindowPositionPreset::Bottom => {
+            remaining_x / 2
+        }
+        WindowPositionPreset::TopRight
+        | WindowPositionPreset::Right
+        | WindowPositionPreset::BottomRight => remaining_x,
+    };
+    let y_offset = match preset {
+        WindowPositionPreset::TopLeft
+        | WindowPositionPreset::Top
+        | WindowPositionPreset::TopRight => 0,
+        WindowPositionPreset::Left | WindowPositionPreset::Center | WindowPositionPreset::Right => {
+            remaining_y / 2
+        }
+        WindowPositionPreset::BottomLeft
+        | WindowPositionPreset::Bottom
+        | WindowPositionPreset::BottomRight => remaining_y,
+    };
+    PhysicalPosition::new(
+        (monitor_position.x as i64 + x_offset) as i32,
+        (monitor_position.y as i64 + y_offset) as i32,
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn window_work_area(
+    window: &Window,
+) -> Option<(PhysicalPosition<i32>, winit::dpi::PhysicalSize<u32>)> {
+    use std::{ffi::c_void, mem::size_of};
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    };
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let handle = window.window_handle().ok()?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return None;
+    };
+    let hwnd = handle.hwnd.get() as *mut c_void;
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+    if monitor.is_null() {
+        return None;
+    }
+    let mut info = MONITORINFO {
+        cbSize: size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    if unsafe { GetMonitorInfoW(monitor, &mut info) } == 0 {
+        return None;
+    }
+    let width = (info.rcWork.right - info.rcWork.left).max(0) as u32;
+    let height = (info.rcWork.bottom - info.rcWork.top).max(0) as u32;
+    Some((
+        PhysicalPosition::new(info.rcWork.left, info.rcWork.top),
+        winit::dpi::PhysicalSize::new(width, height),
+    ))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn window_work_area(_: &Window) -> Option<(PhysicalPosition<i32>, winit::dpi::PhysicalSize<u32>)> {
+    None
+}
 
 #[cfg(target_os = "windows")]
 fn configure_custom_window_chrome(
@@ -180,6 +255,48 @@ impl App {
         let suppressed = self.window_chrome_suppressed();
         if self.tree.set_window_chrome_suppressed(suppressed) {
             self.apply_custom_window_chrome();
+        }
+    }
+    fn apply_initial_window_position(
+        &self,
+        event_loop: &ActiveEventLoop,
+        window: &Window,
+        use_work_area: bool,
+    ) {
+        match self.document.window.position.as_ref() {
+            Some(WindowPosition::Coordinates { x, y }) => {
+                window.set_outer_position(LogicalPosition::new(*x, *y));
+            }
+            Some(WindowPosition::Preset(preset)) => {
+                let Some(monitor) = event_loop
+                    .primary_monitor()
+                    .or_else(|| window.current_monitor())
+                else {
+                    return;
+                };
+                let (monitor_position, monitor_size) = if use_work_area {
+                    window_work_area(window).unwrap_or_else(|| (monitor.position(), monitor.size()))
+                } else {
+                    (monitor.position(), monitor.size())
+                };
+                // A hidden Win32 window can temporarily report an outer size of 16x16 before
+                // its first ShowWindow. Use the configured client size in that case so initial
+                // anchoring is based on the real requested window dimensions.
+                let outer_size = window.outer_size();
+                let window_size = if outer_size.width <= 32 || outer_size.height <= 32 {
+                    LogicalSize::new(self.document.window.width, self.document.window.height)
+                        .to_physical(window.scale_factor())
+                } else {
+                    outer_size
+                };
+                window.set_outer_position(anchored_window_position(
+                    preset,
+                    monitor_position,
+                    monitor_size,
+                    window_size,
+                ));
+            }
+            None => {}
         }
     }
     fn clipboard_shortcut(&mut self, key: &Key) -> Vec<serde_json::Value> {
@@ -388,6 +505,7 @@ impl ApplicationHandler<Command> for App {
                     Ok(graphics) => {
                         self.graphics = Some(graphics);
                         self.window = Some(window.clone());
+                        self.apply_initial_window_position(event_loop, &window, false);
                         self.sync_custom_window_chrome();
                         if let Err(error) = self.prepare() {
                             self.fail(event_loop, error);
@@ -397,6 +515,9 @@ impl ApplicationHandler<Command> for App {
                         // prepared. Making it visible immediately before the synchronous present
                         // prevents Windows from compositing an empty client area on startup.
                         window.set_visible(true);
+                        // Once visible, native decorations have their final outer dimensions.
+                        // Re-apply the anchor to make native-chrome windows exact as well.
+                        self.apply_initial_window_position(event_loop, &window, true);
                         if let Err(error) = self.present() {
                             self.fail(event_loop, error);
                             return;

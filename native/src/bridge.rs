@@ -76,6 +76,16 @@ pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
         {
             return Err("Invalid window dimensions".into());
         }
+        if let Some(protocol::WindowPosition::Coordinates { x, y }) = &w.position
+            && (!x.is_finite()
+                || !y.is_finite()
+                || *x < i32::MIN as f64
+                || *x > i32::MAX as f64
+                || *y < i32::MIN as f64
+                || *y > i32::MAX as f64)
+        {
+            return Err("Invalid window position".into());
+        }
         let mut state = host().lock().map_err(|e| e.to_string())?;
         if state.is_some() {
             return Err("Only one native app can be started per process".into());

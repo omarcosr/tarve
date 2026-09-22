@@ -1,4 +1,4 @@
-import type { Control, Style } from "../../protocol/src/index";
+import type { Control, Style, WindowPosition } from "../../protocol/src/index";
 import { Fragment, jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
 import { buttonVariants, theme, type ButtonVariant, type ThemeDefinition } from "./theme";
 export interface ViewProps extends BaseProps {
@@ -25,6 +25,7 @@ export interface WindowProps extends ViewProps {
   minWidth?: number;
   minHeight?: number;
   resizable?: boolean;
+  position?: WindowPosition;
   theme?: ThemeDefinition;
 }
 export function Window(props: WindowProps): VNode {

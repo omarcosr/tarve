@@ -44,7 +44,7 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
       windowOptions = { title: p.title ?? "Tarve", width: p.width ?? 1120, height: p.height ?? 820,
         minWidth: p.minWidth ?? 780, minHeight: p.minHeight ?? 580,
         background: resolveThemeColor(p.style?.background ?? theme.colors.background, selectedTheme),
-        decorations: true, resizable: p.resizable ?? true, debug };
+        decorations: true, resizable: p.resizable ?? true, position: p.position ?? "center", debug };
     }
     handlers.set(id, { onClick: p.onClick, onHover: p.onHover, onChange: p.onChange, onValueChange: p.onValueChange, onScroll: p.onScroll, onEscape: p.onEscape, onKeyDown: p.onKeyDown, onBlur: p.onBlur });
     const control = p.control ? { ...p.control } : undefined;

@@ -1,5 +1,5 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const PROTOCOL_VERSION = 15;
+export const PROTOCOL_VERSION = 17;
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "textarea" | "pressable" | "icon" | "slider";
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
@@ -40,9 +40,14 @@ export interface NativeNode {
   dragRegion?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "close";
 }
+export type WindowPositionPreset =
+  | "top-left" | "top" | "top-right"
+  | "left" | "center" | "right"
+  | "bottom-left" | "bottom" | "bottom-right";
+export type WindowPosition = WindowPositionPreset | { x: number; y: number };
 export interface WindowOptions {
   title: string; width: number; height: number; minWidth: number; minHeight: number;
-  background: string; decorations: boolean; resizable: boolean; debug?: boolean;
+  background: string; decorations: boolean; resizable: boolean; position?: WindowPosition; debug?: boolean;
 }
 export interface SceneDocument { version: number; window: WindowOptions; root: NativeNode }
 export type NativeCommand =

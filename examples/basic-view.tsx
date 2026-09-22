@@ -7,10 +7,10 @@ import {
   Scroll,
   Text,
   TextInput,
+  Theme,
   TitleBar,
   View,
   Window,
-  Theme,
   darkTheme,
   lightTheme,
   theme,
@@ -78,6 +78,7 @@ export function App() {
       height={870}
       minWidth={860}
       minHeight={640}
+      position="center"
     >
       <TitleBar title="Tarve — Native workspace" />
       <Row

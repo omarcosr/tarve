@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
-pub const VERSION: u32 = 15;
+pub const VERSION: u32 = 17;
 
 fn range_max() -> f64 {
     100.0
@@ -111,6 +111,27 @@ impl Node {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WindowPositionPreset {
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Center,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+pub enum WindowPosition {
+    Preset(WindowPositionPreset),
+    Coordinates { x: f64, y: f64 },
+}
+
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowOptions {
     pub title: String,
@@ -123,6 +144,7 @@ pub struct WindowOptions {
     pub decorations: bool,
     #[serde(default = "default_true")]
     pub resizable: bool,
+    pub position: Option<WindowPosition>,
     #[serde(default)]
     pub debug: bool,
 }

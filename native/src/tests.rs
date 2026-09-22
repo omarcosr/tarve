@@ -1,14 +1,82 @@
 use crate::{
     protocol::{self, Node},
+    runtime::anchored_window_position,
     tree::Tree,
 };
 use serde_json::json;
+use winit::dpi::{PhysicalPosition, PhysicalSize};
 
 fn node(id: &str, kind: &str, style: serde_json::Value, children: Vec<Node>) -> Node {
     serde_json::from_value(json!({"id":id,"kind":kind,"style":style,"children":children})).unwrap()
 }
 fn root(children: Vec<Node>) -> Node {
     node("root", "window", json!({}), children)
+}
+
+#[test]
+fn window_position_protocol_accepts_presets_and_logical_coordinates() {
+    let base = json!({
+        "title":"Positioned",
+        "width":800,
+        "height":600,
+        "minWidth":320,
+        "minHeight":240,
+        "background":"#000000"
+    });
+    for preset in [
+        "top-left",
+        "top",
+        "top-right",
+        "left",
+        "center",
+        "right",
+        "bottom-left",
+        "bottom",
+        "bottom-right",
+    ] {
+        let mut positioned = base.clone();
+        positioned["position"] = json!(preset);
+        let positioned: protocol::WindowOptions = serde_json::from_value(positioned).unwrap();
+        assert!(matches!(
+            positioned.position,
+            Some(protocol::WindowPosition::Preset(_))
+        ));
+    }
+
+    let mut exact = base;
+    exact["position"] = json!({"x":-240,"y":96});
+    let exact: protocol::WindowOptions = serde_json::from_value(exact).unwrap();
+    match exact.position {
+        Some(protocol::WindowPosition::Coordinates { x, y }) => {
+            assert_eq!(x, -240.0);
+            assert_eq!(y, 96.0);
+        }
+        _ => panic!("expected coordinate window position"),
+    }
+}
+
+#[test]
+fn window_position_presets_anchor_to_all_nine_monitor_positions() {
+    use protocol::WindowPositionPreset::*;
+    let monitor_position = PhysicalPosition::new(-1920, 100);
+    let monitor_size = PhysicalSize::new(1920, 1080);
+    let window_size = PhysicalSize::new(800, 600);
+    let cases = [
+        (TopLeft, (-1920, 100)),
+        (Top, (-1360, 100)),
+        (TopRight, (-800, 100)),
+        (Left, (-1920, 340)),
+        (Center, (-1360, 340)),
+        (Right, (-800, 340)),
+        (BottomLeft, (-1920, 580)),
+        (Bottom, (-1360, 580)),
+        (BottomRight, (-800, 580)),
+    ];
+    for (preset, expected) in cases {
+        let position =
+            anchored_window_position(&preset, monitor_position, monitor_size, window_size);
+        assert_eq!((position.x, position.y), expected);
+    }
 }
 
 #[test]

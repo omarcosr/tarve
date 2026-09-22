@@ -81,8 +81,18 @@ describe("native TSX protocol", () => {
   test("Window keeps native chrome when no TitleBar is present", () => {
     const tree = compileTree(<Window title="Native"><Text>Hello</Text></Window>);
     expect(tree.document.window.decorations).toBe(true);
+    expect(tree.document.window.position).toBe("center");
     expect(tree.document.root.style.borderWidth).toBeUndefined();
     expect(tree.document.root.style.radius).toBeUndefined();
+  });
+  test("Window serializes explicit coordinates and initial position presets", () => {
+    const explicit = compileTree(<Window position={{ x: 120, y: -40 }}><Text>Hello</Text></Window>);
+    expect(explicit.document.window.position).toEqual({ x: 120, y: -40 });
+
+    for (const position of ["top-left", "top", "top-right", "left", "center", "right", "bottom-left", "bottom", "bottom-right"] as const) {
+      const tree = compileTree(<Window position={position}><Text>Hello</Text></Window>);
+      expect(tree.document.window.position).toBe(position);
+    }
   });
   test("TitleBar is detected through component composition", () => {
     const Shell = () => <Column><TitleBar title="Nested" /><Text>Body</Text></Column>;
