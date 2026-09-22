@@ -12,6 +12,7 @@ import {
   Drawer,
   Empty,
   Field,
+  Input,
   InputGroup,
   InputOTP,
   Item,
@@ -28,7 +29,7 @@ import {
   Scroll,
   Sidebar,
   Text,
-  Input,
+  TitleBar,
   Toggle,
   ToggleGroup,
   Typography,
@@ -111,6 +112,7 @@ const questionnaireQuestions = [
 export function App() {
   return (
     <Window title="Tarve — Components" width={1180} height={900} minWidth={900} minHeight={650} position="center">
+      <TitleBar title="Tarve — Components" />
       <Scroll id="components-scroll" flex={1}>
         <Column gap={20} padding={28} style={{ width: "100%" }}>
           <Column gap={5}>
@@ -188,6 +190,9 @@ export function App() {
             <Section title="Field" description="Label, description, validation and control layout.">
               <Field label="Email address" description="We only use this for account notifications." required>
                 <Input type="email" value="hello@example.com" />
+              </Field>
+              <Field label="Password" description="Choose a strong password." required>
+                <Input type="password" value="secret" />
               </Field>
             </Section>
 
