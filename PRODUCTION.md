@@ -11,16 +11,16 @@ Objective: publishable npm GUI package for Bun, using the native Taffy / Parley 
 - [ ] Input and lifecycle: robust editing, focus, IME, error handling, resource cleanup and window/device recovery.
 - [ ] Performance: measure idle work, frame latency, scrolling and updates on realistic large trees; optimize based on those measurements.
 - [ ] Smooth interaction: native scrolling/transitions on demand, clipping and correct pointer/keyboard interactions under load.
-- [ ] Examples: minimal app, component gallery, forms, overlays, and large data/list example. Counter, basic gallery, forms and 50,000-row list exist; dedicated overlays and advanced component gallery remain.
+- [ ] Examples: minimal app, component gallery, forms, overlays, and large data/list example. Counter, basic gallery, forms and a virtual-list example exist; dedicated overlays and advanced component gallery remain.
 - [ ] Release documentation and gates: API, support limits, build/distribution, reproducible checks, packaging and native integration tests.
 
 Completion requires verification of the shipped artifact and examples, not only unit tests. Registry publication is a separate action; this work prepares and validates the npm artifact locally.
 
 ## Measured progress
 
-Retained Taffy nodes, a shallow native tree, clipping-aware scene generation and property patches are implemented. Eighteen Rust tests and nineteen TypeScript tests cover layout/input invariants and the update path. Real-window smoke tests pass for the original app, form controls and the 50,000-row virtual list. The npm tarball also passes install, source and standalone EXE checks in an external consumer. The latest release run measured 11.96 ms median for updates and 0.92 ms for ordinary scroll on a 6,005-node tree; idle frames remain zero. See `PERFORMANCE.md` for methodology and limits.
+Retained Taffy nodes, a shallow native tree, clipping-aware scene generation and property patches are implemented. Nineteen Rust tests and nineteen TypeScript tests cover layout/input invariants and the update path. Real-window smoke tests pass for the original app, form controls and the virtual list. The npm tarball also passes install, source and standalone EXE checks in an external consumer. The latest release run measured 11.96 ms median for updates and 0.92 ms for ordinary scroll on a 6,005-node tree; idle frames remain zero. See `PERFORMANCE.md` for methodology and limits.
 
-The public kit now includes Pressable, Icon, Checkbox, Switch, RadioGroup, Slider, Card, Badge, Separator, Progress, Tabs, Accordion and VirtualList. The forms example exercises controls with keyboard and pointer input. A 50,000-record example keeps fewer than 100 native layout nodes while scrolling. Focus scrolls offscreen controls into view; grouped radio choices use one Tab stop; leaving the window during slider drag preserves its value.
+The public kit now includes Pressable, Icon, Checkbox, Switch, RadioGroup, Slider, Card, Badge, Separator, Progress, Tabs, Accordion and VirtualList. The forms example exercises controls with keyboard and pointer input. The virtual-list example keeps fewer than 120 native layout nodes while scrolling. Focus scrolls offscreen controls into view; grouped radio choices use one Tab stop; leaving the window during slider drag preserves its value.
 
 ## Next implementation work
 

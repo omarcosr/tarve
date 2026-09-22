@@ -16,7 +16,7 @@ Windows x64, Bun 1.4.1, AMD Ryzen 7 9800X3D. The workload contains 2,000 rows / 
 
 These are input/update dispatch to native frame-notification times, including Bun/FFI and presentation scheduling. They are not photon latency, universal FPS guarantees, or results from other hardware. Recent update runs on the same machine have ranged from 11.79 to 15.37 ms median, so the current value is one run rather than a fixed performance promise. In that run, TSX tree construction took 5.78 ms median and diffing took 1.54 ms median. The first window took 562 ms. The earlier patch implementation once measured 8.57 ms median; repeatability across machines remains unverified.
 
-The fixed-height `VirtualList` example has 50,000 records and kept at most 97 native layout nodes during initial view, mid-list scroll and bottom-list interaction in the real-window smoke test. Native scroll events trigger updates for virtual lists; ordinary `Scroll` elements paint directly without rebuilding the TSX tree. A virtual list waits for the updated visible rows before scheduling its next frame.
+A previous fixed-height `VirtualList` run with 50,000 records kept at most 97 native layout nodes during initial view, mid-list scroll and bottom-list interaction in the real-window smoke test. The current example uses 500 records and taller padded rows. Native scroll events trigger updates for virtual lists; ordinary `Scroll` elements paint directly without rebuilding the TSX tree. A virtual list waits for the updated visible rows before scheduling its next frame.
 
 ## Memory
 

@@ -1,10 +1,11 @@
-import { Badge, Button, Column, Row, Text, TitleBar, VirtualList, Window, theme } from "tarve";
+import { Badge, Button, Checkbox, Column, Row, Text, TitleBar, VirtualList, Window, theme } from "tarve";
 
 const c = theme.colors;
-const records = Array.from(
-  { length: 500 },
+export const records = Array.from(
+  { length: 50_000 },
   (_, index) => `Record ${String(index + 1).padStart(5, "0")}`,
 );
+export const itemHeight = 56;
 let offset = 0;
 let opened = "None";
 
@@ -18,17 +19,17 @@ export function App() {
             <Text size={24} weight={650}>
               Records
             </Text>
-            <Text color={c.mutedForeground}>50,000 records with fixed-height virtual rows.</Text>
+            <Text color={c.mutedForeground}>{records.length.toLocaleString()} records with fixed-height virtual rows.</Text>
           </Column>
           <Badge variant="secondary">{records.length.toLocaleString()} items</Badge>
         </Row>
         <Text id="visible-range" size={12} color={c.mutedForeground}>
-          First visible row: {Math.floor(offset / 36) + 1} · Opened: {opened}
+          First visible row: {Math.floor(offset / itemHeight) + 1} · Opened: {opened}
         </Text>
         <VirtualList
           id="records"
           items={records}
-          itemHeight={36}
+          itemHeight={itemHeight}
           height={600}
           offset={offset}
           keyForItem={(_, index) => index}
@@ -50,6 +51,7 @@ export function App() {
               <Text id={`record-${index}`} size={13}>
                 {record}
               </Text>
+              <Checkbox checked={false} label="Select" />
               <Button
                 id={`open-${index}`}
                 size="sm"

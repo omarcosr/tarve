@@ -32,7 +32,7 @@ bun run tarve build app.tsx --outfile dist/MeuApp.exe
 
 Configure `tsconfig.json` com `"jsx": "react-jsx"`, `"jsxImportSource": "tarve"`, `"moduleResolution": "Bundler"` e `"types": ["bun", "tarve/assets"]`. A API pública é importada de `tarve`; o build também está disponível como `import { build } from "tarve/build"`.
 
-`examples/counter.tsx` mostra o app mínimo, `examples/basic.tsx` reúne os componentes iniciais, `examples/forms.tsx` demonstra controles de formulário e `examples/large-list.tsx` mostra 50.000 registros com lista virtual. Exemplos usam a mesma API instalada, sem configurar a DLL ou o Worker.
+`examples/counter.tsx` mostra o app mínimo, `examples/basic.tsx` reúne os componentes iniciais, `examples/forms.tsx` demonstra controles de formulário e `examples/large-list.tsx` mostra registros com lista virtual. Exemplos usam a mesma API instalada, sem configurar a DLL ou o Worker.
 
 `examples/` é um projeto Bun consumidor: tem `package.json` e `tsconfig.json` próprios e importa somente a API pública. Após publicar `tarve@0.1.0` no registry, instale o pacote:
 
@@ -73,7 +73,7 @@ let open = false;
 
 `Checkbox`, `Switch`, `RadioGroup`, `Slider`, `Card`, `Badge`, `Separator`, `Progress`, `Tabs` e `Accordion` estão disponíveis em `tarve`. Os controles de seleção recebem o valor atual e notificam alterações por callback; o app guarda esse valor em seu estado. `Pressable` e `Icon` permitem compor controles próprios. Consulte `examples/forms-view.tsx` para um formulário com clique, foco e teclado.
 
-`VirtualList` usa linhas de altura fixa. Passe `items`, `itemHeight`, `height`, `offset`, `renderItem` e `onScroll`; armazene o novo offset no callback. Apenas as linhas visíveis e uma pequena margem de segurança entram na árvore nativa. O exemplo de 50.000 registros mantém menos de 100 nós de layout durante o scroll.
+`VirtualList` usa linhas de altura fixa. Passe `items`, `itemHeight`, `height`, `offset`, `renderItem` e `onScroll`; armazene o novo offset no callback. `itemHeight` deve comportar o conteúdo, o padding e as bordas de cada linha. Apenas as linhas visíveis e uma pequena margem de segurança entram na árvore nativa.
 
 ### Custom title bar
 
@@ -190,7 +190,7 @@ bun run lint            # Clippy rigoroso para o backend Rust
 bun run test            # TSX/protocolo, layout, dirty flags e input
 bun run smoke           # janela real, GPU, FFI, cliques, edição, scroll e resize
 bun run smoke:controls  # checkbox, switch, slider, tabs, radio e teclado em janela real
-bun run smoke:virtual-list # 50.000 linhas com scroll/clique e menos de 120 nós nativos
+bun run smoke:virtual-list # linhas virtuais com scroll/clique e menos de 120 nós nativos
 bun run verify          # checa código, janela real, tarball e EXE isolado
 bun run bench           # latência em uma janela com 2.000 linhas (após build release)
 bun run build           # DLL release + app/worker/assets em dist/
@@ -246,7 +246,7 @@ native/include/tarve.h   contrato C e ownership dos buffers
 examples/basic.tsx       demonstração interativa
 examples/counter.tsx     exemplo mínimo
 examples/forms.tsx       controles de formulário
-examples/large-list.tsx  lista virtual de 50.000 registros
+examples/large-list.tsx  exemplo de lista virtual
 scripts/package.ts      distribuição npm com tipos e binário nativo
 ```
 
