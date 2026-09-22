@@ -75,7 +75,17 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
     if ("id" in event) {
       const handlers = compiled.handlers.get(event.id);
+      if (event.type === "change") {
+        const node = compiled.nodes.get(event.id);
+        if (node && (node.kind === "input" || node.kind === "textarea")) node.value = event.value;
+      }
+      if (event.type === "valueChange") {
+        const node = compiled.nodes.get(event.id);
+        if (node?.control) node.control = { ...node.control, value: event.value };
+      }
       if (event.type === "click" && handlers?.onClick) { handlers.onClick(); update(); }
+      if (event.type === "context" && handlers?.onContextMenu) { handlers.onContextMenu({ x: event.x, y: event.y }); update(); }
+      if (event.type === "outside" && handlers?.onOutsideClick) { handlers.onOutsideClick(); update(); }
       if (event.type === "change" && handlers?.onChange) { handlers.onChange(event.value); update(); }
       if (event.type === "valueChange" && handlers?.onValueChange) { handlers.onValueChange(event.value); update(); }
       if (event.type === "scroll" && handlers?.onScroll) { handlers.onScroll(event.offset, event.max); update(); }

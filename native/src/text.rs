@@ -125,15 +125,15 @@ impl TextEngine {
         &mut self,
         id: &str,
         index: usize,
-        width: f32,
+        width: Option<f32>,
     ) -> Option<parley::BoundingBox> {
         let layout = self.layouts.get_mut(id)?;
-        layout.break_all_lines(Some(width.max(0.0)));
+        layout.break_all_lines(width.map(|width| width.max(0.0)));
         Some(Cursor::from_byte_index(layout, index, Affinity::Downstream).geometry(layout, 1.0))
     }
-    pub fn index_at(&mut self, id: &str, x: f32, y: f32, width: f32) -> Option<usize> {
+    pub fn index_at(&mut self, id: &str, x: f32, y: f32, width: Option<f32>) -> Option<usize> {
         let layout = self.layouts.get_mut(id)?;
-        layout.break_all_lines(Some(width.max(0.0)));
+        layout.break_all_lines(width.map(|width| width.max(0.0)));
         Some(Cursor::from_point(layout, x, y).index())
     }
 }

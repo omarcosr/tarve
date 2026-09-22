@@ -71,7 +71,11 @@ let open = false;
 
 ### Controles de aplicação
 
-`Checkbox`, `Switch`, `RadioGroup`, `Select`, `Slider`, `TextArea`, `Card`, `Badge`, `Separator`, `Progress`, `Tabs` e `Accordion` estão disponíveis em `tarve`. Os controles de seleção recebem o valor atual e notificam alterações por callback; o app guarda esse valor em seu estado. `Pressable` e `Icon` permitem compor controles próprios. Consulte `examples/forms-view.tsx` para um formulário com clique, foco e teclado.
+`Checkbox`, `Switch`, `RadioGroup`, `Select`, `Slider`, `TextArea`, `Card`, `Badge`, `Separator`, `Progress`, `Tabs` e `Accordion` estão disponíveis em `tarve`. Os controles de seleção recebem o valor atual e notificam alterações por callback; o app guarda esse valor em seu estado. `Pressable`, `Icon` e `Portal` permitem compor controles próprios. Consulte `examples/forms-view.tsx` para um formulário com clique, foco e teclado.
+
+O kit também inclui `Tooltip`, `Popover`, `DropdownMenu`, `ContextMenu`, `Combobox`, `Command`, `CommandPalette`, `AlertDialog`, `Sheet`, `Toast`, `Toaster`, `Skeleton`, `Spinner`, `Avatar`, `Breadcrumb`, `Pagination`, `Collapsible`, `Table`, `DataTable`, `Menubar`, `HoverCard`, `Calendar` e `DatePicker`. Popups usam a primitive nativa de portal: continuam ancorados pelo layout do trigger, mas escapam do clipping de `Scroll`, participam do hit-test acima do conteúdo normal e podem fechar por clique fora. `ContextMenu` abre por clique direito nativo.
+
+A camada de componentes também cobre `Alert`, `AspectRatio`, `ButtonGroup`, `Carousel`, `Chart`, `Drawer`, `Empty`, `Field`, `InputGroup`, `InputOTP`, `Item`, `Kbd`, `Label`, `NativeSelect`, `NavigationMenu`, `Resizable`, `Sidebar`, `Toggle`, `ToggleGroup`, `Typography`, `Direction`, `Questionnaire`, `Attachment`, `Bubble`, `Marker`, `Message` e `MessageScroller`. Eles usam as mesmas primitives e tokens do tema; `Resizable` usa um splitter nativo controlado com drag e teclado, e `Chart` renderiza barras com primitives existentes, sem dependência externa.
 
 `List` e `VirtualList` são componentes distintos. `List` é a lista normal: mantém todos os itens montados, aceita alturas diferentes por item e pode receber `items`/`renderItem` ou `children`. `VirtualList` é a opção para coleções grandes: usa linhas de altura fixa e mantém na árvore nativa apenas a faixa visível mais o overscan.
 
@@ -92,9 +96,33 @@ let open = false;
 />
 ```
 
-`Select` segue o modelo controlado de valor (`value` + `onValueChange`) e suporta opções desabilitadas, placeholder, abertura controlada opcional e teclado. `Enter`/`Space` alternam o popup; setas, `Home` e `End` navegam entre opções habilitadas; `Escape` fecha. O popup usa `zIndex` sem alterar o layout Taffy.
+`Select` segue o modelo controlado de valor (`value` + `onValueChange`) e suporta opções desabilitadas, placeholder, abertura controlada opcional e teclado. `Enter`/`Space` alternam o popup; setas, `Home` e `End` navegam entre opções habilitadas; `Escape` fecha. Listas longas ganham scroll e o popup é renderizado como portal nativo.
 
-`TextArea` é um campo de texto multiline nativo. Ele faz wrap com Parley, aceita `Enter`, seleção/clipboard, navegação por caret, clique para posicionar o caret e scroll interno quando o conteúdo excede a altura disponível.
+`TextInput` e `TextArea` usam edição nativa sobre Parley. Ambos suportam caret por clique, seleção parcial por arraste ou `Shift` + setas/Home/End, `Ctrl+A/C/X/V` e deleção sobre a seleção; `TextArea` também faz wrap, navegação vertical e scroll interno mantendo o caret visível.
+
+```tsx
+<Popover id="account" open={open} trigger={<Text>Account</Text>} onOpenChange={setOpen}>
+  <Text>Profile</Text>
+</Popover>
+
+<ContextMenu
+  id="file-menu"
+  open={menuOpen}
+  trigger={<Text>Right click me</Text>}
+  onOpenChange={setMenuOpen}
+  items={[{ value: "rename", label: "Rename" }, { value: "delete", label: "Delete" }]}
+/>
+
+<DatePicker
+  id="due-date"
+  open={dateOpen}
+  month={month}
+  value={date}
+  onOpenChange={setDateOpen}
+  onMonthChange={setMonth}
+  onValueChange={setDate}
+/>
+```
 
 ### Custom title bar
 

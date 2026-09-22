@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
-pub const VERSION: u32 = 17;
+pub const VERSION: u32 = 21;
 
 fn range_max() -> f64 {
     100.0
@@ -55,6 +55,10 @@ pub struct Node {
     pub control: Option<Control>,
     #[serde(default)]
     pub modal: bool,
+    #[serde(default)]
+    pub portal: bool,
+    #[serde(default)]
+    pub dismiss_on_outside: bool,
     #[serde(default = "default_true")]
     pub focusable: bool,
     #[serde(default)]
@@ -85,7 +89,7 @@ impl Node {
         !self.disabled
             && matches!(
                 self.kind.as_str(),
-                "button" | "input" | "textarea" | "pressable" | "slider"
+                "button" | "input" | "textarea" | "pressable" | "slider" | "splitter"
             )
     }
     pub fn text_value(&self) -> &str {
@@ -213,6 +217,7 @@ pub fn validate(root: &Node) -> Result<(), String> {
             "pressable",
             "icon",
             "slider",
+            "splitter",
         ]
         .contains(&n.kind.as_str())
         {
@@ -251,18 +256,18 @@ pub fn validate_patch(nodes: &[Node]) -> Result<(), String> {
 }
 
 fn validate_control(node: &Node) -> Result<(), String> {
-    if node.kind == "slider" {
+    if matches!(node.kind.as_str(), "slider" | "splitter") {
         let control = node
             .control
             .as_ref()
-            .ok_or("Slider requires range properties")?;
+            .ok_or("Range control requires range properties")?;
         if ![control.value, control.min, control.max, control.step]
             .iter()
             .all(|n| n.is_finite())
             || control.max <= control.min
             || control.step <= 0.0
         {
-            return Err("Slider requires finite values, max > min and step > 0".into());
+            return Err("Range control requires finite values, max > min and step > 0".into());
         }
     }
     Ok(())

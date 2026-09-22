@@ -24,6 +24,7 @@ const LAYOUT_KEYS: &[&str] = &[
     "maxHeight",
     "flex",
     "shrink",
+    "aspectRatio",
     "direction",
     "wrap",
     "gap",
@@ -151,7 +152,9 @@ pub struct Tree {
     scroll_drag: Option<ScrollDrag>,
     pub mouse: (f64, f64),
     caret: usize,
-    select_all: bool,
+    selection_anchor: Option<usize>,
+    text_dragging: bool,
+    modal_focus_return: Option<String>,
     pub layouts: u64,
     pub paints: u64,
     pub layout_nodes_created: u64,
@@ -184,6 +187,55 @@ impl Tree {
         self.stacking = stacking;
     }
 
+    fn portal_roots(&self) -> Vec<String> {
+        self.order
+            .iter()
+            .filter(|id| {
+                if !self.entries[*id].node.portal {
+                    return false;
+                }
+                let mut parent = self.entries[*id].parent.as_deref();
+                while let Some(parent_id) = parent {
+                    if self.entries[parent_id].node.portal {
+                        return false;
+                    }
+                    parent = self.entries[parent_id].parent.as_deref();
+                }
+                true
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn ancestor_scroll_offset(&self, id: &str) -> f64 {
+        let mut offset = 0.0;
+        let mut parent = self.entries[id].parent.as_deref();
+        while let Some(parent_id) = parent {
+            offset += self.entries[parent_id].scroll;
+            parent = self.entries[parent_id].parent.as_deref();
+        }
+        offset
+    }
+
+    fn outside_dismissal_at_pointer(&self) -> Option<String> {
+        let mut portals: Vec<_> = self
+            .portal_roots()
+            .into_iter()
+            .filter(|id| self.entries[id].node.dismiss_on_outside)
+            .collect();
+        portals.sort_by(|a, b| {
+            self.stacking
+                .get(a)
+                .copied()
+                .unwrap_or(0.0)
+                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
+        });
+        let portal = portals.last()?;
+        let bounds =
+            self.entries[portal].bounds + Vec2::new(0.0, -self.ancestor_scroll_offset(portal));
+        (!bounds.contains(self.mouse)).then(|| portal.clone())
+    }
+
     pub fn new(root: Node) -> Self {
         let mut tree = Self {
             root: root.id.clone(),
@@ -201,7 +253,9 @@ impl Tree {
             scroll_drag: None,
             mouse: (-1.0, -1.0),
             caret: 0,
-            select_all: false,
+            selection_anchor: None,
+            text_dragging: false,
+            modal_focus_return: None,
             layouts: 0,
             paints: 0,
             layout_nodes_created: 0,
@@ -225,6 +279,8 @@ impl Tree {
         true
     }
     pub fn update(&mut self, root: Node) {
+        let previous_modal = self.active_modal().map(str::to_string);
+        let previous_focus = self.focused.clone();
         let mut old = std::mem::take(&mut self.entries);
         self.order.clear();
         self.root = root.id.clone();
@@ -246,7 +302,18 @@ impl Tree {
                     .is_some_and(|id| self.entries.contains_key(id))
         });
         self.prune_images();
+        let next_modal = self.active_modal().map(str::to_string);
+        if previous_modal.is_none() && next_modal.is_some() {
+            self.modal_focus_return = previous_focus;
+        }
         self.prune_interaction();
+        if previous_modal.is_some()
+            && next_modal.is_none()
+            && let Some(id) = self.modal_focus_return.take()
+            && self.entries.contains_key(&id)
+        {
+            self.focus(&id);
+        }
         self.refresh_stacking();
     }
     fn insert(&mut self, mut node: Node, old: &mut HashMap<String, Entry>, parent: Option<&str>) {
@@ -338,6 +405,8 @@ impl Tree {
         );
     }
     pub fn patch(&mut self, nodes: Vec<Node>) -> Result<(), String> {
+        let previous_modal = self.active_modal().map(str::to_string);
+        let previous_focus = self.focused.clone();
         crate::protocol::validate_patch(&nodes)?;
         // Validate the whole patch before applying any part of it.
         for node in &nodes {
@@ -358,7 +427,18 @@ impl Tree {
             self.reconcile_node(node, children, Some(previous));
         }
         self.prune_images();
+        let next_modal = self.active_modal().map(str::to_string);
+        if previous_modal.is_none() && next_modal.is_some() {
+            self.modal_focus_return = previous_focus;
+        }
         self.prune_interaction();
+        if previous_modal.is_some()
+            && next_modal.is_none()
+            && let Some(id) = self.modal_focus_return.take()
+            && self.entries.contains_key(&id)
+        {
+            self.focus(&id);
+        }
         self.refresh_stacking();
         Ok(())
     }
@@ -543,13 +623,20 @@ impl Tree {
     pub fn scene(&mut self, scale: f64) -> Scene {
         let mut scene = Scene::new();
         self.painted_nodes = 0;
-        self.paint_node(
-            &self.root.clone(),
-            0.0,
-            scale,
-            self.entries[&self.root].rect,
-            &mut scene,
-        );
+        let root_rect = self.entries[&self.root].rect;
+        self.paint_node(&self.root.clone(), 0.0, scale, root_rect, &mut scene);
+        let mut portals = self.portal_roots();
+        portals.sort_by(|a, b| {
+            self.stacking
+                .get(a)
+                .copied()
+                .unwrap_or(0.0)
+                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
+        });
+        for portal in portals {
+            let offset = self.ancestor_scroll_offset(&portal);
+            self.paint_node(&portal, offset, scale, root_rect, &mut scene);
+        }
         self.paints += 1;
         self.dirty.paint = false;
         scene
@@ -732,15 +819,23 @@ impl Tree {
             scene.push_clip_layer(Fill::NonZero, transform, &shape);
             if matches!(node.kind.as_str(), "input" | "textarea")
                 && self.focused.as_deref() == Some(id)
-                && self.select_all
+                && let Some((start, end)) = self.selected_range()
             {
-                scene.fill(
-                    Fill::NonZero,
-                    transform,
-                    color(visual_string(&node, "selectionColor", "#dbeafe", state)),
-                    None,
-                    &BoxRect::new(x, y, x + tw as f64, y + th as f64),
-                );
+                let wrap_width = (node.kind == "textarea").then_some(available_width);
+                for selection in self.selection_rects(id, start, end, wrap_width) {
+                    scene.fill(
+                        Fill::NonZero,
+                        transform,
+                        color(visual_string(&node, "selectionColor", "#dbeafe", state)),
+                        None,
+                        &BoxRect::new(
+                            x + selection.x0,
+                            y + selection.y0,
+                            x + selection.x1,
+                            y + selection.y1,
+                        ),
+                    );
+                }
             }
             self.text.draw(
                 scene,
@@ -753,7 +848,7 @@ impl Tree {
             if node.kind == "textarea" && self.focused.as_deref() == Some(id) {
                 let value = node.value.as_deref().unwrap_or("");
                 let caret = floor_boundary(value, self.caret.min(value.len()));
-                if let Some(cursor) = self.text.caret_rect(id, caret, available_width) {
+                if let Some(cursor) = self.text.caret_rect(id, caret, Some(available_width)) {
                     scene.fill(
                         Fill::NonZero,
                         transform,
@@ -850,6 +945,9 @@ impl Tree {
             clip
         };
         for child in &children {
+            if self.entries[child].node.portal && !node.portal {
+                continue;
+            }
             self.paint_node(child, offset + scroll, scale, child_clip, scene);
         }
         if node.kind == "scroll" {
@@ -868,6 +966,29 @@ impl Tree {
             );
         }
     }
+    fn hit_root(&self, scroll_only: bool) -> Option<String> {
+        let root_rect = self.entries[&self.root].rect;
+        let mut portals = self.portal_roots();
+        portals.sort_by(|a, b| {
+            self.stacking
+                .get(a)
+                .copied()
+                .unwrap_or(0.0)
+                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
+        });
+        for portal in portals.iter().rev() {
+            if let Some(id) = self.hit(
+                portal,
+                self.ancestor_scroll_offset(portal),
+                root_rect,
+                scroll_only,
+            ) {
+                return Some(id);
+            }
+        }
+        self.hit(&self.root, 0.0, root_rect, scroll_only)
+    }
+
     fn hit(&self, id: &str, offset: f64, clip: BoxRect, scroll_only: bool) -> Option<String> {
         let entry = &self.entries[id];
         if !(entry.bounds + Vec2::new(0.0, -offset)).contains(self.mouse) {
@@ -894,6 +1015,9 @@ impl Tree {
                 .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
         });
         for child in children.iter().rev() {
+            if self.entries[child].node.portal && !entry.node.portal {
+                continue;
+            }
             if let Some(id) = self.hit(child, offset + entry.scroll, clip, scroll_only) {
                 return Some(id);
             }
@@ -938,7 +1062,7 @@ impl Tree {
                 continue;
             }
             if let Some(control) = &self.entries[id].node.control
-                && matches!(control.role.as_str(), "radio" | "tab")
+                && matches!(control.role.as_str(), "radio" | "tab" | "menuitem" | "toggle")
                 && !control.group.is_empty()
             {
                 let choice = group_choice
@@ -951,7 +1075,7 @@ impl Tree {
         }
         if let Some(id) = &self.focused
             && let Some(control) = self.entries[id].node.control.as_ref()
-            && matches!(control.role.as_str(), "radio" | "tab")
+            && matches!(control.role.as_str(), "radio" | "tab" | "menuitem" | "toggle")
             && group_choice.contains_key(&control.group)
         {
             group_choice.insert(control.group.clone(), id.clone());
@@ -967,7 +1091,7 @@ impl Tree {
                         .control
                         .as_ref()
                         .is_none_or(|control| {
-                            !matches!(control.role.as_str(), "radio" | "tab")
+                            !matches!(control.role.as_str(), "radio" | "tab" | "menuitem" | "toggle")
                                 || control.group.is_empty()
                                 || group_choice.get(&control.group) == Some(*id)
                         })
@@ -986,7 +1110,8 @@ impl Tree {
         let mut blurred = None;
         if self.focused.as_deref() != Some(id) {
             blurred = self.focused.replace(id.to_string());
-            self.select_all = false;
+            self.selection_anchor = None;
+            self.text_dragging = false;
             self.caret = self.entries[id].node.value.as_deref().map_or(0, str::len);
             self.dirty.paint = true;
         }
@@ -1040,7 +1165,8 @@ impl Tree {
         if !keep_focused {
             self.focused = None;
             self.caret = 0;
-            self.select_all = false;
+            self.selection_anchor = None;
+            self.text_dragging = false;
             if modal.is_some()
                 && let Some(id) = self.focus_order().into_iter().next()
             {
@@ -1136,14 +1262,44 @@ impl Tree {
         let value = control.min + (control.max - control.min) * ratio;
         self.set_slider(id, value)
     }
+    fn splitter_from_pointer(&mut self, id: &str) -> Vec<Value> {
+        let Some(entry) = self.entries.get(id) else {
+            return vec![];
+        };
+        let Some(parent_id) = entry.parent.clone() else {
+            return vec![];
+        };
+        let Some(rect) = self.visible_rect(&parent_id) else {
+            return vec![];
+        };
+        let Some(control) = entry.node.control.as_ref() else {
+            return vec![];
+        };
+        let ratio = if control.orientation == "vertical" {
+            ((self.mouse.1 - rect.y0) / rect.height().max(1.0)).clamp(0.0, 1.0)
+        } else {
+            ((self.mouse.0 - rect.x0) / rect.width().max(1.0)).clamp(0.0, 1.0)
+        };
+        let value = control.min + (control.max - control.min) * ratio;
+        self.set_slider(id, value)
+    }
     pub fn pointer_move(&mut self, x: f64, y: f64) -> Vec<Value> {
         self.mouse = (x, y);
+        if self.text_dragging
+            && let Some(id) = self.focused.clone()
+            && matches!(self.entries[&id].node.kind.as_str(), "input" | "textarea")
+        {
+            self.place_text_caret_from_pointer(&id);
+            if self.entries[&id].node.kind == "textarea" {
+                self.ensure_focused_textarea_caret_visible();
+            }
+        }
         if let Some(drag) = &self.scroll_drag {
             let id = drag.id.clone();
             let grab = drag.grab;
             return self.drag_scrollbar(&id, grab);
         }
-        let next = self.hit(&self.root, 0.0, self.entries[&self.root].rect, false);
+        let next = self.hit_root(false);
         let mut events = vec![];
         if next != self.hovered {
             if let Some(id) = &self.hovered {
@@ -1155,12 +1311,14 @@ impl Tree {
             self.hovered = next;
             self.dirty.paint = true;
         }
-        if let Some(id) = self
-            .pressed
-            .clone()
-            .filter(|id| self.entries[id].node.kind == "slider")
-        {
-            events.extend(self.slider_from_pointer(&id));
+        if let Some(id) = self.pressed.clone().filter(|id| {
+            matches!(self.entries[id].node.kind.as_str(), "slider" | "splitter")
+        }) {
+            events.extend(if self.entries[&id].node.kind == "splitter" {
+                self.splitter_from_pointer(&id)
+            } else {
+                self.slider_from_pointer(&id)
+            });
         }
         events
     }
@@ -1175,15 +1333,21 @@ impl Tree {
     }
     pub fn blur(&mut self) -> Option<String> {
         self.scroll_drag = None;
+        self.text_dragging = false;
         let blurred = self.focused.take();
         if blurred.is_some() || self.pressed.take().is_some() {
             self.caret = 0;
-            self.select_all = false;
+            self.selection_anchor = None;
             self.dirty.paint = true;
         }
         blurred
     }
     pub fn pointer_down(&mut self) -> Vec<Value> {
+        if let Some(id) = self.outside_dismissal_at_pointer() {
+            self.pressed = None;
+            self.text_dragging = false;
+            return vec![json!({"type":"outside", "id":id})];
+        }
         if let Some((id, grab)) = self.scrollbar_at_pointer() {
             self.pressed = None;
             self.scroll_drag = Some(ScrollDrag {
@@ -1192,15 +1356,19 @@ impl Tree {
             });
             return self.drag_scrollbar(&id, grab);
         }
-        self.hovered = self.hit(&self.root, 0.0, self.entries[&self.root].rect, false);
+        self.hovered = self.hit_root(false);
         self.pressed = self.hovered.clone();
         let mut events = vec![];
         if let Some(id) = self.hovered.clone() {
             if let Some(blurred) = self.focus(&id) {
                 events.push(json!({"type":"blur", "id":blurred}));
             }
-            if self.entries[&id].node.kind == "textarea" {
-                self.place_textarea_caret_from_pointer(&id);
+            if matches!(self.entries[&id].node.kind.as_str(), "input" | "textarea") {
+                self.place_text_caret_from_pointer(&id);
+                self.selection_anchor = Some(self.caret);
+                self.text_dragging = true;
+            } else {
+                self.text_dragging = false;
             }
         } else {
             if let Some(blurred) = self.blur() {
@@ -1208,20 +1376,26 @@ impl Tree {
             }
         }
         self.dirty.paint = true;
-        if let Some(id) = self
-            .pressed
-            .clone()
-            .filter(|id| self.entries[id].node.kind == "slider")
-        {
-            events.extend(self.slider_from_pointer(&id));
+        if let Some(id) = self.pressed.clone().filter(|id| {
+            matches!(self.entries[id].node.kind.as_str(), "slider" | "splitter")
+        }) {
+            events.extend(if self.entries[&id].node.kind == "splitter" {
+                self.splitter_from_pointer(&id)
+            } else {
+                self.slider_from_pointer(&id)
+            });
         }
         events
     }
     pub fn pointer_up(&mut self) -> Vec<Value> {
+        self.text_dragging = false;
+        if self.selection_anchor == Some(self.caret) {
+            self.selection_anchor = None;
+        }
         if self.scroll_drag.take().is_some() {
             return vec![];
         }
-        self.hovered = self.hit(&self.root, 0.0, self.entries[&self.root].rect, false);
+        self.hovered = self.hit_root(false);
         let mut out = vec![];
         if let Some(id) = self.pressed.take() {
             if self.hovered.as_ref() == Some(&id)
@@ -1233,15 +1407,25 @@ impl Tree {
         }
         out
     }
+    pub fn pointer_context(&mut self) -> Vec<Value> {
+        if let Some(id) = self.outside_dismissal_at_pointer() {
+            return vec![json!({"type":"outside", "id":id})];
+        }
+        self.hovered = self.hit_root(false);
+        let Some(id) = self.hovered.clone() else {
+            return vec![];
+        };
+        vec![json!({"type":"context", "id":id, "x":self.mouse.0, "y":self.mouse.1})]
+    }
     pub fn wheel(&mut self, delta: f64) -> Vec<Value> {
-        if let Some(id) = self.hit(&self.root, 0.0, self.entries[&self.root].rect, true) {
+        if let Some(id) = self.hit_root(true) {
             let next = self.entries[&id].scroll + delta;
             return self.scroll_to(&id, next);
         }
         vec![]
     }
     fn scrollbar_at_pointer(&self) -> Option<(String, f64)> {
-        let id = self.hit(&self.root, 0.0, self.entries[&self.root].rect, true)?;
+        let id = self.hit_root(true)?;
         let entry = self.entries.get(&id)?;
         if !matches!(entry.node.kind.as_str(), "scroll" | "textarea") || entry.scroll_max <= 0.0 {
             return None;
@@ -1306,11 +1490,22 @@ impl Tree {
         }
         vec![json!({"type":"scroll", "id":id, "offset":next, "max":entry.scroll_max})]
     }
+    fn selected_range(&self) -> Option<(usize, usize)> {
+        let anchor = self.selection_anchor?;
+        let id = self.focused.as_ref()?;
+        if !matches!(self.entries[id].node.kind.as_str(), "input" | "textarea") {
+            return None;
+        }
+        let value = self.entries[id].node.value.as_deref().unwrap_or("");
+        let a = floor_boundary(value, anchor.min(value.len()));
+        let b = floor_boundary(value, self.caret.min(value.len()));
+        (a != b).then_some((a.min(b), a.max(b)))
+    }
     pub fn selected_text(&self) -> Option<String> {
-        self.focused
-            .as_ref()
-            .filter(|_| self.select_all)
-            .and_then(|id| self.entries[id].node.value.clone())
+        let id = self.focused.as_ref()?;
+        let value = self.entries[id].node.value.as_deref().unwrap_or("");
+        let (start, end) = self.selected_range()?;
+        Some(value[start..end].to_string())
     }
     pub fn key(&mut self, key: &str) -> Vec<Value> {
         if key == "Tab" || key == "ShiftTab" {
@@ -1359,6 +1554,17 @@ impl Tree {
             };
             return self.set_slider(&id, value);
         }
+        if self.entries[&id].node.kind == "splitter" {
+            let control = self.entries[&id].node.control.as_ref().unwrap();
+            let value = match (control.orientation.as_str(), key) {
+                ("vertical", "ArrowDown") | ("horizontal", "ArrowRight") => control.value + control.step,
+                ("vertical", "ArrowUp") | ("horizontal", "ArrowLeft") => control.value - control.step,
+                (_, "Home") => control.min,
+                (_, "End") => control.max,
+                _ => return vec![],
+            };
+            return self.set_slider(&id, value);
+        }
         if let Some(control) = &self.entries[&id].node.control
             && !control.group.is_empty()
             && matches!(control.role.as_str(), "radio" | "tab")
@@ -1401,21 +1607,51 @@ impl Tree {
             }
             return events;
         }
+        if let Some(control) = &self.entries[&id].node.control
+            && !control.group.is_empty()
+            && matches!(control.role.as_str(), "toggle" | "menuitem")
+            && matches!(key, "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | "Home" | "End")
+        {
+            let group = control.group.clone();
+            let choices: Vec<_> = self.order.iter().filter(|candidate| {
+                self.interactive(candidate)
+                    && self.entries[*candidate].node.control.as_ref().is_some_and(|candidate_control| candidate_control.group == group)
+            }).cloned().collect();
+            if choices.is_empty() { return vec![]; }
+            let index = choices.iter().position(|candidate| candidate == &id).unwrap_or(0);
+            let next = match key {
+                "Home" => 0,
+                "End" => choices.len() - 1,
+                "ArrowLeft" | "ArrowUp" => (index + choices.len() - 1) % choices.len(),
+                _ => (index + 1) % choices.len(),
+            };
+            return self.focus(&choices[next]).map_or_else(Vec::new, |blurred| vec![json!({"type":"blur", "id":blurred})]);
+        }
         if !matches!(self.entries[&id].node.kind.as_str(), "input" | "textarea") {
             return vec![];
         }
         let multiline = self.entries[&id].node.kind == "textarea";
         let value = self.entries[&id].node.value.clone().unwrap_or_default();
         self.caret = floor_boundary(&value, self.caret.min(value.len()));
+        let selecting = key.starts_with("Shift");
+        let key = key.strip_prefix("Shift").unwrap_or(key);
+        if selecting && self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.caret);
+        }
         match key {
-            "SelectAll" => self.select_all = true,
+            "SelectAll" => {
+                self.selection_anchor = Some(0);
+                self.caret = value.len();
+            }
             "Home" => {
                 self.caret = if multiline {
                     self.textarea_visual_edge(&id, false).unwrap_or(0)
                 } else {
                     0
                 };
-                self.select_all = false;
+                if !selecting {
+                    self.selection_anchor = None;
+                }
             }
             "End" => {
                 self.caret = if multiline {
@@ -1423,44 +1659,54 @@ impl Tree {
                 } else {
                     value.len()
                 };
-                self.select_all = false;
+                if !selecting {
+                    self.selection_anchor = None;
+                }
             }
             "ArrowLeft" => {
                 self.caret = previous_boundary(&value, self.caret);
-                self.select_all = false;
+                if !selecting {
+                    self.selection_anchor = None;
+                }
             }
             "ArrowRight" => {
                 self.caret = next_boundary(&value, self.caret);
-                self.select_all = false;
+                if !selecting {
+                    self.selection_anchor = None;
+                }
             }
             "ArrowUp" if multiline => {
                 if let Some(next) = self.textarea_vertical_index(&id, -1.0) {
                     self.caret = next;
                 }
-                self.select_all = false;
+                if !selecting {
+                    self.selection_anchor = None;
+                }
             }
             "ArrowDown" if multiline => {
                 if let Some(next) = self.textarea_vertical_index(&id, 1.0) {
                     self.caret = next;
                 }
-                self.select_all = false;
+                if !selecting {
+                    self.selection_anchor = None;
+                }
             }
             "Enter" if multiline => {
                 let mut changed = value.clone();
-                if self.select_all {
-                    changed.clear();
-                    self.caret = 0;
+                if let Some((start, end)) = self.selected_range() {
+                    changed.replace_range(start..end, "");
+                    self.caret = start;
                 }
                 changed.insert(self.caret, '\n');
                 self.caret += 1;
-                self.select_all = false;
+                self.selection_anchor = None;
                 return self.set_input(id, changed);
             }
             "Backspace" | "Delete" => {
                 let mut changed = value.clone();
-                if self.select_all {
-                    changed.clear();
-                    self.caret = 0;
+                if let Some((start, end)) = self.selected_range() {
+                    changed.replace_range(start..end, "");
+                    self.caret = start;
                 } else if key == "Backspace" {
                     let start = previous_boundary(&value, self.caret);
                     changed.replace_range(start..self.caret, "");
@@ -1468,7 +1714,7 @@ impl Tree {
                 } else {
                     changed.replace_range(self.caret..next_boundary(&value, self.caret), "");
                 }
-                self.select_all = false;
+                self.selection_anchor = None;
                 return self.set_input(id, changed);
             }
             _ => return vec![],
@@ -1488,9 +1734,9 @@ impl Tree {
         }
         let multiline = self.entries[&id].node.kind == "textarea";
         let mut value = self.entries[&id].node.value.clone().unwrap_or_default();
-        if self.select_all {
-            value.clear();
-            self.caret = 0;
+        if let Some((start, end)) = self.selected_range() {
+            value.replace_range(start..end, "");
+            self.caret = start;
         }
         self.caret = floor_boundary(&value, self.caret.min(value.len()));
         let text: String = text
@@ -1499,7 +1745,7 @@ impl Tree {
             .collect();
         value.insert_str(self.caret, &text);
         self.caret += text.len();
-        self.select_all = false;
+        self.selection_anchor = None;
         self.set_input(id, value)
     }
     fn set_input(&mut self, id: String, value: String) -> Vec<Value> {
@@ -1511,7 +1757,55 @@ impl Tree {
         vec![json!({"type":"change", "id": id, "value": value})]
     }
 
-    fn place_textarea_caret_from_pointer(&mut self, id: &str) {
+    fn selection_rects(
+        &mut self,
+        id: &str,
+        start: usize,
+        end: usize,
+        width: Option<f32>,
+    ) -> Vec<BoxRect> {
+        let value = self.entries[id].node.value.clone().unwrap_or_default();
+        let mut boundaries = vec![start];
+        boundaries.extend(
+            value
+                .grapheme_indices(true)
+                .map(|(index, _)| index)
+                .filter(|index| *index > start && *index < end),
+        );
+        boundaries.push(end);
+        let mut out: Vec<BoxRect> = Vec::new();
+        for pair in boundaries.windows(2) {
+            let Some(a) = self.text.caret_rect(id, pair[0], width) else {
+                continue;
+            };
+            let Some(b) = self.text.caret_rect(id, pair[1], width) else {
+                continue;
+            };
+            if (a.y0 - b.y0).abs() > 0.5 {
+                continue;
+            }
+            let rect = BoxRect::new(
+                a.x0.min(b.x0),
+                a.y0.min(b.y0),
+                a.x0.max(b.x0),
+                a.y1.max(b.y1),
+            );
+            if rect.width() <= 0.0 {
+                continue;
+            }
+            if let Some(last) = out.last_mut()
+                && (last.y0 - rect.y0).abs() < 0.5
+                && (last.x1 - rect.x0).abs() < 1.0
+            {
+                last.x1 = rect.x1;
+            } else {
+                out.push(rect);
+            }
+        }
+        out
+    }
+
+    fn place_text_caret_from_pointer(&mut self, id: &str) {
         let entry = &self.entries[id];
         let pad = entry.node.insets("padding");
         let border = entry.node.insets("borderWidth");
@@ -1519,12 +1813,16 @@ impl Tree {
         let width =
             (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
         let x = (self.mouse.0 - rect.x0 - pad[3] as f64 - border[3] as f64).max(0.0) as f32;
-        let y = (self.mouse.1 - rect.y0 - pad[0] as f64 - border[0] as f64 + entry.scroll).max(0.0)
-            as f32;
+        let multiline = entry.node.kind == "textarea";
+        let y = if multiline {
+            (self.mouse.1 - rect.y0 - pad[0] as f64 - border[0] as f64 + entry.scroll).max(0.0)
+                as f32
+        } else {
+            0.0
+        };
         let value = entry.node.value.as_deref().unwrap_or("");
-        if let Some(index) = self.text.index_at(id, x, y, width) {
+        if let Some(index) = self.text.index_at(id, x, y, multiline.then_some(width)) {
             self.caret = floor_boundary(value, index.min(value.len()));
-            self.select_all = false;
             self.dirty.paint = true;
         }
     }
@@ -1546,24 +1844,24 @@ impl Tree {
     fn textarea_vertical_index(&mut self, id: &str, direction: f32) -> Option<usize> {
         let (width, _, value) = self.textarea_metrics(id)?;
         let caret = floor_boundary(&value, self.caret.min(value.len()));
-        let cursor = self.text.caret_rect(id, caret, width)?;
+        let cursor = self.text.caret_rect(id, caret, Some(width))?;
         let x = cursor.x0 as f32;
         let y = if direction < 0.0 {
             (cursor.y0 as f32 - 1.0).max(0.0)
         } else {
             cursor.y1 as f32 + 1.0
         };
-        let next = self.text.index_at(id, x, y, width)?;
+        let next = self.text.index_at(id, x, y, Some(width))?;
         Some(floor_boundary(&value, next.min(value.len())))
     }
 
     fn textarea_visual_edge(&mut self, id: &str, end: bool) -> Option<usize> {
         let (width, _, value) = self.textarea_metrics(id)?;
         let caret = floor_boundary(&value, self.caret.min(value.len()));
-        let cursor = self.text.caret_rect(id, caret, width)?;
+        let cursor = self.text.caret_rect(id, caret, Some(width))?;
         let x = if end { width } else { 0.0 };
         let y = ((cursor.y0 + cursor.y1) * 0.5) as f32;
-        let next = self.text.index_at(id, x, y, width)?;
+        let next = self.text.index_at(id, x, y, Some(width))?;
         Some(floor_boundary(&value, next.min(value.len())))
     }
 
@@ -1575,7 +1873,7 @@ impl Tree {
             return;
         };
         let caret = floor_boundary(&value, self.caret.min(value.len()));
-        let Some(cursor) = self.text.caret_rect(&id, caret, width) else {
+        let Some(cursor) = self.text.caret_rect(&id, caret, Some(width)) else {
             return;
         };
         let entry = self.entries.get_mut(&id).unwrap();
@@ -1995,15 +2293,19 @@ fn layout_style(node: &Node, suppress_border: bool) -> Style {
             "none" => Display::None,
             _ => Display::Flex,
         },
-        flex_direction: if node.string(
+        flex_direction: match node.string(
             "direction",
             if node.kind == "row" { "row" } else { "column" },
-        ) == "row"
-        {
-            FlexDirection::Row
-        } else {
-            FlexDirection::Column
+        ) {
+            "row" => FlexDirection::Row,
+            "row-reverse" => FlexDirection::RowReverse,
+            "column-reverse" => FlexDirection::ColumnReverse,
+            _ => FlexDirection::Column,
         },
+        aspect_ratio: node.style["aspectRatio"]
+            .as_f64()
+            .map(|value| value as f32)
+            .filter(|value| value.is_finite() && *value > 0.0),
         flex_wrap: if node.style["wrap"].as_bool().unwrap_or(false) {
             FlexWrap::Wrap
         } else {

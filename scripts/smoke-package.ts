@@ -11,7 +11,7 @@ await copyFile(join(root, "tests/fixtures/consumer.tsx"), join(directory, "app.t
 await copyFile(join(root, "examples/assets/studio.png"), join(directory, "fixture.png"));
 const examples = join(directory, "examples");
 await mkdir(join(examples, "assets"), { recursive: true });
-for (const file of ["package.json", "tsconfig.json", "basic.tsx", "basic-view.tsx", "counter.tsx", "forms.tsx", "forms-view.tsx", "large-list.tsx", "large-list-view.tsx"]) {
+for (const file of ["package.json", "tsconfig.json", "basic.tsx", "basic-view.tsx", "components.tsx", "components-view.tsx", "counter.tsx", "forms.tsx", "forms-view.tsx", "large-list.tsx", "large-list-view.tsx"]) {
   await copyFile(join(root, "examples", file), join(examples, file));
 }
 await copyFile(join(root, "examples/assets/studio.png"), join(examples, "assets/studio.png"));
@@ -50,7 +50,7 @@ assert.equal(source.executable, false);
 assert.equal(source.nativeControls, true);
 assert.equal(source.virtualList, true);
 await run([process.execPath, "run", "tarve", "build", "app.tsx", "--outfile", "App.exe"]);
-for (const [entry, outfile] of [["counter.tsx", "Counter.exe"], ["basic.tsx", "Basic.exe"], ["forms.tsx", "Forms.exe"], ["large-list.tsx", "LargeList.exe"]]) {
+for (const [entry, outfile] of [["counter.tsx", "Counter.exe"], ["basic.tsx", "Basic.exe"], ["components.tsx", "Components.exe"], ["forms.tsx", "Forms.exe"], ["large-list.tsx", "LargeList.exe"]]) {
   await run([process.execPath, "run", "tarve", "build", entry, "--outfile", join(directory, "example-build", outfile)], examples);
 }
 const portable = join(directory, "portable");
@@ -65,4 +65,4 @@ assert.equal(executable.result, "PASS");
 assert.equal(executable.executable, true);
 assert.equal(executable.nativeControls, true);
 assert.equal(executable.virtualList, true);
-console.log(JSON.stringify({ result: "PASS", directory, checks: ["npm tarball install", "independent example TypeScript configuration", "all four examples compile from an external directory", "source execution without Rust", "installed tarve build CLI", "standalone EXE with empty cache", "native callbacks, controls, virtual list and local images", "zero idle frames"], source, executable }, null, 2));
+console.log(JSON.stringify({ result: "PASS", directory, checks: ["npm tarball install", "independent example TypeScript configuration", "all five examples compile from an external directory", "source execution without Rust", "installed tarve build CLI", "standalone EXE with empty cache", "native callbacks, controls, virtual list and local images", "zero idle frames"], source, executable }, null, 2));

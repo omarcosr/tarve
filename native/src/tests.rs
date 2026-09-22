@@ -106,6 +106,31 @@ fn taffy_grid_and_parley_measurement_reflow_on_resize() {
 }
 
 #[test]
+fn taffy_aspect_ratio_and_reverse_direction_are_native_layout_features() {
+    let mut ratio_tree = Tree::new(root(vec![node(
+        "ratio",
+        "view",
+        json!({"width":160,"aspectRatio":2}),
+        vec![],
+    )]));
+    ratio_tree.compute(300.0, 200.0).unwrap();
+    assert!((ratio_tree.entries["ratio"].rect.width() - 160.0).abs() < 0.1);
+    assert!((ratio_tree.entries["ratio"].rect.height() - 80.0).abs() < 0.1);
+
+    let mut reverse_tree = Tree::new(root(vec![node(
+        "reverse",
+        "row",
+        json!({"width":200,"height":60,"direction":"row-reverse"}),
+        vec![
+            node("first", "view", json!({"width":40,"height":20}), vec![]),
+            node("second", "view", json!({"width":40,"height":20}), vec![]),
+        ],
+    )]));
+    reverse_tree.compute(300.0, 200.0).unwrap();
+    assert!(reverse_tree.entries["first"].rect.x0 > reverse_tree.entries["second"].rect.x0);
+}
+
+#[test]
 fn per_side_border_width_affects_layout_independently() {
     let child = node(
         "child",
@@ -387,16 +412,42 @@ fn input_deletes_unicode_graphemes_and_disabled_button_never_clicks() {
     button.disabled = true;
     let mut tree = Tree::new(root(vec![input, button]));
     tree.compute(300.0, 200.0).unwrap();
-    tree.pointer_move(10.0, 10.0);
-    tree.pointer_down();
+    let _ = tree.focus("input");
     tree.key("Backspace");
     assert_eq!(tree.entries["input"].node.value.as_deref(), Some("Olá"));
+    tree.key("End");
+    tree.key("ShiftArrowLeft");
+    assert_eq!(tree.selected_text().as_deref(), Some("á"));
+    tree.type_text("a");
+    assert_eq!(tree.entries["input"].node.value.as_deref(), Some("Ola"));
     tree.key("SelectAll");
     tree.type_text("Novo");
     assert_eq!(tree.entries["input"].node.value.as_deref(), Some("Novo"));
     tree.pointer_move(10.0, 50.0);
     tree.pointer_down();
     assert!(tree.pointer_up().is_empty());
+}
+
+#[test]
+fn pointer_drag_selects_partial_input_text() {
+    let mut input = node(
+        "input",
+        "input",
+        json!({"width":220,"height":38,"padding":{"left":8,"right":8},"fontSize":14}),
+        vec![],
+    );
+    input.value = Some("hello world".into());
+    let mut tree = Tree::new(root(vec![input]));
+    tree.compute(260.0, 80.0).unwrap();
+    tree.scene(1.0);
+    let rect = tree.entries["input"].rect;
+    tree.pointer_move(rect.x0 + 10.0, rect.y0 + 18.0);
+    tree.pointer_down();
+    tree.pointer_move(rect.x0 + 48.0, rect.y0 + 18.0);
+    tree.pointer_up();
+    let selected = tree.selected_text().unwrap();
+    assert!(!selected.is_empty());
+    assert_ne!(selected, "hello world");
 }
 #[test]
 fn protocol_rejects_duplicate_ids() {
@@ -592,6 +643,37 @@ fn modal_overlay_is_absolute_blocks_background_and_traps_focus() {
 }
 
 #[test]
+fn closing_modal_restores_focus_to_previous_control() {
+    let trigger = node("trigger", "button", json!({"height":36}), vec![]);
+    let mut tree = Tree::new(root(vec![trigger.clone()]));
+    tree.compute(300.0, 200.0).unwrap();
+    let _ = tree.focus("trigger");
+
+    let close = node("close", "button", json!({"height":30}), vec![]);
+    let panel = node(
+        "panel",
+        "column",
+        json!({"width":180,"height":100}),
+        vec![close],
+    );
+    let mut modal = node(
+        "modal",
+        "pressable",
+        json!({"position":"absolute","top":0,"right":0,"bottom":0,"left":0}),
+        vec![panel],
+    );
+    modal.modal = true;
+    modal.focusable = false;
+    tree.update(root(vec![trigger.clone(), modal]));
+    tree.compute(300.0, 200.0).unwrap();
+    assert_eq!(tree.focused.as_deref(), Some("close"));
+
+    tree.update(root(vec![trigger]));
+    tree.compute(300.0, 200.0).unwrap();
+    assert_eq!(tree.focused.as_deref(), Some("trigger"));
+}
+
+#[test]
 fn focusing_an_offscreen_control_scrolls_it_into_view() {
     let rows = (0..5)
         .map(|index| {
@@ -645,6 +727,49 @@ fn leaving_the_window_while_dragging_does_not_reset_a_slider() {
 }
 
 #[test]
+fn splitter_drag_uses_parent_axis_and_keyboard_matches_split_direction() {
+    let first = node("first", "view", json!({"flex":50,"height":"100%"}), vec![]);
+    let mut splitter = node(
+        "splitter",
+        "splitter",
+        json!({"width":10,"height":"100%","shrink":0}),
+        vec![],
+    );
+    splitter.control = Some(
+        serde_json::from_value(json!({
+            "role":"slider","orientation":"horizontal","value":50,"min":10,"max":90,"step":1
+        }))
+        .unwrap(),
+    );
+    let second = node("second", "view", json!({"flex":50,"height":"100%"}), vec![]);
+    let panels = node(
+        "panels",
+        "row",
+        json!({"width":200,"height":80}),
+        vec![first, splitter, second],
+    );
+    let mut tree = Tree::new(root(vec![panels]));
+    tree.compute(240.0, 120.0).unwrap();
+    let handle = tree.entries["splitter"].rect;
+    tree.pointer_move(handle.center().x, handle.center().y);
+    tree.pointer_down();
+    let events = tree.pointer_move(150.0, 40.0);
+    assert!(events.iter().any(|event| event["type"] == "valueChange"));
+    assert!((tree.entries["splitter"].node.control.as_ref().unwrap().value - 70.0).abs() < 1.0);
+    tree.pointer_up();
+
+    let _ = tree.focus("splitter");
+    let before = tree.entries["splitter"].node.control.as_ref().unwrap().value;
+    tree.key("ArrowRight");
+    assert_eq!(tree.entries["splitter"].node.control.as_ref().unwrap().value, before + 1.0);
+
+    tree.entries.get_mut("splitter").unwrap().node.control.as_mut().unwrap().orientation = "vertical".into();
+    let before = tree.entries["splitter"].node.control.as_ref().unwrap().value;
+    tree.key("ArrowDown");
+    assert_eq!(tree.entries["splitter"].node.control.as_ref().unwrap().value, before + 1.0);
+}
+
+#[test]
 fn radio_groups_use_one_tab_stop_and_arrows_move_between_enabled_choices() {
     let mut radios = Vec::new();
     for (name, checked, disabled) in [
@@ -676,6 +801,49 @@ fn radio_groups_use_one_tab_stop_and_arrows_move_between_enabled_choices() {
         Some("first"),
         "only the focused radio belongs in the tab order"
     );
+}
+
+#[test]
+fn navigation_menuitems_use_roving_focus_and_arrow_activation() {
+    let mut first = node("first", "pressable", json!({"width":60,"height":30}), vec![]);
+    first.control = Some(serde_json::from_value(json!({
+        "role":"menuitem","group":"nav","label":"First","checked":true
+    })).unwrap());
+    let mut second = node("second", "pressable", json!({"width":60,"height":30}), vec![]);
+    second.control = Some(serde_json::from_value(json!({
+        "role":"menuitem","group":"nav","label":"Second","checked":false
+    })).unwrap());
+    let mut tree = Tree::new(root(vec![first, second]));
+    tree.compute(200.0, 100.0).unwrap();
+    let _ = tree.focus("first");
+    let events = tree.key("ArrowRight");
+    assert_eq!(tree.focused.as_deref(), Some("second"));
+    assert!(!events.iter().any(|event| event["type"] == "click"));
+    let events = tree.key("Home");
+    assert_eq!(tree.focused.as_deref(), Some("first"));
+    assert!(!events.iter().any(|event| event["type"] == "click"));
+    let events = tree.key("Space");
+    assert!(events.iter().any(|event| event["type"] == "click" && event["id"] == "first"));
+}
+
+#[test]
+fn toggle_groups_roam_focus_without_toggling_on_arrows() {
+    let mut first = node("first", "pressable", json!({"width":60,"height":30}), vec![]);
+    first.control = Some(serde_json::from_value(json!({
+        "role":"toggle","group":"toggles","label":"First","checked":true
+    })).unwrap());
+    let mut second = node("second", "pressable", json!({"width":60,"height":30}), vec![]);
+    second.control = Some(serde_json::from_value(json!({
+        "role":"toggle","group":"toggles","label":"Second","checked":false
+    })).unwrap());
+    let mut tree = Tree::new(root(vec![first, second]));
+    tree.compute(200.0, 100.0).unwrap();
+    let _ = tree.focus("first");
+    let events = tree.key("ArrowRight");
+    assert_eq!(tree.focused.as_deref(), Some("second"));
+    assert!(!events.iter().any(|event| event["type"] == "click"));
+    let events = tree.key("Space");
+    assert!(events.iter().any(|event| event["type"] == "click" && event["id"] == "second"));
 }
 
 #[test]
@@ -835,4 +1003,89 @@ fn z_index_controls_overlapping_hit_order_without_affecting_layout() {
     tree.pointer_move(20.0, 20.0);
     assert_eq!(tree.hovered.as_deref(), Some("high"));
     assert_eq!(tree.entries["high"].rect, before);
+}
+
+#[test]
+fn portal_escapes_scroll_clip_for_paint_and_hit_testing() {
+    let button = node(
+        "portal-button",
+        "button",
+        json!({"width":100,"height":30}),
+        vec![],
+    );
+    let mut portal = node(
+        "portal",
+        "column",
+        json!({"position":"absolute","top":80,"left":0,"width":100,"height":30,"zIndex":1000}),
+        vec![button],
+    );
+    portal.portal = true;
+    let scroll = node(
+        "scroll",
+        "scroll",
+        json!({"width":200,"height":60}),
+        vec![node(
+            "content",
+            "column",
+            json!({"width":200,"height":160,"shrink":0}),
+            vec![portal],
+        )],
+    );
+    let mut tree = Tree::new(root(vec![scroll]));
+    tree.compute(240.0, 140.0).unwrap();
+    tree.scene(1.0);
+    tree.pointer_move(20.0, 90.0);
+    assert_eq!(tree.hovered.as_deref(), Some("portal-button"));
+}
+
+#[test]
+fn dismissible_portal_emits_outside_without_clicking_through() {
+    let button = node(
+        "popup-button",
+        "button",
+        json!({"width":80,"height":30}),
+        vec![],
+    );
+    let mut popup = node(
+        "popup",
+        "column",
+        json!({"position":"absolute","top":40,"left":20,"width":80,"height":30,"zIndex":1000}),
+        vec![button],
+    );
+    popup.portal = true;
+    popup.dismiss_on_outside = true;
+    let background = node(
+        "background",
+        "button",
+        json!({"width":200,"height":120}),
+        vec![],
+    );
+    let mut tree = Tree::new(root(vec![background, popup]));
+    tree.compute(220.0, 140.0).unwrap();
+    tree.pointer_move(180.0, 100.0);
+    let down = tree.pointer_down();
+    assert_eq!(down[0]["type"], "outside");
+    assert_eq!(down[0]["id"], "popup");
+    assert!(
+        tree.pointer_up().is_empty(),
+        "outside dismissal must not click through"
+    );
+}
+
+#[test]
+fn right_click_emits_context_event_with_pointer_position() {
+    let target = node(
+        "target",
+        "pressable",
+        json!({"width":100,"height":40}),
+        vec![],
+    );
+    let mut tree = Tree::new(root(vec![target]));
+    tree.compute(200.0, 100.0).unwrap();
+    tree.pointer_move(24.0, 16.0);
+    let events = tree.pointer_context();
+    assert_eq!(events[0]["type"], "context");
+    assert_eq!(events[0]["id"], "target");
+    assert_eq!(events[0]["x"], 24.0);
+    assert_eq!(events[0]["y"], 16.0);
 }

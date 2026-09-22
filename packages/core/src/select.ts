@@ -1,5 +1,5 @@
 import { jsx, type BaseProps, type VNode } from "./jsx-runtime";
-import { Column, Icon, Pressable, Row, Text } from "./components";
+import { Column, Icon, Pressable, Row, Scroll, Text } from "./components";
 import { theme } from "./theme";
 
 export interface SelectOption { value: string; label: string; disabled?: boolean }
@@ -24,6 +24,7 @@ export function Select({ id, value, options, placeholder = "Select an option", d
   const expanded = open ?? openSelects.has(id);
   const enabled = options.filter(option => !option.disabled);
   const selected = options.find(option => option.value === value);
+  const popupHeight = Math.min(240, Math.max(40, options.length * 34 + 8));
   const setOpen = (next: boolean) => {
     if (open === undefined) {
       if (next) openSelects.add(id); else openSelects.delete(id);
@@ -64,20 +65,23 @@ export function Select({ id, value, options, placeholder = "Select an option", d
           children: selected?.label ?? placeholder }),
           jsx(Icon, { name: "chevron-down", size: 14, color: theme.colors.mutedForeground })],
       }),
-      expanded && !disabled ? jsx(Column, { id: `${id}-popup`, gap: 2,
-        style: { position: "absolute", top: 42, left: 0, width: "100%", padding: 4,
-          background: theme.colors.card, borderWidth: 1, borderColor: theme.colors.border,
+      expanded && !disabled ? jsx(Scroll, { id: `${id}-popup`, portal: true,
+        dismissOnOutside: true, onOutsideClick: () => setOpen(false),
+        style: { position: "absolute", top: 42, left: 0, width: "100%", height: popupHeight,
+          padding: 4, background: theme.colors.card, borderWidth: 1, borderColor: theme.colors.border,
           radius: theme.radius.md, pointerEvents: "block" },
-        children: options.map(option => jsx(Pressable, { id: `${id}-option-${option.value}`,
-          disabled: option.disabled, focusable: false,
-          control: { role: "button", label: option.label, checked: option.value === value },
-          onClick: () => choose(option.value),
-          style: { minHeight: 32, padding: { left: 8, right: 8 }, radius: theme.radius.sm,
-            direction: "row", align: "center", justify: "between",
-            hover: { background: theme.colors.muted } },
-          children: jsx(Row, { gap: 8, children: [jsx(Text, { color: option.disabled ? theme.colors.disabledForeground : theme.colors.foreground,
-            children: option.label }), option.value === value ? jsx(Icon, { name: "check", size: 14 }) : null] }),
-        }, option.value)) }) : null,
+        children: jsx(Column, { gap: 2, style: { width: "100%" },
+          children: options.map(option => jsx(Pressable, { id: `${id}-option-${option.value}`,
+            disabled: option.disabled, focusable: false,
+            control: { role: "button", label: option.label, checked: option.value === value },
+            onClick: () => choose(option.value),
+            style: { minHeight: 32, padding: { left: 8, right: 8 }, radius: theme.radius.sm,
+              direction: "row", align: "center", justify: "between", shrink: 0,
+              hover: { background: theme.colors.muted } },
+            children: jsx(Row, { gap: 8, children: [jsx(Text, { color: option.disabled ? theme.colors.disabledForeground : theme.colors.foreground,
+              children: option.label }), option.value === value ? jsx(Icon, { name: "check", size: 14 }) : null] }),
+          }, option.value)) }),
+      }) : null,
     ],
   });
 }

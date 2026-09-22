@@ -2,10 +2,10 @@ import { PROTOCOL_VERSION, type NativeNode, type SceneDocument, type WindowOptio
 import { Fragment, type Child, type VNode } from "./jsx-runtime";
 import { lightTheme, resolveThemeColor, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
-export interface Handlers { onClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void }
+export interface Handlers { onClick?: () => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void }
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode> }
-const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "button", "image", "scroll", "input", "textarea", "pressable", "icon", "slider"]);
-const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider"]);
+const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "button", "image", "scroll", "input", "textarea", "pressable", "icon", "slider", "splitter"]);
+const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
 function textContent(value: Child): string {
   if (Array.isArray(value)) return value.map(textContent).join("");
   if (value == null || typeof value === "boolean") return "";
@@ -46,10 +46,10 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
         background: resolveThemeColor(p.style?.background ?? theme.colors.background, selectedTheme),
         decorations: true, resizable: p.resizable ?? true, position: p.position ?? "center", debug };
     }
-    handlers.set(id, { onClick: p.onClick, onHover: p.onHover, onChange: p.onChange, onValueChange: p.onValueChange, onScroll: p.onScroll, onEscape: p.onEscape, onKeyDown: p.onKeyDown, onBlur: p.onBlur });
+    handlers.set(id, { onClick: p.onClick, onContextMenu: p.onContextMenu, onOutsideClick: p.onOutsideClick, onHover: p.onHover, onChange: p.onChange, onValueChange: p.onValueChange, onScroll: p.onScroll, onEscape: p.onEscape, onKeyDown: p.onKeyDown, onBlur: p.onBlur });
     const control = p.control ? { ...p.control } : undefined;
-    const childGroup = control?.role === "radiogroup" || control?.role === "tablist" ? id : group;
-    if (control && (control.role === "radio" || control.role === "tab")) control.group = group;
+    const childGroup = control?.role === "radiogroup" || control?.role === "tablist" || control?.role === "navigation" || control?.role === "togglegroup" ? id : group;
+    if (control && (control.role === "radio" || control.role === "tab" || control.role === "menuitem" || control.role === "toggle")) control.group = group;
     const isText = child.type === "text" || child.type === "button";
     const rawStyle = { ...p.style };
     if (interactiveKinds.has(child.type) && p.focusable !== false) {
@@ -74,6 +74,8 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
       ...(p.placeholder !== undefined ? { placeholder: p.placeholder } : {}),
       ...(p.disabled !== undefined ? { disabled: p.disabled } : {}),
       ...(p.modal !== undefined ? { modal: p.modal } : {}),
+      ...(p.portal !== undefined ? { portal: p.portal } : {}),
+      ...(p.dismissOnOutside !== undefined ? { dismissOnOutside: p.dismissOnOutside } : {}),
       ...(p.focusable !== undefined ? { focusable: p.focusable } : {}),
       ...(p.dragRegion !== undefined ? { dragRegion: p.dragRegion } : {}),
       ...(p.windowAction !== undefined ? { windowAction: p.windowAction } : {}),
@@ -123,7 +125,7 @@ export function diffTrees(previous: CompiledTree, next: CompiledTree): NativeNod
       || old.children.some((child, index) => child.id !== node.children[index].id)) return null;
     if (old.text !== node.text || old.src !== node.src || old.fit !== node.fit
       || old.value !== node.value || old.placeholder !== node.placeholder || old.disabled !== node.disabled
-      || old.modal !== node.modal || old.focusable !== node.focusable
+      || old.modal !== node.modal || old.portal !== node.portal || old.dismissOnOutside !== node.dismissOnOutside || old.focusable !== node.focusable
       || old.dragRegion !== node.dragRegion || old.windowAction !== node.windowAction
       || !sameFields(old.control ?? {}, node.control ?? {})
       || !sameStyle(old.style, node.style)) {

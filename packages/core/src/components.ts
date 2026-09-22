@@ -7,6 +7,9 @@ export interface ViewProps extends BaseProps {
   flex?: number;
   align?: Style["align"];
   justify?: Style["justify"];
+  portal?: boolean;
+  dismissOnOutside?: boolean;
+  onOutsideClick?: () => void;
   dragRegion?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "close";
   focusable?: boolean;
@@ -43,9 +46,14 @@ export function Row(props: ViewProps): VNode {
 export function Column(props: ViewProps): VNode {
   return container("column", props, { direction: "column" });
 }
+export type PortalProps = ViewProps;
+export function Portal(props: PortalProps): VNode {
+  return container("view", { ...props, portal: true });
+}
 export interface PressableProps extends ViewProps {
   disabled?: boolean;
   onClick?: () => void;
+  onContextMenu?: (position: { x: number; y: number }) => void;
   onHover?: (hovered: boolean) => void;
   control?: Control;
   focusable?: boolean;
@@ -393,6 +401,7 @@ export function Modal({
   return jsx(Pressable, {
     ...props,
     modal: true,
+    portal: true,
     focusable: false,
     onClick: closeOnOverlay ? close : undefined,
     onEscape: closeOnEscape ? close : undefined,

@@ -1,6 +1,6 @@
 use crate::{
     bridge::Events,
-    protocol::{Command, Document, WindowPosition, WindowPositionPreset, error},
+    protocol::{Command, Document, Node, WindowPosition, WindowPositionPreset, error},
     renderer::Graphics,
     tree::{Tree, color},
 };
@@ -17,6 +17,21 @@ use winit::{
     keyboard::{Key, ModifiersState, NamedKey},
     window::{CursorIcon, ResizeDirection, Window, WindowId},
 };
+
+pub(crate) fn cursor_for_node(node: Option<&Node>) -> CursorIcon {
+    match node {
+        Some(node) if node.kind == "splitter" => {
+            if node.control.as_ref().is_some_and(|control| control.orientation == "vertical") {
+                CursorIcon::RowResize
+            } else {
+                CursorIcon::ColResize
+            }
+        }
+        Some(node) if matches!(node.kind.as_str(), "button" | "pressable" | "slider") => CursorIcon::Pointer,
+        Some(node) if matches!(node.kind.as_str(), "input" | "textarea") => CursorIcon::Text,
+        _ => CursorIcon::Default,
+    }
+}
 
 pub(crate) fn anchored_window_position(
     preset: &WindowPositionPreset,
@@ -376,16 +391,8 @@ impl App {
                 window.set_cursor(CursorIcon::from(direction));
                 return;
             }
-            let kind = self
-                .tree
-                .hovered
-                .as_ref()
-                .map(|id| self.tree.entries[id].node.kind.as_str());
-            window.set_cursor(match kind {
-                Some("button" | "pressable" | "slider") => CursorIcon::Pointer,
-                Some("input") => CursorIcon::Text,
-                _ => CursorIcon::Default,
-            });
+            let hovered = self.tree.hovered.as_ref().map(|id| &self.tree.entries[id].node);
+            window.set_cursor(cursor_for_node(hovered));
             let editing = self
                 .tree
                 .focused
@@ -681,6 +688,13 @@ impl ApplicationHandler<Command> for App {
                     self.handle_window_actions(event_loop, &events);
                 }
             }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Right,
+                ..
+            } => {
+                events = self.tree.pointer_context();
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 let dy = match delta {
                     MouseScrollDelta::LineDelta(_, y) => -y as f64 * 36.0,
@@ -703,12 +717,36 @@ impl ApplicationHandler<Command> for App {
                     Key::Named(NamedKey::Space) => Some("Space"),
                     Key::Named(NamedKey::Backspace) => Some("Backspace"),
                     Key::Named(NamedKey::Delete) => Some("Delete"),
-                    Key::Named(NamedKey::ArrowLeft) => Some("ArrowLeft"),
-                    Key::Named(NamedKey::ArrowRight) => Some("ArrowRight"),
-                    Key::Named(NamedKey::ArrowUp) => Some("ArrowUp"),
-                    Key::Named(NamedKey::ArrowDown) => Some("ArrowDown"),
-                    Key::Named(NamedKey::Home) => Some("Home"),
-                    Key::Named(NamedKey::End) => Some("End"),
+                    Key::Named(NamedKey::ArrowLeft) => Some(if self.modifiers.shift_key() {
+                        "ShiftArrowLeft"
+                    } else {
+                        "ArrowLeft"
+                    }),
+                    Key::Named(NamedKey::ArrowRight) => Some(if self.modifiers.shift_key() {
+                        "ShiftArrowRight"
+                    } else {
+                        "ArrowRight"
+                    }),
+                    Key::Named(NamedKey::ArrowUp) => Some(if self.modifiers.shift_key() {
+                        "ShiftArrowUp"
+                    } else {
+                        "ArrowUp"
+                    }),
+                    Key::Named(NamedKey::ArrowDown) => Some(if self.modifiers.shift_key() {
+                        "ShiftArrowDown"
+                    } else {
+                        "ArrowDown"
+                    }),
+                    Key::Named(NamedKey::Home) => Some(if self.modifiers.shift_key() {
+                        "ShiftHome"
+                    } else {
+                        "Home"
+                    }),
+                    Key::Named(NamedKey::End) => Some(if self.modifiers.shift_key() {
+                        "ShiftEnd"
+                    } else {
+                        "End"
+                    }),
                     Key::Named(NamedKey::Escape) => {
                         let handled = self.tree.key("Escape");
                         if handled.is_empty() {

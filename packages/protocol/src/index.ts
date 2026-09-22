@@ -1,7 +1,7 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const PROTOCOL_VERSION = 17;
+export const PROTOCOL_VERSION = 21;
 export type Length = number | `${number}%` | "auto";
-export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "textarea" | "pressable" | "icon" | "slider";
+export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "textarea" | "pressable" | "icon" | "slider" | "splitter";
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
 export type OutlineStyle = "dotted" | "dashed" | "solid" | "double" | "groove" | "ridge" | "inset" | "outset" | "none" | "hidden";
 export interface StateStyle {
@@ -12,9 +12,9 @@ export interface StateStyle {
 }
 export interface Style extends StateStyle {
   width?: Length; height?: Length; minWidth?: Length; minHeight?: Length;
-  maxWidth?: Length; maxHeight?: Length; flex?: number; shrink?: number;
+  maxWidth?: Length; maxHeight?: Length; flex?: number; shrink?: number; aspectRatio?: number;
   position?: "relative" | "absolute"; top?: Length; right?: Length; bottom?: Length; left?: Length;
-  direction?: "row" | "column"; wrap?: boolean; gap?: number;
+  direction?: "row" | "row-reverse" | "column" | "column-reverse"; wrap?: boolean; gap?: number;
   padding?: Insets; margin?: Insets; align?: "start" | "center" | "end" | "stretch";
   justify?: "start" | "center" | "end" | "between";
   display?: "flex" | "grid" | "none"; columns?: number;
@@ -26,7 +26,7 @@ export interface Style extends StateStyle {
   strokeWidth?: number; pointerEvents?: "auto" | "block";
 }
 export interface Control {
-  role: "button" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "slider" | "progress" | "virtualList" | "select";
+  role: "button" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "navigation" | "menuitem" | "toggle" | "togglegroup" | "slider" | "progress" | "virtualList" | "select" | "group" | "alert" | "status" | "label" | "option";
   label?: string; checked?: boolean; group?: string;
   orientation?: "horizontal" | "vertical";
   value?: number; min?: number; max?: number; step?: number;
@@ -37,6 +37,8 @@ export interface NativeNode {
   value?: string; placeholder?: string;
   control?: Control | null;
   modal?: boolean; focusable?: boolean;
+  portal?: boolean;
+  dismissOnOutside?: boolean;
   dragRegion?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "close";
 }
@@ -74,6 +76,8 @@ export type NativeEvent =
   | { type: "ready" | "closed" }
   | { type: "escape" }
   | { type: "click"; id: string }
+  | { type: "context"; id: string; x: number; y: number }
+  | { type: "outside"; id: string }
   | { type: "change"; id: string; value: string }
   | { type: "valueChange"; id: string; value: number }
   | { type: "scroll"; id: string; offset: number; max: number }
