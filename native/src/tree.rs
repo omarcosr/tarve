@@ -1141,7 +1141,7 @@ impl Tree {
                 continue;
             }
             if let Some(control) = &self.entries[id].node.control
-                && matches!(control.role.as_str(), "radio" | "tab" | "menuitem" | "toggle")
+                && matches!(control.role.as_str(), "radio" | "tab" | "menuitem" | "toggle" | "treeitem" | "row")
                 && !control.group.is_empty()
             {
                 let choice = group_choice
@@ -1154,7 +1154,7 @@ impl Tree {
         }
         if let Some(id) = &self.focused
             && let Some(control) = self.entries[id].node.control.as_ref()
-            && matches!(control.role.as_str(), "radio" | "tab" | "menuitem" | "toggle")
+            && matches!(control.role.as_str(), "radio" | "tab" | "menuitem" | "toggle" | "treeitem" | "row")
             && group_choice.contains_key(&control.group)
         {
             group_choice.insert(control.group.clone(), id.clone());
@@ -1170,7 +1170,7 @@ impl Tree {
                         .control
                         .as_ref()
                         .is_none_or(|control| {
-                            !matches!(control.role.as_str(), "radio" | "tab" | "menuitem" | "toggle")
+                            !matches!(control.role.as_str(), "radio" | "tab" | "menuitem" | "toggle" | "treeitem" | "row")
                                 || control.group.is_empty()
                                 || group_choice.get(&control.group) == Some(*id)
                         })
@@ -1498,7 +1498,12 @@ impl Tree {
     }
     pub fn wheel(&mut self, delta: f64) -> Vec<Value> {
         if let Some(id) = self.hit_root(true) {
-            let next = self.entries[&id].scroll + delta;
+            let speed = if self.entries[&id].node.kind == "scroll" {
+                self.entries[&id].node.scroll_speed
+            } else {
+                1.0
+            };
+            let next = self.entries[&id].scroll + delta * speed;
             return self.scroll_to(&id, next);
         }
         vec![]
@@ -1615,6 +1620,15 @@ impl Tree {
             .node
             .control
             .as_ref()
+            .is_some_and(|control| control.role == "treeitem")
+            && matches!(key, "ArrowLeft" | "ArrowRight")
+        {
+            return vec![json!({"type":"key", "id":id, "key":key})];
+        }
+        if self.entries[&id]
+            .node
+            .control
+            .as_ref()
             .is_some_and(|control| control.role == "select")
             && matches!(key, "ArrowDown" | "ArrowUp" | "Home" | "End" | "Escape")
         {
@@ -1691,8 +1705,12 @@ impl Tree {
         }
         if let Some(control) = &self.entries[&id].node.control
             && !control.group.is_empty()
-            && matches!(control.role.as_str(), "toggle" | "menuitem")
-            && matches!(key, "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | "Home" | "End")
+            && matches!(control.role.as_str(), "toggle" | "menuitem" | "treeitem" | "row")
+            && (if matches!(control.role.as_str(), "treeitem" | "row") {
+                matches!(key, "ArrowUp" | "ArrowDown" | "Home" | "End")
+            } else {
+                matches!(key, "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | "Home" | "End")
+            })
         {
             let group = control.group.clone();
             let choices: Vec<_> = self.order.iter().filter(|candidate| {

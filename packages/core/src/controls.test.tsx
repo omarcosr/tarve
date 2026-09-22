@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Accordion, Checkbox, Progress, RadioGroup, Slider, Switch, Tabs } from "./controls";
-import { Text, TextArea, Window } from "./components";
+import { Scroll, Text, TextArea, Window } from "./components";
 import { List } from "./list";
 import { Select } from "./select";
 import { VirtualList } from "./virtual-list";
@@ -70,6 +70,17 @@ describe("control kit", () => {
     expect(regular.nodes.get("regular-list")?.control).toBeUndefined();
     expect(items.every((_, index) => regular.nodes.has(`regular-${index}`))).toBe(true);
     expect(() => compileTree(<Window><List items={[1]} /></Window>)).toThrow(TypeError);
+  });
+
+  test("Scroll serializes and validates wheel speed", () => {
+    const normal = compileTree(<Window><Scroll id="normal"><Text>Content</Text></Scroll></Window>);
+    const faster = compileTree(<Window><Scroll id="faster" speed={2.5}><Text>Content</Text></Scroll></Window>);
+    expect(normal.nodes.get("normal")?.scrollSpeed).toBe(1);
+    expect(faster.nodes.get("faster")?.scrollSpeed).toBe(2.5);
+    expect(diffTrees(faster, compileTree(<Window><Scroll id="faster" speed={0.5}><Text>Content</Text></Scroll></Window>))
+      ?.map(node => node.id)).toContain("faster");
+    expect(() => compileTree(<Window><Scroll speed={0}><Text>Content</Text></Scroll></Window>)).toThrow(RangeError);
+    expect(() => compileTree(<Window><Scroll speed={Number.NaN}><Text>Content</Text></Scroll></Window>)).toThrow(RangeError);
   });
 
   test("Select exposes one keyboard trigger and non-tab-stop popup options", () => {

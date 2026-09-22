@@ -90,7 +90,29 @@ try {
   const hovered = await app.inspect();
   assert.equal(hovered.hovered, "demo-resizable-handle");
   await app.capture(resolve(out, "components-resizable-real.png"));
-  const finalScroll = map(hovered).get("components-scroll");
+  const afterResizable = map(hovered);
+  const treeBefore = afterResizable.get("demo-tree");
+  assert(treeBefore, "Showcase TreeView is missing");
+  app.debug({ type: "input", action: "move", x: scroller.x + scroller.width / 2, y: scroller.y + scroller.height / 2 });
+  app.debug({ type: "input", action: "wheel", delta: Math.max(0, treeBefore.y - 240) });
+  await Bun.sleep(50);
+  byId = map(await app.inspect());
+  const tree = byId.get("demo-tree");
+  const treeSelected = byId.get("demo-tree-node-components");
+  const grid = byId.get("demo-grid");
+  const gridHeader = byId.get("demo-grid-header");
+  const gridRow = byId.get("demo-grid-row-2");
+  assert(tree && treeSelected && grid && gridHeader && gridRow, "Showcase TreeView/DataGrid nodes are missing");
+  assert.equal(tree.control?.role, "tree");
+  assert.equal(treeSelected.control?.role, "treeitem");
+  assert.equal(treeSelected.control?.checked, true);
+  assert.equal(grid.control?.role, "grid");
+  assert.equal(gridRow.control?.role, "row");
+  assert.equal(gridRow.control?.checked, true);
+  assert(gridHeader.height >= 37 && gridHeader.height <= 39,
+    "DataGrid header height changed unexpectedly: " + gridHeader.height);
+  await app.capture(resolve(out, "components-desktop-real.png"));
+  const finalScroll = byId.get("components-scroll");
   assert(finalScroll);
 
   console.log(JSON.stringify({
@@ -115,11 +137,19 @@ try {
       y: Number(splitter.y.toFixed(1)),
       hovered: hovered.hovered,
     },
+    desktop: {
+      treeRole: tree.control?.role,
+      selectedTreeItem: treeSelected.id,
+      gridRole: grid.control?.role,
+      selectedGridRow: gridRow.id,
+      gridHeaderHeight: gridHeader.height,
+    },
     scroll: Number(finalScroll.scroll.toFixed(1)),
     captures: [
       resolve(out, "components-chart-real.png"),
       resolve(out, "components-otp-real.png"),
       resolve(out, "components-resizable-real.png"),
+      resolve(out, "components-desktop-real.png"),
     ],
   }, null, 2));
 } finally {

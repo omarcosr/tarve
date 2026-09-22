@@ -1,9 +1,96 @@
 use crate::{
     bridge::Events,
-    protocol::{Command, Document, Node, WindowPosition, WindowPositionPreset, error},
+    protocol::{Command, Document, FileDialogOptions, Node, WindowPosition, WindowPositionPreset, error},
     renderer::Graphics,
     tree::{Tree, color},
 };
+
+#[cfg(target_os = "windows")]
+fn run_file_dialog(window: Option<&Arc<Window>>, mode: &str, options: FileDialogOptions) -> Result<Vec<String>, String> {
+    let mut dialog = rfd::FileDialog::new();
+    if let Some(window) = window {
+        dialog = dialog.set_parent(window.as_ref());
+    }
+    if let Some(title) = options.title.filter(|value| !value.is_empty()) {
+        dialog = dialog.set_title(title);
+    }
+    if let Some(directory) = options.directory.filter(|value| !value.is_empty()) {
+        dialog = dialog.set_directory(directory);
+    }
+    if let Some(file_name) = options.file_name.filter(|value| !value.is_empty()) {
+        dialog = dialog.set_file_name(file_name);
+    }
+    for filter in options.filters {
+        if filter.name.is_empty() || filter.extensions.is_empty() {
+            continue;
+        }
+        let extensions: Vec<String> = filter.extensions.into_iter()
+            .map(|extension| extension.trim().trim_start_matches('.').to_string())
+            .filter(|extension| !extension.is_empty())
+            .collect();
+        if !extensions.is_empty() {
+            dialog = dialog.add_filter(filter.name, &extensions);
+        }
+    }
+    let paths = match mode {
+        "openFile" => dialog.pick_file().into_iter().collect(),
+        "openFiles" => dialog.pick_files().unwrap_or_default(),
+        "openFolder" => dialog.pick_folder().into_iter().collect(),
+        "saveFile" => dialog.save_file().into_iter().collect(),
+        _ => return Err(format!("Unsupported file dialog mode: {mode}")),
+    };
+    Ok(paths.into_iter().map(|path| path.to_string_lossy().into_owned()).collect())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_file_dialog(_window: Option<&Arc<Window>>, _mode: &str, _options: FileDialogOptions) -> Result<Vec<String>, String> {
+    Err("Native file dialogs are currently supported on Windows only".into())
+}
+
+fn shortcut_key_name(key: &Key) -> Option<String> {
+    match key {
+        Key::Character(value) => {
+            let value = value.as_str();
+            if value.chars().count() == 1 { Some(value.to_uppercase()) } else { None }
+        }
+        Key::Named(named) => Some(match named {
+            NamedKey::Escape => "Escape",
+            NamedKey::Enter => "Enter",
+            NamedKey::Space => "Space",
+            NamedKey::Backspace => "Backspace",
+            NamedKey::Delete => "Delete",
+            NamedKey::Tab => "Tab",
+            NamedKey::Home => "Home",
+            NamedKey::End => "End",
+            NamedKey::PageUp => "PageUp",
+            NamedKey::PageDown => "PageDown",
+            NamedKey::Insert => "Insert",
+            NamedKey::ArrowUp => "ArrowUp",
+            NamedKey::ArrowDown => "ArrowDown",
+            NamedKey::ArrowLeft => "ArrowLeft",
+            NamedKey::ArrowRight => "ArrowRight",
+            NamedKey::F1 => "F1", NamedKey::F2 => "F2", NamedKey::F3 => "F3", NamedKey::F4 => "F4",
+            NamedKey::F5 => "F5", NamedKey::F6 => "F6", NamedKey::F7 => "F7", NamedKey::F8 => "F8",
+            NamedKey::F9 => "F9", NamedKey::F10 => "F10", NamedKey::F11 => "F11", NamedKey::F12 => "F12",
+            NamedKey::F13 => "F13", NamedKey::F14 => "F14", NamedKey::F15 => "F15", NamedKey::F16 => "F16",
+            NamedKey::F17 => "F17", NamedKey::F18 => "F18", NamedKey::F19 => "F19", NamedKey::F20 => "F20",
+            NamedKey::F21 => "F21", NamedKey::F22 => "F22", NamedKey::F23 => "F23", NamedKey::F24 => "F24",
+            _ => return None,
+        }.to_string()),
+        _ => None,
+    }
+}
+
+pub(crate) fn shortcut_name(key: &Key, modifiers: ModifiersState) -> Option<String> {
+    let key = shortcut_key_name(key)?;
+    let mut parts = Vec::with_capacity(5);
+    if modifiers.control_key() { parts.push("Ctrl".to_string()); }
+    if modifiers.alt_key() { parts.push("Alt".to_string()); }
+    if modifiers.shift_key() { parts.push("Shift".to_string()); }
+    if modifiers.super_key() { parts.push("Meta".to_string()); }
+    parts.push(key);
+    Some(parts.join("+"))
+}
 use serde_json::json;
 use std::{
     sync::{Arc, mpsc::SyncSender},
@@ -206,6 +293,7 @@ pub fn run(
         fatal: None,
         ime_preedit: false,
         last_titlebar_click: None,
+        close_request_pending: false,
     };
     event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
     if let Some(error) = app.fatal {
@@ -225,8 +313,37 @@ struct App {
     fatal: Option<String>,
     ime_preedit: bool,
     last_titlebar_click: Option<(Instant, (f64, f64))>,
+    close_request_pending: bool,
+}
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum CloseRequestAction {
+    Exit,
+    Emit,
+    Ignore,
+}
+pub(crate) fn close_request_action(intercept: bool, pending: &mut bool) -> CloseRequestAction {
+    if !intercept {
+        return CloseRequestAction::Exit;
+    }
+    if *pending {
+        return CloseRequestAction::Ignore;
+    }
+    *pending = true;
+    CloseRequestAction::Emit
 }
 impl App {
+    fn request_close(&mut self, event_loop: &ActiveEventLoop) {
+        let intercept = self
+            .tree
+            .entries
+            .get(&self.tree.root)
+            .is_some_and(|entry| entry.node.close_intercept);
+        match close_request_action(intercept, &mut self.close_request_pending) {
+            CloseRequestAction::Exit => event_loop.exit(),
+            CloseRequestAction::Emit => self.events.push(json!({"type":"closeRequest"})),
+            CloseRequestAction::Ignore => {}
+        }
+    }
     fn root_color(&self, key: &str, fallback: &str) -> String {
         self.tree
             .entries
@@ -467,8 +584,8 @@ impl App {
             let _ = window.drag_window();
         }
     }
-    fn handle_window_actions(&self, event_loop: &ActiveEventLoop, events: &[serde_json::Value]) {
-        let Some(window) = &self.window else {
+    fn handle_window_actions(&mut self, event_loop: &ActiveEventLoop, events: &[serde_json::Value]) {
+        let Some(window) = self.window.clone() else {
             return;
         };
         for event in events {
@@ -486,7 +603,7 @@ impl App {
             {
                 Some("minimize") => window.set_minimized(true),
                 Some("toggleMaximize") => window.set_maximized(!window.is_maximized()),
-                Some("close") => event_loop.exit(),
+                Some("close") => self.request_close(event_loop),
                 _ => {}
             }
         }
@@ -561,6 +678,7 @@ impl ApplicationHandler<Command> for App {
                 self.sync_custom_window_chrome();
             }
             Command::Close => event_loop.exit(),
+            Command::CancelCloseRequest => self.close_request_pending = false,
             Command::Focus { id } => {
                 if let Some(blurred) = self.tree.focus(&id) {
                     self.events.push(json!({"type":"blur", "id":blurred}));
@@ -607,6 +725,12 @@ impl ApplicationHandler<Command> for App {
                     Err(e) => self.events.push(error(e)),
                 }
             }
+            Command::FileDialog { mode, options, request_id } => {
+                match run_file_dialog(self.window.as_ref(), &mode, options) {
+                    Ok(paths) => self.events.push(json!({"type":"fileDialog", "requestId":request_id, "paths":paths})),
+                    Err(message) => self.events.push(json!({"type":"fileDialog", "requestId":request_id, "paths":[], "error":message})),
+                }
+            }
             Command::Input {
                 action,
                 x,
@@ -638,7 +762,7 @@ impl ApplicationHandler<Command> for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         let mut events = vec![];
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => self.request_close(event_loop),
             WindowEvent::Resized(size) => {
                 if self
                     .graphics
@@ -707,6 +831,9 @@ impl ApplicationHandler<Command> for App {
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 events = self.clipboard_shortcut(&event.logical_key);
+                if !event.repeat && let Some(shortcut) = shortcut_name(&event.logical_key, self.modifiers) {
+                    events.push(json!({"type":"shortcut", "shortcut":shortcut}));
+                }
                 let key = match &event.logical_key {
                     Key::Named(NamedKey::Tab) => Some(if self.modifiers.shift_key() {
                         "ShiftTab"
@@ -764,7 +891,7 @@ impl ApplicationHandler<Command> for App {
                     _ => None,
                 };
                 if let Some(key) = key {
-                    events = self.tree.key(key);
+                    events.extend(self.tree.key(key));
                 }
                 if !self.modifiers.control_key()
                     && !self.modifiers.super_key()

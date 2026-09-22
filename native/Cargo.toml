@@ -20,6 +20,7 @@ arboard = { version = "3.6", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi"] }
+rfd = { version = "=0.17.2", default-features = false, features = ["common-controls-v6"] }
 
 [profile.dev]
 opt-level = 1

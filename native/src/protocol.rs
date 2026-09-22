@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 23;
+pub const VERSION: u32 = 26;
 
 fn range_max() -> f64 {
     100.0
@@ -55,6 +55,8 @@ pub struct Node {
     pub placeholder: String,
     #[serde(default = "default_input_type")]
     pub input_type: String,
+    #[serde(default = "default_scroll_speed")]
+    pub scroll_speed: f64,
     pub control: Option<Control>,
     #[serde(default)]
     pub modal: bool,
@@ -62,6 +64,8 @@ pub struct Node {
     pub portal: bool,
     #[serde(default)]
     pub dismiss_on_outside: bool,
+    #[serde(default)]
+    pub close_intercept: bool,
     #[serde(default = "default_true")]
     pub focusable: bool,
     #[serde(default)]
@@ -75,6 +79,9 @@ fn default_true() -> bool {
 }
 fn default_input_type() -> String {
     "text".into()
+}
+fn default_scroll_speed() -> f64 {
+    1.0
 }
 
 impl Node {
@@ -177,6 +184,25 @@ pub struct Document {
     pub root: Node,
 }
 
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDialogFilter {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub extensions: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDialogOptions {
+    pub title: Option<String>,
+    pub directory: Option<String>,
+    pub file_name: Option<String>,
+    #[serde(default)]
+    pub filters: Vec<FileDialogFilter>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Command {
@@ -187,6 +213,7 @@ pub enum Command {
         root: Box<Node>,
     },
     Close,
+    CancelCloseRequest,
     Focus {
         id: String,
     },
@@ -200,6 +227,13 @@ pub enum Command {
     },
     Capture {
         path: String,
+        #[serde(rename = "requestId")]
+        request_id: String,
+    },
+    FileDialog {
+        mode: String,
+        #[serde(default)]
+        options: FileDialogOptions,
         #[serde(rename = "requestId")]
         request_id: String,
     },
@@ -273,7 +307,37 @@ pub fn validate_patch(nodes: &[Node]) -> Result<(), String> {
     Ok(())
 }
 
+pub fn validate_file_dialog(mode: &str, options: &FileDialogOptions) -> Result<(), String> {
+    if !matches!(mode, "openFile" | "openFiles" | "openFolder" | "saveFile") {
+        return Err(format!("Unsupported file dialog mode: {mode}"));
+    }
+    if options.title.as_ref().is_some_and(|value| value.len() > 4096)
+        || options.file_name.as_ref().is_some_and(|value| value.len() > 4096)
+        || options.directory.as_ref().is_some_and(|value| value.len() > 32_768)
+    {
+        return Err("File dialog text exceeds length limit".into());
+    }
+    if options.filters.len() > 64 {
+        return Err("File dialog filter limit exceeded".into());
+    }
+    for filter in &options.filters {
+        if filter.name.is_empty() || filter.name.len() > 256 || filter.extensions.is_empty() || filter.extensions.len() > 64 {
+            return Err("File dialog filters require a name and 1-64 extensions".into());
+        }
+        if filter.extensions.iter().any(|extension| {
+            let extension = extension.trim().trim_start_matches('.');
+            extension.is_empty() || extension.len() > 32 || extension.contains(['/', '\\', '*', '?'])
+        }) {
+            return Err("Invalid file dialog extension".into());
+        }
+    }
+    Ok(())
+}
+
 fn validate_control(node: &Node) -> Result<(), String> {
+    if node.kind == "scroll" && (!node.scroll_speed.is_finite() || node.scroll_speed <= 0.0) {
+        return Err("Scroll speed must be finite and greater than zero".into());
+    }
     if node.kind == "input"
         && !["text", "password", "email", "number", "search", "tel", "url"]
             .contains(&node.input_type.as_str())

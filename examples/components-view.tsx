@@ -9,6 +9,7 @@ import {
   Chart,
   Column,
   Direction,
+  DataGrid,
   Drawer,
   Empty,
   Field,
@@ -30,6 +31,7 @@ import {
   Sidebar,
   Text,
   TitleBar,
+  TreeView,
   Toggle,
   ToggleGroup,
   Typography,
@@ -83,6 +85,19 @@ let questionnaireValues: Record<string, QuestionnaireAnswer | undefined> = {
   interests: ["native"],
 };
 let attachmentVisible = true;
+let treeExpanded = ["src"];
+let treeSelected = "components";
+let gridOffset = 0;
+let gridSort: { column: string; direction: "asc" | "desc" } | undefined = { column: "name", direction: "asc" };
+let gridSelected: (string | number)[] = [2];
+
+const gridRows = [
+  { id: 1, name: "Renderer", area: "Rust", status: "Ready" },
+  { id: 2, name: "Components", area: "TypeScript", status: "Active" },
+  { id: 3, name: "Protocol", area: "Shared", status: "v26" },
+  { id: 4, name: "Examples", area: "Bun", status: "Ready" },
+  { id: 5, name: "Packaging", area: "Bun", status: "Ready" },
+];
 
 const questionnaireQuestions = [
   { id: "name", title: "What should we call you?", type: "text" as const, required: true, placeholder: "Your name" },
@@ -113,7 +128,7 @@ export function App() {
   return (
     <Window title="Tarve — Components" width={1180} height={900} minWidth={900} minHeight={650} position="center">
       <TitleBar title="Tarve — Components" />
-      <Scroll id="components-scroll" flex={1}>
+      <Scroll id="components-scroll" flex={1} speed={1}>
         <Column gap={20} padding={28} style={{ width: "100%" }}>
           <Column gap={5}>
             <Text size={28} weight={700}>Component showcase</Text>
@@ -376,9 +391,54 @@ export function App() {
                 </Message>
               </MessageScroller>
             </Section>
+
+            <Section title="TreeView" description="Controlled hierarchical navigation with expansion, selection and keyboard focus.">
+              <TreeView
+                id="demo-tree"
+                expandedIds={treeExpanded}
+                selectedId={treeSelected}
+                onExpandedChange={(ids) => { treeExpanded = ids; }}
+                onSelectedChange={(id) => { treeSelected = id; }}
+                nodes={[
+                  {
+                    id: "src",
+                    label: "packages",
+                    icon: "chevron-right",
+                    children: [
+                      { id: "components", label: "components.ts", icon: "info" },
+                      { id: "runtime", label: "runtime.rs", icon: "info" },
+                      { id: "protocol", label: "protocol.ts", icon: "info" },
+                    ],
+                  },
+                  { id: "readme", label: "README.md", icon: "info" },
+                ]}
+              />
+            </Section>
+
+            <Section title="DataGrid" description="Virtualized rows with controlled sorting and selection.">
+              <DataGrid
+                id="demo-grid"
+                rows={gridRows}
+                rowKey={(row) => row.id}
+                height={260}
+                rowHeight={40}
+                offset={gridOffset}
+                sort={gridSort}
+                selectionMode="multiple"
+                selectedKeys={gridSelected}
+                onScroll={(offset) => { gridOffset = offset; }}
+                onSortChange={(sort) => { gridSort = sort; }}
+                onSelectionChange={(keys) => { gridSelected = keys; }}
+                columns={[
+                  { key: "name", header: "Name", sortable: true },
+                  { key: "area", header: "Area", sortable: true },
+                  { key: "status", header: "Status", sortable: true },
+                ]}
+              />
+            </Section>
           </View>
 
-          <Text size={12} color={c.mutedForeground}>27 new components shown in one executable example.</Text>
+          <Text size={12} color={c.mutedForeground}>29 high-level components shown in one executable example.</Text>
         </Column>
       </Scroll>
 

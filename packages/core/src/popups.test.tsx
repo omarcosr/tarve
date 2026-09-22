@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Text, Window } from "./components";
+import { Button, Pressable, Text, Window } from "./components";
+import { jsx } from "./jsx-runtime";
 import { compileTree } from "./reconciler";
 import { Combobox, Command, CommandPalette, ContextMenu, DropdownMenu, Popover, Tooltip } from "./popups";
 
@@ -15,6 +16,34 @@ describe("popup and selection components", () => {
     expect(tree.nodes.get("tip-content")?.style.bottom).toBe("100%");
     tree.handlers.get("tip-trigger")?.onHover?.(false);
     expect(changes).toEqual([false]);
+  });
+
+  test("interactive triggers keep their native node and chain existing popup handlers", () => {
+    const events: string[] = [];
+    const tree = compileTree(
+      <Window>
+        <Tooltip id="button-tip" open={false}
+          trigger={<Button id="button-tip-trigger" onHover={hovered => events.push(`button-hover:${hovered}`)}>Info</Button>}
+          content="Helpful" onOpenChange={open => events.push(`tip:${open}`)} />
+        <Popover id="pressable-popover" open={false}
+          trigger={<Pressable id="pressable-trigger" onClick={() => events.push("pressable-click")}><Text>Open</Text></Pressable>}
+          onOpenChange={open => events.push(`popover:${open}`)}><Text>Body</Text></Popover>
+        <Popover id="native-popover" open={false}
+          trigger={jsx("button", { id: "native-trigger", onClick: () => events.push("native-click"), children: "Native" })}
+          onOpenChange={open => events.push(`native-popover:${open}`)}><Text>Body</Text></Popover>
+      </Window>,
+    );
+    expect(tree.nodes.get("button-tip-trigger")?.kind).toBe("button");
+    expect(tree.nodes.get("pressable-trigger")?.kind).toBe("pressable");
+    expect(tree.nodes.get("native-trigger")?.kind).toBe("button");
+    tree.handlers.get("button-tip-trigger")?.onHover?.(true);
+    tree.handlers.get("pressable-trigger")?.onClick?.();
+    tree.handlers.get("native-trigger")?.onClick?.();
+    expect(events).toEqual([
+      "button-hover:true", "tip:true",
+      "pressable-click", "popover:true",
+      "native-click", "native-popover:true",
+    ]);
   });
 
   test("Popover exposes controlled trigger and escape state changes", () => {
@@ -71,6 +100,38 @@ describe("popup and selection components", () => {
     tree.handlers.get("menu-item-edit")?.onClick?.();
     expect(selected).toEqual(["edit"]);
     expect(openChanges).toEqual([false]);
+  });
+
+  test("DropdownMenu exposes native roving menuitem keyboard semantics and preserves interactive trigger handlers", () => {
+    const events: string[] = [];
+    const tree = compileTree(
+      <Window>
+        <DropdownMenu id="keyboard-menu" open
+          trigger={<Button id="keyboard-menu-button" onClick={() => events.push("trigger")}>Actions</Button>}
+          items={[
+            { value: "first", label: "First" },
+            { value: "blocked", label: "Blocked", disabled: true },
+            { value: "last", label: "Last" },
+          ]}
+          onOpenChange={open => events.push(`open:${open}`)}
+          onSelect={value => events.push(`select:${value}`)} />
+      </Window>,
+    );
+    expect(tree.nodes.get("keyboard-menu")?.control).toEqual({ role: "navigation", orientation: "vertical" });
+    expect(tree.nodes.get("keyboard-menu-button")?.control?.role).toBe("menuitem");
+    expect(tree.nodes.get("keyboard-menu-button")?.control?.group).toBe("keyboard-menu");
+    expect(tree.nodes.get("keyboard-menu-item-first")?.control?.role).toBe("menuitem");
+    expect(tree.nodes.get("keyboard-menu-item-first")?.control?.group).toBe("keyboard-menu");
+    expect(tree.nodes.get("keyboard-menu-item-first")?.focusable).not.toBe(false);
+    expect(tree.nodes.get("keyboard-menu-item-blocked")?.disabled).toBe(true);
+    tree.handlers.get("keyboard-menu-item-last")?.onClick?.();
+    expect(events).toEqual(["select:last", "open:false"]);
+
+    const closed = compileTree(<Window><DropdownMenu id="closed-menu" open={false} trigger={<Button>Actions</Button>}
+      items={[{ value: "one", label: "One" }]} onOpenChange={open => events.push(`closed:${open}`)} /></Window>);
+    expect(closed.nodes.get("closed-menu-trigger")?.control?.role).toBe("select");
+    closed.handlers.get("closed-menu-trigger")?.onKeyDown?.("ArrowDown");
+    expect(events.at(-1)).toBe("closed:true");
   });
 
   test("long popup lists use bounded scroll regions", () => {
@@ -134,6 +195,16 @@ describe("popup and selection components", () => {
     expect(selected).toEqual(["copy"]);
   });
 
+  test("ContextMenu items participate in a vertical keyboard navigation group", () => {
+    const tree = compileTree(<Window><ContextMenu id="context-keys" open trigger={<Pressable><Text>Target</Text></Pressable>}
+      items={[{ value: "copy", label: "Copy" }, { value: "disabled", label: "Disabled", disabled: true }, { value: "paste", label: "Paste" }]} /></Window>);
+    expect(tree.nodes.get("context-keys")?.control).toEqual({ role: "navigation", orientation: "vertical" });
+    expect(tree.nodes.get("context-keys-trigger")?.control?.role).toBe("menuitem");
+    expect(tree.nodes.get("context-keys-item-copy")?.control?.group).toBe("context-keys");
+    expect(tree.nodes.get("context-keys-item-disabled")?.disabled).toBe(true);
+    expect(tree.nodes.get("context-keys-item-paste")?.focusable).not.toBe(false);
+  });
+
   test("Combobox filters by label, value and keywords and closes on selection", () => {
     const selected: string[] = [];
     const openChanges: boolean[] = [];
@@ -159,6 +230,26 @@ describe("popup and selection components", () => {
     tree.handlers.get("framework-option-react")?.onClick?.();
     expect(selected).toEqual(["react"]);
     expect(openChanges).toEqual([false]);
+  });
+
+  test("Combobox uses one roving focus group for trigger, search, and enabled results", () => {
+    const openChanges: boolean[] = [];
+    const selected: string[] = [];
+    const tree = compileTree(<Window><Combobox id="combo-keys" open query="" value="two"
+      options={[{ value: "one", label: "One", disabled: true }, { value: "two", label: "Two" }, { value: "three", label: "Three" }]}
+      onOpenChange={open => openChanges.push(open)} onValueChange={value => selected.push(value)} /></Window>);
+    expect(tree.nodes.get("combo-keys")?.control).toEqual({ role: "navigation", orientation: "vertical" });
+    expect(tree.nodes.get("combo-keys-trigger")?.control?.role).toBe("menuitem");
+    expect(tree.nodes.get("combo-keys-input")?.control?.role).toBe("menuitem");
+    expect(tree.nodes.get("combo-keys-input")?.control?.group).toBe("combo-keys");
+    expect(tree.nodes.get("combo-keys-option-one")?.disabled).toBe(true);
+    expect(tree.nodes.get("combo-keys-option-two")?.control?.group).toBe("combo-keys");
+    expect(tree.nodes.get("combo-keys-option-two")?.focusable).not.toBe(false);
+    tree.handlers.get("combo-keys-option-three")?.onClick?.();
+    expect(selected).toEqual(["three"]);
+    expect(openChanges).toEqual([false]);
+    tree.handlers.get("combo-keys")?.onEscape?.();
+    expect(openChanges).toEqual([false, false]);
   });
 
   test("Command filters grouped actions and emits selection", () => {
@@ -187,6 +278,25 @@ describe("popup and selection components", () => {
     expect(selected).toEqual(["open-repo"]);
   });
 
+  test("Command exposes roving keyboard focus, disabled skipping structure, and Escape", () => {
+    const escaped: string[] = [];
+    const tree = compileTree(<Window><Command id="command-keys" query="" value="two"
+      items={[
+        { value: "one", label: "One", disabled: true },
+        { value: "two", label: "Two" },
+        { value: "three", label: "Three" },
+      ]} onEscape={() => escaped.push("escape")} /></Window>);
+    expect(tree.nodes.get("command-keys")?.control).toEqual({ role: "navigation", orientation: "vertical" });
+    expect(tree.nodes.get("command-keys-input")?.control?.role).toBe("menuitem");
+    expect(tree.nodes.get("command-keys-input")?.control?.group).toBe("command-keys");
+    expect(tree.nodes.get("command-keys-item-one")?.disabled).toBe(true);
+    expect(tree.nodes.get("command-keys-item-two")?.control?.role).toBe("menuitem");
+    expect(tree.nodes.get("command-keys-item-two")?.control?.group).toBe("command-keys");
+    expect(tree.nodes.get("command-keys-item-three")?.focusable).not.toBe(false);
+    tree.handlers.get("command-keys")?.onEscape?.();
+    expect(escaped).toEqual(["escape"]);
+  });
+
   test("CommandPalette is modal, closes on selection, and disappears when closed", () => {
     const openChanges: boolean[] = [];
     const selected: string[] = [];
@@ -208,6 +318,9 @@ describe("popup and selection components", () => {
     openTree.handlers.get("palette-command-item-new")?.onClick?.();
     expect(selected).toEqual(["new"]);
     expect(openChanges).toEqual([false]);
+
+    openTree.handlers.get("palette-command")?.onEscape?.();
+    expect(openChanges).toEqual([false, false]);
 
     const closedTree = compileTree(
       <Window>

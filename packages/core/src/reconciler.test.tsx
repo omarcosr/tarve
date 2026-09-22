@@ -90,8 +90,18 @@ describe("native TSX protocol", () => {
     const tree = compileTree(<Window title="Native"><Text>Hello</Text></Window>);
     expect(tree.document.window.decorations).toBe(true);
     expect(tree.document.window.position).toBe("center");
+    expect(tree.document.root.closeIntercept).toBeUndefined();
     expect(tree.document.root.style.borderWidth).toBeUndefined();
     expect(tree.document.root.style.radius).toBeUndefined();
+  });
+  test("Window close requests stay in JS handlers while native receives an intercept flag", () => {
+    let requested = false;
+    const tree = compileTree(<Window onCloseRequest={() => { requested = true; }}><Text>Hello</Text></Window>);
+    expect(tree.document.version).toBe(26);
+    expect(tree.document.root.closeIntercept).toBe(true);
+    expect(JSON.stringify(tree.document)).not.toContain("onCloseRequest");
+    tree.handlers.get(tree.document.root.id)?.onCloseRequest?.({ defaultPrevented: false, preventDefault() {} });
+    expect(requested).toBe(true);
   });
   test("Window serializes explicit coordinates and initial position presets", () => {
     const explicit = compileTree(<Window position={{ x: 120, y: -40 }}><Text>Hello</Text></Window>);

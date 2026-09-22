@@ -73,7 +73,7 @@ let open = false;
 
 `Input`, `Checkbox`, `Switch`, `RadioGroup`, `Select`, `Slider`, `TextArea`, `Card`, `Badge`, `Separator`, `Progress`, `Tabs` e `Accordion` estão disponíveis em `tarve`. Os controles de seleção recebem o valor atual e notificam alterações por callback; o app guarda esse valor em seu estado. `Pressable`, `Icon` e `Portal` permitem compor controles próprios. Consulte `examples/forms-view.tsx` para um formulário com clique, foco e teclado.
 
-O kit também inclui `Tooltip`, `Popover`, `DropdownMenu`, `ContextMenu`, `Combobox`, `Command`, `CommandPalette`, `AlertDialog`, `Sheet`, `Toast`, `Toaster`, `Skeleton`, `Spinner`, `Avatar`, `Breadcrumb`, `Pagination`, `Collapsible`, `Table`, `DataTable`, `Menubar`, `HoverCard`, `Calendar` e `DatePicker`. Popups usam a primitive nativa de portal: continuam ancorados pelo layout do trigger, mas escapam do clipping de `Scroll`, participam do hit-test acima do conteúdo normal e podem fechar por clique fora. `ContextMenu` abre por clique direito nativo.
+O kit também inclui `Tooltip`, `Popover`, `DropdownMenu`, `ContextMenu`, `Combobox`, `Command`, `CommandPalette`, `AlertDialog`, `Sheet`, `Toast`, `Toaster`, `Skeleton`, `Spinner`, `Avatar`, `Breadcrumb`, `Pagination`, `Collapsible`, `Table`, `DataTable`, `TreeView`, `DataGrid`, `Menubar`, `HoverCard`, `Calendar` e `DatePicker`. Popups usam a primitive nativa de portal: continuam ancorados pelo layout do trigger, mas escapam do clipping de `Scroll`, participam do hit-test acima do conteúdo normal e podem fechar por clique fora. Triggers interativos existentes são preservados em vez de embrulhados em outro controle; menus/combobox/command usam roving focus nativo com teclado. `ContextMenu` abre por clique direito nativo.
 
 A camada de componentes também cobre `Alert`, `AspectRatio`, `ButtonGroup`, `Carousel`, `Chart`, `Drawer`, `Empty`, `Field`, `InputGroup`, `InputOTP`, `Item`, `Kbd`, `Label`, `NativeSelect`, `NavigationMenu`, `Resizable`, `Sidebar`, `Toggle`, `ToggleGroup`, `Typography`, `Direction`, `Questionnaire`, `Attachment`, `Bubble`, `Marker`, `Message` e `MessageScroller`. Eles usam as mesmas primitives e tokens do tema; `Resizable` usa um splitter nativo controlado com drag e teclado, e `Chart` renderiza barras com primitives existentes, sem dependência externa.
 
@@ -98,7 +98,7 @@ A camada de componentes também cobre `Alert`, `AspectRatio`, `ButtonGroup`, `Ca
 
 `Select` segue o modelo controlado de valor (`value` + `onValueChange`) e suporta opções desabilitadas, placeholder, abertura controlada opcional e teclado. `Enter`/`Space` alternam o popup; setas, `Home` e `End` navegam entre opções habilitadas; `Escape` fecha. Listas longas ganham scroll e o popup é renderizado como portal nativo.
 
-`Input` e `TextArea` usam edição nativa sobre Parley. `Input` aceita `type="text" | "password" | "email" | "number" | "search" | "tel" | "url"`; password é mascarado no renderer nativo sem expor a seleção ao clipboard, e number rejeita edições não numéricas. Ambos suportam caret por clique, seleção parcial por arraste ou `Shift` + setas/Home/End, `Ctrl+A/C/X/V` e deleção sobre a seleção; `TextArea` também faz wrap, navegação vertical e scroll interno mantendo o caret visível.
+`Input` e `TextArea` usam edição nativa sobre Parley. `Input` aceita `type="text" | "password" | "email" | "number" | "search" | "tel" | "url"`; password é mascarado no renderer nativo sem expor a seleção ao clipboard, e number rejeita edições não numéricas. Ambos suportam caret por clique, seleção parcial por arraste ou `Shift` + setas/Home/End, `Ctrl+A/C/X/V` e deleção sobre a seleção; `TextArea` também faz wrap, navegação vertical e scroll interno mantendo o caret visível. `Scroll` aceita `speed`, um multiplicador da roda/trackpad (`1` é o padrão, `0.5` reduz pela metade e `2` dobra a velocidade).
 
 ```tsx
 <Input type="email" value={email} onChange={setEmail} />
@@ -130,6 +130,27 @@ A camada de componentes também cobre `Alert`, `AspectRatio`, `ButtonGroup`, `Ca
 />
 ```
 
+`TreeView` usa estado controlado para expansão/seleção e navegação vertical por teclado. `DataGrid` é separado do `DataTable`: suporta virtualização de linhas, sorting/filtering local ou manual, seleção controlada e ativação por teclado.
+
+Para integrações de desktop que não são componentes visuais, use o `AppHandle` retornado por `createApp`:
+
+```tsx
+const app = createApp(App);
+
+const unregisterSave = app.registerHotkey("Ctrl+S", () => save());
+
+const file = await app.openFileDialog({
+  title: "Open project",
+  filters: [{ name: "JSON", extensions: ["json"] }],
+});
+
+const files = await app.openFilesDialog();
+const folder = await app.openFolderDialog();
+const target = await app.saveFileDialog({ fileName: "report.json" });
+```
+
+Hotkeys aceitam aliases comuns (`Control`, `Cmd`, `Option`, `Esc`) e são normalizados para uma representação canônica como `Ctrl+Shift+S`. Os file dialogs usam a UI nativa do Windows e retornam `undefined`/`[]` quando o usuário cancela.
+
 ### Custom title bar
 
 `TitleBar` is declarative: simply render it inside `Window`. Tarve resolves the component tree before creating the native window, detects the title bar, and automatically selects custom window chrome. Without `TitleBar`, the operating-system title bar remains native. On Windows 11 Tarve asks DWM to keep the native rounded window corners and compositor border while the title bar remains fully custom. The root also draws a 1 px shadcn/zinc border with an 8 px radius as a visual fallback. When maximized/fullscreen, both borders and the corner radius are suppressed and restored when the window returns to its normal state. Native drag, minimize/maximize/close and the 6 px resize hit area remain available.
@@ -144,6 +165,16 @@ A camada de componentes também cobre `Alert`, `AspectRatio`, `ButtonGroup`, `Ca
 `TitleBar` accepts normal `style` overrides and custom `children`, plus `showMinimize`, `showMaximize`, `showClose` and `height`. Double-clicking its draggable area toggles maximize/restore.
 
 `Window.position` configures the initial window position before the first visible frame. The default is `"center"`. Presets anchor to the monitor's usable work area (excluding the Windows taskbar). You can also use one of the other anchors (`"top-left"`, `"top"`, `"top-right"`, `"left"`, `"right"`, `"bottom-left"`, `"bottom"`, `"bottom-right"`) or provide logical desktop coordinates. Negative coordinates are valid for monitors positioned to the left or above the primary display.
+
+`Window.onCloseRequest` intercepta o botão fechar do Windows e o botão close de uma `TitleBar` customizada. Chame `event.preventDefault()` para cancelar a tentativa; `app.close()` continua sendo fechamento programático incondicional.
+
+```tsx
+<Window onCloseRequest={(event) => {
+  if (hasUnsavedChanges) event.preventDefault();
+}}>
+  {/* ... */}
+</Window>
+```
 
 ```tsx
 <Window title="Centered" width={900} height={640} position="center">
@@ -375,6 +406,6 @@ Medições e limites do benchmark estão em `PERFORMANCE.md`. O acompanhamento d
 
 ## Escopo do bootstrap
 
-Uma janela por processo. `Input` oferece foco, entrada Unicode, backspace/delete por grapheme, setas, Home/End, Ctrl+A, copiar/colar/recortar e commit de IME; seleção por mouse, undo, preedit visual, edição bidi avançada e acessibilidade via AccessKit ficam para a próxima etapa. Botões aceitam Tab/Shift+Tab e Enter/Espaço. Scroll vertical tem clipping e indicador. Imagens locais PNG/JPEG usam `cover` ou `contain`. `Text` e `Button` recebem texto simples; composição rica pode ser adicionada ao protocolo.
+Uma janela por processo. `Input` oferece foco, entrada Unicode, backspace/delete por grapheme, setas, Home/End, Ctrl+A, copiar/colar/recortar, seleção por mouse e commit de IME; undo, preedit visual, edição bidi avançada e acessibilidade via AccessKit ficam para a próxima etapa. Botões aceitam Tab/Shift+Tab e Enter/Espaço. Scroll vertical tem clipping, indicador e multiplicador de velocidade. Imagens locais PNG/JPEG usam `cover` ou `contain`. `Text` e `Button` recebem texto simples; composição rica pode ser adicionada ao protocolo.
 
 `bun:ffi` é o transporte escolhido para este projeto Bun. Sua API ainda é marcada experimental pelo Bun; a ABI explícita, buffers do chamador e Worker sem callbacks nativos reduzem a superfície de integração. Referências: [Bun FFI](https://bun.com/docs/runtime/ffi), [Taffy](https://docs.rs/taffy/0.14.0), [Parley](https://docs.rs/parley/0.11.1), [Vello](https://docs.rs/vello/0.10.0).

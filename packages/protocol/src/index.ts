@@ -1,5 +1,5 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const PROTOCOL_VERSION = 23;
+export const PROTOCOL_VERSION = 26;
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "textarea" | "pressable" | "icon" | "slider" | "splitter";
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
@@ -26,7 +26,7 @@ export interface Style extends StateStyle {
   strokeWidth?: number; pointerEvents?: "auto" | "block";
 }
 export interface Control {
-  role: "button" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "navigation" | "menuitem" | "toggle" | "togglegroup" | "slider" | "progress" | "virtualList" | "select" | "group" | "alert" | "status" | "label" | "option" | "otpSlot";
+  role: "button" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "navigation" | "menuitem" | "tree" | "treeitem" | "grid" | "row" | "toggle" | "togglegroup" | "slider" | "progress" | "virtualList" | "select" | "group" | "alert" | "status" | "label" | "option" | "otpSlot";
   label?: string; checked?: boolean; group?: string;
   orientation?: "horizontal" | "vertical";
   value?: number; min?: number; max?: number; step?: number;
@@ -36,10 +36,12 @@ export interface NativeNode {
   text?: string; src?: string; fit?: "cover" | "contain"; disabled?: boolean;
   value?: string; placeholder?: string;
   inputType?: "text" | "password" | "email" | "number" | "search" | "tel" | "url";
+  scrollSpeed?: number;
   control?: Control | null;
   modal?: boolean; focusable?: boolean;
   portal?: boolean;
   dismissOnOutside?: boolean;
+  closeIntercept?: boolean;
   dragRegion?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "close";
 }
@@ -53,14 +55,24 @@ export interface WindowOptions {
   background: string; decorations: boolean; resizable: boolean; position?: WindowPosition; debug?: boolean;
 }
 export interface SceneDocument { version: number; window: WindowOptions; root: NativeNode }
+export interface FileDialogFilter { name: string; extensions: string[] }
+export interface FileDialogOptions {
+  title?: string;
+  directory?: string;
+  fileName?: string;
+  filters?: FileDialogFilter[];
+}
+export type FileDialogMode = "openFile" | "openFiles" | "openFolder" | "saveFile";
 export type NativeCommand =
   | { type: "patch"; nodes: NativeNode[] }
   | { type: "update"; root: NativeNode }
   | { type: "close" }
+  | { type: "cancelCloseRequest" }
   | { type: "focus"; id: string }
   | { type: "inspect"; requestId: string }
   | { type: "resize"; width: number; height: number }
   | { type: "capture"; path: string; requestId: string }
+  | { type: "fileDialog"; mode: FileDialogMode; options: FileDialogOptions; requestId: string }
   | { type: "input"; action: "move" | "down" | "up" | "wheel" | "text" | "key"; x?: number; y?: number; delta?: number; text?: string };
 export interface NodeSnapshot {
   id: string; kind: NodeKind; x: number; y: number; width: number; height: number;
@@ -75,6 +87,7 @@ export interface Snapshot {
 }
 export type NativeEvent =
   | { type: "ready" | "closed" }
+  | { type: "closeRequest" }
   | { type: "escape" }
   | { type: "click"; id: string }
   | { type: "context"; id: string; x: number; y: number }
@@ -85,7 +98,9 @@ export type NativeEvent =
   | { type: "hover"; id: string; entered: boolean }
   | { type: "key"; id: string; key: string }
   | { type: "blur"; id: string }
+  | { type: "shortcut"; shortcut: string }
   | { type: "error"; message: string }
   | { type: "inspect"; requestId: string; snapshot: Snapshot }
   | { type: "captured"; requestId: string; path: string }
+  | { type: "fileDialog"; requestId: string; paths: string[]; error?: string }
   | { type: "frame"; frames: number };

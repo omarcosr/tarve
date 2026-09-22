@@ -1,6 +1,6 @@
-import type { Style } from "../../protocol/src/index";
+import type { Control, Style } from "../../protocol/src/index";
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
-import { Column, Icon, Pressable, Row, Scroll, Text, Input, View, type IconName } from "./components";
+import { Button, Column, Icon, Pressable, Row, Scroll, Text, Input, View, type IconName } from "./components";
 import { theme } from "./theme";
 
 const c = theme.colors;
@@ -49,6 +49,71 @@ function triggerLabel(label: string | undefined, child: Child): string | undefin
   return typeof child === "string" || typeof child === "number" ? String(child) : undefined;
 }
 
+type TriggerHandler = (...args: any[]) => void;
+interface TriggerOptions {
+  id: string;
+  disabled?: boolean;
+  focusable?: boolean;
+  style?: Style;
+  fallbackControl?: Control;
+  interactiveControl?: Control;
+  onClick?: () => void;
+  onContextMenu?: (position: { x: number; y: number }) => void;
+  onHover?: (hovered: boolean) => void;
+  onEscape?: () => void;
+  onKeyDown?: (key: string) => void;
+}
+
+function chainHandlers<T extends TriggerHandler>(first: T | undefined, second: T | undefined): T | undefined {
+  if (!first) return second;
+  if (!second) return first;
+  return ((...args: Parameters<T>) => { first(...args); second(...args); }) as T;
+}
+
+function interactiveTrigger(trigger: Child): trigger is VNode {
+  if (!trigger || typeof trigger !== "object" || Array.isArray(trigger)) return false;
+  if (trigger.type === Button || trigger.type === Pressable) return true;
+  return typeof trigger.type === "string" && ["button", "pressable", "input", "textarea", "slider"].includes(trigger.type);
+}
+
+function popupTrigger(trigger: Child, options: TriggerOptions): Child {
+  if (!interactiveTrigger(trigger)) {
+    return jsx(Pressable, {
+      id: options.id,
+      disabled: options.disabled,
+      focusable: options.focusable,
+      control: options.fallbackControl,
+      onClick: options.onClick,
+      onContextMenu: options.onContextMenu,
+      onHover: options.onHover,
+      onEscape: options.onEscape,
+      onKeyDown: options.onKeyDown,
+      style: { background: "#00000000", ...options.style },
+      children: trigger,
+    });
+  }
+  const previous = trigger.props;
+  const control = options.interactiveControl
+    ? { ...(previous.control ?? {}), ...options.interactiveControl,
+        label: previous.control?.label ?? options.interactiveControl.label }
+    : previous.control;
+  return {
+    ...trigger,
+    props: {
+      ...previous,
+      id: previous.id ?? options.id,
+      disabled: Boolean(previous.disabled || options.disabled),
+      ...(control ? { control } : {}),
+      ...(options.style ? { style: { ...previous.style, ...options.style } } : {}),
+      onClick: chainHandlers(previous.onClick, options.onClick),
+      onContextMenu: chainHandlers(previous.onContextMenu, options.onContextMenu),
+      onHover: chainHandlers(previous.onHover, options.onHover),
+      onEscape: chainHandlers(previous.onEscape, options.onEscape),
+      onKeyDown: chainHandlers(previous.onKeyDown, options.onKeyDown),
+    },
+  };
+}
+
 function assertUniqueValues(component: string, values: readonly string[]): void {
   if (new Set(values).size !== values.length) {
     throw new TypeError(`${component} values must be unique`);
@@ -90,13 +155,11 @@ export function Tooltip({
     id,
     style: { position: "relative", zIndex: open ? POPUP_Z_INDEX : 0, ...style },
     children: [
-      jsx(Pressable, {
+      popupTrigger(trigger, {
         id: `${id}-trigger`,
         focusable: false,
-        control: { role: "button", label: triggerLabel(label, trigger), checked: open },
+        fallbackControl: { role: "button", label: triggerLabel(label, trigger), checked: open },
         onHover: (hovered: boolean) => onOpenChange?.(hovered),
-        style: { background: "#00000000" },
-        children: trigger,
       }),
       open
         ? jsx(View, {
@@ -148,17 +211,16 @@ export function Popover({
     id,
     style: { position: "relative", zIndex: open ? POPUP_Z_INDEX : 0, ...style },
     children: [
-      jsx(Pressable, {
+      popupTrigger(trigger, {
         id: `${id}-trigger`,
         disabled,
-        control: { role: "button", label: triggerLabel(label, trigger), checked: open },
+        fallbackControl: { role: "button", label: triggerLabel(label, trigger), checked: open },
         onClick: () => setOpen(!open),
         onEscape: () => setOpen(false),
         onKeyDown: (key: string) => {
           if (key === "Escape") setOpen(false);
         },
-        style: { background: "#00000000", ...triggerStyle },
-        children: trigger,
+        style: triggerStyle,
       }),
       open && !disabled
         ? jsx(Column, {
@@ -207,8 +269,7 @@ function menuItems(
     id: `${id}-item-${item.value}`,
     key: item.value,
     disabled: item.disabled,
-    focusable: false,
-    control: { role: "button", label: item.label, checked: item.checked },
+    control: { role: "menuitem", label: item.label, checked: item.checked },
     onClick: item.disabled ? undefined : () => {
       onSelect?.(item.value);
       close();
@@ -222,6 +283,7 @@ function menuItems(
       gap: 12,
       radius: theme.radius.sm,
       hover: { background: c.muted },
+      focus: { background: c.muted },
       disabled: { foreground: c.disabledForeground },
     },
     children: [
@@ -258,20 +320,21 @@ export function DropdownMenu({
   const close = () => setOpen(false);
   return jsx(View, {
     id,
+    control: { role: "navigation", orientation: "vertical" },
     style: { position: "relative", zIndex: open ? POPUP_Z_INDEX : 0, ...style },
     children: [
-      jsx(Pressable, {
+      popupTrigger(trigger, {
         id: `${id}-trigger`,
         disabled,
-        control: { role: "button", label: triggerLabel(label, trigger), checked: open },
+        fallbackControl: { role: open ? "menuitem" : "select", label: triggerLabel(label, trigger), checked: open },
+        interactiveControl: { role: open ? "menuitem" : "select", label: triggerLabel(label, trigger), checked: open },
         onClick: () => setOpen(!open),
         onEscape: close,
         onKeyDown: (key: string) => {
           if (key === "Escape") close();
-          else if (key === "ArrowDown" || key === "Enter" || key === " ") setOpen(true);
+          else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(key)) setOpen(true);
         },
-        style: { background: "#00000000", ...triggerStyle },
-        children: trigger,
+        style: triggerStyle,
       }),
       open && !disabled
         ? jsx(Column, {
@@ -326,16 +389,20 @@ export function ContextMenu({
   const close = () => setOpen(false);
   return jsx(View, {
     id,
+    control: { role: "navigation", orientation: "vertical" },
     style: { position: "relative", zIndex: open ? POPUP_Z_INDEX : 0, ...style },
     children: [
-      jsx(Pressable, {
+      popupTrigger(trigger, {
         id: `${id}-trigger`,
         disabled,
-        control: { role: "button", label: triggerLabel(label, trigger), checked: open },
+        fallbackControl: { role: open ? "menuitem" : "select", label: triggerLabel(label, trigger), checked: open },
+        interactiveControl: { role: open ? "menuitem" : "select", label: triggerLabel(label, trigger), checked: open },
         onContextMenu: () => setOpen(true),
         onEscape: close,
-        style: { background: "#00000000" },
-        children: trigger,
+        onKeyDown: (key: string) => {
+          if (key === "Escape") close();
+          else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(key)) setOpen(true);
+        },
       }),
       children,
       open && !disabled
@@ -408,17 +475,19 @@ export function Combobox({
   };
   return jsx(View, {
     id,
+    control: { role: "navigation", orientation: "vertical" },
+    onEscape: () => setOpen(false),
     style: { position: "relative", width: 220, zIndex: open ? POPUP_Z_INDEX : 0, ...style },
     children: [
       jsx(Pressable, {
         id: `${id}-trigger`,
         disabled,
-        control: { role: "select", label: selected?.label ?? placeholder, checked: open },
+        control: { role: open ? "menuitem" : "select", label: selected?.label ?? placeholder, checked: open },
         onClick: () => setOpen(!open),
         onEscape: () => setOpen(false),
         onKeyDown: (key: string) => {
           if (key === "Escape") setOpen(false);
-          else if (key === "ArrowDown" || key === "Enter" || key === " ") setOpen(true);
+          else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(key)) setOpen(true);
         },
         style: {
           width: "100%",
@@ -458,6 +527,7 @@ export function Combobox({
                     value: query,
                     placeholder: searchPlaceholder,
                     onChange: onQueryChange,
+                    control: { role: "menuitem", label: searchPlaceholder },
                     style: { flex: 1, minWidth: 0, borderWidth: 0, background: "#00000000" },
                   }),
                 ],
@@ -472,8 +542,7 @@ export function Combobox({
                       id: `${id}-option-${option.value}`,
                       key: option.value,
                       disabled: option.disabled,
-                      focusable: false,
-                      control: { role: "button", label: option.label, checked: option.value === value },
+                      control: { role: "menuitem", label: option.label, checked: option.value === value },
                       onClick: option.disabled ? undefined : () => choose(option.value),
                       style: {
                         minHeight: 32,
@@ -482,7 +551,9 @@ export function Combobox({
                         align: "center",
                         justify: "between",
                         radius: theme.radius.sm,
+                        background: option.value === value ? c.muted : "#00000000",
                         hover: { background: c.muted },
+                        focus: { background: c.muted },
                       },
                       children: [
                         jsx(Text, { color: option.disabled ? c.disabledForeground : c.foreground, children: option.label }),
@@ -517,6 +588,7 @@ export interface CommandProps extends BaseProps {
   onQueryChange?: (query: string) => void;
   onValueChange?: (value: string) => void;
   onSelect?: (value: string) => void;
+  onEscape?: () => void;
 }
 
 export function Command({
@@ -529,6 +601,7 @@ export function Command({
   onQueryChange,
   onValueChange,
   onSelect,
+  onEscape,
   style,
 }: CommandProps): VNode {
   assertUniqueValues("Command", items.map(item => item.value));
@@ -562,7 +635,7 @@ export function Command({
       id: `${id}-item-${item.value}`,
       key: item.value,
       disabled: item.disabled,
-      control: { role: "button", label: item.label, checked: item.value === value },
+      control: { role: "menuitem", label: item.label },
       onClick: item.disabled ? undefined : () => choose(item),
       style: {
         minHeight: 34,
@@ -572,7 +645,9 @@ export function Command({
         justify: "between",
         gap: 12,
         radius: theme.radius.sm,
+        background: item.value === value ? c.muted : "#00000000",
         hover: { background: c.muted },
+        focus: { background: c.muted },
       },
       children: [
         jsx(Row, { gap: 8, children: [
@@ -585,6 +660,8 @@ export function Command({
   }
   return jsx(Column, {
     id,
+    control: { role: "navigation", orientation: "vertical" },
+    onEscape,
     style: {
       minWidth: 260,
       background: c.card,
@@ -604,6 +681,7 @@ export function Command({
             value: query,
             placeholder,
             onChange: onQueryChange,
+            control: { role: "menuitem", label: placeholder },
             style: { flex: 1, minWidth: 0, borderWidth: 0, background: "#00000000" },
           }),
         ],
@@ -646,6 +724,7 @@ export function CommandPalette({
 }: CommandPaletteProps): VNode {
   if (!open) return jsx("fragment", {});
   const close = () => onOpenChange?.(false);
+  const commandEscape = commandProps.onEscape;
   return jsx(Pressable, {
     id,
     modal: true,
@@ -671,6 +750,10 @@ export function CommandPalette({
       children: jsx(Command, {
         ...commandProps,
         id: `${id}-command`,
+        onEscape: () => {
+          commandEscape?.();
+          close();
+        },
         onSelect: (value: string) => {
           onSelect?.(value);
           if (closeOnSelect) close();

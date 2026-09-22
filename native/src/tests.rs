@@ -1,10 +1,11 @@
 use crate::{
     protocol::{self, Node},
-    runtime::{anchored_window_position, cursor_for_node},
+    runtime::{anchored_window_position, close_request_action, cursor_for_node, shortcut_name, CloseRequestAction},
     tree::Tree,
 };
 use serde_json::json;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::CursorIcon;
 
 fn node(id: &str, kind: &str, style: serde_json::Value, children: Vec<Node>) -> Node {
@@ -12,6 +13,69 @@ fn node(id: &str, kind: &str, style: serde_json::Value, children: Vec<Node>) -> 
 }
 fn root(children: Vec<Node>) -> Node {
     node("root", "window", json!({}), children)
+}
+
+#[test]
+fn close_request_protocol_and_coalescing_are_explicit() {
+    let plain = root(vec![]);
+    assert!(!plain.close_intercept);
+    let intercepted: Node = serde_json::from_value(json!({
+        "id":"root","kind":"window","style":{},"children":[],"closeIntercept":true
+    }))
+    .unwrap();
+    assert!(intercepted.close_intercept);
+
+    let command: protocol::Command = serde_json::from_value(json!({"type":"cancelCloseRequest"})).unwrap();
+    assert!(matches!(command, protocol::Command::CancelCloseRequest));
+
+    let mut pending = false;
+    assert_eq!(close_request_action(false, &mut pending), CloseRequestAction::Exit);
+    assert!(!pending, "non-intercepted close should remain immediate");
+    assert_eq!(close_request_action(true, &mut pending), CloseRequestAction::Emit);
+    assert!(pending);
+    assert_eq!(
+        close_request_action(true, &mut pending),
+        CloseRequestAction::Ignore,
+        "repeated OS close requests must coalesce while JS decides"
+    );
+    pending = false;
+    assert_eq!(
+        close_request_action(true, &mut pending),
+        CloseRequestAction::Emit,
+        "canceling should allow a later close request through"
+    );
+}
+
+#[test]
+fn file_dialog_protocol_and_hotkey_names_are_explicit() {
+    let command: protocol::Command = serde_json::from_value(json!({
+        "type":"fileDialog",
+        "mode":"openFiles",
+        "requestId":"files-1",
+        "options":{
+            "title":"Choose files",
+            "directory":"C:/tmp",
+            "filters":[{"name":"Images","extensions":["png","jpg"]}]
+        }
+    })).unwrap();
+    match command {
+        protocol::Command::FileDialog { mode, options, request_id } => {
+            assert_eq!(mode, "openFiles");
+            assert_eq!(request_id, "files-1");
+            assert_eq!(options.title.as_deref(), Some("Choose files"));
+            assert_eq!(options.filters[0].extensions, ["png", "jpg"]);
+        }
+        _ => panic!("expected file dialog command"),
+    }
+    let invalid = protocol::FileDialogOptions {
+        filters: vec![protocol::FileDialogFilter { name: "Bad".into(), extensions: vec!["*.exe".into()] }],
+        ..Default::default()
+    };
+    assert!(protocol::validate_file_dialog("openFile", &invalid).is_err());
+
+    let modifiers = ModifiersState::CONTROL | ModifiersState::SHIFT;
+    assert_eq!(shortcut_name(&Key::Character("s".into()), modifiers).as_deref(), Some("Ctrl+Shift+S"));
+    assert_eq!(shortcut_name(&Key::Named(NamedKey::F2), ModifiersState::empty()).as_deref(), Some("F2"));
 }
 
 #[test]
@@ -812,6 +876,20 @@ fn focusing_an_offscreen_control_scrolls_it_into_view() {
 }
 
 #[test]
+fn scroll_speed_scales_wheel_delta() {
+    let content = node("content", "view", json!({"height":600,"shrink":0}), vec![]);
+    let mut scroll = node("scroll", "scroll", json!({"height":100}), vec![content]);
+    scroll.scroll_speed = 2.5;
+    let mut tree = Tree::new(root(vec![scroll]));
+    tree.compute(200.0, 120.0).unwrap();
+    tree.pointer_move(50.0, 50.0);
+    let events = tree.wheel(20.0);
+    assert!((tree.entries["scroll"].scroll - 50.0).abs() < 0.001);
+    assert_eq!(events[0]["type"], "scroll");
+    assert_eq!(events[0]["offset"], 50.0);
+}
+
+#[test]
 fn leaving_the_window_while_dragging_does_not_reset_a_slider() {
     let mut slider = node("slider", "slider", json!({"width":120,"height":24}), vec![]);
     slider.control = Some(
@@ -934,6 +1012,39 @@ fn navigation_menuitems_use_roving_focus_and_arrow_activation() {
     assert!(!events.iter().any(|event| event["type"] == "click"));
     let events = tree.key("Space");
     assert!(events.iter().any(|event| event["type"] == "click" && event["id"] == "first"));
+}
+
+#[test]
+fn tree_and_grid_items_use_vertical_roving_focus() {
+    let mut first = node("tree-first", "pressable", json!({"width":80,"height":30}), vec![]);
+    first.control = Some(serde_json::from_value(json!({
+        "role":"treeitem","group":"tree","label":"First","checked":true
+    })).unwrap());
+    let mut second = node("tree-second", "pressable", json!({"width":80,"height":30}), vec![]);
+    second.control = Some(serde_json::from_value(json!({
+        "role":"treeitem","group":"tree","label":"Second","checked":false
+    })).unwrap());
+    let mut tree = Tree::new(root(vec![first, second]));
+    tree.compute(200.0, 100.0).unwrap();
+    let _ = tree.focus("tree-first");
+    let events = tree.key("ArrowRight");
+    assert_eq!(tree.focused.as_deref(), Some("tree-first"));
+    assert!(events.iter().any(|event| event["type"] == "key" && event["key"] == "ArrowRight"));
+    let events = tree.key("ArrowDown");
+    assert_eq!(tree.focused.as_deref(), Some("tree-second"));
+    assert!(!events.iter().any(|event| event["type"] == "click"));
+
+    let mut row_one = node("row-one", "pressable", json!({"width":80,"height":30}), vec![]);
+    row_one.control = Some(serde_json::from_value(json!({"role":"row","group":"grid","checked":true})).unwrap());
+    let mut row_two = node("row-two", "pressable", json!({"width":80,"height":30}), vec![]);
+    row_two.control = Some(serde_json::from_value(json!({"role":"row","group":"grid","checked":false})).unwrap());
+    let mut grid = Tree::new(root(vec![row_one, row_two]));
+    grid.compute(200.0, 100.0).unwrap();
+    let _ = grid.focus("row-one");
+    grid.key("End");
+    assert_eq!(grid.focused.as_deref(), Some("row-two"));
+    let events = grid.key("Space");
+    assert!(events.iter().any(|event| event["type"] == "click" && event["id"] == "row-two"));
 }
 
 #[test]
