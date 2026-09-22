@@ -1,7 +1,7 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const PROTOCOL_VERSION = 13;
+export const PROTOCOL_VERSION = 15;
 export type Length = number | `${number}%` | "auto";
-export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "pressable" | "icon" | "slider";
+export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "textarea" | "pressable" | "icon" | "slider";
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
 export type OutlineStyle = "dotted" | "dashed" | "solid" | "double" | "groove" | "ridge" | "inset" | "outset" | "none" | "hidden";
 export interface StateStyle {
@@ -18,6 +18,7 @@ export interface Style extends StateStyle {
   padding?: Insets; margin?: Insets; align?: "start" | "center" | "end" | "stretch";
   justify?: "start" | "center" | "end" | "between";
   display?: "flex" | "grid" | "none"; columns?: number;
+  zIndex?: number;
   borderWidth?: Insets;
   radius?: number; fontSize?: number; fontWeight?: number; fontFamily?: string;
   lineHeight?: number; textAlign?: "start" | "center" | "end";
@@ -25,7 +26,7 @@ export interface Style extends StateStyle {
   strokeWidth?: number; pointerEvents?: "auto" | "block";
 }
 export interface Control {
-  role: "button" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "slider" | "progress" | "virtualList";
+  role: "button" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "slider" | "progress" | "virtualList" | "select";
   label?: string; checked?: boolean; group?: string;
   orientation?: "horizontal" | "vertical";
   value?: number; min?: number; max?: number; step?: number;
@@ -72,6 +73,8 @@ export type NativeEvent =
   | { type: "valueChange"; id: string; value: number }
   | { type: "scroll"; id: string; offset: number; max: number }
   | { type: "hover"; id: string; entered: boolean }
+  | { type: "key"; id: string; key: string }
+  | { type: "blur"; id: string }
   | { type: "error"; message: string }
   | { type: "inspect"; requestId: string; snapshot: Snapshot }
   | { type: "captured"; requestId: string; path: string }

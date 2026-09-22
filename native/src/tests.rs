@@ -506,7 +506,7 @@ fn focusing_an_offscreen_control_scrolls_it_into_view() {
     let mut tree = Tree::new(root(vec![scroll]));
     tree.compute(200.0, 100.0).unwrap();
     assert_eq!(tree.entries["scroll"].scroll, 0.0);
-    tree.focus("row-4");
+    let _ = tree.focus("row-4");
     assert_eq!(tree.focused.as_deref(), Some("row-4"));
     assert!(tree.entries["scroll"].scroll > 0.0);
     let row = tree
@@ -609,4 +609,129 @@ fn virtual_scroll_waits_for_new_rows_before_painting() {
         tree.dirty.paint,
         "the matching virtual rows must schedule the frame"
     );
+}
+
+#[test]
+fn textarea_edits_multiple_lines_and_scrolls_the_caret_into_view() {
+    let mut area = node(
+        "notes",
+        "textarea",
+        json!({
+            "width":180,
+            "height":56,
+            "padding":4,
+            "borderWidth":1,
+            "fontSize":14,
+            "lineHeight":1.5
+        }),
+        vec![],
+    );
+    area.value = Some("first".into());
+    let mut tree = Tree::new(root(vec![area]));
+    tree.compute(220.0, 100.0).unwrap();
+    let _ = tree.focus("notes");
+
+    let enter = tree.key("Enter");
+    assert_eq!(enter[0]["value"], "first\n");
+    let typed = tree.type_text("second\nthird\nfourth\nfifth");
+    assert_eq!(typed[0]["type"], "change");
+    assert_eq!(
+        tree.entries["notes"].node.value.as_deref(),
+        Some("first\nsecond\nthird\nfourth\nfifth")
+    );
+
+    tree.compute(220.0, 100.0).unwrap();
+    assert!(tree.entries["notes"].scroll_max > 0.0);
+    assert!(
+        tree.entries["notes"].scroll > 0.0,
+        "caret at the end must stay visible"
+    );
+    tree.scene(1.0);
+
+    let before = tree.entries["notes"].scroll;
+    let rect = tree.entries["notes"].rect;
+    tree.pointer_move(rect.x0 + 20.0, rect.y0 + 20.0);
+    let wheel = tree.wheel(-24.0);
+    assert_eq!(wheel[0]["id"], "notes");
+    assert!(tree.entries["notes"].scroll < before);
+
+    let _ = tree.focus("notes");
+    let old = tree.entries["notes"].node.value.as_ref().unwrap().len();
+    let deleted = tree.key("Backspace");
+    assert_eq!(deleted[0]["type"], "change");
+    assert!(tree.entries["notes"].node.value.as_ref().unwrap().len() < old);
+}
+
+#[test]
+fn select_trigger_forwards_navigation_keys_to_bun() {
+    let mut trigger = node("select-trigger", "pressable", json!({"height":38}), vec![]);
+    trigger.control = Some(
+        serde_json::from_value(json!({
+            "role":"select","label":"Team","checked":true
+        }))
+        .unwrap(),
+    );
+    let mut tree = Tree::new(root(vec![trigger]));
+    tree.compute(220.0, 100.0).unwrap();
+    let _ = tree.focus("select-trigger");
+    for key in ["ArrowDown", "ArrowUp", "Home", "End", "Escape"] {
+        let events = tree.key(key);
+        assert_eq!(events[0]["type"], "key");
+        assert_eq!(events[0]["id"], "select-trigger");
+        assert_eq!(events[0]["key"], key);
+    }
+}
+
+#[test]
+fn changing_focus_emits_blur_for_the_previous_control() {
+    let first = node(
+        "first",
+        "pressable",
+        json!({"width":80,"height":30}),
+        vec![],
+    );
+    let second = node(
+        "second",
+        "pressable",
+        json!({"width":80,"height":30}),
+        vec![],
+    );
+    let mut tree = Tree::new(root(vec![first, second]));
+    tree.compute(200.0, 100.0).unwrap();
+    let _ = tree.focus("first");
+    let events = tree.key("Tab");
+    assert_eq!(tree.focused.as_deref(), Some("second"));
+    assert_eq!(events[0]["type"], "blur");
+    assert_eq!(events[0]["id"], "first");
+}
+
+#[test]
+fn z_index_controls_overlapping_hit_order_without_affecting_layout() {
+    let high = node(
+        "high",
+        "pressable",
+        json!({
+            "position":"absolute","left":0,"top":0,"width":80,"height":40,"zIndex":10
+        }),
+        vec![],
+    );
+    let low = node(
+        "low",
+        "pressable",
+        json!({
+            "position":"absolute","left":0,"top":0,"width":80,"height":40
+        }),
+        vec![],
+    );
+    let mut tree = Tree::new(root(vec![node(
+        "stack",
+        "view",
+        json!({"position":"relative","width":100,"height":60}),
+        vec![high, low],
+    )]));
+    tree.compute(120.0, 80.0).unwrap();
+    let before = tree.entries["high"].rect;
+    tree.pointer_move(20.0, 20.0);
+    assert_eq!(tree.hovered.as_deref(), Some("high"));
+    assert_eq!(tree.entries["high"].rect, before);
 }

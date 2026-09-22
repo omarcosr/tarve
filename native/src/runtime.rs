@@ -396,7 +396,11 @@ impl ApplicationHandler<Command> for App {
                 self.sync_custom_window_chrome();
             }
             Command::Close => event_loop.exit(),
-            Command::Focus { id } => self.tree.focus(&id),
+            Command::Focus { id } => {
+                if let Some(blurred) = self.tree.focus(&id) {
+                    self.events.push(json!({"type":"blur", "id":blurred}));
+                }
+            }
             Command::Inspect { request_id } => {
                 if let Err(e) = self.prepare() {
                     self.fail(event_loop, e);
@@ -547,7 +551,12 @@ impl ApplicationHandler<Command> for App {
                     Key::Named(NamedKey::Home) => Some("Home"),
                     Key::Named(NamedKey::End) => Some("End"),
                     Key::Named(NamedKey::Escape) => {
-                        events.push(json!({"type":"escape"}));
+                        let handled = self.tree.key("Escape");
+                        if handled.is_empty() {
+                            events.push(json!({"type":"escape"}));
+                        } else {
+                            events.extend(handled);
+                        }
                         None
                     }
                     Key::Character(value)
@@ -575,7 +584,9 @@ impl ApplicationHandler<Command> for App {
                 events = self.tree.type_text(&text);
             }
             WindowEvent::Focused(false) => {
-                self.tree.blur();
+                if let Some(blurred) = self.tree.blur() {
+                    events.push(json!({"type":"blur", "id":blurred}));
+                }
             }
             _ => {}
         }

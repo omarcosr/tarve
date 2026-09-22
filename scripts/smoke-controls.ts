@@ -38,6 +38,28 @@ try {
   assert.equal(node(initial, "notifications").control?.checked, true);
   assert.equal(node(initial, "volume").control?.value, 36);
   assert.equal(node(initial, "volume-progress").control?.value, 36);
+  assert.equal(node(initial, "role-select-trigger").control?.label, "Developer");
+
+  const selectOpen = await click("role-select-trigger");
+  assert(node(selectOpen, "role-select-option-designer"), "Select popup must render its options");
+  const selectedRole = await click("role-select-option-designer");
+  assert.equal(node(selectedRole, "role-select-trigger").control?.label, "Designer");
+  assert.equal(selectedRole.nodes.some(item => item.id === "role-select-option-designer"), false,
+    "Select popup must close after choosing an option");
+
+  await click("role-select-trigger");
+  assert(node(await app.inspect(), "role-select-option-manager"), "Select must reopen");
+  app.focus("profile-notes");
+  const blurredSelect = await settle();
+  assert.equal(blurredSelect.nodes.some(item => item.id === "role-select-option-manager"), false,
+    "Select popup must close when its trigger loses focus");
+
+  app.debug({ type: "input", action: "text", text: "First line" });
+  key("Enter");
+  app.debug({ type: "input", action: "text", text: "Second line" });
+  const textarea = await settle();
+  assert.equal(node(textarea, "profile-notes").text, "First line\nSecond line",
+    "TextArea must accept multiline native input");
 
   const checkbox = await click("updates");
   assert.equal(node(checkbox, "updates").control?.checked, true, "Checkbox click must change state");
@@ -73,7 +95,7 @@ try {
   const idleAfter = await app.inspect();
   assert.equal(idleAfter.frames, idleBefore.frames, "Controls must not keep a frame loop running");
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ result: "PASS", controls: ["Checkbox", "Switch", "Slider", "Progress", "Tabs", "RadioGroup", "disabled", "idle"] }, null, 2));
+  console.log(JSON.stringify({ result: "PASS", controls: ["Checkbox", "Switch", "Slider", "Progress", "Tabs", "RadioGroup", "Select", "TextArea", "disabled", "idle"] }, null, 2));
 } finally {
   app.close();
   await app.closed;

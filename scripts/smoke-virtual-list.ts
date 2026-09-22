@@ -20,7 +20,8 @@ try {
   await app.ready;
   const first = await settle();
   assert(first.frames > 0);
-  assert(first.layoutNodes < 120, "Only visible rows should have native layout nodes");
+  assert(first.layoutNodes < 120,
+    `Only visible rows should have native layout nodes (got ${first.layoutNodes})`);
   assert.equal(node(first, "records").scrollMax, records.length * itemHeight - 600);
   assert(first.nodes.some(item => item.id === "record-0"));
   const textIndex = first.nodes.findIndex(item => item.id === "record-0");

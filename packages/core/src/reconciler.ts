@@ -2,9 +2,9 @@ import { PROTOCOL_VERSION, type NativeNode, type SceneDocument, type WindowOptio
 import { Fragment, type Child, type VNode } from "./jsx-runtime";
 import { lightTheme, resolveThemeColor, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
-export interface Handlers { onClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onEscape?: () => void }
+export interface Handlers { onClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void }
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode> }
-const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "button", "image", "scroll", "input", "pressable", "icon", "slider"]);
+const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "button", "image", "scroll", "input", "textarea", "pressable", "icon", "slider"]);
 function textContent(value: Child): string {
   if (Array.isArray(value)) return value.map(textContent).join("");
   if (value == null || typeof value === "boolean") return "";
@@ -45,7 +45,7 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
         background: resolveThemeColor(p.style?.background ?? theme.colors.background, selectedTheme),
         decorations: true, resizable: p.resizable ?? true, debug };
     }
-    handlers.set(id, { onClick: p.onClick, onHover: p.onHover, onChange: p.onChange, onValueChange: p.onValueChange, onScroll: p.onScroll, onEscape: p.onEscape });
+    handlers.set(id, { onClick: p.onClick, onHover: p.onHover, onChange: p.onChange, onValueChange: p.onValueChange, onScroll: p.onScroll, onEscape: p.onEscape, onKeyDown: p.onKeyDown, onBlur: p.onBlur });
     const control = p.control ? { ...p.control } : undefined;
     const childGroup = control?.role === "radiogroup" || control?.role === "tablist" ? id : group;
     if (control && (control.role === "radio" || control.role === "tab")) control.group = group;

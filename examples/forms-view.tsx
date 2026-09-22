@@ -1,10 +1,12 @@
 import {
   Accordion, Badge, Button, Card, Checkbox, Column, Progress, RadioGroup, Row,
-  Scroll, Separator, Slider, Switch, Tabs, Text, TextInput, Window, theme,
+  Scroll, Select, Separator, Slider, Switch, Tabs, Text, TextArea, TextInput, Window, theme,
 } from "tarve";
 
 const c = theme.colors;
 let name = "";
+let role = "developer";
+let notes = "";
 let updates = false;
 let notifications = true;
 let plan = "team";
@@ -32,6 +34,19 @@ export function App() {
                   <Column gap={6}>
                     <Text size={13} weight={500}>Display name</Text>
                     <TextInput id="display-name" value={name} placeholder="Your name" onChange={value => { name = value; saved = false; }} />
+                  </Column>
+                  <Column gap={6}>
+                    <Text size={13} weight={500}>Role</Text>
+                    <Select id="role-select" value={role} style={{ width: "100%" }} options={[
+                      { value: "developer", label: "Developer" },
+                      { value: "designer", label: "Designer" },
+                      { value: "manager", label: "Manager" },
+                    ]} onValueChange={value => { role = value; saved = false; }} />
+                  </Column>
+                  <Column gap={6}>
+                    <Text size={13} weight={500}>Notes</Text>
+                    <TextArea id="profile-notes" value={notes} placeholder="Add notes about this workspace..."
+                      onChange={value => { notes = value; saved = false; }} />
                   </Column>
                   <Checkbox id="updates" label="Send me product updates" checked={updates}
                     onCheckedChange={value => { updates = value; saved = false; }} />

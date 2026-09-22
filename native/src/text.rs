@@ -2,6 +2,7 @@ use crate::protocol::Node;
 use parley::{
     FontContext, FontFamily, FontWeight, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
     StyleProperty,
+    layout::{Affinity, Cursor},
 };
 use std::collections::HashMap;
 use vello::{
@@ -87,7 +88,7 @@ impl TextEngine {
         let Some(layout) = self.layouts.get_mut(&node.id) else {
             return;
         };
-        layout.break_all_lines(if node.kind == "text" {
+        layout.break_all_lines(if matches!(node.kind.as_str(), "text" | "textarea") {
             Some(width.max(0.0))
         } else {
             None
@@ -119,5 +120,20 @@ impl TextEngine {
                 }
             }
         }
+    }
+    pub fn caret_rect(
+        &mut self,
+        id: &str,
+        index: usize,
+        width: f32,
+    ) -> Option<parley::BoundingBox> {
+        let layout = self.layouts.get_mut(id)?;
+        layout.break_all_lines(Some(width.max(0.0)));
+        Some(Cursor::from_byte_index(layout, index, Affinity::Downstream).geometry(layout, 1.0))
+    }
+    pub fn index_at(&mut self, id: &str, x: f32, y: f32, width: f32) -> Option<usize> {
+        let layout = self.layouts.get_mut(id)?;
+        layout.break_all_lines(Some(width.max(0.0)));
+        Some(Cursor::from_point(layout, x, y).index())
     }
 }

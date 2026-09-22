@@ -1,4 +1,4 @@
-import { Badge, Button, Checkbox, Column, Row, Text, TitleBar, VirtualList, Window, theme } from "tarve";
+import { Badge, Button, Column, Row, Text, TitleBar, VirtualList, Window, theme } from "tarve";
 
 const c = theme.colors;
 export const records = Array.from(
@@ -51,7 +51,6 @@ export function App() {
               <Text id={`record-${index}`} size={13}>
                 {record}
               </Text>
-              <Checkbox checked={false} label="Select" />
               <Button
                 id={`open-${index}`}
                 size="sm"

@@ -71,9 +71,30 @@ let open = false;
 
 ### Controles de aplicação
 
-`Checkbox`, `Switch`, `RadioGroup`, `Slider`, `Card`, `Badge`, `Separator`, `Progress`, `Tabs` e `Accordion` estão disponíveis em `tarve`. Os controles de seleção recebem o valor atual e notificam alterações por callback; o app guarda esse valor em seu estado. `Pressable` e `Icon` permitem compor controles próprios. Consulte `examples/forms-view.tsx` para um formulário com clique, foco e teclado.
+`Checkbox`, `Switch`, `RadioGroup`, `Select`, `Slider`, `TextArea`, `Card`, `Badge`, `Separator`, `Progress`, `Tabs` e `Accordion` estão disponíveis em `tarve`. Os controles de seleção recebem o valor atual e notificam alterações por callback; o app guarda esse valor em seu estado. `Pressable` e `Icon` permitem compor controles próprios. Consulte `examples/forms-view.tsx` para um formulário com clique, foco e teclado.
 
-`VirtualList` usa linhas de altura fixa. Passe `items`, `itemHeight`, `height`, `offset`, `renderItem` e `onScroll`; armazene o novo offset no callback. `itemHeight` deve comportar o conteúdo, o padding e as bordas de cada linha. Apenas as linhas visíveis e uma pequena margem de segurança entram na árvore nativa.
+`List` e `VirtualList` são componentes distintos. `List` é a lista normal: mantém todos os itens montados, aceita alturas diferentes por item e pode receber `items`/`renderItem` ou `children`. `VirtualList` é a opção para coleções grandes: usa linhas de altura fixa e mantém na árvore nativa apenas a faixa visível mais o overscan.
+
+```tsx
+<List
+  items={projects}
+  keyForItem={(project) => project.id}
+  renderItem={(project) => <Text>{project.name}</Text>}
+/>
+
+<VirtualList
+  items={rows}
+  itemHeight={36}
+  height={360}
+  offset={offset}
+  onScroll={(next) => { offset = next; }}
+  renderItem={(row) => <Text>{row.label}</Text>}
+/>
+```
+
+`Select` segue o modelo controlado de valor (`value` + `onValueChange`) e suporta opções desabilitadas, placeholder, abertura controlada opcional e teclado. `Enter`/`Space` alternam o popup; setas, `Home` e `End` navegam entre opções habilitadas; `Escape` fecha. O popup usa `zIndex` sem alterar o layout Taffy.
+
+`TextArea` é um campo de texto multiline nativo. Ele faz wrap com Parley, aceita `Enter`, seleção/clipboard, navegação por caret, clique para posicionar o caret e scroll interno quando o conteúdo excede a altura disponível.
 
 ### Custom title bar
 
@@ -189,7 +210,7 @@ bun run check           # TypeScript
 bun run lint            # Clippy rigoroso para o backend Rust
 bun run test            # TSX/protocolo, layout, dirty flags e input
 bun run smoke           # janela real, GPU, FFI, cliques, edição, scroll e resize
-bun run smoke:controls  # checkbox, switch, slider, tabs, radio e teclado em janela real
+bun run smoke:controls  # checkbox, select, textarea, switch, slider, tabs, radio e teclado
 bun run smoke:virtual-list # linhas virtuais com scroll/clique e menos de 120 nós nativos
 bun run verify          # checa código, janela real, tarball e EXE isolado
 bun run bench           # latência em uma janela com 2.000 linhas (após build release)

@@ -80,6 +80,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (event.type === "valueChange" && handlers?.onValueChange) { handlers.onValueChange(event.value); update(); }
       if (event.type === "scroll" && handlers?.onScroll) { handlers.onScroll(event.offset, event.max); update(); }
       if (event.type === "hover" && handlers?.onHover) { handlers.onHover(event.entered); update(); }
+      if (event.type === "key" && handlers?.onKeyDown) { handlers.onKeyDown(event.key); update(); }
+      if (event.type === "blur" && handlers?.onBlur) { handlers.onBlur(); update(); }
     }
     for (const listener of listeners) listener(event);
   });

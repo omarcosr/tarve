@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Accordion, Checkbox, Progress, RadioGroup, Slider, Switch, Tabs } from "./controls";
-import { Text, Window } from "./components";
+import { Text, TextArea, Window } from "./components";
+import { List } from "./list";
+import { Select } from "./select";
 import { VirtualList } from "./virtual-list";
 import { compileTree, diffTrees } from "./reconciler";
 
@@ -53,5 +55,58 @@ describe("control kit", () => {
     expect(later.nodes.has("item-1000")).toBe(true);
     expect(later.nodes.has("item-0")).toBe(false);
     expect(later.handlers.get("list")?.onScroll).toBeFunction();
+  });
+
+  test("keeps List and VirtualList as separate public list models", () => {
+    const items = [24, 48, 72];
+    const regular = compileTree(
+      <Window>
+        <List id="regular-list" items={items} renderItem={(height, index) => (
+          <Text id={`regular-${index}`} style={{ height }}>{height}</Text>
+        )} />
+      </Window>,
+    );
+    expect(regular.nodes.get("regular-list")?.kind).toBe("scroll");
+    expect(regular.nodes.get("regular-list")?.control).toBeUndefined();
+    expect(items.every((_, index) => regular.nodes.has(`regular-${index}`))).toBe(true);
+    expect(() => compileTree(<Window><List items={[1]} /></Window>)).toThrow(TypeError);
+  });
+
+  test("Select exposes one keyboard trigger and non-tab-stop popup options", () => {
+    const changes: string[] = [];
+    const tree = compileTree(
+      <Window>
+        <Select id="plan-select" value="team" open options={[
+          { value: "personal", label: "Personal" },
+          { value: "team", label: "Team" },
+          { value: "enterprise", label: "Enterprise", disabled: true },
+        ]} onValueChange={value => changes.push(value)} />
+      </Window>,
+    );
+    const trigger = tree.nodes.get("plan-select-trigger");
+    expect(trigger?.control).toEqual({ role: "select", label: "Team", checked: true });
+    expect(tree.handlers.get("plan-select-trigger")?.onBlur).toBeFunction();
+    expect(tree.nodes.get("plan-select-option-personal")?.focusable).toBe(false);
+    expect(tree.nodes.get("plan-select-option-enterprise")?.disabled).toBe(true);
+    tree.handlers.get("plan-select-option-personal")?.onClick?.();
+    expect(changes).toEqual(["personal"]);
+    expect(() => compileTree(<Window><Select id="duplicate" options={[
+      { value: "same", label: "One" }, { value: "same", label: "Two" },
+    ]} /></Window>)).toThrow(TypeError);
+  });
+
+  test("TextArea compiles to a native multiline editable node", () => {
+    const tree = compileTree(
+      <Window>
+        <TextArea id="notes" value={"first\nsecond"} placeholder="Notes" onChange={() => {}} />
+      </Window>,
+    );
+    const area = tree.nodes.get("notes");
+    expect(area?.kind).toBe("textarea");
+    expect(area?.value).toBe("first\nsecond");
+    expect(area?.placeholder).toBe("Notes");
+    expect(area?.style.height).toBe(120);
+    expect(area?.style.focus?.outlineStyle).toBe("solid");
+    expect(tree.handlers.get("notes")?.onChange).toBeFunction();
   });
 });

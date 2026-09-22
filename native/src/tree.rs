@@ -142,6 +142,7 @@ pub struct Tree {
     layout: TaffyTree<String>,
     pub text: TextEngine,
     images: HashMap<String, ImageData>,
+    stacking: HashMap<String, f32>,
     pub dirty: Dirty,
     pub hovered: Option<String>,
     pub focused: Option<String>,
@@ -159,6 +160,29 @@ pub struct Tree {
 }
 
 impl Tree {
+    fn refresh_stacking(&mut self) {
+        fn visit(
+            entries: &HashMap<String, Entry>,
+            id: &str,
+            out: &mut HashMap<String, f32>,
+        ) -> f32 {
+            let entry = &entries[id];
+            let highest = entry
+                .children
+                .iter()
+                .fold(entry.node.number("zIndex", 0.0), |highest, child| {
+                    highest.max(visit(entries, child, out))
+                });
+            out.insert(id.to_string(), highest);
+            highest
+        }
+        let mut stacking = HashMap::with_capacity(self.entries.len());
+        if self.entries.contains_key(&self.root) {
+            visit(&self.entries, &self.root, &mut stacking);
+        }
+        self.stacking = stacking;
+    }
+
     pub fn new(root: Node) -> Self {
         let mut tree = Self {
             root: root.id.clone(),
@@ -167,6 +191,7 @@ impl Tree {
             layout: TaffyTree::new(),
             text: TextEngine::new(),
             images: HashMap::new(),
+            stacking: HashMap::new(),
             dirty: Dirty::all(),
             hovered: None,
             focused: None,
@@ -208,6 +233,7 @@ impl Tree {
         });
         self.prune_images();
         self.prune_interaction();
+        self.refresh_stacking();
     }
     fn insert(&mut self, mut node: Node, old: &mut HashMap<String, Entry>, parent: Option<&str>) {
         // Store the hierarchy once. Entries own only their properties and child IDs.
@@ -227,7 +253,7 @@ impl Tree {
         let mut structure_dirty = true;
         let mut measure_dirty = true;
         if let Some(prev) = &previous {
-            if node.kind == "input" && node.value.is_none() {
+            if matches!(node.kind.as_str(), "input" | "textarea") && node.value.is_none() {
                 node.value = prev.node.value.clone();
             }
             structure_dirty = prev.structure_dirty || child_ids != prev.children;
@@ -319,6 +345,7 @@ impl Tree {
         }
         self.prune_images();
         self.prune_interaction();
+        self.refresh_stacking();
         Ok(())
     }
     fn prune_images(&mut self) {
@@ -401,6 +428,7 @@ impl Tree {
             )
             .map_err(|e| e.to_string())?;
         self.positions(&self.root.clone(), (0.0, 0.0))?;
+        self.ensure_focused_textarea_caret_visible();
         self.layouts += 1;
         self.dirty.layout = false;
         self.dirty.text = false;
@@ -473,6 +501,14 @@ impl Tree {
         );
         entry.scroll_max = if entry.node.kind == "scroll" {
             layout.scroll_height() as f64
+        } else if entry.node.kind == "textarea" {
+            let pad = entry.node.insets("padding");
+            let border = entry.node.insets("borderWidth");
+            let width = (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64)
+                .max(0.0) as f32;
+            let height =
+                (entry.rect.height() - (pad[0] + pad[2] + border[0] + border[2]) as f64).max(0.0);
+            (self.text.measure(id, Some(width)).1 as f64 - height).max(0.0)
         } else {
             0.0
         };
@@ -520,7 +556,14 @@ impl Tree {
         let rect = entry.rect + Vec2::new(0.0, -offset);
         let scroll = entry.scroll;
         let scroll_max = entry.scroll_max;
-        let children = entry.children.clone();
+        let mut children = entry.children.clone();
+        children.sort_by(|a, b| {
+            self.stacking
+                .get(a)
+                .copied()
+                .unwrap_or(0.0)
+                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
+        });
         self.painted_nodes += 1;
         let transform = Affine::scale(scale);
         let state = VisualState {
@@ -639,7 +682,7 @@ impl Tree {
                     as f32;
             let (tw, th) = self.text.measure(
                 id,
-                if node.kind == "text" {
+                if matches!(node.kind.as_str(), "text" | "textarea") {
                     Some(available_width)
                 } else {
                     None
@@ -648,20 +691,26 @@ impl Tree {
             let mut x = rect.x0 + pad[3] as f64 + border[3];
             let y = if node.kind == "text" {
                 rect.y0 + pad[0] as f64 + border[0]
+            } else if node.kind == "textarea" {
+                rect.y0 + pad[0] as f64 + border[0] - scroll
             } else {
                 rect.y0 + (rect.height() - th as f64) / 2.0
             };
             if node.kind == "button" {
                 x = rect.x0 + (rect.width() - tw as f64) / 2.0;
             }
-            let foreground =
-                if node.kind == "input" && node.value.as_deref().unwrap_or("").is_empty() {
-                    visual_string(&node, "placeholderColor", "#a1a1aa", state)
-                } else {
-                    visual_string(&node, "foreground", "#18181b", state)
-                };
+            let foreground = if matches!(node.kind.as_str(), "input" | "textarea")
+                && node.value.as_deref().unwrap_or("").is_empty()
+            {
+                visual_string(&node, "placeholderColor", "#a1a1aa", state)
+            } else {
+                visual_string(&node, "foreground", "#18181b", state)
+            };
             scene.push_clip_layer(Fill::NonZero, transform, &shape);
-            if node.kind == "input" && self.focused.as_deref() == Some(id) && self.select_all {
+            if matches!(node.kind.as_str(), "input" | "textarea")
+                && self.focused.as_deref() == Some(id)
+                && self.select_all
+            {
                 scene.fill(
                     Fill::NonZero,
                     transform,
@@ -678,7 +727,19 @@ impl Tree {
                 color(foreground),
                 scale,
             );
-            if node.kind == "input" && self.focused.as_deref() == Some(id) {
+            if node.kind == "textarea" && self.focused.as_deref() == Some(id) {
+                let value = node.value.as_deref().unwrap_or("");
+                let caret = floor_boundary(value, self.caret.min(value.len()));
+                if let Some(cursor) = self.text.caret_rect(id, caret, available_width) {
+                    scene.fill(
+                        Fill::NonZero,
+                        transform,
+                        color(visual_string(&node, "caretColor", "#18181b", state)),
+                        None,
+                        &BoxRect::new(x + cursor.x0, y + cursor.y0, x + cursor.x1, y + cursor.y1),
+                    );
+                }
+            } else if node.kind == "input" && self.focused.as_deref() == Some(id) {
                 // A real shaped prefix places the caret correctly for variable-width Latin text.
                 let mut prefix = node.clone();
                 prefix.id = format!("{}::caret", node.id);
@@ -770,18 +831,18 @@ impl Tree {
         }
         if node.kind == "scroll" {
             scene.pop_layer();
-            if scroll_max > 0.0 {
-                let track = rect.height() - 12.0;
-                let thumb = (track * rect.height() / (rect.height() + scroll_max)).max(28.0);
-                let top = rect.y0 + 6.0 + (track - thumb) * scroll / scroll_max;
-                scene.fill(
-                    Fill::NonZero,
-                    transform,
-                    color(visual_string(&node, "scrollbarColor", "#d4d4d8", state)),
-                    None,
-                    &RoundedRect::new(rect.x1 - 7.0, top, rect.x1 - 3.0, top + thumb, 2.0),
-                );
-            }
+        }
+        if matches!(node.kind.as_str(), "scroll" | "textarea") && scroll_max > 0.0 {
+            let track = rect.height() - 12.0;
+            let thumb = (track * rect.height() / (rect.height() + scroll_max)).max(28.0);
+            let top = rect.y0 + 6.0 + (track - thumb) * scroll / scroll_max;
+            scene.fill(
+                Fill::NonZero,
+                transform,
+                color(visual_string(&node, "scrollbarColor", "#d4d4d8", state)),
+                None,
+                &RoundedRect::new(rect.x1 - 7.0, top, rect.x1 - 3.0, top + thumb, 2.0),
+            );
         }
     }
     fn hit(&self, id: &str, offset: f64, clip: BoxRect, scroll_only: bool) -> Option<String> {
@@ -801,14 +862,22 @@ impl Tree {
         if !clip.contains(self.mouse) {
             return None;
         }
-        for child in entry.children.iter().rev() {
+        let mut children = entry.children.clone();
+        children.sort_by(|a, b| {
+            self.stacking
+                .get(a)
+                .copied()
+                .unwrap_or(0.0)
+                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
+        });
+        for child in children.iter().rev() {
             if let Some(id) = self.hit(child, offset + entry.scroll, clip, scroll_only) {
                 return Some(id);
             }
         }
         let blocks_pointer = entry.node.string("pointerEvents", "auto") == "block";
         let eligible = if scroll_only {
-            (entry.node.kind == "scroll" && entry.scroll_max > 0.0)
+            (matches!(entry.node.kind.as_str(), "scroll" | "textarea") && entry.scroll_max > 0.0)
                 || blocks_pointer
                 || entry.node.modal
         } else {
@@ -883,16 +952,17 @@ impl Tree {
             .cloned()
             .collect()
     }
-    pub fn focus(&mut self, id: &str) {
+    pub fn focus(&mut self, id: &str) -> Option<String> {
         let modal = self.active_modal();
         if !self.interactive(id)
             || !self.entries[id].node.focusable
             || modal.is_some_and(|modal| !self.is_descendant_of(id, modal))
         {
-            return;
+            return None;
         }
+        let mut blurred = None;
         if self.focused.as_deref() != Some(id) {
-            self.focused = Some(id.to_string());
+            blurred = self.focused.replace(id.to_string());
             self.select_all = false;
             self.caret = self.entries[id].node.value.as_deref().map_or(0, str::len);
             self.dirty.paint = true;
@@ -919,6 +989,7 @@ impl Tree {
             }
             ancestor = self.entries[&parent_id].parent.clone();
         }
+        blurred
     }
     fn prune_interaction(&mut self) {
         let keep_hovered = self
@@ -1079,13 +1150,15 @@ impl Tree {
             vec![]
         }
     }
-    pub fn blur(&mut self) {
+    pub fn blur(&mut self) -> Option<String> {
         self.scroll_drag = None;
-        if self.focused.take().is_some() || self.pressed.take().is_some() {
+        let blurred = self.focused.take();
+        if blurred.is_some() || self.pressed.take().is_some() {
             self.caret = 0;
             self.select_all = false;
             self.dirty.paint = true;
         }
+        blurred
     }
     pub fn pointer_down(&mut self) -> Vec<Value> {
         if let Some((id, grab)) = self.scrollbar_at_pointer() {
@@ -1098,12 +1171,18 @@ impl Tree {
         }
         self.hovered = self.hit(&self.root, 0.0, self.entries[&self.root].rect, false);
         self.pressed = self.hovered.clone();
+        let mut events = vec![];
         if let Some(id) = self.hovered.clone() {
-            self.focus(&id);
+            if let Some(blurred) = self.focus(&id) {
+                events.push(json!({"type":"blur", "id":blurred}));
+            }
+            if self.entries[&id].node.kind == "textarea" {
+                self.place_textarea_caret_from_pointer(&id);
+            }
         } else {
-            self.focused = None;
-            self.caret = 0;
-            self.select_all = false;
+            if let Some(blurred) = self.blur() {
+                events.push(json!({"type":"blur", "id":blurred}));
+            }
         }
         self.dirty.paint = true;
         if let Some(id) = self
@@ -1111,10 +1190,9 @@ impl Tree {
             .clone()
             .filter(|id| self.entries[id].node.kind == "slider")
         {
-            self.slider_from_pointer(&id)
-        } else {
-            vec![]
+            events.extend(self.slider_from_pointer(&id));
         }
+        events
     }
     pub fn pointer_up(&mut self) -> Vec<Value> {
         if self.scroll_drag.take().is_some() {
@@ -1142,7 +1220,7 @@ impl Tree {
     fn scrollbar_at_pointer(&self) -> Option<(String, f64)> {
         let id = self.hit(&self.root, 0.0, self.entries[&self.root].rect, true)?;
         let entry = self.entries.get(&id)?;
-        if entry.node.kind != "scroll" || entry.scroll_max <= 0.0 {
+        if !matches!(entry.node.kind.as_str(), "scroll" | "textarea") || entry.scroll_max <= 0.0 {
             return None;
         }
         let rect = self.visible_rect(&id)?;
@@ -1224,13 +1302,24 @@ impl Tree {
                 } else {
                     index.map_or(0, |i| (i + 1) % ids.len())
                 };
-                self.focus(&ids[next]);
+                if let Some(blurred) = self.focus(&ids[next]) {
+                    return vec![json!({"type":"blur", "id":blurred})];
+                }
             }
             return vec![];
         }
         let Some(id) = self.focused.clone() else {
             return vec![];
         };
+        if self.entries[&id]
+            .node
+            .control
+            .as_ref()
+            .is_some_and(|control| control.role == "select")
+            && matches!(key, "ArrowDown" | "ArrowUp" | "Home" | "End" | "Escape")
+        {
+            return vec![json!({"type":"key", "id":id, "key":key})];
+        }
         if matches!(self.entries[&id].node.kind.as_str(), "button" | "pressable")
             && (key == "Enter" || key == "Space")
         {
@@ -1282,22 +1371,35 @@ impl Tree {
                 "ArrowLeft" | "ArrowUp" => (index + choices.len() - 1) % choices.len(),
                 _ => (index + 1) % choices.len(),
             };
-            self.focus(&choices[next]);
-            return vec![json!({"type":"click", "id":choices[next]})];
+            let blurred = self.focus(&choices[next]);
+            let mut events = vec![json!({"type":"click", "id":choices[next]})];
+            if let Some(blurred) = blurred {
+                events.push(json!({"type":"blur", "id":blurred}));
+            }
+            return events;
         }
-        if self.entries[&id].node.kind != "input" {
+        if !matches!(self.entries[&id].node.kind.as_str(), "input" | "textarea") {
             return vec![];
         }
+        let multiline = self.entries[&id].node.kind == "textarea";
         let value = self.entries[&id].node.value.clone().unwrap_or_default();
         self.caret = floor_boundary(&value, self.caret.min(value.len()));
         match key {
             "SelectAll" => self.select_all = true,
             "Home" => {
-                self.caret = 0;
+                self.caret = if multiline {
+                    self.textarea_visual_edge(&id, false).unwrap_or(0)
+                } else {
+                    0
+                };
                 self.select_all = false;
             }
             "End" => {
-                self.caret = value.len();
+                self.caret = if multiline {
+                    self.textarea_visual_edge(&id, true).unwrap_or(value.len())
+                } else {
+                    value.len()
+                };
                 self.select_all = false;
             }
             "ArrowLeft" => {
@@ -1307,6 +1409,29 @@ impl Tree {
             "ArrowRight" => {
                 self.caret = next_boundary(&value, self.caret);
                 self.select_all = false;
+            }
+            "ArrowUp" if multiline => {
+                if let Some(next) = self.textarea_vertical_index(&id, -1.0) {
+                    self.caret = next;
+                }
+                self.select_all = false;
+            }
+            "ArrowDown" if multiline => {
+                if let Some(next) = self.textarea_vertical_index(&id, 1.0) {
+                    self.caret = next;
+                }
+                self.select_all = false;
+            }
+            "Enter" if multiline => {
+                let mut changed = value.clone();
+                if self.select_all {
+                    changed.clear();
+                    self.caret = 0;
+                }
+                changed.insert(self.caret, '\n');
+                self.caret += 1;
+                self.select_all = false;
+                return self.set_input(id, changed);
             }
             "Backspace" | "Delete" => {
                 let mut changed = value.clone();
@@ -1325,6 +1450,9 @@ impl Tree {
             }
             _ => return vec![],
         }
+        if multiline {
+            self.ensure_focused_textarea_caret_visible();
+        }
         self.dirty.paint = true;
         vec![]
     }
@@ -1332,16 +1460,20 @@ impl Tree {
         let Some(id) = self.focused.clone() else {
             return vec![];
         };
-        if self.entries[&id].node.kind != "input" {
+        if !matches!(self.entries[&id].node.kind.as_str(), "input" | "textarea") {
             return vec![];
         }
+        let multiline = self.entries[&id].node.kind == "textarea";
         let mut value = self.entries[&id].node.value.clone().unwrap_or_default();
         if self.select_all {
             value.clear();
             self.caret = 0;
         }
         self.caret = floor_boundary(&value, self.caret.min(value.len()));
-        let text: String = text.chars().filter(|c| !c.is_control()).collect();
+        let text: String = text
+            .chars()
+            .filter(|c| !c.is_control() || (multiline && *c == '\n'))
+            .collect();
         value.insert_str(self.caret, &text);
         self.caret += text.len();
         self.select_all = false;
@@ -1355,6 +1487,85 @@ impl Tree {
         self.dirty = Dirty::all();
         vec![json!({"type":"change", "id": id, "value": value})]
     }
+
+    fn place_textarea_caret_from_pointer(&mut self, id: &str) {
+        let entry = &self.entries[id];
+        let pad = entry.node.insets("padding");
+        let border = entry.node.insets("borderWidth");
+        let rect = self.visible_rect(id).unwrap_or(entry.rect);
+        let width =
+            (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
+        let x = (self.mouse.0 - rect.x0 - pad[3] as f64 - border[3] as f64).max(0.0) as f32;
+        let y = (self.mouse.1 - rect.y0 - pad[0] as f64 - border[0] as f64 + entry.scroll).max(0.0)
+            as f32;
+        let value = entry.node.value.as_deref().unwrap_or("");
+        if let Some(index) = self.text.index_at(id, x, y, width) {
+            self.caret = floor_boundary(value, index.min(value.len()));
+            self.select_all = false;
+            self.dirty.paint = true;
+        }
+    }
+
+    fn textarea_metrics(&self, id: &str) -> Option<(f32, f64, String)> {
+        let entry = self.entries.get(id)?;
+        if entry.node.kind != "textarea" {
+            return None;
+        }
+        let pad = entry.node.insets("padding");
+        let border = entry.node.insets("borderWidth");
+        let width =
+            (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
+        let height =
+            (entry.rect.height() - (pad[0] + pad[2] + border[0] + border[2]) as f64).max(0.0);
+        Some((width, height, entry.node.value.clone().unwrap_or_default()))
+    }
+
+    fn textarea_vertical_index(&mut self, id: &str, direction: f32) -> Option<usize> {
+        let (width, _, value) = self.textarea_metrics(id)?;
+        let caret = floor_boundary(&value, self.caret.min(value.len()));
+        let cursor = self.text.caret_rect(id, caret, width)?;
+        let x = cursor.x0 as f32;
+        let y = if direction < 0.0 {
+            (cursor.y0 as f32 - 1.0).max(0.0)
+        } else {
+            cursor.y1 as f32 + 1.0
+        };
+        let next = self.text.index_at(id, x, y, width)?;
+        Some(floor_boundary(&value, next.min(value.len())))
+    }
+
+    fn textarea_visual_edge(&mut self, id: &str, end: bool) -> Option<usize> {
+        let (width, _, value) = self.textarea_metrics(id)?;
+        let caret = floor_boundary(&value, self.caret.min(value.len()));
+        let cursor = self.text.caret_rect(id, caret, width)?;
+        let x = if end { width } else { 0.0 };
+        let y = ((cursor.y0 + cursor.y1) * 0.5) as f32;
+        let next = self.text.index_at(id, x, y, width)?;
+        Some(floor_boundary(&value, next.min(value.len())))
+    }
+
+    fn ensure_focused_textarea_caret_visible(&mut self) {
+        let Some(id) = self.focused.clone() else {
+            return;
+        };
+        let Some((width, viewport_height, value)) = self.textarea_metrics(&id) else {
+            return;
+        };
+        let caret = floor_boundary(&value, self.caret.min(value.len()));
+        let Some(cursor) = self.text.caret_rect(&id, caret, width) else {
+            return;
+        };
+        let entry = self.entries.get_mut(&id).unwrap();
+        let next = if cursor.y0 < entry.scroll {
+            cursor.y0
+        } else if cursor.y1 > entry.scroll + viewport_height {
+            cursor.y1 - viewport_height
+        } else {
+            entry.scroll
+        };
+        entry.scroll = next.clamp(0.0, entry.scroll_max);
+    }
+
     pub fn snapshots(&self) -> Vec<Value> {
         let mut result = vec![];
         self.snapshot_node(&self.root, 0.0, &mut result);

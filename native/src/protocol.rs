@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
-pub const VERSION: u32 = 13;
+pub const VERSION: u32 = 15;
 
 fn range_max() -> f64 {
     100.0
@@ -79,17 +79,17 @@ impl Node {
         self.style[key].as_str().unwrap_or(fallback)
     }
     pub fn is_text(&self) -> bool {
-        matches!(self.kind.as_str(), "text" | "button" | "input")
+        matches!(self.kind.as_str(), "text" | "button" | "input" | "textarea")
     }
     pub fn interactive(&self) -> bool {
         !self.disabled
             && matches!(
                 self.kind.as_str(),
-                "button" | "input" | "pressable" | "slider"
+                "button" | "input" | "textarea" | "pressable" | "slider"
             )
     }
     pub fn text_value(&self) -> &str {
-        if self.kind == "input" {
+        if matches!(self.kind.as_str(), "input" | "textarea") {
             self.value
                 .as_deref()
                 .filter(|s| !s.is_empty())
@@ -187,6 +187,7 @@ pub fn validate(root: &Node) -> Result<(), String> {
             "image",
             "scroll",
             "input",
+            "textarea",
             "pressable",
             "icon",
             "slider",

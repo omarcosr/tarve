@@ -414,6 +414,7 @@ export function App() {
       <Modal
         id="demo-modal"
         open={modalOpen}
+        showClose={true}
         onOpenChange={(open) => {
           modalOpen = open;
         }}
