@@ -143,6 +143,7 @@ pub struct Tree {
     pub text: TextEngine,
     images: HashMap<String, ImageData>,
     stacking: HashMap<String, f32>,
+    window_chrome_suppressed: bool,
     pub dirty: Dirty,
     pub hovered: Option<String>,
     pub focused: Option<String>,
@@ -192,6 +193,7 @@ impl Tree {
             text: TextEngine::new(),
             images: HashMap::new(),
             stacking: HashMap::new(),
+            window_chrome_suppressed: false,
             dirty: Dirty::all(),
             hovered: None,
             focused: None,
@@ -209,6 +211,18 @@ impl Tree {
         };
         tree.update(root);
         tree
+    }
+    pub fn set_window_chrome_suppressed(&mut self, suppressed: bool) -> bool {
+        if self.window_chrome_suppressed == suppressed {
+            return false;
+        }
+        self.window_chrome_suppressed = suppressed;
+        if let Some(root) = self.entries.get_mut(&self.root) {
+            root.layout_dirty = true;
+        }
+        self.dirty.layout = true;
+        self.dirty.paint = true;
+        true
     }
     pub fn update(&mut self, root: Node) {
         let mut old = std::mem::take(&mut self.entries);
@@ -441,9 +455,10 @@ impl Tree {
             .iter()
             .map(|child| self.build_layout(child, None))
             .collect::<Result<Vec<_>, _>>()?;
+        let suppress_root_chrome = self.window_chrome_suppressed && id == self.root;
         let entry = self.entries.get_mut(id).unwrap();
         let style = if entry.layout_dirty || entry.layout_id.is_none() || viewport.is_some() {
-            let mut style = layout_style(&entry.node);
+            let mut style = layout_style(&entry.node, suppress_root_chrome);
             if let Some((w, h)) = viewport {
                 style.size = Size {
                     width: length(w),
@@ -572,15 +587,23 @@ impl Tree {
             focused: self.focused.as_deref() == Some(id),
             disabled: node.disabled,
         };
-        let radius = visual_number(&node, "radius", 0.0, state) as f64;
+        let suppress_root_chrome = self.window_chrome_suppressed && id == self.root;
+        let radius = if suppress_root_chrome {
+            0.0
+        } else {
+            visual_number(&node, "radius", 0.0, state) as f64
+        };
         let shape = RoundedRect::from_rect(rect, radius);
         let bg = visual_string(&node, "background", "#00000000", state);
         if bg != "#00000000" {
             scene.fill(Fill::NonZero, transform, color(bg), None, &shape);
         }
-        let border = node
-            .insets("borderWidth")
-            .map(|value| value.max(0.0) as f64);
+        let border = if suppress_root_chrome {
+            [0.0; 4]
+        } else {
+            node.insets("borderWidth")
+                .map(|value| value.max(0.0) as f64)
+        };
         if border.iter().any(|width| *width > 0.0) {
             let border_color = color(visual_string(&node, "borderColor", "#e4e4e7", state));
             let uniform = border
@@ -1958,10 +1981,14 @@ fn limit(v: &Value) -> LengthPercentageAuto {
     }
     auto()
 }
-fn layout_style(node: &Node) -> Style {
+fn layout_style(node: &Node, suppress_border: bool) -> Style {
     let pad = node.insets("padding");
     let margin = node.insets("margin");
-    let border = node.insets("borderWidth").map(|value| value.max(0.0));
+    let border = if suppress_border {
+        [0.0; 4]
+    } else {
+        node.insets("borderWidth").map(|value| value.max(0.0))
+    };
     let mut style = Style {
         display: match node.string("display", "flex") {
             "grid" => Display::Grid,

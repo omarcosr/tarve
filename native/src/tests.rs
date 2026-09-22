@@ -64,6 +64,39 @@ fn per_side_border_width_affects_layout_independently() {
     assert!((child.width() - (panel.width() - 7.0 - 11.0)).abs() < 0.1);
     assert!((child.height() - (panel.height() - 3.0 - 13.0)).abs() < 0.1);
 }
+
+#[test]
+fn custom_window_chrome_border_is_suppressed_when_maximized_or_fullscreen() {
+    let child = node(
+        "child",
+        "view",
+        json!({"width":"100%","height":"100%"}),
+        vec![],
+    );
+    let mut tree = Tree::new(node(
+        "root",
+        "window",
+        json!({"borderWidth":1,"borderColor":"#27272a","radius":8}),
+        vec![child],
+    ));
+
+    tree.compute(100.0, 80.0).unwrap();
+    assert!((tree.entries["child"].rect.x0 - 1.0).abs() < 0.1);
+    assert!((tree.entries["child"].rect.width() - 98.0).abs() < 0.1);
+
+    assert!(tree.set_window_chrome_suppressed(true));
+    tree.compute(100.0, 80.0).unwrap();
+    tree.scene(1.0);
+    assert!(tree.entries["child"].rect.x0.abs() < 0.1);
+    assert!((tree.entries["child"].rect.width() - 100.0).abs() < 0.1);
+    assert_eq!(tree.entries["root"].node.number("radius", 0.0), 8.0);
+    assert_eq!(tree.entries["root"].node.insets("borderWidth"), [1.0; 4]);
+
+    assert!(tree.set_window_chrome_suppressed(false));
+    tree.compute(100.0, 80.0).unwrap();
+    assert!((tree.entries["child"].rect.x0 - 1.0).abs() < 0.1);
+    assert!((tree.entries["child"].rect.width() - 98.0).abs() < 0.1);
+}
 #[test]
 fn hover_and_color_update_do_not_invalidate_layout_or_text() {
     let mut button = node(

@@ -19,10 +19,15 @@ use winit::{
 };
 
 #[cfg(target_os = "windows")]
-fn configure_custom_window_chrome(window: &Window, border: &str) -> Result<(), String> {
+fn configure_custom_window_chrome(
+    window: &Window,
+    border: &str,
+    suppressed: bool,
+) -> Result<(), String> {
     use std::{ffi::c_void, mem::size_of};
     use windows_sys::Win32::Graphics::Dwm::{
-        DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
+        DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
+        DWMWCP_ROUND, DwmSetWindowAttribute,
     };
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -31,11 +36,19 @@ fn configure_custom_window_chrome(window: &Window, border: &str) -> Result<(), S
         return Err("Expected a Win32 window handle".into());
     };
     let hwnd = handle.hwnd.get() as *mut c_void;
-    let corner = DWMWCP_ROUND;
+    let corner = if suppressed {
+        DWMWCP_DONOTROUND
+    } else {
+        DWMWCP_ROUND
+    };
     // COLORREF is 0x00BBGGRR.
     let hex = border.trim_start_matches('#');
     let rgb = u32::from_str_radix(hex.get(..6).unwrap_or("e4e4e7"), 16).unwrap_or(0x00e4e4e7);
-    let border_color = ((rgb & 0xff) << 16) | (rgb & 0x00ff00) | ((rgb >> 16) & 0xff);
+    let border_color = if suppressed {
+        DWMWA_COLOR_NONE
+    } else {
+        ((rgb & 0xff) << 16) | (rgb & 0x00ff00) | ((rgb >> 16) & 0xff)
+    };
     unsafe {
         let corner_result = DwmSetWindowAttribute(
             hwnd,
@@ -66,7 +79,7 @@ fn configure_custom_window_chrome(window: &Window, border: &str) -> Result<(), S
 }
 
 #[cfg(not(target_os = "windows"))]
-fn configure_custom_window_chrome(_: &Window, _: &str) -> Result<(), String> {
+fn configure_custom_window_chrome(_: &Window, _: &str, _: bool) -> Result<(), String> {
     Ok(())
 }
 
@@ -131,18 +144,42 @@ impl App {
             .map(|entry| entry.node.string(key, fallback).to_string())
             .unwrap_or_else(|| fallback.to_string())
     }
-    fn sync_custom_window_chrome(&self) {
+    fn window_chrome_suppressed(&self) -> bool {
+        self.window
+            .as_ref()
+            .is_some_and(|window| window.is_maximized() || window.fullscreen().is_some())
+    }
+    fn apply_custom_window_chrome(&self) {
         if self.document.window.decorations {
             return;
         }
         let Some(window) = &self.window else {
             return;
         };
-        if let Err(chrome_error) =
-            configure_custom_window_chrome(window, &self.root_color("borderColor", "#e4e4e7"))
-        {
+        if let Err(chrome_error) = configure_custom_window_chrome(
+            window,
+            &self.root_color("borderColor", "#e4e4e7"),
+            self.window_chrome_suppressed(),
+        ) {
             self.events
                 .push(error(format!("Custom window chrome: {chrome_error}")));
+        }
+    }
+    fn sync_custom_window_chrome(&mut self) {
+        if self.document.window.decorations {
+            return;
+        }
+        let suppressed = self.window_chrome_suppressed();
+        self.tree.set_window_chrome_suppressed(suppressed);
+        self.apply_custom_window_chrome();
+    }
+    fn sync_custom_window_chrome_state(&mut self) {
+        if self.document.window.decorations {
+            return;
+        }
+        let suppressed = self.window_chrome_suppressed();
+        if self.tree.set_window_chrome_suppressed(suppressed) {
+            self.apply_custom_window_chrome();
         }
     }
     fn clipboard_shortcut(&mut self, key: &Key) -> Vec<serde_json::Value> {
@@ -252,7 +289,7 @@ impl App {
             return None;
         }
         let window = self.window.as_ref()?;
-        if window.is_maximized() {
+        if window.is_maximized() || window.fullscreen().is_some() {
             return None;
         }
         let size = window.inner_size().to_logical::<f64>(window.scale_factor());
@@ -483,6 +520,7 @@ impl ApplicationHandler<Command> for App {
                     self.tree.dirty.layout = true;
                     self.tree.dirty.paint = true;
                 }
+                self.sync_custom_window_chrome_state();
             }
             WindowEvent::ScaleFactorChanged { .. } => {
                 self.tree.dirty.layout = true;
