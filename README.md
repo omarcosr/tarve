@@ -65,13 +65,13 @@ let open = false;
   description="Start a new project in your workspace."
   footer={<Button onClick={() => { open = false; }}>Create project</Button>}
 >
-  <TextInput placeholder="Project name" />
+  <Input placeholder="Project name" />
 </Modal>
 ```
 
 ### Controles de aplicação
 
-`Checkbox`, `Switch`, `RadioGroup`, `Select`, `Slider`, `TextArea`, `Card`, `Badge`, `Separator`, `Progress`, `Tabs` e `Accordion` estão disponíveis em `tarve`. Os controles de seleção recebem o valor atual e notificam alterações por callback; o app guarda esse valor em seu estado. `Pressable`, `Icon` e `Portal` permitem compor controles próprios. Consulte `examples/forms-view.tsx` para um formulário com clique, foco e teclado.
+`Input`, `Checkbox`, `Switch`, `RadioGroup`, `Select`, `Slider`, `TextArea`, `Card`, `Badge`, `Separator`, `Progress`, `Tabs` e `Accordion` estão disponíveis em `tarve`. Os controles de seleção recebem o valor atual e notificam alterações por callback; o app guarda esse valor em seu estado. `Pressable`, `Icon` e `Portal` permitem compor controles próprios. Consulte `examples/forms-view.tsx` para um formulário com clique, foco e teclado.
 
 O kit também inclui `Tooltip`, `Popover`, `DropdownMenu`, `ContextMenu`, `Combobox`, `Command`, `CommandPalette`, `AlertDialog`, `Sheet`, `Toast`, `Toaster`, `Skeleton`, `Spinner`, `Avatar`, `Breadcrumb`, `Pagination`, `Collapsible`, `Table`, `DataTable`, `Menubar`, `HoverCard`, `Calendar` e `DatePicker`. Popups usam a primitive nativa de portal: continuam ancorados pelo layout do trigger, mas escapam do clipping de `Scroll`, participam do hit-test acima do conteúdo normal e podem fechar por clique fora. `ContextMenu` abre por clique direito nativo.
 
@@ -98,7 +98,13 @@ A camada de componentes também cobre `Alert`, `AspectRatio`, `ButtonGroup`, `Ca
 
 `Select` segue o modelo controlado de valor (`value` + `onValueChange`) e suporta opções desabilitadas, placeholder, abertura controlada opcional e teclado. `Enter`/`Space` alternam o popup; setas, `Home` e `End` navegam entre opções habilitadas; `Escape` fecha. Listas longas ganham scroll e o popup é renderizado como portal nativo.
 
-`TextInput` e `TextArea` usam edição nativa sobre Parley. Ambos suportam caret por clique, seleção parcial por arraste ou `Shift` + setas/Home/End, `Ctrl+A/C/X/V` e deleção sobre a seleção; `TextArea` também faz wrap, navegação vertical e scroll interno mantendo o caret visível.
+`Input` e `TextArea` usam edição nativa sobre Parley. `Input` aceita `type="text" | "password" | "email" | "number" | "search" | "tel" | "url"`; password é mascarado no renderer nativo sem expor a seleção ao clipboard, e number rejeita edições não numéricas. Ambos suportam caret por clique, seleção parcial por arraste ou `Shift` + setas/Home/End, `Ctrl+A/C/X/V` e deleção sobre a seleção; `TextArea` também faz wrap, navegação vertical e scroll interno mantendo o caret visível.
+
+```tsx
+<Input type="email" value={email} onChange={setEmail} />
+<Input type="password" value={password} onChange={setPassword} />
+<Input type="number" value={quantity} onChange={setQuantity} />
+```
 
 ```tsx
 <Popover id="account" open={open} trigger={<Text>Account</Text>} onOpenChange={setOpen}>
@@ -369,6 +375,6 @@ Medições e limites do benchmark estão em `PERFORMANCE.md`. O acompanhamento d
 
 ## Escopo do bootstrap
 
-Uma janela por processo. `TextInput` oferece foco, entrada Unicode, backspace/delete por grapheme, setas, Home/End, Ctrl+A, copiar/colar/recortar e commit de IME; seleção por mouse, undo, preedit visual, edição bidi avançada e acessibilidade via AccessKit ficam para a próxima etapa. Botões aceitam Tab/Shift+Tab e Enter/Espaço. Scroll vertical tem clipping e indicador. Imagens locais PNG/JPEG usam `cover` ou `contain`. `Text` e `Button` recebem texto simples; composição rica pode ser adicionada ao protocolo.
+Uma janela por processo. `Input` oferece foco, entrada Unicode, backspace/delete por grapheme, setas, Home/End, Ctrl+A, copiar/colar/recortar e commit de IME; seleção por mouse, undo, preedit visual, edição bidi avançada e acessibilidade via AccessKit ficam para a próxima etapa. Botões aceitam Tab/Shift+Tab e Enter/Espaço. Scroll vertical tem clipping e indicador. Imagens locais PNG/JPEG usam `cover` ou `contain`. `Text` e `Button` recebem texto simples; composição rica pode ser adicionada ao protocolo.
 
 `bun:ffi` é o transporte escolhido para este projeto Bun. Sua API ainda é marcada experimental pelo Bun; a ABI explícita, buffers do chamador e Worker sem callbacks nativos reduzem a superfície de integração. Referências: [Bun FFI](https://bun.com/docs/runtime/ffi), [Taffy](https://docs.rs/taffy/0.14.0), [Parley](https://docs.rs/parley/0.11.1), [Vello](https://docs.rs/vello/0.10.0).

@@ -1,5 +1,5 @@
-export { Window, View, Row, Column, Portal, Pressable, Icon, Text, Button, Image, Scroll, TextInput, TextArea, TitleBar, Modal, Dialog } from "./components";
-export type { WindowProps, ViewProps, PortalProps, PressableProps, IconName, IconProps, TextProps, ButtonProps, ImageProps, ScrollProps, TextInputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
+export { Window, View, Row, Column, Portal, Pressable, Icon, Text, Button, Image, Scroll, Input, TextArea, TitleBar, Modal, Dialog } from "./components";
+export type { WindowProps, ViewProps, PortalProps, PressableProps, IconName, IconProps, TextProps, ButtonProps, ImageProps, ScrollProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
 export { Checkbox, Switch, RadioGroup, Slider, Card, Badge, Separator, Progress, Tabs, Accordion } from "./controls";
 export type { CheckboxProps, SwitchProps, RadioOption, RadioGroupProps, SliderProps, CardProps, BadgeProps, SeparatorProps, ProgressProps, TabItem, TabsProps, AccordionItem, AccordionProps } from "./controls";
 export { VirtualList } from "./virtual-list";

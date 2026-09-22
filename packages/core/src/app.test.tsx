@@ -3,7 +3,7 @@ import type { NativeCommand, NativeEvent, SceneDocument } from "../../protocol/s
 import { createApp } from "./app";
 import type { NativeBridge } from "./bridge";
 import { Slider } from "./controls";
-import { TextInput, Window } from "./components";
+import { Input, Window } from "./components";
 import { InputOTP } from "./form-controls";
 
 class FakeBridge implements NativeBridge {
@@ -23,7 +23,7 @@ describe("controlled native reconciliation", () => {
     const bridge = new FakeBridge();
     let value = "12";
     const app = createApp(() => (
-      <Window><TextInput id="input" value={value} onChange={next => { if (/^\d*$/.test(next)) value = next; }} /></Window>
+      <Window><Input id="input" value={value} onChange={next => { if (/^\d*$/.test(next)) value = next; }} /></Window>
     ), { bridge });
     await app.ready;
     bridge.emit({ type: "change", id: "input", value: "12a" });

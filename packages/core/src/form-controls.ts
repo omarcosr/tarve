@@ -1,6 +1,6 @@
 import type { Style } from "../../protocol/src/index";
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
-import { Button, Column, Pressable, Row, Text, TextArea, TextInput, View, type ButtonProps, type IconName } from "./components";
+import { Button, Column, Pressable, Row, Text, TextArea, Input, View, type ButtonProps, type IconName } from "./components";
 import { Checkbox, RadioGroup, Slider, Switch } from "./controls";
 import { Select, type SelectOption } from "./select";
 import { theme } from "./theme";
@@ -107,7 +107,7 @@ function disableFormChild(child: Child, disabled: boolean | undefined): Child {
   if (!disabled) return child;
   if (Array.isArray(child)) return child.map(item => disableFormChild(item, true));
   if (!child || typeof child !== "object") return child;
-  const disable = child.type === TextInput || child.type === TextArea || child.type === Select || child.type === NativeSelect
+  const disable = child.type === Input || child.type === TextArea || child.type === Select || child.type === NativeSelect
     || child.type === InputGroup || child.type === InputOTP || child.type === Toggle || child.type === ToggleGroup
     || child.type === Checkbox || child.type === Switch || child.type === RadioGroup || child.type === Slider;
   const nested = child.props.children === undefined ? undefined : disableFormChild(child.props.children, true);
@@ -187,7 +187,7 @@ export function InputOTP({ value, length = 6, disabled, mask = false, pattern = 
     disabled,
     style: { position: "relative", width: totalWidth, height: slotHeight, ...style },
     children: [
-      jsx(TextInput, {
+      jsx(Input, {
         ...(id ? { id: `${id}-input` } : {}),
         disabled,
         value,

@@ -1,6 +1,6 @@
 import type { Style } from "../../protocol/src/index";
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
-import { Column, Icon, Pressable, Row, Scroll, Text, TextInput, View, type IconName } from "./components";
+import { Column, Icon, Pressable, Row, Scroll, Text, Input, View, type IconName } from "./components";
 import { theme } from "./theme";
 
 const c = theme.colors;
@@ -453,7 +453,7 @@ export function Combobox({
                 style: { align: "center", padding: { left: 8 }, borderWidth: { bottom: 1 }, borderColor: c.border },
                 children: [
                   jsx(Icon, { name: "search", size: 14, color: c.mutedForeground }),
-                  jsx(TextInput, {
+                  jsx(Input, {
                     id: `${id}-input`,
                     value: query,
                     placeholder: searchPlaceholder,
@@ -599,7 +599,7 @@ export function Command({
         style: { align: "center", padding: { left: 10 }, borderWidth: { bottom: 1 }, borderColor: c.border },
         children: [
           jsx(Icon, { name: "search", size: 15, color: c.mutedForeground }),
-          jsx(TextInput, {
+          jsx(Input, {
             id: `${id}-input`,
             value: query,
             placeholder,

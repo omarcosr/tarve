@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashSet;
+use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 22;
+pub const VERSION: u32 = 23;
 
 fn range_max() -> f64 {
     100.0
@@ -52,6 +53,8 @@ pub struct Node {
     pub value: Option<String>,
     #[serde(default)]
     pub placeholder: String,
+    #[serde(default = "default_input_type")]
+    pub input_type: String,
     pub control: Option<Control>,
     #[serde(default)]
     pub modal: bool,
@@ -69,6 +72,9 @@ pub struct Node {
 
 fn default_true() -> bool {
     true
+}
+fn default_input_type() -> String {
+    "text".into()
 }
 
 impl Node {
@@ -100,6 +106,18 @@ impl Node {
                 .unwrap_or(&self.placeholder)
         } else {
             &self.text
+        }
+    }
+    pub fn display_text(&self) -> String {
+        if self.kind == "input" && self.input_type == "password" {
+            let value = self.value.as_deref().unwrap_or("");
+            if value.is_empty() {
+                self.placeholder.clone()
+            } else {
+                "•".repeat(value.graphemes(true).count())
+            }
+        } else {
+            self.text_value().to_string()
         }
     }
     pub fn insets(&self, key: &str) -> [f32; 4] {
@@ -256,6 +274,12 @@ pub fn validate_patch(nodes: &[Node]) -> Result<(), String> {
 }
 
 fn validate_control(node: &Node) -> Result<(), String> {
+    if node.kind == "input"
+        && !["text", "password", "email", "number", "search", "tel", "url"]
+            .contains(&node.input_type.as_str())
+    {
+        return Err(format!("Unsupported input type: {}", node.input_type));
+    }
     if matches!(node.kind.as_str(), "slider" | "splitter") {
         let control = node
             .control

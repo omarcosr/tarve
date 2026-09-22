@@ -39,15 +39,15 @@ impl TextEngine {
         if !node.is_text() {
             return;
         }
-        let content = node.text_value();
-        let signature = (content.to_string(), node.signature(TEXT_KEYS));
+        let content = node.display_text();
+        let signature = (content.clone(), node.signature(TEXT_KEYS));
         if self.layouts.contains_key(&node.id) && self.signatures.get(&node.id) == Some(&signature)
         {
             return;
         }
         let mut builder = self
             .context
-            .ranged_builder(&mut self.fonts, content, 1.0, true);
+            .ranged_builder(&mut self.fonts, &content, 1.0, true);
         builder.push_default(StyleProperty::FontSize(node.number("fontSize", 14.0)));
         builder.push_default(StyleProperty::FontWeight(FontWeight::new(
             node.number("fontWeight", 400.0),
@@ -58,7 +58,7 @@ impl TextEngine {
         builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
             node.number("lineHeight", 1.5),
         )));
-        let mut layout = builder.build(content);
+        let mut layout = builder.build(&content);
         layout.break_all_lines(None);
         self.layouts.insert(node.id.clone(), layout);
         self.signatures.insert(node.id.clone(), signature);

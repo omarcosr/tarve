@@ -6,7 +6,7 @@ import {
   Row,
   Scroll,
   Text,
-  TextInput,
+  Input,
   Theme,
   TitleBar,
   View,
@@ -223,7 +223,7 @@ export function App() {
                   <Text size={13} weight={500}>
                     Full name
                   </Text>
-                  <TextInput
+                  <Input
                     id="name-input"
                     value={name}
                     placeholder="Your name"
@@ -237,7 +237,7 @@ export function App() {
                   <Text size={13} weight={500}>
                     Email address
                   </Text>
-                  <TextInput
+                  <Input
                     id="email-input"
                     value={email}
                     placeholder="you@example.com"
@@ -454,7 +454,7 @@ export function App() {
       >
         <Column gap={7}>
           <Text size={13} weight={500}>Project name</Text>
-          <TextInput placeholder="My new project" />
+          <Input placeholder="My new project" />
         </Column>
       </Modal>
     </Window>

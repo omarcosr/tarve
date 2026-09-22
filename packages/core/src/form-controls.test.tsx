@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Window, Text, Button, Column, TextInput } from "./components";
+import { Window, Text, Button, Column, Input } from "./components";
 import { compileTree } from "./reconciler";
 import { Alert, AspectRatio, ButtonGroup, Direction, Empty, Field, InputGroup, InputOTP, Item, Kbd, Label,
   NativeSelect, Toggle, ToggleGroup, Typography } from "./form-controls";
@@ -11,8 +11,8 @@ describe("form and visual controls", () => {
       <AspectRatio id="ratio" ratio={16 / 9} width={320} style={{ width: 999, height: 1 }}><Text>Media</Text></AspectRatio>
       <ButtonGroup id="buttons"><Button>One</Button><Button>Two</Button></ButtonGroup>
       <Empty id="empty" title="No data" description="Try again" />
-      <Field id="field" label="Email" required error="Required"><TextInput value="" /></Field>
-      <InputGroup id="input-group" prefix={<Text>$</Text>}><TextInput value="10" /></InputGroup>
+      <Field id="field" label="Email" required error="Required"><Input value="" /></Field>
+      <InputGroup id="input-group" prefix={<Text>$</Text>}><Input value="10" /></InputGroup>
       <Kbd id="kbd">Ctrl K</Kbd>
       <Label id="label" required>Name</Label>
       <Typography id="heading" variant="h1">Title</Typography>
@@ -78,9 +78,9 @@ describe("form and visual controls", () => {
 
   test("Field and InputGroup disable their form controls", () => {
     const tree = compileTree(<Window>
-      <Field id="disabled-field" label="Email" disabled><TextInput id="field-input" value="a" /></Field>
-      <InputGroup id="disabled-group" disabled><TextInput id="group-input" value="b" /></InputGroup>
-      <Field disabled><Column><InputGroup><TextInput id="nested-input" value="c" /></InputGroup></Column></Field>
+      <Field id="disabled-field" label="Email" disabled><Input id="field-input" value="a" /></Field>
+      <InputGroup id="disabled-group" disabled><Input id="group-input" value="b" /></InputGroup>
+      <Field disabled><Column><InputGroup><Input id="nested-input" value="c" /></InputGroup></Column></Field>
     </Window>);
     expect(tree.nodes.get("disabled-field")?.disabled).toBe(true);
     expect(tree.nodes.get("field-input")?.disabled).toBe(true);

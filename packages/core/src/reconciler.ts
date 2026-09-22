@@ -72,6 +72,7 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
       ...(p.src !== undefined ? { src: nativeAssetPath(p.src), fit: p.fit ?? "cover" } : {}),
       ...(p.value !== undefined ? { value: p.value } : {}),
       ...(p.placeholder !== undefined ? { placeholder: p.placeholder } : {}),
+      ...(p.inputType !== undefined ? { inputType: p.inputType } : {}),
       ...(p.disabled !== undefined ? { disabled: p.disabled } : {}),
       ...(p.modal !== undefined ? { modal: p.modal } : {}),
       ...(p.portal !== undefined ? { portal: p.portal } : {}),
@@ -124,7 +125,7 @@ export function diffTrees(previous: CompiledTree, next: CompiledTree): NativeNod
     if (!old || old.kind !== node.kind || old.children.length !== node.children.length
       || old.children.some((child, index) => child.id !== node.children[index].id)) return null;
     if (old.text !== node.text || old.src !== node.src || old.fit !== node.fit
-      || old.value !== node.value || old.placeholder !== node.placeholder || old.disabled !== node.disabled
+      || old.value !== node.value || old.placeholder !== node.placeholder || old.inputType !== node.inputType || old.disabled !== node.disabled
       || old.modal !== node.modal || old.portal !== node.portal || old.dismissOnOutside !== node.dismissOnOutside || old.focusable !== node.focusable
       || old.dragRegion !== node.dragRegion || old.windowAction !== node.windowAction
       || !sameFields(old.control ?? {}, node.control ?? {})

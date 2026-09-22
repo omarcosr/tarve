@@ -28,7 +28,7 @@ import {
   Scroll,
   Sidebar,
   Text,
-  TextInput,
+  Input,
   Toggle,
   ToggleGroup,
   Typography,
@@ -187,13 +187,13 @@ export function App() {
 
             <Section title="Field" description="Label, description, validation and control layout.">
               <Field label="Email address" description="We only use this for account notifications." required>
-                <TextInput value="hello@example.com" />
+                <Input type="email" value="hello@example.com" />
               </Field>
             </Section>
 
             <Section title="InputGroup" description="Prefixes and suffixes around an input.">
               <InputGroup prefix={<Text color={c.mutedForeground}>https://</Text>} suffix={<Kbd>.com</Kbd>}>
-                <TextInput value="tarve" style={{ width: "100%", borderWidth: 0, background: "#00000000" }} />
+                <Input value="tarve" style={{ width: "100%", borderWidth: 0, background: "#00000000" }} />
               </InputGroup>
             </Section>
 

@@ -1,8 +1,13 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { strict as assert } from "node:assert";
-import { createApp } from "../examples/node_modules/tarve/dist/npm/index.js";
 import { App as ShowcaseApp } from "../examples/components-view";
+
+// Runtime must use the freshly packed package installed into examples/node_modules.
+// Keep the specifier dynamic so TypeScript does not try to resolve declarations from
+// the package's internal JS path; the workspace public API supplies compile-time types.
+const installedTarveModule = "../examples/node_modules/tarve/dist/npm/index.js";
+const { createApp } = await import(installedTarveModule) as typeof import("../packages/core/src/index");
 
 const app = createApp(ShowcaseApp, { debug: true });
 const out = resolve("dist");

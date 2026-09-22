@@ -1,5 +1,5 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const PROTOCOL_VERSION = 22;
+export const PROTOCOL_VERSION = 23;
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "textarea" | "pressable" | "icon" | "slider" | "splitter";
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
@@ -35,6 +35,7 @@ export interface NativeNode {
   id: string; kind: NodeKind; style: Style; children: NativeNode[];
   text?: string; src?: string; fit?: "cover" | "contain"; disabled?: boolean;
   value?: string; placeholder?: string;
+  inputType?: "text" | "password" | "email" | "number" | "search" | "tel" | "url";
   control?: Control | null;
   modal?: boolean; focusable?: boolean;
   portal?: boolean;

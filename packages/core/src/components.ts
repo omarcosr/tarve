@@ -181,15 +181,25 @@ export function Scroll(props: ScrollProps): VNode {
     scrollbarColor: theme.colors.scrollbar,
   });
 }
-export interface TextInputProps extends BaseProps {
+export type InputType = "text" | "password" | "email" | "number" | "search" | "tel" | "url";
+export interface InputProps extends BaseProps {
+  type?: InputType;
   value?: string;
   placeholder?: string;
   disabled?: boolean;
   onChange?: (value: string) => void;
 }
-export function TextInput({ style, ...props }: TextInputProps): VNode {
+const inputTypes = new Set<InputType>(["text", "password", "email", "number", "search", "tel", "url"]);
+const numberEditPattern = /^[+-]?(?:\.?|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d*)?)$/;
+export function Input({ type = "text", value, style, ...props }: InputProps): VNode {
+  if (!inputTypes.has(type)) throw new TypeError(`Unsupported Input type: ${String(type)}`);
+  if (type === "number" && value !== undefined && !numberEditPattern.test(value)) {
+    throw new TypeError("Input type=number value must be a valid numeric edit value");
+  }
   return jsx("input", {
     ...props,
+    value,
+    inputType: type,
     style: {
       height: 38,
       minWidth: 120,

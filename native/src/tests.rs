@@ -302,6 +302,49 @@ fn otp_slot_focus_follows_the_native_input_caret() {
 }
 
 #[test]
+fn password_input_masks_rendered_text_and_does_not_copy_selection() {
+    let mut input = node(
+        "password",
+        "input",
+        json!({"width":220,"height":38,"fontSize":14,"padding":{"left":12,"right":12}}),
+        vec![],
+    );
+    input.input_type = "password".into();
+    input.value = Some("é🙂a".into());
+    assert_eq!(input.display_text(), "•••");
+
+    let mut tree = Tree::new(root(vec![input]));
+    tree.compute(300.0, 100.0).unwrap();
+    let _ = tree.focus("password");
+    tree.key("SelectAll");
+    assert_eq!(tree.selected_text(), None);
+    let snapshots = tree.snapshots();
+    let password = snapshots.iter().find(|entry| entry["id"] == "password").unwrap();
+    assert_eq!(password["text"], "•••");
+}
+
+#[test]
+fn number_input_rejects_non_numeric_native_edits() {
+    let mut input = node(
+        "number",
+        "input",
+        json!({"width":220,"height":38,"fontSize":14}),
+        vec![],
+    );
+    input.input_type = "number".into();
+    input.value = Some("12".into());
+    let mut tree = Tree::new(root(vec![input]));
+    tree.compute(300.0, 100.0).unwrap();
+    let _ = tree.focus("number");
+    tree.key("End");
+    assert!(tree.type_text("x").is_empty());
+    assert_eq!(tree.entries["number"].node.value.as_deref(), Some("12"));
+    let events = tree.type_text(".5");
+    assert_eq!(tree.entries["number"].node.value.as_deref(), Some("12.5"));
+    assert_eq!(events[0]["type"], "change");
+}
+
+#[test]
 fn disabled_state_overrides_other_visual_states() {
     let mut button = node(
         "disabled",

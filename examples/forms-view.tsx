@@ -1,6 +1,6 @@
 import {
   Accordion, Badge, Button, Card, Checkbox, Column, Progress, RadioGroup, Row,
-  Scroll, Select, Separator, Slider, Switch, Tabs, Text, TextArea, TextInput, Window, Theme, lightTheme, theme,
+  Scroll, Select, Separator, Slider, Switch, Tabs, Text, TextArea, Input, Window, Theme, lightTheme, theme,
 } from "tarve";
 
 const c = theme.colors;
@@ -41,7 +41,7 @@ export function App() {
                   <Card title="Profile" description="Set the details visible to your team.">
                     <Column gap={6}>
                       <Text size={13} weight={500}>Display name</Text>
-                      <TextInput id="display-name" value={name} placeholder="Your name" onChange={value => { name = value; saved = false; }} />
+                      <Input id="display-name" value={name} placeholder="Your name" onChange={value => { name = value; saved = false; }} />
                     </Column>
                     <Column gap={6}>
                       <Text size={13} weight={500}>Role</Text>

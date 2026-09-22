@@ -1,6 +1,6 @@
 import type { Style } from "../../protocol/src/index";
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
-import { Button, Column, Icon, Pressable, Row, Scroll, Text, TextInput, View, type IconName } from "./components";
+import { Button, Column, Icon, Pressable, Row, Scroll, Text, Input, View, type IconName } from "./components";
 import { Checkbox, RadioGroup, type RadioOption } from "./controls";
 import { Field } from "./form-controls";
 import { Sheet, type SheetSide } from "./extra-controls";
@@ -359,7 +359,7 @@ export function Questionnaire({ questions, values, current, previousLabel = "Pre
   const canContinue = !question.required || hasAnswer;
   let control: Child;
   if (question.type === "text") {
-    control = jsx(TextInput, { ...(id ? { id: `${id}-input-${question.id}` } : {}), value: typeof answer === "string" ? answer : "",
+    control = jsx(Input, { ...(id ? { id: `${id}-input-${question.id}` } : {}), value: typeof answer === "string" ? answer : "",
       placeholder: question.placeholder, onChange: (value: string) => onValueChange?.(question.id, value) });
   } else if (question.type === "single") {
     control = jsx(RadioGroup, { ...(id ? { id: `${id}-single-${question.id}` } : {}), value: typeof answer === "string" ? answer : "",

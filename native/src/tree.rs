@@ -123,6 +123,63 @@ fn visual_optional_number(node: &Node, key: &str, state: VisualState) -> Option<
     visual_value(node, key, state).as_f64()
 }
 
+fn input_display_index(node: &Node, value: &str, actual_index: usize) -> usize {
+    if node.kind == "input" && node.input_type == "password" {
+        let actual_index = floor_boundary(value, actual_index.min(value.len()));
+        value[..actual_index].graphemes(true).count() * '•'.len_utf8()
+    } else {
+        floor_boundary(value, actual_index.min(value.len()))
+    }
+}
+
+fn input_actual_index(node: &Node, value: &str, display_index: usize) -> usize {
+    if node.kind == "input" && node.input_type == "password" {
+        let graphemes = display_index / '•'.len_utf8();
+        value
+            .grapheme_indices(true)
+            .nth(graphemes)
+            .map(|(index, _)| index)
+            .unwrap_or(value.len())
+    } else {
+        floor_boundary(value, display_index.min(value.len()))
+    }
+}
+
+fn valid_number_edit(value: &str) -> bool {
+    if value.is_empty() {
+        return true;
+    }
+    let mut exponent_at = None;
+    for (index, ch) in value.char_indices() {
+        if matches!(ch, 'e' | 'E') {
+            if exponent_at.is_some() {
+                return false;
+            }
+            exponent_at = Some(index);
+        }
+    }
+    let (mantissa, exponent) = exponent_at.map_or((value, None), |index| {
+        (&value[..index], Some(&value[index + 1..]))
+    });
+    let mantissa_body = mantissa
+        .strip_prefix(['+', '-'])
+        .unwrap_or(mantissa);
+    if mantissa_body.chars().any(|ch| !ch.is_ascii_digit() && ch != '.')
+        || mantissa_body.chars().filter(|ch| *ch == '.').count() > 1
+    {
+        return false;
+    }
+    if let Some(exponent) = exponent {
+        if !mantissa_body.chars().any(|ch| ch.is_ascii_digit()) {
+            return false;
+        }
+        let exponent = exponent.strip_prefix(['+', '-']).unwrap_or(exponent);
+        exponent.chars().all(|ch| ch.is_ascii_digit())
+    } else {
+        true
+    }
+}
+
 pub struct Entry {
     pub node: Node,
     children: Vec<String>,
@@ -346,14 +403,14 @@ impl Tree {
             measure_dirty = prev.measure_dirty
                 || node.src != prev.node.src
                 || node.kind != prev.node.kind
-                || node.text_value() != prev.node.text_value()
+                || node.display_text() != prev.node.display_text()
                 || TEXT_KEYS
                     .iter()
                     .any(|key| node.style[*key] != prev.node.style[*key]);
             if structure_dirty || layout_dirty || measure_dirty {
                 self.dirty.layout = true;
             }
-            if node.text_value() != prev.node.text_value()
+            if node.display_text() != prev.node.display_text()
                 || TEXT_KEYS
                     .iter()
                     .any(|key| node.style[*key] != prev.node.style[*key])
@@ -1525,6 +1582,9 @@ impl Tree {
     }
     pub fn selected_text(&self) -> Option<String> {
         let id = self.focused.as_ref()?;
+        if self.entries[id].node.kind == "input" && self.entries[id].node.input_type == "password" {
+            return None;
+        }
         let value = self.entries[id].node.value.as_deref().unwrap_or("");
         let (start, end) = self.selected_range()?;
         Some(value[start..end].to_string())
@@ -1766,6 +1826,12 @@ impl Tree {
             .filter(|c| !c.is_control() || (multiline && *c == '\n'))
             .collect();
         value.insert_str(self.caret, &text);
+        if self.entries[&id].node.kind == "input"
+            && self.entries[&id].node.input_type == "number"
+            && !valid_number_edit(&value)
+        {
+            return vec![];
+        }
         self.caret += text.len();
         self.selection_anchor = None;
         self.set_input(id, value)
@@ -1797,10 +1863,13 @@ impl Tree {
         boundaries.push(end);
         let mut out: Vec<BoxRect> = Vec::new();
         for pair in boundaries.windows(2) {
-            let Some(a) = self.text.caret_rect(id, pair[0], width) else {
+            let node = &self.entries[id].node;
+            let a_index = input_display_index(node, &value, pair[0]);
+            let b_index = input_display_index(node, &value, pair[1]);
+            let Some(a) = self.text.caret_rect(id, a_index, width) else {
                 continue;
             };
-            let Some(b) = self.text.caret_rect(id, pair[1], width) else {
+            let Some(b) = self.text.caret_rect(id, b_index, width) else {
                 continue;
             };
             if (a.y0 - b.y0).abs() > 0.5 {
@@ -1844,7 +1913,7 @@ impl Tree {
         };
         let value = entry.node.value.as_deref().unwrap_or("");
         if let Some(index) = self.text.index_at(id, x, y, multiline.then_some(width)) {
-            self.caret = floor_boundary(value, index.min(value.len()));
+            self.caret = input_actual_index(&entry.node, value, index);
             self.dirty.paint = true;
         }
     }
@@ -1916,7 +1985,7 @@ impl Tree {
     }
     fn snapshot_node(&self, id: &str, offset: f64, out: &mut Vec<Value>) {
         let e = &self.entries[id];
-        out.push(json!({"id":id,"kind":e.node.kind,"x":e.rect.x0,"y":e.rect.y0-offset,"width":e.rect.width(),"height":e.rect.height(),"scroll":e.scroll,"scrollMax":e.scroll_max,"text":e.node.text_value(),"control":e.node.control}));
+        out.push(json!({"id":id,"kind":e.node.kind,"x":e.rect.x0,"y":e.rect.y0-offset,"width":e.rect.width(),"height":e.rect.height(),"scroll":e.scroll,"scrollMax":e.scroll_max,"text":e.node.display_text(),"control":e.node.control}));
         for child in &e.children {
             self.snapshot_node(child, offset + e.scroll, out);
         }

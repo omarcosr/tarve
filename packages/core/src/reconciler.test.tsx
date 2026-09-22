@@ -1,17 +1,25 @@
 import { describe, expect, test } from "bun:test";
-import { Window, Column, Text, Button, TextInput, TitleBar, Modal, Pressable } from "./components";
+import { Window, Column, Text, Button, Input, TitleBar, Modal, Pressable } from "./components";
 import { compileTree, diffTrees } from "./reconciler";
 import { createTheme, darkTheme, lightTheme, Theme, theme } from "./theme";
 
 describe("native TSX protocol", () => {
   test("compiles function components, flattens children, and keeps callbacks outside JSON", () => {
     let clicked = false;
-    const tree = compileTree(<Window title="Test"><Column>{null}<Text>Hello {2}</Text><Button id="button" onClick={() => { clicked = true; }}>Click</Button><TextInput id="input" value="Olá"/></Column></Window>);
+    const tree = compileTree(<Window title="Test"><Column>{null}<Text>Hello {2}</Text><Button id="button" onClick={() => { clicked = true; }}>Click</Button><Input id="input" value="Olá"/></Column></Window>);
     expect(tree.document.root.kind).toBe("window");
     expect(tree.document.root.children[0].children[0].text).toBe("Hello 2");
+    expect(tree.nodes.get("input")?.inputType).toBe("text");
     expect(JSON.stringify(tree.document)).not.toContain("onClick");
     tree.handlers.get("button")?.onClick?.();
     expect(clicked).toBe(true);
+  });
+  test("Input serializes native input types and validates number values", () => {
+    const password = compileTree(<Window><Input id="password" type="password" value="secret" /></Window>);
+    expect(password.nodes.get("password")?.inputType).toBe("password");
+    const number = compileTree(<Window><Input id="number" type="number" value="-12.5e2" /></Window>);
+    expect(number.nodes.get("number")?.inputType).toBe("number");
+    expect(() => compileTree(<Window><Input type="number" value="12x" /></Window>)).toThrow("valid numeric edit value");
   });
   test("keyed identities survive reordering", () => {
     const build = (values: string[]) => compileTree(<Window><Column>{values.map(v => <Text key={v}>{v}</Text>)}</Column></Window>);
@@ -46,7 +54,7 @@ describe("native TSX protocol", () => {
       <Window>
         <Button id="behind">Behind</Button>
         <Modal id="dialog" open={open} title="Dialog" onOpenChange={(value) => { open = value; }}>
-          <TextInput id="dialog-input" />
+          <Input id="dialog-input" />
         </Modal>
       </Window>,
     );
@@ -105,7 +113,7 @@ describe("native TSX protocol", () => {
       <Window theme={lightTheme}>
         <Column>
           <Text id="label">Hello</Text>
-          <TextInput id="input" placeholder="Name" />
+          <Input id="input" placeholder="Name" />
           <Button id="button">Save</Button>
         </Column>
       </Window>,
@@ -114,7 +122,7 @@ describe("native TSX protocol", () => {
       <Window theme={darkTheme}>
         <Column>
           <Text id="label">Hello</Text>
-          <TextInput id="input" placeholder="Name" />
+          <Input id="input" placeholder="Name" />
           <Button id="button">Save</Button>
         </Column>
       </Window>,
@@ -173,7 +181,7 @@ describe("native TSX protocol", () => {
     const tree = compileTree(
       <Window theme={custom}>
         <Button id="themed-focus">Save</Button>
-        <TextInput id="local-focus" style={{ focus: { outlineWidth: 3 } }} />
+        <Input id="local-focus" style={{ focus: { outlineWidth: 3 } }} />
         <Pressable id="not-focusable" focusable={false}>No focus</Pressable>
       </Window>,
     );
