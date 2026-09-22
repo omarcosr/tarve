@@ -20,6 +20,8 @@ describe("advanced controls", () => {
 
   test("Chart creates scaled bars", () => {
     const tree = compileTree(<Window><Chart id="chart" data={[{ label: "A", value: 10 }, { label: "B", value: 20 }]} /></Window>);
+    expect(tree.nodes.get("chart-plot-0")?.style.flex).toBe(1);
+    expect(tree.nodes.get("chart-plot-1")?.style.flex).toBe(1);
     expect(tree.nodes.get("chart-bar-0")?.style.height).toBe("50%");
     expect(tree.nodes.get("chart-bar-1")?.style.height).toBe("100%");
     expect(tree.nodes.get("chart-bar-1")?.control).toEqual({ role: "progress", label: "B", value: 20, min: 0, max: 20 });

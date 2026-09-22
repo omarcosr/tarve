@@ -67,6 +67,7 @@
     "setup:examples": "bun scripts/setup-examples.ts",
     "verify": "bun scripts/verify.ts",
     "test": "bun test packages && cargo test --manifest-path native/Cargo.toml",
+    "test:visual": "bun run build:native && bun scripts/visual-regression.tsx",
     "smoke": "bun run build:native && bun run pack && bun run setup:examples && bun scripts/smoke.ts",
     "smoke:controls": "bun run build:native && bun run pack && bun run setup:examples && bun scripts/smoke-controls.ts",
     "smoke:virtual-list": "bun run build:native && bun run pack && bun run setup:examples && bun scripts/smoke-virtual-list.ts",

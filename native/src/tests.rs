@@ -1,10 +1,11 @@
 use crate::{
     protocol::{self, Node},
-    runtime::anchored_window_position,
+    runtime::{anchored_window_position, cursor_for_node},
     tree::Tree,
 };
 use serde_json::json;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
+use winit::window::CursorIcon;
 
 fn node(id: &str, kind: &str, style: serde_json::Value, children: Vec<Node>) -> Node {
     serde_json::from_value(json!({"id":id,"kind":kind,"style":style,"children":children})).unwrap()
@@ -53,6 +54,19 @@ fn window_position_protocol_accepts_presets_and_logical_coordinates() {
         }
         _ => panic!("expected coordinate window position"),
     }
+}
+
+#[test]
+fn splitter_cursor_matches_resize_axis() {
+    let mut horizontal = node("horizontal", "splitter", json!({}), vec![]);
+    horizontal.control = Some(serde_json::from_value(json!({
+        "role":"slider","orientation":"horizontal","value":50,"min":0,"max":100,"step":1
+    })).unwrap());
+    let mut vertical = horizontal.clone();
+    vertical.id = "vertical".into();
+    vertical.control.as_mut().unwrap().orientation = "vertical".into();
+    assert_eq!(cursor_for_node(Some(&horizontal)), CursorIcon::ColResize);
+    assert_eq!(cursor_for_node(Some(&vertical)), CursorIcon::RowResize);
 }
 
 #[test]

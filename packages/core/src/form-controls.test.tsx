@@ -41,7 +41,10 @@ describe("form and visual controls", () => {
     const tree = compileTree(<Window><InputOTP id="otp" value="12" length={4} onValueChange={value => values.push(value)} /></Window>);
     expect([...tree.nodes.values()].filter(node => node.kind === "input")).toHaveLength(1);
     expect(tree.nodes.get("otp-input")?.value).toBe("12");
+    expect(tree.nodes.get("otp-input")?.style.focus?.outlineWidth).toBe(0);
+    expect(tree.nodes.get("otp")?.style.width).toBe(168);
     expect(tree.nodes.get("otp-slot-0")?.children[0]?.text).toBe("1");
+    expect(Array.from({ length: 4 }, (_, index) => tree.nodes.get(`otp-slot-${index}`)?.style.width)).toEqual([36, 36, 36, 36]);
     tree.handlers.get("otp-input")?.onChange?.("12a34");
     expect(values).toEqual(["1234"]);
 

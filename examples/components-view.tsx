@@ -178,6 +178,7 @@ export function App() {
 
             <Section title="Empty" description="A polished empty state with optional actions.">
               <Empty
+                id="demo-empty"
                 title="No projects yet"
                 description="Create your first project to get started."
                 action={<Button size="sm">Create project</Button>}
