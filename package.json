@@ -34,9 +34,9 @@
     "setup:examples": "bun scripts/setup-examples.ts",
     "verify": "bun scripts/verify.ts",
     "test": "bun test packages && cargo test --manifest-path native/Cargo.toml",
-    "smoke": "bun run pack && bun run setup:examples && bun scripts/smoke.ts",
-    "smoke:controls": "bun run pack && bun run setup:examples && bun scripts/smoke-controls.ts",
-    "smoke:virtual-list": "bun run pack && bun run setup:examples && bun scripts/smoke-virtual-list.ts",
+    "smoke": "bun run build:native && bun run pack && bun run setup:examples && bun scripts/smoke.ts",
+    "smoke:controls": "bun run build:native && bun run pack && bun run setup:examples && bun scripts/smoke-controls.ts",
+    "smoke:virtual-list": "bun run build:native && bun run pack && bun run setup:examples && bun scripts/smoke-virtual-list.ts",
     "smoke:exe": "bun scripts/smoke-exe.ts",
     "smoke:package": "bun scripts/smoke-package.ts",
     "bench": "bun scripts/benchmark.tsx"

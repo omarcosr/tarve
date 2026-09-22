@@ -65,6 +65,11 @@ struct VisualState {
     disabled: bool,
 }
 
+struct ScrollDrag {
+    id: String,
+    grab: f64,
+}
+
 fn visual_value<'a>(node: &'a Node, key: &str, state: VisualState) -> &'a Value {
     let mut value = &node.style[key];
 
@@ -141,6 +146,7 @@ pub struct Tree {
     pub hovered: Option<String>,
     pub focused: Option<String>,
     pressed: Option<String>,
+    scroll_drag: Option<ScrollDrag>,
     pub mouse: (f64, f64),
     caret: usize,
     select_all: bool,
@@ -165,6 +171,7 @@ impl Tree {
             hovered: None,
             focused: None,
             pressed: None,
+            scroll_drag: None,
             mouse: (-1.0, -1.0),
             caret: 0,
             select_all: false,
@@ -949,6 +956,13 @@ impl Tree {
         if !keep_pressed {
             self.pressed = None;
         }
+        if self
+            .scroll_drag
+            .as_ref()
+            .is_some_and(|drag| !self.entries.contains_key(&drag.id))
+        {
+            self.scroll_drag = None;
+        }
         if changed {
             self.dirty.paint = true;
         }
@@ -1030,6 +1044,11 @@ impl Tree {
     }
     pub fn pointer_move(&mut self, x: f64, y: f64) -> Vec<Value> {
         self.mouse = (x, y);
+        if let Some(drag) = &self.scroll_drag {
+            let id = drag.id.clone();
+            let grab = drag.grab;
+            return self.drag_scrollbar(&id, grab);
+        }
         let next = self.hit(&self.root, 0.0, self.entries[&self.root].rect, false);
         let mut events = vec![];
         if next != self.hovered {
@@ -1061,6 +1080,7 @@ impl Tree {
         }
     }
     pub fn blur(&mut self) {
+        self.scroll_drag = None;
         if self.focused.take().is_some() || self.pressed.take().is_some() {
             self.caret = 0;
             self.select_all = false;
@@ -1068,6 +1088,14 @@ impl Tree {
         }
     }
     pub fn pointer_down(&mut self) -> Vec<Value> {
+        if let Some((id, grab)) = self.scrollbar_at_pointer() {
+            self.pressed = None;
+            self.scroll_drag = Some(ScrollDrag {
+                id: id.clone(),
+                grab,
+            });
+            return self.drag_scrollbar(&id, grab);
+        }
         self.hovered = self.hit(&self.root, 0.0, self.entries[&self.root].rect, false);
         self.pressed = self.hovered.clone();
         if let Some(id) = self.hovered.clone() {
@@ -1089,6 +1117,9 @@ impl Tree {
         }
     }
     pub fn pointer_up(&mut self) -> Vec<Value> {
+        if self.scroll_drag.take().is_some() {
+            return vec![];
+        }
         self.hovered = self.hit(&self.root, 0.0, self.entries[&self.root].rect, false);
         let mut out = vec![];
         if let Some(id) = self.pressed.take() {
@@ -1103,24 +1134,76 @@ impl Tree {
     }
     pub fn wheel(&mut self, delta: f64) -> Vec<Value> {
         if let Some(id) = self.hit(&self.root, 0.0, self.entries[&self.root].rect, true) {
-            let entry = self.entries.get_mut(&id).unwrap();
-            let next = (entry.scroll + delta).clamp(0.0, entry.scroll_max);
-            if next != entry.scroll {
-                entry.scroll = next;
-                if !entry
-                    .node
-                    .control
-                    .as_ref()
-                    .is_some_and(|control| control.role == "virtualList")
-                {
-                    self.dirty.paint = true;
-                }
-                return vec![
-                    json!({"type":"scroll", "id":id, "offset":next, "max":entry.scroll_max}),
-                ];
-            }
+            let next = self.entries[&id].scroll + delta;
+            return self.scroll_to(&id, next);
         }
         vec![]
+    }
+    fn scrollbar_at_pointer(&self) -> Option<(String, f64)> {
+        let id = self.hit(&self.root, 0.0, self.entries[&self.root].rect, true)?;
+        let entry = self.entries.get(&id)?;
+        if entry.node.kind != "scroll" || entry.scroll_max <= 0.0 {
+            return None;
+        }
+        let rect = self.visible_rect(&id)?;
+        let track = rect.height() - 12.0;
+        if track <= 0.0
+            || self.mouse.0 < rect.x1 - 10.0
+            || self.mouse.0 > rect.x1
+            || self.mouse.1 < rect.y0 + 6.0
+            || self.mouse.1 > rect.y1 - 6.0
+        {
+            return None;
+        }
+        let thumb = (track * rect.height() / (rect.height() + entry.scroll_max))
+            .max(28.0)
+            .min(track);
+        let top = rect.y0 + 6.0 + (track - thumb) * entry.scroll / entry.scroll_max;
+        let grab = if self.mouse.1 >= top && self.mouse.1 <= top + thumb {
+            self.mouse.1 - top
+        } else {
+            thumb / 2.0
+        };
+        Some((id, grab))
+    }
+    fn drag_scrollbar(&mut self, id: &str, grab: f64) -> Vec<Value> {
+        let Some(entry) = self.entries.get(id) else {
+            return vec![];
+        };
+        let Some(rect) = self.visible_rect(id) else {
+            return vec![];
+        };
+        let track = rect.height() - 12.0;
+        let thumb = (track * rect.height() / (rect.height() + entry.scroll_max))
+            .max(28.0)
+            .min(track);
+        let travel = track - thumb;
+        if travel <= 0.0 {
+            return vec![];
+        }
+        let offset =
+            ((self.mouse.1 - grab - rect.y0 - 6.0) / travel).clamp(0.0, 1.0) * entry.scroll_max;
+        self.scroll_to(id, offset)
+    }
+    fn scroll_to(&mut self, id: &str, offset: f64) -> Vec<Value> {
+        if !offset.is_finite() {
+            return vec![];
+        }
+        let entry = self.entries.get_mut(id).unwrap();
+        let next = offset.clamp(0.0, entry.scroll_max);
+        if (next - entry.scroll).abs() < 1e-6 {
+            return vec![];
+        }
+        entry.scroll = next;
+        if !entry
+            .node
+            .control
+            .as_ref()
+            .is_some_and(|control| control.role == "virtualList")
+        {
+            self.dirty.paint = true;
+        }
+        vec![json!({"type":"scroll", "id":id, "offset":next, "max":entry.scroll_max})]
     }
     pub fn selected_text(&self) -> Option<String> {
         self.focused

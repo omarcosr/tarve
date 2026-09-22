@@ -34,6 +34,18 @@ try {
   assert(middle.layoutNodes < 120);
   assert(scrollEvents.some(event => event.type === "scroll" && event.offset === 360));
 
+  const thumbX = list.x + list.width - 5;
+  app.debug({ type: "input", action: "move", x: thumbX, y: list.y + 15 });
+  app.debug({ type: "input", action: "down" });
+  app.debug({ type: "input", action: "move", x: thumbX, y: list.y + list.height / 2 });
+  app.debug({ type: "input", action: "up" });
+  const dragged = await settle();
+  const dragOffset = node(dragged, "records").scroll;
+  assert(dragOffset > 500_000, "Dragging the scrollbar should jump through the virtual list");
+  assert(node(dragged, "visible-range").text.includes(`First visible row: ${Math.floor(dragOffset / 36) + 1}`));
+  assert(!dragged.nodes.some(item => item.id === "record-0"));
+  assert(dragged.layoutNodes < 120);
+
   app.debug({ type: "input", action: "wheel", delta: 2_000_000 });
   const last = await settle();
   assert(last.nodes.some(item => item.id === "record-49999"));

@@ -238,6 +238,46 @@ fn scroll_clamps_and_hit_test_respects_viewport() {
     tree.pointer_move(20.0, 20.0);
     assert_ne!(tree.hovered.as_deref(), Some("b0"));
 }
+
+#[test]
+fn dragging_scrollbar_moves_virtual_list_and_emits_scroll_event() {
+    let mut scroll = node(
+        "list",
+        "scroll",
+        json!({"height":200}),
+        vec![node(
+            "content",
+            "view",
+            json!({"height":2000,"shrink":0}),
+            vec![],
+        )],
+    );
+    scroll.control = Some(serde_json::from_value(json!({"role":"virtualList","value":0})).unwrap());
+    let mut tree = Tree::new(root(vec![scroll]));
+    tree.compute(300.0, 300.0).unwrap();
+    tree.scene(1.0);
+    let rect = tree.entries["list"].rect;
+    tree.pointer_move(rect.x1 - 5.0, rect.y0 + 15.0);
+    tree.pointer_down();
+    let events = tree.pointer_move(rect.x1 - 5.0, rect.y0 + 100.0);
+    assert!(tree.entries["list"].scroll > 0.0);
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "scroll" && event["id"] == "list")
+    );
+    assert!(
+        !tree.dirty.paint,
+        "virtual rows should be painted after the matching update"
+    );
+    tree.pointer_up();
+    let stopped = tree.entries["list"].scroll;
+    tree.pointer_move(rect.x1 - 5.0, rect.y0 + 140.0);
+    assert_eq!(
+        tree.entries["list"].scroll, stopped,
+        "dragging must stop on mouse release"
+    );
+}
 #[test]
 fn input_deletes_unicode_graphemes_and_disabled_button_never_clicks() {
     let mut input = node("input", "input", json!({"height":38}), vec![]);
