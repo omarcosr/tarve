@@ -11,8 +11,8 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 - Protocol is currently **v29** on both TypeScript and Rust sides and is checked by the FFI bridge before startup.
 - npm packaging includes JS, JSX runtime, declarations and the Windows x64 native library.
 - External-consumer and standalone-EXE smoke tests are part of `bun run verify`.
-- Real GPU visual regression exists in `bun run test:visual`; it is still a separate gate rather than part of `verify`.
-- Latest full validation on this tree: `bun run verify` **PASS** and `bun run test:visual` **PASS** with the freshly packed/installed v29 artifact. The visual gate now exercises composed Button semantics and real horizontal ScrollArea movement; `verify` includes the Windows x64 `smoke:accessibility` gate against the real OS UI Automation provider.
+- Real GPU visual regression is a mandatory release gate: `bun run verify` runs `test:visual` after package/EXE smoke validation, and `bun run release:check` is the CI/release entry point for the same gate.
+- Latest full validation on this tree: `bun run verify` **PASS**, including the integrated `test:visual` gate against the freshly packed/installed v29 artifact. The visual gate exercises composed Button semantics and real horizontal ScrollArea movement; `verify` also includes the Windows x64 `smoke:accessibility` gate against the real OS UI Automation provider and the stale-package-output regression test.
 
 ## Production foundations already implemented
 
@@ -40,9 +40,9 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 
 ## Release and operational hardening
 
-- [ ] Add CI on a Windows x64 runner for `check`, Clippy, Bun/Rust tests, package smoke and standalone EXE smoke.
-- [ ] Decide whether `test:visual` becomes a mandatory release gate and maintain approved captures.
-- [ ] Clean generated package/type output before packaging so removed files cannot survive from a previous build.
+- [x] Windows x64 CI in `.github/workflows/ci.yml` installs locked Bun/Rust dependencies and runs the full `release:check` gate, with visual captures uploaded as artifacts. The workflow is configured for pushes, pull requests and manual dispatch; remote execution still occurs when GitHub runs that workflow.
+- [x] `test:visual` is a mandatory release gate inside `bun run verify` / `bun run release:check`, after package and standalone-EXE smoke validation.
+- [x] Packaging removes stale `dist/npm`, `dist/types`, `native/win32-x64` and prior `dist/tarve-*.tgz` outputs before rebuilding; a focused Bun regression test verifies stale generated files cannot survive while unrelated visual artifacts are preserved.
 - [ ] Synchronize root/core/protocol/Cargo package versions automatically; protocol schema versioning remains separate from package SemVer.
 - [ ] Separate the C ABI version from the JSON protocol version and test both mismatch paths independently.
 - [ ] Bound/coalesce the native event `VecDeque` for high-rate events such as hover/scroll/frame notifications.
@@ -61,6 +61,6 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 
 ## Release completion criteria
 
-For a Windows x64 beta/internal production release, the shipped npm tarball and standalone EXE must pass `bun run verify`, and native/protocol changes should also pass `bun run test:visual` before release.
+For a Windows x64 beta/internal production release, the shipped npm tarball and standalone EXE must pass `bun run release:check` (the same full gate as `bun run verify`), which includes the mandatory real-GPU `test:visual` regression.
 
 For a broad public **production-ready / 1.0** claim, automate the mandatory Windows x64 release gates, complete the applicable distribution/diagnostics hardening above, and document/test the intentionally supported platform/lifecycle limits.

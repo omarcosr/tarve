@@ -5,6 +5,7 @@ const steps = [
   "check",
   "lint",
   "test",
+  "test:package-clean",
   "smoke",
   "smoke:controls",
   "smoke:virtual-list",
@@ -12,6 +13,7 @@ const steps = [
   "pack",
   "smoke:package",
   "smoke:exe",
+  "test:visual",
 ];
 for (const step of steps) {
   console.log(`\n[tarve verify] ${step}`);

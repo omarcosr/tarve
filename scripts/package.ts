@@ -1,9 +1,11 @@
 import { copyFile, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { buildNative } from "./native";
+import { cleanPackageOutputs } from "./package-output";
 
 const root = resolve(import.meta.dir, "..");
 if (process.platform !== "win32" || process.arch !== "x64") throw new Error("The npm release currently targets Windows x64.");
+await cleanPackageOutputs(root);
 const library = await buildNative(true);
 const output = join(root, "dist/npm");
 await mkdir(output, { recursive: true });

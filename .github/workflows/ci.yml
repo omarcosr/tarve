@@ -1,0 +1,60 @@
+name: Windows x64 CI
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tarve-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-x64:
+    name: Windows x64 release gate
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check locked Rust dependency graph
+        run: cargo check --manifest-path native/Cargo.toml --locked
+
+      - name: Rust formatting
+        run: cargo fmt --manifest-path native/Cargo.toml -- --check
+
+      - name: Full release gate
+        run: bun run release:check
+
+      - name: Upload visual captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarve-visual-captures-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: |
+            dist/*-real.png
+            work/*.png
+          retention-days: 14
