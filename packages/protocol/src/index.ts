@@ -1,5 +1,5 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const PROTOCOL_VERSION = 28;
+export const PROTOCOL_VERSION = 29;
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "textarea" | "pressable" | "icon" | "slider" | "splitter";
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
@@ -40,6 +40,7 @@ export interface NativeNode {
   value?: string; placeholder?: string;
   inputType?: "text" | "password" | "email" | "number" | "search" | "tel" | "url";
   scrollSpeed?: number;
+  scrollOrientation?: ScrollOrientation;
   control?: Control | null;
   modal?: boolean; focusable?: boolean;
   rovingGroup?: string;
@@ -49,6 +50,8 @@ export interface NativeNode {
   dragRegion?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "close";
 }
+export type ScrollOrientation = "vertical" | "horizontal" | "both";
+export interface ScrollPosition { x: number; y: number; maxX: number; maxY: number }
 export type WindowPositionPreset =
   | "top-left" | "top" | "top-right"
   | "left" | "center" | "right"
@@ -77,10 +80,11 @@ export type NativeCommand =
   | { type: "resize"; width: number; height: number }
   | { type: "capture"; path: string; requestId: string }
   | { type: "fileDialog"; mode: FileDialogMode; options: FileDialogOptions; requestId: string }
-  | { type: "input"; action: "move" | "down" | "up" | "wheel" | "text" | "key"; x?: number; y?: number; delta?: number; text?: string };
+  | { type: "input"; action: "move" | "down" | "up" | "wheel" | "text" | "key"; x?: number; y?: number; delta?: number; deltaX?: number; deltaY?: number; text?: string };
 export interface NodeSnapshot {
   id: string; kind: NodeKind; x: number; y: number; width: number; height: number;
   scroll: number; scrollMax: number; text: string;
+  scrollX?: number; scrollY?: number; scrollMaxX?: number; scrollMaxY?: number;
   control?: Control | null;
 }
 export interface Snapshot {
@@ -98,7 +102,7 @@ export type NativeEvent =
   | { type: "outside"; id: string }
   | { type: "change"; id: string; value: string }
   | { type: "valueChange"; id: string; value: number }
-  | { type: "scroll"; id: string; offset: number; max: number }
+  | { type: "scroll"; id: string; offset: number; max: number; offsetX?: number; offsetY?: number; maxX?: number; maxY?: number }
   | { type: "hover"; id: string; entered: boolean }
   | { type: "key"; id: string; key: string }
   | { type: "blur"; id: string }

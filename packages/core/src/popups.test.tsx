@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Button, Pressable, Text, Window } from "./components";
+import { Button, Icon, Pressable, Text, Window } from "./components";
 import { jsx } from "./jsx-runtime";
 import { compileTree } from "./reconciler";
 import { Combobox, Command, CommandPalette, ContextMenu, DropdownMenu, Popover, Tooltip } from "./popups";
@@ -135,6 +135,21 @@ describe("popup and selection components", () => {
     expect(closed.nodes.get("closed-menu-trigger")?.control?.expanded).toBe(false);
     closed.handlers.get("closed-menu-trigger")?.onKeyDown?.("ArrowDown");
     expect(events.at(-1)).toBe("closed:true");
+  });
+
+  test("composed Button remains an interactive popup trigger with a derived accessible label", () => {
+    const tree = compileTree(
+      <Window>
+        <DropdownMenu id="composed-menu" open={false}
+          trigger={<Button id="composed-menu-trigger"><Icon name="plus" /><Text>Create</Text></Button>}
+          items={[{ value: "one", label: "One" }]} />
+      </Window>,
+    );
+    const trigger = tree.nodes.get("composed-menu-trigger")!;
+    expect(trigger.kind).toBe("pressable");
+    expect(trigger.control).toEqual({ role: "button", label: "Create", expanded: false, group: "composed-menu" });
+    expect(trigger.rovingGroup).toBe("composed-menu");
+    tree.handlers.get("composed-menu-trigger")?.onKeyDown?.("ArrowDown");
   });
 
   test("long popup lists use bounded scroll regions", () => {

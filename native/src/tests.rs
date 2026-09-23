@@ -1030,6 +1030,164 @@ fn dragging_scrollbar_moves_virtual_list_and_emits_scroll_event() {
         "dragging must stop on mouse release"
     );
 }
+
+#[test]
+fn horizontal_scroll_uses_vertical_wheel_fallback_and_reports_2d_metrics() {
+    let content = node(
+        "content",
+        "view",
+        json!({"width":600,"height":60,"shrink":0}),
+        vec![],
+    );
+    let mut scroll = node(
+        "scroll",
+        "scroll",
+        json!({"width":120,"height":60}),
+        vec![content],
+    );
+    scroll.scroll_orientation = "horizontal".into();
+    let mut tree = Tree::new(root(vec![scroll]));
+    tree.compute(240.0, 120.0).unwrap();
+    assert!(tree.entries["scroll"].scroll_max_x > 0.0);
+    assert_eq!(tree.entries["scroll"].scroll_max, 0.0);
+
+    tree.pointer_move(40.0, 30.0);
+    let events = tree.wheel_2d(0.0, 36.0);
+    assert_eq!(tree.entries["scroll"].scroll_x, 36.0);
+    assert_eq!(tree.entries["scroll"].scroll, 0.0);
+    assert_eq!(events[0]["offset"], 36.0);
+    assert_eq!(events[0]["offsetX"], 36.0);
+    assert_eq!(events[0]["offsetY"], 0.0);
+    assert_eq!(events[0]["max"], events[0]["maxX"]);
+}
+
+#[test]
+fn bidirectional_scroll_tracks_trackpad_axes_and_snapshot_positions() {
+    let content = node(
+        "content",
+        "view",
+        json!({"width":500,"height":400,"shrink":0}),
+        vec![],
+    );
+    let mut scroll = node(
+        "scroll",
+        "scroll",
+        json!({"width":120,"height":90}),
+        vec![content],
+    );
+    scroll.scroll_orientation = "both".into();
+    let mut tree = Tree::new(root(vec![scroll]));
+    tree.compute(240.0, 160.0).unwrap();
+    tree.pointer_move(40.0, 30.0);
+    let events = tree.wheel_2d(24.0, 36.0);
+    assert_eq!(tree.entries["scroll"].scroll_x, 24.0);
+    assert_eq!(tree.entries["scroll"].scroll, 36.0);
+    assert_eq!(
+        events[0]["offset"], 36.0,
+        "legacy scalar remains vertical for both"
+    );
+
+    let content = tree
+        .snapshots()
+        .into_iter()
+        .find(|item| item["id"] == "content")
+        .unwrap();
+    assert_eq!(content["x"], -24.0);
+    assert_eq!(content["y"], -36.0);
+}
+
+#[test]
+fn horizontal_scrollbar_drag_and_focus_scroll_into_view_use_x_axis() {
+    let spacer = node(
+        "spacer",
+        "view",
+        json!({"width":180,"height":40,"shrink":0}),
+        vec![],
+    );
+    let target = node(
+        "target",
+        "button",
+        json!({"width":40,"height":40,"shrink":0}),
+        vec![],
+    );
+    let mut scroll = node(
+        "scroll",
+        "scroll",
+        json!({"width":100,"height":50,"direction":"row"}),
+        vec![spacer, target],
+    );
+    scroll.scroll_orientation = "horizontal".into();
+    let mut tree = Tree::new(root(vec![scroll]));
+    tree.compute(220.0, 100.0).unwrap();
+    tree.scene(1.0);
+    let rect = tree.entries["scroll"].rect;
+
+    tree.pointer_move(rect.x0 + 15.0, rect.y1 - 5.0);
+    tree.pointer_down();
+    let events = tree.pointer_move(rect.x0 + 65.0, rect.y1 - 5.0);
+    assert!(tree.entries["scroll"].scroll_x > 0.0);
+    assert!(events.iter().any(|event| event["type"] == "scroll"));
+    tree.pointer_up();
+
+    tree.entries.get_mut("scroll").unwrap().scroll_x = 0.0;
+    let _ = tree.focus("target");
+    assert!(tree.entries["scroll"].scroll_x > 0.0);
+    let target = tree.visible_rect("target").unwrap();
+    let viewport = tree.visible_rect("scroll").unwrap();
+    assert!(target.x1 <= viewport.x1 + 1e-6);
+}
+
+#[test]
+fn grid_tracks_do_not_expand_to_horizontal_scroll_min_content() {
+    let mut scroll = node(
+        "scroll",
+        "scroll",
+        json!({"width":"100%","height":80}),
+        vec![node(
+            "content",
+            "view",
+            json!({"width":1120,"height":60,"shrink":0}),
+            vec![],
+        )],
+    );
+    scroll.scroll_orientation = "horizontal".into();
+    let section = node(
+        "section",
+        "column",
+        json!({"width":"100%","padding":20}),
+        vec![scroll],
+    );
+    let grid = node(
+        "grid",
+        "view",
+        json!({"display":"grid","columns":2,"gap":18}),
+        vec![section, node("peer", "view", json!({"height":80}), vec![])],
+    );
+    let mut tree = Tree::new(root(vec![node(
+        "container",
+        "column",
+        json!({"width":"100%","padding":28}),
+        vec![grid],
+    )]));
+
+    tree.compute(900.0, 300.0).unwrap();
+    let grid_width = tree.entries["grid"].rect.width();
+    let section_width = tree.entries["section"].rect.width();
+    let scroll_width = tree.entries["scroll"].rect.width();
+    assert!(grid_width < 900.0);
+    assert!(
+        section_width <= (grid_width - 18.0) / 2.0 + 1.0,
+        "1fr grid track must behave like minmax(0, 1fr)"
+    );
+    assert!(
+        scroll_width <= section_width + 1e-6,
+        "100% ScrollArea must remain bounded by its grid parent"
+    );
+    assert!(
+        tree.entries["scroll"].scroll_max_x > 0.0,
+        "wide content should create horizontal overflow instead of widening the grid track"
+    );
+}
 #[test]
 fn input_deletes_unicode_graphemes_and_disabled_button_never_clicks() {
     let mut input = node("input", "input", json!({"height":38}), vec![]);

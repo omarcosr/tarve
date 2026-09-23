@@ -8,11 +8,12 @@ import {
   Carousel,
   Chart,
   Column,
-  Direction,
   DataGrid,
+  Direction,
   Drawer,
   Empty,
   Field,
+  Icon,
   Input,
   InputGroup,
   InputOTP,
@@ -28,13 +29,14 @@ import {
   Resizable,
   Row,
   Scroll,
+  ScrollArea,
   Sidebar,
   Text,
   TextArea,
   TitleBar,
-  TreeView,
   Toggle,
   ToggleGroup,
+  TreeView,
   Typography,
   View,
   Window,
@@ -98,7 +100,7 @@ let imeAligned = "";
 const gridRows = [
   { id: 1, name: "Renderer", area: "Rust", status: "Ready" },
   { id: 2, name: "Components", area: "TypeScript", status: "Active" },
-  { id: 3, name: "Protocol", area: "Shared", status: "v28" },
+  { id: 3, name: "Protocol", area: "Shared", status: "v29" },
   { id: 4, name: "Examples", area: "Bun", status: "Ready" },
   { id: 5, name: "Packaging", area: "Bun", status: "Ready" },
 ];
@@ -160,6 +162,46 @@ export function App() {
                 <Button>Continue</Button>
                 <Button variant="outline">More</Button>
               </ButtonGroup>
+            </Section>
+
+            <Section title="Composed Button" description="Buttons can compose icons, text and nested layout while remaining one interactive control.">
+              <Row gap={10}>
+                <Button id="demo-composed-button">
+                  <Icon name="plus" />
+                  <Text>Create project</Text>
+                </Button>
+                <Button variant="outline">
+                  <Icon name="search" />
+                  <Column gap={0} align="start">
+                    <Text weight={600}>Search</Text>
+                    <Text size={10}>Ctrl+K</Text>
+                  </Column>
+                </Button>
+              </Row>
+            </Section>
+
+            <Section title="Horizontal ScrollArea" description="Horizontal and bidirectional native scrolling with wheel/trackpad support.">
+              <ScrollArea
+                id="demo-horizontal-scroll"
+                orientation="horizontal"
+                style={{ width: "100%", maxWidth: "100%", height: 96, borderWidth: 1, borderColor: c.border, radius: 8 }}
+              >
+                <Row gap={10} padding={8} style={{ width: 1120, height: 94, shrink: 0 }}>
+                  {["Overview", "Activity", "Deployments", "Analytics", "Members"].map((label, index) => (
+                    <View
+                      key={label}
+                      style={{ width: 126, height: 62, shrink: 0, padding: 10, background: c.muted, radius: 7, justify: "center" }}
+                    >
+                      <Text weight={600}>{label}</Text>
+                      <Text size={10} color={c.mutedForeground}>Panel {index + 1}</Text>
+                    </View>
+                  ))}
+                  <Button id="demo-horizontal-target" variant="outline">
+                    <Icon name="chevron-right" />
+                    <Text>Last action</Text>
+                  </Button>
+                </Row>
+              </ScrollArea>
             </Section>
 
             <Section title="Carousel" description="Controlled slide navigation with indicators.">

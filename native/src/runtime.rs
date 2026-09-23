@@ -630,20 +630,22 @@ impl App {
                 }
                 _ => vec![],
             },
-            Action::ScrollUp | Action::ScrollDown => {
+            Action::ScrollUp | Action::ScrollDown | Action::ScrollLeft | Action::ScrollRight => {
                 let page = matches!(request.data, Some(ActionData::ScrollUnit(ScrollUnit::Page)));
-                let direction = if request.action == Action::ScrollUp {
-                    -1.0
-                } else {
-                    1.0
+                let (direction_x, direction_y) = match request.action {
+                    Action::ScrollUp => (0.0, -1.0),
+                    Action::ScrollDown => (0.0, 1.0),
+                    Action::ScrollLeft => (-1.0, 0.0),
+                    Action::ScrollRight => (1.0, 0.0),
+                    _ => (0.0, 0.0),
                 };
                 self.tree
-                    .accessibility_scroll_by(&native_id, direction, page)
+                    .accessibility_scroll_by(&native_id, direction_x, direction_y, page)
             }
             Action::SetScrollOffset => match request.data {
-                Some(ActionData::SetScrollOffset(point)) => {
-                    self.tree.accessibility_set_scroll(&native_id, point.y)
-                }
+                Some(ActionData::SetScrollOffset(point)) => self
+                    .tree
+                    .accessibility_set_scroll(&native_id, point.x, point.y),
                 _ => vec![],
             },
             Action::ScrollIntoView => {
@@ -1374,13 +1376,18 @@ impl ApplicationHandler<Command> for App {
                 x,
                 y,
                 delta,
+                delta_x,
+                delta_y,
                 text,
             } if self.document.window.debug => {
                 let events = match action.as_str() {
                     "move" => self.tree.pointer_move(x.unwrap_or(0.0), y.unwrap_or(0.0)),
                     "down" => self.tree.pointer_down(),
                     "up" => self.tree.pointer_up(),
-                    "wheel" => self.tree.wheel(delta.unwrap_or(0.0)),
+                    "wheel" => self.tree.wheel_2d(
+                        delta_x.unwrap_or(0.0),
+                        delta_y.or(delta).unwrap_or(0.0),
+                    ),
                     "text" => self.tree.type_text(text.as_deref().unwrap_or("")),
                     "key" if text.as_deref() == Some("Escape") => {
                         vec![json!({"type":"escape"})]
@@ -1524,13 +1531,18 @@ impl ApplicationHandler<Command> for App {
                 events = self.tree.pointer_context();
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                let dy = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => -y as f64 * 36.0,
+                let (mut dx, mut dy) = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => (-x as f64 * 36.0, -y as f64 * 36.0),
                     MouseScrollDelta::PixelDelta(p) => {
-                        -p.y / self.window.as_ref().unwrap().scale_factor()
+                        let scale = self.window.as_ref().unwrap().scale_factor();
+                        (-p.x / scale, -p.y / scale)
                     }
                 };
-                events = self.tree.wheel(dy);
+                if self.modifiers.shift_key() && dx.abs() <= f64::EPSILON {
+                    dx = dy;
+                    dy = 0.0;
+                }
+                events = self.tree.wheel_2d(dx, dy);
                 accessibility_changed = !events.is_empty();
             }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),

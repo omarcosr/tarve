@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Window, Column, Text, Button, Input, TitleBar, Modal, Pressable } from "./components";
+import { Window, Column, Row, Text, Button, Icon, Input, TitleBar, Modal, Pressable } from "./components";
 import { compileTree, diffTrees } from "./reconciler";
 import { createTheme, darkTheme, lightTheme, Theme, theme } from "./theme";
 
@@ -13,6 +13,42 @@ describe("native TSX protocol", () => {
     expect(JSON.stringify(tree.document)).not.toContain("onClick");
     tree.handlers.get("button")?.onClick?.();
     expect(clicked).toBe(true);
+  });
+  test("Button keeps text buttons native and compiles composed children into one semantic pressable", () => {
+    const tree = compileTree(
+      <Window theme={darkTheme}>
+        <Button id="text-button">Save</Button>
+        <Button id="composed-button" variant="destructive">
+          <Icon id="composed-icon" name="x" />
+          <Text id="composed-label">Delete</Text>
+          <Row id="composed-detail"><Text id="composed-item">item</Text></Row>
+        </Button>
+        <Button id="explicit-button" variant="default">
+          <Icon id="explicit-icon" name="plus" color="#123456" />
+          <Text id="explicit-label" color="#abcdef">Create</Text>
+        </Button>
+        <Button id="disabled-composed" disabled>
+          <Text id="disabled-label">Disabled</Text>
+        </Button>
+      </Window>,
+    );
+
+    expect(tree.nodes.get("text-button")?.kind).toBe("button");
+    expect(tree.nodes.get("text-button")?.text).toBe("Save");
+    expect(tree.nodes.get("text-button")?.children).toEqual([]);
+
+    const composed = tree.nodes.get("composed-button")!;
+    expect(composed.kind).toBe("pressable");
+    expect(composed.children.map(child => child.id)).toEqual(["composed-icon", "composed-label", "composed-detail"]);
+    expect(composed.control).toEqual({ role: "button", label: "Delete item" });
+    expect(composed.style.direction).toBe("row");
+    expect(composed.style.gap).toBe(8);
+    expect(tree.nodes.get("composed-icon")?.style.foreground).toBe(darkTheme.colors.destructiveForeground);
+    expect(tree.nodes.get("composed-label")?.style.foreground).toBe(darkTheme.colors.destructiveForeground);
+    expect(tree.nodes.get("composed-item")?.style.foreground).toBe(darkTheme.colors.destructiveForeground);
+    expect(tree.nodes.get("explicit-icon")?.style.foreground).toBe("#123456");
+    expect(tree.nodes.get("explicit-label")?.style.foreground).toBe("#abcdef");
+    expect(tree.nodes.get("disabled-label")?.style.foreground).toBe(darkTheme.colors.disabledForeground);
   });
   test("Input serializes native input types and validates number values", () => {
     const password = compileTree(<Window><Input id="password" type="password" value="secret" /></Window>);
@@ -104,7 +140,7 @@ describe("native TSX protocol", () => {
   test("Window close requests stay in JS handlers while native receives an intercept flag", () => {
     let requested = false;
     const tree = compileTree(<Window onCloseRequest={() => { requested = true; }}><Text>Hello</Text></Window>);
-    expect(tree.document.version).toBe(28);
+    expect(tree.document.version).toBe(29);
     expect(tree.document.root.closeIntercept).toBe(true);
     expect(JSON.stringify(tree.document)).not.toContain("onCloseRequest");
     tree.handlers.get(tree.document.root.id)?.onCloseRequest?.({ defaultPrevented: false, preventDefault() {} });

@@ -40,6 +40,38 @@ try {
   }
   await app.capture(resolve(out, "components-chart-real.png"));
 
+  const composedButton = byId.get("demo-composed-button");
+  const horizontalBefore = byId.get("demo-horizontal-scroll");
+  const horizontalTargetBefore = byId.get("demo-horizontal-target");
+  assert(composedButton && horizontalBefore && horizontalTargetBefore,
+    "Composed Button / horizontal ScrollArea showcase nodes are missing");
+  assert.equal(composedButton.kind, "pressable");
+  assert.equal(composedButton.control?.role, "button");
+  assert.equal(composedButton.control?.label, "Create project");
+
+  const rootScroller = byId.get("components-scroll");
+  assert(rootScroller, "Showcase root Scroll is missing");
+  app.debug({ type: "input", action: "move",
+    x: rootScroller.x + rootScroller.width / 2, y: rootScroller.y + rootScroller.height / 2 });
+  app.debug({ type: "input", action: "wheel", delta: Math.max(0, horizontalBefore.y - 260) });
+  await Bun.sleep(50);
+  byId = map(await app.inspect());
+  const horizontal = byId.get("demo-horizontal-scroll");
+  const horizontalTarget = byId.get("demo-horizontal-target");
+  assert(horizontal && horizontalTarget, "Horizontal ScrollArea disappeared after root scroll");
+  const targetXBefore = horizontalTarget.x;
+  app.debug({ type: "input", action: "move",
+    x: horizontal.x + horizontal.width / 2, y: horizontal.y + horizontal.height / 2 });
+  app.debug({ type: "input", action: "wheel", deltaX: 180, deltaY: 0 });
+  await Bun.sleep(50);
+  byId = map(await app.inspect());
+  const horizontalAfter = byId.get("demo-horizontal-scroll");
+  const horizontalTargetAfter = byId.get("demo-horizontal-target");
+  assert(horizontalAfter && horizontalTargetAfter);
+  assert((horizontalAfter.scrollX ?? 0) > 0, "Horizontal ScrollArea did not change scrollX");
+  assert(horizontalTargetAfter.x < targetXBefore, "Horizontal content did not move left after scrolling");
+  await app.capture(resolve(out, "components-horizontal-scroll-real.png"));
+
   const otp = byId.get("demo-otp");
   const otpInput = byId.get("demo-otp-input");
   const slots = Array.from({ length: 6 }, (_, index) => byId.get("demo-otp-slot-" + index));
@@ -137,6 +169,16 @@ try {
       y: Number(splitter.y.toFixed(1)),
       hovered: hovered.hovered,
     },
+    composedButton: {
+      kind: composedButton.kind,
+      role: composedButton.control?.role,
+      label: composedButton.control?.label,
+    },
+    horizontalScroll: {
+      offsetX: Number((horizontalAfter.scrollX ?? 0).toFixed(1)),
+      maxX: Number((horizontalAfter.scrollMaxX ?? 0).toFixed(1)),
+      targetMoved: Number((targetXBefore - horizontalTargetAfter.x).toFixed(1)),
+    },
     desktop: {
       treeRole: tree.control?.role,
       selectedTreeItem: treeSelected.id,
@@ -147,6 +189,7 @@ try {
     scroll: Number(finalScroll.scroll.toFixed(1)),
     captures: [
       resolve(out, "components-chart-real.png"),
+      resolve(out, "components-horizontal-scroll-real.png"),
       resolve(out, "components-otp-real.png"),
       resolve(out, "components-resizable-real.png"),
       resolve(out, "components-desktop-real.png"),

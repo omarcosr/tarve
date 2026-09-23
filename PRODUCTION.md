@@ -6,13 +6,13 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 
 - TypeScript package checking: `bun run check` passes.
 - Rust lint gate: `cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings` passes.
-- Core/UI suite: **96 Bun tests / 511 assertions** pass.
-- Native suite: **73 Rust tests** pass, including deterministic AccessKit tree/action/TextPattern/scroll-alignment coverage.
-- Protocol is currently **v28** on both TypeScript and Rust sides and is checked by the FFI bridge before startup.
+- Core/UI suite: **100 Bun tests / 535 assertions** pass.
+- Native suite: **78 Rust tests** pass, including deterministic AccessKit tree/action/TextPattern/scroll-alignment, horizontal/bidirectional scroll and bounded grid-track coverage.
+- Protocol is currently **v29** on both TypeScript and Rust sides and is checked by the FFI bridge before startup.
 - npm packaging includes JS, JSX runtime, declarations and the Windows x64 native library.
 - External-consumer and standalone-EXE smoke tests are part of `bun run verify`.
 - Real GPU visual regression exists in `bun run test:visual`; it is still a separate gate rather than part of `verify`.
-- Latest full validation on this tree: `bun run verify` **PASS** and `bun run test:visual` **PASS** with the freshly packed/installed v28 artifact. `verify` now includes a reproducible Windows x64 `smoke:accessibility` gate against the real OS UI Automation provider, covering required/invalid/full-description form state, Invoke/Value/Text/Toggle/SelectionItem/ScrollItem patterns, multiline/bidirectional text, password secrecy, Select/DataGrid selection containers, modal Control View isolation and modal focus restoration.
+- Latest full validation on this tree: `bun run verify` **PASS** and `bun run test:visual` **PASS** with the freshly packed/installed v29 artifact. The visual gate now exercises composed Button semantics and real horizontal ScrollArea movement; `verify` includes the Windows x64 `smoke:accessibility` gate against the real OS UI Automation provider.
 
 ## Production foundations already implemented
 
@@ -20,6 +20,7 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 - [x] Parley text shaping, Unicode editing, pointer selection, clipboard operations and grapheme-aware deletion.
 - [x] `Input` types (`text`, `password`, `email`, `number`, `search`, `tel`, `url`), including native password masking and numeric-edit filtering.
 - [x] Native vertical scrolling with clipping, draggable scrollbar, configurable `Scroll.speed` and focus-to-visible behavior.
+- [x] Composite `Button` children and native horizontal/bidirectional `ScrollArea`: text-only buttons retain the compact native path, while icon/text/layout composition remains one focusable/clickable semantic button; scroll areas support vertical/horizontal/both axes, 2D wheel/trackpad offsets, axis scrollbars, focus/UIA scroll-into-view and a backward-compatible scalar `onScroll` plus `onScrollPosition`.
 - [x] Fixed-height `VirtualList` with bounded native layout-node count.
 - [x] Modal portals, focus trap, outside dismissal, Escape handling and focus restoration.
 - [x] Popup triggers preserve existing interactive `Button`/`Pressable`/native controls rather than nesting a competing interactive wrapper.
@@ -53,8 +54,6 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 ## Known scope limits / important follow-up components
 
 - One native app/window lifetime per process remains the documented bootstrap model; multi-window is not implemented.
-- Scroll is vertical only; horizontal/bidirectional `ScrollArea` remains.
-- `Button` still accepts text/number content rather than arbitrary icon+text child composition.
 - `Calendar`/`DatePicker`, `Menubar` and `HoverCard` still need deeper desktop keyboard/focus semantics.
 - `DataTable` remains the lightweight static table API; use the new `DataGrid` when sorting/filtering/selection/virtualization are required.
 - `Toast`/`Toaster` are render-driven and do not yet provide an owned timed queue/live-region implementation.

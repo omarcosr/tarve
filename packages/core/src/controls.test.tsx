@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Accordion, Checkbox, Progress, RadioGroup, Slider, Switch, Tabs } from "./controls";
-import { Scroll, Text, TextArea, Window } from "./components";
+import { Scroll, ScrollArea, Text, TextArea, Window } from "./components";
 import { List } from "./list";
 import { Select } from "./select";
 import { VirtualList } from "./virtual-list";
@@ -81,6 +81,21 @@ describe("control kit", () => {
       ?.map(node => node.id)).toContain("faster");
     expect(() => compileTree(<Window><Scroll speed={0}><Text>Content</Text></Scroll></Window>)).toThrow(RangeError);
     expect(() => compileTree(<Window><Scroll speed={Number.NaN}><Text>Content</Text></Scroll></Window>)).toThrow(RangeError);
+  });
+
+  test("ScrollArea exposes horizontal and bidirectional orientation without changing vertical defaults", () => {
+    const tree = compileTree(<Window>
+      <Scroll id="vertical"><Text>Vertical</Text></Scroll>
+      <ScrollArea id="horizontal" orientation="horizontal" onScrollPosition={() => {}}>
+        <Text>Horizontal</Text>
+      </ScrollArea>
+      <ScrollArea id="both" orientation="both"><Text>Both</Text></ScrollArea>
+    </Window>);
+    expect(tree.nodes.get("vertical")?.scrollOrientation).toBe("vertical");
+    expect(tree.nodes.get("horizontal")?.scrollOrientation).toBe("horizontal");
+    expect(tree.nodes.get("both")?.scrollOrientation).toBe("both");
+    expect(tree.handlers.get("horizontal")?.onScrollPosition).toBeFunction();
+    expect(() => Scroll({ orientation: "diagonal" as never })).toThrow(TypeError);
   });
 
   test("Select exposes one keyboard trigger and non-tab-stop popup options", () => {

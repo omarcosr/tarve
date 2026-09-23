@@ -184,7 +184,9 @@ impl AccessibilityTree {
         let mut parent = tree.entries[id].parent.as_deref();
         while let Some(parent_id) = parent {
             let entry = &tree.entries[parent_id];
-            if matches!(entry.node.kind.as_str(), "scroll" | "textarea") && entry.scroll_max > 0.0 {
+            if matches!(entry.node.kind.as_str(), "scroll" | "textarea")
+                && (entry.scroll_max > 0.0 || entry.scroll_max_x > 0.0)
+            {
                 return true;
             }
             parent = entry.parent.as_deref();
@@ -460,12 +462,21 @@ impl AccessibilityTree {
         let mut nodes = Vec::with_capacity(tree.entries.len() * 2);
 
         for native_id in &order {
-            let (tarve_node, entry_children, entry_scroll, entry_scroll_max) = {
+            let (
+                tarve_node,
+                entry_children,
+                entry_scroll_x,
+                entry_scroll,
+                entry_scroll_max_x,
+                entry_scroll_max,
+            ) = {
                 let entry = &tree.entries[native_id];
                 (
                     entry.node.clone(),
                     entry.children.clone(),
+                    entry.scroll_x,
                     entry.scroll,
+                    entry.scroll_max_x,
                     entry.scroll_max,
                 )
             };
@@ -589,6 +600,11 @@ impl AccessibilityTree {
             }
             if matches!(tarve_node.kind.as_str(), "scroll" | "textarea") {
                 node.set_clips_children();
+                if entry_scroll_max_x > 0.0 {
+                    node.set_scroll_x(entry_scroll_x);
+                    node.set_scroll_x_min(0.0);
+                    node.set_scroll_x_max(entry_scroll_max_x);
+                }
                 if entry_scroll_max > 0.0 {
                     node.set_scroll_y(entry_scroll);
                     node.set_scroll_y_min(0.0);
@@ -670,10 +686,16 @@ impl AccessibilityTree {
                     }
                 }
                 if matches!(tarve_node.kind.as_str(), "scroll" | "textarea")
-                    && entry_scroll_max > 0.0
+                    && (entry_scroll_max > 0.0 || entry_scroll_max_x > 0.0)
                 {
-                    node.add_action(Action::ScrollUp);
-                    node.add_action(Action::ScrollDown);
+                    if entry_scroll_max_x > 0.0 {
+                        node.add_action(Action::ScrollLeft);
+                        node.add_action(Action::ScrollRight);
+                    }
+                    if entry_scroll_max > 0.0 {
+                        node.add_action(Action::ScrollUp);
+                        node.add_action(Action::ScrollDown);
+                    }
                     node.add_action(Action::SetScrollOffset);
                 }
                 if Self::has_scroll_ancestor(tree, native_id) {
@@ -830,6 +852,32 @@ mod tests {
         assert_eq!(slider.min_numeric_value(), Some(0.0));
         assert_eq!(slider.max_numeric_value(), Some(100.0));
         assert_eq!(slider.numeric_value_step(), Some(5.0));
+    }
+
+    #[test]
+    fn projects_horizontal_scroll_range_and_actions() {
+        let root = node(json!({
+            "id":"root","kind":"window","children":[
+                {"id":"scroll","kind":"scroll","scrollOrientation":"horizontal","style":{"width":100,"height":60},"children":[
+                    {"id":"content","kind":"view","style":{"width":400,"height":50,"shrink":0},"children":[]}
+                ]}
+            ]
+        }));
+        let mut tree = Tree::new(root);
+        tree.compute(240.0, 120.0).unwrap();
+        tree.pointer_move(20.0, 20.0);
+        tree.wheel_2d(32.0, 0.0);
+
+        let mut builder = AccessibilityTree::default();
+        let update = builder.build(&mut tree, "Example", 1.0);
+        let by_id: HashMap<_, _> = update.nodes.into_iter().collect();
+        let scroll = &by_id[&builder.ids["scroll"]];
+        assert_eq!(scroll.role(), Role::ScrollView);
+        assert!(scroll.supports_action(Action::ScrollLeft));
+        assert!(scroll.supports_action(Action::ScrollRight));
+        assert!(!scroll.supports_action(Action::ScrollUp));
+        assert!(!scroll.supports_action(Action::ScrollDown));
+        assert!(scroll.supports_action(Action::SetScrollOffset));
     }
 
     #[test]
@@ -1045,7 +1093,7 @@ mod tests {
         let byte = value.find("five").unwrap();
         let character = value[..byte].graphemes(true).count();
 
-        tree.accessibility_set_scroll("notes", 0.0);
+        tree.accessibility_set_scroll("notes", 0.0, 0.0);
         let top_events = tree.accessibility_scroll_text_position_into_view(
             "notes",
             character,
@@ -1054,7 +1102,7 @@ mod tests {
         let top = tree.entries["notes"].scroll;
         assert!(!top_events.is_empty());
 
-        tree.accessibility_set_scroll("notes", 0.0);
+        tree.accessibility_set_scroll("notes", 0.0, 0.0);
         let bottom_events = tree.accessibility_scroll_text_position_into_view(
             "notes",
             character,
@@ -1067,7 +1115,7 @@ mod tests {
             "top alignment must scroll farther than bottom alignment"
         );
 
-        tree.accessibility_set_scroll("notes", 0.0);
+        tree.accessibility_set_scroll("notes", 0.0, 0.0);
         tree.accessibility_scroll_text_position_into_view("notes", character, None);
         let minimal = tree.entries["notes"].scroll;
         assert!((minimal - bottom).abs() < 1e-6);

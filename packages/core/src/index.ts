@@ -1,5 +1,5 @@
-export { Window, View, Row, Column, Portal, Pressable, Icon, Text, Button, Image, Scroll, Input, TextArea, TitleBar, Modal, Dialog } from "./components";
-export type { WindowProps, WindowCloseRequestEvent, ViewProps, PortalProps, PressableProps, IconName, IconProps, TextProps, ButtonProps, ImageProps, ScrollProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
+export { Window, View, Row, Column, Portal, Pressable, Icon, Text, Button, Image, Scroll, ScrollArea, Input, TextArea, TitleBar, Modal, Dialog } from "./components";
+export type { WindowProps, WindowCloseRequestEvent, ViewProps, PortalProps, PressableProps, IconName, IconProps, TextProps, ButtonProps, ImageProps, ScrollProps, ScrollAreaProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
 export { Checkbox, Switch, RadioGroup, Slider, Card, Badge, Separator, Progress, Tabs, Accordion } from "./controls";
 export type { CheckboxProps, SwitchProps, RadioOption, RadioGroupProps, SliderProps, CardProps, BadgeProps, SeparatorProps, ProgressProps, TabItem, TabsProps, AccordionItem, AccordionProps } from "./controls";
 export { VirtualList } from "./virtual-list";
@@ -21,7 +21,7 @@ export type { AppErrorEvent, AppErrorSource, AppHandle, AppOptions } from "./app
 export { theme, Theme, lightTheme, darkTheme, createTheme, buttonVariants } from "./theme";
 export type { ThemeColors, ThemeFocusOutline, ThemeDefinition, ThemeOverrides, ButtonVariant } from "./theme";
 export { Style } from "./style";
-export type { StateStyle, OutlineStyle, WindowPosition, WindowPositionPreset, FileDialogFilter, FileDialogOptions } from "../../protocol/src/index";
+export type { StateStyle, OutlineStyle, WindowPosition, WindowPositionPreset, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition } from "../../protocol/src/index";
 export type { VNode, Child } from "./jsx-runtime";
 export { BunFfiBridge } from "./bridge";
 export type { NativeBridge, BunFfiBridgeOptions } from "./bridge";

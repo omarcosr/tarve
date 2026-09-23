@@ -3,7 +3,7 @@ import type { NativeCommand, NativeEvent, SceneDocument } from "../../protocol/s
 import { createApp, type AppErrorEvent } from "./app";
 import type { NativeBridge } from "./bridge";
 import { Slider } from "./controls";
-import { Button, Input, Window } from "./components";
+import { Button, Input, ScrollArea, Window } from "./components";
 import { InputOTP } from "./form-controls";
 
 class FakeBridge implements NativeBridge {
@@ -147,6 +147,36 @@ describe("controlled native reconciliation", () => {
     const patch = bridge.commands.find(command => command.type === "patch");
     expect(patch?.type).toBe("patch");
     if (patch?.type === "patch") expect(patch.nodes.find(node => node.id === "slider")?.control?.value).toBe(20);
+  });
+
+  test("scroll dispatch keeps the scalar callback and exposes optional 2D position", async () => {
+    const bridge = new FakeBridge();
+    const scalar: number[][] = [];
+    const positions: unknown[] = [];
+    const app = createApp(() => (
+      <Window>
+        <ScrollArea
+          id="scroll"
+          orientation="both"
+          onScroll={(offset, max) => scalar.push([offset, max])}
+          onScrollPosition={position => positions.push(position)}
+        />
+      </Window>
+    ), { bridge });
+    await app.ready;
+    bridge.emit({
+      type: "scroll",
+      id: "scroll",
+      offset: 30,
+      max: 300,
+      offsetX: 20,
+      offsetY: 30,
+      maxX: 200,
+      maxY: 300,
+    });
+    await Bun.sleep(0);
+    expect(scalar).toEqual([[30, 300]]);
+    expect(positions).toEqual([{ x: 20, y: 30, maxX: 200, maxY: 300 }]);
   });
 
   test("InputOTP filters native edits and patches rejected characters back out", async () => {

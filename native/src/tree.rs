@@ -68,7 +68,14 @@ struct VisualState {
 
 struct ScrollDrag {
     id: String,
+    axis: ScrollbarAxis,
     grab: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScrollbarAxis {
+    Horizontal,
+    Vertical,
 }
 
 #[derive(Clone, Debug)]
@@ -227,6 +234,8 @@ pub struct Entry {
     measure_dirty: bool,
     pub rect: BoxRect,
     bounds: BoxRect,
+    pub scroll_x: f64,
+    pub scroll_max_x: f64,
     pub scroll: f64,
     pub scroll_max: f64,
 }
@@ -303,11 +312,12 @@ impl Tree {
             .collect()
     }
 
-    fn ancestor_scroll_offset(&self, id: &str) -> f64 {
-        let mut offset = 0.0;
+    fn ancestor_scroll_offset(&self, id: &str) -> Vec2 {
+        let mut offset = Vec2::ZERO;
         let mut parent = self.entries[id].parent.as_deref();
         while let Some(parent_id) = parent {
-            offset += self.entries[parent_id].scroll;
+            let entry = &self.entries[parent_id];
+            offset += Vec2::new(entry.scroll_x, entry.scroll);
             parent = self.entries[parent_id].parent.as_deref();
         }
         offset
@@ -327,8 +337,8 @@ impl Tree {
                 .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
         });
         let portal = portals.last()?;
-        let bounds =
-            self.entries[portal].bounds + Vec2::new(0.0, -self.ancestor_scroll_offset(portal));
+        let offset = self.ancestor_scroll_offset(portal);
+        let bounds = self.entries[portal].bounds + Vec2::new(-offset.x, -offset.y);
         (!bounds.contains(self.mouse)).then(|| portal.clone())
     }
 
@@ -510,6 +520,8 @@ impl Tree {
                 measure_dirty,
                 rect: previous.as_ref().map(|e| e.rect).unwrap_or(BoxRect::ZERO),
                 bounds: previous.as_ref().map(|e| e.bounds).unwrap_or(BoxRect::ZERO),
+                scroll_x: previous.as_ref().map(|e| e.scroll_x).unwrap_or(0.0),
+                scroll_max_x: previous.as_ref().map(|e| e.scroll_max_x).unwrap_or(0.0),
                 scroll: previous.as_ref().map(|e| e.scroll).unwrap_or(0.0),
                 scroll_max: previous.as_ref().map(|e| e.scroll_max).unwrap_or(0.0),
             },
@@ -751,7 +763,18 @@ impl Tree {
             origin,
             (layout.size.width as f64, layout.size.height as f64),
         );
-        entry.scroll_max = if entry.node.kind == "scroll" {
+        entry.scroll_max_x = if entry.node.kind == "scroll"
+            && matches!(
+                entry.node.scroll_orientation.as_str(),
+                "horizontal" | "both"
+            ) {
+            layout.scroll_width() as f64
+        } else {
+            0.0
+        };
+        entry.scroll_max = if entry.node.kind == "scroll"
+            && matches!(entry.node.scroll_orientation.as_str(), "vertical" | "both")
+        {
             layout.scroll_height() as f64
         } else if entry.node.kind == "textarea" {
             let pad = entry.node.insets("padding");
@@ -764,6 +787,7 @@ impl Tree {
         } else {
             0.0
         };
+        entry.scroll_x = entry.scroll_x.clamp(0.0, entry.scroll_max_x);
         entry.scroll = entry.scroll.clamp(0.0, entry.scroll_max);
         let children = entry.children.clone();
         let clips = entry.node.kind == "scroll";
@@ -781,7 +805,7 @@ impl Tree {
         let mut scene = Scene::new();
         self.painted_nodes = 0;
         let root_rect = self.entries[&self.root].rect;
-        self.paint_node(&self.root.clone(), 0.0, scale, root_rect, &mut scene);
+        self.paint_node(&self.root.clone(), Vec2::ZERO, scale, root_rect, &mut scene);
         let mut portals = self.portal_roots();
         portals.sort_by(|a, b| {
             self.stacking
@@ -825,9 +849,9 @@ impl Tree {
             disabled: node.disabled,
         }
     }
-    fn paint_node(&mut self, id: &str, offset: f64, scale: f64, clip: BoxRect, scene: &mut Scene) {
+    fn paint_node(&mut self, id: &str, offset: Vec2, scale: f64, clip: BoxRect, scene: &mut Scene) {
         let entry = &self.entries[id];
-        let bounds = entry.bounds + Vec2::new(0.0, -offset);
+        let bounds = entry.bounds + Vec2::new(-offset.x, -offset.y);
         if bounds.x1 <= clip.x0
             || bounds.x0 >= clip.x1
             || bounds.y1 <= clip.y0
@@ -839,8 +863,10 @@ impl Tree {
         if node.string("display", "flex") == "none" {
             return;
         }
-        let rect = entry.rect + Vec2::new(0.0, -offset);
+        let rect = entry.rect + Vec2::new(-offset.x, -offset.y);
+        let scroll_x = entry.scroll_x;
         let scroll = entry.scroll;
+        let scroll_max_x = entry.scroll_max_x;
         let scroll_max = entry.scroll_max;
         let mut children = entry.children.clone();
         children.sort_by(|a, b| {
@@ -1184,7 +1210,13 @@ impl Tree {
             if self.entries[child].node.portal && !node.portal {
                 continue;
             }
-            self.paint_node(child, offset + scroll, scale, child_clip, scene);
+            self.paint_node(
+                child,
+                offset + Vec2::new(scroll_x, scroll),
+                scale,
+                child_clip,
+                scene,
+            );
         }
         if node.kind == "scroll" {
             scene.pop_layer();
@@ -1199,6 +1231,20 @@ impl Tree {
                 color(visual_string(&node, "scrollbarColor", "#d4d4d8", state)),
                 None,
                 &RoundedRect::new(rect.x1 - 7.0, top, rect.x1 - 3.0, top + thumb, 2.0),
+            );
+        }
+        if node.kind == "scroll" && scroll_max_x > 0.0 {
+            let track = rect.width() - 12.0;
+            let thumb = (track * rect.width() / (rect.width() + scroll_max_x))
+                .max(28.0)
+                .min(track);
+            let left = rect.x0 + 6.0 + (track - thumb) * scroll_x / scroll_max_x;
+            scene.fill(
+                Fill::NonZero,
+                transform,
+                color(visual_string(&node, "scrollbarColor", "#d4d4d8", state)),
+                None,
+                &RoundedRect::new(left, rect.y1 - 7.0, left + thumb, rect.y1 - 3.0, 2.0),
             );
         }
     }
@@ -1222,18 +1268,18 @@ impl Tree {
                 return Some(id);
             }
         }
-        self.hit(&self.root, 0.0, root_rect, scroll_only)
+        self.hit(&self.root, Vec2::ZERO, root_rect, scroll_only)
     }
 
-    fn hit(&self, id: &str, offset: f64, clip: BoxRect, scroll_only: bool) -> Option<String> {
+    fn hit(&self, id: &str, offset: Vec2, clip: BoxRect, scroll_only: bool) -> Option<String> {
         let entry = &self.entries[id];
-        if !(entry.bounds + Vec2::new(0.0, -offset)).contains(self.mouse) {
+        if !(entry.bounds + Vec2::new(-offset.x, -offset.y)).contains(self.mouse) {
             return None;
         }
         if entry.node.disabled || entry.node.string("display", "flex") == "none" {
             return None;
         }
-        let rect = entry.rect + Vec2::new(0.0, -offset);
+        let rect = entry.rect + Vec2::new(-offset.x, -offset.y);
         let clip = if entry.node.kind == "scroll" {
             clip.intersect(rect)
         } else {
@@ -1254,13 +1300,19 @@ impl Tree {
             if self.entries[child].node.portal && !entry.node.portal {
                 continue;
             }
-            if let Some(id) = self.hit(child, offset + entry.scroll, clip, scroll_only) {
+            if let Some(id) = self.hit(
+                child,
+                offset + Vec2::new(entry.scroll_x, entry.scroll),
+                clip,
+                scroll_only,
+            ) {
                 return Some(id);
             }
         }
         let blocks_pointer = entry.node.string("pointerEvents", "auto") == "block";
         let eligible = if scroll_only {
-            (matches!(entry.node.kind.as_str(), "scroll" | "textarea") && entry.scroll_max > 0.0)
+            (matches!(entry.node.kind.as_str(), "scroll" | "textarea")
+                && (entry.scroll_max > 0.0 || entry.scroll_max_x > 0.0))
                 || blocks_pointer
                 || entry.node.modal
         } else {
@@ -1378,7 +1430,14 @@ impl Tree {
                 && let (Some(target), Some(viewport)) =
                     (self.visible_rect(id), self.visible_rect(&parent_id))
             {
-                let delta = if target.y0 < viewport.y0 {
+                let delta_x = if target.x0 < viewport.x0 {
+                    target.x0 - viewport.x0
+                } else if target.x1 > viewport.x1 {
+                    target.x1 - viewport.x1
+                } else {
+                    0.0
+                };
+                let delta_y = if target.y0 < viewport.y0 {
                     target.y0 - viewport.y0
                 } else if target.y1 > viewport.y1 {
                     target.y1 - viewport.y1
@@ -1386,9 +1445,11 @@ impl Tree {
                     0.0
                 };
                 let entry = self.entries.get_mut(&parent_id).unwrap();
-                let next = (entry.scroll + delta).clamp(0.0, entry.scroll_max);
-                if next != entry.scroll {
-                    entry.scroll = next;
+                let next_x = (entry.scroll_x + delta_x).clamp(0.0, entry.scroll_max_x);
+                let next_y = (entry.scroll + delta_y).clamp(0.0, entry.scroll_max);
+                if next_x != entry.scroll_x || next_y != entry.scroll {
+                    entry.scroll_x = next_x;
+                    entry.scroll = next_y;
                     self.dirty.paint = true;
                 }
             }
@@ -1469,14 +1530,14 @@ impl Tree {
     }
     pub(crate) fn visible_rect(&self, id: &str) -> Option<BoxRect> {
         let entry = self.entries.get(id)?;
-        let mut offset = 0.0;
+        let mut offset = Vec2::ZERO;
         let mut current = entry.parent.as_deref();
         while let Some(parent_id) = current {
             let parent = self.entries.get(parent_id)?;
-            offset += parent.scroll;
+            offset += Vec2::new(parent.scroll_x, parent.scroll);
             current = parent.parent.as_deref();
         }
-        Some(entry.rect + Vec2::new(0.0, -offset))
+        Some(entry.rect + Vec2::new(-offset.x, -offset.y))
     }
     fn set_slider(&mut self, id: &str, value: f64) -> Vec<Value> {
         if !value.is_finite() {
@@ -1554,8 +1615,9 @@ impl Tree {
         }
         if let Some(drag) = &self.scroll_drag {
             let id = drag.id.clone();
+            let axis = drag.axis;
             let grab = drag.grab;
-            return self.drag_scrollbar(&id, grab);
+            return self.drag_scrollbar(&id, axis, grab);
         }
         let next = self.hit_root(false);
         let mut events = vec![];
@@ -1609,13 +1671,14 @@ impl Tree {
             self.text_dragging = false;
             return vec![json!({"type":"outside", "id":id})];
         }
-        if let Some((id, grab)) = self.scrollbar_at_pointer() {
+        if let Some((id, axis, grab)) = self.scrollbar_at_pointer() {
             self.pressed = None;
             self.scroll_drag = Some(ScrollDrag {
                 id: id.clone(),
+                axis,
                 grab,
             });
-            return self.drag_scrollbar(&id, grab);
+            return self.drag_scrollbar(&id, axis, grab);
         }
         self.hovered = self.hit_root(false);
         self.pressed = self.hovered.clone();
@@ -1683,74 +1746,138 @@ impl Tree {
         };
         vec![json!({"type":"context", "id":id, "x":self.mouse.0, "y":self.mouse.1})]
     }
+    #[cfg(test)]
     pub fn wheel(&mut self, delta: f64) -> Vec<Value> {
+        self.wheel_2d(0.0, delta)
+    }
+    pub fn wheel_2d(&mut self, delta_x: f64, delta_y: f64) -> Vec<Value> {
         if let Some(id) = self.hit_root(true) {
-            let speed = if self.entries[&id].node.kind == "scroll" {
-                self.entries[&id].node.scroll_speed
+            let entry = &self.entries[&id];
+            let speed = if entry.node.kind == "scroll" {
+                entry.node.scroll_speed
             } else {
                 1.0
             };
-            let next = self.entries[&id].scroll + delta * speed;
-            return self.scroll_to(&id, next);
+            let (dx, dy) = match entry.node.kind.as_str() {
+                "textarea" => (0.0, delta_y),
+                "scroll" => match entry.node.scroll_orientation.as_str() {
+                    "horizontal" => {
+                        let horizontal = if delta_x.abs() > f64::EPSILON {
+                            delta_x
+                        } else {
+                            delta_y
+                        };
+                        (horizontal, 0.0)
+                    }
+                    "both" => (delta_x, delta_y),
+                    _ => (0.0, delta_y),
+                },
+                _ => (0.0, 0.0),
+            };
+            return self.scroll_to_2d(&id, entry.scroll_x + dx * speed, entry.scroll + dy * speed);
         }
         vec![]
     }
-    fn scrollbar_at_pointer(&self) -> Option<(String, f64)> {
+    fn scrollbar_at_pointer(&self) -> Option<(String, ScrollbarAxis, f64)> {
         let id = self.hit_root(true)?;
         let entry = self.entries.get(&id)?;
-        if !matches!(entry.node.kind.as_str(), "scroll" | "textarea") || entry.scroll_max <= 0.0 {
-            return None;
-        }
-        let rect = self.visible_rect(&id)?;
-        let track = rect.height() - 12.0;
-        if track <= 0.0
-            || self.mouse.0 < rect.x1 - 10.0
-            || self.mouse.0 > rect.x1
-            || self.mouse.1 < rect.y0 + 6.0
-            || self.mouse.1 > rect.y1 - 6.0
+        if !matches!(entry.node.kind.as_str(), "scroll" | "textarea")
+            || (entry.scroll_max <= 0.0 && entry.scroll_max_x <= 0.0)
         {
             return None;
         }
-        let thumb = (track * rect.height() / (rect.height() + entry.scroll_max))
-            .max(28.0)
-            .min(track);
-        let top = rect.y0 + 6.0 + (track - thumb) * entry.scroll / entry.scroll_max;
-        let grab = if self.mouse.1 >= top && self.mouse.1 <= top + thumb {
-            self.mouse.1 - top
-        } else {
-            thumb / 2.0
-        };
-        Some((id, grab))
+        let rect = self.visible_rect(&id)?;
+        if entry.scroll_max > 0.0 {
+            let track = rect.height() - 12.0;
+            if track > 0.0
+                && self.mouse.0 >= rect.x1 - 10.0
+                && self.mouse.0 <= rect.x1
+                && self.mouse.1 >= rect.y0 + 6.0
+                && self.mouse.1 <= rect.y1 - 6.0
+            {
+                let thumb = (track * rect.height() / (rect.height() + entry.scroll_max))
+                    .max(28.0)
+                    .min(track);
+                let top = rect.y0 + 6.0 + (track - thumb) * entry.scroll / entry.scroll_max;
+                let grab = if self.mouse.1 >= top && self.mouse.1 <= top + thumb {
+                    self.mouse.1 - top
+                } else {
+                    thumb / 2.0
+                };
+                return Some((id, ScrollbarAxis::Vertical, grab));
+            }
+        }
+        if entry.node.kind == "scroll" && entry.scroll_max_x > 0.0 {
+            let track = rect.width() - 12.0;
+            if track > 0.0
+                && self.mouse.1 >= rect.y1 - 10.0
+                && self.mouse.1 <= rect.y1
+                && self.mouse.0 >= rect.x0 + 6.0
+                && self.mouse.0 <= rect.x1 - 6.0
+            {
+                let thumb = (track * rect.width() / (rect.width() + entry.scroll_max_x))
+                    .max(28.0)
+                    .min(track);
+                let left = rect.x0 + 6.0 + (track - thumb) * entry.scroll_x / entry.scroll_max_x;
+                let grab = if self.mouse.0 >= left && self.mouse.0 <= left + thumb {
+                    self.mouse.0 - left
+                } else {
+                    thumb / 2.0
+                };
+                return Some((id, ScrollbarAxis::Horizontal, grab));
+            }
+        }
+        None
     }
-    fn drag_scrollbar(&mut self, id: &str, grab: f64) -> Vec<Value> {
+    fn drag_scrollbar(&mut self, id: &str, axis: ScrollbarAxis, grab: f64) -> Vec<Value> {
         let Some(entry) = self.entries.get(id) else {
             return vec![];
         };
         let Some(rect) = self.visible_rect(id) else {
             return vec![];
         };
-        let track = rect.height() - 12.0;
-        let thumb = (track * rect.height() / (rect.height() + entry.scroll_max))
-            .max(28.0)
-            .min(track);
+        let (track, thumb, pointer, start, max) = match axis {
+            ScrollbarAxis::Vertical => {
+                let track = rect.height() - 12.0;
+                let thumb = (track * rect.height() / (rect.height() + entry.scroll_max))
+                    .max(28.0)
+                    .min(track);
+                (track, thumb, self.mouse.1, rect.y0, entry.scroll_max)
+            }
+            ScrollbarAxis::Horizontal => {
+                let track = rect.width() - 12.0;
+                let thumb = (track * rect.width() / (rect.width() + entry.scroll_max_x))
+                    .max(28.0)
+                    .min(track);
+                (track, thumb, self.mouse.0, rect.x0, entry.scroll_max_x)
+            }
+        };
         let travel = track - thumb;
-        if travel <= 0.0 {
+        if travel <= 0.0 || max <= 0.0 {
             return vec![];
         }
-        let offset =
-            ((self.mouse.1 - grab - rect.y0 - 6.0) / travel).clamp(0.0, 1.0) * entry.scroll_max;
-        self.scroll_to(id, offset)
+        let offset = ((pointer - grab - start - 6.0) / travel).clamp(0.0, 1.0) * max;
+        match axis {
+            ScrollbarAxis::Vertical => self.scroll_to_2d(id, entry.scroll_x, offset),
+            ScrollbarAxis::Horizontal => self.scroll_to_2d(id, offset, entry.scroll),
+        }
     }
     fn scroll_to(&mut self, id: &str, offset: f64) -> Vec<Value> {
-        if !offset.is_finite() {
+        let x = self.entries.get(id).map_or(0.0, |entry| entry.scroll_x);
+        self.scroll_to_2d(id, x, offset)
+    }
+    fn scroll_to_2d(&mut self, id: &str, offset_x: f64, offset_y: f64) -> Vec<Value> {
+        if !offset_x.is_finite() || !offset_y.is_finite() {
             return vec![];
         }
         let entry = self.entries.get_mut(id).unwrap();
-        let next = offset.clamp(0.0, entry.scroll_max);
-        if (next - entry.scroll).abs() < 1e-6 {
+        let next_x = offset_x.clamp(0.0, entry.scroll_max_x);
+        let next_y = offset_y.clamp(0.0, entry.scroll_max);
+        if (next_x - entry.scroll_x).abs() < 1e-6 && (next_y - entry.scroll).abs() < 1e-6 {
             return vec![];
         }
-        entry.scroll = next;
+        entry.scroll_x = next_x;
+        entry.scroll = next_y;
         if !entry
             .node
             .control
@@ -1759,7 +1886,17 @@ impl Tree {
         {
             self.dirty.paint = true;
         }
-        vec![json!({"type":"scroll", "id":id, "offset":next, "max":entry.scroll_max})]
+        let (offset, max) =
+            if entry.node.kind == "scroll" && entry.node.scroll_orientation == "horizontal" {
+                (next_x, entry.scroll_max_x)
+            } else {
+                (next_y, entry.scroll_max)
+            };
+        vec![json!({
+            "type":"scroll", "id":id, "offset":offset, "max":max,
+            "offsetX":next_x, "offsetY":next_y,
+            "maxX":entry.scroll_max_x, "maxY":entry.scroll_max
+        })]
     }
 
     fn ime_display(&self, id: &str) -> Option<ImeDisplay> {
@@ -2650,7 +2787,8 @@ impl Tree {
     pub(crate) fn accessibility_scroll_by(
         &mut self,
         id: &str,
-        direction: f64,
+        direction_x: f64,
+        direction_y: f64,
         page: bool,
     ) -> Vec<Value> {
         if !self.accessibility_in_scope(id) {
@@ -2659,29 +2797,47 @@ impl Tree {
         let Some(entry) = self.entries.get(id) else {
             return vec![];
         };
-        if !matches!(entry.node.kind.as_str(), "scroll" | "textarea") || entry.scroll_max <= 0.0 {
+        if !matches!(entry.node.kind.as_str(), "scroll" | "textarea")
+            || (entry.scroll_max <= 0.0 && entry.scroll_max_x <= 0.0)
+        {
             return vec![];
         }
-        let amount = if page {
-            self.visible_rect(id)
-                .map_or(120.0, |rect| (rect.height() - 24.0).max(36.0))
+        let rect = self.visible_rect(id);
+        let amount_x = if page {
+            rect.map_or(120.0, |rect| (rect.width() - 24.0).max(36.0))
         } else {
             36.0
         };
-        self.scroll_to(id, entry.scroll + amount * direction.signum())
+        let amount_y = if page {
+            rect.map_or(120.0, |rect| (rect.height() - 24.0).max(36.0))
+        } else {
+            36.0
+        };
+        self.scroll_to_2d(
+            id,
+            entry.scroll_x + amount_x * direction_x.signum(),
+            entry.scroll + amount_y * direction_y.signum(),
+        )
     }
 
-    pub(crate) fn accessibility_set_scroll(&mut self, id: &str, offset: f64) -> Vec<Value> {
+    pub(crate) fn accessibility_set_scroll(
+        &mut self,
+        id: &str,
+        offset_x: f64,
+        offset_y: f64,
+    ) -> Vec<Value> {
         if !self.accessibility_in_scope(id) {
             return vec![];
         }
         let Some(entry) = self.entries.get(id) else {
             return vec![];
         };
-        if !matches!(entry.node.kind.as_str(), "scroll" | "textarea") || entry.scroll_max <= 0.0 {
+        if !matches!(entry.node.kind.as_str(), "scroll" | "textarea")
+            || (entry.scroll_max <= 0.0 && entry.scroll_max_x <= 0.0)
+        {
             return vec![];
         }
-        self.scroll_to(id, offset)
+        self.scroll_to_2d(id, offset_x, offset_y)
     }
 
     pub(crate) fn accessibility_scroll_into_view(&mut self, id: &str) -> Vec<Value> {
@@ -2695,7 +2851,8 @@ impl Tree {
             if matches!(
                 self.entries[&parent_id].node.kind.as_str(),
                 "scroll" | "textarea"
-            ) && self.entries[&parent_id].scroll_max > 0.0
+            ) && (self.entries[&parent_id].scroll_max > 0.0
+                || self.entries[&parent_id].scroll_max_x > 0.0)
             {
                 ancestors.push(parent_id);
             }
@@ -2707,16 +2864,27 @@ impl Tree {
             else {
                 continue;
             };
-            let delta = if target.y0 < viewport.y0 {
+            let delta_x = if target.x0 < viewport.x0 {
+                target.x0 - viewport.x0
+            } else if target.x1 > viewport.x1 {
+                target.x1 - viewport.x1
+            } else {
+                0.0
+            };
+            let delta_y = if target.y0 < viewport.y0 {
                 target.y0 - viewport.y0
             } else if target.y1 > viewport.y1 {
                 target.y1 - viewport.y1
             } else {
                 0.0
             };
-            if delta != 0.0 {
-                let next = self.entries[&ancestor].scroll + delta;
-                events.extend(self.scroll_to(&ancestor, next));
+            if delta_x != 0.0 || delta_y != 0.0 {
+                let entry = &self.entries[&ancestor];
+                events.extend(self.scroll_to_2d(
+                    &ancestor,
+                    entry.scroll_x + delta_x,
+                    entry.scroll + delta_y,
+                ));
             }
         }
         events
@@ -2775,7 +2943,8 @@ impl Tree {
                 if matches!(
                     self.entries[&parent_id].node.kind.as_str(),
                     "scroll" | "textarea"
-                ) && self.entries[&parent_id].scroll_max > 0.0
+                ) && (self.entries[&parent_id].scroll_max > 0.0
+                    || self.entries[&parent_id].scroll_max_x > 0.0)
                 {
                     ancestors.push(parent_id);
                 }
@@ -2787,13 +2956,24 @@ impl Tree {
                 let Some(viewport) = self.visible_rect(&ancestor) else {
                     continue;
                 };
-                let delta = match alignment {
+                let delta_x = if target.x0 < viewport.x0 {
+                    target.x0 - viewport.x0
+                } else if target.x1 > viewport.x1 {
+                    target.x1 - viewport.x1
+                } else {
+                    0.0
+                };
+                let delta_y = match alignment {
                     AccessibilityScrollAlignment::Top => target.y0 - viewport.y0,
                     AccessibilityScrollAlignment::Bottom => target.y1 - viewport.y1,
                 };
-                if delta != 0.0 {
-                    let next = self.entries[&ancestor].scroll + delta;
-                    events.extend(self.scroll_to(&ancestor, next));
+                if delta_x != 0.0 || delta_y != 0.0 {
+                    let entry = &self.entries[&ancestor];
+                    events.extend(self.scroll_to_2d(
+                        &ancestor,
+                        entry.scroll_x + delta_x,
+                        entry.scroll + delta_y,
+                    ));
                 }
             }
         } else {
@@ -2966,14 +3146,22 @@ impl Tree {
 
     pub fn snapshots(&self) -> Vec<Value> {
         let mut result = vec![];
-        self.snapshot_node(&self.root, 0.0, &mut result);
+        self.snapshot_node(&self.root, Vec2::ZERO, &mut result);
         result
     }
-    fn snapshot_node(&self, id: &str, offset: f64, out: &mut Vec<Value>) {
+    fn snapshot_node(&self, id: &str, offset: Vec2, out: &mut Vec<Value>) {
         let e = &self.entries[id];
-        out.push(json!({"id":id,"kind":e.node.kind,"x":e.rect.x0,"y":e.rect.y0-offset,"width":e.rect.width(),"height":e.rect.height(),"scroll":e.scroll,"scrollMax":e.scroll_max,"text":e.node.display_text(),"control":e.node.control}));
+        out.push(json!({
+            "id":id,"kind":e.node.kind,
+            "x":e.rect.x0-offset.x,"y":e.rect.y0-offset.y,
+            "width":e.rect.width(),"height":e.rect.height(),
+            "scroll":e.scroll,"scrollMax":e.scroll_max,
+            "scrollX":e.scroll_x,"scrollY":e.scroll,
+            "scrollMaxX":e.scroll_max_x,"scrollMaxY":e.scroll_max,
+            "text":e.node.display_text(),"control":e.node.control
+        }));
         for child in &e.children {
-            self.snapshot_node(child, offset + e.scroll, out);
+            self.snapshot_node(child, offset + Vec2::new(e.scroll_x, e.scroll), out);
         }
     }
     pub fn layout_node_count(&self) -> usize {
@@ -3462,12 +3650,18 @@ fn layout_style(node: &Node, suppress_border: bool) -> Style {
         style.min_size.width = length(0.0);
     }
     if node.kind == "scroll" {
-        style.overflow.y = taffy::style::Overflow::Scroll;
-        style.min_size.height = length(0.0);
+        if matches!(node.scroll_orientation.as_str(), "horizontal" | "both") {
+            style.overflow.x = taffy::style::Overflow::Scroll;
+            style.min_size.width = length(0.0);
+        }
+        if matches!(node.scroll_orientation.as_str(), "vertical" | "both") {
+            style.overflow.y = taffy::style::Overflow::Scroll;
+            style.min_size.height = length(0.0);
+        }
     }
     if style.display == Display::Grid {
         style.grid_template_columns =
-            vec![fr(1.0); node.number("columns", 2.0).clamp(1.0, 24.0) as usize];
+            vec![flex(1.0); node.number("columns", 2.0).clamp(1.0, 24.0) as usize];
     }
     style
 }

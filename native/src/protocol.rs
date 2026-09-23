@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 28;
+pub const VERSION: u32 = 29;
 
 fn range_max() -> f64 {
     100.0
@@ -67,6 +67,8 @@ pub struct Node {
     pub input_type: String,
     #[serde(default = "default_scroll_speed")]
     pub scroll_speed: f64,
+    #[serde(default = "default_scroll_orientation")]
+    pub scroll_orientation: String,
     pub control: Option<Control>,
     #[serde(default)]
     pub modal: bool,
@@ -94,6 +96,9 @@ fn default_input_type() -> String {
 }
 fn default_scroll_speed() -> f64 {
     1.0
+}
+fn default_scroll_orientation() -> String {
+    "vertical".into()
 }
 
 impl Node {
@@ -254,6 +259,10 @@ pub enum Command {
         x: Option<f64>,
         y: Option<f64>,
         delta: Option<f64>,
+        #[serde(rename = "deltaX")]
+        delta_x: Option<f64>,
+        #[serde(rename = "deltaY")]
+        delta_y: Option<f64>,
         text: Option<String>,
     },
     #[cfg(target_os = "windows")]
@@ -376,6 +385,14 @@ pub fn validate_file_dialog(mode: &str, options: &FileDialogOptions) -> Result<(
 fn validate_control(node: &Node) -> Result<(), String> {
     if node.kind == "scroll" && (!node.scroll_speed.is_finite() || node.scroll_speed <= 0.0) {
         return Err("Scroll speed must be finite and greater than zero".into());
+    }
+    if node.kind == "scroll"
+        && !["vertical", "horizontal", "both"].contains(&node.scroll_orientation.as_str())
+    {
+        return Err(format!(
+            "Unsupported scroll orientation: {}",
+            node.scroll_orientation
+        ));
     }
     if node.kind == "input"
         && ![

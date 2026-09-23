@@ -1,9 +1,9 @@
-import { PROTOCOL_VERSION, type NativeNode, type SceneDocument, type WindowOptions } from "../../protocol/src/index";
+import { PROTOCOL_VERSION, type NativeNode, type SceneDocument, type ScrollPosition, type WindowOptions } from "../../protocol/src/index";
 import { Fragment, type Child, type VNode } from "./jsx-runtime";
 import { lightTheme, resolveThemeColor, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
 import type { WindowCloseRequestEvent } from "./components";
-export interface Handlers { onClick?: () => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void }
+export interface Handlers { onClick?: () => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onScrollPosition?: (position: ScrollPosition) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void }
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode> }
 const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "button", "image", "scroll", "input", "textarea", "pressable", "icon", "slider", "splitter"]);
 const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
@@ -47,7 +47,7 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
         background: resolveThemeColor(p.style?.background ?? theme.colors.background, selectedTheme),
         decorations: true, resizable: p.resizable ?? true, position: p.position ?? "center", debug };
     }
-    handlers.set(id, { onClick: p.onClick, onContextMenu: p.onContextMenu, onOutsideClick: p.onOutsideClick, onHover: p.onHover, onChange: p.onChange, onValueChange: p.onValueChange, onScroll: p.onScroll, onEscape: p.onEscape, onKeyDown: p.onKeyDown, onBlur: p.onBlur, onCloseRequest: p.onCloseRequest });
+    handlers.set(id, { onClick: p.onClick, onContextMenu: p.onContextMenu, onOutsideClick: p.onOutsideClick, onHover: p.onHover, onChange: p.onChange, onValueChange: p.onValueChange, onScroll: p.onScroll, onScrollPosition: p.onScrollPosition, onEscape: p.onEscape, onKeyDown: p.onKeyDown, onBlur: p.onBlur, onCloseRequest: p.onCloseRequest });
     const control = p.control ? { ...p.control } : undefined;
     const childGroup = control?.role === "radiogroup" || control?.role === "tablist" || control?.role === "navigation" || control?.role === "togglegroup"
       || control?.role === "tree" || control?.role === "grid" ? id : group;
@@ -79,6 +79,7 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
       ...(p.placeholder !== undefined ? { placeholder: p.placeholder } : {}),
       ...(p.inputType !== undefined ? { inputType: p.inputType } : {}),
       ...(p.scrollSpeed !== undefined ? { scrollSpeed: p.scrollSpeed } : {}),
+      ...(p.scrollOrientation !== undefined ? { scrollOrientation: p.scrollOrientation } : {}),
       ...(p.disabled !== undefined ? { disabled: p.disabled } : {}),
       ...(p.modal !== undefined ? { modal: p.modal } : {}),
       ...(rovingGroup ? { rovingGroup } : {}),
@@ -133,7 +134,7 @@ export function diffTrees(previous: CompiledTree, next: CompiledTree): NativeNod
     if (!old || old.kind !== node.kind || old.children.length !== node.children.length
       || old.children.some((child, index) => child.id !== node.children[index].id)) return null;
     if (old.text !== node.text || old.src !== node.src || old.fit !== node.fit
-      || old.value !== node.value || old.placeholder !== node.placeholder || old.inputType !== node.inputType || old.scrollSpeed !== node.scrollSpeed || old.disabled !== node.disabled
+      || old.value !== node.value || old.placeholder !== node.placeholder || old.inputType !== node.inputType || old.scrollSpeed !== node.scrollSpeed || old.scrollOrientation !== node.scrollOrientation || old.disabled !== node.disabled
       || old.modal !== node.modal || old.rovingGroup !== node.rovingGroup || old.portal !== node.portal || old.dismissOnOutside !== node.dismissOnOutside || old.closeIntercept !== node.closeIntercept || old.focusable !== node.focusable
       || old.dragRegion !== node.dragRegion || old.windowAction !== node.windowAction
       || !sameFields(old.control ?? {}, node.control ?? {})
