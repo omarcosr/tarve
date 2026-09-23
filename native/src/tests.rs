@@ -1,4 +1,5 @@
 use crate::{
+    bridge,
     protocol::{self, Node},
     renderer::{GraphicsFaultKind, SurfaceIssue, SurfaceRecoveryAction, surface_recovery_action},
     runtime::{
@@ -10,6 +11,17 @@ use crate::{
     },
     tree::Tree,
 };
+
+#[test]
+fn abi_and_json_protocol_versions_fail_independently() {
+    assert_eq!(bridge::tarve_abi_version(), bridge::ABI_VERSION);
+    assert_ne!(bridge::ABI_VERSION, protocol::VERSION);
+    assert!(bridge::validate_protocol_version(protocol::VERSION).is_ok());
+    assert_eq!(
+        bridge::validate_protocol_version(protocol::VERSION + 1).unwrap_err(),
+        "Protocol version mismatch"
+    );
+}
 use serde_json::json;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::keyboard::{Key, ModifiersState, NamedKey};

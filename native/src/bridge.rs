@@ -32,6 +32,7 @@ struct Host {
 }
 static HOST: OnceLock<Mutex<Option<Host>>> = OnceLock::new();
 static LAST_ERROR: Mutex<String> = Mutex::new(String::new());
+pub const ABI_VERSION: u32 = 1;
 fn host() -> &'static Mutex<Option<Host>> {
     HOST.get_or_init(|| Mutex::new(None))
 }
@@ -58,16 +59,21 @@ unsafe fn read_json<T: serde::de::DeserializeOwned>(ptr: *const u8, len: u32) ->
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn tarve_abi_version() -> u32 {
-    protocol::VERSION
+    ABI_VERSION
+}
+pub(crate) fn validate_protocol_version(version: u32) -> Result<(), String> {
+    if version == protocol::VERSION {
+        Ok(())
+    } else {
+        Err("Protocol version mismatch".into())
+    }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
     guard(|| {
         let document: Document = unsafe { read_json(ptr, len)? };
-        if document.version != protocol::VERSION {
-            return Err("Protocol version mismatch".into());
-        }
+        validate_protocol_version(document.version)?;
         protocol::validate(&document.root)?;
         let w = &document.window;
         if ![w.width, w.height, w.min_width, w.min_height]

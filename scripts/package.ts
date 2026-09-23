@@ -31,5 +31,6 @@ for (const result of results) {
 const types = Bun.spawn([process.execPath, join(root, "node_modules/typescript/bin/tsc"), "-p", "tsconfig.package.json"], { cwd: root, stdout: "inherit", stderr: "inherit" });
 if (await types.exited !== 0) throw new Error("Package declaration generation failed");
 await copyFile(join(root, "packages/core/src/assets.d.ts"), join(root, "dist/types/core/src/assets.d.ts"));
-await copyFile(library, join(root, "native/win32-x64/tarve_native.dll"));
+const packagedLibrary = join(root, "native/win32-x64/tarve_native.dll");
+await copyFile(library, packagedLibrary);
 console.log("npm package ready: JS, declarations, CLI, and native Windows x64 release library.");

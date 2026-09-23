@@ -6,13 +6,14 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 
 - TypeScript package checking: `bun run check` passes.
 - Rust lint gate: `cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings` passes.
-- Core/UI suite: **100 Bun tests / 535 assertions** pass.
-- Native suite: **78 Rust tests** pass, including deterministic AccessKit tree/action/TextPattern/scroll-alignment, horizontal/bidirectional scroll and bounded grid-track coverage.
-- Protocol is currently **v29** on both TypeScript and Rust sides and is checked by the FFI bridge before startup.
+- Core/UI suite: **101 Bun tests / 538 assertions** pass.
+- Native suite: **79 Rust tests** pass, including deterministic AccessKit tree/action/TextPattern/scroll-alignment, horizontal/bidirectional scroll, bounded grid-track coverage and independent ABI/protocol mismatch handling.
+- JSON protocol is currently **v29** on both TypeScript and Rust sides; the native C ABI is independently versioned at **v1** and checked before startup.
 - npm packaging includes JS, JSX runtime, declarations and the Windows x64 native library.
 - External-consumer and standalone-EXE smoke tests are part of `bun run verify`.
 - Real GPU visual regression is a mandatory release gate: `bun run verify` runs `test:visual` after package/EXE smoke validation, and `bun run release:check` is the CI/release entry point for the same gate.
-- Latest full validation on this tree: `bun run verify` **PASS**, including the integrated `test:visual` gate against the freshly packed/installed v29 artifact. The visual gate exercises composed Button semantics and real horizontal ScrollArea movement; `verify` also includes the Windows x64 `smoke:accessibility` gate against the real OS UI Automation provider and the stale-package-output regression test.
+- Latest full validation on this tree: `bun run verify` **PASS**, including release-policy checks, synchronized product-version policy, independent ABI/protocol tests, the integrated `test:visual` gate against the freshly packed/installed v29 artifact, Windows x64 `smoke:accessibility`, package/standalone-EXE smoke and stale-package-output coverage.
+- Authenticode signing is wired into the tagged Windows release path and fails closed without signing credentials. The local verifier was exercised against a trusted, timestamped Windows binary and returned `Valid`; an actual Tarve release signature is produced only when the configured release workflow runs with the project PFX secrets.
 
 ## Production foundations already implemented
 
@@ -43,13 +44,13 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 - [x] Windows x64 CI in `.github/workflows/ci.yml` installs locked Bun/Rust dependencies and runs the full `release:check` gate, with visual captures uploaded as artifacts. The workflow is configured for pushes, pull requests and manual dispatch; remote execution still occurs when GitHub runs that workflow.
 - [x] `test:visual` is a mandatory release gate inside `bun run verify` / `bun run release:check`, after package and standalone-EXE smoke validation.
 - [x] Packaging removes stale `dist/npm`, `dist/types`, `native/win32-x64` and prior `dist/tarve-*.tgz` outputs before rebuilding; a focused Bun regression test verifies stale generated files cannot survive while unrelated visual artifacts are preserved.
-- [ ] Synchronize root/core/protocol/Cargo package versions automatically; protocol schema versioning remains separate from package SemVer.
-- [ ] Separate the C ABI version from the JSON protocol version and test both mismatch paths independently.
+- [x] Product SemVer is synchronized across root/core/protocol/`bun.lock`/Cargo/Cargo.lock by `version:set`, enforced by `version:check` / `release:policy`, while protocol schema versioning remains independent.
+- [x] The native C ABI is versioned independently from the JSON protocol (ABI v1 vs protocol v29), with TS/Rust agreement checks and independent mismatch regressions.
 - [ ] Bound/coalesce the native event `VecDeque` for high-rate events such as hover/scroll/frame notifications.
 - [ ] Add structured diagnostics: selected GPU/backend/adapter, startup failures, renderer/device failures and optional persistent crash/startup logs.
 - [ ] Test sustained interaction and startup/presentation latency on multiple Windows releases and multiple NVIDIA/AMD/Intel GPUs.
-- [ ] Add Authenticode signing to the public EXE release path if binaries will be distributed to third parties.
-- [ ] Replace `UNLICENSED` only if Tarve is intended to be distributed under a public/open license; keep it intentionally if the project remains proprietary.
+- [x] Tagged Windows releases use Authenticode SHA-256 + RFC 3161 timestamping for the standalone EXE and native DLL, re-verify the DLL inside the final npm tarball, emit SHA-256 release metadata and publish only after the full release gate passes.
+- [x] License policy is explicit and release-gated: Tarve uses **Apache License 2.0** (`Apache-2.0`) across the root package, private workspace packages and native crate, with the canonical `LICENSE` text included in distribution artifacts; the native crate remains non-publishable independently.
 
 ## Known scope limits / important follow-up components
 
@@ -61,6 +62,8 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 
 ## Release completion criteria
 
-For a Windows x64 beta/internal production release, the shipped npm tarball and standalone EXE must pass `bun run release:check` (the same full gate as `bun run verify`), which includes the mandatory real-GPU `test:visual` regression.
+For a Windows x64 beta/internal production release, the shipped npm tarball and standalone EXE must pass `bun run release:check` (the same full gate as `bun run verify`), which includes the mandatory real-GPU `test:visual` regression and release-policy/version checks.
+
+Official third-party release artifacts must be produced by the signed tag workflow in `.github/workflows/release.yml`, with a tag exactly matching `v<product-semver>` and valid Authenticode certificate secrets configured. The detailed license/version/signing/release procedure is documented in `RELEASE.md`.
 
 For a broad public **production-ready / 1.0** claim, automate the mandatory Windows x64 release gates, complete the applicable distribution/diagnostics hardening above, and document/test the intentionally supported platform/lifecycle limits.

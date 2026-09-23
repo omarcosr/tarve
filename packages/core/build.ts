@@ -20,6 +20,10 @@ export async function build(options: BuildOptions): Promise<string> {
     throw new Error("Tarve executable distribution currently supports Windows x64.");
   }
   const entrypoint = resolve(options.entrypoint);
+  const packageMetadata = await Bun.file(resolve(import.meta.dir, "../../package.json")).json() as { version?: string };
+  if (typeof packageMetadata.version !== "string" || packageMetadata.version.length === 0) {
+    throw new Error("Tarve package version is missing.");
+  }
   const name = options.name ?? basename(entrypoint).replace(/\.[^.]+$/, "");
   const outfile = resolve(options.outfile ?? `dist/${name}.exe`);
   const library = resolve(options.nativeLibrary ?? nativePath());
@@ -64,7 +68,7 @@ export async function build(options: BuildOptions): Promise<string> {
       outfile,
       autoloadDotenv: false,
       autoloadBunfig: false,
-      windows: { hideConsole: true, title: name, version: options.version ?? "0.1.0", description: `${name} — native Tarve application` },
+      windows: { hideConsole: true, title: name, version: options.version ?? packageMetadata.version, description: `${name} — native Tarve application` },
     },
   });
   if (!result.success) throw new AggregateError(result.logs, "Could not compile the Tarve application");

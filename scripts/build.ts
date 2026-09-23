@@ -19,7 +19,11 @@ const outfile = values.outfile ? resolve(process.cwd(), values.outfile) : join(r
 if (executable && (process.platform !== "win32" || process.arch !== "x64")) {
   throw new Error("The production executable currently targets Windows x64. Build it on Windows x64.");
 }
-const nativeArtifact = await buildNative(release);
+const prebuiltNative = process.env.TARVE_PREBUILT_NATIVE?.trim();
+const nativeArtifact = prebuiltNative ? resolve(prebuiltNative) : await buildNative(release);
+if (prebuiltNative && (!release || !existsSync(nativeArtifact))) {
+  throw new Error("TARVE_PREBUILT_NATIVE must point to an existing release native library.");
+}
 const name = basename(nativeArtifact);
 if (!release) {
   const directory = join(root, "native/bin");

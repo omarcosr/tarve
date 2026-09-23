@@ -1,10 +1,15 @@
 import { Worker } from "node:worker_threads";
-import { PROTOCOL_VERSION, type SceneDocument, type NativeCommand, type NativeEvent } from "../../../protocol/src/index";
+import { NATIVE_ABI_VERSION, type SceneDocument, type NativeCommand, type NativeEvent } from "../../../protocol/src/index";
 import { openLibrary } from "./binding";
 import { nativePath, workerPath } from "#tarve/runtime";
 
 export interface NativeBridge { start(document: SceneDocument, onEvent: (event: NativeEvent) => void): void; send(command: NativeCommand): void; join(): void }
 export interface BunFfiBridgeOptions { libraryPath?: string; workerPath?: string | URL }
+export function assertNativeAbiVersion(actual: number): void {
+  if (actual !== NATIVE_ABI_VERSION) {
+    throw new Error(`Native ABI mismatch; expected ${NATIVE_ABI_VERSION}, got ${actual}. Rebuild the library.`);
+  }
+}
 export class BunFfiBridge implements NativeBridge {
   private library?: ReturnType<typeof openLibrary>;
   private worker?: Worker;
@@ -19,7 +24,7 @@ export class BunFfiBridge implements NativeBridge {
     if (this.library) throw new Error("Bridge already started");
     const path = this.options.libraryPath ?? nativePath();
     this.library = openLibrary(path);
-    if (this.library.symbols.tarve_abi_version() !== PROTOCOL_VERSION) throw new Error("Native ABI mismatch; rebuild the library.");
+    assertNativeAbiVersion(this.library.symbols.tarve_abi_version());
     const payload = new TextEncoder().encode(JSON.stringify(document));
     if (this.library.symbols.tarve_start(payload, payload.length) !== 0) throw this.error();
     try {

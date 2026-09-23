@@ -2,6 +2,8 @@
 
 GUI nativa para **Bun + TypeScript/TSX**, com **Taffy** (Flex/Grid), **Parley** (shaping, medição e quebra de texto) e **Vello/WGPU** (GPU). Janela Win32 via Winit. O tema padrão usa a linguagem visual shadcn: zinc, superfícies claras, bordas discretas, raios de 6–12 px e Segoe UI.
 
+Licenciado sob a **Apache License 2.0**. Consulte [`LICENSE`](LICENSE).
+
 ## Rodar no Windows
 
 Pré-requisitos: Bun 1.4+, Rust estável com target `x86_64-pc-windows-msvc`, Visual Studio Build Tools com C++/Windows SDK e GPU com suporte a compute shaders (DirectX 12 ou Vulkan).
@@ -17,6 +19,8 @@ bun run dev
 ## Usar como pacote npm
 
 O pacote para Windows x64 inclui a DLL em release; quem instala precisa somente do Bun e de um driver de GPU compatível. A publicação no registry ainda é uma etapa separada. Para gerar e instalar o artefato local:
+
+A política oficial de licença, versionamento, Authenticode e release está em [`RELEASE.md`](RELEASE.md). Releases assinados usam tags `v<semver>`; o npm registry continua fora do workflow automático até a política de distribuição pública ser definida explicitamente.
 
 ```powershell
 # No repositório Tarve:

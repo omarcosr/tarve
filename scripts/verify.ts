@@ -2,10 +2,12 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 const steps = [
+  "release:policy",
   "check",
   "lint",
   "test",
   "test:package-clean",
+  "test:release-policy",
   "smoke",
   "smoke:controls",
   "smoke:virtual-list",

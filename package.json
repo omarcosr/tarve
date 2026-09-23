@@ -2,7 +2,7 @@
   "name": "tarve",
   "version": "0.1.0",
   "description": "Native Bun/TSX GUI with Taffy layout, Parley text and Vello rendering",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "bin": {
     "tarve": "./dist/npm/cli.js"
   },
@@ -14,7 +14,9 @@
     "dist/types",
     "native/win32-x64",
     "README.md",
-    "PERFORMANCE.md"
+    "PERFORMANCE.md",
+    "RELEASE.md",
+    "LICENSE"
   ],
   "os": [
     "win32"
@@ -59,7 +61,7 @@
     "build:exe": "bun scripts/build.ts --exe",
     "build:native": "bun scripts/build.ts",
     "package": "bun scripts/package.ts",
-    "prepack": "bun scripts/package.ts",
+    "prepack": "bun scripts/prepack.ts",
     "pack": "bun pm pack --ignore-scripts --destination dist",
     "start": "bun run setup:examples && bun examples/basic.tsx",
     "check": "tsc --noEmit",
@@ -67,8 +69,13 @@
     "setup:examples": "bun scripts/setup-examples.ts",
     "verify": "bun scripts/verify.ts",
     "release:check": "bun run verify",
+    "release:policy": "bun scripts/release-policy.ts",
+    "release:build": "bun scripts/release.ts",
+    "version:check": "bun scripts/version-policy.ts --check",
+    "version:set": "bun scripts/version-policy.ts --set",
     "test": "bun test packages && cargo test --manifest-path native/Cargo.toml",
     "test:package-clean": "bun test scripts/package-output.test.ts",
+    "test:release-policy": "bun test scripts/version-policy.test.ts scripts/release-policy.test.ts scripts/authenticode.test.ts",
     "test:visual": "bun run pack && bun run setup:examples && bun scripts/visual-regression.tsx",
     "smoke": "bun run build:native && bun run pack && bun run setup:examples && bun scripts/smoke.ts",
     "smoke:controls": "bun run build:native && bun run pack && bun run setup:examples && bun scripts/smoke-controls.ts",

@@ -1,0 +1,104 @@
+name: Signed Windows Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tarve-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-x64-release:
+    name: Windows x64 signed release
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Validate release ref and version policy
+        shell: pwsh
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if ("${{ github.ref_type }}" -ne "tag") {
+            throw "Signed releases must run from a tag."
+          }
+          bun scripts/release-policy.ts --tag "$env:GITHUB_REF_NAME"
+          git fetch origin "$env:DEFAULT_BRANCH" --no-tags
+          git merge-base --is-ancestor "$env:GITHUB_SHA" "origin/$env:DEFAULT_BRANCH"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release tag must point to a commit reachable from the default branch."
+          }
+
+      - name: Full unsigned release gate
+        run: bun run release:check
+
+      - name: Build and verify signed release artifacts
+        env:
+          TARVE_RELEASE_TAG: ${{ github.ref_name }}
+          TARVE_AUTHENTICODE_SIGN: "1"
+          TARVE_AUTHENTICODE_PFX_BASE64: ${{ secrets.TARVE_AUTHENTICODE_PFX_BASE64 }}
+          TARVE_AUTHENTICODE_PFX_PASSWORD: ${{ secrets.TARVE_AUTHENTICODE_PFX_PASSWORD }}
+          TARVE_AUTHENTICODE_TIMESTAMP_URL: ${{ vars.TARVE_AUTHENTICODE_TIMESTAMP_URL }}
+        run: bun run release:build
+
+      - name: Upload signed release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarve-${{ github.ref_name }}-windows-x64
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/Tarve.exe
+            dist/tarve-*.tgz
+            dist/release-manifest.json
+            native/win32-x64/tarve_native.dll
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tarball = (Get-ChildItem -LiteralPath dist -Filter "tarve-*.tgz" -File | Select-Object -First 1).FullName
+          if (-not $tarball) { throw "Release tarball is missing." }
+          $arguments = @(
+            "release", "create", "$env:GITHUB_REF_NAME",
+            "dist/Tarve.exe",
+            $tarball,
+            "dist/release-manifest.json",
+            "native/win32-x64/tarve_native.dll",
+            "--verify-tag",
+            "--generate-notes",
+            "--title", "Tarve $env:GITHUB_REF_NAME"
+          )
+          if ($env:GITHUB_REF_NAME -match "-") { $arguments += "--prerelease" }
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) { throw "GitHub release creation failed." }
