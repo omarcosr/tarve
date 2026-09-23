@@ -572,7 +572,7 @@ export function Collapsible({ open, trigger, label = "Toggle section", disabled,
       jsx(Pressable, {
         ...(id ? { id: `${id}-trigger` } : {}),
         disabled,
-        control: { role: "button", label, checked: open },
+        control: { role: "button", label, expanded: open },
         onClick: () => onOpenChange?.(!open),
         style: { background: transparent },
         children: trigger,
@@ -843,6 +843,10 @@ export function Sheet({
     : null;
   const panel = jsx(Column, {
     ...(id ? { id: `${id}-content` } : {}),
+    ...((title || description) ? {
+      control: { role: "group", label: title ?? "", description: description ?? "" },
+    } : {}),
+    modal: true,
     gap: 18,
     style: {
       position: "absolute",
@@ -859,7 +863,6 @@ export function Sheet({
   return jsx(Pressable, {
     ...props,
     ...(id ? { id } : {}),
-    modal: true,
     portal: true,
     focusable: false,
     onClick: closeOnOverlay ? close : undefined,
@@ -1014,7 +1017,7 @@ export function Menubar({ menus, openMenu, onOpenMenuChange, onSelect, style, id
           jsx(Pressable, {
             ...(id ? { id: `${id}-menu-${menu.value}` } : {}),
             disabled: menu.disabled,
-            control: { role: "button", label: menu.label, checked: expanded },
+            control: { role: "button", label: menu.label, expanded },
             onClick: () => onOpenMenuChange?.(expanded ? undefined : menu.value),
             style: {
               height: 30,
@@ -1048,7 +1051,7 @@ export function Menubar({ menus, openMenu, onOpenMenuChange, onSelect, style, id
                   jsx(Pressable, {
                     ...(id ? { id: `${id}-item-${menu.value}-${item.value}` } : {}),
                     disabled: item.disabled,
-                    control: { role: "button", label: item.label, checked: item.checked },
+                    control: { role: "menuitem", label: item.label, checked: item.checked },
                     onClick: () => {
                       item.onSelect?.();
                       onSelect?.(menu.value, item.value);

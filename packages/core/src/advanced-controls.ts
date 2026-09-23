@@ -164,7 +164,9 @@ export function NavigationMenu({ items, value, openValue, onValueChange, onOpenV
           jsx(Pressable, {
             ...(id ? { id: `${id}-trigger-${item.value}` } : {}),
             disabled: item.disabled,
-            control: { role: "menuitem", label: item.label, checked: direct ? value === item.value : open },
+            control: direct
+              ? { role: "menuitem", label: item.label, selected: value === item.value }
+              : { role: "menuitem", label: item.label, expanded: open },
             onClick: direct ? () => { onValueChange?.(item.value); onOpenValueChange?.(undefined); }
               : () => onOpenValueChange?.(open ? undefined : item.value),
             style: { minHeight: 36, padding: { left: 12, right: 12 }, align: "center", justify: "center",
@@ -183,7 +185,7 @@ export function NavigationMenu({ items, value, openValue, onValueChange, onOpenV
             children: item.links!.map(link => jsx(Pressable, {
               ...(id ? { id: `${id}-link-${link.value}` } : {}),
               disabled: link.disabled,
-              control: { role: "button", label: link.label, checked: value === link.value },
+              control: { role: "button", label: link.label, selected: value === link.value },
               onClick: () => { onValueChange?.(link.value); onOpenValueChange?.(undefined); },
               style: { minHeight: 40, padding: 8, hover: { background: c.muted }, background: value === link.value ? c.muted : transparent },
               children: jsx(Column, { gap: 2, children: [
@@ -284,7 +286,7 @@ export function Sidebar({ items, value, collapsed = false, width = 248, collapse
           return jsx(Pressable, {
             ...(id ? { id: `${id}-item-${item.value}` } : {}),
             disabled: item.disabled,
-            control: { role: "button", label: item.label, checked: item.value === value },
+            control: { role: "button", label: item.label, selected: item.value === value },
             onClick: () => onValueChange?.(item.value),
             style: { minHeight: 38, padding: { left: collapsed ? 6 : 10, right: collapsed ? 6 : 10 },
               align: "center", justify: collapsed ? "center" : "between", direction: "row",

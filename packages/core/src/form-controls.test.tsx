@@ -23,7 +23,9 @@ describe("form and visual controls", () => {
     expect(tree.nodes.get("ratio")?.style.aspectRatio).toBe(16 / 9);
     expect(tree.nodes.get("field-error")?.text).toBe("Required");
     expect(tree.nodes.get("field-error")?.control?.role).toBe("alert");
-    expect(tree.nodes.get("field")?.control).toEqual({ role: "group", label: "Email" });
+    expect(tree.nodes.get("field")?.control).toEqual({
+      role: "field", label: "Email", description: "", required: true,
+    });
     expect(tree.nodes.get("label")?.control?.role).toBe("label");
     expect(tree.nodes.get("buttons")?.control).toEqual({ role: "group", orientation: "horizontal" });
     expect(tree.nodes.get("heading")?.style.fontSize).toBe(32);

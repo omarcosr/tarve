@@ -97,7 +97,7 @@ export function TreeView<T>({
       return jsx(Pressable, {
         ...(rowId ? { id: rowId } : {}),
         disabled: node.disabled,
-        control: { role: "treeitem", label: node.label, checked: selected },
+        control: { role: "treeitem", label: node.label, selected, ...(hasChildren ? { expanded: isExpanded } : {}) },
         onClick: () => {
           onSelectedChange?.(node.id, node);
           onActivate?.(node.id, node);
@@ -287,7 +287,11 @@ export function DataGrid<T>({
       if (!column.sortable) return jsx(Row, { ...common, children: content }, column.key);
       return jsx(Pressable, {
         ...(id ? { id: `${id}-sort-${column.key}` } : {}),
-        control: { role: "button", label: `Sort by ${typeof column.header === "string" ? column.header : column.key}`, checked: active },
+        control: {
+          role: "button",
+          label: `Sort by ${typeof column.header === "string" ? column.header : column.key}`,
+          ...(active ? { sortDirection: sort!.direction === "asc" ? "ascending" as const : "descending" as const } : {}),
+        },
         onClick: () => onSortChange?.(!active ? { column: column.key, direction: "asc" }
           : sort!.direction === "asc" ? { column: column.key, direction: "desc" } : undefined),
         ...common,
@@ -319,7 +323,7 @@ export function DataGrid<T>({
           const selected = selectedTokens.has(token);
           return jsx(Pressable, {
             ...(id ? { id: `${id}-row-${String(entry.key)}` } : {}),
-            control: { role: "row", label: `Row ${entry.sourceIndex + 1}`, checked: selected },
+            control: { role: "row", label: `Row ${entry.sourceIndex + 1}`, selected },
             onClick: () => { toggleSelection(entry); onRowActivate?.(entry.row, entry.sourceIndex); },
             style: { width: "100%", height: rowHeight, shrink: 0, direction: "row", background: selected ? c.muted : "#00000000", hover: { background: c.muted }, borderWidth: { bottom: 1 }, borderColor: c.border },
             children: columns.map(column => jsx(View, {

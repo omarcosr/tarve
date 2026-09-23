@@ -1356,6 +1356,50 @@ fn closing_modal_restores_focus_to_previous_control() {
 }
 
 #[test]
+fn nested_modal_restores_focus_one_scope_at_a_time() {
+    let trigger = node("trigger", "button", json!({"height":36}), vec![]);
+    let mut tree = Tree::new(root(vec![trigger.clone()]));
+    tree.compute(320.0, 220.0).unwrap();
+    let _ = tree.focus("trigger");
+
+    let outer_button = node("outer-button", "button", json!({"height":30}), vec![]);
+    let mut outer = node(
+        "outer",
+        "column",
+        json!({"position":"absolute","top":0,"right":0,"bottom":0,"left":0}),
+        vec![outer_button.clone()],
+    );
+    outer.modal = true;
+    outer.focusable = false;
+    tree.update(root(vec![trigger.clone(), outer.clone()]));
+    tree.compute(320.0, 220.0).unwrap();
+    assert_eq!(tree.focused.as_deref(), Some("outer-button"));
+
+    let inner_button = node("inner-button", "button", json!({"height":30}), vec![]);
+    let mut inner = node(
+        "inner",
+        "column",
+        json!({"position":"absolute","top":20,"left":20,"width":160,"height":100}),
+        vec![inner_button],
+    );
+    inner.modal = true;
+    inner.focusable = false;
+    outer.children.push(inner);
+    tree.update(root(vec![trigger.clone(), outer.clone()]));
+    tree.compute(320.0, 220.0).unwrap();
+    assert_eq!(tree.focused.as_deref(), Some("inner-button"));
+
+    outer.children.retain(|child| child.id != "inner");
+    tree.update(root(vec![trigger.clone(), outer]));
+    tree.compute(320.0, 220.0).unwrap();
+    assert_eq!(tree.focused.as_deref(), Some("outer-button"));
+
+    tree.update(root(vec![trigger]));
+    tree.compute(320.0, 220.0).unwrap();
+    assert_eq!(tree.focused.as_deref(), Some("trigger"));
+}
+
+#[test]
 fn focusing_an_offscreen_control_scrolls_it_into_view() {
     let rows = (0..5)
         .map(|index| {

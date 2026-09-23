@@ -54,6 +54,7 @@ interface TriggerOptions {
   id: string;
   disabled?: boolean;
   focusable?: boolean;
+  rovingGroup?: boolean;
   style?: Style;
   fallbackControl?: Control;
   interactiveControl?: Control;
@@ -82,6 +83,7 @@ function popupTrigger(trigger: Child, options: TriggerOptions): Child {
       id: options.id,
       disabled: options.disabled,
       focusable: options.focusable,
+      rovingGroup: options.rovingGroup,
       control: options.fallbackControl,
       onClick: options.onClick,
       onContextMenu: options.onContextMenu,
@@ -103,6 +105,7 @@ function popupTrigger(trigger: Child, options: TriggerOptions): Child {
       ...previous,
       id: previous.id ?? options.id,
       disabled: Boolean(previous.disabled || options.disabled),
+      ...(options.rovingGroup ? { rovingGroup: true } : {}),
       ...(control ? { control } : {}),
       ...(options.style ? { style: { ...previous.style, ...options.style } } : {}),
       onClick: chainHandlers(previous.onClick, options.onClick),
@@ -158,7 +161,7 @@ export function Tooltip({
       popupTrigger(trigger, {
         id: `${id}-trigger`,
         focusable: false,
-        fallbackControl: { role: "button", label: triggerLabel(label, trigger), checked: open },
+        fallbackControl: { role: "button", label: triggerLabel(label, trigger) },
         onHover: (hovered: boolean) => onOpenChange?.(hovered),
       }),
       open
@@ -214,7 +217,7 @@ export function Popover({
       popupTrigger(trigger, {
         id: `${id}-trigger`,
         disabled,
-        fallbackControl: { role: "button", label: triggerLabel(label, trigger), checked: open },
+        fallbackControl: { role: "button", label: triggerLabel(label, trigger), expanded: open },
         onClick: () => setOpen(!open),
         onEscape: () => setOpen(false),
         onKeyDown: (key: string) => {
@@ -326,8 +329,9 @@ export function DropdownMenu({
       popupTrigger(trigger, {
         id: `${id}-trigger`,
         disabled,
-        fallbackControl: { role: open ? "menuitem" : "select", label: triggerLabel(label, trigger), checked: open },
-        interactiveControl: { role: open ? "menuitem" : "select", label: triggerLabel(label, trigger), checked: open },
+        rovingGroup: true,
+        fallbackControl: { role: "button", label: triggerLabel(label, trigger), expanded: open },
+        interactiveControl: { role: "button", label: triggerLabel(label, trigger), expanded: open },
         onClick: () => setOpen(!open),
         onEscape: close,
         onKeyDown: (key: string) => {
@@ -395,8 +399,9 @@ export function ContextMenu({
       popupTrigger(trigger, {
         id: `${id}-trigger`,
         disabled,
-        fallbackControl: { role: open ? "menuitem" : "select", label: triggerLabel(label, trigger), checked: open },
-        interactiveControl: { role: open ? "menuitem" : "select", label: triggerLabel(label, trigger), checked: open },
+        rovingGroup: true,
+        fallbackControl: { role: "button", label: triggerLabel(label, trigger), expanded: open },
+        interactiveControl: { role: "button", label: triggerLabel(label, trigger), expanded: open },
         onContextMenu: () => setOpen(true),
         onEscape: close,
         onKeyDown: (key: string) => {
@@ -482,7 +487,8 @@ export function Combobox({
       jsx(Pressable, {
         id: `${id}-trigger`,
         disabled,
-        control: { role: open ? "menuitem" : "select", label: selected?.label ?? placeholder, checked: open },
+        rovingGroup: true,
+        control: { role: "select", label: selected?.label ?? placeholder, expanded: open },
         onClick: () => setOpen(!open),
         onEscape: () => setOpen(false),
         onKeyDown: (key: string) => {
@@ -527,7 +533,7 @@ export function Combobox({
                     value: query,
                     placeholder: searchPlaceholder,
                     onChange: onQueryChange,
-                    control: { role: "menuitem", label: searchPlaceholder },
+                    rovingGroup: true,
                     style: { flex: 1, minWidth: 0, borderWidth: 0, background: "#00000000" },
                   }),
                 ],
@@ -542,7 +548,8 @@ export function Combobox({
                       id: `${id}-option-${option.value}`,
                       key: option.value,
                       disabled: option.disabled,
-                      control: { role: "menuitem", label: option.label, checked: option.value === value },
+                      rovingGroup: true,
+                      control: { role: "option", label: option.label, selected: option.value === value },
                       onClick: option.disabled ? undefined : () => choose(option.value),
                       style: {
                         minHeight: 32,
@@ -681,7 +688,7 @@ export function Command({
             value: query,
             placeholder,
             onChange: onQueryChange,
-            control: { role: "menuitem", label: placeholder },
+            rovingGroup: true,
             style: { flex: 1, minWidth: 0, borderWidth: 0, background: "#00000000" },
           }),
         ],
@@ -727,7 +734,6 @@ export function CommandPalette({
   const commandEscape = commandProps.onEscape;
   return jsx(Pressable, {
     id,
-    modal: true,
     portal: true,
     focusable: false,
     onClick: closeOnOverlay ? close : undefined,
@@ -746,6 +752,8 @@ export function CommandPalette({
     },
     children: jsx(Column, {
       id: `${id}-content`,
+      control: { role: "group", label: "Command palette" },
+      modal: true,
       style: { width, maxWidth: "90%", pointerEvents: "block" },
       children: jsx(Command, {
         ...commandProps,

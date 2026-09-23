@@ -51,8 +51,10 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
     const control = p.control ? { ...p.control } : undefined;
     const childGroup = control?.role === "radiogroup" || control?.role === "tablist" || control?.role === "navigation" || control?.role === "togglegroup"
       || control?.role === "tree" || control?.role === "grid" ? id : group;
-    if (control && (control.role === "radio" || control.role === "tab" || control.role === "menuitem" || control.role === "toggle"
-      || control.role === "treeitem" || control.role === "row")) control.group = group;
+    const semanticRoving = control && (control.role === "radio" || control.role === "tab" || control.role === "menuitem" || control.role === "toggle"
+      || control.role === "treeitem" || control.role === "row");
+    if ((semanticRoving || p.rovingGroup === true) && control) control.group = group;
+    const rovingGroup = group && (p.rovingGroup === true || semanticRoving) ? group : undefined;
     const isText = child.type === "text" || child.type === "button";
     const rawStyle = { ...p.style };
     if ((interactiveKinds.has(child.type) && p.focusable !== false) || control?.role === "otpSlot") {
@@ -79,6 +81,7 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
       ...(p.scrollSpeed !== undefined ? { scrollSpeed: p.scrollSpeed } : {}),
       ...(p.disabled !== undefined ? { disabled: p.disabled } : {}),
       ...(p.modal !== undefined ? { modal: p.modal } : {}),
+      ...(rovingGroup ? { rovingGroup } : {}),
       ...(p.portal !== undefined ? { portal: p.portal } : {}),
       ...(p.dismissOnOutside !== undefined ? { dismissOnOutside: p.dismissOnOutside } : {}),
       ...(child.type === "window" && p.onCloseRequest !== undefined ? { closeIntercept: true } : {}),

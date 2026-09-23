@@ -8,6 +8,11 @@ use crate::{
 };
 
 #[cfg(target_os = "windows")]
+use crate::accessibility::AccessibilityBridge;
+#[cfg(target_os = "windows")]
+use accesskit::{Action, ActionData, ActionRequest, ScrollUnit};
+
+#[cfg(target_os = "windows")]
 fn run_file_dialog(
     window: Option<&Arc<Window>>,
     mode: &str,
@@ -336,9 +341,8 @@ pub fn run(
     }
     let event_loop = builder.build().map_err(|e| e.to_string())?;
     event_loop.set_control_flow(ControlFlow::Wait);
-    ready
-        .send(event_loop.create_proxy())
-        .map_err(|e| e.to_string())?;
+    let event_proxy = event_loop.create_proxy();
+    ready.send(event_proxy.clone()).map_err(|e| e.to_string())?;
     let tree = Tree::new(document.root.clone());
     let mut app = App {
         document,
@@ -357,6 +361,9 @@ pub fn run(
         ime_enabled: false,
         last_titlebar_click: None,
         close_request_pending: false,
+        event_proxy,
+        #[cfg(target_os = "windows")]
+        accessibility: None,
     };
     event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
     if let Some(error) = app.fatal {
@@ -382,6 +389,9 @@ struct App {
     ime_enabled: bool,
     last_titlebar_click: Option<(Instant, (f64, f64))>,
     close_request_pending: bool,
+    event_proxy: EventLoopProxy<Command>,
+    #[cfg(target_os = "windows")]
+    accessibility: Option<AccessibilityBridge>,
 }
 
 const MAX_GRAPHICS_RECOVERY_ATTEMPTS: u8 = 3;
@@ -504,6 +514,131 @@ pub(crate) fn close_request_action(intercept: bool, pending: &mut bool) -> Close
     CloseRequestAction::Emit
 }
 impl App {
+    #[cfg(target_os = "windows")]
+    fn initialize_accessibility(&mut self, event_loop: &ActiveEventLoop, window: &Window) {
+        self.accessibility = Some(AccessibilityBridge::new(
+            event_loop,
+            window,
+            self.event_proxy.clone(),
+            &mut self.tree,
+            &self.document.window.title,
+            window.scale_factor(),
+        ));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn initialize_accessibility(&mut self, _: &ActiveEventLoop, _: &Window) {}
+
+    #[cfg(target_os = "windows")]
+    fn sync_accessibility(&mut self) {
+        if self.accessibility.is_none() {
+            return;
+        }
+        if let Err(message) = self.prepare() {
+            self.events.push(error(format!(
+                "Accessibility layout update failed: {message}"
+            )));
+            return;
+        }
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+        if let Some(accessibility) = self.accessibility.as_mut() {
+            accessibility.sync(
+                &mut self.tree,
+                &self.document.window.title,
+                window.scale_factor(),
+            );
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn sync_accessibility(&mut self) {}
+
+    #[cfg(target_os = "windows")]
+    fn handle_accessibility_action(&mut self, request: ActionRequest) -> Vec<serde_json::Value> {
+        let text_run_start = self
+            .accessibility
+            .as_ref()
+            .and_then(|accessibility| accessibility.text_run_start(request.target_node));
+        let Some(native_id) = self
+            .accessibility
+            .as_ref()
+            .and_then(|accessibility| accessibility.resolve(request.target_node))
+            .map(str::to_string)
+        else {
+            return vec![];
+        };
+        if !self.tree.entries.contains_key(&native_id) {
+            return vec![];
+        }
+        match request.action {
+            Action::Focus => self.tree.accessibility_focus(&native_id),
+            Action::Blur => self.tree.accessibility_blur(&native_id),
+            Action::Click | Action::Expand | Action::Collapse => {
+                self.tree.accessibility_click(&native_id)
+            }
+            Action::ShowContextMenu => self.tree.accessibility_context(&native_id),
+            Action::Increment => self.tree.accessibility_adjust_numeric(&native_id, 1.0),
+            Action::Decrement => self.tree.accessibility_adjust_numeric(&native_id, -1.0),
+            Action::SetValue => match request.data {
+                Some(ActionData::Value(value)) => {
+                    self.tree.accessibility_set_text_value(&native_id, &value)
+                }
+                Some(ActionData::NumericValue(value)) => {
+                    self.tree.accessibility_set_numeric_value(&native_id, value)
+                }
+                _ => vec![],
+            },
+            Action::ReplaceSelectedText => match request.data {
+                Some(ActionData::Value(value)) => self
+                    .tree
+                    .accessibility_replace_selected_text(&native_id, &value),
+                _ => vec![],
+            },
+            Action::SetTextSelection => match request.data {
+                Some(ActionData::SetTextSelection(selection)) => {
+                    let positions = self.accessibility.as_ref().and_then(|accessibility| {
+                        let anchor = accessibility.resolve_text_position(selection.anchor)?;
+                        let focus = accessibility.resolve_text_position(selection.focus)?;
+                        (anchor.0 == native_id && focus.0 == native_id)
+                            .then_some((anchor.1, focus.1))
+                    });
+                    positions.map_or_else(Vec::new, |(anchor, focus)| {
+                        self.tree
+                            .accessibility_set_text_selection(&native_id, anchor, focus)
+                    })
+                }
+                _ => vec![],
+            },
+            Action::ScrollUp | Action::ScrollDown => {
+                let page = matches!(request.data, Some(ActionData::ScrollUnit(ScrollUnit::Page)));
+                let direction = if request.action == Action::ScrollUp {
+                    -1.0
+                } else {
+                    1.0
+                };
+                self.tree
+                    .accessibility_scroll_by(&native_id, direction, page)
+            }
+            Action::SetScrollOffset => match request.data {
+                Some(ActionData::SetScrollOffset(point)) => {
+                    self.tree.accessibility_set_scroll(&native_id, point.y)
+                }
+                _ => vec![],
+            },
+            Action::ScrollIntoView => {
+                if let Some(character) = text_run_start {
+                    self.tree
+                        .accessibility_scroll_text_position_into_view(&native_id, character)
+                } else {
+                    self.tree.accessibility_scroll_into_view(&native_id)
+                }
+            }
+            _ => vec![],
+        }
+    }
+
     fn request_close(&mut self, event_loop: &ActiveEventLoop) {
         let intercept = self
             .tree
@@ -1072,6 +1207,7 @@ impl ApplicationHandler<Command> for App {
                             self.fail(event_loop, error);
                             return;
                         }
+                        self.initialize_accessibility(event_loop, window.as_ref());
                         // Keep the HWND hidden while WGPU, layout, text and the first scene are
                         // prepared. Making it visible immediately before the synchronous present
                         // prevents Windows from compositing an empty client area on startup.
@@ -1088,6 +1224,7 @@ impl ApplicationHandler<Command> for App {
         }
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, command: Command) {
+        let mut accessibility_changed = false;
         match command {
             Command::Patch { nodes } => {
                 let chrome_changed = nodes.iter().any(|node| {
@@ -1095,13 +1232,17 @@ impl ApplicationHandler<Command> for App {
                 });
                 if let Err(error) = self.tree.patch(nodes) {
                     self.events.push(crate::protocol::error(error));
-                } else if chrome_changed {
-                    self.sync_custom_window_chrome();
+                } else {
+                    accessibility_changed = true;
+                    if chrome_changed {
+                        self.sync_custom_window_chrome();
+                    }
                 }
             }
             Command::Update { root } => {
                 self.tree.update(*root);
                 self.sync_custom_window_chrome();
+                accessibility_changed = true;
             }
             Command::Close => event_loop.exit(),
             Command::CancelCloseRequest => self.close_request_pending = false,
@@ -1109,6 +1250,7 @@ impl ApplicationHandler<Command> for App {
                 if let Some(blurred) = self.tree.focus(&id) {
                     self.events.push(json!({"type":"blur", "id":blurred}));
                 }
+                accessibility_changed = true;
             }
             Command::Inspect { request_id } => {
                 if let Err(e) = self.prepare() {
@@ -1205,10 +1347,21 @@ impl ApplicationHandler<Command> for App {
                     _ => vec![],
                 };
                 self.emit(events);
+                accessibility_changed = true;
+            }
+            #[cfg(target_os = "windows")]
+            Command::Accessibility { request } => {
+                let events = self.handle_accessibility_action(request);
+                self.handle_window_actions(event_loop, &events);
+                self.emit(events);
+                accessibility_changed = true;
             }
             _ => self
                 .events
                 .push(error("Diagnostic command requires debug: true")),
+        }
+        if accessibility_changed {
+            self.sync_accessibility();
         }
         self.sync_cursor();
         self.redraw();
@@ -1246,7 +1399,12 @@ impl ApplicationHandler<Command> for App {
         self.sync_control_flow(event_loop);
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+        #[cfg(target_os = "windows")]
+        if let (Some(accessibility), Some(window)) = (&mut self.accessibility, &self.window) {
+            accessibility.process_event(window.as_ref(), &event);
+        }
         let mut events = vec![];
+        let mut accessibility_changed = false;
         match event {
             WindowEvent::CloseRequested => self.request_close(event_loop),
             WindowEvent::Resized(size) => {
@@ -1259,10 +1417,12 @@ impl ApplicationHandler<Command> for App {
                     self.presentation_retry_at = None;
                 }
                 self.sync_custom_window_chrome_state();
+                accessibility_changed = true;
             }
             WindowEvent::ScaleFactorChanged { .. } => {
                 self.tree.dirty.layout = true;
                 self.tree.dirty.paint = true;
+                accessibility_changed = true;
             }
             WindowEvent::Occluded(false) => self.request_present_now(),
             WindowEvent::Occluded(true) => {
@@ -1278,6 +1438,10 @@ impl ApplicationHandler<Command> for App {
                 events = self
                     .tree
                     .pointer_move(position.x / scale, position.y / scale);
+                accessibility_changed = self.tree.accessibility_selection_dragging()
+                    || events.iter().any(|event| {
+                        matches!(event["type"].as_str(), Some("valueChange" | "scroll"))
+                    });
             }
             WindowEvent::CursorLeft { .. } => events = self.tree.pointer_leave(),
             WindowEvent::MouseInput {
@@ -1292,6 +1456,7 @@ impl ApplicationHandler<Command> for App {
                     events = self.tree.pointer_up();
                     self.handle_window_actions(event_loop, &events);
                 }
+                accessibility_changed = true;
             }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
@@ -1308,6 +1473,7 @@ impl ApplicationHandler<Command> for App {
                     }
                 };
                 events = self.tree.wheel(dy);
+                accessibility_changed = !events.is_empty();
             }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
@@ -1384,6 +1550,7 @@ impl ApplicationHandler<Command> for App {
                 {
                     events.extend(self.tree.type_text(&text));
                 }
+                accessibility_changed = true;
             }
             WindowEvent::Ime(Ime::Enabled) => {
                 self.ime_enabled = self.ime_target.is_some();
@@ -1407,6 +1574,7 @@ impl ApplicationHandler<Command> for App {
                     && let Some(target) = self.ime_target.clone()
                 {
                     events = self.tree.ime_commit(&target, &text);
+                    accessibility_changed = true;
                 }
             }
             WindowEvent::Focused(false) => {
@@ -1415,10 +1583,14 @@ impl ApplicationHandler<Command> for App {
                 if let Some(blurred) = self.tree.blur() {
                     events.push(json!({"type":"blur", "id":blurred}));
                 }
+                accessibility_changed = true;
             }
             _ => {}
         }
         self.emit(events);
+        if accessibility_changed {
+            self.sync_accessibility();
+        }
         self.sync_cursor();
         self.redraw();
     }

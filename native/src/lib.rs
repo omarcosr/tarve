@@ -1,3 +1,5 @@
+#[cfg(target_os = "windows")]
+mod accessibility;
 mod bridge;
 mod controls;
 mod icons;

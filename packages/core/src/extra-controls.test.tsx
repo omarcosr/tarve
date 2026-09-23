@@ -153,12 +153,12 @@ describe("extra controls", () => {
     );
     const closed = render(false);
     expect(closed.nodes.has("details-content")).toBe(false);
-    expect(closed.nodes.get("details-trigger")?.control?.checked).toBe(false);
+    expect(closed.nodes.get("details-trigger")?.control?.expanded).toBe(false);
     closed.handlers.get("details-trigger")?.onClick?.();
     expect(changes).toEqual([true]);
     const open = render(true);
     expect(open.nodes.has("details-body")).toBe(true);
-    expect(open.nodes.get("details-trigger")?.control?.checked).toBe(true);
+    expect(open.nodes.get("details-trigger")?.control?.expanded).toBe(true);
   });
 
   test("Table and DataTable render typed columns, keyed rows and row actions", () => {
@@ -210,8 +210,8 @@ describe("extra controls", () => {
       </Window>,
     );
 
-    expect(tree.nodes.get("confirm")?.modal).toBe(true);
-    expect(tree.nodes.get("sheet")?.modal).toBe(true);
+    expect(tree.nodes.get("confirm-content")?.modal).toBe(true);
+    expect(tree.nodes.get("sheet-content")?.modal).toBe(true);
     expect(tree.nodes.get("toaster")?.style.position).toBe("absolute");
     tree.handlers.get("confirm-action")?.onClick?.();
     tree.handlers.get("sheet-close")?.onClick?.();

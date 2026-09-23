@@ -105,10 +105,10 @@ try {
   assert(tree && treeSelected && grid && gridHeader && gridRow, "Showcase TreeView/DataGrid nodes are missing");
   assert.equal(tree.control?.role, "tree");
   assert.equal(treeSelected.control?.role, "treeitem");
-  assert.equal(treeSelected.control?.checked, true);
+  assert.equal(treeSelected.control?.selected, true);
   assert.equal(grid.control?.role, "grid");
   assert.equal(gridRow.control?.role, "row");
-  assert.equal(gridRow.control?.checked, true);
+  assert.equal(gridRow.control?.selected, true);
   assert(gridHeader.height >= 37 && gridHeader.height <= 39,
     "DataGrid header height changed unexpectedly: " + gridHeader.height);
   await app.capture(resolve(out, "components-desktop-real.png"));

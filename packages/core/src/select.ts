@@ -46,7 +46,7 @@ export function Select({ id, value, options, placeholder = "Select an option", d
     zIndex: expanded ? 100 : 0, ...style },
     children: [
       jsx(Pressable, { id: `${id}-trigger`, disabled, focusable: true,
-        control: { role: "select", label: selected?.label ?? placeholder, checked: expanded },
+        control: { role: "select", label: selected?.label ?? placeholder, expanded },
         onClick: () => setOpen(!expanded),
         onBlur: () => setOpen(false),
         onKeyDown: (key: string) => {
@@ -73,7 +73,7 @@ export function Select({ id, value, options, placeholder = "Select an option", d
         children: jsx(Column, { gap: 2, style: { width: "100%" },
           children: options.map(option => jsx(Pressable, { id: `${id}-option-${option.value}`,
             disabled: option.disabled, focusable: false,
-            control: { role: "button", label: option.label, checked: option.value === value },
+            control: { role: "option", label: option.label, selected: option.value === value },
             onClick: () => choose(option.value),
             style: { minHeight: 32, padding: { left: 8, right: 8 }, radius: theme.radius.sm,
               direction: "row", align: "center", justify: "between", shrink: 0,

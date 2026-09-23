@@ -95,7 +95,8 @@ describe("control kit", () => {
       </Window>,
     );
     const trigger = tree.nodes.get("plan-select-trigger");
-    expect(trigger?.control).toEqual({ role: "select", label: "Team", checked: true });
+    expect(trigger?.control).toEqual({ role: "select", label: "Team", expanded: true });
+    expect(tree.nodes.get("plan-select-option-team")?.control).toEqual({ role: "option", label: "Team", selected: true });
     expect(tree.handlers.get("plan-select-trigger")?.onBlur).toBeFunction();
     expect(tree.nodes.get("plan-select-option-personal")?.focusable).toBe(false);
     expect(tree.nodes.get("plan-select-option-enterprise")?.disabled).toBe(true);

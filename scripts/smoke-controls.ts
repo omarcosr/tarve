@@ -79,7 +79,7 @@ try {
   app.focus(billing.id);
   key("Enter");
   const tabbed = await settle();
-  assert.equal(choice(tabbed, "tab", "Billing").control?.checked, true, "Tab must activate by keyboard");
+  assert.equal(choice(tabbed, "tab", "Billing").control?.selected, true, "Tab must activate by keyboard");
   const personal = choice(tabbed, "radio", "Personal");
   app.focus(personal.id);
   key("Space");

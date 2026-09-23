@@ -98,7 +98,7 @@ let imeAligned = "";
 const gridRows = [
   { id: 1, name: "Renderer", area: "Rust", status: "Ready" },
   { id: 2, name: "Components", area: "TypeScript", status: "Active" },
-  { id: 3, name: "Protocol", area: "Shared", status: "v27" },
+  { id: 3, name: "Protocol", area: "Shared", status: "v28" },
   { id: 4, name: "Examples", area: "Bun", status: "Ready" },
   { id: 5, name: "Packaging", area: "Bun", status: "Ready" },
 ];

@@ -19,6 +19,8 @@ unicode-segmentation = "1.12"
 arboard = { version = "3.6", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
+accesskit = "=0.25.0"
+accesskit_winit = { version = "=0.34.0", default-features = false, features = ["rwh_06"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi"] }
 rfd = { version = "=0.17.2", default-features = false, features = ["common-controls-v6"] }
 

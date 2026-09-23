@@ -115,11 +115,17 @@ function disableFormChild(child: Child, disabled: boolean | undefined): Child {
     ...(child.props.children === undefined ? {} : { children: nested }) } };
 }
 export function Field({ label, description, error, required, disabled, children, style, id, ...props }: FieldProps): VNode {
+  const semanticGroup = label !== undefined || description !== undefined || error !== undefined || required === true;
   return jsx(Column, {
     ...props,
     ...(id ? { id } : {}),
     disabled,
-    control: label ? { role: "group", label } : undefined,
+    control: semanticGroup ? {
+      role: "field",
+      label: label ?? "",
+      description: description ?? "",
+      required: required === true,
+    } : undefined,
     gap: 6,
     style,
     children: [
@@ -238,7 +244,7 @@ export function Item({ title, description, leading, trailing, disabled, selected
     background: selected ? c.muted : transparent, ...style };
   if (!onClick) return jsx(View, { ...props, style: itemStyle, children: body });
   return jsx(Pressable, { ...props, disabled, onClick,
-    control: selected === undefined ? { role: "button", label: title } : { role: "option", label: title, checked: selected },
+    control: selected === undefined ? { role: "button", label: title } : { role: "option", label: title, selected },
     style: { ...itemStyle, hover: { background: c.muted } }, children: body });
 }
 

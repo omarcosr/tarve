@@ -59,8 +59,11 @@ describe("native TSX protocol", () => {
       </Window>,
     );
     const dialog = tree.nodes.get("dialog")!;
+    const dialogContent = tree.nodes.get("dialog-content")!;
     expect(dialog.kind).toBe("pressable");
-    expect(dialog.modal).toBe(true);
+    expect(dialog.modal).toBeUndefined();
+    expect(dialogContent.modal).toBe(true);
+    expect(dialogContent.control).toEqual({ role: "group", label: "Dialog", description: "" });
     expect(dialog.focusable).toBe(false);
     expect(dialog.style.position).toBe("absolute");
     expect(dialog.style.top).toBe(0);
@@ -85,6 +88,10 @@ describe("native TSX protocol", () => {
     expect(tree.nodes.get("titlebar")?.style.borderWidth).toEqual({ bottom: 1 });
     const actions = [...tree.nodes.values()].map(node => node.windowAction).filter(Boolean);
     expect(actions).toEqual(["minimize", "toggleMaximize", "close"]);
+    const actionLabels = [...tree.nodes.values()]
+      .filter(node => Boolean(node.windowAction))
+      .map(node => node.control?.label);
+    expect(actionLabels).toEqual(["Minimize window", "Maximize or restore window", "Close window"]);
   });
   test("Window keeps native chrome when no TitleBar is present", () => {
     const tree = compileTree(<Window title="Native"><Text>Hello</Text></Window>);
@@ -97,7 +104,7 @@ describe("native TSX protocol", () => {
   test("Window close requests stay in JS handlers while native receives an intercept flag", () => {
     let requested = false;
     const tree = compileTree(<Window onCloseRequest={() => { requested = true; }}><Text>Hello</Text></Window>);
-    expect(tree.document.version).toBe(27);
+    expect(tree.document.version).toBe(28);
     expect(tree.document.root.closeIntercept).toBe(true);
     expect(JSON.stringify(tree.document)).not.toContain("onCloseRequest");
     tree.handlers.get(tree.document.root.id)?.onCloseRequest?.({ defaultPrevented: false, preventDefault() {} });

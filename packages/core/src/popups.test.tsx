@@ -118,7 +118,9 @@ describe("popup and selection components", () => {
       </Window>,
     );
     expect(tree.nodes.get("keyboard-menu")?.control).toEqual({ role: "navigation", orientation: "vertical" });
-    expect(tree.nodes.get("keyboard-menu-button")?.control?.role).toBe("menuitem");
+    expect(tree.nodes.get("keyboard-menu-button")?.control?.role).toBe("button");
+    expect(tree.nodes.get("keyboard-menu-button")?.control?.expanded).toBe(true);
+    expect(tree.nodes.get("keyboard-menu-button")?.rovingGroup).toBe("keyboard-menu");
     expect(tree.nodes.get("keyboard-menu-button")?.control?.group).toBe("keyboard-menu");
     expect(tree.nodes.get("keyboard-menu-item-first")?.control?.role).toBe("menuitem");
     expect(tree.nodes.get("keyboard-menu-item-first")?.control?.group).toBe("keyboard-menu");
@@ -129,7 +131,8 @@ describe("popup and selection components", () => {
 
     const closed = compileTree(<Window><DropdownMenu id="closed-menu" open={false} trigger={<Button>Actions</Button>}
       items={[{ value: "one", label: "One" }]} onOpenChange={open => events.push(`closed:${open}`)} /></Window>);
-    expect(closed.nodes.get("closed-menu-trigger")?.control?.role).toBe("select");
+    expect(closed.nodes.get("closed-menu-trigger")?.control?.role).toBe("button");
+    expect(closed.nodes.get("closed-menu-trigger")?.control?.expanded).toBe(false);
     closed.handlers.get("closed-menu-trigger")?.onKeyDown?.("ArrowDown");
     expect(events.at(-1)).toBe("closed:true");
   });
@@ -199,7 +202,8 @@ describe("popup and selection components", () => {
     const tree = compileTree(<Window><ContextMenu id="context-keys" open trigger={<Pressable><Text>Target</Text></Pressable>}
       items={[{ value: "copy", label: "Copy" }, { value: "disabled", label: "Disabled", disabled: true }, { value: "paste", label: "Paste" }]} /></Window>);
     expect(tree.nodes.get("context-keys")?.control).toEqual({ role: "navigation", orientation: "vertical" });
-    expect(tree.nodes.get("context-keys-trigger")?.control?.role).toBe("menuitem");
+    expect(tree.nodes.get("context-keys-trigger")?.control?.role).toBe("button");
+    expect(tree.nodes.get("context-keys-trigger")?.rovingGroup).toBe("context-keys");
     expect(tree.nodes.get("context-keys-item-copy")?.control?.group).toBe("context-keys");
     expect(tree.nodes.get("context-keys-item-disabled")?.disabled).toBe(true);
     expect(tree.nodes.get("context-keys-item-paste")?.focusable).not.toBe(false);
@@ -226,7 +230,7 @@ describe("popup and selection components", () => {
     );
     expect(tree.nodes.has("framework-option-react")).toBe(true);
     expect(tree.nodes.has("framework-option-svelte")).toBe(false);
-    expect(tree.nodes.get("framework-option-react")?.control?.checked).toBe(true);
+    expect(tree.nodes.get("framework-option-react")?.control?.selected).toBe(true);
     tree.handlers.get("framework-option-react")?.onClick?.();
     expect(selected).toEqual(["react"]);
     expect(openChanges).toEqual([false]);
@@ -239,9 +243,10 @@ describe("popup and selection components", () => {
       options={[{ value: "one", label: "One", disabled: true }, { value: "two", label: "Two" }, { value: "three", label: "Three" }]}
       onOpenChange={open => openChanges.push(open)} onValueChange={value => selected.push(value)} /></Window>);
     expect(tree.nodes.get("combo-keys")?.control).toEqual({ role: "navigation", orientation: "vertical" });
-    expect(tree.nodes.get("combo-keys-trigger")?.control?.role).toBe("menuitem");
-    expect(tree.nodes.get("combo-keys-input")?.control?.role).toBe("menuitem");
-    expect(tree.nodes.get("combo-keys-input")?.control?.group).toBe("combo-keys");
+    expect(tree.nodes.get("combo-keys-trigger")?.control?.role).toBe("select");
+    expect(tree.nodes.get("combo-keys-trigger")?.rovingGroup).toBe("combo-keys");
+    expect(tree.nodes.get("combo-keys-input")?.control).toBeUndefined();
+    expect(tree.nodes.get("combo-keys-input")?.rovingGroup).toBe("combo-keys");
     expect(tree.nodes.get("combo-keys-option-one")?.disabled).toBe(true);
     expect(tree.nodes.get("combo-keys-option-two")?.control?.group).toBe("combo-keys");
     expect(tree.nodes.get("combo-keys-option-two")?.focusable).not.toBe(false);
@@ -287,8 +292,8 @@ describe("popup and selection components", () => {
         { value: "three", label: "Three" },
       ]} onEscape={() => escaped.push("escape")} /></Window>);
     expect(tree.nodes.get("command-keys")?.control).toEqual({ role: "navigation", orientation: "vertical" });
-    expect(tree.nodes.get("command-keys-input")?.control?.role).toBe("menuitem");
-    expect(tree.nodes.get("command-keys-input")?.control?.group).toBe("command-keys");
+    expect(tree.nodes.get("command-keys-input")?.control).toBeUndefined();
+    expect(tree.nodes.get("command-keys-input")?.rovingGroup).toBe("command-keys");
     expect(tree.nodes.get("command-keys-item-one")?.disabled).toBe(true);
     expect(tree.nodes.get("command-keys-item-two")?.control?.role).toBe("menuitem");
     expect(tree.nodes.get("command-keys-item-two")?.control?.group).toBe("command-keys");
@@ -312,8 +317,10 @@ describe("popup and selection components", () => {
         />
       </Window>,
     );
-    expect(openTree.nodes.get("palette")?.modal).toBe(true);
+    expect(openTree.nodes.get("palette")?.modal).toBeUndefined();
+    expect(openTree.nodes.get("palette-content")?.modal).toBe(true);
     expect(openTree.nodes.get("palette")?.portal).toBe(true);
+    expect(openTree.nodes.get("palette-content")?.control?.label).toBe("Command palette");
     expect(openTree.nodes.get("palette")?.style.zIndex).toBe(1000);
     openTree.handlers.get("palette-command-item-new")?.onClick?.();
     expect(selected).toEqual(["new"]);

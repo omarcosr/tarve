@@ -1,6 +1,6 @@
 use crate::{
     protocol::Node,
-    text::{TEXT_KEYS, TextEngine},
+    text::{AccessibilityTextLine, TEXT_KEYS, TextEngine},
 };
 use serde_json::{Value, json};
 use std::{
@@ -213,8 +213,8 @@ fn valid_number_edit(value: &str) -> bool {
 
 pub struct Entry {
     pub node: Node,
-    children: Vec<String>,
-    parent: Option<String>,
+    pub(crate) children: Vec<String>,
+    pub(crate) parent: Option<String>,
     layout_id: Option<NodeId>,
     layout_dirty: bool,
     structure_dirty: bool,
@@ -244,7 +244,7 @@ pub struct Tree {
     text_dragging: bool,
     ime: Option<ImeComposition>,
     ime_blocked: Option<ImeBlock>,
-    modal_focus_return: Option<String>,
+    modal_focus_returns: Vec<(String, Option<String>)>,
     pub layouts: u64,
     pub paints: u64,
     pub layout_nodes_created: u64,
@@ -347,7 +347,7 @@ impl Tree {
             text_dragging: false,
             ime: None,
             ime_blocked: None,
-            modal_focus_return: None,
+            modal_focus_returns: Vec::new(),
             layouts: 0,
             paints: 0,
             layout_nodes_created: 0,
@@ -397,16 +397,9 @@ impl Tree {
                     .is_some_and(|id| self.entries.contains_key(id))
         });
         self.prune_images();
-        let next_modal = self.active_modal().map(str::to_string);
-        if previous_modal.is_none() && next_modal.is_some() {
-            self.modal_focus_return = previous_focus;
-        }
+        let restore_focus = self.modal_focus_transition(previous_modal, previous_focus);
         self.prune_interaction();
-        if previous_modal.is_some()
-            && next_modal.is_none()
-            && let Some(id) = self.modal_focus_return.take()
-            && self.entries.contains_key(&id)
-        {
+        if let Some(id) = restore_focus {
             self.focus(&id);
         }
         self.refresh_stacking();
@@ -539,20 +532,66 @@ impl Tree {
             self.reconcile_node(node, children, Some(previous));
         }
         self.prune_images();
-        let next_modal = self.active_modal().map(str::to_string);
-        if previous_modal.is_none() && next_modal.is_some() {
-            self.modal_focus_return = previous_focus;
-        }
+        let restore_focus = self.modal_focus_transition(previous_modal, previous_focus);
         self.prune_interaction();
-        if previous_modal.is_some()
-            && next_modal.is_none()
-            && let Some(id) = self.modal_focus_return.take()
-            && self.entries.contains_key(&id)
-        {
+        if let Some(id) = restore_focus {
             self.focus(&id);
         }
         self.refresh_stacking();
         Ok(())
+    }
+
+    fn modal_focus_transition(
+        &mut self,
+        previous_modal: Option<String>,
+        previous_focus: Option<String>,
+    ) -> Option<String> {
+        let next_modal = self.active_modal().map(str::to_string);
+        if previous_modal == next_modal {
+            return None;
+        }
+
+        let valid_return = |id: &str| self.entries.contains_key(id);
+        match next_modal {
+            Some(next) => {
+                if let Some(position) = self
+                    .modal_focus_returns
+                    .iter()
+                    .position(|(modal, _)| modal == &next)
+                {
+                    let closed = self.modal_focus_returns.split_off(position + 1);
+                    return closed
+                        .into_iter()
+                        .rev()
+                        .filter_map(|(_, focus)| focus)
+                        .find(|id| valid_return(id));
+                }
+
+                let fallback = previous_focus.filter(|id| valid_return(id)).or_else(|| {
+                    self.modal_focus_returns
+                        .iter()
+                        .rev()
+                        .filter_map(|(_, focus)| focus.as_ref())
+                        .find(|id| valid_return(id))
+                        .cloned()
+                });
+                self.modal_focus_returns.retain(|(modal, _)| {
+                    self.entries
+                        .get(modal)
+                        .is_some_and(|entry| entry.node.modal)
+                });
+                self.modal_focus_returns.push((next, fallback));
+                None
+            }
+            None => {
+                let closed = std::mem::take(&mut self.modal_focus_returns);
+                closed
+                    .into_iter()
+                    .rev()
+                    .filter_map(|(_, focus)| focus)
+                    .find(|id| valid_return(id))
+            }
+        }
     }
     fn prune_images(&mut self) {
         let used: HashSet<String> = self
@@ -1242,6 +1281,29 @@ impl Tree {
         }
         true
     }
+    fn accessibility_interactive(&self, id: &str) -> bool {
+        self.interactive(id)
+            && self
+                .active_modal()
+                .is_none_or(|modal| self.is_descendant_of(id, modal))
+    }
+    fn accessibility_in_scope(&self, id: &str) -> bool {
+        self.entries.contains_key(id)
+            && self
+                .active_modal()
+                .is_none_or(|modal| self.is_descendant_of(id, modal))
+    }
+    fn roving_group(&self, id: &str) -> Option<&str> {
+        let group = self.entries.get(id)?.node.roving_group.as_str();
+        (!group.is_empty()).then_some(group).or_else(|| {
+            self.entries[id]
+                .node
+                .control
+                .as_ref()
+                .map(|control| control.group.as_str())
+                .filter(|group| !group.is_empty())
+        })
+    }
     fn focus_order(&self) -> Vec<String> {
         let modal = self.active_modal();
         let mut group_choice = HashMap::<String, String>::new();
@@ -1252,30 +1314,27 @@ impl Tree {
             {
                 continue;
             }
-            if let Some(control) = &self.entries[id].node.control
-                && matches!(
-                    control.role.as_str(),
-                    "radio" | "tab" | "menuitem" | "toggle" | "treeitem" | "row"
-                )
-                && !control.group.is_empty()
-            {
+            if let Some(group) = self.roving_group(id) {
                 let choice = group_choice
-                    .entry(control.group.clone())
+                    .entry(group.to_string())
                     .or_insert_with(|| id.clone());
-                if control.checked {
+                let chosen = self.entries[id]
+                    .node
+                    .control
+                    .as_ref()
+                    .is_some_and(|control| {
+                        control.selected == Some(true) || control.checked == Some(true)
+                    });
+                if chosen {
                     *choice = id.clone();
                 }
             }
         }
         if let Some(id) = &self.focused
-            && let Some(control) = self.entries[id].node.control.as_ref()
-            && matches!(
-                control.role.as_str(),
-                "radio" | "tab" | "menuitem" | "toggle" | "treeitem" | "row"
-            )
-            && group_choice.contains_key(&control.group)
+            && let Some(group) = self.roving_group(id)
+            && group_choice.contains_key(group)
         {
-            group_choice.insert(control.group.clone(), id.clone());
+            group_choice.insert(group.to_string(), id.clone());
         }
         self.order
             .iter()
@@ -1283,17 +1342,9 @@ impl Tree {
                 self.interactive(id)
                     && self.entries[*id].node.focusable
                     && modal.is_none_or(|modal| self.is_descendant_of(id, modal))
-                    && self.entries[*id]
-                        .node
-                        .control
-                        .as_ref()
-                        .is_none_or(|control| {
-                            !matches!(
-                                control.role.as_str(),
-                                "radio" | "tab" | "menuitem" | "toggle" | "treeitem" | "row"
-                            ) || control.group.is_empty()
-                                || group_choice.get(&control.group) == Some(*id)
-                        })
+                    && self
+                        .roving_group(id)
+                        .is_none_or(|group| group_choice.get(group) == Some(*id))
             })
             .cloned()
             .collect()
@@ -1389,7 +1440,7 @@ impl Tree {
         }
     }
 
-    fn active_modal(&self) -> Option<&str> {
+    pub(crate) fn active_modal(&self) -> Option<&str> {
         self.order
             .iter()
             .rev()
@@ -1397,7 +1448,7 @@ impl Tree {
             .map(String::as_str)
     }
 
-    fn is_descendant_of(&self, id: &str, ancestor: &str) -> bool {
+    pub(crate) fn is_descendant_of(&self, id: &str, ancestor: &str) -> bool {
         let mut current = Some(id);
         while let Some(current_id) = current {
             if current_id == ancestor {
@@ -1410,7 +1461,7 @@ impl Tree {
         }
         false
     }
-    fn visible_rect(&self, id: &str) -> Option<BoxRect> {
+    pub(crate) fn visible_rect(&self, id: &str) -> Option<BoxRect> {
         let entry = self.entries.get(id)?;
         let mut offset = 0.0;
         let mut current = entry.parent.as_deref();
@@ -2166,13 +2217,38 @@ impl Tree {
             }
             return events;
         }
-        if let Some(control) = &self.entries[&id].node.control
-            && !control.group.is_empty()
-            && matches!(
-                control.role.as_str(),
-                "toggle" | "menuitem" | "treeitem" | "row"
-            )
-            && (if matches!(control.role.as_str(), "treeitem" | "row") {
+        if let Some(group) = self.roving_group(&id).map(str::to_string)
+            && (self
+                .entries
+                .get(&group)
+                .and_then(|entry| entry.node.control.as_ref())
+                .is_some_and(|control| {
+                    matches!(
+                        control.role.as_str(),
+                        "navigation" | "togglegroup" | "tree" | "grid"
+                    )
+                })
+                || self.entries[&id]
+                    .node
+                    .control
+                    .as_ref()
+                    .is_some_and(|control| {
+                        matches!(
+                            control.role.as_str(),
+                            "toggle" | "menuitem" | "treeitem" | "row"
+                        )
+                    }))
+            && (if self
+                .entries
+                .get(&group)
+                .and_then(|entry| entry.node.control.as_ref())
+                .is_some_and(|control| matches!(control.role.as_str(), "tree" | "grid"))
+                || self.entries[&id]
+                    .node
+                    .control
+                    .as_ref()
+                    .is_some_and(|control| matches!(control.role.as_str(), "treeitem" | "row"))
+            {
                 matches!(key, "ArrowUp" | "ArrowDown" | "Home" | "End")
             } else {
                 matches!(
@@ -2181,17 +2257,12 @@ impl Tree {
                 )
             })
         {
-            let group = control.group.clone();
             let choices: Vec<_> = self
                 .order
                 .iter()
                 .filter(|candidate| {
                     self.interactive(candidate)
-                        && self.entries[*candidate]
-                            .node
-                            .control
-                            .as_ref()
-                            .is_some_and(|candidate_control| candidate_control.group == group)
+                        && self.roving_group(candidate) == Some(group.as_str())
                 })
                 .cloned()
                 .collect();
@@ -2347,6 +2418,349 @@ impl Tree {
         self.text.layouts.remove(&id);
         self.dirty = Dirty::all();
         vec![json!({"type":"change", "id": id, "value": value})]
+    }
+
+    pub(crate) fn accessibility_text_selection(&self, id: &str) -> Option<(usize, usize)> {
+        if self.focused.as_deref() != Some(id) {
+            return None;
+        }
+        let entry = self.entries.get(id)?;
+        if !matches!(entry.node.kind.as_str(), "input" | "textarea") {
+            return None;
+        }
+        let value = entry.node.value.as_deref().unwrap_or("");
+        let focus = floor_boundary(value, self.caret.min(value.len()));
+        let anchor = self
+            .selection_anchor
+            .map(|anchor| floor_boundary(value, anchor.min(value.len())))
+            .unwrap_or(focus);
+        Some((anchor, focus))
+    }
+
+    pub(crate) fn accessibility_text_lines(
+        &mut self,
+        id: &str,
+        value: &str,
+    ) -> Vec<AccessibilityTextLine> {
+        let Some(entry) = self.entries.get(id) else {
+            return vec![];
+        };
+        if !matches!(entry.node.kind.as_str(), "input" | "textarea") {
+            return vec![];
+        }
+        let node = entry.node.clone();
+        let scroll = entry.scroll;
+        let rect = entry.rect;
+        let Some(visible) = self.visible_rect(id) else {
+            return vec![];
+        };
+        let pad = node.insets("padding");
+        let border = node.insets("borderWidth");
+        let multiline = node.kind == "textarea";
+        let available_width =
+            (rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
+        let wrap_width = multiline.then_some(available_width);
+        self.text.prepare(&node);
+        let (_, text_height) = self.text.measure(id, wrap_width);
+        let origin_x = visible.x0 + pad[3] as f64 + border[3] as f64;
+        let origin_y = if multiline {
+            visible.y0 + pad[0] as f64 + border[0] as f64 - scroll
+        } else {
+            visible.y0 + (visible.height() - text_height as f64) / 2.0
+        };
+        let mut lines = self.text.accessibility_lines(id, value, wrap_width);
+        for line in &mut lines {
+            line.x0 += origin_x;
+            line.x1 += origin_x;
+            line.y0 += origin_y;
+            line.y1 += origin_y;
+        }
+        lines
+    }
+
+    pub(crate) fn accessibility_selection_dragging(&self) -> bool {
+        self.text_dragging
+    }
+
+    pub(crate) fn accessibility_focus(&mut self, id: &str) -> Vec<Value> {
+        self.focus(id).map_or_else(Vec::new, |blurred| {
+            vec![json!({"type":"blur", "id":blurred})]
+        })
+    }
+
+    pub(crate) fn accessibility_blur(&mut self, id: &str) -> Vec<Value> {
+        if self.focused.as_deref() != Some(id) {
+            return vec![];
+        }
+        self.blur()
+            .map(|blurred| vec![json!({"type":"blur", "id":blurred})])
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn accessibility_click(&self, id: &str) -> Vec<Value> {
+        if !self.accessibility_interactive(id) {
+            return vec![];
+        }
+        let node = &self.entries[id].node;
+        if matches!(node.kind.as_str(), "button" | "pressable") {
+            vec![json!({"type":"click", "id":id})]
+        } else {
+            vec![]
+        }
+    }
+
+    pub(crate) fn accessibility_context(&self, id: &str) -> Vec<Value> {
+        if !self.accessibility_interactive(id) {
+            return vec![];
+        }
+        let Some(rect) = self.visible_rect(id) else {
+            return vec![];
+        };
+        vec![json!({
+            "type":"context",
+            "id":id,
+            "x":rect.center().x,
+            "y":rect.center().y
+        })]
+    }
+
+    fn valid_accessibility_text_value(&self, id: &str, value: &str) -> bool {
+        let Some(entry) = self.entries.get(id) else {
+            return false;
+        };
+        if !self.accessibility_interactive(id)
+            || !matches!(entry.node.kind.as_str(), "input" | "textarea")
+            || value
+                .chars()
+                .any(|ch| ch.is_control() && !(entry.node.kind == "textarea" && ch == '\n'))
+        {
+            return false;
+        }
+        entry.node.kind != "input" || entry.node.input_type != "number" || valid_number_edit(value)
+    }
+
+    pub(crate) fn accessibility_set_text_value(&mut self, id: &str, value: &str) -> Vec<Value> {
+        if !self.valid_accessibility_text_value(id, value) {
+            return vec![];
+        }
+        if self.ime_target() == Some(id) {
+            self.ime_cancel();
+        }
+        if self.focused.as_deref() == Some(id) {
+            self.caret = value.len();
+            self.selection_anchor = None;
+        }
+        self.set_input(id.to_string(), value.to_string())
+    }
+
+    pub(crate) fn accessibility_replace_selected_text(
+        &mut self,
+        id: &str,
+        replacement: &str,
+    ) -> Vec<Value> {
+        if self.focused.as_deref() != Some(id) {
+            return vec![];
+        }
+        let Some(entry) = self.entries.get(id) else {
+            return vec![];
+        };
+        if !matches!(entry.node.kind.as_str(), "input" | "textarea") {
+            return vec![];
+        }
+        let mut value = entry.node.value.clone().unwrap_or_default();
+        let (start, end) = self
+            .selected_range()
+            .unwrap_or_else(|| (self.caret.min(value.len()), self.caret.min(value.len())));
+        value.replace_range(start..end, replacement);
+        if !self.valid_accessibility_text_value(id, &value) {
+            return vec![];
+        }
+        self.ime_cancel();
+        self.caret = start + replacement.len();
+        self.selection_anchor = None;
+        self.set_input(id.to_string(), value)
+    }
+
+    pub(crate) fn accessibility_set_text_selection(
+        &mut self,
+        id: &str,
+        anchor_character: usize,
+        focus_character: usize,
+    ) -> Vec<Value> {
+        let Some(entry) = self.entries.get(id) else {
+            return vec![];
+        };
+        if !self.accessibility_interactive(id)
+            || !matches!(entry.node.kind.as_str(), "input" | "textarea")
+        {
+            return vec![];
+        }
+        let value = entry.node.value.clone().unwrap_or_default();
+        let multiline = entry.node.kind == "textarea";
+        let byte_at_character = |character: usize| {
+            value
+                .grapheme_indices(true)
+                .nth(character)
+                .map(|(index, _)| index)
+                .unwrap_or(value.len())
+        };
+        let anchor = byte_at_character(anchor_character);
+        let focus = byte_at_character(focus_character);
+        let events = self.accessibility_focus(id);
+        self.ime_cancel();
+        self.caret = focus;
+        self.selection_anchor = (anchor != focus).then_some(anchor);
+        if multiline {
+            self.ensure_focused_textarea_caret_visible();
+        }
+        self.dirty.paint = true;
+        events
+    }
+
+    pub(crate) fn accessibility_set_numeric_value(&mut self, id: &str, value: f64) -> Vec<Value> {
+        if !self.accessibility_interactive(id)
+            || !self
+                .entries
+                .get(id)
+                .is_some_and(|entry| matches!(entry.node.kind.as_str(), "slider" | "splitter"))
+        {
+            return vec![];
+        }
+        self.set_slider(id, value)
+    }
+
+    pub(crate) fn accessibility_adjust_numeric(&mut self, id: &str, direction: f64) -> Vec<Value> {
+        let Some(control) = self
+            .entries
+            .get(id)
+            .filter(|_| self.accessibility_interactive(id))
+            .and_then(|entry| entry.node.control.as_ref())
+        else {
+            return vec![];
+        };
+        self.set_slider(id, control.value + control.step * direction.signum())
+    }
+
+    pub(crate) fn accessibility_scroll_by(
+        &mut self,
+        id: &str,
+        direction: f64,
+        page: bool,
+    ) -> Vec<Value> {
+        if !self.accessibility_in_scope(id) {
+            return vec![];
+        }
+        let Some(entry) = self.entries.get(id) else {
+            return vec![];
+        };
+        if !matches!(entry.node.kind.as_str(), "scroll" | "textarea") || entry.scroll_max <= 0.0 {
+            return vec![];
+        }
+        let amount = if page {
+            self.visible_rect(id)
+                .map_or(120.0, |rect| (rect.height() - 24.0).max(36.0))
+        } else {
+            36.0
+        };
+        self.scroll_to(id, entry.scroll + amount * direction.signum())
+    }
+
+    pub(crate) fn accessibility_set_scroll(&mut self, id: &str, offset: f64) -> Vec<Value> {
+        if !self.accessibility_in_scope(id) {
+            return vec![];
+        }
+        let Some(entry) = self.entries.get(id) else {
+            return vec![];
+        };
+        if !matches!(entry.node.kind.as_str(), "scroll" | "textarea") || entry.scroll_max <= 0.0 {
+            return vec![];
+        }
+        self.scroll_to(id, offset)
+    }
+
+    pub(crate) fn accessibility_scroll_into_view(&mut self, id: &str) -> Vec<Value> {
+        if !self.accessibility_in_scope(id) {
+            return vec![];
+        }
+        let mut ancestors = Vec::new();
+        let mut parent = self.entries[id].parent.clone();
+        while let Some(parent_id) = parent {
+            parent = self.entries[&parent_id].parent.clone();
+            if matches!(
+                self.entries[&parent_id].node.kind.as_str(),
+                "scroll" | "textarea"
+            ) && self.entries[&parent_id].scroll_max > 0.0
+            {
+                ancestors.push(parent_id);
+            }
+        }
+        let mut events = Vec::new();
+        for ancestor in ancestors {
+            let (Some(target), Some(viewport)) =
+                (self.visible_rect(id), self.visible_rect(&ancestor))
+            else {
+                continue;
+            };
+            let delta = if target.y0 < viewport.y0 {
+                target.y0 - viewport.y0
+            } else if target.y1 > viewport.y1 {
+                target.y1 - viewport.y1
+            } else {
+                0.0
+            };
+            if delta != 0.0 {
+                let next = self.entries[&ancestor].scroll + delta;
+                events.extend(self.scroll_to(&ancestor, next));
+            }
+        }
+        events
+    }
+
+    pub(crate) fn accessibility_scroll_text_position_into_view(
+        &mut self,
+        id: &str,
+        character: usize,
+    ) -> Vec<Value> {
+        if !self.accessibility_in_scope(id) {
+            return vec![];
+        }
+        let Some(entry) = self.entries.get(id) else {
+            return vec![];
+        };
+        if !matches!(entry.node.kind.as_str(), "input" | "textarea") {
+            return self.accessibility_scroll_into_view(id);
+        }
+        let value = entry.node.value.clone().unwrap_or_default();
+        let byte = value
+            .grapheme_indices(true)
+            .nth(character)
+            .map(|(index, _)| index)
+            .unwrap_or(value.len());
+        let multiline = entry.node.kind == "textarea";
+        let mut events = Vec::new();
+
+        if multiline {
+            let Some((width, viewport_height, _)) = self.textarea_metrics(id) else {
+                return vec![];
+            };
+            self.text.prepare(&self.entries[id].node.clone());
+            if let Some(cursor) = self.text.caret_rect(id, byte, Some(width)) {
+                let current = self.entries[id].scroll;
+                let next = if cursor.y0 < current {
+                    cursor.y0
+                } else if cursor.y1 > current + viewport_height {
+                    cursor.y1 - viewport_height
+                } else {
+                    current
+                };
+                if next != current {
+                    events.extend(self.scroll_to(id, next));
+                }
+            }
+        }
+
+        events.extend(self.accessibility_scroll_into_view(id));
+        events
     }
 
     fn selection_rects(

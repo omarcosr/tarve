@@ -15,8 +15,10 @@ export interface TitleBarProps extends ViewProps {
 
 function titleBarButton(action: "minimize" | "toggleMaximize" | "close", child: Child): VNode {
   const close = action === "close";
+  const label = action === "minimize" ? "Minimize window" : action === "toggleMaximize" ? "Maximize or restore window" : "Close window";
   return jsx(Pressable, {
     windowAction: action,
+    control: { role: "button", label },
     focusable: false,
     style: {
       width: 46,

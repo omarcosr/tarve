@@ -12,7 +12,8 @@ describe("desktop controls", () => {
       { id: "readme", label: "README" },
     ]} onExpandedChange={ids => expanded.push(ids)} onSelectedChange={id => selected.push(id)} /></Window>);
     expect(tree.nodes.has("tree-node-a")).toBe(true);
-    expect(tree.nodes.get("tree-node-a")?.control?.checked).toBe(true);
+    expect(tree.nodes.get("tree-node-a")?.control?.selected).toBe(true);
+    expect(tree.nodes.get("tree-node-src")?.control?.expanded).toBe(true);
     expect(tree.nodes.get("tree")?.control?.role).toBe("tree");
     expect(tree.nodes.get("tree-node-a")?.control?.group).toBe("tree");
     tree.handlers.get("tree-node-src-toggle")?.onClick?.();
@@ -40,6 +41,8 @@ describe("desktop controls", () => {
     expect(tree.nodes.has("grid-row-2")).toBe(true);
     expect(tree.nodes.has("grid-row-3")).toBe(true);
     expect(tree.nodes.get("grid-row-3")?.control?.group).toBe("grid");
+    expect(tree.nodes.get("grid-row-3")?.control?.selected).toBe(true);
+    expect(tree.nodes.get("grid-sort-name")?.control?.sortDirection).toBe("ascending");
     expect(tree.nodes.get("grid-sort-name")?.style.focus).toMatchObject({ outlineWidth: 0, outlineStyle: "none" });
     tree.handlers.get("grid-row-3")?.onClick?.();
     expect(selections).toEqual([[]]);

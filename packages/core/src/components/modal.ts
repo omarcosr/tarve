@@ -68,6 +68,10 @@ export function Modal({
   const footerNode = footer ? jsx(Row, { gap: 8, justify: "end", children: footer }) : null;
   const panel = jsx(Column, {
     ...(modalId ? { id: `${modalId}-content` } : {}),
+    ...((title || description) ? {
+      control: { role: "group", label: title ?? "", description: description ?? "" },
+    } : {}),
+    modal: true,
     style: {
       position: "relative",
       width,
@@ -85,7 +89,6 @@ export function Modal({
   });
   return jsx(Pressable, {
     ...props,
-    modal: true,
     portal: true,
     focusable: false,
     onClick: closeOnOverlay ? close : undefined,

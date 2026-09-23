@@ -6,13 +6,13 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 
 - TypeScript package checking: `bun run check` passes.
 - Rust lint gate: `cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings` passes.
-- Core/UI suite: **94 Bun tests / 482 assertions** pass.
-- Native suite: **58 Rust tests** pass.
-- Protocol is currently **v27** on both TypeScript and Rust sides and is checked by the FFI bridge before startup.
+- Core/UI suite: **94 Bun tests / 499 assertions** pass.
+- Native suite: **69 Rust tests** pass, including deterministic AccessKit tree/action/TextPattern coverage.
+- Protocol is currently **v28** on both TypeScript and Rust sides and is checked by the FFI bridge before startup.
 - npm packaging includes JS, JSX runtime, declarations and the Windows x64 native library.
 - External-consumer and standalone-EXE smoke tests are part of `bun run verify`.
 - Real GPU visual regression exists in `bun run test:visual`; it is still a separate gate rather than part of `verify`.
-- Latest full validation on this tree: `bun run verify` **PASS** and `bun run test:visual` **PASS** with the freshly packed/installed v27 artifact.
+- Latest full validation on this tree: `bun run verify` **PASS** and `bun run test:visual` **PASS** with the freshly packed/installed v28 artifact. A live Windows UI Automation smoke also confirmed the published HWND, Invoke/Value/Text patterns and modal Control View isolation through the OS UIA client.
 
 ## Production foundations already implemented
 
@@ -32,17 +32,10 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 - [x] Application-level JavaScript exception containment with structured `onError`, deterministic startup rejection, isolated handlers/listeners/hotkeys, transactional native updates and rollback to the last confirmed tree after recoverable failures.
 - [x] GPU/surface/device recovery: `Outdated`, `Timeout`, `Occluded` and `Lost` presentation states recover without terminating the app; wgpu device-loss/uncaptured-error callbacks feed a bounded graphics state machine that can rebuild Device/Queue/Vello/surface state, fail over Vulkan/DX12 on Windows, preserve CPU tree/scene/focus/scroll/image state and keep frame counters monotonic across graphics generations.
 - [x] Complete native IME composition for `Input` and `TextArea`: visual preedit/selection, selection replacement and commit/cancel lifecycle, UTF-8 byte cursor handling, candidate positioning from the same Parley-shaped caret used for rendering (including wrapping, scrolling and text alignment), controlled-value reconciliation with stale-event rejection, password masking and final number-input validation.
+- [x] Native Windows accessibility bridge through AccessKit/UI Automation: stable semantic IDs, names/roles/states/actions, focus notifications, range values, live regions, modal scopes, scroll-into-view and `Field` label/description/error/required associations. Editable `Input`/`TextArea` nodes expose Value/Text patterns with grapheme-aware multiline/bidirectional text geometry and selection, while password values remain masked in the accessibility tree.
 - [x] npm tarball consumer tests validate the installed declarations rather than only workspace types.
 - [x] Standalone Windows executable build embeds the Bun app/runtime and native DLL and runs with no development repository on PATH.
 - [x] Idle event loop performs no continuous frame polling.
-
-## Remaining blockers before a general production claim
-
-### 1. OS accessibility bridge
-
-Tarve has internal semantic roles and keyboard focus behavior, but those roles are not yet projected into Windows UI Automation/AccessKit. Narrator/NVDA therefore cannot consume a complete native accessibility tree. This is a blocker for a general-purpose public desktop toolkit.
-
-Required work: add AccessKit/UIA integration, names/roles/states/actions, focus notifications, value/range semantics, modal scopes and label/description/error relationships. Add automated accessibility-tree tests where possible.
 
 ## Release and operational hardening
 
@@ -62,7 +55,6 @@ Required work: add AccessKit/UIA integration, names/roles/states/actions, focus 
 - One native app/window lifetime per process remains the documented bootstrap model; multi-window is not implemented.
 - Scroll is vertical only; horizontal/bidirectional `ScrollArea` remains.
 - `Button` still accepts text/number content rather than arbitrary icon+text child composition.
-- `Label`/`Field` do not yet expose full native labelled-by/described-by/error associations; this should land together with accessibility work.
 - `Calendar`/`DatePicker`, `Menubar` and `HoverCard` still need deeper desktop keyboard/focus semantics.
 - `DataTable` remains the lightweight static table API; use the new `DataGrid` when sorting/filtering/selection/virtualization are required.
 - `Toast`/`Toaster` are render-driven and do not yet provide an owned timed queue/live-region implementation.
@@ -72,4 +64,4 @@ Required work: add AccessKit/UIA integration, names/roles/states/actions, focus 
 
 For a Windows x64 beta/internal production release, the shipped npm tarball and standalone EXE must pass `bun run verify`, and native/protocol changes should also pass `bun run test:visual` before release.
 
-For a broad public **production-ready / 1.0** claim, complete the accessibility blocker above, automate the release gates, and document the intentionally supported platform/lifecycle limits.
+For a broad public **production-ready / 1.0** claim, automate the mandatory Windows x64 release gates, complete the applicable distribution/diagnostics hardening above, and document/test the intentionally supported platform/lifecycle limits.

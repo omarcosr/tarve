@@ -157,7 +157,7 @@ export function Tabs({ value, items, onValueChange, style, ...props }: TabsProps
     children: [jsx(Row, { gap: 4, control: { role: "tablist" },
       style: { padding: 4, background: c.muted, radius: theme.radius.md },
       children: items.map(item => jsx(Pressable, { disabled: item.disabled,
-        control: { role: "tab", label: item.label, checked: value === item.value },
+        control: { role: "tab", label: item.label, selected: value === item.value },
         onClick: () => onValueChange?.(item.value),
         style: { height: 32, padding: { left: 12, right: 12 }, align: "center", justify: "center",
           background: value === item.value ? c.card : "#00000000",
@@ -179,7 +179,7 @@ export function Accordion({ value, items, onValueChange, style, ...props }: Acco
     const open = value === item.value;
     return jsx(Column, { style: { borderWidth: { bottom: 1 }, borderColor: c.border },
       children: [jsx(Pressable, { disabled: item.disabled,
-        control: { role: "button", label: item.title, checked: open },
+        control: { role: "button", label: item.title, expanded: open },
         onClick: () => onValueChange?.(open ? undefined : item.value),
         style: { direction: "row", minHeight: 44, align: "center", justify: "between",
           hover: { foreground: c.mutedForeground } },

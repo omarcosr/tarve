@@ -32,7 +32,9 @@ describe("advanced controls", () => {
   test("Drawer delegates controlled modal behavior to Sheet", () => {
     const events: boolean[] = [];
     const tree = compileTree(<Window><Drawer id="drawer" open title="Filters" onOpenChange={open => events.push(open)}><Text>Body</Text></Drawer></Window>);
-    expect(tree.nodes.get("drawer")?.modal).toBe(true);
+    expect(tree.nodes.get("drawer")?.modal).toBeUndefined();
+    expect(tree.nodes.get("drawer-content")?.modal).toBe(true);
+    expect(tree.nodes.get("drawer-content")?.control).toMatchObject({ role: "group", label: "Filters" });
     tree.handlers.get("drawer-close")?.onClick?.();
     expect(events).toEqual([false]);
     expect(() => compileTree(<Window><Drawer open size={0} /></Window>)).toThrow(RangeError);

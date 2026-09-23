@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 27;
+pub const VERSION: u32 = 28;
 
 fn range_max() -> f64 {
     100.0
@@ -18,7 +18,11 @@ pub struct Control {
     #[serde(default)]
     pub label: String,
     #[serde(default)]
-    pub checked: bool,
+    pub checked: Option<bool>,
+    #[serde(default)]
+    pub selected: Option<bool>,
+    #[serde(default)]
+    pub expanded: Option<bool>,
     #[serde(default)]
     pub group: String,
     #[serde(default)]
@@ -31,6 +35,12 @@ pub struct Control {
     pub max: f64,
     #[serde(default = "range_step")]
     pub step: f64,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub sort_direction: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -68,6 +78,8 @@ pub struct Node {
     pub close_intercept: bool,
     #[serde(default = "default_true")]
     pub focusable: bool,
+    #[serde(default)]
+    pub roving_group: String,
     #[serde(default)]
     pub drag_region: bool,
     #[serde(default)]
@@ -243,6 +255,11 @@ pub enum Command {
         y: Option<f64>,
         delta: Option<f64>,
         text: Option<String>,
+    },
+    #[cfg(target_os = "windows")]
+    #[serde(skip)]
+    Accessibility {
+        request: accesskit::ActionRequest,
     },
 }
 
