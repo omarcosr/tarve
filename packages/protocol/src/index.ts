@@ -1,5 +1,5 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const PROTOCOL_VERSION = 26;
+export const PROTOCOL_VERSION = 27;
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "textarea" | "pressable" | "icon" | "slider" | "splitter";
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
@@ -101,6 +101,6 @@ export type NativeEvent =
   | { type: "shortcut"; shortcut: string }
   | { type: "error"; message: string }
   | { type: "inspect"; requestId: string; snapshot: Snapshot }
-  | { type: "captured"; requestId: string; path: string }
+  | { type: "captured"; requestId: string; path: string; error?: string }
   | { type: "fileDialog"; requestId: string; paths: string[]; error?: string }
   | { type: "frame"; frames: number };

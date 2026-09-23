@@ -1,20 +1,39 @@
 import { describe, expect, test } from "bun:test";
 import type { NativeCommand, NativeEvent, SceneDocument } from "../../protocol/src/index";
-import { createApp } from "./app";
+import { createApp, type AppErrorEvent } from "./app";
 import type { NativeBridge } from "./bridge";
 import { Slider } from "./controls";
-import { Input, Window } from "./components";
+import { Button, Input, Window } from "./components";
 import { InputOTP } from "./form-controls";
 
 class FakeBridge implements NativeBridge {
   commands: NativeCommand[] = [];
+  starts = 0;
+  joins = 0;
+  document?: SceneDocument;
+  startError?: Error;
+  joinError?: Error;
+  failNextSend?: Error;
   private listener?: (event: NativeEvent) => void;
-  start(_document: SceneDocument, onEvent: (event: NativeEvent) => void): void {
+  start(document: SceneDocument, onEvent: (event: NativeEvent) => void): void {
+    this.starts++;
+    if (this.startError) throw this.startError;
+    this.document = document;
     this.listener = onEvent;
     onEvent({ type: "ready" });
   }
-  send(command: NativeCommand): void { this.commands.push(command); }
-  join(): void {}
+  send(command: NativeCommand): void {
+    if (this.failNextSend) {
+      const error = this.failNextSend;
+      this.failNextSend = undefined;
+      throw error;
+    }
+    this.commands.push(command);
+  }
+  join(): void {
+    this.joins++;
+    if (this.joinError) throw this.joinError;
+  }
   emit(event: NativeEvent): void { this.listener?.(event); }
 }
 
@@ -143,5 +162,218 @@ describe("controlled native reconciliation", () => {
     const patch = bridge.commands.find(command => command.type === "patch");
     expect(patch?.type).toBe("patch");
     if (patch?.type === "patch") expect(patch.nodes.find(node => node.id === "otp-input")?.value).toBe("1234");
+  });
+
+  test("startup render failures reject ready, resolve closed, report context, and never start native", async () => {
+    const bridge = new FakeBridge();
+    const errors: AppErrorEvent[] = [];
+    const app = createApp(() => { throw new Error("startup boom"); }, { bridge, onError: event => errors.push(event) });
+    await expect(app.ready).rejects.toThrow("startup boom");
+    await app.closed;
+    expect(bridge.starts).toBe(0);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.source).toBe("render");
+    expect(errors[0]?.event).toBe("startup");
+  });
+
+  test("bridge startup failures reject ready and settle closed deterministically", async () => {
+    const bridge = new FakeBridge();
+    bridge.startError = new Error("native unavailable");
+    const errors: AppErrorEvent[] = [];
+    const app = createApp(() => <Window />, { bridge, onError: event => errors.push(event) });
+    await expect(app.ready).rejects.toThrow("native unavailable");
+    await app.closed;
+    expect(errors.map(event => [event.source, event.event])).toEqual([["bridge", "start"]]);
+  });
+
+  test("failed update render keeps the last valid native tree and can recover later", async () => {
+    const bridge = new FakeBridge();
+    const errors: AppErrorEvent[] = [];
+    let label = "before";
+    let broken = false;
+    const app = createApp(() => {
+      if (broken) throw new Error("render failed");
+      return <Window><Button id="button">{label}</Button></Window>;
+    }, { bridge, onError: event => errors.push(event) });
+    await app.ready;
+    label = "after";
+    broken = true;
+    app.update();
+    await Bun.sleep(0);
+    expect(bridge.commands).toHaveLength(0);
+    expect(errors.at(-1)?.source).toBe("render");
+    broken = false;
+    app.update();
+    await Bun.sleep(0);
+    const patch = bridge.commands.at(-1);
+    expect(patch?.type).toBe("patch");
+    if (patch?.type === "patch") expect(patch.nodes.find(node => node.id === "button")?.text).toBe("after");
+  });
+
+  test("failed bridge send does not commit new handlers or advance the canonical tree", async () => {
+    const bridge = new FakeBridge();
+    const errors: AppErrorEvent[] = [];
+    let alternate = false;
+    let oldCalls = 0;
+    let newCalls = 0;
+    const app = createApp(() => (
+      <Window>
+        <Button id="button" onClick={alternate ? () => { newCalls++; } : () => { oldCalls++; }}>
+          {alternate ? "new" : "old"}
+        </Button>
+      </Window>
+    ), { bridge, onError: event => errors.push(event) });
+    await app.ready;
+    alternate = true;
+    bridge.failNextSend = new Error("send failed");
+    app.update();
+    await Bun.sleep(0);
+    expect(errors.at(-1)?.source).toBe("bridge");
+    expect(errors.at(-1)?.event).toBe("patch");
+    bridge.emit({ type: "click", id: "button" });
+    expect(oldCalls).toBe(1);
+    expect(newCalls).toBe(0);
+    await Bun.sleep(0);
+    expect(bridge.commands.at(-1)?.type).toBe("patch");
+  });
+
+  test("throwing controlled change handler is contained and rolls native value back", async () => {
+    const bridge = new FakeBridge();
+    const errors: AppErrorEvent[] = [];
+    const app = createApp(() => (
+      <Window><Input id="input" value="fixed" onChange={() => { throw new Error("reject edit"); }} /></Window>
+    ), { bridge, onError: event => errors.push(event) });
+    await app.ready;
+    expect(() => bridge.emit({ type: "change", id: "input", value: "changed" })).not.toThrow();
+    expect(errors.at(-1)?.source).toBe("event-handler");
+    expect(errors.at(-1)?.event).toBe("change");
+    expect(errors.at(-1)?.targetId).toBe("input");
+    const patch = bridge.commands.at(-1);
+    expect(patch?.type).toBe("patch");
+    if (patch?.type === "patch") expect(patch.nodes.find(node => node.id === "input")?.value).toBe("fixed");
+  });
+
+  test("controlled native edits are reconciled even without a change handler", async () => {
+    const bridge = new FakeBridge();
+    const app = createApp(() => <Window><Input id="input" value="fixed" /></Window>, { bridge });
+    await app.ready;
+    bridge.emit({ type: "change", id: "input", value: "changed" });
+    await Bun.sleep(0);
+    const patch = bridge.commands.at(-1);
+    expect(patch?.type).toBe("patch");
+    if (patch?.type === "patch") expect(patch.nodes.find(node => node.id === "input")?.value).toBe("fixed");
+  });
+
+  test("event handlers, hotkeys, and listeners are isolated from sibling failures", async () => {
+    const bridge = new FakeBridge();
+    const errors: AppErrorEvent[] = [];
+    let goodClicks = 0;
+    let goodHotkeys = 0;
+    let goodListeners = 0;
+    const app = createApp(() => (
+      <Window>
+        <Button id="bad" onClick={() => { throw new Error("bad click"); }}>Bad</Button>
+        <Button id="good" onClick={() => { goodClicks++; }}>Good</Button>
+      </Window>
+    ), { bridge, onError: event => errors.push(event) });
+    await app.ready;
+    app.registerHotkey("Ctrl+S", () => { throw new Error("bad hotkey"); });
+    app.registerHotkey("Ctrl+S", () => { goodHotkeys++; });
+    app.onEvent(() => { throw new Error("bad listener"); });
+    app.onEvent(() => { goodListeners++; });
+    bridge.emit({ type: "click", id: "bad" });
+    bridge.emit({ type: "click", id: "good" });
+    bridge.emit({ type: "shortcut", shortcut: "Ctrl+S" });
+    expect(goodClicks).toBe(1);
+    expect(goodHotkeys).toBe(1);
+    expect(goodListeners).toBe(3);
+    expect(errors.some(event => event.source === "event-handler")).toBe(true);
+    expect(errors.some(event => event.source === "hotkey")).toBe(true);
+    expect(errors.filter(event => event.source === "listener")).toHaveLength(3);
+  });
+
+  test("throwing close-request handler cancels the handshake and does not escape", async () => {
+    const bridge = new FakeBridge();
+    const errors: AppErrorEvent[] = [];
+    const app = createApp(() => <Window onCloseRequest={() => { throw new Error("cannot decide"); }} />, {
+      bridge,
+      onError: event => errors.push(event),
+    });
+    await app.ready;
+    expect(() => bridge.emit({ type: "closeRequest" })).not.toThrow();
+    expect(bridge.commands.at(-1)).toEqual({ type: "cancelCloseRequest" });
+    expect(errors.at(-1)?.source).toBe("event-handler");
+    bridge.emit({ type: "closeRequest" });
+    expect(bridge.commands.filter(command => command.type === "cancelCloseRequest")).toHaveLength(2);
+  });
+
+  test("programmatic close inside onCloseRequest does not send a second close decision", async () => {
+    const bridge = new FakeBridge();
+    let app!: ReturnType<typeof createApp>;
+    app = createApp(() => <Window onCloseRequest={() => app.close()} />, { bridge });
+    await app.ready;
+    bridge.emit({ type: "closeRequest" });
+    expect(bridge.commands).toEqual([{ type: "close" }]);
+    app.close();
+    expect(bridge.commands).toEqual([{ type: "close" }]);
+  });
+
+  test("onError throwing cannot take down dispatch", async () => {
+    const bridge = new FakeBridge();
+    let goodClicks = 0;
+    const originalConsoleError = console.error;
+    console.error = () => {};
+    try {
+      const app = createApp(() => (
+        <Window>
+          <Button id="bad" onClick={() => { throw new Error("handler failed"); }}>Bad</Button>
+          <Button id="good" onClick={() => { goodClicks++; }}>Good</Button>
+        </Window>
+      ), { bridge, onError: () => { throw new Error("reporter failed"); } });
+      await app.ready;
+      expect(() => bridge.emit({ type: "click", id: "bad" })).not.toThrow();
+      bridge.emit({ type: "click", id: "good" });
+      expect(goodClicks).toBe(1);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
+  test("native and file-dialog errors use the structured error channel while promises still reject", async () => {
+    const bridge = new FakeBridge();
+    const errors: AppErrorEvent[] = [];
+    const app = createApp(() => <Window />, { bridge, debug: true, onError: event => errors.push(event) });
+    await app.ready;
+    bridge.emit({ type: "error", message: "renderer lost" });
+    expect(errors.at(-1)?.source).toBe("native");
+    const opening = app.openFileDialog();
+    const command = bridge.commands.at(-1);
+    if (command?.type !== "fileDialog") throw new Error("expected fileDialog command");
+    bridge.emit({ type: "fileDialog", requestId: command.requestId, paths: [], error: "dialog failed" });
+    await expect(opening).rejects.toThrow("dialog failed");
+    expect(errors.at(-1)?.source).toBe("file-dialog");
+
+    const capturing = app.capture("capture.png");
+    const captureCommand = bridge.commands.at(-1);
+    if (captureCommand?.type !== "capture") throw new Error("expected capture command");
+    bridge.emit({ type: "captured", requestId: captureCommand.requestId, path: captureCommand.path, error: "capture failed" });
+    await expect(capturing).rejects.toThrow("capture failed");
+    expect(errors.at(-1)?.source).toBe("request");
+    expect(errors.at(-1)?.event).toBe("capture");
+  });
+
+  test("closed settles and rejects pending requests even when bridge.join throws", async () => {
+    const bridge = new FakeBridge();
+    bridge.joinError = new Error("join failed");
+    const errors: AppErrorEvent[] = [];
+    const app = createApp(() => <Window />, { bridge, onError: event => errors.push(event) });
+    await app.ready;
+    const pending = app.inspect();
+    bridge.emit({ type: "closed" });
+    await app.closed;
+    await expect(pending).rejects.toThrow("Native window closed");
+    expect(bridge.joins).toBe(1);
+    expect(errors.at(-1)?.source).toBe("bridge");
+    expect(errors.at(-1)?.event).toBe("join");
   });
 });

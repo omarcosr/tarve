@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 26;
+pub const VERSION: u32 = 27;
 
 fn range_max() -> f64 {
     100.0

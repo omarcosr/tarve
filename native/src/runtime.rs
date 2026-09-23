@@ -722,7 +722,7 @@ impl ApplicationHandler<Command> for App {
                     Ok(()) => self
                         .events
                         .push(json!({"type":"captured", "requestId":request_id, "path":path})),
-                    Err(e) => self.events.push(error(e)),
+                    Err(e) => self.events.push(json!({"type":"captured", "requestId":request_id, "path":path, "error":e})),
                 }
             }
             Command::FileDialog { mode, options, request_id } => {

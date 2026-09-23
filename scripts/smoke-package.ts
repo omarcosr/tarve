@@ -21,7 +21,7 @@ await Bun.write(join(directory, "tsconfig.json"), JSON.stringify({ compilerOptio
   jsx: "react-jsx", jsxImportSource: "tarve", types: ["bun", "tarve/assets"],
 }, include: ["*.tsx", "*.ts"] }));
 await Bun.write(join(directory, "types.test.ts"), [
-  'import type { AppHandle, ButtonProps, DataGridProps, FileDialogOptions, ScrollProps, TreeViewProps } from "tarve";',
+  'import type { AppErrorEvent, AppHandle, AppOptions, ButtonProps, DataGridProps, FileDialogOptions, ScrollProps, TreeViewProps } from "tarve";',
   'import type { NativeNode } from "tarve/protocol";',
   '// @ts-expect-error An invalid variant must be rejected by the installed declarations.',
   'const invalid: ButtonProps = { variant: "not-a-variant" };',
@@ -29,6 +29,7 @@ await Bun.write(join(directory, "types.test.ts"), [
   'const nativeScrollSpeed: NativeNode["scrollSpeed"] = scroll.speed;',
   'const dialog: FileDialogOptions = { filters: [{ name: "Text", extensions: ["txt"] }] };',
   'declare const app: AppHandle;',
+  'const appOptions: AppOptions = { onError: (event: AppErrorEvent) => { const source: string = event.source; void source; } };',
   'const unregister: () => void = app.registerHotkey("Ctrl+S", () => {});',
   'const opened: Promise<string | undefined> = app.openFileDialog(dialog);',
   'const grid: DataGridProps<{ id: number; name: string }> = { columns: [{ key: "name", header: "Name", sortable: true }], rows: [], rowKey: row => row.id };',

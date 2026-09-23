@@ -17,7 +17,7 @@ export * from "./desktop-controls";
 export { normalizeHotkey } from "./hotkeys";
 export type { HotkeyHandler } from "./hotkeys";
 export { createApp, render } from "./app";
-export type { AppHandle, AppOptions } from "./app";
+export type { AppErrorEvent, AppErrorSource, AppHandle, AppOptions } from "./app";
 export { theme, Theme, lightTheme, darkTheme, createTheme, buttonVariants } from "./theme";
 export type { ThemeColors, ThemeFocusOutline, ThemeDefinition, ThemeOverrides, ButtonVariant } from "./theme";
 export { Style } from "./style";

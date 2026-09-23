@@ -25,8 +25,9 @@ export class BunFfiBridge implements NativeBridge {
     try {
       this.worker = new Worker(this.options.workerPath ?? workerPath(), { workerData: { path } });
     } catch (error) {
-      this.send({ type: "close" });
-      this.join();
+      try { this.send({ type: "close" }); } catch {}
+      try { this.join(); } catch {}
+      this.closed = true;
       throw error;
     }
     this.worker.on("message", (event: NativeEvent) => {
@@ -35,10 +36,23 @@ export class BunFfiBridge implements NativeBridge {
     });
     this.worker.on("error", (error) => {
       if (!this.closed) {
-        this.send({ type: "close" });
-        this.join();
+        const cleanupErrors: Error[] = [];
+        try { this.send({ type: "close" }); } catch (value) { cleanupErrors.push(value instanceof Error ? value : new Error(String(value))); }
+        try { this.join(); } catch (value) { cleanupErrors.push(value instanceof Error ? value : new Error(String(value))); }
         this.closed = true;
         onEvent({ type: "error", message: String(error) });
+        for (const cleanupError of cleanupErrors) onEvent({ type: "error", message: `Bridge cleanup failed: ${cleanupError.message}` });
+        onEvent({ type: "closed" });
+      }
+    });
+    this.worker.on("exit", (code) => {
+      if (!this.closed) {
+        const cleanupErrors: Error[] = [];
+        try { this.send({ type: "close" }); } catch (value) { cleanupErrors.push(value instanceof Error ? value : new Error(String(value))); }
+        try { this.join(); } catch (value) { cleanupErrors.push(value instanceof Error ? value : new Error(String(value))); }
+        this.closed = true;
+        onEvent({ type: "error", message: `Native event worker exited unexpectedly${code === 0 ? "" : ` with code ${code}`}` });
+        for (const cleanupError of cleanupErrors) onEvent({ type: "error", message: `Bridge cleanup failed: ${cleanupError.message}` });
         onEvent({ type: "closed" });
       }
     });

@@ -151,6 +151,20 @@ const target = await app.saveFileDialog({ fileName: "report.json" });
 
 Hotkeys aceitam aliases comuns (`Control`, `Cmd`, `Option`, `Esc`) e são normalizados para uma representação canônica como `Ctrl+Shift+S`. Os file dialogs usam a UI nativa do Windows e retornam `undefined`/`[]` quando o usuário cancela.
 
+`createApp` também oferece um boundary global de erros estruturados. Falhas recuperáveis de render/update, callbacks, listeners, hotkeys, bridge e dialogs são contidas e encaminhadas para `onError`; uma atualização que falha mantém a última árvore confirmada no native. Falha de render ou de inicialização antes do primeiro `ready` rejeita `app.ready` e encerra o handle sem criar uma janela parcialmente válida.
+
+```tsx
+const app = createApp(App, {
+  onError(event) {
+    console.error(event.source, event.event, event.targetId, event.error);
+  },
+});
+
+await app.ready;
+```
+
+`AppErrorEvent.source` distingue `render`, `event-handler`, `listener`, `hotkey`, `bridge`, `native`, `request` e `file-dialog`. O próprio `onError` é isolado: se ele lançar, Tarve faz fallback para `console.error` sem derrubar o dispatcher.
+
 ### Custom title bar
 
 `TitleBar` is declarative: simply render it inside `Window`. Tarve resolves the component tree before creating the native window, detects the title bar, and automatically selects custom window chrome. Without `TitleBar`, the operating-system title bar remains native. On Windows 11 Tarve asks DWM to keep the native rounded window corners and compositor border while the title bar remains fully custom. The root also draws a 1 px shadcn/zinc border with an 8 px radius as a visual fallback. When maximized/fullscreen, both borders and the corner radius are suppressed and restored when the window returns to its normal state. Native drag, minimize/maximize/close and the 6 px resize hit area remain available.
