@@ -107,7 +107,7 @@ try {
   assert.equal(treeSelected.control?.role, "treeitem");
   assert.equal(treeSelected.control?.selected, true);
   assert.equal(grid.control?.role, "grid");
-  assert.equal(gridRow.control?.role, "row");
+  assert.equal(gridRow.control?.role, "option");
   assert.equal(gridRow.control?.selected, true);
   assert(gridHeader.height >= 37 && gridHeader.height <= 39,
     "DataGrid header height changed unexpectedly: " + gridHeader.height);

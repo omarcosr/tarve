@@ -287,6 +287,20 @@ describe("native TSX protocol", () => {
     );
     expect(diffTrees(view(), view())).toEqual([]);
   });
+  test("roving group changes are emitted as native patches", () => {
+    const view = () => compileTree(
+      <Window>
+        <Pressable focusable={false} control={{ role: "navigation" }}>
+          <Pressable id="item" rovingGroup control={{ role: "button", label: "Item" }}>Item</Pressable>
+        </Pressable>
+      </Window>,
+    );
+    const before = view();
+    const after = view();
+    expect(before.nodes.get("item")?.rovingGroup).toBeDefined();
+    after.nodes.get("item")!.rovingGroup = "changed-group";
+    expect(diffTrees(before, after)?.map(node => node.id)).toEqual(["item"]);
+  });
   test("supports every outlineStyle value", () => {
     const styles = ["dotted", "dashed", "solid", "double", "groove", "ridge", "inset", "outset", "none", "hidden"] as const;
     const tree = compileTree(

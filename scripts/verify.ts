@@ -1,7 +1,18 @@
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
-const steps = ["check", "lint", "test", "smoke", "smoke:controls", "smoke:virtual-list", "pack", "smoke:package", "smoke:exe"];
+const steps = [
+  "check",
+  "lint",
+  "test",
+  "smoke",
+  "smoke:controls",
+  "smoke:virtual-list",
+  ...(process.platform === "win32" && process.arch === "x64" ? ["smoke:accessibility"] : []),
+  "pack",
+  "smoke:package",
+  "smoke:exe",
+];
 for (const step of steps) {
   console.log(`\n[tarve verify] ${step}`);
   const process = Bun.spawn([Bun.which("bun") ?? "bun", "run", step], {

@@ -102,6 +102,12 @@ struct EditLayout {
     caret: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AccessibilityScrollAlignment {
+    Top,
+    Bottom,
+}
+
 fn visual_value<'a>(node: &'a Node, key: &str, state: VisualState) -> &'a Value {
     let mut value = &node.style[key];
 
@@ -1422,7 +1428,7 @@ impl Tree {
             if modal.is_some()
                 && let Some(id) = self.focus_order().into_iter().next()
             {
-                self.focused = Some(id);
+                let _ = self.focus(&id);
             }
         }
         if !keep_pressed {
@@ -2720,6 +2726,7 @@ impl Tree {
         &mut self,
         id: &str,
         character: usize,
+        alignment: Option<AccessibilityScrollAlignment>,
     ) -> Vec<Value> {
         if !self.accessibility_in_scope(id) {
             return vec![];
@@ -2737,6 +2744,7 @@ impl Tree {
             .map(|(index, _)| index)
             .unwrap_or(value.len());
         let multiline = entry.node.kind == "textarea";
+        let display_byte = input_display_index(&entry.node, &value, byte);
         let mut events = Vec::new();
 
         if multiline {
@@ -2744,14 +2752,14 @@ impl Tree {
                 return vec![];
             };
             self.text.prepare(&self.entries[id].node.clone());
-            if let Some(cursor) = self.text.caret_rect(id, byte, Some(width)) {
+            if let Some(cursor) = self.text.caret_rect(id, display_byte, Some(width)) {
                 let current = self.entries[id].scroll;
-                let next = if cursor.y0 < current {
-                    cursor.y0
-                } else if cursor.y1 > current + viewport_height {
-                    cursor.y1 - viewport_height
-                } else {
-                    current
+                let next = match alignment {
+                    Some(AccessibilityScrollAlignment::Top) => cursor.y0,
+                    Some(AccessibilityScrollAlignment::Bottom) => cursor.y1 - viewport_height,
+                    None if cursor.y0 < current => cursor.y0,
+                    None if cursor.y1 > current + viewport_height => cursor.y1 - viewport_height,
+                    None => current,
                 };
                 if next != current {
                     events.extend(self.scroll_to(id, next));
@@ -2759,8 +2767,75 @@ impl Tree {
             }
         }
 
-        events.extend(self.accessibility_scroll_into_view(id));
+        if let Some(alignment) = alignment {
+            let mut ancestors = Vec::new();
+            let mut parent = self.entries[id].parent.clone();
+            while let Some(parent_id) = parent {
+                parent = self.entries[&parent_id].parent.clone();
+                if matches!(
+                    self.entries[&parent_id].node.kind.as_str(),
+                    "scroll" | "textarea"
+                ) && self.entries[&parent_id].scroll_max > 0.0
+                {
+                    ancestors.push(parent_id);
+                }
+            }
+            for ancestor in ancestors {
+                let Some(target) = self.accessibility_text_position_rect(id, display_byte) else {
+                    break;
+                };
+                let Some(viewport) = self.visible_rect(&ancestor) else {
+                    continue;
+                };
+                let delta = match alignment {
+                    AccessibilityScrollAlignment::Top => target.y0 - viewport.y0,
+                    AccessibilityScrollAlignment::Bottom => target.y1 - viewport.y1,
+                };
+                if delta != 0.0 {
+                    let next = self.entries[&ancestor].scroll + delta;
+                    events.extend(self.scroll_to(&ancestor, next));
+                }
+            }
+        } else {
+            events.extend(self.accessibility_scroll_into_view(id));
+        }
         events
+    }
+
+    fn accessibility_text_position_rect(
+        &mut self,
+        id: &str,
+        display_byte: usize,
+    ) -> Option<BoxRect> {
+        let entry = self.entries.get(id)?;
+        if !matches!(entry.node.kind.as_str(), "input" | "textarea") {
+            return self.visible_rect(id);
+        }
+        let node = entry.node.clone();
+        let scroll = entry.scroll;
+        let rect = entry.rect;
+        let visible = self.visible_rect(id)?;
+        let pad = node.insets("padding");
+        let border = node.insets("borderWidth");
+        let multiline = node.kind == "textarea";
+        let available_width =
+            (rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
+        let wrap_width = multiline.then_some(available_width);
+        self.text.prepare(&node);
+        let (_, text_height) = self.text.measure(id, wrap_width);
+        let cursor = self.text.caret_rect(id, display_byte, wrap_width)?;
+        let origin_x = visible.x0 + pad[3] as f64 + border[3] as f64;
+        let origin_y = if multiline {
+            visible.y0 + pad[0] as f64 + border[0] as f64 - scroll
+        } else {
+            visible.y0 + (visible.height() - text_height as f64) / 2.0
+        };
+        Some(BoxRect::new(
+            origin_x + cursor.x0,
+            origin_y + cursor.y0,
+            origin_x + cursor.x1.max(cursor.x0 + 1.0),
+            origin_y + cursor.y1.max(cursor.y0 + 1.0),
+        ))
     }
 
     fn selection_rects(

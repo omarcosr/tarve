@@ -244,6 +244,7 @@ describe("popup and selection components", () => {
       onOpenChange={open => openChanges.push(open)} onValueChange={value => selected.push(value)} /></Window>);
     expect(tree.nodes.get("combo-keys")?.control).toEqual({ role: "navigation", orientation: "vertical" });
     expect(tree.nodes.get("combo-keys-trigger")?.control?.role).toBe("select");
+    expect(tree.nodes.get("combo-keys-trigger")?.children.map(node => node.id)).toContain("combo-keys-content");
     expect(tree.nodes.get("combo-keys-trigger")?.rovingGroup).toBe("combo-keys");
     expect(tree.nodes.get("combo-keys-input")?.control).toBeUndefined();
     expect(tree.nodes.get("combo-keys-input")?.rovingGroup).toBe("combo-keys");

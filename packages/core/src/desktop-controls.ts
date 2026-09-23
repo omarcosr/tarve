@@ -321,9 +321,13 @@ export function DataGrid<T>({
         renderItem: (entry: GridEntry<T>) => {
           const token = `${typeof entry.key}:${String(entry.key)}`;
           const selected = selectedTokens.has(token);
+          const selectable = selectionMode !== "none";
           return jsx(Pressable, {
             ...(id ? { id: `${id}-row-${String(entry.key)}` } : {}),
-            control: { role: "row", label: `Row ${entry.sourceIndex + 1}`, selected },
+            ...(selectable ? { rovingGroup: true } : {}),
+            control: selectable
+              ? { role: "option", label: `Row ${entry.sourceIndex + 1}`, selected }
+              : { role: "row", label: `Row ${entry.sourceIndex + 1}` },
             onClick: () => { toggleSelection(entry); onRowActivate?.(entry.row, entry.sourceIndex); },
             style: { width: "100%", height: rowHeight, shrink: 0, direction: "row", background: selected ? c.muted : "#00000000", hover: { background: c.muted }, borderWidth: { bottom: 1 }, borderColor: c.border },
             children: columns.map(column => jsx(View, {

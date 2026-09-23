@@ -4,13 +4,30 @@ use crate::{
         Command, Document, FileDialogOptions, Node, WindowPosition, WindowPositionPreset, error,
     },
     renderer::{CaptureError, Graphics, GraphicsFaultKind, PresentResult, RenderError},
-    tree::{Tree, color},
+    tree::{AccessibilityScrollAlignment, Tree, color},
 };
 
 #[cfg(target_os = "windows")]
 use crate::accessibility::AccessibilityBridge;
 #[cfg(target_os = "windows")]
-use accesskit::{Action, ActionData, ActionRequest, ScrollUnit};
+use accesskit::{Action, ActionData, ActionRequest, ScrollHint, ScrollUnit};
+#[cfg(target_os = "windows")]
+use accesskit_winit::WindowEvent as AccessKitWindowEvent;
+
+#[cfg(target_os = "windows")]
+fn accessibility_scroll_alignment(
+    data: Option<&ActionData>,
+) -> Option<AccessibilityScrollAlignment> {
+    match data {
+        Some(ActionData::ScrollHint(ScrollHint::TopLeft | ScrollHint::TopEdge)) => {
+            Some(AccessibilityScrollAlignment::Top)
+        }
+        Some(ActionData::ScrollHint(ScrollHint::BottomRight | ScrollHint::BottomEdge)) => {
+            Some(AccessibilityScrollAlignment::Bottom)
+        }
+        _ => None,
+    }
+}
 
 #[cfg(target_os = "windows")]
 fn run_file_dialog(
@@ -520,9 +537,6 @@ impl App {
             event_loop,
             window,
             self.event_proxy.clone(),
-            &mut self.tree,
-            &self.document.window.title,
-            window.scale_factor(),
         ));
     }
 
@@ -531,24 +545,29 @@ impl App {
 
     #[cfg(target_os = "windows")]
     fn sync_accessibility(&mut self) {
-        if self.accessibility.is_none() {
-            return;
-        }
-        if let Err(message) = self.prepare() {
-            self.events.push(error(format!(
-                "Accessibility layout update failed: {message}"
-            )));
+        if !self
+            .accessibility
+            .as_ref()
+            .is_some_and(AccessibilityBridge::is_active)
+        {
             return;
         }
         let Some(window) = self.window.as_ref() else {
             return;
         };
+        let scale = window.scale_factor();
+        let size = window.inner_size().to_logical::<f32>(scale);
+        if let Err(message) = self.tree.compute(size.width, size.height) {
+            self.events.push(error(format!(
+                "Accessibility layout update failed: {message}"
+            )));
+            return;
+        }
+        for message in self.tree.warnings.drain(..) {
+            self.events.push(error(message));
+        }
         if let Some(accessibility) = self.accessibility.as_mut() {
-            accessibility.sync(
-                &mut self.tree,
-                &self.document.window.title,
-                window.scale_factor(),
-            );
+            accessibility.sync(&mut self.tree, &self.document.window.title, scale);
         }
     }
 
@@ -629,8 +648,10 @@ impl App {
             },
             Action::ScrollIntoView => {
                 if let Some(character) = text_run_start {
-                    self.tree
-                        .accessibility_scroll_text_position_into_view(&native_id, character)
+                    let alignment = accessibility_scroll_alignment(request.data.as_ref());
+                    self.tree.accessibility_scroll_text_position_into_view(
+                        &native_id, character, alignment,
+                    )
                 } else {
                     self.tree.accessibility_scroll_into_view(&native_id)
                 }
@@ -1158,6 +1179,27 @@ impl App {
         }
     }
 }
+
+#[cfg(all(test, target_os = "windows"))]
+mod accessibility_tests {
+    use super::*;
+
+    #[test]
+    fn preserves_vertical_accesskit_scroll_hints_for_text_ranges() {
+        assert_eq!(
+            accessibility_scroll_alignment(Some(&ActionData::ScrollHint(ScrollHint::TopEdge))),
+            Some(AccessibilityScrollAlignment::Top)
+        );
+        assert_eq!(
+            accessibility_scroll_alignment(Some(&ActionData::ScrollHint(ScrollHint::BottomEdge))),
+            Some(AccessibilityScrollAlignment::Bottom)
+        );
+        assert_eq!(
+            accessibility_scroll_alignment(Some(&ActionData::ScrollHint(ScrollHint::LeftEdge))),
+            None
+        );
+    }
+}
 impl ApplicationHandler<Command> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(window) = self.window.clone() {
@@ -1350,11 +1392,27 @@ impl ApplicationHandler<Command> for App {
                 accessibility_changed = true;
             }
             #[cfg(target_os = "windows")]
-            Command::Accessibility { request } => {
-                let events = self.handle_accessibility_action(request);
-                self.handle_window_actions(event_loop, &events);
-                self.emit(events);
-                accessibility_changed = true;
+            Command::Accessibility { event } => match event.window_event {
+                AccessKitWindowEvent::InitialTreeRequested => {
+                    if let Some(accessibility) = self.accessibility.as_mut() {
+                        accessibility.set_active(true);
+                    }
+                    accessibility_changed = true;
+                }
+                AccessKitWindowEvent::ActionRequested(request) => {
+                    if let Some(accessibility) = self.accessibility.as_mut() {
+                        accessibility.set_active(true);
+                    }
+                    let events = self.handle_accessibility_action(request);
+                    self.handle_window_actions(event_loop, &events);
+                    self.emit(events);
+                    accessibility_changed = true;
+                }
+                AccessKitWindowEvent::AccessibilityDeactivated => {
+                    if let Some(accessibility) = self.accessibility.as_mut() {
+                        accessibility.set_active(false);
+                    }
+                }
             }
             _ => self
                 .events

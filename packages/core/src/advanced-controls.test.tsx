@@ -65,6 +65,23 @@ describe("advanced controls", () => {
     expect(() => compileTree(<Window><NavigationMenu openValue="home" items={[{ value: "home", label: "Home" }]} /></Window>)).toThrow(RangeError);
   });
 
+  test("NavigationMenu and Sidebar expose active state through UIA-supported toggle semantics", () => {
+    const tree = compileTree(<Window>
+      <NavigationMenu id="semantic-nav" value="home" openValue="docs" items={[
+        { value: "home", label: "Home" },
+        { value: "docs", label: "Docs", links: [{ value: "intro", label: "Introduction" }] },
+      ]} />
+      <Sidebar id="semantic-side" value="home" items={[
+        { value: "home", label: "Home" },
+        { value: "settings", label: "Settings" },
+      ]} />
+    </Window>);
+    expect(tree.nodes.get("semantic-nav-trigger-home")?.control).toMatchObject({ role: "menuitem", checked: true });
+    expect(tree.nodes.get("semantic-nav-link-intro")?.control).toMatchObject({ role: "menuitem", checked: false });
+    expect(tree.nodes.get("semantic-side-item-home")?.control).toMatchObject({ role: "toggle", checked: true });
+    expect(tree.nodes.get("semantic-side-item-settings")?.control).toMatchObject({ role: "toggle", checked: false });
+  });
+
   test("Resizable uses a native splitter between panels", () => {
     const sizes: number[] = [];
     const tree = compileTree(<Window><Resizable id="split" size={40} first={<Text>A</Text>} second={<Text>B</Text>}

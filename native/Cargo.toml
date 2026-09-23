@@ -24,6 +24,11 @@ accesskit_winit = { version = "=0.34.0", default-features = false, features = ["
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi"] }
 rfd = { version = "=0.17.2", default-features = false, features = ["common-controls-v6"] }
 
+# Upstream accesskit_windows 0.35.0 does not expose AccessKit Invalid through
+# UIA_IsDataValidForFormPropertyId, so keep the Windows provider patch local.
+[patch.crates-io]
+accesskit_windows = { path = "vendor/accesskit_windows" }
+
 [profile.dev]
 opt-level = 1
 

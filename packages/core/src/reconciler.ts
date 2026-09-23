@@ -134,7 +134,7 @@ export function diffTrees(previous: CompiledTree, next: CompiledTree): NativeNod
       || old.children.some((child, index) => child.id !== node.children[index].id)) return null;
     if (old.text !== node.text || old.src !== node.src || old.fit !== node.fit
       || old.value !== node.value || old.placeholder !== node.placeholder || old.inputType !== node.inputType || old.scrollSpeed !== node.scrollSpeed || old.disabled !== node.disabled
-      || old.modal !== node.modal || old.portal !== node.portal || old.dismissOnOutside !== node.dismissOnOutside || old.closeIntercept !== node.closeIntercept || old.focusable !== node.focusable
+      || old.modal !== node.modal || old.rovingGroup !== node.rovingGroup || old.portal !== node.portal || old.dismissOnOutside !== node.dismissOnOutside || old.closeIntercept !== node.closeIntercept || old.focusable !== node.focusable
       || old.dragRegion !== node.dragRegion || old.windowAction !== node.windowAction
       || !sameFields(old.control ?? {}, node.control ?? {})
       || !sameStyle(old.style, node.style)) {

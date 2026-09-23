@@ -3,15 +3,12 @@ use crate::{
     tree::Tree,
 };
 use accesskit::{
-    Action, ActionHandler, ActionRequest, ActivationHandler, Affine, DeactivationHandler, Invalid,
-    Live, Node as AccessNode, NodeId, Orientation, Rect, Role, SortDirection, TextDirection,
-    TextPosition, TextSelection, Toggled, TreeId, TreeInfo, TreeUpdate,
+    Action, Affine, Invalid, Live, Node as AccessNode, NodeId, Orientation, Rect, Role,
+    SortDirection, TextDirection, TextPosition, TextSelection, Toggled, TreeId, TreeInfo,
+    TreeUpdate,
 };
 use accesskit_winit::Adapter;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::collections::HashMap;
 use unicode_segmentation::UnicodeSegmentation;
 use winit::{
     event::WindowEvent,
@@ -708,41 +705,10 @@ impl AccessibilityTree {
     }
 }
 
-struct SnapshotActivation {
-    snapshot: Arc<Mutex<TreeUpdate>>,
-}
-
-impl ActivationHandler for SnapshotActivation {
-    fn request_initial_tree(&mut self) -> Option<TreeUpdate> {
-        Some(
-            self.snapshot
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .clone(),
-        )
-    }
-}
-
-struct ProxyAction {
-    proxy: EventLoopProxy<Command>,
-}
-
-impl ActionHandler for ProxyAction {
-    fn do_action(&mut self, request: ActionRequest) {
-        let _ = self.proxy.send_event(Command::Accessibility { request });
-    }
-}
-
-struct NoopDeactivation;
-
-impl DeactivationHandler for NoopDeactivation {
-    fn deactivate_accessibility(&mut self) {}
-}
-
 pub(crate) struct AccessibilityBridge {
     adapter: Adapter,
     tree: AccessibilityTree,
-    snapshot: Arc<Mutex<TreeUpdate>>,
+    active: bool,
 }
 
 impl AccessibilityBridge {
@@ -750,26 +716,12 @@ impl AccessibilityBridge {
         event_loop: &ActiveEventLoop,
         window: &Window,
         proxy: EventLoopProxy<Command>,
-        tree: &mut Tree,
-        title: &str,
-        scale_factor: f64,
     ) -> Self {
-        let mut accessibility_tree = AccessibilityTree::default();
-        let initial = accessibility_tree.build(tree, title, scale_factor);
-        let snapshot = Arc::new(Mutex::new(initial));
-        let adapter = Adapter::with_direct_handlers(
-            event_loop,
-            window,
-            SnapshotActivation {
-                snapshot: Arc::clone(&snapshot),
-            },
-            ProxyAction { proxy },
-            NoopDeactivation,
-        );
+        let adapter = Adapter::with_event_loop_proxy(event_loop, window, proxy);
         Self {
             adapter,
-            tree: accessibility_tree,
-            snapshot,
+            tree: AccessibilityTree::default(),
+            active: false,
         }
     }
 
@@ -777,13 +729,21 @@ impl AccessibilityBridge {
         self.adapter.process_event(window, event);
     }
 
+    pub(crate) fn set_active(&mut self, active: bool) {
+        self.active = active;
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        self.active
+    }
+
     pub(crate) fn sync(&mut self, tree: &mut Tree, title: &str, scale_factor: f64) {
-        let update = self.tree.build(tree, title, scale_factor);
-        *self
-            .snapshot
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = update.clone();
-        self.adapter.update_if_active(|| update);
+        let accessibility_tree = &mut self.tree;
+        // Keep the full-tree projection inside this closure: AccessKit only invokes it while
+        // a platform accessibility client is active. Building it eagerly makes ordinary input
+        // and scroll events O(tree size) even when no UIA client is connected.
+        self.adapter
+            .update_if_active(|| accessibility_tree.build(tree, title, scale_factor));
     }
 
     pub(crate) fn resolve(&self, id: NodeId) -> Option<&str> {
@@ -810,6 +770,7 @@ impl AccessibilityBridge {
 mod tests {
     use super::*;
     use crate::protocol::Node as TarveNode;
+    use crate::tree::AccessibilityScrollAlignment;
     use serde_json::json;
 
     fn node(value: serde_json::Value) -> TarveNode {
@@ -1036,6 +997,106 @@ mod tests {
         let mut builder = AccessibilityTree::default();
         let update = builder.build(&mut tree, "Example", 1.0);
         assert_eq!(update.focus, builder.ids["dialog"]);
+    }
+
+    #[test]
+    fn modal_fallback_focus_uses_normal_text_focus_initialization() {
+        let root = node(json!({
+            "id":"root","kind":"window","children":[
+                {"id":"dialog","kind":"column","modal":true,"children":[
+                    {"id":"name","kind":"input","value":"A🙂","children":[]}
+                ]}
+            ]
+        }));
+        let mut tree = Tree::new(root);
+        tree.compute(320.0, 160.0).unwrap();
+
+        assert_eq!(tree.focused.as_deref(), Some("name"));
+        let value = tree.entries["name"].node.value.as_deref().unwrap();
+        assert_eq!(
+            tree.accessibility_text_selection("name"),
+            Some((value.len(), value.len()))
+        );
+
+        let mut builder = AccessibilityTree::default();
+        let update = builder.build(&mut tree, "Example", 1.0);
+        let by_id: HashMap<_, _> = update.nodes.into_iter().collect();
+        let selection = by_id[&builder.ids["name"]].text_selection().unwrap();
+        assert_eq!(
+            builder.text_run_starts[&selection.anchor.node] + selection.anchor.character_index,
+            2
+        );
+        assert_eq!(
+            builder.text_run_starts[&selection.focus.node] + selection.focus.character_index,
+            2
+        );
+    }
+
+    #[test]
+    fn text_range_scroll_alignment_honors_top_and_bottom_edges() {
+        let value = "one\ntwo\nthree\nfour\nfive\nsix";
+        let root = node(json!({
+            "id":"root","kind":"window","children":[
+                {"id":"notes","kind":"textarea","value":value,"style":{"width":180,"height":48},"children":[]}
+            ]
+        }));
+        let mut tree = Tree::new(root);
+        tree.compute(240.0, 120.0).unwrap();
+        let byte = value.find("five").unwrap();
+        let character = value[..byte].graphemes(true).count();
+
+        tree.accessibility_set_scroll("notes", 0.0);
+        let top_events = tree.accessibility_scroll_text_position_into_view(
+            "notes",
+            character,
+            Some(AccessibilityScrollAlignment::Top),
+        );
+        let top = tree.entries["notes"].scroll;
+        assert!(!top_events.is_empty());
+
+        tree.accessibility_set_scroll("notes", 0.0);
+        let bottom_events = tree.accessibility_scroll_text_position_into_view(
+            "notes",
+            character,
+            Some(AccessibilityScrollAlignment::Bottom),
+        );
+        let bottom = tree.entries["notes"].scroll;
+        assert!(!bottom_events.is_empty());
+        assert!(
+            top > bottom,
+            "top alignment must scroll farther than bottom alignment"
+        );
+
+        tree.accessibility_set_scroll("notes", 0.0);
+        tree.accessibility_scroll_text_position_into_view("notes", character, None);
+        let minimal = tree.entries["notes"].scroll;
+        assert!((minimal - bottom).abs() < 1e-6);
+    }
+
+    #[test]
+    fn generic_scroll_into_view_keeps_minimal_reveal_behavior() {
+        let root = node(json!({
+            "id":"root","kind":"window","children":[
+                {"id":"scroll","kind":"scroll","style":{"width":180,"height":80},"children":[
+                    {"id":"spacer","kind":"view","style":{"height":120,"shrink":0},"children":[]},
+                    {"id":"target","kind":"button","text":"Target","style":{"height":30,"shrink":0},"children":[]},
+                    {"id":"after","kind":"view","style":{"height":100,"shrink":0},"children":[]}
+                ]}
+            ]
+        }));
+        let mut tree = Tree::new(root);
+        tree.compute(240.0, 160.0).unwrap();
+
+        let before = tree.visible_rect("target").unwrap();
+        let viewport = tree.visible_rect("scroll").unwrap();
+        assert!(before.y1 > viewport.y1);
+
+        let events = tree.accessibility_scroll_into_view("target");
+        assert!(!events.is_empty());
+        let target = tree.visible_rect("target").unwrap();
+        let viewport = tree.visible_rect("scroll").unwrap();
+        assert!((target.y1 - viewport.y1).abs() < 1e-6);
+        assert!(target.y0 > viewport.y0);
     }
 
     #[test]

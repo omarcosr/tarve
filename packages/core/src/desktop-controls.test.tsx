@@ -40,6 +40,8 @@ describe("desktop controls", () => {
     expect(tree.nodes.get("grid")?.control?.role).toBe("grid");
     expect(tree.nodes.has("grid-row-2")).toBe(true);
     expect(tree.nodes.has("grid-row-3")).toBe(true);
+    expect(tree.nodes.get("grid-row-3")?.control?.role).toBe("option");
+    expect(tree.nodes.get("grid-row-3")?.rovingGroup).toBe("grid");
     expect(tree.nodes.get("grid-row-3")?.control?.group).toBe("grid");
     expect(tree.nodes.get("grid-row-3")?.control?.selected).toBe(true);
     expect(tree.nodes.get("grid-sort-name")?.control?.sortDirection).toBe("ascending");
@@ -51,5 +53,10 @@ describe("desktop controls", () => {
     expect(() => compileTree(<Window><DataGrid rows={rows} rowKey={row => row.id} sort={{ column: "score", direction: "asc" }} columns={[
       { key: "score", header: "Score" },
     ]} /></Window>)).toThrow(RangeError);
+    const inert = compileTree(<Window><DataGrid id="inert-grid" rows={rows} rowKey={row => row.id} columns={[
+      { key: "name", header: "Name" },
+    ]} /></Window>);
+    expect(inert.nodes.get("inert-grid-row-1")?.control).toEqual({ role: "row", label: "Row 1", group: "inert-grid" });
+    expect(inert.nodes.get("inert-grid-row-1")?.rovingGroup).toBe("inert-grid");
   });
 });

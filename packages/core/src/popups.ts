@@ -512,65 +512,65 @@ export function Combobox({
         children: [
           jsx(Text, { size: 14, color: selected ? c.foreground : c.placeholder, children: selected?.label ?? placeholder }),
           jsx(Icon, { name: "chevron-down", size: 14, color: c.mutedForeground }),
+          open && !disabled
+            ? jsx(Column, {
+                id: `${id}-content`,
+                portal: true,
+                dismissOnOutside: true,
+                onOutsideClick: () => setOpen(false),
+                gap: 4,
+                style: popupSurface("bottom", { width: "100%", margin: { top: 4 }, ...contentStyle }),
+                children: [
+                  jsx(Row, {
+                    gap: 6,
+                    style: { align: "center", padding: { left: 8 }, borderWidth: { bottom: 1 }, borderColor: c.border },
+                    children: [
+                      jsx(Icon, { name: "search", size: 14, color: c.mutedForeground }),
+                      jsx(Input, {
+                        id: `${id}-input`,
+                        value: query,
+                        placeholder: searchPlaceholder,
+                        onChange: onQueryChange,
+                        rovingGroup: true,
+                        style: { flex: 1, minWidth: 0, borderWidth: 0, background: "#00000000" },
+                      }),
+                    ],
+                  }),
+                  visible.length === 0
+                    ? jsx(Text, { id: `${id}-empty`, size: 13, color: c.mutedForeground, style: { padding: 8 }, children: emptyText })
+                    : jsx(Scroll, {
+                        id: `${id}-results`,
+                        gap: 2,
+                        style: { height: boundedHeight(visible.length, 34, MENU_MAX_HEIGHT) },
+                        children: visible.map(option => jsx(Pressable, {
+                          id: `${id}-option-${option.value}`,
+                          key: option.value,
+                          disabled: option.disabled,
+                          rovingGroup: true,
+                          control: { role: "option", label: option.label, selected: option.value === value },
+                          onClick: option.disabled ? undefined : () => choose(option.value),
+                          style: {
+                            minHeight: 32,
+                            padding: { left: 8, right: 8 },
+                            direction: "row",
+                            align: "center",
+                            justify: "between",
+                            radius: theme.radius.sm,
+                            background: option.value === value ? c.muted : "#00000000",
+                            hover: { background: c.muted },
+                            focus: { background: c.muted },
+                          },
+                          children: [
+                            jsx(Text, { color: option.disabled ? c.disabledForeground : c.foreground, children: option.label }),
+                            option.value === value ? jsx(Icon, { name: "check", size: 14 }) : null,
+                          ],
+                        }, option.value)),
+                      }),
+                ],
+              })
+            : null,
         ],
       }),
-      open && !disabled
-        ? jsx(Column, {
-            id: `${id}-content`,
-            portal: true,
-            dismissOnOutside: true,
-            onOutsideClick: () => setOpen(false),
-            gap: 4,
-            style: popupSurface("bottom", { width: "100%", margin: { top: 4 }, ...contentStyle }),
-            children: [
-              jsx(Row, {
-                gap: 6,
-                style: { align: "center", padding: { left: 8 }, borderWidth: { bottom: 1 }, borderColor: c.border },
-                children: [
-                  jsx(Icon, { name: "search", size: 14, color: c.mutedForeground }),
-                  jsx(Input, {
-                    id: `${id}-input`,
-                    value: query,
-                    placeholder: searchPlaceholder,
-                    onChange: onQueryChange,
-                    rovingGroup: true,
-                    style: { flex: 1, minWidth: 0, borderWidth: 0, background: "#00000000" },
-                  }),
-                ],
-              }),
-              visible.length === 0
-                ? jsx(Text, { id: `${id}-empty`, size: 13, color: c.mutedForeground, style: { padding: 8 }, children: emptyText })
-                : jsx(Scroll, {
-                    id: `${id}-results`,
-                    gap: 2,
-                    style: { height: boundedHeight(visible.length, 34, MENU_MAX_HEIGHT) },
-                    children: visible.map(option => jsx(Pressable, {
-                      id: `${id}-option-${option.value}`,
-                      key: option.value,
-                      disabled: option.disabled,
-                      rovingGroup: true,
-                      control: { role: "option", label: option.label, selected: option.value === value },
-                      onClick: option.disabled ? undefined : () => choose(option.value),
-                      style: {
-                        minHeight: 32,
-                        padding: { left: 8, right: 8 },
-                        direction: "row",
-                        align: "center",
-                        justify: "between",
-                        radius: theme.radius.sm,
-                        background: option.value === value ? c.muted : "#00000000",
-                        hover: { background: c.muted },
-                        focus: { background: c.muted },
-                      },
-                      children: [
-                        jsx(Text, { color: option.disabled ? c.disabledForeground : c.foreground, children: option.label }),
-                        option.value === value ? jsx(Icon, { name: "check", size: 14 }) : null,
-                      ],
-                    }, option.value)),
-                  }),
-            ],
-          })
-        : null,
     ],
   });
 }

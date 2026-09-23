@@ -259,8 +259,15 @@ pub enum Command {
     #[cfg(target_os = "windows")]
     #[serde(skip)]
     Accessibility {
-        request: accesskit::ActionRequest,
+        event: accesskit_winit::Event,
     },
+}
+
+#[cfg(target_os = "windows")]
+impl From<accesskit_winit::Event> for Command {
+    fn from(event: accesskit_winit::Event) -> Self {
+        Self::Accessibility { event }
+    }
 }
 
 pub fn validate(root: &Node) -> Result<(), String> {

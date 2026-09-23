@@ -6,13 +6,13 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 
 - TypeScript package checking: `bun run check` passes.
 - Rust lint gate: `cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings` passes.
-- Core/UI suite: **94 Bun tests / 499 assertions** pass.
-- Native suite: **69 Rust tests** pass, including deterministic AccessKit tree/action/TextPattern coverage.
+- Core/UI suite: **96 Bun tests / 511 assertions** pass.
+- Native suite: **73 Rust tests** pass, including deterministic AccessKit tree/action/TextPattern/scroll-alignment coverage.
 - Protocol is currently **v28** on both TypeScript and Rust sides and is checked by the FFI bridge before startup.
 - npm packaging includes JS, JSX runtime, declarations and the Windows x64 native library.
 - External-consumer and standalone-EXE smoke tests are part of `bun run verify`.
 - Real GPU visual regression exists in `bun run test:visual`; it is still a separate gate rather than part of `verify`.
-- Latest full validation on this tree: `bun run verify` **PASS** and `bun run test:visual` **PASS** with the freshly packed/installed v28 artifact. A live Windows UI Automation smoke also confirmed the published HWND, Invoke/Value/Text patterns and modal Control View isolation through the OS UIA client.
+- Latest full validation on this tree: `bun run verify` **PASS** and `bun run test:visual` **PASS** with the freshly packed/installed v28 artifact. `verify` now includes a reproducible Windows x64 `smoke:accessibility` gate against the real OS UI Automation provider, covering required/invalid/full-description form state, Invoke/Value/Text/Toggle/SelectionItem/ScrollItem patterns, multiline/bidirectional text, password secrecy, Select/DataGrid selection containers, modal Control View isolation and modal focus restoration.
 
 ## Production foundations already implemented
 
@@ -32,7 +32,7 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 - [x] Application-level JavaScript exception containment with structured `onError`, deterministic startup rejection, isolated handlers/listeners/hotkeys, transactional native updates and rollback to the last confirmed tree after recoverable failures.
 - [x] GPU/surface/device recovery: `Outdated`, `Timeout`, `Occluded` and `Lost` presentation states recover without terminating the app; wgpu device-loss/uncaptured-error callbacks feed a bounded graphics state machine that can rebuild Device/Queue/Vello/surface state, fail over Vulkan/DX12 on Windows, preserve CPU tree/scene/focus/scroll/image state and keep frame counters monotonic across graphics generations.
 - [x] Complete native IME composition for `Input` and `TextArea`: visual preedit/selection, selection replacement and commit/cancel lifecycle, UTF-8 byte cursor handling, candidate positioning from the same Parley-shaped caret used for rendering (including wrapping, scrolling and text alignment), controlled-value reconciliation with stale-event rejection, password masking and final number-input validation.
-- [x] Native Windows accessibility bridge through AccessKit/UI Automation: stable semantic IDs, names/roles/states/actions, focus notifications, range values, live regions, modal scopes, scroll-into-view and `Field` label/description/error/required associations. Editable `Input`/`TextArea` nodes expose Value/Text patterns with grapheme-aware multiline/bidirectional text geometry and selection, while password values remain masked in the accessibility tree.
+- [x] Native Windows accessibility bridge through AccessKit/UI Automation: stable semantic IDs, names/roles/states/actions, focus notifications, range values, live regions, modal scopes, UIA TextRange-aligned scroll-into-view and `Field` label/description/error/required/invalid associations. Editable `Input`/`TextArea` nodes expose Value/Text patterns with grapheme-aware multiline/bidirectional text geometry and selection, password values remain masked, selectable controls expose UIA-supported selection/toggle semantics and modal fallback focus uses the same caret/scroll initialization path as normal focus. AccessKit tree projection is lazy: normal input/scroll/update paths do no accessibility layout/tree work until a Windows UIA client activates the provider, and active accessibility sync performs layout/geometry only rather than eagerly rebuilding the Vello scene. The real Windows UIA provider is exercised automatically by `smoke:accessibility`.
 - [x] npm tarball consumer tests validate the installed declarations rather than only workspace types.
 - [x] Standalone Windows executable build embeds the Bun app/runtime and native DLL and runs with no development repository on PATH.
 - [x] Idle event loop performs no continuous frame polling.
