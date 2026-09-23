@@ -161,10 +161,10 @@ fn valid_number_edit(value: &str) -> bool {
     let (mantissa, exponent) = exponent_at.map_or((value, None), |index| {
         (&value[..index], Some(&value[index + 1..]))
     });
-    let mantissa_body = mantissa
-        .strip_prefix(['+', '-'])
-        .unwrap_or(mantissa);
-    if mantissa_body.chars().any(|ch| !ch.is_ascii_digit() && ch != '.')
+    let mantissa_body = mantissa.strip_prefix(['+', '-']).unwrap_or(mantissa);
+    if mantissa_body
+        .chars()
+        .any(|ch| !ch.is_ascii_digit() && ch != '.')
         || mantissa_body.chars().filter(|ch| *ch == '.').count() > 1
     {
         return false;
@@ -1141,7 +1141,10 @@ impl Tree {
                 continue;
             }
             if let Some(control) = &self.entries[id].node.control
-                && matches!(control.role.as_str(), "radio" | "tab" | "menuitem" | "toggle" | "treeitem" | "row")
+                && matches!(
+                    control.role.as_str(),
+                    "radio" | "tab" | "menuitem" | "toggle" | "treeitem" | "row"
+                )
                 && !control.group.is_empty()
             {
                 let choice = group_choice
@@ -1154,7 +1157,10 @@ impl Tree {
         }
         if let Some(id) = &self.focused
             && let Some(control) = self.entries[id].node.control.as_ref()
-            && matches!(control.role.as_str(), "radio" | "tab" | "menuitem" | "toggle" | "treeitem" | "row")
+            && matches!(
+                control.role.as_str(),
+                "radio" | "tab" | "menuitem" | "toggle" | "treeitem" | "row"
+            )
             && group_choice.contains_key(&control.group)
         {
             group_choice.insert(control.group.clone(), id.clone());
@@ -1170,8 +1176,10 @@ impl Tree {
                         .control
                         .as_ref()
                         .is_none_or(|control| {
-                            !matches!(control.role.as_str(), "radio" | "tab" | "menuitem" | "toggle" | "treeitem" | "row")
-                                || control.group.is_empty()
+                            !matches!(
+                                control.role.as_str(),
+                                "radio" | "tab" | "menuitem" | "toggle" | "treeitem" | "row"
+                            ) || control.group.is_empty()
                                 || group_choice.get(&control.group) == Some(*id)
                         })
             })
@@ -1390,9 +1398,11 @@ impl Tree {
             self.hovered = next;
             self.dirty.paint = true;
         }
-        if let Some(id) = self.pressed.clone().filter(|id| {
-            matches!(self.entries[id].node.kind.as_str(), "slider" | "splitter")
-        }) {
+        if let Some(id) = self
+            .pressed
+            .clone()
+            .filter(|id| matches!(self.entries[id].node.kind.as_str(), "slider" | "splitter"))
+        {
             events.extend(if self.entries[&id].node.kind == "splitter" {
                 self.splitter_from_pointer(&id)
             } else {
@@ -1455,9 +1465,11 @@ impl Tree {
             }
         }
         self.dirty.paint = true;
-        if let Some(id) = self.pressed.clone().filter(|id| {
-            matches!(self.entries[id].node.kind.as_str(), "slider" | "splitter")
-        }) {
+        if let Some(id) = self
+            .pressed
+            .clone()
+            .filter(|id| matches!(self.entries[id].node.kind.as_str(), "slider" | "splitter"))
+        {
             events.extend(if self.entries[&id].node.kind == "splitter" {
                 self.splitter_from_pointer(&id)
             } else {
@@ -1653,8 +1665,12 @@ impl Tree {
         if self.entries[&id].node.kind == "splitter" {
             let control = self.entries[&id].node.control.as_ref().unwrap();
             let value = match (control.orientation.as_str(), key) {
-                ("vertical", "ArrowDown") | ("horizontal", "ArrowRight") => control.value + control.step,
-                ("vertical", "ArrowUp") | ("horizontal", "ArrowLeft") => control.value - control.step,
+                ("vertical", "ArrowDown") | ("horizontal", "ArrowRight") => {
+                    control.value + control.step
+                }
+                ("vertical", "ArrowUp") | ("horizontal", "ArrowLeft") => {
+                    control.value - control.step
+                }
                 (_, "Home") => control.min,
                 (_, "End") => control.max,
                 _ => return vec![],
@@ -1705,27 +1721,49 @@ impl Tree {
         }
         if let Some(control) = &self.entries[&id].node.control
             && !control.group.is_empty()
-            && matches!(control.role.as_str(), "toggle" | "menuitem" | "treeitem" | "row")
+            && matches!(
+                control.role.as_str(),
+                "toggle" | "menuitem" | "treeitem" | "row"
+            )
             && (if matches!(control.role.as_str(), "treeitem" | "row") {
                 matches!(key, "ArrowUp" | "ArrowDown" | "Home" | "End")
             } else {
-                matches!(key, "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | "Home" | "End")
+                matches!(
+                    key,
+                    "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | "Home" | "End"
+                )
             })
         {
             let group = control.group.clone();
-            let choices: Vec<_> = self.order.iter().filter(|candidate| {
-                self.interactive(candidate)
-                    && self.entries[*candidate].node.control.as_ref().is_some_and(|candidate_control| candidate_control.group == group)
-            }).cloned().collect();
-            if choices.is_empty() { return vec![]; }
-            let index = choices.iter().position(|candidate| candidate == &id).unwrap_or(0);
+            let choices: Vec<_> = self
+                .order
+                .iter()
+                .filter(|candidate| {
+                    self.interactive(candidate)
+                        && self.entries[*candidate]
+                            .node
+                            .control
+                            .as_ref()
+                            .is_some_and(|candidate_control| candidate_control.group == group)
+                })
+                .cloned()
+                .collect();
+            if choices.is_empty() {
+                return vec![];
+            }
+            let index = choices
+                .iter()
+                .position(|candidate| candidate == &id)
+                .unwrap_or(0);
             let next = match key {
                 "Home" => 0,
                 "End" => choices.len() - 1,
                 "ArrowLeft" | "ArrowUp" => (index + choices.len() - 1) % choices.len(),
                 _ => (index + 1) % choices.len(),
             };
-            return self.focus(&choices[next]).map_or_else(Vec::new, |blurred| vec![json!({"type":"blur", "id":blurred})]);
+            return self.focus(&choices[next]).map_or_else(Vec::new, |blurred| {
+                vec![json!({"type":"blur", "id":blurred})]
+            });
         }
         if !matches!(self.entries[&id].node.kind.as_str(), "input" | "textarea") {
             return vec![];

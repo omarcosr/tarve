@@ -375,8 +375,7 @@ impl Graphics {
         background: vello::peniko::Color,
     ) -> Result<PresentResult, RenderError> {
         let (frame, suboptimal) = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame)
-                => (frame, false),
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
             wgpu::CurrentSurfaceTexture::Outdated => {
                 return self.recover_surface_issue(SurfaceIssue::Outdated);

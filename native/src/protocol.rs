@@ -311,9 +311,18 @@ pub fn validate_file_dialog(mode: &str, options: &FileDialogOptions) -> Result<(
     if !matches!(mode, "openFile" | "openFiles" | "openFolder" | "saveFile") {
         return Err(format!("Unsupported file dialog mode: {mode}"));
     }
-    if options.title.as_ref().is_some_and(|value| value.len() > 4096)
-        || options.file_name.as_ref().is_some_and(|value| value.len() > 4096)
-        || options.directory.as_ref().is_some_and(|value| value.len() > 32_768)
+    if options
+        .title
+        .as_ref()
+        .is_some_and(|value| value.len() > 4096)
+        || options
+            .file_name
+            .as_ref()
+            .is_some_and(|value| value.len() > 4096)
+        || options
+            .directory
+            .as_ref()
+            .is_some_and(|value| value.len() > 32_768)
     {
         return Err("File dialog text exceeds length limit".into());
     }
@@ -321,12 +330,18 @@ pub fn validate_file_dialog(mode: &str, options: &FileDialogOptions) -> Result<(
         return Err("File dialog filter limit exceeded".into());
     }
     for filter in &options.filters {
-        if filter.name.is_empty() || filter.name.len() > 256 || filter.extensions.is_empty() || filter.extensions.len() > 64 {
+        if filter.name.is_empty()
+            || filter.name.len() > 256
+            || filter.extensions.is_empty()
+            || filter.extensions.len() > 64
+        {
             return Err("File dialog filters require a name and 1-64 extensions".into());
         }
         if filter.extensions.iter().any(|extension| {
             let extension = extension.trim().trim_start_matches('.');
-            extension.is_empty() || extension.len() > 32 || extension.contains(['/', '\\', '*', '?'])
+            extension.is_empty()
+                || extension.len() > 32
+                || extension.contains(['/', '\\', '*', '?'])
         }) {
             return Err("Invalid file dialog extension".into());
         }
@@ -339,8 +354,10 @@ fn validate_control(node: &Node) -> Result<(), String> {
         return Err("Scroll speed must be finite and greater than zero".into());
     }
     if node.kind == "input"
-        && !["text", "password", "email", "number", "search", "tel", "url"]
-            .contains(&node.input_type.as_str())
+        && ![
+            "text", "password", "email", "number", "search", "tel", "url",
+        ]
+        .contains(&node.input_type.as_str())
     {
         return Err(format!("Unsupported input type: {}", node.input_type));
     }

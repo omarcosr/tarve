@@ -1,14 +1,12 @@
 use crate::{
     protocol::{self, Node},
-    renderer::{
-        GraphicsFaultKind, SurfaceIssue, SurfaceRecoveryAction, surface_recovery_action,
-    },
+    renderer::{GraphicsFaultKind, SurfaceIssue, SurfaceRecoveryAction, surface_recovery_action},
     runtime::{
         CloseRequestAction, GraphicsFaultAction, GraphicsRecoveryCircuitAction,
-        GraphicsRecoveryFailureAction,
-        anchored_window_position, close_request_action, cursor_for_node, graphics_fault_action,
+        GraphicsRecoveryFailureAction, anchored_window_position, close_request_action,
+        cursor_for_node, graphics_fault_action, graphics_recoveries_after_stability,
         graphics_recovery_circuit_action, graphics_recovery_delay,
-        graphics_recoveries_after_stability, graphics_recovery_failure_action, shortcut_name,
+        graphics_recovery_failure_action, shortcut_name,
     },
     tree::Tree,
 };
@@ -70,8 +68,14 @@ fn graphics_device_faults_distinguish_recovery_from_fatal_errors() {
 
 #[test]
 fn graphics_recovery_retries_are_bounded_and_backed_off() {
-    assert_eq!(graphics_recovery_delay(1), std::time::Duration::from_millis(100));
-    assert_eq!(graphics_recovery_delay(2), std::time::Duration::from_millis(250));
+    assert_eq!(
+        graphics_recovery_delay(1),
+        std::time::Duration::from_millis(100)
+    );
+    assert_eq!(
+        graphics_recovery_delay(2),
+        std::time::Duration::from_millis(250)
+    );
     assert_eq!(
         graphics_recovery_failure_action(1),
         GraphicsRecoveryFailureAction::RetryAfter(std::time::Duration::from_millis(100))
@@ -117,10 +121,8 @@ fn graphics_recovery_circuit_breaker_spans_generations_and_decays_after_stabilit
         graphics_recoveries_after_stability(recovery_episodes, std::time::Duration::from_secs(29)),
         3
     );
-    recovery_episodes = graphics_recoveries_after_stability(
-        recovery_episodes,
-        std::time::Duration::from_secs(30),
-    );
+    recovery_episodes =
+        graphics_recoveries_after_stability(recovery_episodes, std::time::Duration::from_secs(30));
     assert_eq!(recovery_episodes, 0);
     assert_eq!(
         graphics_recovery_circuit_action(recovery_episodes),
@@ -139,13 +141,20 @@ fn close_request_protocol_and_coalescing_are_explicit() {
     .unwrap();
     assert!(intercepted.close_intercept);
 
-    let command: protocol::Command = serde_json::from_value(json!({"type":"cancelCloseRequest"})).unwrap();
+    let command: protocol::Command =
+        serde_json::from_value(json!({"type":"cancelCloseRequest"})).unwrap();
     assert!(matches!(command, protocol::Command::CancelCloseRequest));
 
     let mut pending = false;
-    assert_eq!(close_request_action(false, &mut pending), CloseRequestAction::Exit);
+    assert_eq!(
+        close_request_action(false, &mut pending),
+        CloseRequestAction::Exit
+    );
     assert!(!pending, "non-intercepted close should remain immediate");
-    assert_eq!(close_request_action(true, &mut pending), CloseRequestAction::Emit);
+    assert_eq!(
+        close_request_action(true, &mut pending),
+        CloseRequestAction::Emit
+    );
     assert!(pending);
     assert_eq!(
         close_request_action(true, &mut pending),
@@ -171,9 +180,14 @@ fn file_dialog_protocol_and_hotkey_names_are_explicit() {
             "directory":"C:/tmp",
             "filters":[{"name":"Images","extensions":["png","jpg"]}]
         }
-    })).unwrap();
+    }))
+    .unwrap();
     match command {
-        protocol::Command::FileDialog { mode, options, request_id } => {
+        protocol::Command::FileDialog {
+            mode,
+            options,
+            request_id,
+        } => {
             assert_eq!(mode, "openFiles");
             assert_eq!(request_id, "files-1");
             assert_eq!(options.title.as_deref(), Some("Choose files"));
@@ -182,14 +196,23 @@ fn file_dialog_protocol_and_hotkey_names_are_explicit() {
         _ => panic!("expected file dialog command"),
     }
     let invalid = protocol::FileDialogOptions {
-        filters: vec![protocol::FileDialogFilter { name: "Bad".into(), extensions: vec!["*.exe".into()] }],
+        filters: vec![protocol::FileDialogFilter {
+            name: "Bad".into(),
+            extensions: vec!["*.exe".into()],
+        }],
         ..Default::default()
     };
     assert!(protocol::validate_file_dialog("openFile", &invalid).is_err());
 
     let modifiers = ModifiersState::CONTROL | ModifiersState::SHIFT;
-    assert_eq!(shortcut_name(&Key::Character("s".into()), modifiers).as_deref(), Some("Ctrl+Shift+S"));
-    assert_eq!(shortcut_name(&Key::Named(NamedKey::F2), ModifiersState::empty()).as_deref(), Some("F2"));
+    assert_eq!(
+        shortcut_name(&Key::Character("s".into()), modifiers).as_deref(),
+        Some("Ctrl+Shift+S")
+    );
+    assert_eq!(
+        shortcut_name(&Key::Named(NamedKey::F2), ModifiersState::empty()).as_deref(),
+        Some("F2")
+    );
 }
 
 #[test]
@@ -237,9 +260,12 @@ fn window_position_protocol_accepts_presets_and_logical_coordinates() {
 #[test]
 fn splitter_cursor_matches_resize_axis() {
     let mut horizontal = node("horizontal", "splitter", json!({}), vec![]);
-    horizontal.control = Some(serde_json::from_value(json!({
-        "role":"slider","orientation":"horizontal","value":50,"min":0,"max":100,"step":1
-    })).unwrap());
+    horizontal.control = Some(
+        serde_json::from_value(json!({
+            "role":"slider","orientation":"horizontal","value":50,"min":0,"max":100,"step":1
+        }))
+        .unwrap(),
+    );
     let mut vertical = horizontal.clone();
     vertical.id = "vertical".into();
     vertical.control.as_mut().unwrap().orientation = "vertical".into();
@@ -464,19 +490,37 @@ fn otp_slot_focus_follows_the_native_input_caret() {
             slot
         })
         .collect();
-    let mut tree = Tree::new(root(vec![input, node("slots", "row", json!({"gap":8}), slots)]));
+    let mut tree = Tree::new(root(vec![
+        input,
+        node("slots", "row", json!({"gap":8}), slots),
+    ]));
     tree.compute(320.0, 120.0).unwrap();
 
     let _ = tree.focus("otp-input");
-    assert_eq!(tree.resolved_visual_number("slot-2", "outlineWidth", 0.0), 2.0);
-    assert_eq!(tree.resolved_visual_number("slot-1", "outlineWidth", 0.0), 0.0);
+    assert_eq!(
+        tree.resolved_visual_number("slot-2", "outlineWidth", 0.0),
+        2.0
+    );
+    assert_eq!(
+        tree.resolved_visual_number("slot-1", "outlineWidth", 0.0),
+        0.0
+    );
 
     tree.key("ArrowLeft");
-    assert_eq!(tree.resolved_visual_number("slot-1", "outlineWidth", 0.0), 2.0);
-    assert_eq!(tree.resolved_visual_number("slot-2", "outlineWidth", 0.0), 0.0);
+    assert_eq!(
+        tree.resolved_visual_number("slot-1", "outlineWidth", 0.0),
+        2.0
+    );
+    assert_eq!(
+        tree.resolved_visual_number("slot-2", "outlineWidth", 0.0),
+        0.0
+    );
 
     tree.key("Home");
-    assert_eq!(tree.resolved_visual_number("slot-0", "outlineWidth", 0.0), 2.0);
+    assert_eq!(
+        tree.resolved_visual_number("slot-0", "outlineWidth", 0.0),
+        2.0
+    );
 }
 
 #[test]
@@ -497,7 +541,10 @@ fn password_input_masks_rendered_text_and_does_not_copy_selection() {
     tree.key("SelectAll");
     assert_eq!(tree.selected_text(), None);
     let snapshots = tree.snapshots();
-    let password = snapshots.iter().find(|entry| entry["id"] == "password").unwrap();
+    let password = snapshots
+        .iter()
+        .find(|entry| entry["id"] == "password")
+        .unwrap();
     assert_eq!(password["text"], "•••");
 }
 
@@ -857,7 +904,12 @@ fn repaint_after_graphics_epoch_preserves_cpu_ui_and_decoded_images() {
         std::process::id()
     ));
     image::RgbaImage::new(8, 8).save(&path).unwrap();
-    let mut cached_image = node("cached-image", "image", json!({"width":8,"height":8}), vec![]);
+    let mut cached_image = node(
+        "cached-image",
+        "image",
+        json!({"width":8,"height":8}),
+        vec![],
+    );
     cached_image.src = path.to_string_lossy().into_owned();
     let scroll = node(
         "recovery-scroll",
@@ -888,10 +940,17 @@ fn repaint_after_graphics_epoch_preserves_cpu_ui_and_decoded_images() {
     tree.dirty.paint = true;
     tree.scene(1.0);
 
-    assert_eq!(tree.image_cache_len(), 1, "decoded image bytes must remain CPU-owned");
+    assert_eq!(
+        tree.image_cache_len(),
+        1,
+        "decoded image bytes must remain CPU-owned"
+    );
     assert_eq!(tree.focused.as_deref(), Some("recovery-focus"));
     assert_eq!(tree.entries["recovery-scroll"].scroll, scroll_before);
-    assert!(!path.exists(), "repaint must not need the original image file");
+    assert!(
+        !path.exists(),
+        "repaint must not need the original image file"
+    );
 }
 
 #[test]
@@ -1101,18 +1160,61 @@ fn splitter_drag_uses_parent_axis_and_keyboard_matches_split_direction() {
     tree.pointer_down();
     let events = tree.pointer_move(150.0, 40.0);
     assert!(events.iter().any(|event| event["type"] == "valueChange"));
-    assert!((tree.entries["splitter"].node.control.as_ref().unwrap().value - 70.0).abs() < 1.0);
+    assert!(
+        (tree.entries["splitter"]
+            .node
+            .control
+            .as_ref()
+            .unwrap()
+            .value
+            - 70.0)
+            .abs()
+            < 1.0
+    );
     tree.pointer_up();
 
     let _ = tree.focus("splitter");
-    let before = tree.entries["splitter"].node.control.as_ref().unwrap().value;
+    let before = tree.entries["splitter"]
+        .node
+        .control
+        .as_ref()
+        .unwrap()
+        .value;
     tree.key("ArrowRight");
-    assert_eq!(tree.entries["splitter"].node.control.as_ref().unwrap().value, before + 1.0);
+    assert_eq!(
+        tree.entries["splitter"]
+            .node
+            .control
+            .as_ref()
+            .unwrap()
+            .value,
+        before + 1.0
+    );
 
-    tree.entries.get_mut("splitter").unwrap().node.control.as_mut().unwrap().orientation = "vertical".into();
-    let before = tree.entries["splitter"].node.control.as_ref().unwrap().value;
+    tree.entries
+        .get_mut("splitter")
+        .unwrap()
+        .node
+        .control
+        .as_mut()
+        .unwrap()
+        .orientation = "vertical".into();
+    let before = tree.entries["splitter"]
+        .node
+        .control
+        .as_ref()
+        .unwrap()
+        .value;
     tree.key("ArrowDown");
-    assert_eq!(tree.entries["splitter"].node.control.as_ref().unwrap().value, before + 1.0);
+    assert_eq!(
+        tree.entries["splitter"]
+            .node
+            .control
+            .as_ref()
+            .unwrap()
+            .value,
+        before + 1.0
+    );
 }
 
 #[test]
@@ -1151,14 +1253,30 @@ fn radio_groups_use_one_tab_stop_and_arrows_move_between_enabled_choices() {
 
 #[test]
 fn navigation_menuitems_use_roving_focus_and_arrow_activation() {
-    let mut first = node("first", "pressable", json!({"width":60,"height":30}), vec![]);
-    first.control = Some(serde_json::from_value(json!({
-        "role":"menuitem","group":"nav","label":"First","checked":true
-    })).unwrap());
-    let mut second = node("second", "pressable", json!({"width":60,"height":30}), vec![]);
-    second.control = Some(serde_json::from_value(json!({
-        "role":"menuitem","group":"nav","label":"Second","checked":false
-    })).unwrap());
+    let mut first = node(
+        "first",
+        "pressable",
+        json!({"width":60,"height":30}),
+        vec![],
+    );
+    first.control = Some(
+        serde_json::from_value(json!({
+            "role":"menuitem","group":"nav","label":"First","checked":true
+        }))
+        .unwrap(),
+    );
+    let mut second = node(
+        "second",
+        "pressable",
+        json!({"width":60,"height":30}),
+        vec![],
+    );
+    second.control = Some(
+        serde_json::from_value(json!({
+            "role":"menuitem","group":"nav","label":"Second","checked":false
+        }))
+        .unwrap(),
+    );
     let mut tree = Tree::new(root(vec![first, second]));
     tree.compute(200.0, 100.0).unwrap();
     let _ = tree.focus("first");
@@ -1169,52 +1287,108 @@ fn navigation_menuitems_use_roving_focus_and_arrow_activation() {
     assert_eq!(tree.focused.as_deref(), Some("first"));
     assert!(!events.iter().any(|event| event["type"] == "click"));
     let events = tree.key("Space");
-    assert!(events.iter().any(|event| event["type"] == "click" && event["id"] == "first"));
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "click" && event["id"] == "first")
+    );
 }
 
 #[test]
 fn tree_and_grid_items_use_vertical_roving_focus() {
-    let mut first = node("tree-first", "pressable", json!({"width":80,"height":30}), vec![]);
-    first.control = Some(serde_json::from_value(json!({
-        "role":"treeitem","group":"tree","label":"First","checked":true
-    })).unwrap());
-    let mut second = node("tree-second", "pressable", json!({"width":80,"height":30}), vec![]);
-    second.control = Some(serde_json::from_value(json!({
-        "role":"treeitem","group":"tree","label":"Second","checked":false
-    })).unwrap());
+    let mut first = node(
+        "tree-first",
+        "pressable",
+        json!({"width":80,"height":30}),
+        vec![],
+    );
+    first.control = Some(
+        serde_json::from_value(json!({
+            "role":"treeitem","group":"tree","label":"First","checked":true
+        }))
+        .unwrap(),
+    );
+    let mut second = node(
+        "tree-second",
+        "pressable",
+        json!({"width":80,"height":30}),
+        vec![],
+    );
+    second.control = Some(
+        serde_json::from_value(json!({
+            "role":"treeitem","group":"tree","label":"Second","checked":false
+        }))
+        .unwrap(),
+    );
     let mut tree = Tree::new(root(vec![first, second]));
     tree.compute(200.0, 100.0).unwrap();
     let _ = tree.focus("tree-first");
     let events = tree.key("ArrowRight");
     assert_eq!(tree.focused.as_deref(), Some("tree-first"));
-    assert!(events.iter().any(|event| event["type"] == "key" && event["key"] == "ArrowRight"));
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "key" && event["key"] == "ArrowRight")
+    );
     let events = tree.key("ArrowDown");
     assert_eq!(tree.focused.as_deref(), Some("tree-second"));
     assert!(!events.iter().any(|event| event["type"] == "click"));
 
-    let mut row_one = node("row-one", "pressable", json!({"width":80,"height":30}), vec![]);
-    row_one.control = Some(serde_json::from_value(json!({"role":"row","group":"grid","checked":true})).unwrap());
-    let mut row_two = node("row-two", "pressable", json!({"width":80,"height":30}), vec![]);
-    row_two.control = Some(serde_json::from_value(json!({"role":"row","group":"grid","checked":false})).unwrap());
+    let mut row_one = node(
+        "row-one",
+        "pressable",
+        json!({"width":80,"height":30}),
+        vec![],
+    );
+    row_one.control =
+        Some(serde_json::from_value(json!({"role":"row","group":"grid","checked":true})).unwrap());
+    let mut row_two = node(
+        "row-two",
+        "pressable",
+        json!({"width":80,"height":30}),
+        vec![],
+    );
+    row_two.control =
+        Some(serde_json::from_value(json!({"role":"row","group":"grid","checked":false})).unwrap());
     let mut grid = Tree::new(root(vec![row_one, row_two]));
     grid.compute(200.0, 100.0).unwrap();
     let _ = grid.focus("row-one");
     grid.key("End");
     assert_eq!(grid.focused.as_deref(), Some("row-two"));
     let events = grid.key("Space");
-    assert!(events.iter().any(|event| event["type"] == "click" && event["id"] == "row-two"));
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "click" && event["id"] == "row-two")
+    );
 }
 
 #[test]
 fn toggle_groups_roam_focus_without_toggling_on_arrows() {
-    let mut first = node("first", "pressable", json!({"width":60,"height":30}), vec![]);
-    first.control = Some(serde_json::from_value(json!({
-        "role":"toggle","group":"toggles","label":"First","checked":true
-    })).unwrap());
-    let mut second = node("second", "pressable", json!({"width":60,"height":30}), vec![]);
-    second.control = Some(serde_json::from_value(json!({
-        "role":"toggle","group":"toggles","label":"Second","checked":false
-    })).unwrap());
+    let mut first = node(
+        "first",
+        "pressable",
+        json!({"width":60,"height":30}),
+        vec![],
+    );
+    first.control = Some(
+        serde_json::from_value(json!({
+            "role":"toggle","group":"toggles","label":"First","checked":true
+        }))
+        .unwrap(),
+    );
+    let mut second = node(
+        "second",
+        "pressable",
+        json!({"width":60,"height":30}),
+        vec![],
+    );
+    second.control = Some(
+        serde_json::from_value(json!({
+            "role":"toggle","group":"toggles","label":"Second","checked":false
+        }))
+        .unwrap(),
+    );
     let mut tree = Tree::new(root(vec![first, second]));
     tree.compute(200.0, 100.0).unwrap();
     let _ = tree.focus("first");
@@ -1222,7 +1396,11 @@ fn toggle_groups_roam_focus_without_toggling_on_arrows() {
     assert_eq!(tree.focused.as_deref(), Some("second"));
     assert!(!events.iter().any(|event| event["type"] == "click"));
     let events = tree.key("Space");
-    assert!(events.iter().any(|event| event["type"] == "click" && event["id"] == "second"));
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "click" && event["id"] == "second")
+    );
 }
 
 #[test]

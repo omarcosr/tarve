@@ -1,12 +1,18 @@
 use crate::{
     bridge::Events,
-    protocol::{Command, Document, FileDialogOptions, Node, WindowPosition, WindowPositionPreset, error},
+    protocol::{
+        Command, Document, FileDialogOptions, Node, WindowPosition, WindowPositionPreset, error,
+    },
     renderer::{CaptureError, Graphics, GraphicsFaultKind, PresentResult, RenderError},
     tree::{Tree, color},
 };
 
 #[cfg(target_os = "windows")]
-fn run_file_dialog(window: Option<&Arc<Window>>, mode: &str, options: FileDialogOptions) -> Result<Vec<String>, String> {
+fn run_file_dialog(
+    window: Option<&Arc<Window>>,
+    mode: &str,
+    options: FileDialogOptions,
+) -> Result<Vec<String>, String> {
     let mut dialog = rfd::FileDialog::new();
     if let Some(window) = window {
         dialog = dialog.set_parent(window.as_ref());
@@ -24,7 +30,9 @@ fn run_file_dialog(window: Option<&Arc<Window>>, mode: &str, options: FileDialog
         if filter.name.is_empty() || filter.extensions.is_empty() {
             continue;
         }
-        let extensions: Vec<String> = filter.extensions.into_iter()
+        let extensions: Vec<String> = filter
+            .extensions
+            .into_iter()
             .map(|extension| extension.trim().trim_start_matches('.').to_string())
             .filter(|extension| !extension.is_empty())
             .collect();
@@ -39,11 +47,18 @@ fn run_file_dialog(window: Option<&Arc<Window>>, mode: &str, options: FileDialog
         "saveFile" => dialog.save_file().into_iter().collect(),
         _ => return Err(format!("Unsupported file dialog mode: {mode}")),
     };
-    Ok(paths.into_iter().map(|path| path.to_string_lossy().into_owned()).collect())
+    Ok(paths
+        .into_iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect())
 }
 
 #[cfg(not(target_os = "windows"))]
-fn run_file_dialog(_window: Option<&Arc<Window>>, _mode: &str, _options: FileDialogOptions) -> Result<Vec<String>, String> {
+fn run_file_dialog(
+    _window: Option<&Arc<Window>>,
+    _mode: &str,
+    _options: FileDialogOptions,
+) -> Result<Vec<String>, String> {
     Err("Native file dialogs are currently supported on Windows only".into())
 }
 
@@ -51,32 +66,57 @@ fn shortcut_key_name(key: &Key) -> Option<String> {
     match key {
         Key::Character(value) => {
             let value = value.as_str();
-            if value.chars().count() == 1 { Some(value.to_uppercase()) } else { None }
+            if value.chars().count() == 1 {
+                Some(value.to_uppercase())
+            } else {
+                None
+            }
         }
-        Key::Named(named) => Some(match named {
-            NamedKey::Escape => "Escape",
-            NamedKey::Enter => "Enter",
-            NamedKey::Space => "Space",
-            NamedKey::Backspace => "Backspace",
-            NamedKey::Delete => "Delete",
-            NamedKey::Tab => "Tab",
-            NamedKey::Home => "Home",
-            NamedKey::End => "End",
-            NamedKey::PageUp => "PageUp",
-            NamedKey::PageDown => "PageDown",
-            NamedKey::Insert => "Insert",
-            NamedKey::ArrowUp => "ArrowUp",
-            NamedKey::ArrowDown => "ArrowDown",
-            NamedKey::ArrowLeft => "ArrowLeft",
-            NamedKey::ArrowRight => "ArrowRight",
-            NamedKey::F1 => "F1", NamedKey::F2 => "F2", NamedKey::F3 => "F3", NamedKey::F4 => "F4",
-            NamedKey::F5 => "F5", NamedKey::F6 => "F6", NamedKey::F7 => "F7", NamedKey::F8 => "F8",
-            NamedKey::F9 => "F9", NamedKey::F10 => "F10", NamedKey::F11 => "F11", NamedKey::F12 => "F12",
-            NamedKey::F13 => "F13", NamedKey::F14 => "F14", NamedKey::F15 => "F15", NamedKey::F16 => "F16",
-            NamedKey::F17 => "F17", NamedKey::F18 => "F18", NamedKey::F19 => "F19", NamedKey::F20 => "F20",
-            NamedKey::F21 => "F21", NamedKey::F22 => "F22", NamedKey::F23 => "F23", NamedKey::F24 => "F24",
-            _ => return None,
-        }.to_string()),
+        Key::Named(named) => Some(
+            match named {
+                NamedKey::Escape => "Escape",
+                NamedKey::Enter => "Enter",
+                NamedKey::Space => "Space",
+                NamedKey::Backspace => "Backspace",
+                NamedKey::Delete => "Delete",
+                NamedKey::Tab => "Tab",
+                NamedKey::Home => "Home",
+                NamedKey::End => "End",
+                NamedKey::PageUp => "PageUp",
+                NamedKey::PageDown => "PageDown",
+                NamedKey::Insert => "Insert",
+                NamedKey::ArrowUp => "ArrowUp",
+                NamedKey::ArrowDown => "ArrowDown",
+                NamedKey::ArrowLeft => "ArrowLeft",
+                NamedKey::ArrowRight => "ArrowRight",
+                NamedKey::F1 => "F1",
+                NamedKey::F2 => "F2",
+                NamedKey::F3 => "F3",
+                NamedKey::F4 => "F4",
+                NamedKey::F5 => "F5",
+                NamedKey::F6 => "F6",
+                NamedKey::F7 => "F7",
+                NamedKey::F8 => "F8",
+                NamedKey::F9 => "F9",
+                NamedKey::F10 => "F10",
+                NamedKey::F11 => "F11",
+                NamedKey::F12 => "F12",
+                NamedKey::F13 => "F13",
+                NamedKey::F14 => "F14",
+                NamedKey::F15 => "F15",
+                NamedKey::F16 => "F16",
+                NamedKey::F17 => "F17",
+                NamedKey::F18 => "F18",
+                NamedKey::F19 => "F19",
+                NamedKey::F20 => "F20",
+                NamedKey::F21 => "F21",
+                NamedKey::F22 => "F22",
+                NamedKey::F23 => "F23",
+                NamedKey::F24 => "F24",
+                _ => return None,
+            }
+            .to_string(),
+        ),
         _ => None,
     }
 }
@@ -84,10 +124,18 @@ fn shortcut_key_name(key: &Key) -> Option<String> {
 pub(crate) fn shortcut_name(key: &Key, modifiers: ModifiersState) -> Option<String> {
     let key = shortcut_key_name(key)?;
     let mut parts = Vec::with_capacity(5);
-    if modifiers.control_key() { parts.push("Ctrl".to_string()); }
-    if modifiers.alt_key() { parts.push("Alt".to_string()); }
-    if modifiers.shift_key() { parts.push("Shift".to_string()); }
-    if modifiers.super_key() { parts.push("Meta".to_string()); }
+    if modifiers.control_key() {
+        parts.push("Ctrl".to_string());
+    }
+    if modifiers.alt_key() {
+        parts.push("Alt".to_string());
+    }
+    if modifiers.shift_key() {
+        parts.push("Shift".to_string());
+    }
+    if modifiers.super_key() {
+        parts.push("Meta".to_string());
+    }
     parts.push(key);
     Some(parts.join("+"))
 }
@@ -108,13 +156,19 @@ use winit::{
 pub(crate) fn cursor_for_node(node: Option<&Node>) -> CursorIcon {
     match node {
         Some(node) if node.kind == "splitter" => {
-            if node.control.as_ref().is_some_and(|control| control.orientation == "vertical") {
+            if node
+                .control
+                .as_ref()
+                .is_some_and(|control| control.orientation == "vertical")
+            {
                 CursorIcon::RowResize
             } else {
                 CursorIcon::ColResize
             }
         }
-        Some(node) if matches!(node.kind.as_str(), "button" | "pressable" | "slider") => CursorIcon::Pointer,
+        Some(node) if matches!(node.kind.as_str(), "button" | "pressable" | "slider") => {
+            CursorIcon::Pointer
+        }
         Some(node) if matches!(node.kind.as_str(), "input" | "textarea") => CursorIcon::Text,
         _ => CursorIcon::Default,
     }
@@ -373,7 +427,9 @@ pub(crate) fn graphics_fault_action(kind: GraphicsFaultKind) -> GraphicsFaultAct
         GraphicsFaultKind::DeviceLost | GraphicsFaultKind::Internal => {
             GraphicsFaultAction::RecoverDevice
         }
-        GraphicsFaultKind::OutOfMemory | GraphicsFaultKind::Validation => GraphicsFaultAction::Fatal,
+        GraphicsFaultKind::OutOfMemory | GraphicsFaultKind::Validation => {
+            GraphicsFaultAction::Fatal
+        }
     }
 }
 
@@ -599,7 +655,9 @@ impl App {
             }
             _ => None,
         };
-        let present_at = self.presentation_retry_at.filter(|deadline| *deadline > now);
+        let present_at = self
+            .presentation_retry_at
+            .filter(|deadline| *deadline > now);
         match (recovery_at, present_at) {
             (Some(a), Some(b)) => event_loop.set_control_flow(ControlFlow::WaitUntil(a.min(b))),
             (Some(deadline), None) | (None, Some(deadline)) => {
@@ -608,11 +666,7 @@ impl App {
             (None, None) => event_loop.set_control_flow(ControlFlow::Wait),
         }
     }
-    fn start_graphics_recovery(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        cause: String,
-    ) -> bool {
+    fn start_graphics_recovery(&mut self, event_loop: &ActiveEventLoop, cause: String) -> bool {
         if matches!(self.graphics, GraphicsState::Recovering(_)) {
             return true;
         }
@@ -845,7 +899,11 @@ impl App {
                 window.set_cursor(CursorIcon::from(direction));
                 return;
             }
-            let hovered = self.tree.hovered.as_ref().map(|id| &self.tree.entries[id].node);
+            let hovered = self
+                .tree
+                .hovered
+                .as_ref()
+                .map(|id| &self.tree.entries[id].node);
             window.set_cursor(cursor_for_node(hovered));
             let editing = self
                 .tree
@@ -921,7 +979,11 @@ impl App {
             let _ = window.drag_window();
         }
     }
-    fn handle_window_actions(&mut self, event_loop: &ActiveEventLoop, events: &[serde_json::Value]) {
+    fn handle_window_actions(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        events: &[serde_json::Value],
+    ) {
         let Some(window) = self.window.clone() else {
             return;
         };
@@ -1142,9 +1204,7 @@ impl ApplicationHandler<Command> for App {
             GraphicsState::Ready(graphics) => {
                 GraphicsState::Suspended(GraphicsCheckpoint::from_graphics(&graphics))
             }
-            GraphicsState::Recovering(recovery) => {
-                GraphicsState::Suspended(recovery.checkpoint)
-            }
+            GraphicsState::Recovering(recovery) => GraphicsState::Suspended(recovery.checkpoint),
             GraphicsState::Suspended(checkpoint) => GraphicsState::Suspended(checkpoint),
             GraphicsState::Fatal => GraphicsState::Fatal,
         };
@@ -1163,7 +1223,9 @@ impl ApplicationHandler<Command> for App {
         if present_due {
             self.presentation_retry_at = None;
         }
-        if (present_due || recovery_due) && let Some(window) = &self.window {
+        if (present_due || recovery_due)
+            && let Some(window) = &self.window
+        {
             window.request_redraw();
         }
         self.sync_control_flow(event_loop);
@@ -1235,7 +1297,9 @@ impl ApplicationHandler<Command> for App {
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 events = self.clipboard_shortcut(&event.logical_key);
-                if !event.repeat && let Some(shortcut) = shortcut_name(&event.logical_key, self.modifiers) {
+                if !event.repeat
+                    && let Some(shortcut) = shortcut_name(&event.logical_key, self.modifiers)
+                {
                     events.push(json!({"type":"shortcut", "shortcut":shortcut}));
                 }
                 let key = match &event.logical_key {
