@@ -1,12 +1,12 @@
 # Tarve
 
-GUI nativa para **Bun + TypeScript/TSX**, com **Taffy** (Flex/Grid), **Parley** (shaping, medição e quebra de texto) e **Vello/WGPU** (GPU). Janela Win32 via Winit. O tema padrão usa a linguagem visual shadcn: zinc, superfícies claras, bordas discretas, raios de 6–12 px e Segoe UI.
+GUI nativa para **Bun + TypeScript/TSX**, com **Taffy** (Flex/Grid), **Parley** (shaping, medição e quebra de texto) e renderer selecionável: **Vello/WGPU** (GPU) ou **vello_cpu + softbuffer** (baixo consumo de memória). Janela Win32 via Winit. O tema padrão usa a linguagem visual shadcn: zinc, superfícies claras, bordas discretas, raios de 6–12 px e Segoe UI.
 
 Licenciado sob a **Apache License 2.0**. Consulte [`LICENSE`](LICENSE).
 
 ## Rodar no Windows
 
-Pré-requisitos: Bun 1.4+, Rust estável com target `x86_64-pc-windows-msvc`, Visual Studio Build Tools com C++/Windows SDK e GPU com suporte a compute shaders (DirectX 12 ou Vulkan).
+Pré-requisitos para desenvolver o Tarve: Bun 1.4+, Rust estável com target `x86_64-pc-windows-msvc` e Visual Studio Build Tools com C++/Windows SDK. O renderer GPU exige DirectX 12 ou Vulkan; o renderer CPU não exige compute shaders.
 
 ```powershell
 cd A:\tarve
@@ -16,9 +16,30 @@ bun run dev
 
 `dev` gera o pacote npm local, instala o tarball nos exemplos e reinicia o app ao editar TS/TSX. Após editar o Tarve ou o backend Rust, reinicie `dev` para gerar e instalar um pacote atualizado. Para abrir o exemplo usando o último tarball instalado: `bun run start`.
 
+### Renderer de baixo consumo de memória
+
+O backend GPU continua sendo o padrão. A forma recomendada de escolher o renderer é na própria criação do app:
+
+```tsx
+const app = createApp(App, {
+  renderer: "cpu",
+});
+```
+
+`renderer` aceita `"cpu"`, `"gpu"` ou `"auto"`. `"cpu"` usa `vello_cpu + softbuffer`; `"gpu"` usa Vello/WGPU; `"auto"` é o padrão e seleciona GPU salvo quando `TARVE_RENDERER` é usado como override de desenvolvimento/CI.
+
+Uma escolha explícita no app tem prioridade sobre o ambiente. Por exemplo, `renderer: "cpu"` continua CPU mesmo se `TARVE_RENDERER=gpu`. O env permanece disponível para testar apps que usam `renderer: "auto"`:
+
+```powershell
+$env:TARVE_RENDERER="cpu"
+bun examples/counter.tsx
+```
+
+No env também são aceitos `software` e `softbuffer` como aliases de `cpu`. Um valor desconhecido falha explicitamente quando o app está em `"auto"`; uma escolha explícita `"cpu"`/`"gpu"` não depende do valor do env.
+
 ## Usar como pacote npm
 
-O pacote para Windows x64 inclui a DLL em release; quem instala precisa somente do Bun e de um driver de GPU compatível. A publicação no registry ainda é uma etapa separada. Para gerar e instalar o artefato local:
+O pacote para Windows x64 inclui a DLL em release; quem instala precisa somente do Bun. O renderer GPU exige driver compatível; o renderer CPU não exige compute shaders. A publicação no registry ainda é uma etapa separada. Para gerar e instalar o artefato local:
 
 A política oficial de licença, versionamento, Authenticode e release está em [`RELEASE.md`](RELEASE.md). Releases assinados usam tags `v<semver>`; o npm registry continua fora do workflow automático até a política de distribuição pública ser definida explicitamente.
 
@@ -36,7 +57,7 @@ bun run tarve build app.tsx --outfile dist/MeuApp.exe
 
 Configure `tsconfig.json` com `"jsx": "react-jsx"`, `"jsxImportSource": "tarve"`, `"moduleResolution": "Bundler"` e `"types": ["bun", "tarve/assets"]`. A API pública é importada de `tarve`; o build também está disponível como `import { build } from "tarve/build"`.
 
-`examples/counter.tsx` mostra o app mínimo, `examples/basic.tsx` reúne os componentes iniciais, `examples/forms.tsx` demonstra controles de formulário e `examples/large-list.tsx` mostra registros com lista virtual. Exemplos usam a mesma API instalada, sem configurar a DLL ou o Worker.
+`examples/counter.tsx` mostra o app mínimo, `examples/basic.tsx` reúne os componentes iniciais, `examples/forms.tsx` demonstra controles de formulário e `examples/large-list.tsx` mostra registros com lista virtual. Exemplos usam a mesma API instalada, sem configurar manualmente a DLL. Eventos nativos ficam em uma fila FIFO na DLL e o runtime Bun principal os drena com `tarve_poll_event()` não bloqueante; não há um segundo Bun Worker dedicado ao pump de eventos.
 
 `examples/` é um projeto Bun consumidor: tem `package.json` e `tsconfig.json` próprios e importa somente a API pública. Após publicar `tarve@0.1.0` no registry, instale o pacote:
 
@@ -373,9 +394,9 @@ bun run build:exe
 bun run smoke:exe
 ```
 
-Distribua apenas **`dist/Tarve.exe`**. O build compila Rust em release e incorpora o runtime Bun, o app, o Worker de eventos, a DLL e a imagem. O runtime C da DLL usa link estático: o destinatário não precisa instalar Bun, Node, Rust ou o redistribuível do Visual C++. O executável Windows x64 abre diretamente a janela, sem console; continua precisando de GPU/driver compatível com Vello/WGPU. Os pré-requisitos de compilação acima são necessários apenas na máquina de build.
+Distribua apenas **`dist/Tarve.exe`**. O build compila Rust em release e incorpora o runtime Bun, o app, a DLL e a imagem. O runtime C da DLL usa link estático: o destinatário não precisa instalar Bun, Node, Rust ou o redistribuível do Visual C++. O executável Windows x64 abre diretamente a janela, sem console; `renderer: "gpu"` precisa de driver compatível com Vello/WGPU, enquanto `renderer: "cpu"` usa o renderer software. Os pré-requisitos de compilação acima são necessários apenas na máquina de build.
 
-Na inicialização, a DLL, o Worker e as imagens usadas são extraídos para `%TEMP%\tarve-assets`, em diretórios identificados e verificados por SHA-256. Isso dá ao carregador do Windows e ao backend Rust caminhos físicos para os arquivos incorporados. Os caminhos ficam em cache durante a execução.
+Na inicialização, a DLL e as imagens usadas são extraídas para `%TEMP%\tarve-assets`, em diretórios identificados e verificados por SHA-256. Isso dá ao carregador do Windows e ao backend Rust caminhos físicos para os arquivos incorporados. Os caminhos ficam em cache durante a execução.
 
 O ponto de entrada é o próprio app, `examples/basic.tsx`. O exemplo contém apenas interface, estado e execução normal. O CLI do pacote incorpora o runtime nativo automaticamente. `bun run build:exe --entry examples/basic.tsx --outfile dist/Basic.exe` é o comando de manutenção equivalente neste repositório; em um projeto consumidor, use `bun run tarve build basic.tsx --outfile dist/Basic.exe`.
 
@@ -403,7 +424,7 @@ Callbacks de clique/change atualizam a árvore automaticamente. Para alteraçõe
 
 ```text
 packages/core/src/       componentes, JSX runtime, tema, reconciliação, app
-  bridge/                bun:ffi e Worker bloqueante de eventos
+  bridge/                bun:ffi e polling FIFO não bloqueante de eventos
 packages/core/build.ts   empacotador reutilizável para apps
 packages/core/cli.ts     comando tarve build
 packages/protocol/src/   contrato TypeScript versionado
@@ -418,7 +439,7 @@ scripts/package.ts      distribuição npm com tipos e binário nativo
 
 Bun envia a árvore inicial em UTF-8 JSON pela ABI C. Atualizações de propriedades enviam apenas os nós alterados; mudanças de estrutura enviam a árvore e preservam os IDs. Rust mantém os nós e caches do Taffy, preserva scroll/foco e invalida apenas os estágios necessários. A cena Vello inclui apenas as subárvores visíveis. As APIs das crates ficam internas ao backend; as fronteiras são `NativeBridge` e o protocolo versionado.
 
-Rust usa `ControlFlow::Wait`. Um Worker Bun espera numa condition variable e entrega eventos à thread do app; não há polling, timer de frames ou game loop. Hover/scroll pintam; conteúdo/tipografia invalidam texto e layout; redimensionamento reutiliza o shaping e recalcula quebras/layout. Texturas de imagem e layouts de texto ficam em cache. A escala de DPI é aplicada na renderização e no hit testing.
+Rust usa `ControlFlow::Wait`, então a thread nativa dorme quando não há trabalho. O runtime Bun principal consulta a fila nativa com um poll FFI não bloqueante a cada 4 ms; não há Worker adicional, timer de frames ou game loop. Esse poll apenas verifica a fila e não redesenha a janela. Hover/scroll pintam; conteúdo/tipografia invalidam texto e layout; redimensionamento reutiliza o shaping e recalcula quebras/layout. Texturas de imagem e layouts de texto ficam em cache. A escala de DPI é aplicada na renderização e no hit testing.
 
 Medições e limites do benchmark estão em `PERFORMANCE.md`. O acompanhamento do trabalho restante está em `PRODUCTION.md`.
 
@@ -426,4 +447,4 @@ Medições e limites do benchmark estão em `PERFORMANCE.md`. O acompanhamento d
 
 Uma janela por processo. `Input` e `TextArea` oferecem edição Unicode e IME completo; a árvore nativa também expõe UI Automation/AccessKit no Windows. Botões aceitam Tab/Shift+Tab e Enter/Espaço; `Button` mantém o caminho nativo compacto para texto simples e também aceita composição de ícones, texto e layouts aninhados como um único controle semântico. `ScrollArea` possui clipping e scrollbars nativos vertical, horizontal ou bidirecional. Imagens locais PNG/JPEG usam `cover` ou `contain`.
 
-`bun:ffi` é o transporte escolhido para este projeto Bun. Sua API ainda é marcada experimental pelo Bun; a ABI explícita, buffers do chamador e Worker sem callbacks nativos reduzem a superfície de integração. Referências: [Bun FFI](https://bun.com/docs/runtime/ffi), [Taffy](https://docs.rs/taffy/0.14.0), [Parley](https://docs.rs/parley/0.11.1), [Vello](https://docs.rs/vello/0.10.0).
+`bun:ffi` é o transporte escolhido para este projeto Bun. Sua API ainda é marcada experimental pelo Bun; a ABI explícita, buffers do chamador e polling não bloqueante evitam reentrância/callbacks nativos cross-thread no runtime principal. Referências: [Bun FFI](https://bun.com/docs/runtime/ffi), [Taffy](https://docs.rs/taffy/0.14.0), [Parley](https://docs.rs/parley/0.11.1), [Vello](https://docs.rs/vello/0.10.0).

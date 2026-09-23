@@ -1,8 +1,13 @@
+use crate::{paint::CpuPaintTarget, protocol::RendererPreference};
+use softbuffer::{Context as SoftContext, Surface as SoftSurface};
 use std::{
+    collections::HashMap,
+    num::NonZeroU32,
     num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
 use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene, wgpu};
+use vello_cpu::{PixmapMut, RenderContext as CpuRenderContext, Resources as CpuResources};
 use winit::window::Window;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,7 +141,7 @@ impl GraphicsSignals {
     }
 }
 
-pub struct Graphics {
+struct GpuGraphics {
     // Keep surface before instance so it is dropped first.
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
@@ -151,10 +156,8 @@ pub struct Graphics {
     signals: Arc<GraphicsSignals>,
     backend: wgpu::Backend,
     surface_failure_streak: u16,
-    pub frames: u64,
-    pub generation: u64,
 }
-impl Graphics {
+impl GpuGraphics {
     pub fn new(window: Arc<Window>) -> Result<Self, String> {
         if std::env::var_os("WGPU_BACKEND").is_some() {
             return Self::new_with_backends(window, None);
@@ -303,13 +306,7 @@ impl Graphics {
             signals,
             backend,
             surface_failure_streak: 0,
-            frames: 0,
-            generation: 1,
         })
-    }
-    pub fn restore_counters(&mut self, frames: u64, generation: u64) {
-        self.frames = frames;
-        self.generation = generation.max(1);
     }
     pub(crate) fn take_fault(&self) -> Option<GraphicsFault> {
         self.signals.take()
@@ -415,7 +412,6 @@ impl Graphics {
             .copy(&self.device, &mut encoder, &self.target_view, &view);
         self.queue.submit([encoder.finish()]);
         frame.present();
-        self.frames += 1;
         self.surface_failure_streak = 0;
         if suboptimal {
             self.reconfigure_surface();
@@ -511,6 +507,319 @@ impl Graphics {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RendererBackend {
+    Gpu(wgpu::Backend),
+    Cpu,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ResolvedRenderer {
+    Gpu,
+    Cpu,
+}
+
+fn renderer_from_env(value: Option<&std::ffi::OsStr>) -> Result<ResolvedRenderer, String> {
+    let Some(value) = value else {
+        return Ok(ResolvedRenderer::Gpu);
+    };
+    match value.to_string_lossy().trim().to_ascii_lowercase().as_str() {
+        "" | "gpu" | "vello" => Ok(ResolvedRenderer::Gpu),
+        "cpu" | "software" | "softbuffer" => Ok(ResolvedRenderer::Cpu),
+        other => Err(format!(
+            "Unsupported TARVE_RENDERER '{other}'; expected 'gpu' or 'cpu'"
+        )),
+    }
+}
+
+fn resolve_renderer(
+    preference: RendererPreference,
+    env: Option<&std::ffi::OsStr>,
+) -> Result<ResolvedRenderer, String> {
+    match preference {
+        RendererPreference::Gpu => Ok(ResolvedRenderer::Gpu),
+        RendererPreference::Cpu => Ok(ResolvedRenderer::Cpu),
+        RendererPreference::Auto => renderer_from_env(env),
+    }
+}
+
+struct CpuGraphics {
+    _soft_context: SoftContext<Arc<Window>>,
+    surface: SoftSurface<Arc<Window>, Arc<Window>>,
+    context: CpuRenderContext,
+    resources: CpuResources,
+    images: HashMap<String, Arc<vello_cpu::Pixmap>>,
+    width: u32,
+    height: u32,
+    prepared: bool,
+}
+
+impl CpuGraphics {
+    fn dimensions(width: u32, height: u32) -> Result<(u16, u16), String> {
+        let width = u16::try_from(width.max(1))
+            .map_err(|_| format!("CPU renderer width {width} exceeds vello_cpu limit"))?;
+        let height = u16::try_from(height.max(1))
+            .map_err(|_| format!("CPU renderer height {height} exceeds vello_cpu limit"))?;
+        Ok((width, height))
+    }
+
+    fn new(window: Arc<Window>) -> Result<Self, String> {
+        let size = window.inner_size();
+        let (width, height) = Self::dimensions(size.width, size.height)?;
+        let soft_context = SoftContext::new(window.clone()).map_err(|error| error.to_string())?;
+        let surface = SoftSurface::new(&soft_context, window).map_err(|error| error.to_string())?;
+        Ok(Self {
+            _soft_context: soft_context,
+            surface,
+            context: CpuRenderContext::new(width, height),
+            resources: CpuResources::new(),
+            images: HashMap::new(),
+            width: u32::from(width),
+            height: u32::from(height),
+            prepared: false,
+        })
+    }
+
+    fn prepare(
+        &mut self,
+        width: u32,
+        height: u32,
+        paint: impl FnOnce(&mut CpuPaintTarget<'_>),
+    ) -> Result<(), String> {
+        let (cpu_width, cpu_height) = Self::dimensions(width, height)?;
+        self.width = u32::from(cpu_width);
+        self.height = u32::from(cpu_height);
+        self.context.reset_and_resize(cpu_width, cpu_height);
+        let mut target =
+            CpuPaintTarget::new(&mut self.context, &mut self.resources, &mut self.images);
+        paint(&mut target);
+        self.context.flush();
+        self.prepared = true;
+        Ok(())
+    }
+
+    fn resize(&mut self, width: u32, height: u32) -> bool {
+        if width == 0 || height == 0 || (self.width == width && self.height == height) {
+            return false;
+        }
+        self.width = width;
+        self.height = height;
+        self.prepared = false;
+        true
+    }
+
+    fn render(
+        &mut self,
+        background: vello::peniko::Color,
+        content_changed: bool,
+    ) -> Result<PresentResult, RenderError> {
+        if !self.prepared {
+            return Err(RenderError::Fatal(
+                "CPU renderer frame was not prepared before presentation".into(),
+            ));
+        }
+        let (width, height) =
+            Self::dimensions(self.width, self.height).map_err(RenderError::Fatal)?;
+        self.surface
+            .resize(
+                NonZeroU32::new(u32::from(width)).unwrap(),
+                NonZeroU32::new(u32::from(height)).unwrap(),
+            )
+            .map_err(|error| RenderError::Fatal(format!("Softbuffer resize failed: {error}")))?;
+        let mut buffer = self
+            .surface
+            .buffer_mut()
+            .map_err(|error| RenderError::Fatal(format!("Softbuffer buffer failed: {error}")))?;
+        if should_rasterize_cpu_frame(content_changed, buffer.age()) {
+            {
+                let bytes = bytemuck::cast_slice_mut::<u32, u8>(&mut buffer);
+                let pixmap = PixmapMut::new(width, height, bytes)
+                    .ok_or_else(|| RenderError::Fatal("Invalid CPU framebuffer size".into()))?;
+                self.context.render(pixmap, &mut self.resources);
+            }
+            flatten_rgba_for_softbuffer(&mut buffer, background);
+        }
+        buffer
+            .present()
+            .map_err(|error| RenderError::Fatal(format!("Softbuffer present failed: {error}")))?;
+        Ok(PresentResult::Presented)
+    }
+
+    fn capture(
+        &mut self,
+        background: vello::peniko::Color,
+        path: &str,
+    ) -> Result<(), CaptureError> {
+        if !self.prepared {
+            return Err(CaptureError::Request(
+                "CPU renderer frame was not prepared before capture".into(),
+            ));
+        }
+        let (width, height) =
+            Self::dimensions(self.width, self.height).map_err(CaptureError::Request)?;
+        let mut pixels = vec![0_u8; usize::from(width) * usize::from(height) * 4];
+        let pixmap = PixmapMut::new(width, height, &mut pixels)
+            .ok_or_else(|| CaptureError::Request("Invalid CPU capture size".into()))?;
+        self.context.render(pixmap, &mut self.resources);
+        flatten_rgba_bytes(&mut pixels, background);
+        image::save_buffer(
+            path,
+            &pixels,
+            u32::from(width),
+            u32::from(height),
+            image::ColorType::Rgba8,
+        )
+        .map_err(|error| CaptureError::Request(error.to_string()))
+    }
+}
+
+fn should_rasterize_cpu_frame(content_changed: bool, buffer_age: u8) -> bool {
+    content_changed || buffer_age == 0
+}
+
+fn flatten_rgba_bytes(pixels: &mut [u8], background: vello::peniko::Color) {
+    let background = background.to_rgba8();
+    for pixel in pixels.as_chunks_mut::<4>().0 {
+        let alpha = u16::from(pixel[3]);
+        let inverse = 255_u16.saturating_sub(alpha);
+        pixel[0] =
+            (u16::from(pixel[0]) + (u16::from(background.r) * inverse + 127) / 255).min(255) as u8;
+        pixel[1] =
+            (u16::from(pixel[1]) + (u16::from(background.g) * inverse + 127) / 255).min(255) as u8;
+        pixel[2] =
+            (u16::from(pixel[2]) + (u16::from(background.b) * inverse + 127) / 255).min(255) as u8;
+        pixel[3] = 255;
+    }
+}
+
+fn flatten_rgba_for_softbuffer(pixels: &mut [u32], background: vello::peniko::Color) {
+    let background = background.to_rgba8();
+    for pixel in pixels {
+        let [r, g, b, a] = pixel.to_ne_bytes();
+        let alpha = u16::from(a);
+        let inverse = 255_u16.saturating_sub(alpha);
+        let r = (u16::from(r) + (u16::from(background.r) * inverse + 127) / 255).min(255) as u32;
+        let g = (u16::from(g) + (u16::from(background.g) * inverse + 127) / 255).min(255) as u32;
+        let b = (u16::from(b) + (u16::from(background.b) * inverse + 127) / 255).min(255) as u32;
+        *pixel = b | (g << 8) | (r << 16);
+    }
+}
+
+enum GraphicsImpl {
+    Gpu(Box<GpuGraphics>),
+    Cpu(Box<CpuGraphics>),
+}
+
+pub struct Graphics {
+    backend: GraphicsImpl,
+    frames: u64,
+    generation: u64,
+}
+
+impl Graphics {
+    pub fn new(window: Arc<Window>, preference: RendererPreference) -> Result<Self, String> {
+        let backend =
+            match resolve_renderer(preference, std::env::var_os("TARVE_RENDERER").as_deref())? {
+                ResolvedRenderer::Gpu => GraphicsImpl::Gpu(Box::new(GpuGraphics::new(window)?)),
+                ResolvedRenderer::Cpu => GraphicsImpl::Cpu(Box::new(CpuGraphics::new(window)?)),
+            };
+        Ok(Self {
+            backend,
+            frames: 0,
+            generation: 1,
+        })
+    }
+
+    pub fn recover(window: Arc<Window>, previous_backend: RendererBackend) -> Result<Self, String> {
+        let backend = match previous_backend {
+            RendererBackend::Gpu(previous) => {
+                GraphicsImpl::Gpu(Box::new(GpuGraphics::recover(window, previous)?))
+            }
+            RendererBackend::Cpu => GraphicsImpl::Cpu(Box::new(CpuGraphics::new(window)?)),
+        };
+        Ok(Self {
+            backend,
+            frames: 0,
+            generation: 1,
+        })
+    }
+
+    pub fn restore_counters(&mut self, frames: u64, generation: u64) {
+        self.frames = frames;
+        self.generation = generation.max(1);
+    }
+
+    pub(crate) fn frames(&self) -> u64 {
+        self.frames
+    }
+
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub(crate) fn backend(&self) -> RendererBackend {
+        match &self.backend {
+            GraphicsImpl::Gpu(graphics) => RendererBackend::Gpu(graphics.backend()),
+            GraphicsImpl::Cpu(_) => RendererBackend::Cpu,
+        }
+    }
+
+    pub(crate) fn prepare_cpu_frame(
+        &mut self,
+        width: u32,
+        height: u32,
+        paint: impl FnOnce(&mut CpuPaintTarget<'_>),
+    ) -> Result<bool, String> {
+        let GraphicsImpl::Cpu(graphics) = &mut self.backend else {
+            return Ok(false);
+        };
+        graphics.prepare(width, height, paint)?;
+        Ok(true)
+    }
+
+    pub(crate) fn take_fault(&self) -> Option<GraphicsFault> {
+        match &self.backend {
+            GraphicsImpl::Gpu(graphics) => graphics.take_fault(),
+            GraphicsImpl::Cpu(_) => None,
+        }
+    }
+
+    pub fn resize(&mut self, width: u32, height: u32) -> bool {
+        match &mut self.backend {
+            GraphicsImpl::Gpu(graphics) => graphics.resize(width, height),
+            GraphicsImpl::Cpu(graphics) => graphics.resize(width, height),
+        }
+    }
+
+    pub fn render(
+        &mut self,
+        scene: &Scene,
+        background: vello::peniko::Color,
+        content_changed: bool,
+    ) -> Result<PresentResult, RenderError> {
+        let result = match &mut self.backend {
+            GraphicsImpl::Gpu(graphics) => graphics.render(scene, background),
+            GraphicsImpl::Cpu(graphics) => graphics.render(background, content_changed),
+        }?;
+        if result == PresentResult::Presented {
+            self.frames = self.frames.saturating_add(1);
+        }
+        Ok(result)
+    }
+
+    pub fn capture(
+        &mut self,
+        scene: &Scene,
+        background: vello::peniko::Color,
+        path: &str,
+    ) -> Result<(), CaptureError> {
+        match &mut self.backend {
+            GraphicsImpl::Gpu(graphics) => graphics.capture(scene, background, path),
+            GraphicsImpl::Cpu(graphics) => graphics.capture(background, path),
+        }
+    }
+}
+
 fn create_targets(
     width: u32,
     height: u32,
@@ -537,8 +846,72 @@ fn create_targets(
 #[cfg(test)]
 mod tests {
     use super::{
-        GraphicsFault, GraphicsFaultKind, GraphicsSignals, SurfaceIssue, surface_failure_threshold,
+        CpuGraphics, GraphicsFault, GraphicsFaultKind, GraphicsSignals, ResolvedRenderer,
+        SurfaceIssue, flatten_rgba_bytes, flatten_rgba_for_softbuffer, resolve_renderer,
+        should_rasterize_cpu_frame, surface_failure_threshold,
     };
+    use crate::protocol::RendererPreference;
+    use std::ffi::OsStr;
+    use vello::peniko::Color;
+
+    #[test]
+    fn renderer_preference_honors_app_config_before_environment() {
+        assert_eq!(
+            resolve_renderer(RendererPreference::Auto, None).unwrap(),
+            ResolvedRenderer::Gpu
+        );
+        assert_eq!(
+            resolve_renderer(RendererPreference::Auto, Some(OsStr::new("gpu"))).unwrap(),
+            ResolvedRenderer::Gpu
+        );
+        assert_eq!(
+            resolve_renderer(RendererPreference::Auto, Some(OsStr::new("cpu"))).unwrap(),
+            ResolvedRenderer::Cpu
+        );
+        assert_eq!(
+            resolve_renderer(RendererPreference::Auto, Some(OsStr::new("softbuffer"))).unwrap(),
+            ResolvedRenderer::Cpu
+        );
+        assert!(resolve_renderer(RendererPreference::Auto, Some(OsStr::new("unknown"))).is_err());
+        assert_eq!(
+            resolve_renderer(RendererPreference::Cpu, Some(OsStr::new("gpu"))).unwrap(),
+            ResolvedRenderer::Cpu
+        );
+        assert_eq!(
+            resolve_renderer(RendererPreference::Gpu, Some(OsStr::new("cpu"))).unwrap(),
+            ResolvedRenderer::Gpu
+        );
+        assert_eq!(
+            resolve_renderer(RendererPreference::Cpu, Some(OsStr::new("unknown"))).unwrap(),
+            ResolvedRenderer::Cpu
+        );
+    }
+
+    #[test]
+    fn cpu_dimensions_reject_only_sizes_outside_vello_cpu_range() {
+        assert_eq!(CpuGraphics::dimensions(0, 0).unwrap(), (1, 1));
+        assert_eq!(CpuGraphics::dimensions(1920, 1080).unwrap(), (1920, 1080));
+        assert!(CpuGraphics::dimensions(u32::from(u16::MAX) + 1, 1080).is_err());
+    }
+
+    #[test]
+    fn cpu_clean_redraw_reuses_retained_softbuffer_pixels() {
+        assert!(should_rasterize_cpu_frame(true, 1));
+        assert!(should_rasterize_cpu_frame(false, 0));
+        assert!(!should_rasterize_cpu_frame(false, 1));
+    }
+
+    #[test]
+    fn cpu_pixels_are_composited_and_packed_for_softbuffer() {
+        let background = Color::from_rgb8(10, 20, 30);
+        let mut rgba = [100, 50, 25, 128];
+        flatten_rgba_bytes(&mut rgba, background);
+        assert_eq!(rgba, [105, 60, 40, 255]);
+
+        let mut pixel = [u32::from_ne_bytes([100, 50, 25, 128])];
+        flatten_rgba_for_softbuffer(&mut pixel, background);
+        assert_eq!(pixel[0], 40 | (60 << 8) | (105 << 16));
+    }
 
     #[test]
     fn graphics_fault_signal_coalesces_to_the_most_severe_pending_fault() {

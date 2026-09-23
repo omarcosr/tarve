@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join } from "node:path";
 import type { AppHandle } from "@tarve/core";
 import type { Snapshot } from "@tarve/protocol";
 
-/** Runs inside the actual compiled EXE, using its embedded Worker, DLL and image. */
+/** Runs inside the actual compiled EXE, using its embedded DLL and image. */
 export async function verifyExecutable(app: AppHandle, errors: string[]): Promise<void> {
   const reportIndex = process.argv.indexOf("--smoke-report");
   const reportPath = reportIndex >= 0 ? process.argv[reportIndex + 1] : undefined;
@@ -37,5 +37,5 @@ export async function verifyExecutable(app: AppHandle, errors: string[]): Promis
   const after = await app.inspect();
   assert.equal(after.frames, before.frames, "Idle EXE must not run a frame loop");
   assert.deepEqual(errors, [], "Native EXE runtime must not report errors");
-  await Bun.write(reportPath, JSON.stringify({ result: "PASS", executable: process.execPath, cwd: process.cwd(), frames: after.frames, nodes: initial.nodes.length, ffiCallback: true, idleFrames: after.frames - before.frames }, null, 2));
+  await Bun.write(reportPath, JSON.stringify({ result: "PASS", executable: process.execPath, cwd: process.cwd(), frames: after.frames, nodes: initial.nodes.length, ffiEvents: true, idleFrames: after.frames - before.frames }, null, 2));
 }

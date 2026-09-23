@@ -61,7 +61,7 @@ try {
   const idle = await app.inspect();
   assert.equal(idle.frames, virtual.frames);
   assert.deepEqual(errors, []);
-  await Bun.write("result.json", JSON.stringify({ result: "PASS", executable: Bun.isStandaloneExecutable, nativeCallback: true, nativeControls: true, virtualList: true, localImage: true, idleFrames: idle.frames - virtual.frames }, null, 2));
+  await Bun.write("result.json", JSON.stringify({ result: "PASS", executable: Bun.isStandaloneExecutable, nativeEvents: true, nativeControls: true, virtualList: true, localImage: true, idleFrames: idle.frames - virtual.frames }, null, 2));
 } finally {
   app.close();
   await app.closed;

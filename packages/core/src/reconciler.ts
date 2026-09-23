@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, type NativeNode, type SceneDocument, type ScrollPosition, type WindowOptions } from "../../protocol/src/index";
+import { PROTOCOL_VERSION, type NativeNode, type Renderer, type SceneDocument, type ScrollPosition, type WindowOptions } from "../../protocol/src/index";
 import { Fragment, type Child, type VNode } from "./jsx-runtime";
 import { lightTheme, resolveThemeColor, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
@@ -13,7 +13,7 @@ function textContent(value: Child): string {
   if (typeof value === "object") throw new Error("Text/Button children must be strings or numbers.");
   return String(value);
 }
-export function compileTree(element: VNode, debug = false): CompiledTree {
+export function compileTree(element: VNode, debug = false, renderer: Renderer = "auto"): CompiledTree {
   const handlers = new Map<string, Handlers>();
   const ids = new Set<string>();
   const nodes = new Map<string, NativeNode>();
@@ -103,7 +103,7 @@ export function compileTree(element: VNode, debug = false): CompiledTree {
     roots[0].style.borderColor ??= selectedTheme.colors.border;
     roots[0].style.radius ??= theme.radius.md;
   }
-  return { document: { version: PROTOCOL_VERSION, window: windowOptions, root: roots[0] }, handlers, nodes };
+  return { document: { version: PROTOCOL_VERSION, renderer, window: windowOptions, root: roots[0] }, handlers, nodes };
 }
 
 function sameValue(a: unknown, b: unknown): boolean {

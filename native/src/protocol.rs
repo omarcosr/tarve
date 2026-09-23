@@ -3,7 +3,16 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 29;
+pub const VERSION: u32 = 30;
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RendererPreference {
+    #[default]
+    Auto,
+    Gpu,
+    Cpu,
+}
 
 fn range_max() -> f64 {
     100.0
@@ -197,6 +206,8 @@ pub struct WindowOptions {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Document {
     pub version: u32,
+    #[serde(default)]
+    pub renderer: RendererPreference,
     pub window: WindowOptions,
     pub root: Node,
 }

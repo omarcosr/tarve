@@ -1,12 +1,11 @@
-use crate::protocol::Node;
+use crate::{paint::PaintTarget, protocol::Node};
 use vello::{
-    Scene,
     kurbo::{Affine, Circle, Rect, RoundedRect, Stroke},
     peniko::{Color, Fill},
 };
 
-pub fn slider(
-    scene: &mut Scene,
+pub fn slider<P: PaintTarget>(
+    target: &mut P,
     node: &Node,
     rect: Rect,
     scale: f64,
@@ -38,32 +37,28 @@ pub fn slider(
         )
     };
     let transform = Affine::scale(scale);
-    scene.fill(
+    target.fill(
         Fill::NonZero,
         transform,
         border_color,
-        None,
         &RoundedRect::from_rect(track, 2.0),
     );
-    scene.fill(
+    target.fill(
         Fill::NonZero,
         transform,
         accent,
-        None,
         &RoundedRect::from_rect(fill, 2.0),
     );
-    scene.fill(
+    target.fill(
         Fill::NonZero,
         transform,
         thumb_color,
-        None,
         &Circle::new(center, 7.0),
     );
-    scene.stroke(
+    target.stroke(
         &Stroke::new(1.5),
         transform,
         accent,
-        None,
         &Circle::new(center, 7.0),
     );
 }

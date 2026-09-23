@@ -14,6 +14,11 @@ describe("native TSX protocol", () => {
     tree.handlers.get("button")?.onClick?.();
     expect(clicked).toBe(true);
   });
+  test("renderer preference is serialized at document scope", () => {
+    expect(compileTree(<Window />).document.renderer).toBe("auto");
+    expect(compileTree(<Window />, false, "cpu").document.renderer).toBe("cpu");
+    expect(compileTree(<Window />, false, "gpu").document.renderer).toBe("gpu");
+  });
   test("Button keeps text buttons native and compiles composed children into one semantic pressable", () => {
     const tree = compileTree(
       <Window theme={darkTheme}>
@@ -140,7 +145,7 @@ describe("native TSX protocol", () => {
   test("Window close requests stay in JS handlers while native receives an intercept flag", () => {
     let requested = false;
     const tree = compileTree(<Window onCloseRequest={() => { requested = true; }}><Text>Hello</Text></Window>);
-    expect(tree.document.version).toBe(29);
+    expect(tree.document.version).toBe(30);
     expect(tree.document.root.closeIntercept).toBe(true);
     expect(JSON.stringify(tree.document)).not.toContain("onCloseRequest");
     tree.handlers.get(tree.document.root.id)?.onCloseRequest?.({ defaultPrevented: false, preventDefault() {} });

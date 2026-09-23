@@ -3,7 +3,9 @@ use crate::{
     protocol::{
         Command, Document, FileDialogOptions, Node, WindowPosition, WindowPositionPreset, error,
     },
-    renderer::{CaptureError, Graphics, GraphicsFaultKind, PresentResult, RenderError},
+    renderer::{
+        CaptureError, Graphics, GraphicsFaultKind, PresentResult, RenderError, RendererBackend,
+    },
     tree::{AccessibilityScrollAlignment, Tree, color},
 };
 
@@ -420,14 +422,14 @@ const PRESENT_RETRY_DELAY: Duration = Duration::from_millis(16);
 struct GraphicsCheckpoint {
     frames: u64,
     generation: u64,
-    backend: Option<vello::wgpu::Backend>,
+    backend: Option<RendererBackend>,
 }
 
 impl GraphicsCheckpoint {
     fn from_graphics(graphics: &Graphics) -> Self {
         Self {
-            frames: graphics.frames,
-            generation: graphics.generation,
+            frames: graphics.frames(),
+            generation: graphics.generation(),
             backend: Some(graphics.backend()),
         }
     }
@@ -902,7 +904,7 @@ impl App {
         let result = if let Some(previous_backend) = recovery.checkpoint.backend {
             Graphics::recover(window, previous_backend)
         } else {
-            Graphics::new(window)
+            Graphics::new(window, self.document.renderer)
         };
         match result {
             Ok(mut graphics) => {
@@ -952,35 +954,50 @@ impl App {
         }
         true
     }
-    fn present(&mut self) -> Result<PresentResult, RenderError> {
+    fn present(&mut self, content_changed: bool) -> Result<PresentResult, RenderError> {
         let background = self.root_color("background", &self.document.window.background);
         let result = match &mut self.graphics {
-            GraphicsState::Ready(graphics) => graphics.render(&self.scene, color(&background)),
+            GraphicsState::Ready(graphics) => {
+                graphics.render(&self.scene, color(&background), content_changed)
+            }
             _ => Err(RenderError::Fatal("Renderer not ready".into())),
         }?;
         if result == PresentResult::Presented && self.document.window.debug {
             let frames = match &self.graphics {
-                GraphicsState::Ready(graphics) => graphics.frames,
+                GraphicsState::Ready(graphics) => graphics.frames(),
                 _ => 0,
             };
             self.events.push(json!({"type":"frame", "frames":frames}));
         }
         Ok(result)
     }
-    fn prepare(&mut self) -> Result<(), String> {
+    fn prepare(&mut self) -> Result<bool, String> {
         let Some(window) = &self.window else {
-            return Ok(());
+            return Ok(false);
         };
         let scale = window.scale_factor();
+        let physical = window.inner_size();
         let size = window.inner_size().to_logical::<f32>(scale);
         self.tree.compute(size.width, size.height)?;
-        if self.tree.dirty.paint {
-            self.scene = self.tree.scene(scale);
+        let content_changed = self.tree.dirty.paint;
+        if content_changed {
+            let tree = &mut self.tree;
+            let cpu_prepared = match &mut self.graphics {
+                GraphicsState::Ready(graphics) => {
+                    graphics.prepare_cpu_frame(physical.width, physical.height, |target| {
+                        tree.paint(scale, target)
+                    })?
+                }
+                _ => false,
+            };
+            if !cpu_prepared {
+                self.scene = self.tree.scene(scale);
+            }
         }
         for message in self.tree.warnings.drain(..) {
             self.events.push(error(message));
         }
-        Ok(())
+        Ok(content_changed)
     }
     fn fail(&mut self, event_loop: &ActiveEventLoop, message: String) {
         self.fatal = Some(message);
@@ -1005,11 +1022,14 @@ impl App {
         if self.handle_graphics_fault(event_loop) {
             return;
         }
-        if let Err(error) = self.prepare() {
-            self.fail(event_loop, error);
-            return;
-        }
-        match self.present() {
+        let content_changed = match self.prepare() {
+            Ok(content_changed) => content_changed,
+            Err(error) => {
+                self.fail(event_loop, error);
+                return;
+            }
+        };
+        match self.present(content_changed) {
             Ok(PresentResult::Presented) => {
                 self.presentation_retry_at = None;
                 if self.graphics_recovery_episodes > 0 {
@@ -1207,25 +1227,27 @@ impl ApplicationHandler<Command> for App {
         if let Some(window) = self.window.clone() {
             let state = std::mem::replace(&mut self.graphics, GraphicsState::Fatal);
             match state {
-                GraphicsState::Suspended(checkpoint) => match Graphics::new(window) {
-                    Ok(mut graphics) => {
-                        let generation = checkpoint.generation.saturating_add(1).max(1);
-                        graphics.restore_counters(checkpoint.frames, generation);
-                        self.graphics = GraphicsState::Ready(Box::new(graphics));
-                        self.tree.dirty.paint = true;
-                        self.request_present_now();
+                GraphicsState::Suspended(checkpoint) => {
+                    match Graphics::new(window, self.document.renderer) {
+                        Ok(mut graphics) => {
+                            let generation = checkpoint.generation.saturating_add(1).max(1);
+                            graphics.restore_counters(checkpoint.frames, generation);
+                            self.graphics = GraphicsState::Ready(Box::new(graphics));
+                            self.tree.dirty.paint = true;
+                            self.request_present_now();
+                        }
+                        Err(error) => {
+                            self.graphics = GraphicsState::Recovering(GraphicsRecovery {
+                                checkpoint,
+                                attempts: 1,
+                                next_attempt: Instant::now() + graphics_recovery_delay(1),
+                                cause: "GPU recreation after application resume failed".into(),
+                                last_error: Some(error),
+                            });
+                            self.sync_control_flow(event_loop);
+                        }
                     }
-                    Err(error) => {
-                        self.graphics = GraphicsState::Recovering(GraphicsRecovery {
-                            checkpoint,
-                            attempts: 1,
-                            next_attempt: Instant::now() + graphics_recovery_delay(1),
-                            cause: "GPU recreation after application resume failed".into(),
-                            last_error: Some(error),
-                        });
-                        self.sync_control_flow(event_loop);
-                    }
-                },
+                }
                 other => self.graphics = other,
             }
             return;
@@ -1241,7 +1263,7 @@ impl ApplicationHandler<Command> for App {
         match event_loop.create_window(attributes) {
             Ok(window) => {
                 let window = Arc::new(window);
-                match Graphics::new(window.clone()) {
+                match Graphics::new(window.clone(), self.document.renderer) {
                     Ok(graphics) => {
                         self.graphics = GraphicsState::Ready(Box::new(graphics));
                         self.window = Some(window.clone());
@@ -1304,7 +1326,7 @@ impl ApplicationHandler<Command> for App {
                 if let Some(window) = &self.window {
                     let size = window.inner_size().to_logical::<f64>(window.scale_factor());
                     let frames = match &self.graphics {
-                        GraphicsState::Ready(graphics) => graphics.frames,
+                        GraphicsState::Ready(graphics) => graphics.frames(),
                         GraphicsState::Recovering(recovery) => recovery.checkpoint.frames,
                         GraphicsState::Suspended(checkpoint) => checkpoint.frames,
                         GraphicsState::Fatal => 0,
@@ -1332,7 +1354,7 @@ impl ApplicationHandler<Command> for App {
                 let background = self.root_color("background", &self.document.window.background);
                 let result = match self.prepare() {
                     Err(error) => Err(CaptureError::Request(error)),
-                    Ok(()) => match &mut self.graphics {
+                    Ok(_) => match &mut self.graphics {
                         GraphicsState::Ready(graphics) => {
                             graphics.capture(&self.scene, color(&background), &path)
                         }

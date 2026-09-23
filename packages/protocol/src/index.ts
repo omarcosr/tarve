@@ -1,6 +1,7 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const NATIVE_ABI_VERSION = 1;
-export const PROTOCOL_VERSION = 29;
+export const NATIVE_ABI_VERSION = 3;
+export const PROTOCOL_VERSION = 30;
+export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "textarea" | "pressable" | "icon" | "slider" | "splitter";
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
@@ -62,7 +63,7 @@ export interface WindowOptions {
   title: string; width: number; height: number; minWidth: number; minHeight: number;
   background: string; decorations: boolean; resizable: boolean; position?: WindowPosition; debug?: boolean;
 }
-export interface SceneDocument { version: number; window: WindowOptions; root: NativeNode }
+export interface SceneDocument { version: number; renderer: Renderer; window: WindowOptions; root: NativeNode }
 export interface FileDialogFilter { name: string; extensions: string[] }
 export interface FileDialogOptions {
   title?: string;

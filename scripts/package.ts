@@ -15,7 +15,6 @@ const entries = [
   ["packages/core/src/jsx-runtime.ts", "jsx-runtime.js"],
   ["packages/core/src/jsx-dev-runtime.ts", "jsx-dev-runtime.js"],
   ["packages/core/src/bridge/runtime.ts", "runtime.js"],
-  ["packages/core/src/bridge/event-worker.ts", "event-worker.js"],
   ["packages/core/src/embedded-assets.ts", "embedded-assets.js"],
   ["packages/core/build.ts", "build.js"],
   ["packages/core/cli.ts", "cli.js"],

@@ -118,7 +118,7 @@ try {
   assert.equal(idleAfter.layouts, idleBefore.layouts);
   assert.equal(idleAfter.paints, idleBefore.paints);
   assert.deepEqual(errors, [], "Native runtime must not report errors");
-  console.log(JSON.stringify({ result: "PASS", initialFrames: initial.frames, nodes: initial.nodes.length, layouts: idleAfter.layouts, paints: idleAfter.paints, idleFrames: idleAfter.frames - idleBefore.frames, verified: ["FFI Worker", "Vello GPU", "Parley shaping", "Taffy Flex/Grid", "light/dark theme switch", "hover paint-only", "all button variants", "shadcn modal", "modal focus trap", "Escape/backdrop dismiss", "disabled button", "Bun state roundtrip", "Unicode input", "scroll clipping", "resize", "idle event loop", "local PNG"], captures: "work/*.png" }, null, 2));
+  console.log(JSON.stringify({ result: "PASS", initialFrames: initial.frames, nodes: initial.nodes.length, layouts: idleAfter.layouts, paints: idleAfter.paints, idleFrames: idleAfter.frames - idleBefore.frames, verified: ["FFI event bridge", "renderer presentation", "Parley shaping", "Taffy Flex/Grid", "light/dark theme switch", "hover paint-only", "all button variants", "shadcn modal", "modal focus trap", "Escape/backdrop dismiss", "disabled button", "Bun state roundtrip", "Unicode input", "scroll clipping", "resize", "idle event loop", "local PNG"], captures: "work/*.png" }, null, 2));
 } finally {
   app.close();
   await app.closed;

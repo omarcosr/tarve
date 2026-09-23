@@ -20,6 +20,23 @@ A previous fixed-height `VirtualList` run with 50,000 records kept at most 97 na
 
 ## Memory
 
+### Low-memory CPU renderer
+
+Windows x64, Bun 1.4.2, Counter 620x520 executado a partir do pacote local atualizado no renderer CPU. O backend pode ser selecionado por `createApp(App, { renderer: "cpu" })`; `TARVE_RENDERER=cpu` continua disponível quando o app usa `renderer: "auto"`. No estado final com polling FFI não bloqueante de 4 ms, após o app estabilizar em idle:
+
+| Metric | CPU renderer |
+| --- | ---: |
+| Working set | **46.9 MB** |
+| Private bytes | 134.5 MB |
+| Threads | 24 |
+| CPU idle | **0.39% de um core** (~0.024% do CPU total de 16 threads) |
+
+Esse modo mantém o Bun como runtime principal e continua suportando TypeScript/TSX, APIs Bun e pacotes npm. A redução vem de duas mudanças: o pump de eventos não cria mais um segundo Bun Worker, e o renderer `vello_cpu + softbuffer` evita inicializar `wgpu + Vello GPU`. O backend GPU continua disponível e permanece o padrão. Uma configuração explícita em `createApp` tem prioridade sobre `TARVE_RENDERER`; `"auto"` preserva o override por env para desenvolvimento/CI.
+
+Um protótipo anterior tentou usar `JSCallback({ threadsafe: true })` para acordar o runtime principal. No Bun 1.4.2, depois da primeira invocação cross-thread esse callback manteve aproximadamente um core ocupado em idle. O caminho final remove callbacks cross-thread e usa `tarve_poll_event()` a cada 4 ms. Em probes isolados, polls de 4–16 ms ficaram entre ~0.0% e ~0.2% de um core; no app completo o Counter ficou em ~0.39% de um core idle.
+
+Os números abaixo são medições históricas do renderer GPU e usam um método diferente (executáveis standalone), portanto não devem ser tratados como comparação A/B direta com a tabela acima.
+
 Windows x64 measurements after 1.8 s idle, using the standalone release executables and Vulkan:
 
 | Example | Working set | Private bytes |
@@ -27,7 +44,7 @@ Windows x64 measurements after 1.8 s idle, using the standalone release executab
 | Counter | ~203 MB | ~537 MB |
 | Basic | ~207–215 MB | ~597 MB |
 
-Before requesting wgpu's memory-oriented allocation strategy and limiting Vello shader initialization to one thread, the Counter executable measured about 266 MB working set / 842 MB private bytes. The Bun event Worker itself adds roughly 16 MB working set and 40 MB private bytes in an isolated process test; removing it would require a different native event-delivery mechanism rather than polling.
+Before requesting wgpu's memory-oriented allocation strategy and limiting Vello shader initialization to one thread, the Counter executable measured about 266 MB working set / 842 MB private bytes. In an isolated Bun process, the old dedicated event Worker added roughly 15–16 MB working set and about 40 MB private bytes. It has since been removed: native events remain in a FIFO queue and the main Bun runtime drains them with a non-blocking FFI poll.
 
 ## Implemented
 
@@ -38,8 +55,10 @@ Before requesting wgpu's memory-oriented allocation strategy and limiting Vello 
 - Paint and hit testing discard subtrees outside the current clipping region.
 - Local asset extraction is cached per process. No filesystem reads are required for those assets during subsequent tree updates.
 - Decoded image cache entries are released when the corresponding image nodes leave the retained tree.
-- The Windows renderer requests wgpu's memory-oriented allocation strategy and uses one Vello shader-initialization thread.
-- The event loop sleeps when idle. The event Worker waits on a native condition variable.
+- The Windows GPU renderer requests wgpu's memory-oriented allocation strategy and uses one Vello shader-initialization thread.
+- `createApp(App, { renderer: "cpu" })` selects a single-threaded `vello_cpu + softbuffer` path that shares the same tree/text/control paint traversal and supports captures, images, clipping and text. `"gpu"` forces Vello/WGPU; `"auto"` keeps the GPU default and honors `TARVE_RENDERER` for development/CI overrides.
+- Clean software redraws reuse retained softbuffer pixels when possible, avoiding another full-frame vello_cpu rasterization and RGBA flattening pass when content did not change.
+- The native event loop sleeps when idle. Native events are queued FIFO and the Bun main runtime checks them with a 4 ms non-blocking FFI poll; no dedicated Bun event Worker or cross-thread JS callback is created.
 
 ## Remaining work
 

@@ -77,4 +77,4 @@ assert.equal(executable.result, "PASS");
 assert.equal(executable.executable, true);
 assert.equal(executable.nativeControls, true);
 assert.equal(executable.virtualList, true);
-console.log(JSON.stringify({ result: "PASS", directory, checks: ["npm tarball install", "independent example TypeScript configuration", "all five examples compile from an external directory", "source execution without Rust", "installed tarve build CLI", "standalone EXE with empty cache", "native callbacks, controls, virtual list and local images", "zero idle frames"], source, executable }, null, 2));
+console.log(JSON.stringify({ result: "PASS", directory, checks: ["npm tarball install", "independent example TypeScript configuration", "all five examples compile from an external directory", "source execution without Rust", "installed tarve build CLI", "standalone EXE with empty cache", "native events, controls, virtual list and local images", "zero idle frames"], source, executable }, null, 2));

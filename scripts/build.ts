@@ -42,7 +42,7 @@ if (!release) {
   console.log(`Standalone Windows executable: ${result}`);
 } else {
   await mkdir(join(root, "dist/assets"), { recursive: true });
-  for (const [entry, naming] of [["examples/basic.tsx", "basic.js"], ["packages/core/src/bridge/event-worker.ts", "event-worker.js"]]) {
+  for (const [entry, naming] of [["examples/basic.tsx", "basic.js"]]) {
     const result = await Bun.build({ entrypoints: [join(root, entry)], outdir: join(root, "dist"), naming, target: "bun", minify: false });
     if (!result.success) { console.error(result.logs); process.exit(1); }
   }

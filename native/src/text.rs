@@ -1,4 +1,7 @@
-use crate::protocol::Node;
+use crate::{
+    paint::{PaintGlyph, PaintTarget},
+    protocol::Node,
+};
 use parley::{
     FontContext, FontFamily, FontWeight, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
     StyleProperty,
@@ -6,11 +9,7 @@ use parley::{
 };
 use std::{collections::HashMap, ops::Range};
 use unicode_segmentation::UnicodeSegmentation;
-use vello::{
-    Glyph, Scene,
-    kurbo::Affine,
-    peniko::{Color, Fill},
-};
+use vello::{kurbo::Affine, peniko::Color};
 
 pub const TEXT_KEYS: &[&str] = &[
     "fontSize",
@@ -105,9 +104,9 @@ impl TextEngine {
         layout.break_all_lines(width.map(|w| w.max(0.0)));
         (layout.width().ceil(), layout.height().ceil())
     }
-    pub fn draw(
+    pub fn draw<P: PaintTarget>(
         &mut self,
-        scene: &mut Scene,
+        target: &mut P,
         node: &Node,
         origin: (f64, f64),
         width: f32,
@@ -128,20 +127,22 @@ impl TextEngine {
             for item in line.items() {
                 if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
                     let run = glyph_run.run();
-                    scene
-                        .draw_glyphs(run.font())
-                        .font_size(run.font_size())
-                        .normalized_coords(run.normalized_coords())
-                        .transform(Affine::scale(scale) * Affine::translate(origin))
-                        .brush(color)
-                        .draw(
-                            Fill::NonZero,
-                            glyph_run.positioned_glyphs().map(|g| Glyph {
-                                id: g.id,
-                                x: g.x,
-                                y: g.y,
-                            }),
-                        );
+                    let glyphs: Vec<_> = glyph_run
+                        .positioned_glyphs()
+                        .map(|glyph| PaintGlyph {
+                            id: glyph.id,
+                            x: glyph.x,
+                            y: glyph.y,
+                        })
+                        .collect();
+                    target.draw_glyphs(
+                        run.font(),
+                        run.font_size(),
+                        run.normalized_coords(),
+                        Affine::scale(scale) * Affine::translate(origin),
+                        color,
+                        &glyphs,
+                    );
                 }
             }
         }

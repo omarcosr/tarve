@@ -38,6 +38,23 @@ class FakeBridge implements NativeBridge {
 }
 
 describe("controlled native reconciliation", () => {
+  test("createApp forwards renderer selection and defaults to auto", async () => {
+    const cpuBridge = new FakeBridge();
+    const cpuApp = createApp(() => <Window />, { bridge: cpuBridge, renderer: "cpu" });
+    await cpuApp.ready;
+    expect(cpuBridge.document?.renderer).toBe("cpu");
+
+    const gpuBridge = new FakeBridge();
+    const gpuApp = createApp(() => <Window />, { bridge: gpuBridge, renderer: "gpu" });
+    await gpuApp.ready;
+    expect(gpuBridge.document?.renderer).toBe("gpu");
+
+    const autoBridge = new FakeBridge();
+    const autoApp = createApp(() => <Window />, { bridge: autoBridge });
+    await autoApp.ready;
+    expect(autoBridge.document?.renderer).toBe("auto");
+  });
+
   test("registerHotkey normalizes shortcuts and unsubscribes cleanly", async () => {
     const bridge = new FakeBridge();
     const app = createApp(() => <Window />, { bridge });

@@ -9,7 +9,7 @@ function developmentLibrary(directory: string): string | undefined {
   return join(directory, library);
 }
 
-/** File resolution for development and npm installs; the app compiler embeds these files. */
+/** File resolution for development and npm installs; the app compiler embeds the native library. */
 export function nativePath(): string {
   const names: Record<string, string> = {
     win32: "tarve_native.dll",
@@ -30,9 +30,4 @@ export function nativePath(): string {
     if (existsSync(path)) return path;
   }
   throw new Error(`Tarve native library missing for ${process.platform}-${process.arch}. In the repository, run bun run build:native.`);
-}
-
-export function workerPath(): string {
-  const source = join(import.meta.dir, "event-worker.ts");
-  return existsSync(source) ? source : join(import.meta.dir, "event-worker.js");
 }

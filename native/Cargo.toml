@@ -10,6 +10,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 vello = "=0.10.0"
+vello_cpu = { version = "=0.2.0", default-features = false, features = ["std", "text", "u8_pipeline"] }
+softbuffer = "=0.4.8"
 parley = "=0.11.1"
 taffy = { version = "=0.14.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "content_size"] }
 winit = "0.30.12"
@@ -19,6 +21,7 @@ serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 unicode-segmentation = "1.12"
 arboard = { version = "3.6", default-features = false }
+bytemuck = "=1.25.0"
 
 [target.'cfg(windows)'.dependencies]
 accesskit = "=0.25.0"

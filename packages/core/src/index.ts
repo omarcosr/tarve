@@ -21,7 +21,7 @@ export type { AppErrorEvent, AppErrorSource, AppHandle, AppOptions } from "./app
 export { theme, Theme, lightTheme, darkTheme, createTheme, buttonVariants } from "./theme";
 export type { ThemeColors, ThemeFocusOutline, ThemeDefinition, ThemeOverrides, ButtonVariant } from "./theme";
 export { Style } from "./style";
-export type { StateStyle, OutlineStyle, WindowPosition, WindowPositionPreset, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition } from "../../protocol/src/index";
+export type { StateStyle, OutlineStyle, Renderer, WindowPosition, WindowPositionPreset, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition } from "../../protocol/src/index";
 export type { VNode, Child } from "./jsx-runtime";
 export { BunFfiBridge } from "./bridge";
 export type { NativeBridge, BunFfiBridgeOptions } from "./bridge";

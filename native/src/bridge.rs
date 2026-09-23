@@ -32,7 +32,7 @@ struct Host {
 }
 static HOST: OnceLock<Mutex<Option<Host>>> = OnceLock::new();
 static LAST_ERROR: Mutex<String> = Mutex::new(String::new());
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 3;
 fn host() -> &'static Mutex<Option<Host>> {
     HOST.get_or_init(|| Mutex::new(None))
 }
@@ -61,6 +61,7 @@ unsafe fn read_json<T: serde::de::DeserializeOwned>(ptr: *const u8, len: u32) ->
 pub extern "C" fn tarve_abi_version() -> u32 {
     ABI_VERSION
 }
+
 pub(crate) fn validate_protocol_version(version: u32) -> Result<(), String> {
     if version == protocol::VERSION {
         Ok(())
@@ -169,6 +170,37 @@ pub unsafe extern "C" fn tarve_wait_event(ptr: *mut u8, capacity: u32) -> i32 {
             queue = events.wake.wait(queue).map_err(|e| e.to_string())?;
         }
         let data = queue.front().unwrap();
+        if data.len() > capacity as usize {
+            return Ok(-(data.len() as i32));
+        }
+        let data = queue.pop_front().unwrap();
+        // SAFETY: caller owns a writable buffer of capacity bytes; length checked above.
+        unsafe {
+            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
+        }
+        Ok(data.len() as i32)
+    })
+}
+
+/// Non-blocking event dequeue for the Bun main runtime.
+/// Positive = bytes copied; < -1 = required capacity (event retained); 0 = no queued event.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tarve_poll_event(ptr: *mut u8, capacity: u32) -> i32 {
+    guard(|| {
+        if ptr.is_null() || capacity == 0 {
+            return Err("Invalid output buffer".into());
+        }
+        let events = host()
+            .lock()
+            .map_err(|e| e.to_string())?
+            .as_ref()
+            .ok_or("App not started")?
+            .events
+            .clone();
+        let mut queue = events.queue.lock().map_err(|e| e.to_string())?;
+        let Some(data) = queue.front() else {
+            return Ok(0);
+        };
         if data.len() > capacity as usize {
             return Ok(-(data.len() as i32));
         }

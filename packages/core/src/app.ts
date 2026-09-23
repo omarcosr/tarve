@@ -1,4 +1,4 @@
-import type { FileDialogOptions, NativeEvent, NativeCommand, NativeNode, Snapshot } from "../../protocol/src/index";
+import type { FileDialogOptions, NativeEvent, NativeCommand, NativeNode, Renderer, Snapshot } from "../../protocol/src/index";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
 import { compileTree, diffTrees, type CompiledTree } from "./reconciler";
 import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
@@ -23,6 +23,8 @@ export interface AppErrorEvent {
 
 export interface AppOptions {
   debug?: boolean;
+  /** Native renderer selected when the app starts. Explicit cpu/gpu wins over TARVE_RENDERER. */
+  renderer?: Renderer;
   bridge?: NativeBridge;
   onError?: (event: AppErrorEvent) => void;
 }
@@ -205,7 +207,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
       let next: CompiledTree;
       try {
-        next = compileTree(view(), options.debug);
+        next = compileTree(view(), options.debug, options.renderer ?? "auto");
         if (committed.document.window.decorations !== next.document.window.decorations) {
           throw new Error("Adding or removing TitleBar after the native window has been created is not supported. Recreate the Window instead.");
         }
@@ -308,11 +310,15 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
     rejectPending(closeError);
     settleClosed();
-    try {
-      bridge.join();
-    } catch (error) {
-      reportError(error, { source: "bridge", event: "join" });
-    }
+    // Keep native teardown outside the event-dispatch stack. This also preserves deterministic
+    // ordering if the close event was drained together with other queued native events.
+    queueMicrotask(() => {
+      try {
+        bridge.join();
+      } catch (error) {
+        reportError(error, { source: "bridge", event: "join" });
+      }
+    });
   }
 
   function dispatchNativeEvent(event: NativeEvent): void {
@@ -508,7 +514,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   };
 
   try {
-    committed = compileTree(view(), options.debug);
+    committed = compileTree(view(), options.debug, options.renderer ?? "auto");
     observed = nativeShadow(committed);
   } catch (error) {
     const startupError = reportError(error, { source: "render", event: "startup" });

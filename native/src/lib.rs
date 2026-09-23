@@ -3,6 +3,7 @@ mod accessibility;
 mod bridge;
 mod controls;
 mod icons;
+mod paint;
 mod protocol;
 mod renderer;
 mod runtime;

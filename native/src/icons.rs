@@ -1,10 +1,17 @@
+use crate::paint::PaintTarget;
 use vello::{
-    Scene,
     kurbo::{Affine, BezPath, Circle, Rect, Stroke},
     peniko::Color,
 };
 
-pub fn draw(scene: &mut Scene, name: &str, rect: Rect, color: Color, width: f64, scale: f64) {
+pub fn draw<P: PaintTarget>(
+    target: &mut P,
+    name: &str,
+    rect: Rect,
+    color: Color,
+    width: f64,
+    scale: f64,
+) {
     let transform = Affine::scale(scale)
         * Affine::translate((rect.x0, rect.y0))
         * Affine::scale_non_uniform(rect.width() / 16.0, rect.height() / 16.0);
@@ -20,23 +27,11 @@ pub fn draw(scene: &mut Scene, name: &str, rect: Rect, color: Color, width: f64,
         "chevron-right" => &[&[(6.0, 4.0), (10.0, 8.0), (6.0, 12.0)]],
         "chevron-left" => &[&[(10.0, 4.0), (6.0, 8.0), (10.0, 12.0)]],
         "search" => {
-            scene.stroke(
-                &stroke,
-                transform,
-                color,
-                None,
-                &Circle::new((7.0, 7.0), 4.5),
-            );
+            target.stroke(&stroke, transform, color, &Circle::new((7.0, 7.0), 4.5));
             &[&[(10.5, 10.5), (14.0, 14.0)]]
         }
         "info" => {
-            scene.stroke(
-                &stroke,
-                transform,
-                color,
-                None,
-                &Circle::new((8.0, 8.0), 6.0),
-            );
+            target.stroke(&stroke, transform, color, &Circle::new((8.0, 8.0), 6.0));
             &[&[(8.0, 7.0), (8.0, 11.5)], &[(8.0, 4.0), (8.0, 5.0)]]
         }
         _ => &[],
@@ -47,5 +42,5 @@ pub fn draw(scene: &mut Scene, name: &str, rect: Rect, color: Color, width: f64,
             path.line_to(*point);
         }
     }
-    scene.stroke(&stroke, transform, color, None, &path);
+    target.stroke(&stroke, transform, color, &path);
 }

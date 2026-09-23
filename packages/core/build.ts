@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { nativePath, workerPath } from "#tarve/runtime";
+import { nativePath } from "#tarve/runtime";
 
 export interface BuildOptions {
   entrypoint: string;
@@ -30,9 +30,6 @@ export async function build(options: BuildOptions): Promise<string> {
   const assetsModule = fileURLToPath(import.meta.resolve("#tarve/assets"));
   const sourceDirectory = join(import.meta.dir, "src");
   const repositorySource = existsSync(join(sourceDirectory, "index.ts"));
-  const worker = await Bun.build({ entrypoints: [workerPath()], target: "bun", minify: true });
-  if (!worker.success) throw new AggregateError(worker.logs, "Could not bundle the Tarve event Worker");
-  const workerBytes = new Uint8Array(await worker.outputs[0].arrayBuffer());
   const runtime: BunPlugin = {
     name: "tarve-native-runtime",
     setup(builder) {
@@ -46,14 +43,10 @@ export async function build(options: BuildOptions): Promise<string> {
         loader: "ts",
         contents: [
           `import library from ${JSON.stringify(library)} with { type: "file" };`,
-          'import worker from "tarve:worker" with { type: "file" };',
           `import { materializeAsset } from ${JSON.stringify(assetsModule)};`,
           'export function nativePath() { return materializeAsset(library, "tarve_native.dll"); }',
-          'export function workerPath() { return materializeAsset(worker, "event-worker.js"); }',
         ].join("\n"),
       }));
-      builder.onResolve({ filter: /^tarve:worker$/ }, () => ({ path: "event-worker.js", namespace: "tarve-worker" }));
-      builder.onLoad({ filter: /.*/, namespace: "tarve-worker" }, () => ({ loader: "file", contents: workerBytes }));
     },
   };
   await mkdir(dirname(outfile), { recursive: true });
