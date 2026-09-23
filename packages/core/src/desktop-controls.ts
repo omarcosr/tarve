@@ -291,7 +291,12 @@ export function DataGrid<T>({
         onClick: () => onSortChange?.(!active ? { column: column.key, direction: "asc" }
           : sort!.direction === "asc" ? { column: column.key, direction: "desc" } : undefined),
         ...common,
-        style: { ...common.style, background: "#00000000", hover: { background: c.muted } },
+        style: {
+          ...common.style,
+          background: "#00000000",
+          hover: { background: c.muted },
+          focus: { outlineWidth: 0, outlineStyle: "none" },
+        },
         children: content,
       }, column.key);
     }),

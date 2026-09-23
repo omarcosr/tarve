@@ -174,6 +174,10 @@ pub(crate) fn cursor_for_node(node: Option<&Node>) -> CursorIcon {
     }
 }
 
+pub(crate) fn ime_allowed_for_node(node: Option<&Node>) -> bool {
+    node.is_some_and(|node| matches!(node.kind.as_str(), "input" | "textarea"))
+}
+
 pub(crate) fn anchored_window_position(
     preset: &WindowPositionPreset,
     monitor_position: PhysicalPosition<i32>,
@@ -349,7 +353,8 @@ pub fn run(
         presentation_retry_at: None,
         graphics_recovery_episodes: 0,
         graphics_stable_since: None,
-        ime_preedit: false,
+        ime_target: None,
+        ime_enabled: false,
         last_titlebar_click: None,
         close_request_pending: false,
     };
@@ -373,7 +378,8 @@ struct App {
     presentation_retry_at: Option<Instant>,
     graphics_recovery_episodes: usize,
     graphics_stable_since: Option<Instant>,
-    ime_preedit: bool,
+    ime_target: Option<String>,
+    ime_enabled: bool,
     last_titlebar_click: Option<(Instant, (f64, f64))>,
     close_request_pending: bool,
 }
@@ -893,29 +899,38 @@ impl App {
             Err(RenderError::Fatal(message)) => self.fail(event_loop, message),
         }
     }
-    fn sync_cursor(&self) {
-        if let Some(window) = &self.window {
+    fn sync_cursor(&mut self) {
+        if let Some(window) = self.window.clone() {
             if let Some(direction) = self.resize_direction() {
                 window.set_cursor(CursorIcon::from(direction));
-                return;
+            } else {
+                let hovered = self
+                    .tree
+                    .hovered
+                    .as_ref()
+                    .map(|id| &self.tree.entries[id].node);
+                window.set_cursor(cursor_for_node(hovered));
             }
-            let hovered = self
-                .tree
-                .hovered
-                .as_ref()
-                .map(|id| &self.tree.entries[id].node);
-            window.set_cursor(cursor_for_node(hovered));
-            let editing = self
+            let target = self
                 .tree
                 .focused
                 .as_ref()
-                .is_some_and(|id| self.tree.entries[id].node.kind == "input");
-            window.set_ime_allowed(editing);
-            if let Some(id) = self.tree.focused.as_ref().filter(|_| editing) {
-                let rect = self.tree.entries[id].rect;
+                .filter(|id| ime_allowed_for_node(Some(&self.tree.entries[*id].node)))
+                .cloned();
+            if target != self.ime_target {
+                self.tree.ime_cancel();
+                window.set_ime_allowed(false);
+                self.ime_enabled = false;
+                self.ime_target = target.clone();
+            }
+            window.set_ime_allowed(target.is_some());
+            if self.ime_enabled
+                && target.is_some()
+                && let Some(rect) = self.tree.ime_cursor_area()
+            {
                 window.set_ime_cursor_area(
-                    LogicalPosition::new(rect.x0 + 12.0, rect.y1),
-                    LogicalSize::new(2.0, 20.0),
+                    LogicalPosition::new(rect.x0, rect.y0),
+                    LogicalSize::new(rect.width().max(1.0), rect.height().max(1.0)),
                 );
             }
         }
@@ -1363,19 +1378,40 @@ impl ApplicationHandler<Command> for App {
                 }
                 if !self.modifiers.control_key()
                     && !self.modifiers.super_key()
-                    && !self.ime_preedit
+                    && !self.tree.ime_active()
                     && (key.is_none() || key == Some("Space"))
                     && let Some(text) = event.text
                 {
                     events.extend(self.tree.type_text(&text));
                 }
             }
-            WindowEvent::Ime(Ime::Preedit(text, _)) => self.ime_preedit = !text.is_empty(),
+            WindowEvent::Ime(Ime::Enabled) => {
+                self.ime_enabled = self.ime_target.is_some();
+                if let Some(target) = self.ime_target.clone() {
+                    self.tree.ime_enabled(&target);
+                }
+            }
+            WindowEvent::Ime(Ime::Disabled) => {
+                self.ime_enabled = false;
+                self.tree.ime_cancel();
+            }
+            WindowEvent::Ime(Ime::Preedit(text, cursor)) => {
+                if self.ime_enabled
+                    && let Some(target) = self.ime_target.clone()
+                {
+                    self.tree.ime_preedit(&target, &text, cursor);
+                }
+            }
             WindowEvent::Ime(Ime::Commit(text)) => {
-                self.ime_preedit = false;
-                events = self.tree.type_text(&text);
+                if self.ime_enabled
+                    && let Some(target) = self.ime_target.clone()
+                {
+                    events = self.tree.ime_commit(&target, &text);
+                }
             }
             WindowEvent::Focused(false) => {
+                self.ime_enabled = false;
+                self.ime_target = None;
                 if let Some(blurred) = self.tree.blur() {
                     events.push(json!({"type":"blur", "id":blurred}));
                 }

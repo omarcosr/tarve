@@ -40,6 +40,7 @@ describe("desktop controls", () => {
     expect(tree.nodes.has("grid-row-2")).toBe(true);
     expect(tree.nodes.has("grid-row-3")).toBe(true);
     expect(tree.nodes.get("grid-row-3")?.control?.group).toBe("grid");
+    expect(tree.nodes.get("grid-sort-name")?.style.focus).toMatchObject({ outlineWidth: 0, outlineStyle: "none" });
     tree.handlers.get("grid-row-3")?.onClick?.();
     expect(selections).toEqual([[]]);
     tree.handlers.get("grid-sort-name")?.onClick?.();

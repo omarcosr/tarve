@@ -30,6 +30,7 @@ import {
   Scroll,
   Sidebar,
   Text,
+  TextArea,
   TitleBar,
   TreeView,
   Toggle,
@@ -90,6 +91,9 @@ let treeSelected = "components";
 let gridOffset = 0;
 let gridSort: { column: string; direction: "asc" | "desc" } | undefined = { column: "name", direction: "asc" };
 let gridSelected: (string | number)[] = [2];
+let imeInput = "";
+let imeNotes = "";
+let imeAligned = "";
 
 const gridRows = [
   { id: 1, name: "Renderer", area: "Rust", status: "Ready" },
@@ -436,9 +440,43 @@ export function App() {
                 ]}
               />
             </Section>
+
+            <Section title="IME / Composition" description="Native preedit, candidate positioning and CJK composition for Input and TextArea.">
+              <Column gap={12}>
+                <Text size={12} color={c.mutedForeground}>
+                  Enable a Japanese, Chinese or Korean IME in Windows and compose text below. Preedit stays visual until commit.
+                </Text>
+                <Field label="Single-line composition" description={`Committed value: ${imeInput || "empty"}`}>
+                  <Input
+                    id="demo-ime-input"
+                    value={imeInput}
+                    placeholder="Compose 日本語 / 中文 / 한국어…"
+                    onChange={(value) => { imeInput = value; }}
+                  />
+                </Field>
+                <Field label="Wrapped TextArea" description={`Committed value: ${imeNotes || "empty"}`}>
+                  <TextArea
+                    id="demo-ime-textarea"
+                    value={imeNotes}
+                    placeholder="Long composition wraps and keeps the IME candidate at the shaped caret…"
+                    onChange={(value) => { imeNotes = value; }}
+                    style={{ width: "100%", height: 92 }}
+                  />
+                </Field>
+                <Field label="End-aligned TextArea" description="Candidate and marked ranges follow Parley text alignment.">
+                  <TextArea
+                    id="demo-ime-aligned"
+                    value={imeAligned}
+                    placeholder="Compose here…"
+                    onChange={(value) => { imeAligned = value; }}
+                    style={{ width: "100%", height: 72, textAlign: "end" }}
+                  />
+                </Field>
+              </Column>
+            </Section>
           </View>
 
-          <Text size={12} color={c.mutedForeground}>29 high-level components shown in one executable example.</Text>
+          <Text size={12} color={c.mutedForeground}>29 high-level components plus the native IME/composition showcase in one executable example.</Text>
         </Column>
       </Scroll>
 

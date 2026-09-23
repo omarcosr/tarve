@@ -7,7 +7,7 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 - TypeScript package checking: `bun run check` passes.
 - Rust lint gate: `cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings` passes.
 - Core/UI suite: **94 Bun tests / 482 assertions** pass.
-- Native suite: **50 Rust tests** pass.
+- Native suite: **58 Rust tests** pass.
 - Protocol is currently **v27** on both TypeScript and Rust sides and is checked by the FFI bridge before startup.
 - npm packaging includes JS, JSX runtime, declarations and the Windows x64 native library.
 - External-consumer and standalone-EXE smoke tests are part of `bun run verify`.
@@ -31,6 +31,7 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 - [x] `DataGrid` distinct from `DataTable`, with fixed-row virtualization, local/manual filtering, local/manual sorting, controlled single/multiple selection and keyboard row navigation/activation.
 - [x] Application-level JavaScript exception containment with structured `onError`, deterministic startup rejection, isolated handlers/listeners/hotkeys, transactional native updates and rollback to the last confirmed tree after recoverable failures.
 - [x] GPU/surface/device recovery: `Outdated`, `Timeout`, `Occluded` and `Lost` presentation states recover without terminating the app; wgpu device-loss/uncaptured-error callbacks feed a bounded graphics state machine that can rebuild Device/Queue/Vello/surface state, fail over Vulkan/DX12 on Windows, preserve CPU tree/scene/focus/scroll/image state and keep frame counters monotonic across graphics generations.
+- [x] Complete native IME composition for `Input` and `TextArea`: visual preedit/selection, selection replacement and commit/cancel lifecycle, UTF-8 byte cursor handling, candidate positioning from the same Parley-shaped caret used for rendering (including wrapping, scrolling and text alignment), controlled-value reconciliation with stale-event rejection, password masking and final number-input validation.
 - [x] npm tarball consumer tests validate the installed declarations rather than only workspace types.
 - [x] Standalone Windows executable build embeds the Bun app/runtime and native DLL and runs with no development repository on PATH.
 - [x] Idle event loop performs no continuous frame polling.
@@ -42,12 +43,6 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 Tarve has internal semantic roles and keyboard focus behavior, but those roles are not yet projected into Windows UI Automation/AccessKit. Narrator/NVDA therefore cannot consume a complete native accessibility tree. This is a blocker for a general-purpose public desktop toolkit.
 
 Required work: add AccessKit/UIA integration, names/roles/states/actions, focus notifications, value/range semantics, modal scopes and label/description/error relationships. Add automated accessibility-tree tests where possible.
-
-### 2. IME/composition completeness
-
-IME commit works for `Input`, but preedit text is not rendered, the candidate rectangle is not positioned from the shaped caret, and `TextArea` is not currently included in the IME enablement path. CJK/composition-heavy editing therefore remains incomplete.
-
-Required work: visual preedit ranges, shaped-caret candidate positioning, `TextArea` IME, composition selection/replacement rules and dedicated Windows IME regression tests.
 
 ## Release and operational hardening
 
@@ -77,4 +72,4 @@ Required work: visual preedit ranges, shaped-caret candidate positioning, `TextA
 
 For a Windows x64 beta/internal production release, the shipped npm tarball and standalone EXE must pass `bun run verify`, and native/protocol changes should also pass `bun run test:visual` before release.
 
-For a broad public **production-ready / 1.0** claim, complete the two blockers above (accessibility and IME), automate the release gates, and document the intentionally supported platform/lifecycle limits.
+For a broad public **production-ready / 1.0** claim, complete the accessibility blocker above, automate the release gates, and document the intentionally supported platform/lifecycle limits.

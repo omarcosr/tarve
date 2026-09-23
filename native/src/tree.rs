@@ -71,6 +71,37 @@ struct ScrollDrag {
     grab: f64,
 }
 
+#[derive(Clone, Debug)]
+struct ImeComposition {
+    target: String,
+    base_value: String,
+    replace_start: usize,
+    replace_end: usize,
+    original_caret: usize,
+    original_anchor: Option<usize>,
+    preedit: String,
+    cursor: Option<(usize, usize)>,
+}
+
+#[derive(Clone, Debug)]
+struct ImeBlock {
+    target: String,
+    boundary_seen: bool,
+}
+
+struct ImeDisplay {
+    node: Node,
+    value: String,
+    marked_range: (usize, usize),
+    cursor_range: Option<(usize, usize)>,
+}
+
+struct EditLayout {
+    node: Node,
+    value: String,
+    caret: usize,
+}
+
 fn visual_value<'a>(node: &'a Node, key: &str, state: VisualState) -> &'a Value {
     let mut value = &node.style[key];
 
@@ -211,6 +242,8 @@ pub struct Tree {
     caret: usize,
     selection_anchor: Option<usize>,
     text_dragging: bool,
+    ime: Option<ImeComposition>,
+    ime_blocked: Option<ImeBlock>,
     modal_focus_return: Option<String>,
     pub layouts: u64,
     pub paints: u64,
@@ -312,6 +345,8 @@ impl Tree {
             caret: 0,
             selection_anchor: None,
             text_dragging: false,
+            ime: None,
+            ime_blocked: None,
             modal_focus_return: None,
             layouts: 0,
             paints: 0,
@@ -357,6 +392,9 @@ impl Tree {
                 || id
                     .strip_suffix("::caret")
                     .is_some_and(|id| self.entries.contains_key(id))
+                || id
+                    .strip_suffix("::ime")
+                    .is_some_and(|id| self.entries.contains_key(id))
         });
         self.prune_images();
         let next_modal = self.active_modal().map(str::to_string);
@@ -391,6 +429,23 @@ impl Tree {
         let mut structure_dirty = true;
         let mut measure_dirty = true;
         if let Some(prev) = &previous {
+            if let Some(incoming) = node.value.as_deref()
+                && let Some(ime) = self
+                    .ime
+                    .as_ref()
+                    .filter(|ime| ime.target == node.id && incoming != ime.base_value)
+            {
+                let boundary_seen = ime.preedit.is_empty();
+                self.ime = None;
+                self.ime_blocked = Some(ImeBlock {
+                    target: node.id.clone(),
+                    boundary_seen,
+                });
+                self.text.layouts.remove(&format!("{}::ime", node.id));
+                self.selection_anchor = None;
+                self.caret = floor_boundary(incoming, self.caret.min(incoming.len()));
+                self.dirty.paint = true;
+            }
             if matches!(node.kind.as_str(), "input" | "textarea") && node.value.is_none() {
                 node.value = prev.node.value.clone();
             }
@@ -865,12 +920,20 @@ impl Tree {
             );
         }
         if node.is_text() {
+            let ime_display = self.ime_display(id);
+            let render_node = ime_display
+                .as_ref()
+                .map(|display| display.node.clone())
+                .unwrap_or_else(|| node.clone());
+            if ime_display.is_some() {
+                self.text.prepare(&render_node);
+            }
             let pad = node.insets("padding");
             let available_width =
                 (rect.width() - pad[1] as f64 - pad[3] as f64 - border[1] - border[3]).max(0.0)
                     as f32;
             let (tw, th) = self.text.measure(
-                id,
+                &render_node.id,
                 if matches!(node.kind.as_str(), "text" | "textarea") {
                     Some(available_width)
                 } else {
@@ -889,7 +952,7 @@ impl Tree {
                 x = rect.x0 + (rect.width() - tw as f64) / 2.0;
             }
             let foreground = if matches!(node.kind.as_str(), "input" | "textarea")
-                && node.value.as_deref().unwrap_or("").is_empty()
+                && render_node.value.as_deref().unwrap_or("").is_empty()
             {
                 visual_string(&node, "placeholderColor", "#a1a1aa", state)
             } else {
@@ -898,6 +961,7 @@ impl Tree {
             scene.push_clip_layer(Fill::NonZero, transform, &shape);
             if matches!(node.kind.as_str(), "input" | "textarea")
                 && self.focused.as_deref() == Some(id)
+                && ime_display.is_none()
                 && let Some((start, end)) = self.selected_range()
             {
                 let wrap_width = (node.kind == "textarea").then_some(available_width);
@@ -916,44 +980,92 @@ impl Tree {
                     );
                 }
             }
-            self.text.draw(
-                scene,
-                &node,
-                (x, y),
-                available_width,
-                color(foreground),
-                scale,
-            );
-            if node.kind == "textarea" && self.focused.as_deref() == Some(id) {
-                let value = node.value.as_deref().unwrap_or("");
-                let caret = floor_boundary(value, self.caret.min(value.len()));
-                if let Some(cursor) = self.text.caret_rect(id, caret, Some(available_width)) {
+            if let Some(display) = &ime_display {
+                let wrap_width = (node.kind == "textarea").then_some(available_width);
+                if let Some((anchor, caret)) = display.cursor_range
+                    && anchor != caret
+                {
+                    for selection in self.text_range_rects(
+                        &display.node,
+                        &display.node.id,
+                        &display.value,
+                        anchor.min(caret),
+                        anchor.max(caret),
+                        wrap_width,
+                    ) {
+                        scene.fill(
+                            Fill::NonZero,
+                            transform,
+                            color(visual_string(&node, "selectionColor", "#dbeafe", state)),
+                            None,
+                            &BoxRect::new(
+                                x + selection.x0,
+                                y + selection.y0,
+                                x + selection.x1,
+                                y + selection.y1,
+                            ),
+                        );
+                    }
+                }
+                for marked in self.text_range_rects(
+                    &display.node,
+                    &display.node.id,
+                    &display.value,
+                    display.marked_range.0,
+                    display.marked_range.1,
+                    wrap_width,
+                ) {
+                    let underline_y = y + marked.y1 - 1.0;
                     scene.fill(
                         Fill::NonZero,
                         transform,
                         color(visual_string(&node, "caretColor", "#18181b", state)),
                         None,
-                        &BoxRect::new(x + cursor.x0, y + cursor.y0, x + cursor.x1, y + cursor.y1),
+                        &BoxRect::new(x + marked.x0, underline_y, x + marked.x1, underline_y + 1.0),
                     );
                 }
-            } else if node.kind == "input" && self.focused.as_deref() == Some(id) {
-                // A real shaped prefix places the caret correctly for variable-width Latin text.
-                let mut prefix = node.clone();
-                prefix.id = format!("{}::caret", node.id);
-                let value = node.value.as_deref().unwrap_or("");
-                let caret = floor_boundary(value, self.caret.min(value.len()));
-                prefix.value = Some(value[..caret].to_string());
-                prefix.placeholder.clear();
-                self.text.prepare(&prefix);
-                let (cw, _) = self.text.measure(&prefix.id, None);
-                let cx = (x + cw as f64).min(rect.x1 - 10.0);
-                scene.fill(
-                    Fill::NonZero,
-                    transform,
-                    color(visual_string(&node, "caretColor", "#18181b", state)),
-                    None,
-                    &BoxRect::new(cx, y + 3.0, cx + 1.0, y + th as f64 - 3.0),
-                );
+            }
+            self.text.draw(
+                scene,
+                &render_node,
+                (x, y),
+                available_width,
+                color(foreground),
+                scale,
+            );
+            if matches!(node.kind.as_str(), "input" | "textarea")
+                && self.focused.as_deref() == Some(id)
+            {
+                let caret = if let Some(display) = &ime_display {
+                    display.cursor_range.map(|(_, caret)| caret)
+                } else {
+                    let value = node.value.as_deref().unwrap_or("");
+                    Some(floor_boundary(value, self.caret.min(value.len())))
+                };
+                if let Some(caret) = caret {
+                    let value = ime_display
+                        .as_ref()
+                        .map(|display| display.value.as_str())
+                        .unwrap_or_else(|| node.value.as_deref().unwrap_or(""));
+                    let display_index = input_display_index(&render_node, value, caret);
+                    let wrap_width = (node.kind == "textarea").then_some(available_width);
+                    if let Some(cursor) =
+                        self.text
+                            .caret_rect(&render_node.id, display_index, wrap_width)
+                    {
+                        let content_right = rect.x1 - pad[1] as f64 - border[1];
+                        let cx = (x + cursor.x0).clamp(x, content_right.max(x));
+                        let cy0 = y + cursor.y0;
+                        let cy1 = y + cursor.y1;
+                        scene.fill(
+                            Fill::NonZero,
+                            transform,
+                            color(visual_string(&node, "caretColor", "#18181b", state)),
+                            None,
+                            &BoxRect::new(cx, cy0, cx + 1.0, cy1.max(cy0 + 1.0)),
+                        );
+                    }
+                }
             }
             scene.pop_layer();
         }
@@ -1196,6 +1308,7 @@ impl Tree {
         }
         let mut blurred = None;
         if self.focused.as_deref() != Some(id) {
+            self.ime_cancel();
             blurred = self.focused.replace(id.to_string());
             self.selection_anchor = None;
             self.text_dragging = false;
@@ -1250,6 +1363,7 @@ impl Tree {
             self.hovered = None;
         }
         if !keep_focused {
+            self.ime_cancel();
             self.focused = None;
             self.caret = 0;
             self.selection_anchor = None;
@@ -1423,6 +1537,7 @@ impl Tree {
     pub fn blur(&mut self) -> Option<String> {
         self.scroll_drag = None;
         self.text_dragging = false;
+        self.ime_cancel();
         let blurred = self.focused.take();
         if blurred.is_some() || self.pressed.take().is_some() {
             self.caret = 0;
@@ -1453,6 +1568,9 @@ impl Tree {
                 events.push(json!({"type":"blur", "id":blurred}));
             }
             if matches!(self.entries[&id].node.kind.as_str(), "input" | "textarea") {
+                if self.ime_target() == Some(id.as_str()) {
+                    self.ime_cancel();
+                }
                 self.place_text_caret_from_pointer(&id);
                 self.selection_anchor = Some(self.caret);
                 self.text_dragging = true;
@@ -1586,6 +1704,323 @@ impl Tree {
         }
         vec![json!({"type":"scroll", "id":id, "offset":next, "max":entry.scroll_max})]
     }
+
+    fn ime_display(&self, id: &str) -> Option<ImeDisplay> {
+        let ime = self
+            .ime
+            .as_ref()
+            .filter(|ime| ime.target == id && !ime.preedit.is_empty())?;
+        let entry = self.entries.get(id)?;
+        if !matches!(entry.node.kind.as_str(), "input" | "textarea") {
+            return None;
+        }
+        let base = entry.node.value.as_deref().unwrap_or("");
+        if base != ime.base_value {
+            return None;
+        }
+        let start = floor_boundary(base, ime.replace_start.min(base.len()));
+        let end = floor_boundary(base, ime.replace_end.min(base.len())).max(start);
+        let mut value = String::with_capacity(base.len() - (end - start) + ime.preedit.len());
+        value.push_str(&base[..start]);
+        value.push_str(&ime.preedit);
+        value.push_str(&base[end..]);
+        let marked_range = (start, start + ime.preedit.len());
+        let cursor_range = ime.cursor.map(|(anchor, caret)| {
+            let anchor = floor_char_boundary(&ime.preedit, anchor.min(ime.preedit.len()));
+            let caret = floor_char_boundary(&ime.preedit, caret.min(ime.preedit.len()));
+            (start + anchor, start + caret)
+        });
+        let mut node = entry.node.clone();
+        node.id = format!("{id}::ime");
+        node.value = Some(value.clone());
+        node.placeholder.clear();
+        Some(ImeDisplay {
+            node,
+            value,
+            marked_range,
+            cursor_range,
+        })
+    }
+
+    fn prepare_edit_layout(&mut self, id: &str) -> Option<EditLayout> {
+        if let Some(display) = self.ime_display(id) {
+            let caret = display
+                .cursor_range
+                .map(|(_, caret)| caret)
+                .unwrap_or(display.marked_range.1);
+            self.text.prepare(&display.node);
+            return Some(EditLayout {
+                node: display.node,
+                value: display.value,
+                caret,
+            });
+        }
+        let entry = self.entries.get(id)?;
+        if !matches!(entry.node.kind.as_str(), "input" | "textarea") {
+            return None;
+        }
+        let node = entry.node.clone();
+        let value = node.value.clone().unwrap_or_default();
+        let caret = floor_boundary(&value, self.caret.min(value.len()));
+        self.text.prepare(&node);
+        Some(EditLayout { node, value, caret })
+    }
+
+    pub(crate) fn ime_cursor_area(&mut self) -> Option<BoxRect> {
+        let id = self.focused.clone()?;
+        let entry = self.entries.get(&id)?;
+        if !matches!(entry.node.kind.as_str(), "input" | "textarea") {
+            return None;
+        }
+        let visible = self.visible_rect(&id)?;
+        let pad = entry.node.insets("padding");
+        let border = entry.node.insets("borderWidth");
+        let scroll = entry.scroll;
+        let multiline = entry.node.kind == "textarea";
+        let available_width =
+            (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
+        let layout = self.prepare_edit_layout(&id)?;
+        let wrap_width = multiline.then_some(available_width);
+        let (_, text_height) = self.text.measure(&layout.node.id, wrap_width);
+        let display_index = input_display_index(&layout.node, &layout.value, layout.caret);
+        let cursor = self
+            .text
+            .caret_rect(&layout.node.id, display_index, wrap_width)?;
+        let origin_x = visible.x0 + pad[3] as f64 + border[3] as f64;
+        let origin_y = if multiline {
+            visible.y0 + pad[0] as f64 + border[0] as f64 - scroll
+        } else {
+            visible.y0 + (visible.height() - text_height as f64) / 2.0
+        };
+        let content_right = visible.x1 - pad[1] as f64 - border[1] as f64;
+        let x = (origin_x + cursor.x0).clamp(origin_x, content_right.max(origin_x));
+        let y = origin_y + cursor.y0;
+        let width = (cursor.x1 - cursor.x0).max(1.0);
+        let height = (cursor.y1 - cursor.y0).max(1.0);
+        Some(BoxRect::new(x, y, x + width, y + height))
+    }
+
+    fn clear_ime_layout(&mut self, target: &str) {
+        self.text.layouts.remove(&format!("{target}::ime"));
+    }
+
+    pub(crate) fn ime_active(&self) -> bool {
+        self.ime.as_ref().is_some_and(|ime| !ime.preedit.is_empty())
+    }
+
+    pub(crate) fn ime_target(&self) -> Option<&str> {
+        self.ime.as_ref().map(|ime| ime.target.as_str())
+    }
+
+    pub(crate) fn ime_enabled(&mut self, target: &str) {
+        if self.focused.as_deref() == Some(target) {
+            self.ime_blocked = None;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ime_display_text(&self) -> Option<String> {
+        let target = self.ime.as_ref()?.target.as_str();
+        self.ime_display(target)
+            .map(|display| display.node.display_text())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ime_cursor_bytes(&self) -> Option<(usize, usize)> {
+        self.ime.as_ref()?.cursor
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ime_marked_rects(&mut self) -> Vec<BoxRect> {
+        let id = match self.ime.as_ref() {
+            Some(ime) => ime.target.clone(),
+            None => return vec![],
+        };
+        let Some(display) = self.ime_display(&id) else {
+            return vec![];
+        };
+        let entry = &self.entries[&id];
+        let pad = entry.node.insets("padding");
+        let border = entry.node.insets("borderWidth");
+        let available_width =
+            (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
+        let wrap_width = (entry.node.kind == "textarea").then_some(available_width);
+        self.text.prepare(&display.node);
+        self.text_range_rects(
+            &display.node,
+            &display.node.id,
+            &display.value,
+            display.marked_range.0,
+            display.marked_range.1,
+            wrap_width,
+        )
+    }
+
+    pub(crate) fn ime_preedit(&mut self, target: &str, text: &str, cursor: Option<(usize, usize)>) {
+        if self.focused.as_deref() != Some(target)
+            || !self
+                .entries
+                .get(target)
+                .is_some_and(|entry| matches!(entry.node.kind.as_str(), "input" | "textarea"))
+        {
+            return;
+        }
+
+        if self
+            .ime_blocked
+            .as_ref()
+            .is_some_and(|blocked| blocked.target == target)
+        {
+            if text.is_empty()
+                && let Some(blocked) = self.ime_blocked.as_mut()
+            {
+                if blocked.boundary_seen {
+                    self.ime_blocked = None;
+                } else {
+                    blocked.boundary_seen = true;
+                }
+            }
+            return;
+        }
+
+        if text.is_empty() {
+            if let Some(ime) = self.ime.as_mut().filter(|ime| ime.target == target) {
+                ime.preedit.clear();
+                ime.cursor = None;
+                self.clear_ime_layout(target);
+                self.dirty.paint = true;
+                self.ensure_focused_textarea_caret_visible();
+            }
+            return;
+        }
+
+        let value = self.entries[target].node.value.clone().unwrap_or_default();
+        let restart = self.ime.as_ref().is_none_or(|ime| {
+            ime.target != target || ime.base_value != value || ime.preedit.is_empty()
+        });
+        if restart {
+            self.ime_cancel();
+            self.ime_blocked = None;
+            let caret = floor_boundary(&value, self.caret.min(value.len()));
+            let (replace_start, replace_end) = self.selected_range().unwrap_or((caret, caret));
+            self.ime = Some(ImeComposition {
+                target: target.to_string(),
+                base_value: value,
+                replace_start,
+                replace_end,
+                original_caret: self.caret,
+                original_anchor: self.selection_anchor,
+                preedit: String::new(),
+                cursor: None,
+            });
+        }
+
+        let normalized_cursor = cursor.map(|(anchor, caret)| {
+            (
+                floor_char_boundary(text, anchor.min(text.len())),
+                floor_char_boundary(text, caret.min(text.len())),
+            )
+        });
+        if let Some(ime) = self.ime.as_mut() {
+            ime.preedit.clear();
+            ime.preedit.push_str(text);
+            ime.cursor = normalized_cursor;
+        }
+        self.clear_ime_layout(target);
+        self.dirty.paint = true;
+        self.ensure_focused_textarea_caret_visible();
+    }
+
+    pub(crate) fn ime_cancel(&mut self) {
+        let Some(ime) = self.ime.take() else {
+            return;
+        };
+        let boundary_seen = ime.preedit.is_empty();
+        self.ime_blocked = Some(ImeBlock {
+            target: ime.target.clone(),
+            boundary_seen,
+        });
+        self.clear_ime_layout(&ime.target);
+        if self.focused.as_deref() == Some(ime.target.as_str())
+            && let Some(entry) = self.entries.get(&ime.target)
+        {
+            let value = entry.node.value.as_deref().unwrap_or("");
+            self.caret = floor_boundary(value, ime.original_caret.min(value.len()));
+            self.selection_anchor = ime
+                .original_anchor
+                .map(|anchor| floor_boundary(value, anchor.min(value.len())));
+        }
+        self.dirty.paint = true;
+        self.ensure_focused_textarea_caret_visible();
+    }
+
+    pub(crate) fn ime_commit(&mut self, target: &str, text: &str) -> Vec<Value> {
+        if self.focused.as_deref() != Some(target)
+            || !self
+                .entries
+                .get(target)
+                .is_some_and(|entry| matches!(entry.node.kind.as_str(), "input" | "textarea"))
+        {
+            return vec![];
+        }
+
+        let Some(ime) = self.ime.take() else {
+            if self
+                .ime_blocked
+                .as_ref()
+                .is_some_and(|blocked| blocked.target == target)
+            {
+                self.ime_blocked = None;
+                return vec![];
+            }
+            return self.type_text(text);
+        };
+        if ime.target != target {
+            self.ime = Some(ime);
+            return vec![];
+        }
+        self.clear_ime_layout(target);
+        if self
+            .ime_blocked
+            .as_ref()
+            .is_some_and(|blocked| blocked.target == target)
+        {
+            self.ime_blocked = None;
+        }
+
+        let multiline = self.entries[target].node.kind == "textarea";
+        let current = self.entries[target].node.value.clone().unwrap_or_default();
+        if current != ime.base_value {
+            self.caret = floor_boundary(&current, self.caret.min(current.len()));
+            self.selection_anchor = None;
+            self.dirty.paint = true;
+            return vec![];
+        }
+        let start = floor_boundary(&current, ime.replace_start.min(current.len()));
+        let end = floor_boundary(&current, ime.replace_end.min(current.len())).max(start);
+        let committed: String = text
+            .chars()
+            .filter(|ch| !ch.is_control() || (multiline && *ch == '\n'))
+            .collect();
+        let mut value = current;
+        value.replace_range(start..end, &committed);
+        if self.entries[target].node.kind == "input"
+            && self.entries[target].node.input_type == "number"
+            && !valid_number_edit(&value)
+        {
+            let base = self.entries[target].node.value.as_deref().unwrap_or("");
+            self.caret = floor_boundary(base, ime.original_caret.min(base.len()));
+            self.selection_anchor = ime
+                .original_anchor
+                .map(|anchor| floor_boundary(base, anchor.min(base.len())));
+            self.dirty.paint = true;
+            return vec![];
+        }
+        self.caret = start + committed.len();
+        self.selection_anchor = None;
+        self.set_input(target.to_string(), value)
+    }
+
     fn selected_range(&self) -> Option<(usize, usize)> {
         let anchor = self.selection_anchor?;
         let id = self.focused.as_ref()?;
@@ -1628,6 +2063,18 @@ impl Tree {
         let Some(id) = self.focused.clone() else {
             return vec![];
         };
+        if self.ime_target() == Some(id.as_str())
+            && matches!(self.entries[&id].node.kind.as_str(), "input" | "textarea")
+        {
+            if self.ime_active() {
+                if key == "Escape" {
+                    self.ime_cancel();
+                }
+                return vec![];
+            } else {
+                self.ime_cancel();
+            }
+        }
         if self.entries[&id]
             .node
             .control
@@ -1864,6 +2311,7 @@ impl Tree {
         vec![]
     }
     pub fn type_text(&mut self, text: &str) -> Vec<Value> {
+        self.ime_cancel();
         let Some(id) = self.focused.clone() else {
             return vec![];
         };
@@ -1908,48 +2356,33 @@ impl Tree {
         end: usize,
         width: Option<f32>,
     ) -> Vec<BoxRect> {
-        let value = self.entries[id].node.value.clone().unwrap_or_default();
-        let mut boundaries = vec![start];
-        boundaries.extend(
-            value
-                .grapheme_indices(true)
-                .map(|(index, _)| index)
-                .filter(|index| *index > start && *index < end),
-        );
-        boundaries.push(end);
-        let mut out: Vec<BoxRect> = Vec::new();
-        for pair in boundaries.windows(2) {
-            let node = &self.entries[id].node;
-            let a_index = input_display_index(node, &value, pair[0]);
-            let b_index = input_display_index(node, &value, pair[1]);
-            let Some(a) = self.text.caret_rect(id, a_index, width) else {
-                continue;
-            };
-            let Some(b) = self.text.caret_rect(id, b_index, width) else {
-                continue;
-            };
-            if (a.y0 - b.y0).abs() > 0.5 {
-                continue;
-            }
-            let rect = BoxRect::new(
-                a.x0.min(b.x0),
-                a.y0.min(b.y0),
-                a.x0.max(b.x0),
-                a.y1.max(b.y1),
-            );
-            if rect.width() <= 0.0 {
-                continue;
-            }
-            if let Some(last) = out.last_mut()
-                && (last.y0 - rect.y0).abs() < 0.5
-                && (last.x1 - rect.x0).abs() < 1.0
-            {
-                last.x1 = rect.x1;
-            } else {
-                out.push(rect);
-            }
+        let node = self.entries[id].node.clone();
+        let value = node.value.clone().unwrap_or_default();
+        self.text_range_rects(&node, id, &value, start, end, width)
+    }
+
+    fn text_range_rects(
+        &mut self,
+        node: &Node,
+        layout_id: &str,
+        value: &str,
+        start: usize,
+        end: usize,
+        width: Option<f32>,
+    ) -> Vec<BoxRect> {
+        let start = floor_boundary(value, start.min(value.len()));
+        let end = floor_boundary(value, end.min(value.len())).max(start);
+        if start == end {
+            return vec![];
         }
-        out
+        let display_start = input_display_index(node, value, start);
+        let display_end = input_display_index(node, value, end);
+        self.text
+            .range_rects(layout_id, display_start, display_end, width)
+            .into_iter()
+            .filter(|rect| rect.x1 > rect.x0 && rect.y1 > rect.y0)
+            .map(|rect| BoxRect::new(rect.x0, rect.y0, rect.x1, rect.y1))
+            .collect()
     }
 
     fn place_text_caret_from_pointer(&mut self, id: &str) {
@@ -2016,14 +2449,22 @@ impl Tree {
         let Some(id) = self.focused.clone() else {
             return;
         };
-        let Some((width, viewport_height, value)) = self.textarea_metrics(&id) else {
+        let Some((width, viewport_height, _)) = self.textarea_metrics(&id) else {
             return;
         };
-        let caret = floor_boundary(&value, self.caret.min(value.len()));
-        let Some(cursor) = self.text.caret_rect(&id, caret, Some(width)) else {
+        let Some(layout) = self.prepare_edit_layout(&id) else {
             return;
         };
+        let display_index = input_display_index(&layout.node, &layout.value, layout.caret);
+        let Some(cursor) = self
+            .text
+            .caret_rect(&layout.node.id, display_index, Some(width))
+        else {
+            return;
+        };
+        let content_height = self.text.measure(&layout.node.id, Some(width)).1 as f64;
         let entry = self.entries.get_mut(&id).unwrap();
+        entry.scroll_max = (content_height - viewport_height).max(0.0);
         let next = if cursor.y0 < entry.scroll {
             cursor.y0
         } else if cursor.y1 > entry.scroll + viewport_height {
@@ -2075,6 +2516,13 @@ fn floor_boundary(value: &str, position: usize) -> usize {
         .take_while(|i| *i <= position)
         .last()
         .unwrap_or(0)
+}
+fn floor_char_boundary(value: &str, position: usize) -> usize {
+    let mut position = position.min(value.len());
+    while position > 0 && !value.is_char_boundary(position) {
+        position -= 1;
+    }
+    position
 }
 fn previous_boundary(value: &str, position: usize) -> usize {
     value

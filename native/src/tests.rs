@@ -6,7 +6,7 @@ use crate::{
         GraphicsRecoveryFailureAction, anchored_window_position, close_request_action,
         cursor_for_node, graphics_fault_action, graphics_recoveries_after_stability,
         graphics_recovery_circuit_action, graphics_recovery_delay,
-        graphics_recovery_failure_action, shortcut_name,
+        graphics_recovery_failure_action, ime_allowed_for_node, shortcut_name,
     },
     tree::Tree,
 };
@@ -271,6 +271,17 @@ fn splitter_cursor_matches_resize_axis() {
     vertical.control.as_mut().unwrap().orientation = "vertical".into();
     assert_eq!(cursor_for_node(Some(&horizontal)), CursorIcon::ColResize);
     assert_eq!(cursor_for_node(Some(&vertical)), CursorIcon::RowResize);
+}
+
+#[test]
+fn ime_enablement_includes_input_and_textarea_only() {
+    let input = node("input", "input", json!({}), vec![]);
+    let textarea = node("textarea", "textarea", json!({}), vec![]);
+    let button = node("button", "button", json!({}), vec![]);
+    assert!(ime_allowed_for_node(Some(&input)));
+    assert!(ime_allowed_for_node(Some(&textarea)));
+    assert!(!ime_allowed_for_node(Some(&button)));
+    assert!(!ime_allowed_for_node(None));
 }
 
 #[test]
@@ -567,6 +578,286 @@ fn number_input_rejects_non_numeric_native_edits() {
     let events = tree.type_text(".5");
     assert_eq!(tree.entries["number"].node.value.as_deref(), Some("12.5"));
     assert_eq!(events[0]["type"], "change");
+}
+
+#[test]
+fn ime_preedit_replaces_selection_visually_and_commits_once() {
+    let mut input = node(
+        "field",
+        "input",
+        json!({"width":240,"height":40,"fontSize":16,"padding":8}),
+        vec![],
+    );
+    input.value = Some("abcXYZdef".into());
+    let mut tree = Tree::new(root(vec![input]));
+    tree.compute(300.0, 100.0).unwrap();
+    let _ = tree.focus("field");
+    tree.key("Home");
+    for _ in 0..3 {
+        tree.key("ArrowRight");
+    }
+    for _ in 0..3 {
+        tree.key("ShiftArrowRight");
+    }
+
+    tree.ime_preedit("field", "日本", Some((0, "日".len())));
+    assert!(tree.ime_active());
+    assert_eq!(tree.ime_display_text().as_deref(), Some("abc日本def"));
+    assert_eq!(
+        tree.entries["field"].node.value.as_deref(),
+        Some("abcXYZdef")
+    );
+
+    tree.ime_preedit("field", "にほん", Some(("に".len(), "にほん".len())));
+    assert_eq!(tree.ime_display_text().as_deref(), Some("abcにほんdef"));
+    assert_eq!(
+        tree.entries["field"].node.value.as_deref(),
+        Some("abcXYZdef")
+    );
+
+    tree.ime_preedit("field", "", None);
+    assert!(!tree.ime_active());
+    assert_eq!(tree.ime_display_text(), None);
+    let mut controlled = tree.entries["field"].node.clone();
+    controlled.value = Some("server".into());
+    tree.patch(vec![controlled]).unwrap();
+    assert!(
+        tree.ime_commit("field", "stale").is_empty(),
+        "a controlled update between Winit's empty preedit and commit must reject that stale commit"
+    );
+    assert_eq!(tree.entries["field"].node.value.as_deref(), Some("server"));
+
+    tree.key("SelectAll");
+    tree.ime_preedit("field", "日本", Some((0, "日本".len())));
+    tree.ime_preedit("field", "", None);
+    let events = tree.ime_commit("field", "日本");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["type"], "change");
+    assert_eq!(events[0]["value"], "日本");
+    assert_eq!(tree.entries["field"].node.value.as_deref(), Some("日本"));
+}
+
+#[test]
+fn ime_cancel_focus_change_and_controlled_reconciliation_reject_stale_commit() {
+    let mut first = node("first", "input", json!({"width":180,"height":38}), vec![]);
+    first.value = Some("hello".into());
+    let mut second = node("second", "input", json!({"width":180,"height":38}), vec![]);
+    second.value = Some("other".into());
+    let mut tree = Tree::new(root(vec![first, second]));
+    tree.compute(420.0, 100.0).unwrap();
+    let _ = tree.focus("first");
+
+    tree.ime_preedit("first", "世界", Some((0, "世界".len())));
+    let same = tree.entries["first"].node.clone();
+    tree.patch(vec![same]).unwrap();
+    assert!(
+        tree.ime_active(),
+        "same controlled value must preserve preedit"
+    );
+
+    let mut changed = tree.entries["first"].node.clone();
+    changed.value = Some("server".into());
+    tree.patch(vec![changed]).unwrap();
+    assert!(!tree.ime_active());
+    tree.ime_preedit("first", "stale-preedit", Some((13, 13)));
+    assert!(
+        !tree.ime_active(),
+        "late preedit from a rejected controlled session must stay blocked"
+    );
+    assert_eq!(tree.entries["first"].node.value.as_deref(), Some("server"));
+    tree.ime_preedit("first", "", None);
+    assert!(tree.ime_commit("first", "late").is_empty());
+    assert_eq!(tree.entries["first"].node.value.as_deref(), Some("server"));
+
+    tree.ime_enabled("first");
+    tree.ime_preedit("first", "再", Some(("再".len(), "再".len())));
+    assert!(tree.ime_active());
+    let blurred = tree.focus("second");
+    assert_eq!(blurred.as_deref(), Some("first"));
+    assert!(!tree.ime_active());
+    assert!(tree.ime_commit("first", "stale").is_empty());
+    assert_eq!(tree.entries["second"].node.value.as_deref(), Some("other"));
+}
+
+#[test]
+fn ime_new_composition_after_clear_uses_the_current_caret() {
+    let mut input = node("field", "input", json!({"width":220,"height":38}), vec![]);
+    input.value = Some("abcd".into());
+    let mut tree = Tree::new(root(vec![input]));
+    tree.compute(260.0, 80.0).unwrap();
+    let _ = tree.focus("field");
+    tree.key("Home");
+    tree.key("ArrowRight");
+    tree.ime_preedit("field", "旧", Some(("旧".len(), "旧".len())));
+    tree.ime_preedit("field", "", None);
+
+    tree.key("End");
+    tree.ime_preedit("field", "", None);
+    tree.ime_preedit("field", "新", Some(("新".len(), "新".len())));
+    let events = tree.ime_commit("field", "新");
+    assert_eq!(events[0]["value"], "abcd新");
+    assert_eq!(tree.entries["field"].node.value.as_deref(), Some("abcd新"));
+}
+
+#[test]
+fn ime_cursor_bytes_are_clamped_and_candidate_area_tracks_shaped_caret() {
+    let mut input = node(
+        "field",
+        "input",
+        json!({"width":260,"height":44,"fontSize":18,"padding":{"left":10,"right":10}}),
+        vec![],
+    );
+    input.value = Some(String::new());
+    let mut tree = Tree::new(root(vec![input]));
+    tree.compute(320.0, 100.0).unwrap();
+    let _ = tree.focus("field");
+
+    tree.ime_preedit("field", "日本WWW", Some((2, usize::MAX)));
+    let end_area = tree.ime_cursor_area().unwrap();
+    assert!(end_area.width() >= 1.0 && end_area.height() >= 1.0);
+
+    let combining = "e\u{301}x";
+    tree.ime_preedit("field", combining, Some((1, 1)));
+    assert_eq!(
+        tree.ime_cursor_bytes(),
+        Some((1, 1)),
+        "Winit cursor offsets are UTF-8 byte offsets and valid char boundaries inside a grapheme must be preserved"
+    );
+
+    tree.ime_preedit("field", "日本WWW", Some((0, 0)));
+    let start_area = tree.ime_cursor_area().unwrap();
+    assert!(
+        end_area.x0 > start_area.x0,
+        "candidate area must move with the Parley-shaped preedit caret"
+    );
+
+    tree.ime_preedit("field", "日本WWW", None);
+    assert!(tree.ime_cursor_area().is_some());
+    tree.scene(1.0);
+}
+
+#[test]
+fn textarea_ime_wraps_scrolls_and_uses_visible_composition_caret() {
+    let mut area = node(
+        "notes",
+        "textarea",
+        json!({
+            "width":92,
+            "height":40,
+            "padding":4,
+            "borderWidth":1,
+            "fontSize":16,
+            "lineHeight":1.4
+        }),
+        vec![],
+    );
+    area.value = Some(String::new());
+    let mut tree = Tree::new(root(vec![area]));
+    tree.compute(160.0, 90.0).unwrap();
+    let _ = tree.focus("notes");
+
+    let preedit = "日本語入力候補日本語入力候補日本語入力候補";
+    tree.ime_preedit("notes", preedit, Some((preedit.len(), preedit.len())));
+    assert_eq!(tree.entries["notes"].node.value.as_deref(), Some(""));
+    assert!(tree.entries["notes"].scroll_max > 0.0);
+    assert!(tree.entries["notes"].scroll > 0.0);
+    let marked = tree.ime_marked_rects();
+    assert!(
+        marked.len() >= 2 && marked.iter().all(|rect| rect.width() > 0.0),
+        "wrapped preedit must retain marked geometry on every visual line"
+    );
+    let caret = tree.ime_cursor_area().unwrap();
+    let rect = tree.entries["notes"].rect;
+    assert!(caret.y0 >= rect.y0 - 1.0 && caret.y1 <= rect.y1 + 1.0);
+
+    let events = tree.ime_commit("notes", "日本語");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["value"], "日本語");
+}
+
+#[test]
+fn textarea_ime_geometry_matches_text_alignment() {
+    fn candidate_x(text_align: &str) -> (f64, f64) {
+        let mut area = node(
+            "notes",
+            "textarea",
+            json!({
+                "width":220,
+                "height":70,
+                "padding":8,
+                "borderWidth":1,
+                "fontSize":18,
+                "textAlign":text_align
+            }),
+            vec![],
+        );
+        area.value = Some(String::new());
+        let mut tree = Tree::new(root(vec![area]));
+        tree.compute(280.0, 110.0).unwrap();
+        let _ = tree.focus("notes");
+        tree.ime_preedit("notes", "abc", Some((3, 3)));
+        let caret = tree.ime_cursor_area().unwrap();
+        let marked = tree.ime_marked_rects();
+        (caret.x0, marked[0].x0)
+    }
+
+    let (start_caret, start_mark) = candidate_x("start");
+    let (end_caret, end_mark) = candidate_x("end");
+    assert!(
+        end_caret > start_caret + 80.0,
+        "candidate caret must follow end-aligned rendered text"
+    );
+    assert!(
+        end_mark > start_mark + 80.0,
+        "marked preedit geometry must follow end-aligned rendered text"
+    );
+}
+
+#[test]
+fn ime_password_stays_masked_and_number_validation_happens_on_commit() {
+    let mut password = node(
+        "password-ime",
+        "input",
+        json!({"width":220,"height":38}),
+        vec![],
+    );
+    password.input_type = "password".into();
+    password.value = Some("secret".into());
+    let mut tree = Tree::new(root(vec![password]));
+    tree.compute(260.0, 80.0).unwrap();
+    let _ = tree.focus("password-ime");
+    tree.key("SelectAll");
+    tree.ime_preedit("password-ime", "日本", Some((0, "日本".len())));
+    let display = tree.ime_display_text().unwrap();
+    assert_eq!(display, "••");
+    assert!(!display.contains('日'));
+    tree.ime_cancel();
+    assert_eq!(
+        tree.entries["password-ime"].node.value.as_deref(),
+        Some("secret")
+    );
+
+    let mut number = node(
+        "number-ime",
+        "input",
+        json!({"width":220,"height":38}),
+        vec![],
+    );
+    number.input_type = "number".into();
+    number.value = Some("12".into());
+    let mut numbers = Tree::new(root(vec![number]));
+    numbers.compute(260.0, 80.0).unwrap();
+    let _ = numbers.focus("number-ime");
+    numbers.ime_preedit("number-ime", "abc", Some((3, 3)));
+    assert_eq!(numbers.ime_display_text().as_deref(), Some("12abc"));
+    assert!(numbers.ime_commit("number-ime", "abc").is_empty());
+    assert_eq!(
+        numbers.entries["number-ime"].node.value.as_deref(),
+        Some("12")
+    );
+    numbers.ime_preedit("number-ime", ".5", Some((2, 2)));
+    let events = numbers.ime_commit("number-ime", ".5");
+    assert_eq!(events[0]["value"], "12.5");
 }
 
 #[test]

@@ -2,7 +2,7 @@ use crate::protocol::Node;
 use parley::{
     FontContext, FontFamily, FontWeight, Layout, LayoutContext, LineHeight, PositionedLayoutItem,
     StyleProperty,
-    layout::{Affinity, Cursor},
+    layout::{Affinity, Cursor, Selection},
 };
 use std::collections::HashMap;
 use vello::{
@@ -24,7 +24,17 @@ pub struct TextEngine {
     pub layouts: HashMap<String, Layout<()>>,
     pub shapes: u64,
     signatures: HashMap<String, (String, Vec<serde_json::Value>)>,
+    alignments: HashMap<String, parley::Alignment>,
 }
+
+fn alignment_for_node(node: &Node) -> parley::Alignment {
+    match node.string("textAlign", "start") {
+        "center" => parley::Alignment::Center,
+        "end" => parley::Alignment::End,
+        _ => parley::Alignment::Start,
+    }
+}
+
 impl TextEngine {
     pub fn new() -> Self {
         Self {
@@ -33,6 +43,7 @@ impl TextEngine {
             layouts: HashMap::new(),
             shapes: 0,
             signatures: HashMap::new(),
+            alignments: HashMap::new(),
         }
     }
     pub fn prepare(&mut self, node: &Node) {
@@ -62,11 +73,15 @@ impl TextEngine {
         layout.break_all_lines(None);
         self.layouts.insert(node.id.clone(), layout);
         self.signatures.insert(node.id.clone(), signature);
+        self.alignments
+            .insert(node.id.clone(), alignment_for_node(node));
         self.shapes += 1;
     }
     pub fn retain(&mut self, mut keep: impl FnMut(&str) -> bool) {
         self.layouts.retain(|id, _| keep(id));
         self.signatures
+            .retain(|id, _| self.layouts.contains_key(id));
+        self.alignments
             .retain(|id, _| self.layouts.contains_key(id));
     }
     pub fn measure(&mut self, id: &str, width: Option<f32>) -> (f32, f32) {
@@ -93,11 +108,7 @@ impl TextEngine {
         } else {
             None
         });
-        let align = match node.string("textAlign", "start") {
-            "center" => parley::Alignment::Center,
-            "end" => parley::Alignment::End,
-            _ => parley::Alignment::Start,
-        };
+        let align = alignment_for_node(node);
         layout.align(align, parley::AlignmentOptions::default());
         for line in layout.lines() {
             for item in line.items() {
@@ -127,13 +138,53 @@ impl TextEngine {
         index: usize,
         width: Option<f32>,
     ) -> Option<parley::BoundingBox> {
+        let align = self
+            .alignments
+            .get(id)
+            .copied()
+            .unwrap_or(parley::Alignment::Start);
         let layout = self.layouts.get_mut(id)?;
         layout.break_all_lines(width.map(|width| width.max(0.0)));
+        layout.align(align, parley::AlignmentOptions::default());
         Some(Cursor::from_byte_index(layout, index, Affinity::Downstream).geometry(layout, 1.0))
     }
+    pub fn range_rects(
+        &mut self,
+        id: &str,
+        start: usize,
+        end: usize,
+        width: Option<f32>,
+    ) -> Vec<parley::BoundingBox> {
+        let align = self
+            .alignments
+            .get(id)
+            .copied()
+            .unwrap_or(parley::Alignment::Start);
+        let Some(layout) = self.layouts.get_mut(id) else {
+            return vec![];
+        };
+        layout.break_all_lines(width.map(|width| width.max(0.0)));
+        layout.align(align, parley::AlignmentOptions::default());
+        if start >= end {
+            return vec![];
+        }
+        let anchor = Cursor::from_byte_index(layout, start, Affinity::Downstream);
+        let focus = Cursor::from_byte_index(layout, end, Affinity::Upstream);
+        Selection::new(anchor, focus)
+            .geometry(layout)
+            .into_iter()
+            .map(|(rect, _)| rect)
+            .collect()
+    }
     pub fn index_at(&mut self, id: &str, x: f32, y: f32, width: Option<f32>) -> Option<usize> {
+        let align = self
+            .alignments
+            .get(id)
+            .copied()
+            .unwrap_or(parley::Alignment::Start);
         let layout = self.layouts.get_mut(id)?;
         layout.break_all_lines(width.map(|width| width.max(0.0)));
+        layout.align(align, parley::AlignmentOptions::default());
         Some(Cursor::from_point(layout, x, y).index())
     }
 }
