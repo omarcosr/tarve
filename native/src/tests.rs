@@ -1,6 +1,15 @@
 use crate::{
     protocol::{self, Node},
-    runtime::{anchored_window_position, close_request_action, cursor_for_node, shortcut_name, CloseRequestAction},
+    renderer::{
+        GraphicsFaultKind, SurfaceIssue, SurfaceRecoveryAction, surface_recovery_action,
+    },
+    runtime::{
+        CloseRequestAction, GraphicsFaultAction, GraphicsRecoveryCircuitAction,
+        GraphicsRecoveryFailureAction,
+        anchored_window_position, close_request_action, cursor_for_node, graphics_fault_action,
+        graphics_recovery_circuit_action, graphics_recovery_delay,
+        graphics_recoveries_after_stability, graphics_recovery_failure_action, shortcut_name,
+    },
     tree::Tree,
 };
 use serde_json::json;
@@ -13,6 +22,111 @@ fn node(id: &str, kind: &str, style: serde_json::Value, children: Vec<Node>) -> 
 }
 fn root(children: Vec<Node>) -> Node {
     node("root", "window", json!({}), children)
+}
+
+#[test]
+fn graphics_surface_failures_have_explicit_recovery_actions() {
+    assert_eq!(
+        surface_recovery_action(SurfaceIssue::Timeout),
+        SurfaceRecoveryAction::RetryLater
+    );
+    assert_eq!(
+        surface_recovery_action(SurfaceIssue::Occluded),
+        SurfaceRecoveryAction::SuspendPresentation
+    );
+    assert_eq!(
+        surface_recovery_action(SurfaceIssue::Outdated),
+        SurfaceRecoveryAction::Reconfigure
+    );
+    assert_eq!(
+        surface_recovery_action(SurfaceIssue::Lost),
+        SurfaceRecoveryAction::RecreateSurface
+    );
+    assert_eq!(
+        surface_recovery_action(SurfaceIssue::Validation),
+        SurfaceRecoveryAction::Fatal
+    );
+}
+
+#[test]
+fn graphics_device_faults_distinguish_recovery_from_fatal_errors() {
+    assert_eq!(
+        graphics_fault_action(GraphicsFaultKind::DeviceLost),
+        GraphicsFaultAction::RecoverDevice
+    );
+    assert_eq!(
+        graphics_fault_action(GraphicsFaultKind::Internal),
+        GraphicsFaultAction::RecoverDevice
+    );
+    assert_eq!(
+        graphics_fault_action(GraphicsFaultKind::OutOfMemory),
+        GraphicsFaultAction::Fatal
+    );
+    assert_eq!(
+        graphics_fault_action(GraphicsFaultKind::Validation),
+        GraphicsFaultAction::Fatal
+    );
+}
+
+#[test]
+fn graphics_recovery_retries_are_bounded_and_backed_off() {
+    assert_eq!(graphics_recovery_delay(1), std::time::Duration::from_millis(100));
+    assert_eq!(graphics_recovery_delay(2), std::time::Duration::from_millis(250));
+    assert_eq!(
+        graphics_recovery_failure_action(1),
+        GraphicsRecoveryFailureAction::RetryAfter(std::time::Duration::from_millis(100))
+    );
+    assert_eq!(
+        graphics_recovery_failure_action(2),
+        GraphicsRecoveryFailureAction::RetryAfter(std::time::Duration::from_millis(250))
+    );
+    assert_eq!(
+        graphics_recovery_failure_action(3),
+        GraphicsRecoveryFailureAction::Fatal
+    );
+    assert_eq!(
+        graphics_recovery_circuit_action(0),
+        GraphicsRecoveryCircuitAction::Allow
+    );
+    assert_eq!(
+        graphics_recovery_circuit_action(2),
+        GraphicsRecoveryCircuitAction::Allow
+    );
+    assert_eq!(
+        graphics_recovery_circuit_action(3),
+        GraphicsRecoveryCircuitAction::Fatal
+    );
+}
+
+#[test]
+fn graphics_recovery_circuit_breaker_spans_generations_and_decays_after_stability() {
+    let mut recovery_episodes = 0;
+    for _generation in 1..=3 {
+        assert_eq!(
+            graphics_recovery_circuit_action(recovery_episodes),
+            GraphicsRecoveryCircuitAction::Allow
+        );
+        recovery_episodes += 1;
+    }
+    assert_eq!(
+        graphics_recovery_circuit_action(recovery_episodes),
+        GraphicsRecoveryCircuitAction::Fatal,
+        "a replacement device that immediately fails must not reset the global recovery budget"
+    );
+    assert_eq!(
+        graphics_recoveries_after_stability(recovery_episodes, std::time::Duration::from_secs(29)),
+        3
+    );
+    recovery_episodes = graphics_recoveries_after_stability(
+        recovery_episodes,
+        std::time::Duration::from_secs(30),
+    );
+    assert_eq!(recovery_episodes, 0);
+    assert_eq!(
+        graphics_recovery_circuit_action(recovery_episodes),
+        GraphicsRecoveryCircuitAction::Allow,
+        "a sustained healthy period restores the recovery budget"
+    );
 }
 
 #[test]
@@ -734,6 +848,50 @@ fn removed_images_are_released_from_cache() {
     tree.update(root(vec![]));
     assert_eq!(tree.image_cache_len(), 0);
     let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn repaint_after_graphics_epoch_preserves_cpu_ui_and_decoded_images() {
+    let path = std::env::temp_dir().join(format!(
+        "tarve-gpu-recovery-image-{}.png",
+        std::process::id()
+    ));
+    image::RgbaImage::new(8, 8).save(&path).unwrap();
+    let mut cached_image = node("cached-image", "image", json!({"width":8,"height":8}), vec![]);
+    cached_image.src = path.to_string_lossy().into_owned();
+    let scroll = node(
+        "recovery-scroll",
+        "scroll",
+        json!({"height":60}),
+        vec![node(
+            "recovery-content",
+            "column",
+            json!({"height":240,"shrink":0}),
+            vec![
+                node("recovery-focus", "button", json!({"height":40}), vec![]),
+                cached_image,
+                node("recovery-tail", "button", json!({"height":160}), vec![]),
+            ],
+        )],
+    );
+    let mut tree = Tree::new(root(vec![scroll]));
+    tree.compute(240.0, 120.0).unwrap();
+    let _ = tree.focus("recovery-focus");
+    tree.pointer_move(20.0, 20.0);
+    tree.wheel(10_000.0);
+    tree.scene(1.0);
+    let scroll_before = tree.entries["recovery-scroll"].scroll;
+    assert!(scroll_before > 0.0);
+    assert_eq!(tree.image_cache_len(), 1);
+
+    std::fs::remove_file(&path).unwrap();
+    tree.dirty.paint = true;
+    tree.scene(1.0);
+
+    assert_eq!(tree.image_cache_len(), 1, "decoded image bytes must remain CPU-owned");
+    assert_eq!(tree.focused.as_deref(), Some("recovery-focus"));
+    assert_eq!(tree.entries["recovery-scroll"].scroll, scroll_before);
+    assert!(!path.exists(), "repaint must not need the original image file");
 }
 
 #[test]

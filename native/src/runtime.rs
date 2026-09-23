@@ -1,7 +1,7 @@
 use crate::{
     bridge::Events,
     protocol::{Command, Document, FileDialogOptions, Node, WindowPosition, WindowPositionPreset, error},
-    renderer::Graphics,
+    renderer::{CaptureError, Graphics, GraphicsFaultKind, PresentResult, RenderError},
     tree::{Tree, color},
 };
 
@@ -286,11 +286,15 @@ pub fn run(
         document,
         events,
         tree,
-        graphics: None,
+        graphics: GraphicsState::Suspended(GraphicsCheckpoint::default()),
         window: None,
         modifiers: ModifiersState::empty(),
         scene: vello::Scene::new(),
         fatal: None,
+        ready_emitted: false,
+        presentation_retry_at: None,
+        graphics_recovery_episodes: 0,
+        graphics_stable_since: None,
         ime_preedit: false,
         last_titlebar_click: None,
         close_request_pending: false,
@@ -306,14 +310,120 @@ struct App {
     document: Document,
     events: Arc<Events>,
     tree: Tree,
-    graphics: Option<Graphics>,
+    graphics: GraphicsState,
     window: Option<Arc<Window>>,
     modifiers: ModifiersState,
     scene: vello::Scene,
     fatal: Option<String>,
+    ready_emitted: bool,
+    presentation_retry_at: Option<Instant>,
+    graphics_recovery_episodes: usize,
+    graphics_stable_since: Option<Instant>,
     ime_preedit: bool,
     last_titlebar_click: Option<(Instant, (f64, f64))>,
     close_request_pending: bool,
+}
+
+const MAX_GRAPHICS_RECOVERY_ATTEMPTS: u8 = 3;
+const MAX_GRAPHICS_RECOVERY_EPISODES: usize = 3;
+const GRAPHICS_RECOVERY_WINDOW: Duration = Duration::from_secs(30);
+const PRESENT_RETRY_DELAY: Duration = Duration::from_millis(16);
+
+#[derive(Clone, Copy, Debug, Default)]
+struct GraphicsCheckpoint {
+    frames: u64,
+    generation: u64,
+    backend: Option<vello::wgpu::Backend>,
+}
+
+impl GraphicsCheckpoint {
+    fn from_graphics(graphics: &Graphics) -> Self {
+        Self {
+            frames: graphics.frames,
+            generation: graphics.generation,
+            backend: Some(graphics.backend()),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct GraphicsRecovery {
+    checkpoint: GraphicsCheckpoint,
+    attempts: u8,
+    next_attempt: Instant,
+    cause: String,
+    last_error: Option<String>,
+}
+
+enum GraphicsState {
+    Ready(Box<Graphics>),
+    Recovering(GraphicsRecovery),
+    Suspended(GraphicsCheckpoint),
+    Fatal,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum GraphicsFaultAction {
+    RecoverDevice,
+    Fatal,
+}
+
+pub(crate) fn graphics_fault_action(kind: GraphicsFaultKind) -> GraphicsFaultAction {
+    match kind {
+        GraphicsFaultKind::DeviceLost | GraphicsFaultKind::Internal => {
+            GraphicsFaultAction::RecoverDevice
+        }
+        GraphicsFaultKind::OutOfMemory | GraphicsFaultKind::Validation => GraphicsFaultAction::Fatal,
+    }
+}
+
+pub(crate) fn graphics_recovery_delay(attempt: u8) -> Duration {
+    match attempt {
+        0 | 1 => Duration::from_millis(100),
+        2 => Duration::from_millis(250),
+        _ => Duration::from_millis(500),
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum GraphicsRecoveryFailureAction {
+    RetryAfter(Duration),
+    Fatal,
+}
+
+pub(crate) fn graphics_recovery_failure_action(attempts: u8) -> GraphicsRecoveryFailureAction {
+    if attempts >= MAX_GRAPHICS_RECOVERY_ATTEMPTS {
+        GraphicsRecoveryFailureAction::Fatal
+    } else {
+        GraphicsRecoveryFailureAction::RetryAfter(graphics_recovery_delay(attempts))
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum GraphicsRecoveryCircuitAction {
+    Allow,
+    Fatal,
+}
+
+pub(crate) fn graphics_recovery_circuit_action(
+    recoveries_in_window: usize,
+) -> GraphicsRecoveryCircuitAction {
+    if recoveries_in_window >= MAX_GRAPHICS_RECOVERY_EPISODES {
+        GraphicsRecoveryCircuitAction::Fatal
+    } else {
+        GraphicsRecoveryCircuitAction::Allow
+    }
+}
+
+pub(crate) fn graphics_recoveries_after_stability(
+    recovery_episodes: usize,
+    stable_for: Duration,
+) -> usize {
+    if stable_for >= GRAPHICS_RECOVERY_WINDOW {
+        0
+    } else {
+        recovery_episodes
+    }
 }
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum CloseRequestAction {
@@ -471,17 +581,173 @@ impl App {
             window.request_redraw();
         }
     }
-    fn present(&mut self) -> Result<(), String> {
-        let background = self.root_color("background", &self.document.window.background);
-        self.graphics
-            .as_mut()
-            .ok_or("Renderer not ready".to_string())?
-            .render(&self.scene, color(&background))?;
-        if self.document.window.debug {
-            self.events
-                .push(json!({"type":"frame", "frames":self.graphics.as_ref().unwrap().frames}));
+    fn request_present_now(&mut self) {
+        self.presentation_retry_at = None;
+        if let Some(window) = &self.window {
+            window.request_redraw();
         }
-        Ok(())
+    }
+    fn schedule_present_retry(&mut self, event_loop: &ActiveEventLoop) {
+        self.presentation_retry_at = Some(Instant::now() + PRESENT_RETRY_DELAY);
+        self.sync_control_flow(event_loop);
+    }
+    fn sync_control_flow(&self, event_loop: &ActiveEventLoop) {
+        let now = Instant::now();
+        let recovery_at = match &self.graphics {
+            GraphicsState::Recovering(recovery) if recovery.next_attempt > now => {
+                Some(recovery.next_attempt)
+            }
+            _ => None,
+        };
+        let present_at = self.presentation_retry_at.filter(|deadline| *deadline > now);
+        match (recovery_at, present_at) {
+            (Some(a), Some(b)) => event_loop.set_control_flow(ControlFlow::WaitUntil(a.min(b))),
+            (Some(deadline), None) | (None, Some(deadline)) => {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+            }
+            (None, None) => event_loop.set_control_flow(ControlFlow::Wait),
+        }
+    }
+    fn start_graphics_recovery(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        cause: String,
+    ) -> bool {
+        if matches!(self.graphics, GraphicsState::Recovering(_)) {
+            return true;
+        }
+        if matches!(self.graphics, GraphicsState::Fatal) {
+            return false;
+        }
+        let now = Instant::now();
+        if let Some(stable_since) = self.graphics_stable_since {
+            self.graphics_recovery_episodes = graphics_recoveries_after_stability(
+                self.graphics_recovery_episodes,
+                now.duration_since(stable_since),
+            );
+        }
+        if graphics_recovery_circuit_action(self.graphics_recovery_episodes)
+            == GraphicsRecoveryCircuitAction::Fatal
+        {
+            self.fail(
+                event_loop,
+                format!(
+                    "GPU recovery circuit breaker opened after {} recovery episodes without {} seconds of stable presentation; latest cause: {cause}",
+                    self.graphics_recovery_episodes,
+                    GRAPHICS_RECOVERY_WINDOW.as_secs()
+                ),
+            );
+            return false;
+        }
+        self.graphics_recovery_episodes = self.graphics_recovery_episodes.saturating_add(1);
+        self.graphics_stable_since = None;
+        let state = std::mem::replace(&mut self.graphics, GraphicsState::Fatal);
+        let checkpoint = match state {
+            GraphicsState::Ready(graphics) => GraphicsCheckpoint::from_graphics(&graphics),
+            GraphicsState::Suspended(checkpoint) => checkpoint,
+            GraphicsState::Recovering(recovery) => {
+                self.graphics = GraphicsState::Recovering(recovery);
+                return true;
+            }
+            GraphicsState::Fatal => {
+                self.graphics = GraphicsState::Fatal;
+                return false;
+            }
+        };
+        self.graphics = GraphicsState::Recovering(GraphicsRecovery {
+            checkpoint,
+            attempts: 0,
+            next_attempt: Instant::now(),
+            cause,
+            last_error: None,
+        });
+        self.presentation_retry_at = None;
+        true
+    }
+    fn try_graphics_recovery(&mut self, event_loop: &ActiveEventLoop) {
+        let state = std::mem::replace(&mut self.graphics, GraphicsState::Fatal);
+        let GraphicsState::Recovering(mut recovery) = state else {
+            self.graphics = state;
+            return;
+        };
+        let now = Instant::now();
+        if now < recovery.next_attempt {
+            self.graphics = GraphicsState::Recovering(recovery);
+            self.sync_control_flow(event_loop);
+            return;
+        }
+        let Some(window) = self.window.clone() else {
+            self.fail(event_loop, "GPU recovery attempted without a window".into());
+            return;
+        };
+        recovery.attempts = recovery.attempts.saturating_add(1);
+        let result = if let Some(previous_backend) = recovery.checkpoint.backend {
+            Graphics::recover(window, previous_backend)
+        } else {
+            Graphics::new(window)
+        };
+        match result {
+            Ok(mut graphics) => {
+                let generation = recovery.checkpoint.generation.saturating_add(1).max(1);
+                graphics.restore_counters(recovery.checkpoint.frames, generation);
+                self.graphics = GraphicsState::Ready(Box::new(graphics));
+                self.tree.dirty.paint = true;
+                self.presentation_retry_at = None;
+                event_loop.set_control_flow(ControlFlow::Wait);
+                self.request_present_now();
+            }
+            Err(error) => match graphics_recovery_failure_action(recovery.attempts) {
+                GraphicsRecoveryFailureAction::RetryAfter(delay) => {
+                    recovery.last_error = Some(error);
+                    recovery.next_attempt = now + delay;
+                    self.graphics = GraphicsState::Recovering(recovery);
+                    self.sync_control_flow(event_loop);
+                }
+                GraphicsRecoveryFailureAction::Fatal => {
+                    let previous = recovery.last_error.as_deref().unwrap_or("none");
+                    self.fail(
+                        event_loop,
+                        format!(
+                            "GPU recovery exhausted after {} attempts; cause: {}; previous error: {previous}; final error: {error}",
+                            recovery.attempts, recovery.cause
+                        ),
+                    );
+                }
+            },
+        }
+    }
+    fn handle_graphics_fault(&mut self, event_loop: &ActiveEventLoop) -> bool {
+        let fault = match &self.graphics {
+            GraphicsState::Ready(graphics) => graphics.take_fault(),
+            _ => None,
+        };
+        let Some(fault) = fault else {
+            return false;
+        };
+        match graphics_fault_action(fault.kind) {
+            GraphicsFaultAction::RecoverDevice => {
+                if self.start_graphics_recovery(event_loop, fault.message) {
+                    self.try_graphics_recovery(event_loop);
+                }
+            }
+            GraphicsFaultAction::Fatal => self.fail(event_loop, fault.message),
+        }
+        true
+    }
+    fn present(&mut self) -> Result<PresentResult, RenderError> {
+        let background = self.root_color("background", &self.document.window.background);
+        let result = match &mut self.graphics {
+            GraphicsState::Ready(graphics) => graphics.render(&self.scene, color(&background)),
+            _ => Err(RenderError::Fatal("Renderer not ready".into())),
+        }?;
+        if result == PresentResult::Presented && self.document.window.debug {
+            let frames = match &self.graphics {
+                GraphicsState::Ready(graphics) => graphics.frames,
+                _ => 0,
+            };
+            self.events.push(json!({"type":"frame", "frames":frames}));
+        }
+        Ok(result)
     }
     fn prepare(&mut self) -> Result<(), String> {
         let Some(window) = &self.window else {
@@ -500,7 +766,78 @@ impl App {
     }
     fn fail(&mut self, event_loop: &ActiveEventLoop, message: String) {
         self.fatal = Some(message);
+        self.graphics = GraphicsState::Fatal;
         event_loop.exit();
+    }
+    fn redraw_frame(&mut self, event_loop: &ActiveEventLoop) {
+        if self
+            .window
+            .as_ref()
+            .is_some_and(|window| window.inner_size().width == 0 || window.inner_size().height == 0)
+        {
+            return;
+        }
+        if matches!(self.graphics, GraphicsState::Recovering(_)) {
+            self.try_graphics_recovery(event_loop);
+            return;
+        }
+        if !matches!(self.graphics, GraphicsState::Ready(_)) {
+            return;
+        }
+        if self.handle_graphics_fault(event_loop) {
+            return;
+        }
+        if let Err(error) = self.prepare() {
+            self.fail(event_loop, error);
+            return;
+        }
+        match self.present() {
+            Ok(PresentResult::Presented) => {
+                self.presentation_retry_at = None;
+                if self.graphics_recovery_episodes > 0 {
+                    let now = Instant::now();
+                    if let Some(stable_since) = self.graphics_stable_since {
+                        self.graphics_recovery_episodes = graphics_recoveries_after_stability(
+                            self.graphics_recovery_episodes,
+                            now.duration_since(stable_since),
+                        );
+                        if self.graphics_recovery_episodes == 0 {
+                            self.graphics_stable_since = None;
+                        }
+                    } else {
+                        self.graphics_stable_since = Some(now);
+                    }
+                }
+                if !self.ready_emitted {
+                    self.ready_emitted = true;
+                    self.events.push(json!({"type":"ready"}));
+                }
+                self.sync_control_flow(event_loop);
+            }
+            Ok(PresentResult::RetryNow) => {
+                self.graphics_stable_since = None;
+                self.request_present_now();
+            }
+            Ok(PresentResult::RetryLater) => {
+                self.graphics_stable_since = None;
+                self.schedule_present_retry(event_loop);
+            }
+            Ok(PresentResult::Occluded) => {
+                self.presentation_retry_at = None;
+                self.graphics_stable_since = None;
+                if !self.ready_emitted {
+                    self.ready_emitted = true;
+                    self.events.push(json!({"type":"ready"}));
+                }
+                self.sync_control_flow(event_loop);
+            }
+            Err(RenderError::RecoverDevice(message)) => {
+                if self.start_graphics_recovery(event_loop, message) {
+                    self.try_graphics_recovery(event_loop);
+                }
+            }
+            Err(RenderError::Fatal(message)) => self.fail(event_loop, message),
+        }
     }
     fn sync_cursor(&self) {
         if let Some(window) = &self.window {
@@ -611,7 +948,30 @@ impl App {
 }
 impl ApplicationHandler<Command> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
+        if let Some(window) = self.window.clone() {
+            let state = std::mem::replace(&mut self.graphics, GraphicsState::Fatal);
+            match state {
+                GraphicsState::Suspended(checkpoint) => match Graphics::new(window) {
+                    Ok(mut graphics) => {
+                        let generation = checkpoint.generation.saturating_add(1).max(1);
+                        graphics.restore_counters(checkpoint.frames, generation);
+                        self.graphics = GraphicsState::Ready(Box::new(graphics));
+                        self.tree.dirty.paint = true;
+                        self.request_present_now();
+                    }
+                    Err(error) => {
+                        self.graphics = GraphicsState::Recovering(GraphicsRecovery {
+                            checkpoint,
+                            attempts: 1,
+                            next_attempt: Instant::now() + graphics_recovery_delay(1),
+                            cause: "GPU recreation after application resume failed".into(),
+                            last_error: Some(error),
+                        });
+                        self.sync_control_flow(event_loop);
+                    }
+                },
+                other => self.graphics = other,
+            }
             return;
         }
         let options = &self.document.window;
@@ -627,7 +987,7 @@ impl ApplicationHandler<Command> for App {
                 let window = Arc::new(window);
                 match Graphics::new(window.clone()) {
                     Ok(graphics) => {
-                        self.graphics = Some(graphics);
+                        self.graphics = GraphicsState::Ready(Box::new(graphics));
                         self.window = Some(window.clone());
                         self.apply_initial_window_position(event_loop, &window, false);
                         self.sync_custom_window_chrome();
@@ -642,18 +1002,7 @@ impl ApplicationHandler<Command> for App {
                         // Once visible, native decorations have their final outer dimensions.
                         // Re-apply the anchor to make native-chrome windows exact as well.
                         self.apply_initial_window_position(event_loop, &window, true);
-                        if let Err(error) = self.present() {
-                            self.fail(event_loop, error);
-                            return;
-                        }
-                        self.events.push(json!({"type":"ready"}));
-                        if self
-                            .graphics
-                            .as_ref()
-                            .is_some_and(|graphics| graphics.frames == 0)
-                        {
-                            self.redraw();
-                        }
+                        self.redraw_frame(event_loop);
                     }
                     Err(error) => self.fail(event_loop, error),
                 }
@@ -691,8 +1040,14 @@ impl ApplicationHandler<Command> for App {
                 }
                 if let Some(window) = &self.window {
                     let size = window.inner_size().to_logical::<f64>(window.scale_factor());
+                    let frames = match &self.graphics {
+                        GraphicsState::Ready(graphics) => graphics.frames,
+                        GraphicsState::Recovering(recovery) => recovery.checkpoint.frames,
+                        GraphicsState::Suspended(checkpoint) => checkpoint.frames,
+                        GraphicsState::Fatal => 0,
+                    };
                     self.events.push(json!({"type":"inspect", "requestId":request_id, "snapshot": {
-                        "frames": self.graphics.as_ref().map_or(0, |g| g.frames), "layouts":self.tree.layouts, "shapes":self.tree.text.shapes, "paints":self.tree.paints,
+                        "frames": frames, "layouts":self.tree.layouts, "shapes":self.tree.text.shapes, "paints":self.tree.paints,
                         "hovered":self.tree.hovered, "focused":self.tree.focused, "nodes":self.tree.snapshots(), "width":size.width, "height":size.height, "scale":window.scale_factor(),
                         "layoutNodes":self.tree.layout_node_count(), "layoutNodesCreated":self.tree.layout_nodes_created, "measureCalls":self.tree.measure_calls, "paintedNodes":self.tree.painted_nodes
                     }}));
@@ -712,17 +1067,39 @@ impl ApplicationHandler<Command> for App {
             }
             Command::Capture { path, request_id } if self.document.window.debug => {
                 let background = self.root_color("background", &self.document.window.background);
-                let result = self.prepare().and_then(|_| {
-                    self.graphics
-                        .as_mut()
-                        .ok_or("Window is not ready".to_string())?
-                        .capture(&self.scene, color(&background), &path)
-                });
+                let result = match self.prepare() {
+                    Err(error) => Err(CaptureError::Request(error)),
+                    Ok(()) => match &mut self.graphics {
+                        GraphicsState::Ready(graphics) => {
+                            graphics.capture(&self.scene, color(&background), &path)
+                        }
+                        _ => Err(CaptureError::Request("Window renderer is not ready".into())),
+                    },
+                };
                 match result {
                     Ok(()) => self
                         .events
                         .push(json!({"type":"captured", "requestId":request_id, "path":path})),
-                    Err(e) => self.events.push(json!({"type":"captured", "requestId":request_id, "path":path, "error":e})),
+                    Err(error) => {
+                        let message = error.message().to_string();
+                        self.events.push(json!({"type":"captured", "requestId":request_id, "path":path, "error":message}));
+                        match error {
+                            CaptureError::RecoverDevice(message) => {
+                                if self.start_graphics_recovery(event_loop, message) {
+                                    self.try_graphics_recovery(event_loop);
+                                }
+                                return;
+                            }
+                            CaptureError::FatalGpu(message) => {
+                                self.fail(event_loop, message);
+                                return;
+                            }
+                            CaptureError::Request(_) => {}
+                        }
+                    }
+                }
+                if self.handle_graphics_fault(event_loop) {
+                    return;
                 }
             }
             Command::FileDialog { mode, options, request_id } => {
@@ -759,18 +1136,50 @@ impl ApplicationHandler<Command> for App {
         self.sync_cursor();
         self.redraw();
     }
+    fn suspended(&mut self, event_loop: &ActiveEventLoop) {
+        let state = std::mem::replace(&mut self.graphics, GraphicsState::Fatal);
+        self.graphics = match state {
+            GraphicsState::Ready(graphics) => {
+                GraphicsState::Suspended(GraphicsCheckpoint::from_graphics(&graphics))
+            }
+            GraphicsState::Recovering(recovery) => {
+                GraphicsState::Suspended(recovery.checkpoint)
+            }
+            GraphicsState::Suspended(checkpoint) => GraphicsState::Suspended(checkpoint),
+            GraphicsState::Fatal => GraphicsState::Fatal,
+        };
+        self.presentation_retry_at = None;
+        self.sync_control_flow(event_loop);
+    }
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let now = Instant::now();
+        let present_due = self
+            .presentation_retry_at
+            .is_some_and(|deadline| deadline <= now);
+        let recovery_due = matches!(
+            &self.graphics,
+            GraphicsState::Recovering(recovery) if recovery.next_attempt <= now
+        );
+        if present_due {
+            self.presentation_retry_at = None;
+        }
+        if (present_due || recovery_due) && let Some(window) = &self.window {
+            window.request_redraw();
+        }
+        self.sync_control_flow(event_loop);
+    }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         let mut events = vec![];
         match event {
             WindowEvent::CloseRequested => self.request_close(event_loop),
             WindowEvent::Resized(size) => {
-                if self
-                    .graphics
-                    .as_mut()
-                    .is_some_and(|graphics| graphics.resize(size.width, size.height))
-                {
+                if size.width > 0 && size.height > 0 {
+                    if let GraphicsState::Ready(graphics) = &mut self.graphics {
+                        graphics.resize(size.width, size.height);
+                    }
                     self.tree.dirty.layout = true;
                     self.tree.dirty.paint = true;
+                    self.presentation_retry_at = None;
                 }
                 self.sync_custom_window_chrome_state();
             }
@@ -778,18 +1187,13 @@ impl ApplicationHandler<Command> for App {
                 self.tree.dirty.layout = true;
                 self.tree.dirty.paint = true;
             }
+            WindowEvent::Occluded(false) => self.request_present_now(),
+            WindowEvent::Occluded(true) => {
+                self.presentation_retry_at = None;
+                self.sync_control_flow(event_loop);
+            }
             WindowEvent::RedrawRequested => {
-                if self
-                    .window
-                    .as_ref()
-                    .is_some_and(|w| w.inner_size().width == 0 || w.inner_size().height == 0)
-                {
-                    return;
-                }
-                let result = self.prepare().and_then(|_| self.present());
-                if let Err(error) = result {
-                    self.fail(event_loop, error);
-                }
+                self.redraw_frame(event_loop);
                 return;
             }
             WindowEvent::CursorMoved { position, .. } => {
