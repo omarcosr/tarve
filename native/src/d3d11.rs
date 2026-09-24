@@ -1153,7 +1153,7 @@ fn create_render_target(
 }
 
 fn choose_sample_desc(device: &ID3D11Device) -> DXGI_SAMPLE_DESC {
-    for count in [4_u32, 2] {
+    for count in [8_u32, 4, 2] {
         if unsafe { device.CheckMultisampleQualityLevels(DXGI_FORMAT_B8G8R8A8_UNORM, count) }
             .is_ok_and(|levels| levels > 0)
         {
