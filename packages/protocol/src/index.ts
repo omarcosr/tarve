@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 4;
-export const PROTOCOL_VERSION = 32;
+export const PROTOCOL_VERSION = 33;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter";
@@ -12,6 +12,7 @@ export type SvgNode =
   | readonly [SvgElementName, SvgAttributes, readonly SvgNode[]];
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
 export type OutlineStyle = "dotted" | "dashed" | "solid" | "double" | "groove" | "ridge" | "inset" | "outset" | "none" | "hidden";
+export type UserSelect = "auto" | "text" | "none" | "all";
 export interface StateStyle {
   background?: string; foreground?: string; borderColor?: string; radius?: number;
   outlineWidth?: number; outlineColor?: string; outlineOffset?: number; outlineRadius?: number; outlineStyle?: OutlineStyle;
@@ -31,7 +32,7 @@ export interface Style extends StateStyle {
   radius?: number; fontSize?: number; fontWeight?: number; fontFamily?: string;
   lineHeight?: number; textAlign?: "start" | "center" | "end";
   hover?: StateStyle; focus?: StateStyle; active?: StateStyle; disabled?: StateStyle;
-  strokeWidth?: number; pointerEvents?: "auto" | "block";
+  strokeWidth?: number; pointerEvents?: "auto" | "block"; userSelect?: UserSelect;
 }
 export interface Control {
   role: "button" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "navigation" | "menuitem" | "tree" | "treeitem" | "grid" | "row" | "toggle" | "togglegroup" | "slider" | "progress" | "virtualList" | "select" | "group" | "field" | "alert" | "status" | "label" | "option" | "otpSlot";

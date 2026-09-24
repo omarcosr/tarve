@@ -1,7 +1,7 @@
-import { Camera } from 'lucide-react';
 import { CameraIcon as HeroCamera } from "@heroicons/react/24/outline";
 import { Camera as PhosphorCamera } from "@phosphor-icons/react";
 import { IconCamera as TablerCamera } from "@tabler/icons-react";
+import { Camera } from 'lucide-react';
 import {
   Alert,
   AspectRatio,
@@ -304,7 +304,7 @@ export function App() {
             <Section title="Drawer" description="Sheet-based drawer with a controlled open state.">
               <Column gap={10}>
                 <Button id="open-drawer" onClick={() => { drawerOpen = true; }}>Open drawer</Button>
-                <Text size={12} color={c.mutedForeground}>The drawer opens from the bottom and uses the native modal overlay.</Text>
+                <Text size={12} color={c.mutedForeground} style={{ userSelect: "text" }}>The drawer opens from the bottom and uses the native modal overlay.</Text>
               </Column>
             </Section>
 

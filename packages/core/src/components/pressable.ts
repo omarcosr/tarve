@@ -17,5 +17,5 @@ export interface PressableProps extends ViewProps {
 }
 
 export function Pressable(props: PressableProps): VNode {
-  return container("pressable", props, { radius: theme.radius.sm });
+  return container("pressable", props, { radius: theme.radius.sm, userSelect: "none" });
 }

@@ -21,6 +21,18 @@ describe("native TSX protocol", () => {
     expect(compileTree(<Window />, false, "cpu").document.renderer).toBe("cpu");
     expect(compileTree(<Window />, false, "gpu").document.renderer).toBe("gpu");
   });
+  test("userSelect serializes as a native style and interactive text defaults stay unselectable", () => {
+    const tree = compileTree(
+      <Window>
+        <Text id="selectable" style={{ userSelect: "all" }}>Selectable</Text>
+        <Button id="button">Button</Button>
+        <Pressable id="pressable"><Text>Pressable</Text></Pressable>
+      </Window>,
+    );
+    expect(tree.nodes.get("selectable")?.style.userSelect).toBe("all");
+    expect(tree.nodes.get("button")?.style.userSelect).toBe("none");
+    expect(tree.nodes.get("pressable")?.style.userSelect).toBe("none");
+  });
   test("intrinsic div compiles to a native view with CSS-like aliases", () => {
     let entered = 0;
     let left = 0;
@@ -462,7 +474,7 @@ describe("native TSX protocol", () => {
   test("Window close requests stay in JS handlers while native receives an intercept flag", () => {
     let requested = false;
     const tree = compileTree(<Window onCloseRequest={() => { requested = true; }}><Text>Hello</Text></Window>);
-    expect(tree.document.version).toBe(32);
+    expect(tree.document.version).toBe(33);
     expect(tree.document.root.closeIntercept).toBe(true);
     expect(JSON.stringify(tree.document)).not.toContain("onCloseRequest");
     tree.handlers.get(tree.document.root.id)?.onCloseRequest?.({ defaultPrevented: false, preventDefault() {} });

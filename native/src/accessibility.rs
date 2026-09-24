@@ -678,7 +678,9 @@ impl AccessibilityTree {
                 if matches!(tarve_node.kind.as_str(), "input" | "textarea") {
                     node.add_action(Action::SetValue);
                     node.add_action(Action::ReplaceSelectedText);
-                    node.add_action(Action::SetTextSelection);
+                    if tree.user_select_mode(native_id) != crate::tree::UserSelectMode::None {
+                        node.add_action(Action::SetTextSelection);
+                    }
                 }
                 if matches!(tarve_node.kind.as_str(), "slider" | "splitter") {
                     node.add_action(Action::SetValue);
@@ -863,6 +865,27 @@ mod tests {
         assert_eq!(slider.min_numeric_value(), Some(0.0));
         assert_eq!(slider.max_numeric_value(), Some(100.0));
         assert_eq!(slider.numeric_value_step(), Some(5.0));
+    }
+
+    #[test]
+    fn user_select_none_removes_accessibility_text_selection_action() {
+        let root = node(json!({
+            "id":"root","kind":"window","children":[
+                {"id":"locked","kind":"input","value":"hello","style":{"userSelect":"none"},"children":[]},
+                {"id":"normal","kind":"input","value":"world","style":{"userSelect":"text"},"children":[]}
+            ]
+        }));
+        let mut tree = Tree::new(root);
+        tree.compute(320.0, 120.0).unwrap();
+        let mut builder = AccessibilityTree::default();
+        let update = builder.build(&mut tree, "Example", 1.0);
+        let by_id: HashMap<_, _> = update.nodes.into_iter().collect();
+
+        let locked = &by_id[&builder.ids["locked"]];
+        assert!(locked.supports_action(Action::SetValue));
+        assert!(!locked.supports_action(Action::SetTextSelection));
+        let normal = &by_id[&builder.ids["normal"]];
+        assert!(normal.supports_action(Action::SetTextSelection));
     }
 
     #[test]

@@ -311,6 +311,18 @@ const noOutline = Style.merge(styles.button, {
 });
 ```
 
+Text selection can be controlled with the CSS-like `userSelect` style:
+
+```tsx
+<Text style={{ userSelect: "text" }}>Drag to select part of this text.</Text>
+<Text style={{ userSelect: "all" }}>Any selection selects this whole element.</Text>
+<View style={{ userSelect: "none" }}>
+  <Text>This subtree is not selectable unless a child explicitly overrides it.</Text>
+</View>
+```
+
+Supported values are `auto`, `text`, `none` and `all`. Tarve defaults normal UI text and chrome to `none`, matching native-app behavior where labels are not selectable. Editable `Input` and `TextArea` controls remain text-selectable by default. `auto` follows the nearest explicit ancestor selection mode; without one, it resolves to the native default for that node kind. Use `text` to opt normal UI text into partial selection, or `all` to make a subtree select atomically. `Button` and `Pressable` also serialize `none` explicitly so dragging labels does not interfere with normal control activation.
+
 Borders can use one width for every side or independent widths, using the same inset shape as `padding` and `margin`:
 
 ```tsx

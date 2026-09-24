@@ -135,6 +135,28 @@ enum ScrollbarAxis {
     Vertical,
 }
 
+enum SelectableTextHit {
+    Miss,
+    Blocked,
+    Text(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum UserSelectMode {
+    None,
+    Text,
+    All,
+}
+
+#[derive(Clone, Debug)]
+struct StaticTextSelection {
+    anchor_id: String,
+    anchor: usize,
+    focus_id: String,
+    focus: usize,
+    atomic_root: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 struct ImeComposition {
     target: String,
@@ -315,6 +337,8 @@ pub struct Tree {
     caret: usize,
     selection_anchor: Option<usize>,
     text_dragging: bool,
+    static_selection: Option<StaticTextSelection>,
+    static_text_dragging: bool,
     ime: Option<ImeComposition>,
     ime_blocked: Option<ImeBlock>,
     modal_focus_returns: Vec<(String, Option<String>)>,
@@ -420,6 +444,8 @@ impl Tree {
             caret: 0,
             selection_anchor: None,
             text_dragging: false,
+            static_selection: None,
+            static_text_dragging: false,
             ime: None,
             ime_blocked: None,
             modal_focus_returns: Vec::new(),
@@ -1111,6 +1137,25 @@ impl Tree {
                 visual_string(&node, "foreground", "#18181b", state)
             };
             target.push_clip(Fill::NonZero, transform, &shape);
+            if node.kind == "text"
+                && let Some((start, end)) = self.static_selection_range_for(id)
+            {
+                for selection in
+                    self.text_range_rects(&node, id, &node.text, start, end, Some(available_width))
+                {
+                    target.fill(
+                        Fill::NonZero,
+                        transform,
+                        color(visual_string(&node, "selectionColor", "#dbeafe", state)),
+                        &BoxRect::new(
+                            x + selection.x0,
+                            y + selection.y0,
+                            x + selection.x1,
+                            y + selection.y1,
+                        ),
+                    );
+                }
+            }
             if matches!(node.kind.as_str(), "input" | "textarea")
                 && self.focused.as_deref() == Some(id)
                 && ime_display.is_none()
@@ -1184,6 +1229,7 @@ impl Tree {
             );
             if matches!(node.kind.as_str(), "input" | "textarea")
                 && self.focused.as_deref() == Some(id)
+                && self.user_select_mode(id) != UserSelectMode::None
             {
                 let caret = if let Some(display) = &ime_display {
                     display.cursor_range.map(|(_, caret)| caret)
@@ -1347,6 +1393,88 @@ impl Tree {
         self.hit(&self.root, Vec2::ZERO, root_rect, scroll_only)
     }
 
+    fn selectable_text_hit_root(&self) -> Option<String> {
+        let root_rect = self.entries[&self.root].rect;
+        let mut portals = self.portal_roots();
+        portals.sort_by(|a, b| {
+            self.stacking
+                .get(a)
+                .copied()
+                .unwrap_or(0.0)
+                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
+        });
+        for portal in portals.iter().rev() {
+            match self.selectable_text_hit(portal, self.ancestor_scroll_offset(portal), root_rect) {
+                SelectableTextHit::Text(id) => return Some(id),
+                SelectableTextHit::Blocked => return None,
+                SelectableTextHit::Miss => {}
+            }
+        }
+        match self.selectable_text_hit(&self.root, Vec2::ZERO, root_rect) {
+            SelectableTextHit::Text(id) => Some(id),
+            SelectableTextHit::Miss | SelectableTextHit::Blocked => None,
+        }
+    }
+
+    fn selectable_text_hit(&self, id: &str, offset: Vec2, clip: BoxRect) -> SelectableTextHit {
+        let entry = &self.entries[id];
+        if !(entry.bounds + Vec2::new(-offset.x, -offset.y)).contains(self.mouse)
+            || entry.node.disabled
+            || entry.node.string("display", "flex") == "none"
+        {
+            return SelectableTextHit::Miss;
+        }
+        let rect = entry.rect + Vec2::new(-offset.x, -offset.y);
+        let clip = if entry.node.kind == "scroll" {
+            clip.intersect(rect)
+        } else {
+            clip
+        };
+        if !clip.contains(self.mouse) {
+            return SelectableTextHit::Miss;
+        }
+        let mut children = entry.children.clone();
+        children.sort_by(|a, b| {
+            self.stacking
+                .get(a)
+                .copied()
+                .unwrap_or(0.0)
+                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
+        });
+        for child in children.iter().rev() {
+            if self.entries[child].node.portal && !entry.node.portal {
+                continue;
+            }
+            match self.selectable_text_hit(
+                child,
+                offset + Vec2::new(entry.scroll_x, entry.scroll),
+                clip,
+            ) {
+                SelectableTextHit::Text(id) => return SelectableTextHit::Text(id),
+                SelectableTextHit::Blocked => return SelectableTextHit::Blocked,
+                SelectableTextHit::Miss => {}
+            }
+        }
+        if entry.node.kind == "text"
+            && self.user_select_mode(id) != UserSelectMode::None
+            && rect.contains(self.mouse)
+        {
+            return SelectableTextHit::Text(id.to_string());
+        }
+        if rect.contains(self.mouse)
+            && (entry.node.interactive()
+                || entry.node.string("pointerEvents", "auto") == "block"
+                || entry.node.modal)
+        {
+            return SelectableTextHit::Blocked;
+        }
+        SelectableTextHit::Miss
+    }
+
+    pub(crate) fn selectable_text_at_pointer(&self) -> Option<String> {
+        self.selectable_text_hit_root()
+    }
+
     fn hit(&self, id: &str, offset: Vec2, clip: BoxRect, scroll_only: bool) -> Option<String> {
         let entry = &self.entries[id];
         if !(entry.bounds + Vec2::new(-offset.x, -offset.y)).contains(self.mouse) {
@@ -1497,6 +1625,8 @@ impl Tree {
             blurred = self.focused.replace(id.to_string());
             self.selection_anchor = None;
             self.text_dragging = false;
+            self.static_selection = None;
+            self.static_text_dragging = false;
             self.caret = self.entries[id].node.value.as_deref().map_or(0, str::len);
             self.dirty.paint = true;
         }
@@ -1550,6 +1680,16 @@ impl Tree {
             .pressed
             .as_deref()
             .is_some_and(|id| self.interactive(id));
+        let keep_static_selection = self.static_selection.as_ref().is_none_or(|selection| {
+            self.entries.contains_key(&selection.anchor_id)
+                && self.entries.contains_key(&selection.focus_id)
+                && selection
+                    .atomic_root
+                    .as_ref()
+                    .is_none_or(|root| self.entries.contains_key(root))
+                && self.user_select_mode(&selection.anchor_id) != UserSelectMode::None
+                && self.user_select_mode(&selection.focus_id) != UserSelectMode::None
+        });
         let changed = (!keep_hovered && self.hovered.is_some())
             || (!keep_focused && self.focused.is_some())
             || (!keep_pressed && self.pressed.is_some());
@@ -1570,6 +1710,18 @@ impl Tree {
         }
         if !keep_pressed {
             self.pressed = None;
+        }
+        if self
+            .focused
+            .as_deref()
+            .is_some_and(|id| self.user_select_mode(id) == UserSelectMode::None)
+        {
+            self.selection_anchor = None;
+            self.text_dragging = false;
+        }
+        if !keep_static_selection {
+            self.static_selection = None;
+            self.static_text_dragging = false;
         }
         if self
             .scroll_drag
@@ -1603,6 +1755,49 @@ impl Tree {
                 .and_then(|entry| entry.parent.as_deref());
         }
         false
+    }
+    pub(crate) fn user_select_mode(&self, id: &str) -> UserSelectMode {
+        let Some(entry) = self.entries.get(id) else {
+            return UserSelectMode::None;
+        };
+        match entry.node.string("userSelect", "auto") {
+            "none" => UserSelectMode::None,
+            "all" => UserSelectMode::All,
+            "text" => UserSelectMode::Text,
+            _ => {
+                let mut parent = entry.parent.as_deref();
+                while let Some(parent_id) = parent {
+                    let Some(parent_entry) = self.entries.get(parent_id) else {
+                        break;
+                    };
+                    match parent_entry.node.string("userSelect", "auto") {
+                        "none" => return UserSelectMode::None,
+                        "all" => return UserSelectMode::All,
+                        "text" => return UserSelectMode::Text,
+                        _ => parent = parent_entry.parent.as_deref(),
+                    }
+                }
+                if matches!(entry.node.kind.as_str(), "input" | "textarea") {
+                    UserSelectMode::Text
+                } else {
+                    UserSelectMode::None
+                }
+            }
+        }
+    }
+    fn user_select_all_root(&self, id: &str) -> Option<String> {
+        let mut current = Some(id);
+        let mut selected = None;
+        while let Some(current_id) = current {
+            let entry = self.entries.get(current_id)?;
+            match entry.node.string("userSelect", "auto") {
+                "all" => selected = Some(current_id.to_string()),
+                "none" | "text" => break,
+                _ => {}
+            }
+            current = entry.parent.as_deref();
+        }
+        selected
     }
     pub(crate) fn visible_rect(&self, id: &str) -> Option<BoxRect> {
         let entry = self.entries.get(id)?;
@@ -1678,17 +1873,87 @@ impl Tree {
         let value = control.min + (control.max - control.min) * ratio;
         self.set_slider(id, value)
     }
+    fn begin_static_text_selection(&mut self, id: &str) {
+        match self.user_select_mode(id) {
+            UserSelectMode::None => {
+                self.static_selection = None;
+                self.static_text_dragging = false;
+            }
+            UserSelectMode::All => {
+                let root = self
+                    .user_select_all_root(id)
+                    .unwrap_or_else(|| id.to_string());
+                self.static_selection = Some(StaticTextSelection {
+                    anchor_id: id.to_string(),
+                    anchor: 0,
+                    focus_id: id.to_string(),
+                    focus: self.entries[id].node.text.len(),
+                    atomic_root: Some(root),
+                });
+                self.static_text_dragging = false;
+                self.dirty.paint = true;
+            }
+            UserSelectMode::Text => {
+                let Some(index) = self.static_text_index_from_pointer(id) else {
+                    return;
+                };
+                self.static_selection = Some(StaticTextSelection {
+                    anchor_id: id.to_string(),
+                    anchor: index,
+                    focus_id: id.to_string(),
+                    focus: index,
+                    atomic_root: None,
+                });
+                self.static_text_dragging = true;
+                self.dirty.paint = true;
+            }
+        }
+    }
+    fn update_static_text_selection_from_pointer(&mut self) {
+        if !self.static_text_dragging {
+            return;
+        }
+        let Some(id) = self.selectable_text_hit_root() else {
+            return;
+        };
+        match self.user_select_mode(&id) {
+            UserSelectMode::None => {}
+            UserSelectMode::All => {
+                let root = self.user_select_all_root(&id).unwrap_or_else(|| id.clone());
+                if let Some(selection) = self.static_selection.as_mut() {
+                    selection.focus_id = id.clone();
+                    selection.focus = self.entries[&id].node.text.len();
+                    selection.atomic_root = Some(root);
+                }
+                self.static_text_dragging = false;
+                self.dirty.paint = true;
+            }
+            UserSelectMode::Text => {
+                let Some(index) = self.static_text_index_from_pointer(&id) else {
+                    return;
+                };
+                if let Some(selection) = self.static_selection.as_mut() {
+                    selection.focus_id = id;
+                    selection.focus = index;
+                    selection.atomic_root = None;
+                    self.dirty.paint = true;
+                }
+            }
+        }
+    }
     pub fn pointer_move(&mut self, x: f64, y: f64) -> Vec<Value> {
         self.mouse = (x, y);
         if self.text_dragging
             && let Some(id) = self.focused.clone()
             && matches!(self.entries[&id].node.kind.as_str(), "input" | "textarea")
+            && self.user_select_mode(&id) == UserSelectMode::Text
         {
             self.place_text_caret_from_pointer(&id);
             if self.entries[&id].node.kind == "textarea" {
                 self.ensure_focused_textarea_caret_visible();
             }
         }
+        self.update_static_text_selection_from_pointer();
         if let Some(drag) = &self.scroll_drag {
             let id = drag.id.clone();
             let axis = drag.axis;
@@ -1732,6 +1997,7 @@ impl Tree {
     pub fn blur(&mut self) -> Option<String> {
         self.scroll_drag = None;
         self.text_dragging = false;
+        self.static_text_dragging = false;
         self.ime_cancel();
         let blurred = self.focused.take();
         if blurred.is_some() || self.pressed.take().is_some() {
@@ -1745,6 +2011,7 @@ impl Tree {
         if let Some(id) = self.outside_dismissal_at_pointer() {
             self.pressed = None;
             self.text_dragging = false;
+            self.static_text_dragging = false;
             return vec![json!({"type":"outside", "id":id})];
         }
         if let Some((id, axis, grab)) = self.scrollbar_at_pointer() {
@@ -1756,6 +2023,7 @@ impl Tree {
             });
             return self.drag_scrollbar(&id, axis, grab);
         }
+        let selectable_text = self.selectable_text_hit_root();
         self.hovered = self.hit_root(false);
         self.pressed = self.hovered.clone();
         let mut events = vec![];
@@ -1768,8 +2036,22 @@ impl Tree {
                     self.ime_cancel();
                 }
                 self.place_text_caret_from_pointer(&id);
-                self.selection_anchor = Some(self.caret);
-                self.text_dragging = true;
+                match self.user_select_mode(&id) {
+                    UserSelectMode::None => {
+                        self.selection_anchor = None;
+                        self.text_dragging = false;
+                    }
+                    UserSelectMode::Text => {
+                        self.selection_anchor = Some(self.caret);
+                        self.text_dragging = true;
+                    }
+                    UserSelectMode::All => {
+                        let value_len = self.entries[&id].node.value.as_deref().unwrap_or("").len();
+                        self.selection_anchor = Some(0);
+                        self.caret = value_len;
+                        self.text_dragging = false;
+                    }
+                }
             } else {
                 self.text_dragging = false;
             }
@@ -1777,6 +2059,19 @@ impl Tree {
             if let Some(blurred) = self.blur() {
                 events.push(json!({"type":"blur", "id":blurred}));
             }
+        }
+        let hovered_editable = self
+            .hovered
+            .as_deref()
+            .is_some_and(|id| matches!(self.entries[id].node.kind.as_str(), "input" | "textarea"));
+        if hovered_editable {
+            self.static_selection = None;
+            self.static_text_dragging = false;
+        } else if let Some(id) = selectable_text.as_deref() {
+            self.begin_static_text_selection(id);
+        } else {
+            self.static_selection = None;
+            self.static_text_dragging = false;
         }
         self.dirty.paint = true;
         if let Some(id) = self
@@ -1794,8 +2089,12 @@ impl Tree {
     }
     pub fn pointer_up(&mut self) -> Vec<Value> {
         self.text_dragging = false;
+        self.static_text_dragging = false;
         if self.selection_anchor == Some(self.caret) {
             self.selection_anchor = None;
+        }
+        if self.static_selected_text().is_none() {
+            self.static_selection = None;
         }
         if self.scroll_drag.take().is_some() {
             return vec![];
@@ -2297,19 +2596,29 @@ impl Tree {
         if !matches!(self.entries[id].node.kind.as_str(), "input" | "textarea") {
             return None;
         }
+        if self.user_select_mode(id) == UserSelectMode::None {
+            return None;
+        }
         let value = self.entries[id].node.value.as_deref().unwrap_or("");
         let a = floor_boundary(value, anchor.min(value.len()));
         let b = floor_boundary(value, self.caret.min(value.len()));
         (a != b).then_some((a.min(b), a.max(b)))
     }
     pub fn selected_text(&self) -> Option<String> {
-        let id = self.focused.as_ref()?;
-        if self.entries[id].node.kind == "input" && self.entries[id].node.input_type == "password" {
-            return None;
+        if let Some(id) = self.focused.as_ref()
+            && matches!(self.entries[id].node.kind.as_str(), "input" | "textarea")
+        {
+            if self.entries[id].node.kind == "input"
+                && self.entries[id].node.input_type == "password"
+            {
+                return None;
+            }
+            let value = self.entries[id].node.value.as_deref().unwrap_or("");
+            if let Some((start, end)) = self.selected_range() {
+                return Some(value[start..end].to_string());
+            }
         }
-        let value = self.entries[id].node.value.as_deref().unwrap_or("");
-        let (start, end) = self.selected_range()?;
-        Some(value[start..end].to_string())
+        self.static_selected_text()
     }
     pub fn key(&mut self, key: &str) -> Vec<Value> {
         if key == "Tab" || key == "ShiftTab" {
@@ -2326,6 +2635,27 @@ impl Tree {
                 };
                 if let Some(blurred) = self.focus(&ids[next]) {
                     return vec![json!({"type":"blur", "id":blurred})];
+                }
+            }
+            return vec![];
+        }
+        if key == "SelectAll" && self.focused.is_none() {
+            if let Some(selection) = self.static_selection.clone() {
+                let id = selection.focus_id;
+                if let Some(entry) = self.entries.get(&id)
+                    && entry.node.kind == "text"
+                    && self.user_select_mode(&id) != UserSelectMode::None
+                {
+                    let atomic_root = (self.user_select_mode(&id) == UserSelectMode::All)
+                        .then(|| self.user_select_all_root(&id).unwrap_or_else(|| id.clone()));
+                    self.static_selection = Some(StaticTextSelection {
+                        anchor_id: id.clone(),
+                        anchor: 0,
+                        focus_id: id.clone(),
+                        focus: entry.node.text.len(),
+                        atomic_root,
+                    });
+                    self.dirty.paint = true;
                 }
             }
             return vec![];
@@ -2505,18 +2835,33 @@ impl Tree {
         if !matches!(self.entries[&id].node.kind.as_str(), "input" | "textarea") {
             return vec![];
         }
+        let user_select = self.user_select_mode(&id);
         let multiline = self.entries[&id].node.kind == "textarea";
         let value = self.entries[&id].node.value.clone().unwrap_or_default();
         self.caret = floor_boundary(&value, self.caret.min(value.len()));
-        let selecting = key.starts_with("Shift");
+        if user_select == UserSelectMode::None {
+            self.selection_anchor = None;
+        }
+        let selecting = key.starts_with("Shift") && user_select != UserSelectMode::None;
         let key = key.strip_prefix("Shift").unwrap_or(key);
+        if user_select == UserSelectMode::All && (selecting || key == "SelectAll") {
+            self.selection_anchor = Some(0);
+            self.caret = value.len();
+            if multiline {
+                self.ensure_focused_textarea_caret_visible();
+            }
+            self.dirty.paint = true;
+            return vec![];
+        }
         if selecting && self.selection_anchor.is_none() {
             self.selection_anchor = Some(self.caret);
         }
         match key {
             "SelectAll" => {
-                self.selection_anchor = Some(0);
-                self.caret = value.len();
+                if user_select == UserSelectMode::Text {
+                    self.selection_anchor = Some(0);
+                    self.caret = value.len();
+                }
             }
             "Home" => {
                 self.caret = if multiline {
@@ -2645,6 +2990,9 @@ impl Tree {
         }
         let entry = self.entries.get(id)?;
         if !matches!(entry.node.kind.as_str(), "input" | "textarea") {
+            return None;
+        }
+        if self.user_select_mode(id) == UserSelectMode::None {
             return None;
         }
         let value = entry.node.value.as_deref().unwrap_or("");
@@ -2814,6 +3162,10 @@ impl Tree {
         {
             return vec![];
         }
+        let user_select = self.user_select_mode(id);
+        if user_select == UserSelectMode::None {
+            return vec![];
+        }
         let value = entry.node.value.clone().unwrap_or_default();
         let multiline = entry.node.kind == "textarea";
         let byte_at_character = |character: usize| {
@@ -2823,8 +3175,12 @@ impl Tree {
                 .map(|(index, _)| index)
                 .unwrap_or(value.len())
         };
-        let anchor = byte_at_character(anchor_character);
-        let focus = byte_at_character(focus_character);
+        let mut anchor = byte_at_character(anchor_character);
+        let mut focus = byte_at_character(focus_character);
+        if user_select == UserSelectMode::All && anchor != focus {
+            anchor = 0;
+            focus = value.len();
+        }
         let events = self.accessibility_focus(id);
         self.ime_cancel();
         self.caret = focus;
@@ -3092,6 +3448,98 @@ impl Tree {
             origin_x + cursor.x1.max(cursor.x0 + 1.0),
             origin_y + cursor.y1.max(cursor.y0 + 1.0),
         ))
+    }
+
+    fn static_text_index_from_pointer(&mut self, id: &str) -> Option<usize> {
+        let entry = self.entries.get(id)?;
+        if entry.node.kind != "text" || self.user_select_mode(id) == UserSelectMode::None {
+            return None;
+        }
+        let node = entry.node.clone();
+        let rect = self.visible_rect(id).unwrap_or(entry.rect);
+        let pad = node.insets("padding");
+        let border = node.insets("borderWidth");
+        let width =
+            (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
+        let x = (self.mouse.0 - rect.x0 - pad[3] as f64 - border[3] as f64).max(0.0) as f32;
+        let y = (self.mouse.1 - rect.y0 - pad[0] as f64 - border[0] as f64).max(0.0) as f32;
+        self.text.prepare(&node);
+        let index = self.text.index_at(id, x, y, Some(width))?;
+        Some(floor_boundary(&node.text, index.min(node.text.len())))
+    }
+
+    fn static_selection_range_for(&self, id: &str) -> Option<(usize, usize)> {
+        let selection = self.static_selection.as_ref()?;
+        let entry = self.entries.get(id)?;
+        if entry.node.kind != "text" || self.user_select_mode(id) == UserSelectMode::None {
+            return None;
+        }
+        let value = &entry.node.text;
+        if let Some(root) = selection.atomic_root.as_deref() {
+            if !self.is_descendant_of(id, root) || value.is_empty() {
+                return None;
+            }
+            return Some((0, value.len()));
+        }
+
+        let anchor_index = self
+            .order
+            .iter()
+            .position(|candidate| candidate == &selection.anchor_id)?;
+        let focus_index = self
+            .order
+            .iter()
+            .position(|candidate| candidate == &selection.focus_id)?;
+        let current_index = self.order.iter().position(|candidate| candidate == id)?;
+        let anchor = floor_boundary(
+            self.entries.get(&selection.anchor_id)?.node.text.as_str(),
+            selection.anchor,
+        );
+        let focus = floor_boundary(
+            self.entries.get(&selection.focus_id)?.node.text.as_str(),
+            selection.focus,
+        );
+
+        if anchor_index == focus_index {
+            if current_index != anchor_index {
+                return None;
+            }
+            let (start, end) = (anchor.min(focus), anchor.max(focus));
+            return (start != end).then_some((start, end));
+        }
+
+        let (start_index, start_offset, end_index, end_offset) = if anchor_index < focus_index {
+            (anchor_index, anchor, focus_index, focus)
+        } else {
+            (focus_index, focus, anchor_index, anchor)
+        };
+        if current_index < start_index || current_index > end_index {
+            return None;
+        }
+        let (start, end) = if current_index == start_index {
+            (start_offset.min(value.len()), value.len())
+        } else if current_index == end_index {
+            (0, end_offset.min(value.len()))
+        } else {
+            (0, value.len())
+        };
+        (start != end).then_some((start, end))
+    }
+
+    fn static_selected_text(&self) -> Option<String> {
+        let mut parts = Vec::new();
+        for id in &self.order {
+            let Some((start, end)) = self.static_selection_range_for(id) else {
+                continue;
+            };
+            let text = &self.entries[id].node.text;
+            if let Some(part) = text.get(start..end)
+                && !part.is_empty()
+            {
+                parts.push(part.to_string());
+            }
+        }
+        (!parts.is_empty()).then(|| parts.join("\n"))
     }
 
     fn selection_rects(

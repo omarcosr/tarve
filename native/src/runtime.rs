@@ -1100,12 +1100,22 @@ impl App {
             if let Some(direction) = self.resize_direction() {
                 window.set_cursor(CursorIcon::from(direction));
             } else {
-                let hovered = self
-                    .tree
-                    .hovered
-                    .as_ref()
-                    .map(|id| &self.tree.entries[id].node);
-                window.set_cursor(cursor_for_node(hovered));
+                let cursor = if self.tree.selectable_text_at_pointer().is_some() {
+                    CursorIcon::Text
+                } else {
+                    let hovered = self.tree.hovered.as_ref();
+                    if hovered.is_some_and(|id| {
+                        matches!(
+                            self.tree.entries[id].node.kind.as_str(),
+                            "input" | "textarea"
+                        ) && self.tree.user_select_mode(id) == crate::tree::UserSelectMode::None
+                    }) {
+                        CursorIcon::Default
+                    } else {
+                        cursor_for_node(hovered.map(|id| &self.tree.entries[id].node))
+                    }
+                };
+                window.set_cursor(cursor);
             }
             let target = self
                 .tree

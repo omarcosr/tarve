@@ -1246,10 +1246,229 @@ fn pointer_drag_selects_partial_input_text() {
     assert!(!selected.is_empty());
     assert_ne!(selected, "hello world");
 }
+
+#[test]
+fn user_select_none_blocks_selection_but_keeps_input_editable() {
+    let mut input = node(
+        "input",
+        "input",
+        json!({
+            "width":220,"height":38,"padding":{"left":8,"right":8},"fontSize":14,
+            "userSelect":"none"
+        }),
+        vec![],
+    );
+    input.value = Some("hello world".into());
+    let mut tree = Tree::new(root(vec![input]));
+    tree.compute(260.0, 80.0).unwrap();
+    tree.scene(1.0);
+    let rect = tree.entries["input"].rect;
+
+    tree.pointer_move(rect.x0 + 10.0, rect.y0 + 18.0);
+    tree.pointer_down();
+    tree.pointer_move(rect.x0 + 90.0, rect.y0 + 18.0);
+    tree.pointer_up();
+    assert_eq!(tree.selected_text(), None);
+
+    tree.key("SelectAll");
+    assert_eq!(tree.selected_text(), None);
+    assert!(
+        tree.accessibility_set_text_selection("input", 0, 5)
+            .is_empty()
+    );
+    assert_eq!(tree.selected_text(), None);
+
+    tree.key("End");
+    tree.type_text("!");
+    assert_eq!(
+        tree.entries["input"].node.value.as_deref(),
+        Some("hello world!")
+    );
+}
+
+#[test]
+fn user_select_all_makes_input_selection_atomic() {
+    let mut input = node(
+        "input",
+        "input",
+        json!({
+            "width":220,"height":38,"padding":{"left":8,"right":8},"fontSize":14,
+            "userSelect":"all"
+        }),
+        vec![],
+    );
+    input.value = Some("hello world".into());
+    let mut tree = Tree::new(root(vec![input]));
+    tree.compute(260.0, 80.0).unwrap();
+    tree.scene(1.0);
+    let rect = tree.entries["input"].rect;
+
+    tree.pointer_move(rect.x0 + 48.0, rect.y0 + 18.0);
+    tree.pointer_down();
+    tree.pointer_up();
+    assert_eq!(tree.selected_text().as_deref(), Some("hello world"));
+
+    tree.type_text("replacement");
+    assert_eq!(
+        tree.entries["input"].node.value.as_deref(),
+        Some("replacement")
+    );
+}
+
+#[test]
+fn user_select_auto_text_and_all_work_for_static_text() {
+    let mut first = node("first", "text", json!({"width":160,"fontSize":14}), vec![]);
+    first.text = "First selectable text".into();
+    let mut second = node("second", "text", json!({"width":160,"fontSize":14}), vec![]);
+    second.text = "Second selectable text".into();
+    let group = node(
+        "group",
+        "column",
+        json!({"width":180,"gap":8,"userSelect":"all"}),
+        vec![first, second],
+    );
+    let mut tree = Tree::new(root(vec![group]));
+    tree.compute(240.0, 140.0).unwrap();
+    tree.scene(1.0);
+
+    assert_eq!(
+        tree.user_select_mode("first"),
+        crate::tree::UserSelectMode::All
+    );
+    let rect = tree.entries["first"].rect;
+    tree.pointer_move(rect.x0 + 20.0, rect.y0 + 8.0);
+    tree.pointer_down();
+    tree.pointer_up();
+    assert_eq!(
+        tree.selected_text().as_deref(),
+        Some("First selectable text\nSecond selectable text")
+    );
+
+    tree.entries.get_mut("first").unwrap().node.style["userSelect"] = json!("text");
+    assert_eq!(
+        tree.user_select_mode("first"),
+        crate::tree::UserSelectMode::Text
+    );
+}
+
+#[test]
+fn user_select_defaults_to_none_and_explicit_text_opts_in() {
+    let mut default_text = node("default", "text", json!({"width":160}), vec![]);
+    default_text.text = "Native default".into();
+    let mut auto_text = node(
+        "auto",
+        "text",
+        json!({"width":160,"userSelect":"auto"}),
+        vec![],
+    );
+    auto_text.text = "Auto default".into();
+    let mut selectable_text = node(
+        "selectable",
+        "text",
+        json!({"width":160,"userSelect":"text"}),
+        vec![],
+    );
+    selectable_text.text = "Selectable".into();
+    let mut input = node("input", "input", json!({"width":160}), vec![]);
+    input.value = Some("Editable".into());
+    let tree = Tree::new(root(vec![default_text, auto_text, selectable_text, input]));
+
+    assert_eq!(
+        tree.user_select_mode("default"),
+        crate::tree::UserSelectMode::None
+    );
+    assert_eq!(
+        tree.user_select_mode("auto"),
+        crate::tree::UserSelectMode::None
+    );
+    assert_eq!(
+        tree.user_select_mode("selectable"),
+        crate::tree::UserSelectMode::Text
+    );
+    assert_eq!(
+        tree.user_select_mode("input"),
+        crate::tree::UserSelectMode::Text
+    );
+}
+
+#[test]
+fn user_select_text_supports_partial_static_selection_and_blocking_layers() {
+    let mut text = node(
+        "text",
+        "text",
+        json!({"width":220,"fontSize":14,"userSelect":"text"}),
+        vec![],
+    );
+    text.text = "hello selectable world".into();
+    let mut tree = Tree::new(root(vec![text]));
+    tree.compute(260.0, 80.0).unwrap();
+    tree.scene(1.0);
+    let rect = tree.entries["text"].rect;
+    tree.pointer_move(rect.x0 + 8.0, rect.y0 + 8.0);
+    tree.pointer_down();
+    tree.pointer_move(rect.x0 + 70.0, rect.y0 + 8.0);
+    tree.pointer_up();
+    let selected = tree.selected_text().unwrap();
+    assert!(!selected.is_empty());
+    assert_ne!(selected, "hello selectable world");
+
+    let mut behind = node("behind", "text", json!({"width":220,"fontSize":14}), vec![]);
+    behind.text = "must not select through overlay".into();
+    let overlay = node(
+        "overlay",
+        "view",
+        json!({"position":"absolute","width":220,"height":30,"pointerEvents":"block","zIndex":10}),
+        vec![],
+    );
+    let mut blocked = Tree::new(root(vec![behind, overlay]));
+    blocked.compute(260.0, 80.0).unwrap();
+    blocked.scene(1.0);
+    let rect = blocked.entries["behind"].rect;
+    blocked.pointer_move(rect.x0 + 10.0, rect.y0 + 8.0);
+    blocked.pointer_down();
+    blocked.pointer_move(rect.x0 + 80.0, rect.y0 + 8.0);
+    blocked.pointer_up();
+    assert_eq!(blocked.selected_text(), None);
+}
+
+#[test]
+fn user_select_none_inherits_through_auto_and_explicit_text_can_override_it() {
+    let mut inherited = node("inherited", "text", json!({"width":120}), vec![]);
+    inherited.text = "Inherited".into();
+    let mut override_text = node(
+        "override",
+        "text",
+        json!({"width":120,"userSelect":"text"}),
+        vec![],
+    );
+    override_text.text = "Override".into();
+    let parent = node(
+        "parent",
+        "column",
+        json!({"userSelect":"none"}),
+        vec![inherited, override_text],
+    );
+    let tree = Tree::new(root(vec![parent]));
+    assert_eq!(
+        tree.user_select_mode("inherited"),
+        crate::tree::UserSelectMode::None
+    );
+    assert_eq!(
+        tree.user_select_mode("override"),
+        crate::tree::UserSelectMode::Text
+    );
+}
+
 #[test]
 fn protocol_rejects_duplicate_ids() {
     let leaf = node("same", "view", json!({}), vec![]);
     assert!(protocol::validate(&root(vec![leaf.clone(), leaf])).is_err());
+}
+
+#[test]
+fn protocol_rejects_invalid_user_select_values() {
+    let invalid = node("bad", "text", json!({"userSelect":"maybe"}), vec![]);
+    assert!(protocol::validate(&root(vec![invalid])).is_err());
 }
 
 #[test]

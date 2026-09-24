@@ -111,6 +111,7 @@ export function Button({ variant = "default", size = "default", style, disabled,
     fontFamily: theme.font.family,
     lineHeight: theme.font.lineHeight,
     fontWeight: 500,
+    userSelect: "none",
     align: "center",
     justify: "center",
     disabled: {

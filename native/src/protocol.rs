@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 32;
+pub const VERSION: u32 = 33;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -295,6 +295,17 @@ impl From<accesskit_winit::Event> for Command {
 }
 
 pub fn validate(root: &Node) -> Result<(), String> {
+    fn validate_style(n: &Node) -> Result<(), String> {
+        if let Some(value) = n.style.get("userSelect") {
+            let Some(value) = value.as_str() else {
+                return Err(format!("userSelect must be a string on {}", n.id));
+            };
+            if !matches!(value, "auto" | "text" | "none" | "all") {
+                return Err(format!("Invalid userSelect on {}: {value}", n.id));
+            }
+        }
+        Ok(())
+    }
     fn walk(n: &Node, ids: &mut HashSet<String>, depth: usize) -> Result<(), String> {
         if depth > 128 || ids.len() > 20_000 {
             return Err("UI tree exceeds size/depth limit".into());
@@ -327,6 +338,7 @@ pub fn validate(root: &Node) -> Result<(), String> {
             return Err("Only the root can be a Window".into());
         }
         validate_control(n)?;
+        validate_style(n)?;
         for child in &n.children {
             walk(child, ids, depth + 1)?;
         }
@@ -348,6 +360,14 @@ pub fn validate_patch(nodes: &[Node]) -> Result<(), String> {
     let mut ids = HashSet::new();
     for node in nodes {
         validate_control(node)?;
+        if let Some(value) = node.style.get("userSelect") {
+            let Some(value) = value.as_str() else {
+                return Err(format!("userSelect must be a string on {}", node.id));
+            };
+            if !matches!(value, "auto" | "text" | "none" | "all") {
+                return Err(format!("Invalid userSelect on {}: {value}", node.id));
+            }
+        }
         if node.id.is_empty() || !ids.insert(&node.id) || !node.children.is_empty() {
             return Err("A property patch must have unique IDs and no children".into());
         }
