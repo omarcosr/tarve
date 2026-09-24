@@ -59,7 +59,7 @@ bun run tarve build app.tsx --outfile dist/MeuApp.exe
 
 Configure `tsconfig.json` com `"jsx": "react-jsx"`, `"jsxImportSource": "tarve"`, `"moduleResolution": "Bundler"` e `"types": ["bun", "tarve/assets"]`. A API pública é importada de `tarve`; o build também está disponível como `import { build } from "tarve/build"`.
 
-`examples/counter.tsx` mostra o app mínimo, `examples/basic.tsx` reúne os componentes iniciais, `examples/forms.tsx` demonstra controles de formulário e `examples/large-list.tsx` mostra registros com lista virtual. Exemplos usam a mesma API instalada, sem configurar manualmente a DLL. Eventos nativos ficam em uma fila FIFO na DLL e o runtime Bun principal os drena com `tarve_poll_event()` não bloqueante; não há um segundo Bun Worker dedicado ao pump de eventos.
+`examples/counter.tsx` mostra o app mínimo, `examples/basic.tsx` reúne os componentes iniciais, `examples/forms.tsx` demonstra controles de formulário e `examples/large-list.tsx` mostra registros com lista virtual. Exemplos usam a mesma API instalada, sem configurar manualmente a DLL. Eventos nativos ficam em uma fila FIFO na DLL; um named pipe do Windows acorda o event loop apenas quando a fila passa de vazia para não vazia, e o runtime Bun principal então a drena com `tarve_poll_event()` não bloqueante. Não há um segundo Bun Worker dedicado ao pump de eventos.
 
 `examples/` é um projeto Bun consumidor: tem `package.json` e `tsconfig.json` próprios e importa somente a API pública. Após publicar `tarve@0.1.0` no registry, instale o pacote:
 
@@ -470,7 +470,7 @@ Callbacks de clique/change atualizam a árvore automaticamente. Para alteraçõe
 
 ```text
 packages/core/src/       componentes, JSX runtime, tema, reconciliação, app
-  bridge/                bun:ffi e polling FIFO não bloqueante de eventos
+  bridge/                bun:ffi, fila FIFO e wakeup event-driven via named pipe
 packages/core/build.ts   empacotador reutilizável para apps
 packages/core/cli.ts     comando tarve build
 packages/react-icons/    adapters opcionais para bibliotecas React de ícones
@@ -486,7 +486,7 @@ scripts/package.ts      distribuição npm com tipos e binário nativo
 
 Bun envia a árvore inicial em UTF-8 JSON pela ABI C. Atualizações de propriedades enviam apenas os nós alterados; mudanças de estrutura enviam a árvore e preservam os IDs. Rust mantém os nós e caches do Taffy, preserva scroll/foco e invalida apenas os estágios necessários. A cena Vello inclui apenas as subárvores visíveis. As APIs das crates ficam internas ao backend; as fronteiras são `NativeBridge` e o protocolo versionado.
 
-Rust usa `ControlFlow::Wait`, então a thread nativa dorme quando não há trabalho. O runtime Bun principal consulta a fila nativa com um poll FFI não bloqueante a cada 4 ms; não há Worker adicional, timer de frames ou game loop. Esse poll apenas verifica a fila e não redesenha a janela. Hover/scroll pintam; conteúdo/tipografia invalidam texto e layout; redimensionamento reutiliza o shaping e recalcula quebras/layout. Texturas de imagem e layouts de texto ficam em cache. A escala de DPI é aplicada na renderização e no hit testing.
+Rust usa `ControlFlow::Wait`, então a thread nativa dorme quando não há trabalho. Eventos ficam em uma fila FIFO nativa; quando ela passa de vazia para não vazia, Rust sinaliza o event loop do Bun por um named pipe do Windows. O Bun então drena a fila com `tarve_poll_event()` não bloqueante até ela ficar vazia. Não há polling periódico, Worker adicional, timer de frames ou game loop, portanto o bridge também fica sem wakeups periódicos em idle. Hover/scroll pintam; conteúdo/tipografia invalidam texto e layout; redimensionamento reutiliza o shaping e recalcula quebras/layout. Texturas de imagem e layouts de texto ficam em cache. A escala de DPI é aplicada na renderização e no hit testing.
 
 Medições e limites do benchmark estão em `PERFORMANCE.md`. O acompanhamento do trabalho restante está em `PRODUCTION.md`.
 
@@ -494,4 +494,4 @@ Medições e limites do benchmark estão em `PERFORMANCE.md`. O acompanhamento d
 
 Uma janela por processo. `Input` e `TextArea` oferecem edição Unicode e IME completo; a árvore nativa também expõe UI Automation/AccessKit no Windows. Botões aceitam Tab/Shift+Tab e Enter/Espaço; `Button` mantém o caminho nativo compacto para texto simples e também aceita composição de ícones, texto e layouts aninhados como um único controle semântico. `ScrollArea` possui clipping e scrollbars nativos vertical, horizontal ou bidirecional. Imagens locais PNG/JPEG/SVG usam `cover` ou `contain`; SVGs de UI podem ser declarados em TSX e `Icon` aceita dados vetoriais externos via `iconNode`.
 
-`bun:ffi` é o transporte escolhido para este projeto Bun. Sua API ainda é marcada experimental pelo Bun; a ABI explícita, buffers do chamador e polling não bloqueante evitam reentrância/callbacks nativos cross-thread no runtime principal. Referências: [Bun FFI](https://bun.com/docs/runtime/ffi), [Taffy](https://docs.rs/taffy/0.14.0), [Parley](https://docs.rs/parley/0.11.1), [Vello](https://docs.rs/vello/0.10.0).
+`bun:ffi` é o transporte escolhido para este projeto Bun. Sua API ainda é marcada experimental pelo Bun; a ABI explícita, buffers do chamador e o named pipe usado apenas como sinal de wakeup evitam reentrância/callbacks nativos cross-thread no runtime principal. Os dados dos eventos continuam atravessando a ABI somente quando Bun drena a fila. Referências: [Bun FFI](https://bun.com/docs/runtime/ffi), [Taffy](https://docs.rs/taffy/0.14.0), [Parley](https://docs.rs/parley/0.11.1), [Vello](https://docs.rs/vello/0.10.0).

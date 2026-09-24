@@ -1,5 +1,5 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const NATIVE_ABI_VERSION = 3;
+export const NATIVE_ABI_VERSION = 4;
 export const PROTOCOL_VERSION = 31;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";

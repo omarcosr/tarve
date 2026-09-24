@@ -1,8 +1,7 @@
 import { NATIVE_ABI_VERSION, type SceneDocument, type NativeCommand, type NativeEvent } from "../../../protocol/src/index";
 import { openLibrary } from "./binding";
 import { nativePath } from "#tarve/runtime";
-
-const EVENT_POLL_INTERVAL_MS = 4;
+import { createConnection, type Socket } from "node:net";
 
 export interface NativeBridge {
   start(document: SceneDocument, onEvent: (event: NativeEvent) => void): void;
@@ -67,10 +66,11 @@ export function drainNativeEvents(
 
 export class BunFfiBridge implements NativeBridge {
   private library?: ReturnType<typeof openLibrary>;
-  private eventTimer?: ReturnType<typeof setTimeout>;
+  private eventSocket?: Socket;
   private eventBuffer: Uint8Array<ArrayBufferLike> = new Uint8Array(64 * 1024);
   private readonly decoder = new TextDecoder();
   private closed = false;
+  private eventTransportFailed = false;
 
   constructor(private readonly options: BunFfiBridgeOptions = {}) {}
 
@@ -87,25 +87,66 @@ export class BunFfiBridge implements NativeBridge {
       (buffer, capacity) => this.library!.symbols.tarve_poll_event(buffer, capacity),
       () => this.error(),
       (event) => {
-        if (event.type === "closed") this.closed = true;
+        if (event.type === "closed") {
+          this.closed = true;
+          this.closeEventSocket();
+        }
         onEvent(event);
       },
       this.decoder,
     );
   }
 
-  private clearEventTimer(): void {
-    if (this.eventTimer === undefined) return;
-    clearTimeout(this.eventTimer);
-    this.eventTimer = undefined;
+  private eventPipeName(): string {
+    if (!this.library) throw new Error("Bridge not started");
+    let buffer = new Uint8Array(256);
+    for (;;) {
+      const length = this.library.symbols.tarve_event_pipe_name(buffer, buffer.length);
+      if (length < -1) {
+        buffer = new Uint8Array(-length);
+        continue;
+      }
+      if (length < 0) throw this.error();
+      if (length === 0) throw new Error("Native event wake pipe name is empty");
+      return this.decoder.decode(buffer.subarray(0, length));
+    }
   }
 
-  private scheduleEventPoll(onEvent: (event: NativeEvent) => void, delay = EVENT_POLL_INTERVAL_MS): void {
-    if (!this.library || this.closed || this.eventTimer !== undefined) return;
-    this.eventTimer = setTimeout(() => {
-      this.eventTimer = undefined;
+  private closeEventSocket(): void {
+    const socket = this.eventSocket;
+    this.eventSocket = undefined;
+    if (socket && !socket.destroyed) socket.destroy();
+  }
+
+  private failEventTransport(error: unknown, onEvent: (event: NativeEvent) => void): void {
+    if (this.closed || this.eventTransportFailed) return;
+    this.eventTransportFailed = true;
+    this.closed = true;
+    this.closeEventSocket();
+    const cleanupErrors = this.stopAfterEventFailure();
+    onEvent({ type: "error", message: `Native event wake pipe failed: ${error instanceof Error ? error.message : String(error)}` });
+    for (const cleanupError of cleanupErrors) {
+      onEvent({ type: "error", message: `Bridge cleanup failed: ${cleanupError.message}` });
+    }
+    onEvent({ type: "closed" });
+  }
+
+  private connectEventWake(onEvent: (event: NativeEvent) => void): void {
+    const socket = createConnection(this.eventPipeName());
+    this.eventSocket = socket;
+    socket.on("connect", () => {
+      if (this.closed || this.eventSocket !== socket) return;
       this.pollEvents(onEvent);
-    }, delay);
+    });
+    socket.on("data", () => {
+      if (this.closed || this.eventSocket !== socket) return;
+      this.pollEvents(onEvent);
+    });
+    socket.on("error", error => this.failEventTransport(error, onEvent));
+    socket.on("close", hadError => {
+      if (this.closed || this.eventSocket !== socket) return;
+      this.failEventTransport(new Error(hadError ? "wake pipe closed after socket error" : "wake pipe closed unexpectedly"), onEvent);
+    });
   }
 
   private pollEvents(onEvent: (event: NativeEvent) => void): void {
@@ -123,13 +164,12 @@ export class BunFfiBridge implements NativeBridge {
       onEvent({ type: "closed" });
       return;
     }
-    if (!this.closed) this.scheduleEventPoll(onEvent);
   }
 
   private stopAfterEventFailure(): Error[] {
     const cleanupErrors: Error[] = [];
     if (!this.library) return cleanupErrors;
-    this.clearEventTimer();
+    this.closeEventSocket();
     const close = new TextEncoder().encode(JSON.stringify({ type: "close" }));
     if (this.library.symbols.tarve_send(close, close.length) !== 0) cleanupErrors.push(this.error());
     return cleanupErrors;
@@ -144,7 +184,18 @@ export class BunFfiBridge implements NativeBridge {
     if (this.library.symbols.tarve_start(payload, payload.length) !== 0) {
       throw this.error();
     }
-    this.scheduleEventPoll(onEvent, 0);
+    try {
+      this.connectEventWake(onEvent);
+    } catch (error) {
+      this.closed = true;
+      const cleanupErrors = this.stopAfterEventFailure();
+      const joinResult = this.library.symbols.tarve_join();
+      if (joinResult !== 0) cleanupErrors.push(this.error());
+      if (cleanupErrors.length) {
+        throw new AggregateError([error, ...cleanupErrors], "Could not initialize native event wake pipe");
+      }
+      throw error;
+    }
   }
 
   send(command: NativeCommand): void {
@@ -156,7 +207,7 @@ export class BunFfiBridge implements NativeBridge {
 
   join(): void {
     if (!this.library) return;
-    this.clearEventTimer();
+    this.closeEventSocket();
     const result = this.library.symbols.tarve_join();
     if (result !== 0) throw this.error();
   }

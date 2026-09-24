@@ -11,18 +11,204 @@ use std::{
 };
 use winit::event_loop::EventLoopProxy;
 
-#[derive(Default)]
+#[cfg(target_os = "windows")]
+mod wake_pipe {
+    use std::{
+        ptr,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+    use windows_sys::Win32::{
+        Foundation::{
+            CloseHandle, ERROR_BROKEN_PIPE, ERROR_NO_DATA, ERROR_PIPE_CONNECTED,
+            ERROR_PIPE_LISTENING, GetLastError, INVALID_HANDLE_VALUE,
+        },
+        Storage::FileSystem::{PIPE_ACCESS_DUPLEX, WriteFile},
+        System::Pipes::{
+            ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_NOWAIT,
+            PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE,
+        },
+    };
+
+    static NEXT_PIPE_ID: AtomicU64 = AtomicU64::new(1);
+
+    pub struct WakePipe {
+        handle: usize,
+        name: String,
+        connected: bool,
+    }
+
+    impl WakePipe {
+        pub fn new() -> Result<Self, String> {
+            let id = NEXT_PIPE_ID.fetch_add(1, Ordering::Relaxed);
+            let name = format!(r"\\.\pipe\tarve-events-{}-{id}", std::process::id());
+            let wide: Vec<u16> = name.encode_utf16().chain([0]).collect();
+            let handle = unsafe {
+                CreateNamedPipeW(
+                    wide.as_ptr(),
+                    PIPE_ACCESS_DUPLEX,
+                    PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                    1,
+                    64,
+                    64,
+                    0,
+                    ptr::null(),
+                )
+            };
+            if handle == INVALID_HANDLE_VALUE {
+                return Err(format!(
+                    "Could not create native event wake pipe: {}",
+                    unsafe { GetLastError() }
+                ));
+            }
+            Ok(Self {
+                handle: handle as usize,
+                name,
+                connected: false,
+            })
+        }
+
+        pub fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn handle(&self) -> windows_sys::Win32::Foundation::HANDLE {
+            self.handle as windows_sys::Win32::Foundation::HANDLE
+        }
+
+        fn ensure_connected(&mut self) -> bool {
+            if self.connected || self.handle == 0 {
+                return self.connected;
+            }
+            let connected = unsafe { ConnectNamedPipe(self.handle(), ptr::null_mut()) } != 0;
+            if connected {
+                self.connected = true;
+                return true;
+            }
+            match unsafe { GetLastError() } {
+                ERROR_PIPE_CONNECTED => {
+                    self.connected = true;
+                    true
+                }
+                ERROR_PIPE_LISTENING => false,
+                ERROR_NO_DATA | ERROR_BROKEN_PIPE => {
+                    unsafe { DisconnectNamedPipe(self.handle()) };
+                    false
+                }
+                _ => {
+                    self.close();
+                    false
+                }
+            }
+        }
+
+        pub fn signal(&mut self) {
+            if !self.ensure_connected() {
+                return;
+            }
+            let byte = [1u8];
+            let mut written = 0u32;
+            let ok = unsafe {
+                WriteFile(
+                    self.handle(),
+                    byte.as_ptr(),
+                    byte.len() as u32,
+                    &mut written,
+                    ptr::null_mut(),
+                )
+            } != 0;
+            if !ok {
+                let error = unsafe { GetLastError() };
+                if error == ERROR_NO_DATA || error == ERROR_BROKEN_PIPE {
+                    unsafe { DisconnectNamedPipe(self.handle()) };
+                    self.connected = false;
+                } else {
+                    self.close();
+                }
+            } else if written != 1 {
+                self.close();
+            }
+        }
+
+        pub fn close(&mut self) {
+            if self.handle == 0 {
+                return;
+            }
+            if self.connected {
+                unsafe { DisconnectNamedPipe(self.handle()) };
+            }
+            unsafe { CloseHandle(self.handle()) };
+            self.handle = 0;
+            self.connected = false;
+        }
+    }
+
+    impl Drop for WakePipe {
+        fn drop(&mut self) {
+            self.close();
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+mod wake_pipe {
+    pub struct WakePipe;
+    impl WakePipe {
+        pub fn new() -> Result<Self, String> {
+            Err("Native event wake pipe is only supported on Windows".into())
+        }
+        pub fn name(&self) -> &str {
+            ""
+        }
+        pub fn signal(&mut self) {}
+        pub fn close(&mut self) {}
+    }
+}
+
+use wake_pipe::WakePipe;
+
 pub struct Events {
     queue: Mutex<VecDeque<Vec<u8>>>,
     wake: Condvar,
+    wake_pipe: Mutex<WakePipe>,
 }
 impl Events {
+    fn new() -> Result<Self, String> {
+        Ok(Self {
+            queue: Mutex::new(VecDeque::new()),
+            wake: Condvar::new(),
+            wake_pipe: Mutex::new(WakePipe::new()?),
+        })
+    }
+
     pub fn push(&self, event: serde_json::Value) {
-        self.queue
+        let should_wake = {
+            let mut queue = self.queue.lock().unwrap_or_else(|p| p.into_inner());
+            let was_empty = queue.is_empty();
+            queue.push_back(event.to_string().into_bytes());
+            was_empty
+        };
+        self.wake.notify_one();
+        if should_wake {
+            self.wake_pipe
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .signal();
+        }
+    }
+
+    fn wake_pipe_name(&self) -> String {
+        self.wake_pipe
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .push_back(event.to_string().into_bytes());
-        self.wake.notify_one();
+            .name()
+            .to_owned()
+    }
+
+    fn close_wake_pipe(&self) {
+        self.wake_pipe
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .close();
     }
 }
 struct Host {
@@ -32,7 +218,7 @@ struct Host {
 }
 static HOST: OnceLock<Mutex<Option<Host>>> = OnceLock::new();
 static LAST_ERROR: Mutex<String> = Mutex::new(String::new());
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
 fn host() -> &'static Mutex<Option<Host>> {
     HOST.get_or_init(|| Mutex::new(None))
 }
@@ -97,7 +283,7 @@ pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
         if state.is_some() {
             return Err("Only one native app can be started per process".into());
         }
-        let events = Arc::new(Events::default());
+        let events = Arc::new(Events::new()?);
         let out = events.clone();
         let (tx, rx) = mpsc::sync_channel(1);
         let thread = std::thread::Builder::new()
@@ -122,6 +308,31 @@ pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
             thread: Some(thread),
         });
         Ok(0)
+    })
+}
+
+/// Returns the UTF-8 Windows named-pipe path used only to wake the Bun event loop.
+/// Events themselves remain in the native FIFO and are consumed by tarve_poll_event().
+/// A negative value is the required capacity and leaves the name unchanged for retry.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tarve_event_pipe_name(ptr: *mut u8, capacity: u32) -> i32 {
+    guard(|| {
+        if ptr.is_null() || capacity == 0 {
+            return Err("Invalid output buffer".into());
+        }
+        let name = host()
+            .lock()
+            .map_err(|e| e.to_string())?
+            .as_ref()
+            .ok_or("App not started")?
+            .events
+            .wake_pipe_name();
+        let bytes = name.as_bytes();
+        if bytes.len() > capacity as usize {
+            return Ok(-(bytes.len() as i32));
+        }
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len()) };
+        Ok(bytes.len() as i32)
     })
 }
 
@@ -150,7 +361,7 @@ pub unsafe extern "C" fn tarve_send(ptr: *const u8, len: u32) -> i32 {
     })
 }
 
-/// Blocks on a condition variable. Call ONLY from the dedicated Bun Worker.
+/// Legacy blocking dequeue retained for ABI consumers outside the current Bun bridge.
 /// Negative return is the required capacity; the event remains queued for retry.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tarve_wait_event(ptr: *mut u8, capacity: u32) -> i32 {
@@ -228,16 +439,72 @@ pub unsafe extern "C" fn tarve_last_error(ptr: *mut u8, capacity: u32) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn tarve_join() -> i32 {
     guard(|| {
-        let thread = host()
-            .lock()
-            .map_err(|e| e.to_string())?
-            .as_mut()
-            .and_then(|h| h.thread.take());
+        let (thread, events) = {
+            let mut state = host().lock().map_err(|e| e.to_string())?;
+            let host = state.as_mut().ok_or("App not started")?;
+            (host.thread.take(), host.events.clone())
+        };
         if let Some(thread) = thread {
             thread
                 .join()
                 .map_err(|_| "Window thread failed".to_string())?;
         }
+        events.close_wake_pipe();
         Ok(0)
     })
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use super::Events;
+    use std::{fs::OpenOptions, io::Read, os::windows::io::AsRawHandle};
+    use windows_sys::Win32::System::Pipes::PeekNamedPipe;
+
+    fn available_bytes(file: &std::fs::File) -> u32 {
+        let mut available = 0u32;
+        let ok = unsafe {
+            PeekNamedPipe(
+                file.as_raw_handle() as _,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        };
+        assert_ne!(ok, 0);
+        available
+    }
+
+    #[test]
+    fn named_pipe_wakes_once_per_empty_to_nonempty_queue_transition() {
+        let events = Events::new().expect("wake pipe");
+        let name = events.wake_pipe_name();
+        let mut client = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(name)
+            .expect("connect wake pipe client");
+
+        events.push(serde_json::json!({"type":"first"}));
+        let mut byte = [0u8; 1];
+        client.read_exact(&mut byte).expect("read first wake");
+        assert_eq!(byte, [1]);
+
+        events.push(serde_json::json!({"type":"second"}));
+        assert_eq!(
+            available_bytes(&client),
+            0,
+            "queued bursts must coalesce wake signals"
+        );
+
+        events
+            .queue
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clear();
+        events.push(serde_json::json!({"type":"third"}));
+        client.read_exact(&mut byte).expect("read rearmed wake");
+        assert_eq!(byte, [1]);
+    }
 }

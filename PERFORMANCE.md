@@ -38,7 +38,7 @@ No mesmo PC, um probe separado do GPUix 0.10.0 ficou em ~94.3 MB de working set 
 
 ### Low-memory CPU renderer
 
-Windows x64, Bun 1.4.2, Counter 620x520 executado a partir do pacote local atualizado no renderer CPU. O backend pode ser selecionado por `createApp(App, { renderer: "cpu" })`; `TARVE_RENDERER=cpu` continua disponível quando o app usa `renderer: "auto"`. No estado final com polling FFI não bloqueante de 4 ms, após o app estabilizar em idle:
+Windows x64, Bun 1.4.2, Counter 620x520 executado a partir do pacote local no renderer CPU. O backend pode ser selecionado por `createApp(App, { renderer: "cpu" })`; `TARVE_RENDERER=cpu` continua disponível quando o app usa `renderer: "auto"`. A medição abaixo foi feita na revisão anterior do bridge, ainda com polling FFI não bloqueante de 4 ms, após o app estabilizar em idle; portanto ela é um limite histórico conservador e ainda não foi refeita após o wakeup event-driven:
 
 | Metric | CPU renderer |
 | --- | ---: |
@@ -49,7 +49,7 @@ Windows x64, Bun 1.4.2, Counter 620x520 executado a partir do pacote local atual
 
 Esse modo mantém o Bun como runtime principal e continua suportando TypeScript/TSX, APIs Bun e pacotes npm. A redução vem de duas mudanças: o pump de eventos não cria mais um segundo Bun Worker, e o renderer `vello_cpu + softbuffer` evita inicializar `wgpu + Vello GPU`. O backend GPU continua disponível e permanece o padrão. Uma configuração explícita em `createApp` tem prioridade sobre `TARVE_RENDERER`; `"auto"` preserva o override por env para desenvolvimento/CI.
 
-Um protótipo anterior tentou usar `JSCallback({ threadsafe: true })` para acordar o runtime principal. No Bun 1.4.2, depois da primeira invocação cross-thread esse callback manteve aproximadamente um core ocupado em idle. O caminho final remove callbacks cross-thread e usa `tarve_poll_event()` a cada 4 ms. Em probes isolados, polls de 4–16 ms ficaram entre ~0.0% e ~0.2% de um core; no app completo o Counter ficou em ~0.39% de um core idle.
+Um protótipo anterior tentou usar `JSCallback({ threadsafe: true })` para acordar o runtime principal. No Bun 1.4.2, depois da primeira invocação cross-thread esse callback manteve aproximadamente um core ocupado em idle. A revisão seguinte removeu callbacks cross-thread e usou `tarve_poll_event()` a cada 4 ms; em probes isolados, polls de 4–16 ms ficaram entre ~0.0% e ~0.2% de um core e o Counter ficou em ~0.39% de um core idle. O bridge atual eliminou também esse polling periódico: um named pipe sinaliza apenas a transição da fila nativa de vazia para não vazia, e Bun drena a FIFO via FFI quando acordado. Uma nova medição A/B de CPU idle ainda deve ser registrada antes de substituir os números históricos acima.
 
 Os números abaixo são medições históricas do renderer GPU Vello/WGPU e usam um método diferente (executáveis standalone), portanto não devem ser tratados como comparação A/B direta com a tabela D3D11 atual.
 
@@ -60,7 +60,7 @@ Windows x64 measurements after 1.8 s idle, using the standalone release executab
 | Counter | ~203 MB | ~537 MB |
 | Basic | ~207–215 MB | ~597 MB |
 
-Before requesting wgpu's memory-oriented allocation strategy and limiting Vello shader initialization to one thread, the Counter executable measured about 266 MB working set / 842 MB private bytes. In an isolated Bun process, the old dedicated event Worker added roughly 15–16 MB working set and about 40 MB private bytes. It has since been removed: native events remain in a FIFO queue and the main Bun runtime drains them with a non-blocking FFI poll.
+Before requesting wgpu's memory-oriented allocation strategy and limiting Vello shader initialization to one thread, the Counter executable measured about 266 MB working set / 842 MB private bytes. In an isolated Bun process, the old dedicated event Worker added roughly 15–16 MB working set and about 40 MB private bytes. It has since been removed: native events remain in a FIFO queue, a Windows named pipe wakes the Bun event loop only when work arrives, and the main runtime then drains the queue with non-blocking FFI calls.
 
 ## Implemented
 
@@ -75,7 +75,7 @@ Before requesting wgpu's memory-oriented allocation strategy and limiting Vello 
 - The legacy Windows Vello/WGPU path still requests wgpu's memory-oriented allocation strategy and uses one Vello shader-initialization thread. Defining `WGPU_BACKEND` explicitly selects this path for development/diagnostics.
 - `createApp(App, { renderer: "cpu" })` selects a single-threaded `vello_cpu + softbuffer` path that shares the same tree/text/control paint traversal and supports captures, images, clipping and text. `"gpu"` explicitly selects GPU; `"auto"` keeps the GPU default and honors `TARVE_RENDERER` for development/CI overrides.
 - Clean software redraws reuse retained softbuffer pixels when possible, avoiding another full-frame vello_cpu rasterization and RGBA flattening pass when content did not change.
-- The native event loop sleeps when idle. Native events are queued FIFO and the Bun main runtime checks them with a 4 ms non-blocking FFI poll; no dedicated Bun event Worker or cross-thread JS callback is created.
+- The native event loop sleeps when idle. Native events are queued FIFO; a Windows named pipe sends one wake signal when the queue transitions from empty to non-empty, then the Bun main runtime drains it with non-blocking FFI calls. There is no periodic bridge poll, dedicated Bun event Worker or cross-thread JS callback.
 
 ## Remaining work
 
