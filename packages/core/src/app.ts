@@ -1,6 +1,6 @@
 import type { FileDialogOptions, NativeEvent, NativeCommand, NativeNode, Renderer, Snapshot } from "../../protocol/src/index";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
-import { compileTree, diffTrees, type CompiledTree } from "./reconciler";
+import { compileTree, diffTreeMutations, type CompiledTree } from "./reconciler";
 import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
 import type { VNode } from "./jsx-runtime";
 import type { ComponentAdapter } from "./component-adapter";
@@ -84,6 +84,16 @@ function nativeShadow(tree: CompiledTree, previous?: CompiledTree): CompiledTree
   };
   index(document.root);
   return { document, handlers: tree.handlers, nodes };
+}
+
+function reconciliationCommand(previous: CompiledTree, next: CompiledTree): NativeCommand | undefined {
+  const mutations = diffTreeMutations(previous, next);
+  if (mutations === null) return { type: "update", root: next.document.root };
+  if (mutations.length === 0) return undefined;
+  if (mutations.every(mutation => mutation.type === "patch")) {
+    return { type: "patch", nodes: mutations.map(mutation => mutation.node) };
+  }
+  return { type: "mutate", mutations };
 }
 
 export function createApp(view: () => VNode, options: AppOptions = {}): AppHandle {
@@ -178,14 +188,14 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
   function restoreCommitted(): void {
     if (ended || closing || !committed || !observed) return;
-    let nodes: NativeNode[] | null;
+    let command: NativeCommand | undefined;
     try {
-      nodes = diffTrees(observed, committed);
+      command = reconciliationCommand(observed, committed);
     } catch (error) {
       reportError(error, { source: "render", event: "rollback" });
       return;
     }
-    if (nodes !== null && nodes.length === 0) return;
+    if (!command) return;
     let restoredObserved: CompiledTree;
     try {
       restoredObserved = nativeShadow(committed, observed);
@@ -193,9 +203,6 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       reportError(error, { source: "render", event: "rollback-shadow" });
       return;
     }
-    const command: NativeCommand = nodes === null
-      ? { type: "update", root: committed.document.root }
-      : { type: "patch", nodes };
     if (sendInternal(command, { source: "bridge", event: `rollback:${command.type}` })) {
       observed = restoredObserved;
     }
@@ -220,9 +227,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         return;
       }
 
-      let nodes: NativeNode[] | null;
+      let command: NativeCommand | undefined;
       try {
-        nodes = diffTrees(observed, next);
+        command = reconciliationCommand(observed, next);
       } catch (error) {
         reportError(error, { source: "render", event: "diff" });
         restoreCommitted();
@@ -238,10 +245,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         return;
       }
 
-      if (nodes === null || nodes.length > 0) {
-        const command: NativeCommand = nodes === null
-          ? { type: "update", root: next.document.root }
-          : { type: "patch", nodes };
+      if (command) {
         if (!sendInternal(command, { source: "bridge", event: command.type })) {
           restoreCommitted();
           return;

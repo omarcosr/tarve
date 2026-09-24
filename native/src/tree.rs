@@ -1,6 +1,6 @@
 use crate::{
     paint::PaintTarget,
-    protocol::Node,
+    protocol::{Node, TreeMutation},
     text::{AccessibilityTextLine, TEXT_KEYS, TextEngine},
 };
 use serde_json::{Value, json};
@@ -656,6 +656,223 @@ impl Tree {
             let children = previous.children.clone();
             self.reconcile_node(node, children, Some(previous));
         }
+        self.prune_images();
+        self.prune_svgs();
+        let restore_focus = self.modal_focus_transition(previous_modal, previous_focus);
+        self.prune_interaction();
+        if let Some(id) = restore_focus {
+            self.focus(&id);
+        }
+        self.refresh_stacking();
+        Ok(())
+    }
+
+    pub fn mutate(&mut self, mutations: Vec<TreeMutation>) -> Result<(), String> {
+        crate::protocol::validate_mutations(&mutations)?;
+        if mutations.is_empty() {
+            return Ok(());
+        }
+
+        // Build and validate the resulting hierarchy before touching retained state. This makes
+        // the whole mutation batch atomic even though application below is incremental.
+        let mut structure: HashMap<String, Vec<String>> = self
+            .entries
+            .iter()
+            .map(|(id, entry)| (id.clone(), entry.children.clone()))
+            .collect();
+        let mut kinds: HashMap<String, String> = self
+            .entries
+            .iter()
+            .map(|(id, entry)| (id.clone(), entry.node.kind.clone()))
+            .collect();
+        let mut creates = Vec::new();
+        let mut patches = Vec::new();
+        let mut child_updates = HashMap::<String, Vec<String>>::new();
+        let mut removes = HashSet::<String>::new();
+        let mut created = HashSet::<String>::new();
+        let mut patched = HashSet::<String>::new();
+
+        for mutation in mutations {
+            match mutation {
+                TreeMutation::Create { node } => {
+                    let node = *node;
+                    if kinds.contains_key(&node.id) || !created.insert(node.id.clone()) {
+                        return Err(format!("Create references an existing node: {}", node.id));
+                    }
+                    structure.insert(node.id.clone(), Vec::new());
+                    kinds.insert(node.id.clone(), node.kind.clone());
+                    creates.push(node);
+                }
+                TreeMutation::Patch { node } => {
+                    let node = *node;
+                    if created.contains(&node.id) {
+                        return Err(format!(
+                            "Created node must carry its final properties: {}",
+                            node.id
+                        ));
+                    }
+                    let Some(kind) = kinds.get(&node.id) else {
+                        return Err(format!("Patch references a missing node: {}", node.id));
+                    };
+                    if kind != &node.kind {
+                        return Err(format!("Patch changes node kind: {}", node.id));
+                    }
+                    if !patched.insert(node.id.clone()) {
+                        return Err(format!("Duplicate property patch: {}", node.id));
+                    }
+                    patches.push(node);
+                }
+                TreeMutation::Children { id, children } => {
+                    if !kinds.contains_key(&id) {
+                        return Err(format!("Children mutation references a missing node: {id}"));
+                    }
+                    if child_updates.insert(id.clone(), children).is_some() {
+                        return Err(format!("Duplicate children mutation: {id}"));
+                    }
+                }
+                TreeMutation::Remove { id } => {
+                    if id == self.root {
+                        return Err("Structural mutations cannot remove the root Window".into());
+                    }
+                    if created.contains(&id) {
+                        return Err(format!(
+                            "Mutation batch cannot create and remove the same node: {id}"
+                        ));
+                    }
+                    if !kinds.contains_key(&id) || !removes.insert(id.clone()) {
+                        return Err(format!(
+                            "Remove references a missing or duplicate node: {id}"
+                        ));
+                    }
+                }
+            }
+        }
+
+        for id in &removes {
+            if patched.contains(id) || child_updates.contains_key(id) {
+                return Err(format!("Removed node also has another mutation: {id}"));
+            }
+        }
+        for (id, children) in &child_updates {
+            if removes.contains(id) {
+                return Err(format!("Removed node also changes children: {id}"));
+            }
+            structure.insert(id.clone(), children.clone());
+        }
+        for id in &removes {
+            structure.remove(id);
+            kinds.remove(id);
+        }
+        if structure.len() > 20_000 {
+            return Err("UI tree exceeds size limit".into());
+        }
+        if kinds.get(&self.root).map(String::as_str) != Some("window") {
+            return Err("Structural mutation batch must preserve the root Window".into());
+        }
+
+        let mut parents = HashMap::<String, String>::new();
+        for (parent, children) in &structure {
+            let mut siblings = HashSet::with_capacity(children.len());
+            for child in children {
+                if !siblings.insert(child) {
+                    return Err(format!("Duplicate child {child} under {parent}"));
+                }
+                if child == &self.root {
+                    return Err("Root Window cannot become a child".into());
+                }
+                if !structure.contains_key(child) {
+                    return Err(format!("Dangling child {child} under {parent}"));
+                }
+                if let Some(previous) = parents.insert(child.clone(), parent.clone()) {
+                    return Err(format!(
+                        "Node {child} cannot have two parents: {previous} and {parent}"
+                    ));
+                }
+            }
+        }
+        for id in structure.keys() {
+            if id != &self.root && !parents.contains_key(id) {
+                return Err(format!("Structural mutation leaves node detached: {id}"));
+            }
+        }
+
+        fn visit_order(
+            id: &str,
+            structure: &HashMap<String, Vec<String>>,
+            visited: &mut HashSet<String>,
+            order: &mut Vec<String>,
+            depth: usize,
+        ) -> Result<(), String> {
+            if depth > 128 {
+                return Err("UI tree exceeds depth limit".into());
+            }
+            if !visited.insert(id.to_string()) {
+                return Err(format!("Structural mutation creates a cycle at {id}"));
+            }
+            order.push(id.to_string());
+            for child in &structure[id] {
+                visit_order(child, structure, visited, order, depth + 1)?;
+            }
+            Ok(())
+        }
+
+        let mut final_order = Vec::with_capacity(structure.len());
+        let mut visited = HashSet::with_capacity(structure.len());
+        visit_order(&self.root, &structure, &mut visited, &mut final_order, 0)?;
+        if visited.len() != structure.len() {
+            return Err("Structural mutation creates a disconnected cycle".into());
+        }
+
+        let previous_modal = self.active_modal().map(str::to_string);
+        let previous_focus = self.focused.clone();
+
+        for node in creates {
+            self.reconcile_node(node, Vec::new(), None);
+        }
+        for node in patches {
+            let previous = self
+                .entries
+                .remove(&node.id)
+                .expect("validated patch target exists");
+            let children = previous.children.clone();
+            self.reconcile_node(node, children, Some(previous));
+        }
+        for (id, children) in child_updates {
+            let entry = self
+                .entries
+                .get_mut(&id)
+                .expect("validated children target exists");
+            if entry.children != children {
+                entry.children = children;
+                entry.structure_dirty = true;
+                self.dirty.layout = true;
+                self.dirty.paint = true;
+            }
+        }
+        for id in removes {
+            if let Some(removed) = self.entries.remove(&id)
+                && let Some(layout_id) = removed.layout_id
+            {
+                self.layout
+                    .remove(layout_id)
+                    .expect("retained layout node exists");
+            }
+            self.svgs.remove(&id);
+        }
+        for (id, entry) in &mut self.entries {
+            entry.parent = parents.get(id).cloned();
+        }
+        self.order = final_order;
+
+        self.text.retain(|id| {
+            self.entries.contains_key(id)
+                || id
+                    .strip_suffix("::caret")
+                    .is_some_and(|id| self.entries.contains_key(id))
+                || id
+                    .strip_suffix("::ime")
+                    .is_some_and(|id| self.entries.contains_key(id))
+        });
         self.prune_images();
         self.prune_svgs();
         let restore_focus = self.modal_focus_transition(previous_modal, previous_focus);

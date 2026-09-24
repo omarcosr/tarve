@@ -1338,6 +1338,23 @@ impl ApplicationHandler<Command> for App {
                     }
                 }
             }
+            Command::Mutate { mutations } => {
+                let chrome_changed = mutations.iter().any(|mutation| match mutation {
+                    crate::protocol::TreeMutation::Patch { node }
+                    | crate::protocol::TreeMutation::Create { node } => {
+                        node.id == self.tree.root && node.style.get("borderColor").is_some()
+                    }
+                    _ => false,
+                });
+                if let Err(error) = self.tree.mutate(mutations) {
+                    self.events.push(crate::protocol::error(error));
+                } else {
+                    accessibility_changed = true;
+                    if chrome_changed {
+                        self.sync_custom_window_chrome();
+                    }
+                }
+            }
             Command::Update { root } => {
                 self.tree.update(*root);
                 self.sync_custom_window_chrome();

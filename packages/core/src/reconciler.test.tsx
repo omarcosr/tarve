@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Window, View, Column, Row, Text, Button, Link, Icon, Svg, Path, Circle, Image, Input, TextArea, TitleBar, Modal, Pressable } from "./components";
-import { compileTree, diffTrees } from "./reconciler";
+import { compileTree, diffTreeMutations, diffTrees } from "./reconciler";
 import { createTheme, darkTheme, lightTheme, Theme, theme } from "./theme";
 import type { ComponentAdapter } from "./component-adapter";
 import type { VNode } from "./jsx-runtime";
@@ -415,6 +415,28 @@ describe("native TSX protocol", () => {
     expect(tree.nodes.get("foreign")?.style.width).toBe(18);
     expect(() => compileTree(Window({ children: foreignNode }))).toThrow("foreign component executed directly");
   });
+  test("component adapters can return raw native svg nodes without intrinsic svg rewriting", () => {
+    const ForeignIcon = () => { throw new Error("foreign icon executed directly"); };
+    const foreignNode: VNode = { type: ForeignIcon, props: { id: "foreign-icon" } };
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" color="#000000" data-tarve-current-color="1" fill="none" stroke="currentColor"><path d="M2 12h20"/></svg>';
+    const adapter: ComponentAdapter = ({ type, props }) => type === ForeignIcon
+      ? {
+          type: "svg",
+          props: {
+            id: String(props.id),
+            style: { width: 24, height: 24, foreground: theme.colors.foreground },
+            svg,
+          },
+        }
+      : undefined;
+    const tree = compileTree(Window({ children: foreignNode }), false, "auto", [adapter]);
+    const icon = tree.nodes.get("foreign-icon");
+    expect(icon?.kind).toBe("svg");
+    expect(icon?.style.width).toBe(24);
+    expect(icon?.style.foreground).toBe(lightTheme.colors.foreground);
+    expect(icon?.svg).toBe(svg);
+    expect(icon?.svg).toContain('<path d="M2 12h20"/>');
+  });
   test("Button keeps text buttons native and compiles composed children into one semantic pressable", () => {
     const tree = compileTree(
       <Window theme={darkTheme}>
@@ -468,7 +490,7 @@ describe("native TSX protocol", () => {
     expect(() => compileTree(<Window><Text id="same">a</Text><Text id="same">b</Text></Window>)).toThrow("Duplicate");
     expect(() => compileTree(<Column/>)).toThrow("Window root");
   });
-  test("sends only changed properties and detects structural updates", () => {
+  test("sends property patches and encodes structural changes as retained mutations", () => {
     const view = (value: string) => compileTree(<Window><Column><Text id="label">{value}</Text><Button id="button">Save</Button></Column></Window>);
     const a = view("Before");
     expect(diffTrees(a, view("Before"))).toEqual([]);
@@ -477,6 +499,25 @@ describe("native TSX protocol", () => {
     expect(changes[0].children).toEqual([]);
     expect(changes[0].text).toBe("After");
     expect(diffTrees(a, compileTree(<Window><Text id="label">After</Text></Window>))).toBeNull();
+
+    const before = compileTree(
+      <Window><Column id="parent"><Text id="a">A</Text><Text id="b">B</Text></Column></Window>,
+    );
+    const after = compileTree(
+      <Window><Column id="parent"><Text id="b">B</Text><Text id="c">C</Text></Column></Window>,
+    );
+    expect(diffTreeMutations(before, after)).toEqual([
+      expect.objectContaining({ type: "create", node: expect.objectContaining({ id: "c", children: [] }) }),
+      { type: "children", id: "parent", children: ["b", "c"] },
+      { type: "remove", id: "a" },
+    ]);
+
+    const reordered = compileTree(
+      <Window><Column id="parent"><Text id="b">B</Text><Text id="a">A</Text></Column></Window>,
+    );
+    expect(diffTreeMutations(before, reordered)).toEqual([
+      { type: "children", id: "parent", children: ["b", "a"] },
+    ]);
   });
   test("style snapshots detect mutations to shared inset objects", () => {
     const padding = { left: 8 };
@@ -541,7 +582,7 @@ describe("native TSX protocol", () => {
   test("Window close requests stay in JS handlers while native receives an intercept flag", () => {
     let requested = false;
     const tree = compileTree(<Window onCloseRequest={() => { requested = true; }}><Text>Hello</Text></Window>);
-    expect(tree.document.version).toBe(35);
+    expect(tree.document.version).toBe(36);
     expect(tree.document.root.closeIntercept).toBe(true);
     expect(JSON.stringify(tree.document)).not.toContain("onCloseRequest");
     tree.handlers.get(tree.document.root.id)?.onCloseRequest?.({ defaultPrevented: false, preventDefault() {} });

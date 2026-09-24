@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, type NativeNode, type Renderer, type SceneDocument, type ScrollPosition, type WindowOptions } from "../../protocol/src/index";
+import { PROTOCOL_VERSION, type NativeNode, type Renderer, type SceneDocument, type ScrollPosition, type TreeMutation, type WindowOptions } from "../../protocol/src/index";
 import { Fragment, _isNativeVNode, type Child, type IntrinsicAnchorProps, type VNode } from "./jsx-runtime";
 import { lightTheme, resolveThemeColor, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
@@ -55,7 +55,7 @@ export function compileTree(
   const labelableTargets = new Map<string, string>();
   let windowOptions: WindowOptions | undefined;
   let selectedTheme: ThemeDefinition = lightTheme;
-  function visit(child: Child, path: string, group?: string): NativeNode[] {
+  function visit(child: Child, path: string, group?: string, adapterNative = false): NativeNode[] {
     if (child == null || typeof child === "boolean") return [];
     if (Array.isArray(child)) return child.flatMap((item, index) => {
       const key = typeof item === "object" && item && !Array.isArray(item) ? item.key : undefined;
@@ -69,14 +69,18 @@ export function compileTree(
       return [node];
     }
     if (child.type === Fragment || child.type === "fragment") return visit(child.props.children, path, group);
-    for (const adapter of componentAdapters) {
-      const adapted = adapter({ type: child.type, props: child.props, key: child.key });
-      if (!adapted) continue;
-      if (adapted === child) throw new Error("Component adapter returned the same VNode instance.");
-      return visit(adapted, path, group);
+    if (!adapterNative) {
+      for (const adapter of componentAdapters) {
+        const adapted = adapter({ type: child.type, props: child.props, key: child.key });
+        if (!adapted) continue;
+        if (adapted === child) throw new Error("Component adapter returned the same VNode instance.");
+        const adaptedIsNative = typeof adapted.type === "string" && kinds.has(adapted.type);
+        return visit(adapted, path, group, adaptedIsNative);
+      }
     }
     if (typeof child.type === "function") return visit(child.type(child.props), path, group);
-    if (!_isNativeVNode(child) && child.type in headingPreset) {
+    const isNativeVNode = adapterNative || _isNativeVNode(child);
+    if (!isNativeVNode && child.type in headingPreset) {
       const props = child.props as Parameters<typeof Text>[0];
       const preset = headingPreset[child.type as keyof typeof headingPreset];
       return visit(Text({
@@ -86,27 +90,27 @@ export function compileTree(
         style: canonicalizeIntrinsicStyle(props.style),
       }), path, group);
     }
-    if (!_isNativeVNode(child) && (child.type === "span" || child.type === "p")) {
+    if (!isNativeVNode && (child.type === "span" || child.type === "p")) {
       const props = child.props as Parameters<typeof Text>[0];
       return visit(Text({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
     }
-    if (!_isNativeVNode(child) && child.type === "img") {
+    if (!isNativeVNode && child.type === "img") {
       const props = child.props as Parameters<typeof Image>[0];
       return visit(Image({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
     }
-    if (!_isNativeVNode(child) && child.type === "input") {
+    if (!isNativeVNode && child.type === "input") {
       const props = child.props as Parameters<typeof Input>[0];
       return visit(Input({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
     }
-    if (!_isNativeVNode(child) && child.type === "textarea") {
+    if (!isNativeVNode && child.type === "textarea") {
       const props = child.props as Parameters<typeof TextArea>[0];
       return visit(TextArea({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
     }
-    if (!_isNativeVNode(child) && child.type === "button") {
+    if (!isNativeVNode && child.type === "button") {
       const props = child.props as Parameters<typeof Button>[0];
       return visit(Button({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
     }
-    if (!_isNativeVNode(child) && child.type === "a") {
+    if (!isNativeVNode && child.type === "a") {
       const { ariaLabel, style, ...props } = child.props as IntrinsicAnchorProps;
       return visit(Link({
         ...props,
@@ -114,14 +118,14 @@ export function compileTree(
         style: canonicalizeIntrinsicStyle(style),
       }), path, group);
     }
-    if (!_isNativeVNode(child) && child.type === "svg") {
+    if (!isNativeVNode && child.type === "svg") {
       const props = child.props as Parameters<typeof Svg>[0];
       return visit(Svg({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
     }
-    if (!_isNativeVNode(child) && typeof child.type === "string" && svgIntrinsicElements.has(child.type)) {
+    if (!isNativeVNode && typeof child.type === "string" && svgIntrinsicElements.has(child.type)) {
       throw new Error(`SVG element <${child.type}> must be a child of <svg>.`);
     }
-    if (!_isNativeVNode(child) && child.type === "label") {
+    if (!isNativeVNode && child.type === "label") {
       const { htmlFor, ...rawProps } = child.props;
       const id = rawProps.id ?? path;
       if (htmlFor) {
@@ -132,7 +136,7 @@ export function compileTree(
       const props = rawProps as Parameters<typeof Label>[0];
       return visit(Label({ ...props, id: String(id), style: canonicalizeIntrinsicStyle(props.style) }), path, group);
     }
-    if (!_isNativeVNode(child) && child.type === "select") {
+    if (!isNativeVNode && child.type === "select") {
       const { children, onChange, onValueChange, ...rawProps } = child.props;
       const id = String(rawProps.id ?? path);
       const optionNodes = Array.isArray(children) ? children.flat(Infinity) : [children];
@@ -162,14 +166,14 @@ export function compileTree(
         },
       }), path, group);
     }
-    if (!_isNativeVNode(child) && child.type === "option") {
+    if (!isNativeVNode && child.type === "option") {
       throw new Error("option must be a direct child of select.");
     }
-    if (!_isNativeVNode(child) && child.type === "progress") {
+    if (!isNativeVNode && child.type === "progress") {
       const props = child.props as Parameters<typeof Progress>[0];
       return visit(Progress({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
     }
-    if (!_isNativeVNode(child) && child.type === "hr") {
+    if (!isNativeVNode && child.type === "hr") {
       const props = child.props as Parameters<typeof Separator>[0];
       return visit(Separator({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
     }
@@ -290,22 +294,67 @@ function sameStyle(a: NativeNode["style"], b: NativeNode["style"]): boolean {
   return sameValue(a, b);
 }
 
+function sameChildren(a: NativeNode, b: NativeNode): boolean {
+  return a.children.length === b.children.length
+    && a.children.every((child, index) => child.id === b.children[index]?.id);
+}
+
+function nodePropertiesChanged(old: NativeNode, node: NativeNode): boolean {
+  return old.text !== node.text || old.src !== node.src || old.fit !== node.fit || !sameValue(old.svg, node.svg)
+    || old.value !== node.value || old.placeholder !== node.placeholder || old.inputType !== node.inputType || old.scrollSpeed !== node.scrollSpeed || old.scrollOrientation !== node.scrollOrientation || old.disabled !== node.disabled
+    || old.modal !== node.modal || old.rovingGroup !== node.rovingGroup || old.portal !== node.portal || old.dismissOnOutside !== node.dismissOnOutside || !sameValue(old.labelledBy, node.labelledBy) || old.closeIntercept !== node.closeIntercept || old.focusable !== node.focusable
+    || old.dragRegion !== node.dragRegion || old.windowAction !== node.windowAction
+    || !sameFields(old.control ?? {}, node.control ?? {})
+    || !sameStyle(old.style, node.style);
+}
+
+function flatNode(node: NativeNode): NativeNode {
+  return { ...node, children: [] };
+}
+
 /** null requests a structural replacement; an empty list means no native work is needed. */
 export function diffTrees(previous: CompiledTree, next: CompiledTree): NativeNode[] | null {
   if (previous.nodes.size !== next.nodes.size || previous.document.root.id !== next.document.root.id) return null;
   const changed: NativeNode[] = [];
   for (const [id, node] of next.nodes) {
     const old = previous.nodes.get(id);
-    if (!old || old.kind !== node.kind || old.children.length !== node.children.length
-      || old.children.some((child, index) => child.id !== node.children[index].id)) return null;
-    if (old.text !== node.text || old.src !== node.src || old.fit !== node.fit || !sameValue(old.svg, node.svg)
-      || old.value !== node.value || old.placeholder !== node.placeholder || old.inputType !== node.inputType || old.scrollSpeed !== node.scrollSpeed || old.scrollOrientation !== node.scrollOrientation || old.disabled !== node.disabled
-      || old.modal !== node.modal || old.rovingGroup !== node.rovingGroup || old.portal !== node.portal || old.dismissOnOutside !== node.dismissOnOutside || !sameValue(old.labelledBy, node.labelledBy) || old.closeIntercept !== node.closeIntercept || old.focusable !== node.focusable
-      || old.dragRegion !== node.dragRegion || old.windowAction !== node.windowAction
-      || !sameFields(old.control ?? {}, node.control ?? {})
-      || !sameStyle(old.style, node.style)) {
-      changed.push({ ...node, children: [] });
-    }
+    if (!old || old.kind !== node.kind || !sameChildren(old, node)) return null;
+    if (nodePropertiesChanged(old, node)) changed.push(flatNode(node));
   }
   return changed;
+}
+
+/**
+ * Computes one atomic retained-tree mutation batch. A null result is reserved for
+ * identity-incompatible replacements (root ID or an existing keyed node kind changed).
+ */
+export function diffTreeMutations(previous: CompiledTree, next: CompiledTree): TreeMutation[] | null {
+  if (previous.document.root.id !== next.document.root.id) return null;
+
+  const creates: TreeMutation[] = [];
+  const patches: TreeMutation[] = [];
+  const children: TreeMutation[] = [];
+  const removes: TreeMutation[] = [];
+
+  for (const [id, node] of next.nodes) {
+    const old = previous.nodes.get(id);
+    if (!old) {
+      creates.push({ type: "create", node: flatNode(node) });
+      if (node.children.length > 0) {
+        children.push({ type: "children", id, children: node.children.map(child => child.id) });
+      }
+      continue;
+    }
+    if (old.kind !== node.kind) return null;
+    if (nodePropertiesChanged(old, node)) patches.push({ type: "patch", node: flatNode(node) });
+    if (!sameChildren(old, node)) {
+      children.push({ type: "children", id, children: node.children.map(child => child.id) });
+    }
+  }
+
+  for (const id of previous.nodes.keys()) {
+    if (!next.nodes.has(id)) removes.push({ type: "remove", id });
+  }
+
+  return [...creates, ...patches, ...children, ...removes];
 }

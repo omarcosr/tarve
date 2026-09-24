@@ -415,6 +415,9 @@ pub unsafe extern "C" fn tarve_send(ptr: *const u8, len: u32) -> i32 {
         if let Command::Patch { nodes } = &command {
             protocol::validate_patch(nodes)?;
         }
+        if let Command::Mutate { mutations } = &command {
+            protocol::validate_mutations(mutations)?;
+        }
         if let Command::FileDialog { mode, options, .. } = &command {
             protocol::validate_file_dialog(mode, options)?;
         }

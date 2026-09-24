@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { strict as assert } from "node:assert";
+import { inflateSync } from "node:zlib";
 import { lucideReactAdapter, phosphorReactAdapter, reactSvgAdapter } from "@tarve/react-icons";
 import { App as ShowcaseApp } from "../examples/components-view";
 
@@ -19,6 +20,92 @@ mkdirSync(out, { recursive: true });
 
 function map(snapshot: Awaited<ReturnType<typeof app.inspect>>) {
   return new Map(snapshot.nodes.map(node => [node.id, node]));
+}
+
+async function readCapturedRgba(path: string) {
+  const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  assert(signature.every((value, index) => bytes[index] === value), "capture is not a PNG");
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  const idat: Uint8Array[] = [];
+  while (offset + 12 <= bytes.length) {
+    const length = view.getUint32(offset);
+    const type = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
+    const data = bytes.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") {
+      width = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(0);
+      height = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(4);
+      assert.equal(data[8], 8, "visual regression PNG must use 8-bit channels");
+      assert.equal(data[9], 6, "visual regression PNG must use RGBA pixels");
+      assert.equal(data[12], 0, "interlaced visual regression PNG is not supported");
+    } else if (type === "IDAT") {
+      idat.push(data.slice());
+    } else if (type === "IEND") {
+      break;
+    }
+    offset += 12 + length;
+  }
+  assert(width > 0 && height > 0 && idat.length > 0, "capture PNG is missing image data");
+  const compressed = Buffer.concat(idat.map(chunk => Buffer.from(chunk)));
+  const raw = inflateSync(compressed);
+  const stride = width * 4;
+  assert.equal(raw.length, height * (stride + 1), "unexpected capture PNG row size");
+  const rgba = new Uint8Array(width * height * 4);
+  const paeth = (a: number, b: number, c: number) => {
+    const p = a + b - c;
+    const pa = Math.abs(p - a);
+    const pb = Math.abs(p - b);
+    const pc = Math.abs(p - c);
+    return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+  };
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    const source = y * (stride + 1) + 1;
+    const target = y * stride;
+    for (let x = 0; x < stride; x++) {
+      const encoded = raw[source + x];
+      const left = x >= 4 ? rgba[target + x - 4] : 0;
+      const up = y > 0 ? rgba[target - stride + x] : 0;
+      const upLeft = y > 0 && x >= 4 ? rgba[target - stride + x - 4] : 0;
+      const predictor = filter === 0 ? 0
+        : filter === 1 ? left
+        : filter === 2 ? up
+        : filter === 3 ? Math.floor((left + up) / 2)
+        : filter === 4 ? paeth(left, up, upLeft)
+        : (() => { throw new Error(`Unsupported PNG filter ${filter}`); })();
+      rgba[target + x] = (encoded + predictor) & 0xff;
+    }
+  }
+  return { width, height, rgba };
+}
+
+function assertVisibleInk(
+  png: Awaited<ReturnType<typeof readCapturedRgba>>,
+  snapshot: Awaited<ReturnType<typeof app.inspect>>,
+  node: NonNullable<Awaited<ReturnType<typeof app.inspect>>["nodes"][number]>,
+  label: string,
+) {
+  const sx = png.width / snapshot.width;
+  const sy = png.height / snapshot.height;
+  const x0 = Math.max(0, Math.floor(node.x * sx));
+  const y0 = Math.max(0, Math.floor(node.y * sy));
+  const x1 = Math.min(png.width, Math.ceil((node.x + node.width) * sx));
+  const y1 = Math.min(png.height, Math.ceil((node.y + node.height) * sy));
+  let ink = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const index = (y * png.width + x) * 4;
+      const r = png.rgba[index];
+      const g = png.rgba[index + 1];
+      const b = png.rgba[index + 2];
+      // External icon cards use the default light muted surface (#f4f4f5).
+      if (Math.abs(r - 244) + Math.abs(g - 244) + Math.abs(b - 245) > 45) ink++;
+    }
+  }
+  assert(ink >= 12, `${label} occupies a native SVG node but paints no visible icon pixels (ink=${ink})`);
 }
 
 try {
@@ -53,6 +140,38 @@ try {
     const icon = byId.get(`demo-icon-${name}`);
     assert(icon && icon.kind === "svg", `Missing Lucide-style icon: ${name}`);
   }
+
+  const rootScrollerForIcons = byId.get("components-scroll");
+  assert(rootScrollerForIcons, "Showcase root Scroll is missing before icon paint check");
+  app.debug({ type: "input", action: "move",
+    x: rootScrollerForIcons.x + rootScrollerForIcons.width / 2,
+    y: rootScrollerForIcons.y + rootScrollerForIcons.height / 2 });
+  app.debug({ type: "input", action: "wheel", delta: Math.max(0, lucideReactCamera.y - 300) });
+  await Bun.sleep(50);
+  const iconsSnapshot = await app.inspect();
+  const iconsById = map(iconsSnapshot);
+  const visibleExternalIcons = [
+    ["demo-lucide-react-camera", "Lucide"],
+    ["demo-heroicons-camera", "Heroicons"],
+    ["demo-phosphor-camera", "Phosphor"],
+    ["demo-tabler-camera", "Tabler"],
+  ] as const;
+  const iconCapture = resolve(out, "components-external-icons-real.png");
+  await app.capture(iconCapture);
+  const png = await readCapturedRgba(iconCapture);
+  for (const [id, label] of visibleExternalIcons) {
+    const icon = iconsById.get(id);
+    assert(icon && icon.y >= 0 && icon.y + icon.height <= iconsSnapshot.height,
+      `${label} icon was not made visible for paint validation`);
+    assertVisibleInk(png, iconsSnapshot, icon, label);
+  }
+  app.debug({ type: "input", action: "move",
+    x: rootScrollerForIcons.x + rootScrollerForIcons.width / 2,
+    y: rootScrollerForIcons.y + rootScrollerForIcons.height / 2 });
+  app.debug({ type: "input", action: "wheel", delta: -1_000_000 });
+  await Bun.sleep(50);
+  byId = map(await app.inspect());
+
   assert(chart.height === 180, "Chart height changed unexpectedly: " + chart.height);
   assert(chart.y + chart.height <= empty.y + 0.5,
     "Chart overlaps the following section: chartBottom=" + (chart.y + chart.height) + ", emptyTop=" + empty.y);

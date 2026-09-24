@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 35;
+pub const VERSION: u32 = 36;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -216,6 +216,15 @@ pub struct Document {
     pub root: Node,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum TreeMutation {
+    Create { node: Box<Node> },
+    Patch { node: Box<Node> },
+    Children { id: String, children: Vec<String> },
+    Remove { id: String },
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileDialogFilter {
@@ -240,6 +249,9 @@ pub struct FileDialogOptions {
 pub enum Command {
     Patch {
         nodes: Vec<Node>,
+    },
+    Mutate {
+        mutations: Vec<TreeMutation>,
     },
     Update {
         root: Box<Node>,
@@ -368,6 +380,63 @@ pub fn validate(root: &Node) -> Result<(), String> {
         return Err("Root must be Window".into());
     }
     walk(root, &mut HashSet::new(), 0)
+}
+
+pub fn validate_mutations(mutations: &[TreeMutation]) -> Result<(), String> {
+    if mutations.len() > 40_000 {
+        return Err("Mutation batch exceeds operation limit".into());
+    }
+    for mutation in mutations {
+        match mutation {
+            TreeMutation::Create { node } => {
+                validate_patch(std::slice::from_ref(node.as_ref()))?;
+                if node.kind == "window" {
+                    return Err("Structural mutations cannot create a Window".into());
+                }
+                if ![
+                    "titlebar",
+                    "view",
+                    "row",
+                    "column",
+                    "text",
+                    "button",
+                    "image",
+                    "scroll",
+                    "input",
+                    "textarea",
+                    "pressable",
+                    "svg",
+                    "slider",
+                    "splitter",
+                ]
+                .contains(&node.kind.as_str())
+                {
+                    return Err(format!("Unknown component: {}", node.kind));
+                }
+            }
+            TreeMutation::Patch { node } => {
+                validate_patch(std::slice::from_ref(node.as_ref()))?;
+            }
+            TreeMutation::Children { id, children } => {
+                if id.is_empty() || children.len() > 20_000 {
+                    return Err("Invalid structural children mutation".into());
+                }
+                let mut seen = HashSet::with_capacity(children.len());
+                if children
+                    .iter()
+                    .any(|child| child.is_empty() || !seen.insert(child))
+                {
+                    return Err("Children mutation requires unique non-empty IDs".into());
+                }
+            }
+            TreeMutation::Remove { id } => {
+                if id.is_empty() {
+                    return Err("Remove mutation requires a node ID".into());
+                }
+            }
+        }
+    }
+    Ok(())
 }
 pub fn error(message: impl ToString) -> Value {
     json!({"type":"error", "message": message.to_string()})

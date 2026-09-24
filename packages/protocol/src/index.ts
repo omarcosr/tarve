@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 35;
+export const PROTOCOL_VERSION = 36;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter";
@@ -75,6 +75,11 @@ export interface WindowOptions {
   background: string; decorations: boolean; resizable: boolean; position?: WindowPosition; debug?: boolean;
 }
 export interface SceneDocument { version: number; renderer: Renderer; window: WindowOptions; root: NativeNode }
+export type TreeMutation =
+  | { type: "create"; node: NativeNode }
+  | { type: "patch"; node: NativeNode }
+  | { type: "children"; id: string; children: string[] }
+  | { type: "remove"; id: string };
 export interface FileDialogFilter { name: string; extensions: string[] }
 export interface FileDialogOptions {
   title?: string;
@@ -85,6 +90,7 @@ export interface FileDialogOptions {
 export type FileDialogMode = "openFile" | "openFiles" | "openFolder" | "saveFile";
 export type NativeCommand =
   | { type: "patch"; nodes: NativeNode[] }
+  | { type: "mutate"; mutations: TreeMutation[] }
   | { type: "update"; root: NativeNode }
   | { type: "close" }
   | { type: "cancelCloseRequest" }

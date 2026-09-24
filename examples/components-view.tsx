@@ -235,7 +235,7 @@ export function App() {
                     <Text size={10} color={c.mutedForeground}>Phosphor</Text>
                   </Column>
                   <Column gap={5} align="center" style={{ width: 100, padding: 10, background: c.muted, radius: 8 }}>
-                    <TablerCamera id="demo-tabler-camera" size={28} stroke={1.8} />
+                    <TablerCamera id="demo-tabler-camera" color="#ff00ff" size={28} stroke={1.8} />
                     <Text size={10} color={c.mutedForeground}>Tabler</Text>
                   </Column>
                 </Row>

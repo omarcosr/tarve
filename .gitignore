@@ -5,3 +5,4 @@ native/win32-x64/
 dist/
 work/
 *.log
+plan.md

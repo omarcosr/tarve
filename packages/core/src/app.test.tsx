@@ -3,7 +3,7 @@ import type { NativeCommand, NativeEvent, SceneDocument } from "../../protocol/s
 import { createApp, type AppErrorEvent } from "./app";
 import type { NativeBridge } from "./bridge";
 import { Slider } from "./controls";
-import { Button, Input, ScrollArea, Window } from "./components";
+import { Button, Column, Input, ScrollArea, Window } from "./components";
 import { InputOTP } from "./form-controls";
 import { Svg } from "./components/svg";
 import type { ComponentAdapter } from "./component-adapter";
@@ -298,6 +298,90 @@ describe("controlled native reconciliation", () => {
     expect(newCalls).toBe(0);
     await Bun.sleep(0);
     expect(bridge.commands.at(-1)?.type).toBe("patch");
+  });
+
+  test("structural renders use incremental mutation batches instead of full-tree updates", async () => {
+    const bridge = new FakeBridge();
+    let items = ["a"];
+    const clicks: string[] = [];
+    const app = createApp(() => (
+      <Window>
+        <Column id="list">
+          {items.map(item => <Button key={item} id={item} onClick={() => clicks.push(item)}>{item}</Button>)}
+        </Column>
+      </Window>
+    ), { bridge });
+    await app.ready;
+
+    items = ["a", "b"];
+    app.update();
+    await Bun.sleep(0);
+    const inserted = bridge.commands.at(-1);
+    expect(inserted?.type).toBe("mutate");
+    if (inserted?.type !== "mutate") throw new Error("expected structural mutate command");
+    expect(inserted.mutations).toEqual([
+      expect.objectContaining({ type: "create", node: expect.objectContaining({ id: "b", children: [] }) }),
+      { type: "children", id: "list", children: ["a", "b"] },
+    ]);
+    expect(bridge.commands.some(command => command.type === "update")).toBe(false);
+
+    bridge.emit({ type: "click", id: "b" });
+    expect(clicks).toEqual(["b"]);
+
+    items = ["b", "a"];
+    app.update();
+    await Bun.sleep(0);
+    const reordered = bridge.commands.at(-1);
+    expect(reordered).toEqual({
+      type: "mutate",
+      mutations: [{ type: "children", id: "list", children: ["b", "a"] }],
+    });
+
+    items = ["b"];
+    app.update();
+    await Bun.sleep(0);
+    const removed = bridge.commands.at(-1);
+    expect(removed).toEqual({
+      type: "mutate",
+      mutations: [
+        { type: "children", id: "list", children: ["b"] },
+        { type: "remove", id: "a" },
+      ],
+    });
+  });
+
+  test("failed structural mutation send does not advance handlers or the native shadow", async () => {
+    const bridge = new FakeBridge();
+    const errors: AppErrorEvent[] = [];
+    let showExtra = false;
+    let extraClicks = 0;
+    const app = createApp(() => (
+      <Window>
+        <Column id="list">
+          <Button id="stable">Stable</Button>
+          {showExtra ? <Button id="extra" onClick={() => { extraClicks++; }}>Extra</Button> : null}
+        </Column>
+      </Window>
+    ), { bridge, onError: event => errors.push(event) });
+    await app.ready;
+
+    showExtra = true;
+    bridge.failNextSend = new Error("mutation send failed");
+    app.update();
+    await Bun.sleep(0);
+    expect(errors.at(-1)?.source).toBe("bridge");
+    expect(errors.at(-1)?.event).toBe("mutate");
+    bridge.emit({ type: "click", id: "extra" });
+    expect(extraClicks).toBe(0);
+
+    app.update();
+    await Bun.sleep(0);
+    const recovered = bridge.commands.at(-1);
+    expect(recovered?.type).toBe("mutate");
+    if (recovered?.type !== "mutate") throw new Error("expected recovered mutate command");
+    expect(recovered.mutations.some(mutation => mutation.type === "create" && mutation.node.id === "extra")).toBe(true);
+    bridge.emit({ type: "click", id: "extra" });
+    expect(extraClicks).toBe(1);
   });
 
   test("throwing controlled change handler is contained and rolls native value back", async () => {

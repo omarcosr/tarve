@@ -1,6 +1,6 @@
 use crate::{
     bridge,
-    protocol::{self, Node},
+    protocol::{self, Node, TreeMutation},
     renderer::{GraphicsFaultKind, SurfaceIssue, SurfaceRecoveryAction, surface_recovery_action},
     runtime::{
         CloseRequestAction, GraphicsFaultAction, GraphicsRecoveryCircuitAction,
@@ -1642,6 +1642,135 @@ fn text_updates_retain_layout_nodes_and_removals_release_them() {
         1,
         "removed nodes must leave the retained layout tree"
     );
+}
+
+#[test]
+fn structural_mutations_retain_stable_layout_focus_and_support_reparenting() {
+    let item = node("item", "button", json!({"height":24}), vec![]);
+    let left = node("left", "column", json!({"width":120}), vec![item]);
+    let right = node("right", "column", json!({"width":120}), vec![]);
+    let mut tree = Tree::new(root(vec![left, right]));
+    tree.compute(300.0, 160.0).unwrap();
+    let created = tree.layout_nodes_created;
+    tree.focus("item");
+
+    tree.mutate(vec![
+        TreeMutation::Children {
+            id: "left".into(),
+            children: vec![],
+        },
+        TreeMutation::Children {
+            id: "right".into(),
+            children: vec!["item".into()],
+        },
+    ])
+    .unwrap();
+    tree.compute(300.0, 160.0).unwrap();
+
+    assert_eq!(tree.entries["item"].parent.as_deref(), Some("right"));
+    assert_eq!(tree.focused.as_deref(), Some("item"));
+    assert_eq!(
+        tree.layout_nodes_created, created,
+        "reparenting stable keyed nodes must reuse their Taffy identity"
+    );
+}
+
+#[test]
+fn structural_mutations_create_remove_and_reorder_without_rebuilding_stable_nodes() {
+    let a = node("a", "view", json!({"height":20}), vec![]);
+    let b = node("b", "view", json!({"height":20}), vec![]);
+    let parent = node("parent", "column", json!({}), vec![a, b]);
+    let mut tree = Tree::new(root(vec![parent]));
+    tree.compute(300.0, 160.0).unwrap();
+    let created = tree.layout_nodes_created;
+
+    let c = node("c", "view", json!({"height":20}), vec![]);
+    tree.mutate(vec![
+        TreeMutation::Create { node: Box::new(c) },
+        TreeMutation::Children {
+            id: "parent".into(),
+            children: vec!["b".into(), "c".into()],
+        },
+        TreeMutation::Remove { id: "a".into() },
+    ])
+    .unwrap();
+    tree.compute(300.0, 160.0).unwrap();
+
+    assert_eq!(tree.entries["parent"].children, vec!["b", "c"]);
+    assert!(!tree.entries.contains_key("a"));
+    assert_eq!(tree.layout_nodes_created, created + 1);
+    assert_eq!(
+        tree.layout_node_count(),
+        4,
+        "root + parent + b + c must remain"
+    );
+}
+
+#[test]
+fn invalid_structural_mutation_batch_is_atomic() {
+    let a = node("a", "view", json!({"height":20}), vec![]);
+    let parent = node("parent", "column", json!({}), vec![a]);
+    let mut tree = Tree::new(root(vec![parent]));
+    tree.compute(300.0, 160.0).unwrap();
+    let order = tree.order.clone();
+    let children = tree.entries["parent"].children.clone();
+    let count = tree.layout_node_count();
+
+    let result = tree.mutate(vec![TreeMutation::Children {
+        id: "parent".into(),
+        children: vec!["missing".into()],
+    }]);
+
+    assert!(result.is_err());
+    assert_eq!(tree.order, order);
+    assert_eq!(tree.entries["parent"].children, children);
+    assert_eq!(tree.layout_node_count(), count);
+    assert!(tree.entries.contains_key("a"));
+}
+
+#[test]
+fn structural_mutations_preserve_scroll_and_uncontrolled_input_state() {
+    let rows = (0..12)
+        .map(|index| {
+            node(
+                &format!("row-{index}"),
+                "view",
+                json!({"height":24,"shrink":0}),
+                vec![],
+            )
+        })
+        .collect::<Vec<_>>();
+    let list = node("list", "scroll", json!({"height":96,"width":200}), rows);
+    let mut input = node("input", "input", json!({"width":160,"height":32}), vec![]);
+    input.value = None;
+    let mut tree = Tree::new(root(vec![list, input]));
+    tree.compute(300.0, 180.0).unwrap();
+    tree.entries.get_mut("list").unwrap().scroll = 48.0;
+    tree.entries.get_mut("input").unwrap().node.value = Some("native edit".into());
+
+    let new_row = node("row-new", "view", json!({"height":24,"shrink":0}), vec![]);
+    let mut children = (0..12)
+        .map(|index| format!("row-{index}"))
+        .collect::<Vec<_>>();
+    children.push("row-new".into());
+    tree.mutate(vec![
+        TreeMutation::Create {
+            node: Box::new(new_row),
+        },
+        TreeMutation::Children {
+            id: "list".into(),
+            children,
+        },
+    ])
+    .unwrap();
+
+    assert_eq!(tree.entries["list"].scroll, 48.0);
+    assert_eq!(
+        tree.entries["input"].node.value.as_deref(),
+        Some("native edit")
+    );
+    tree.compute(300.0, 180.0).unwrap();
+    assert_eq!(tree.entries["list"].scroll, 48.0);
 }
 
 #[test]
