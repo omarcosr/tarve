@@ -3,6 +3,7 @@ import { BunFfiBridge, type NativeBridge } from "./bridge";
 import { compileTree, diffTreeMutations, type CompiledTree } from "./reconciler";
 import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
 import type { VNode } from "./jsx-runtime";
+import { withRenderScope } from "./render-scope";
 import type { ComponentAdapter } from "./component-adapter";
 
 export type AppErrorSource =
@@ -39,6 +40,7 @@ export interface AppHandle {
   update(): void;
   close(): void;
   focus(id: string): void;
+  scrollToItem(id: string, index: number, offset?: number): void;
   registerHotkey(shortcut: string, handler: HotkeyHandler): () => void;
   openFileDialog(options?: FileDialogOptions): Promise<string | undefined>;
   openFilesDialog(options?: FileDialogOptions): Promise<string[]>;
@@ -98,6 +100,7 @@ function reconciliationCommand(previous: CompiledTree, next: CompiledTree): Nati
 
 export function createApp(view: () => VNode, options: AppOptions = {}): AppHandle {
   const bridge = options.bridge ?? new BunFfiBridge();
+  const renderScope = {};
   let committed: CompiledTree | undefined;
   let observed: CompiledTree | undefined;
   let queued = false;
@@ -217,7 +220,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
       let next: CompiledTree;
       try {
-        next = compileTree(view(), options.debug, options.renderer ?? "auto", options.componentAdapters);
+        next = withRenderScope(renderScope, () => compileTree(
+          view(), options.debug, options.renderer ?? "auto", options.componentAdapters, renderScope,
+        ));
         if (committed.document.window.decorations !== next.document.window.decorations) {
           throw new Error("Adding or removing TitleBar after the native window has been created is not supported. Recreate the Window instead.");
         }
@@ -431,6 +436,24 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         };
         succeeded = invokeHandler("scrollPosition", event.id, handlers.onScrollPosition as (...args: never[]) => void, position as never) && succeeded;
       }
+      if (event.type === "virtualListLayout" && handlers?.onVirtualListLayout) {
+        handled = true;
+        succeeded = invokeHandler("virtualListLayout", event.id, handlers.onVirtualListLayout as (...args: never[]) => void, event.items as never) && succeeded;
+      }
+      if (event.type === "virtualListScrollToItem" && handlers?.onVirtualListScrollToItem) {
+        handled = true;
+        succeeded = invokeHandler(
+          "virtualListScrollToItem",
+          event.id,
+          handlers.onVirtualListScrollToItem as (...args: never[]) => void,
+          event.index as never,
+          event.offset as never,
+        ) && succeeded;
+      }
+      if (event.type === "virtualListFocus" && handlers?.onVirtualListFocus) {
+        handled = true;
+        succeeded = invokeHandler("virtualListFocus", event.id, handlers.onVirtualListFocus as (...args: never[]) => void, event.key as never) && succeeded;
+      }
       if (event.type === "hover" && handlers?.onHover) { handled = true; succeeded = invokeHandler("hover", event.id, handlers.onHover as (...args: never[]) => void, event.entered as never); }
       if (event.type === "key" && handlers?.onKeyDown) { handled = true; succeeded = invokeHandler("key", event.id, handlers.onKeyDown as (...args: never[]) => void, event.key as never); }
       if (event.type === "blur" && handlers?.onBlur) { handled = true; succeeded = invokeHandler("blur", event.id, handlers.onBlur); }
@@ -467,6 +490,12 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     },
     focus(id: string): void {
       if (!ended) sendPublic({ type: "focus", id });
+    },
+    scrollToItem(id: string, index: number, offset = 0): void {
+      if (!id) throw new TypeError("scrollToItem requires a list id");
+      if (!Number.isInteger(index) || index < 0) throw new RangeError("scrollToItem index must be a nonnegative integer");
+      if (!Number.isFinite(offset)) throw new RangeError("scrollToItem offset must be finite");
+      if (!ended) sendPublic({ type: "scrollToItem", id, index, ...(offset !== 0 ? { offset } : {}) });
     },
     registerHotkey(shortcut: string, handler: HotkeyHandler): () => void {
       const canonical = normalizeHotkey(shortcut);
@@ -521,7 +550,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   };
 
   try {
-    committed = compileTree(view(), options.debug, options.renderer ?? "auto", options.componentAdapters);
+    committed = withRenderScope(renderScope, () => compileTree(
+      view(), options.debug, options.renderer ?? "auto", options.componentAdapters, renderScope,
+    ));
     observed = nativeShadow(committed);
   } catch (error) {
     const startupError = reportError(error, { source: "render", event: "startup" });

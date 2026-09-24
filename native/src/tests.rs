@@ -1121,6 +1121,533 @@ fn dragging_scrollbar_moves_virtual_list_and_emits_scroll_event() {
 }
 
 #[test]
+fn variable_virtual_list_measures_rows_and_anchors_growth_above_viewport() {
+    let rows = ["a", "b", "c", "d", "e"]
+        .into_iter()
+        .map(|id| node(id, "row", json!({"height":40,"shrink":0}), vec![]))
+        .collect();
+    let mut scroll = node(
+        "variable-list",
+        "scroll",
+        json!({"height":100}),
+        vec![node(
+            "variable-content",
+            "column",
+            json!({"width":"100%"}),
+            rows,
+        )],
+    );
+    scroll.control =
+        Some(serde_json::from_value(json!({"role":"virtualList","value":60})).unwrap());
+    scroll.virtual_list = Some(
+        serde_json::from_value(json!({
+            "estimatedItemHeight":40,
+            "itemCount":5,
+            "windowStart":0,
+            "windowEnd":5,
+            "renderedKeys":["s:a","s:b","s:c","s:d","s:e"]
+        }))
+        .unwrap(),
+    );
+
+    let mut tree = Tree::new(root(vec![scroll]));
+    tree.compute(240.0, 180.0).unwrap();
+    assert_eq!(tree.entries["variable-list"].scroll, 60.0);
+    assert_eq!(tree.entries["variable-list"].scroll_max, 100.0);
+    let initial = tree.take_layout_events();
+    let measured = initial
+        .iter()
+        .find(|event| event["type"] == "virtualListLayout")
+        .expect("variable rows emit native measurements");
+    assert_eq!(measured["items"].as_array().unwrap().len(), 5);
+
+    tree.patch(vec![node(
+        "a",
+        "row",
+        json!({"height":60,"shrink":0}),
+        vec![],
+    )])
+    .unwrap();
+    tree.compute(240.0, 180.0).unwrap();
+
+    assert_eq!(tree.entries["variable-list"].scroll_max, 120.0);
+    assert_eq!(
+        tree.entries["variable-list"].scroll, 80.0,
+        "growing a row above the top anchor must preserve the same viewport position"
+    );
+    let events = tree.take_layout_events();
+    assert!(events.iter().any(|event| {
+        event["type"] == "scroll" && event["id"] == "variable-list" && event["offset"] == 80.0
+    }));
+    assert!(events.iter().any(|event| {
+        event["type"] == "virtualListLayout"
+            && event["id"] == "variable-list"
+            && event["items"].as_array().is_some_and(|items| {
+                items
+                    .iter()
+                    .any(|item| item["key"] == "s:a" && item["height"] == 60.0)
+            })
+    }));
+}
+
+#[test]
+fn variable_virtual_list_retains_keyed_anchor_through_prepend_and_reorder() {
+    fn list_patch(keys: &[&str], count: usize) -> Node {
+        let mut scroll = node("variable-list", "scroll", json!({"height":80}), vec![]);
+        scroll.control =
+            Some(serde_json::from_value(json!({"role":"virtualList","value":60})).unwrap());
+        scroll.virtual_list = Some(
+            serde_json::from_value(json!({
+                "estimatedItemHeight":40,
+                "itemCount":count,
+                "windowStart":0,
+                "windowEnd":count,
+                "renderedKeys":keys.iter().map(|key| format!("s:{key}")).collect::<Vec<_>>()
+            }))
+            .unwrap(),
+        );
+        scroll
+    }
+
+    let initial_rows = ["a", "b", "c", "d"]
+        .into_iter()
+        .map(|id| node(id, "row", json!({"height":40,"shrink":0}), vec![]))
+        .collect();
+    let mut scroll = list_patch(&["a", "b", "c", "d"], 4);
+    scroll.children = vec![node(
+        "variable-content",
+        "column",
+        json!({"width":"100%"}),
+        initial_rows,
+    )];
+    let mut tree = Tree::new(root(vec![scroll]));
+    tree.compute(240.0, 180.0).unwrap();
+    tree.take_layout_events();
+    assert_eq!(tree.entries["variable-list"].scroll, 60.0);
+
+    tree.mutate(vec![
+        TreeMutation::Create {
+            node: Box::new(node("x", "row", json!({"height":30,"shrink":0}), vec![])),
+        },
+        TreeMutation::Patch {
+            node: Box::new(list_patch(&["x", "a", "b", "c", "d"], 5)),
+        },
+        TreeMutation::Children {
+            id: "variable-content".into(),
+            children: ["x", "a", "b", "c", "d"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        },
+    ])
+    .unwrap();
+    tree.compute(240.0, 180.0).unwrap();
+    assert_eq!(
+        tree.entries["variable-list"].scroll, 90.0,
+        "prepending 30 px before the retained b anchor must compensate by 30 px"
+    );
+    tree.take_layout_events();
+
+    tree.mutate(vec![
+        TreeMutation::Patch {
+            node: Box::new(list_patch(&["x", "b", "a", "c", "d"], 5)),
+        },
+        TreeMutation::Children {
+            id: "variable-content".into(),
+            children: ["x", "b", "a", "c", "d"]
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        },
+    ])
+    .unwrap();
+    tree.compute(240.0, 180.0).unwrap();
+    assert_eq!(
+        tree.entries["variable-list"].scroll, 50.0,
+        "reordering must keep the same b row at its previous intra-viewport offset"
+    );
+    assert!(tree.take_layout_events().iter().any(|event| {
+        event["type"] == "scroll" && event["id"] == "variable-list" && event["offset"] == 50.0
+    }));
+}
+
+#[test]
+fn variable_virtual_list_follow_tail_stops_and_resumes_with_user_scroll() {
+    fn tail_list(keys: &[&str], follow_tail: bool) -> Node {
+        let rows = keys
+            .iter()
+            .map(|id| node(id, "row", json!({"height":40,"shrink":0}), vec![]))
+            .collect();
+        let mut scroll = node(
+            "tail-list",
+            "scroll",
+            json!({"height":80}),
+            vec![node(
+                "tail-content",
+                "column",
+                json!({"width":"100%"}),
+                rows,
+            )],
+        );
+        scroll.control =
+            Some(serde_json::from_value(json!({"role":"virtualList","value":0})).unwrap());
+        scroll.virtual_list = Some(
+            serde_json::from_value(json!({
+                "estimatedItemHeight":40,
+                "itemCount":keys.len(),
+                "windowStart":0,
+                "windowEnd":keys.len(),
+                "renderedKeys":keys.iter().map(|key| format!("s:{key}")).collect::<Vec<_>>(),
+                "alignment":"bottom",
+                "followTail":follow_tail
+            }))
+            .unwrap(),
+        );
+        scroll
+    }
+
+    let mut tree = Tree::new(root(vec![tail_list(&["a", "b", "c", "d", "e"], true)]));
+    tree.compute(240.0, 180.0).unwrap();
+    assert_eq!(tree.entries["tail-list"].scroll_max, 120.0);
+    assert_eq!(tree.entries["tail-list"].scroll, 120.0);
+    assert!(tree.take_layout_events().iter().any(|event| {
+        event["type"] == "scroll" && event["id"] == "tail-list" && event["offset"] == 120.0
+    }));
+
+    tree.update(root(vec![tail_list(&["a", "b", "c", "d", "e", "f"], true)]));
+    tree.compute(240.0, 180.0).unwrap();
+    assert_eq!(tree.entries["tail-list"].scroll, 160.0);
+    tree.take_layout_events();
+
+    let rect = tree.entries["tail-list"].rect;
+    tree.pointer_move(rect.x0 + 20.0, rect.y0 + 20.0);
+    let events = tree.wheel(-80.0);
+    assert!(events.iter().any(|event| event["type"] == "scroll"));
+    assert_eq!(tree.entries["tail-list"].scroll, 80.0);
+
+    tree.update(root(vec![tail_list(
+        &["a", "b", "c", "d", "e", "f", "g"],
+        true,
+    )]));
+    tree.compute(240.0, 180.0).unwrap();
+    assert_eq!(
+        tree.entries["tail-list"].scroll, 80.0,
+        "appending must not pull a user who scrolled away back to the tail"
+    );
+
+    tree.pointer_move(rect.x0 + 20.0, rect.y0 + 20.0);
+    tree.wheel(10_000.0);
+    assert_eq!(tree.entries["tail-list"].scroll, 200.0);
+    tree.update(root(vec![tail_list(
+        &["a", "b", "c", "d", "e", "f", "g", "h"],
+        true,
+    )]));
+    tree.compute(240.0, 180.0).unwrap();
+    assert_eq!(
+        tree.entries["tail-list"].scroll, 240.0,
+        "returning to the end must resume tail following"
+    );
+}
+
+#[test]
+fn variable_virtual_list_scroll_request_applies_each_generation_once_and_inspects_anchor() {
+    fn requested_list(request: Option<(u64, f64)>) -> Node {
+        let rows = ["a", "b", "c", "d", "e"]
+            .into_iter()
+            .map(|id| node(id, "row", json!({"height":40,"shrink":0}), vec![]))
+            .collect();
+        let mut scroll = node(
+            "requested-list",
+            "scroll",
+            json!({"height":80}),
+            vec![node(
+                "requested-content",
+                "column",
+                json!({"width":"100%"}),
+                rows,
+            )],
+        );
+        scroll.control =
+            Some(serde_json::from_value(json!({"role":"virtualList","value":0})).unwrap());
+        let mut metadata = json!({
+            "estimatedItemHeight":40,
+            "itemCount":5,
+            "windowStart":0,
+            "windowEnd":5,
+            "renderedKeys":["s:a","s:b","s:c","s:d","s:e"],
+            "alignment":"top",
+            "followTail":false
+        });
+        if let Some((generation, offset)) = request {
+            metadata["scrollRequest"] = json!({"generation":generation,"offset":offset});
+        }
+        scroll.virtual_list = Some(serde_json::from_value(metadata).unwrap());
+        scroll
+    }
+
+    let mut tree = Tree::new(root(vec![requested_list(None)]));
+    tree.compute(240.0, 180.0).unwrap();
+    tree.take_layout_events();
+    assert_eq!(
+        tree.request_virtual_scroll_to_item("requested-list", 3, 5.0)
+            .unwrap(),
+        vec![json!({
+            "type":"virtualListScrollToItem", "id":"requested-list", "index":3, "offset":5.0
+        })]
+    );
+    assert!(
+        tree.request_virtual_scroll_to_item("requested-list", 5, 0.0)
+            .is_err()
+    );
+
+    tree.update(root(vec![requested_list(Some((1, 125.0)))]));
+    tree.compute(240.0, 180.0).unwrap();
+    assert_eq!(tree.entries["requested-list"].scroll, 120.0);
+    let applied = tree.take_layout_events();
+    assert!(applied.iter().any(|event| {
+        event["type"] == "scroll" && event["id"] == "requested-list" && event["offset"] == 120.0
+    }));
+    let snapshots = tree.snapshots();
+    let list = snapshots
+        .iter()
+        .find(|snapshot| snapshot["id"] == "requested-list")
+        .unwrap();
+    assert_eq!(list["virtualListAnchor"]["index"], 3);
+    assert_eq!(list["virtualListAnchor"]["key"], "s:d");
+    assert_eq!(list["virtualListAnchor"]["offset"], 0.0);
+
+    tree.update(root(vec![requested_list(Some((1, 40.0)))]));
+    tree.compute(240.0, 180.0).unwrap();
+    assert_eq!(
+        tree.entries["requested-list"].scroll, 120.0,
+        "an already-applied generation must not replay with a new offset"
+    );
+    assert!(
+        !tree
+            .take_layout_events()
+            .iter()
+            .any(|event| event["type"] == "scroll")
+    );
+
+    tree.update(root(vec![requested_list(Some((2, 40.0)))]));
+    tree.compute(240.0, 180.0).unwrap();
+    assert_eq!(tree.entries["requested-list"].scroll, 40.0);
+}
+
+#[test]
+fn variable_virtual_list_reports_focused_row_key_and_clears_it_on_blur() {
+    let mut editor = node(
+        "focused-editor",
+        "input",
+        json!({"width":160,"height":32}),
+        vec![],
+    );
+    editor.value = Some("edit".into());
+    let row = node(
+        "focused-row",
+        "row",
+        json!({"height":40,"shrink":0}),
+        vec![editor],
+    );
+    let mut list = node(
+        "focused-list",
+        "scroll",
+        json!({"height":80}),
+        vec![node(
+            "focused-content",
+            "column",
+            json!({"width":"100%"}),
+            vec![row],
+        )],
+    );
+    list.control = Some(serde_json::from_value(json!({"role":"virtualList","value":0})).unwrap());
+    list.virtual_list = Some(
+        serde_json::from_value(json!({
+            "estimatedItemHeight":40,
+            "itemCount":1,
+            "windowStart":0,
+            "windowEnd":1,
+            "renderedKeys":["s:row"]
+        }))
+        .unwrap(),
+    );
+
+    let mut tree = Tree::new(root(vec![list]));
+    tree.compute(240.0, 160.0).unwrap();
+    let _ = tree.focus("focused-editor");
+    assert_eq!(
+        tree.take_interaction_events(),
+        vec![json!({"type":"virtualListFocus","id":"focused-list","key":"s:row"})]
+    );
+
+    assert_eq!(tree.blur().as_deref(), Some("focused-editor"));
+    assert_eq!(
+        tree.take_interaction_events(),
+        vec![json!({"type":"virtualListFocus","id":"focused-list","key":null})]
+    );
+}
+
+#[test]
+fn variable_virtual_list_parked_editor_retains_focus_value_and_caret_and_leaves_tab_order() {
+    fn list_patch(retained: bool) -> Node {
+        let mut list = node("parking-list", "scroll", json!({"height":80}), vec![]);
+        list.control =
+            Some(serde_json::from_value(json!({"role":"virtualList","value":0})).unwrap());
+        list.virtual_list = Some(
+            serde_json::from_value(if retained {
+                json!({
+                    "estimatedItemHeight":40,
+                    "itemCount":5,
+                    "windowStart":3,
+                    "windowEnd":5,
+                    "renderedKeys":["s:d","s:e"],
+                    "retainedKey":"s:b"
+                })
+            } else {
+                json!({
+                    "estimatedItemHeight":40,
+                    "itemCount":5,
+                    "windowStart":0,
+                    "windowEnd":2,
+                    "renderedKeys":["s:a","s:b"]
+                })
+            })
+            .unwrap(),
+        );
+        list
+    }
+
+    let mut editor = node(
+        "parking-editor",
+        "input",
+        json!({"width":160,"height":32}),
+        vec![],
+    );
+    editor.value = Some("abcd".into());
+    let row_a = node("parking-a", "row", json!({"height":40,"shrink":0}), vec![]);
+    let row_b = node(
+        "parking-b",
+        "row",
+        json!({"height":40,"shrink":0}),
+        vec![editor],
+    );
+    let after = node(
+        "parking-after",
+        "row",
+        json!({"height":120,"shrink":0}),
+        vec![],
+    );
+    let mut list = list_patch(false);
+    list.children = vec![node(
+        "parking-content",
+        "column",
+        json!({"width":"100%"}),
+        vec![row_a, row_b, after],
+    )];
+    let mut next = node(
+        "parking-next",
+        "input",
+        json!({"width":160,"height":32}),
+        vec![],
+    );
+    next.value = Some(String::new());
+
+    let mut tree = Tree::new(root(vec![list, next]));
+    tree.compute(260.0, 180.0).unwrap();
+    let _ = tree.focus("parking-editor");
+    tree.take_interaction_events();
+    tree.key("ArrowLeft");
+
+    let parked_row = node(
+        "parking-b",
+        "row",
+        json!({
+            "position":"absolute",
+            "top":-1_000_000,
+            "left":0,
+            "width":"100%",
+            "shrink":0
+        }),
+        vec![],
+    );
+    tree.mutate(vec![
+        TreeMutation::Create {
+            node: Box::new(node(
+                "parking-before",
+                "row",
+                json!({"height":120,"shrink":0}),
+                vec![],
+            )),
+        },
+        TreeMutation::Create {
+            node: Box::new(node(
+                "parking-d",
+                "row",
+                json!({"height":40,"shrink":0}),
+                vec![],
+            )),
+        },
+        TreeMutation::Create {
+            node: Box::new(node(
+                "parking-e",
+                "row",
+                json!({"height":40,"shrink":0}),
+                vec![],
+            )),
+        },
+        TreeMutation::Patch {
+            node: Box::new(list_patch(true)),
+        },
+        TreeMutation::Patch {
+            node: Box::new(parked_row),
+        },
+        TreeMutation::Children {
+            id: "parking-content".into(),
+            children: vec![
+                "parking-before".into(),
+                "parking-d".into(),
+                "parking-e".into(),
+                "parking-b".into(),
+            ],
+        },
+        TreeMutation::Remove {
+            id: "parking-a".into(),
+        },
+        TreeMutation::Remove {
+            id: "parking-after".into(),
+        },
+    ])
+    .unwrap();
+    tree.compute(260.0, 180.0).unwrap();
+
+    assert_eq!(tree.focused.as_deref(), Some("parking-editor"));
+    assert!(tree.is_virtual_parked("parking-b"));
+    assert!(tree.is_virtual_parked("parking-editor"));
+    assert_eq!(
+        tree.entries["parking-editor"].node.value.as_deref(),
+        Some("abcd")
+    );
+    let change = tree.type_text("X");
+    assert_eq!(
+        tree.entries["parking-editor"].node.value.as_deref(),
+        Some("abcXd"),
+        "parking must preserve the native caret position"
+    );
+    assert_eq!(change[0]["id"], "parking-editor");
+
+    tree.key("Tab");
+    assert_eq!(
+        tree.focused.as_deref(),
+        Some("parking-next"),
+        "parked descendants must be skipped by keyboard focus traversal"
+    );
+    assert_eq!(
+        tree.take_interaction_events(),
+        vec![json!({"type":"virtualListFocus","id":"parking-list","key":null})]
+    );
+}
+
+#[test]
 fn horizontal_scroll_uses_vertical_wheel_fallback_and_reports_2d_metrics() {
     let content = node(
         "content",
@@ -1545,6 +2072,42 @@ fn protocol_rejects_duplicate_ids() {
 fn protocol_rejects_invalid_user_select_values() {
     let invalid = node("bad", "text", json!({"userSelect":"maybe"}), vec![]);
     assert!(protocol::validate(&root(vec![invalid])).is_err());
+}
+
+#[test]
+fn protocol_validates_variable_virtual_list_metadata() {
+    let mut valid = node("list", "scroll", json!({"height":80}), vec![]);
+    valid.control = Some(serde_json::from_value(json!({"role":"virtualList","value":0})).unwrap());
+    valid.virtual_list = Some(
+        serde_json::from_value(json!({
+            "estimatedItemHeight":40,
+            "itemCount":3,
+            "windowStart":1,
+            "windowEnd":3,
+            "renderedKeys":["s:b","s:c"]
+        }))
+        .unwrap(),
+    );
+    assert!(protocol::validate(&root(vec![valid.clone()])).is_ok());
+
+    let mut retained = valid.clone();
+    retained.virtual_list.as_mut().unwrap().retained_key = Some("s:a".into());
+    assert!(protocol::validate(&root(vec![retained])).is_ok());
+
+    let mut empty_retained = valid.clone();
+    empty_retained.virtual_list.as_mut().unwrap().retained_key = Some(String::new());
+    assert!(protocol::validate(&root(vec![empty_retained])).is_err());
+
+    let mut duplicate_retained = valid.clone();
+    duplicate_retained
+        .virtual_list
+        .as_mut()
+        .unwrap()
+        .retained_key = Some("s:b".into());
+    assert!(protocol::validate(&root(vec![duplicate_retained])).is_err());
+
+    valid.virtual_list.as_mut().unwrap().rendered_keys = vec!["s:b".into(), "s:b".into()];
+    assert!(protocol::validate(&root(vec![valid])).is_err());
 }
 
 #[test]

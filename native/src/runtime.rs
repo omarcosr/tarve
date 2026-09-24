@@ -565,6 +565,8 @@ impl App {
             )));
             return;
         }
+        let layout_events = self.tree.take_layout_events();
+        self.emit(layout_events);
         for message in self.tree.warnings.drain(..) {
             self.events.push(error(message));
         }
@@ -981,6 +983,8 @@ impl App {
         self.tree
             .compute(size.width, size.height)
             .map_err(RenderError::Fatal)?;
+        let layout_events = self.tree.take_layout_events();
+        self.emit(layout_events);
         let content_changed = self.tree.dirty.paint;
         if content_changed {
             let tree = &mut self.tree;
@@ -1368,6 +1372,15 @@ impl ApplicationHandler<Command> for App {
                 }
                 accessibility_changed = true;
             }
+            Command::ScrollToItem { id, index, offset } => {
+                match self
+                    .tree
+                    .request_virtual_scroll_to_item(&id, index, offset.unwrap_or(0.0))
+                {
+                    Ok(events) => self.emit(events),
+                    Err(message) => self.events.push(error(message)),
+                }
+            }
             Command::Inspect { request_id } => {
                 if let Err(e) = self.prepare() {
                     self.handle_render_error(event_loop, e);
@@ -1500,6 +1513,8 @@ impl ApplicationHandler<Command> for App {
                 .events
                 .push(error("Diagnostic command requires debug: true")),
         }
+        let interaction_events = self.tree.take_interaction_events();
+        self.emit(interaction_events);
         if accessibility_changed {
             self.sync_accessibility();
         }
@@ -1738,6 +1753,7 @@ impl ApplicationHandler<Command> for App {
             }
             _ => {}
         }
+        events.extend(self.tree.take_interaction_events());
         self.emit(events);
         if accessibility_changed {
             self.sync_accessibility();

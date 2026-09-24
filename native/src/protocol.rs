@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 36;
+pub const VERSION: u32 = 37;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -54,6 +54,34 @@ pub struct Control {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct VirtualListLayout {
+    pub estimated_item_height: f64,
+    pub item_count: usize,
+    pub window_start: usize,
+    pub window_end: usize,
+    #[serde(default)]
+    pub rendered_keys: Vec<String>,
+    pub retained_key: Option<String>,
+    #[serde(default = "default_virtual_list_alignment")]
+    pub alignment: String,
+    #[serde(default)]
+    pub follow_tail: bool,
+    pub scroll_request: Option<VirtualListScrollRequest>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct VirtualListScrollRequest {
+    pub generation: u64,
+    pub offset: f64,
+}
+
+fn default_virtual_list_alignment() -> String {
+    "top".into()
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Node {
     pub id: String,
     pub kind: String,
@@ -80,6 +108,7 @@ pub struct Node {
     pub scroll_speed: f64,
     #[serde(default = "default_scroll_orientation")]
     pub scroll_orientation: String,
+    pub virtual_list: Option<VirtualListLayout>,
     pub control: Option<Control>,
     #[serde(default)]
     pub modal: bool,
@@ -260,6 +289,11 @@ pub enum Command {
     CancelCloseRequest,
     Focus {
         id: String,
+    },
+    ScrollToItem {
+        id: String,
+        index: usize,
+        offset: Option<f64>,
     },
     Inspect {
         #[serde(rename = "requestId")]
@@ -537,6 +571,36 @@ fn validate_control(node: &Node) -> Result<(), String> {
             "Unsupported scroll orientation: {}",
             node.scroll_orientation
         ));
+    }
+    if let Some(virtual_list) = &node.virtual_list {
+        if node.kind != "scroll"
+            || !virtual_list.estimated_item_height.is_finite()
+            || virtual_list.estimated_item_height <= 0.0
+            || virtual_list.window_start > virtual_list.window_end
+            || virtual_list.window_end > virtual_list.item_count
+            || virtual_list.rendered_keys.len()
+                != virtual_list.window_end - virtual_list.window_start
+            || virtual_list.rendered_keys.iter().any(String::is_empty)
+            || virtual_list
+                .retained_key
+                .as_ref()
+                .is_some_and(|key| key.is_empty() || virtual_list.rendered_keys.contains(key))
+            || !matches!(virtual_list.alignment.as_str(), "top" | "bottom")
+            || virtual_list
+                .scroll_request
+                .as_ref()
+                .is_some_and(|request| request.generation == 0 || !request.offset.is_finite())
+        {
+            return Err("Invalid virtual list layout metadata".into());
+        }
+        let mut seen = HashSet::with_capacity(virtual_list.rendered_keys.len());
+        if virtual_list
+            .rendered_keys
+            .iter()
+            .any(|key| !seen.insert(key))
+        {
+            return Err("Virtual list rendered keys must be unique".into());
+        }
     }
     if node.kind == "input"
         && ![

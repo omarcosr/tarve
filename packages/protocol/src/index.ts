@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 36;
+export const PROTOCOL_VERSION = 37;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter";
@@ -45,6 +45,19 @@ export interface Control {
   description?: string;
   sortDirection?: "ascending" | "descending" | "other";
 }
+export interface VirtualListLayout {
+  estimatedItemHeight: number;
+  itemCount: number;
+  windowStart: number;
+  windowEnd: number;
+  renderedKeys: string[];
+  retainedKey?: string;
+  alignment: "top" | "bottom";
+  followTail: boolean;
+  scrollRequest?: { generation: number; offset: number };
+}
+export interface VirtualListMeasurement { key: string; height: number }
+export interface VirtualListAnchor { index: number; key: string; offset: number }
 export interface NativeNode {
   id: string; kind: NodeKind; style: Style; children: NativeNode[];
   text?: string; src?: string; fit?: "cover" | "contain"; disabled?: boolean;
@@ -53,6 +66,7 @@ export interface NativeNode {
   inputType?: "text" | "password" | "email" | "number" | "search" | "tel" | "url";
   scrollSpeed?: number;
   scrollOrientation?: ScrollOrientation;
+  virtualList?: VirtualListLayout;
   control?: Control | null;
   modal?: boolean; focusable?: boolean;
   rovingGroup?: string;
@@ -95,6 +109,7 @@ export type NativeCommand =
   | { type: "close" }
   | { type: "cancelCloseRequest" }
   | { type: "focus"; id: string }
+  | { type: "scrollToItem"; id: string; index: number; offset?: number }
   | { type: "inspect"; requestId: string }
   | { type: "resize"; width: number; height: number }
   | { type: "capture"; path: string; requestId: string }
@@ -105,6 +120,7 @@ export interface NodeSnapshot {
   scroll: number; scrollMax: number; text: string;
   scrollX?: number; scrollY?: number; scrollMaxX?: number; scrollMaxY?: number;
   control?: Control | null;
+  virtualListAnchor?: VirtualListAnchor | null;
 }
 export interface Snapshot {
   layoutNodes: number; layoutNodesCreated: number; measureCalls: number; paintedNodes: number;
@@ -122,6 +138,9 @@ export type NativeEvent =
   | { type: "change"; id: string; value: string }
   | { type: "valueChange"; id: string; value: number }
   | { type: "scroll"; id: string; offset: number; max: number; offsetX?: number; offsetY?: number; maxX?: number; maxY?: number }
+  | { type: "virtualListLayout"; id: string; items: VirtualListMeasurement[] }
+  | { type: "virtualListScrollToItem"; id: string; index: number; offset: number }
+  | { type: "virtualListFocus"; id: string; key: string | null }
   | { type: "hover"; id: string; entered: boolean }
   | { type: "key"; id: string; key: string }
   | { type: "blur"; id: string }

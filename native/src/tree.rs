@@ -45,6 +45,7 @@ const LAYOUT_KEYS: &[&str] = &[
     "left",
 ];
 const MAX_SVG_RASTER_DIMENSION: u32 = 4096;
+const MAX_VIRTUAL_MEASUREMENTS_PER_LIST: usize = 100_000;
 
 fn load_image_data(path: &str) -> Result<ImageData, String> {
     let extension = Path::new(path)
@@ -128,6 +129,28 @@ struct ScrollDrag {
     id: String,
     axis: ScrollbarAxis,
     grab: f64,
+}
+
+#[derive(Clone)]
+struct VirtualRowAnchor {
+    row_id: String,
+    viewport_delta: f64,
+    edge: VirtualAnchorEdge,
+}
+
+struct VirtualListRestore {
+    list_id: String,
+    anchor: Option<VirtualRowAnchor>,
+    following_tail: bool,
+    initial_layout: bool,
+    bottom_aligned: bool,
+    scroll_request: Option<crate::protocol::VirtualListScrollRequest>,
+}
+
+#[derive(Clone, Copy)]
+enum VirtualAnchorEdge {
+    Top,
+    Bottom,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -328,6 +351,10 @@ pub struct Entry {
     pub scroll_max_x: f64,
     pub scroll: f64,
     pub scroll_max: f64,
+    virtual_anchor: Option<VirtualRowAnchor>,
+    virtual_following_tail: bool,
+    virtual_initial_layout: bool,
+    virtual_scroll_generation: u64,
 }
 pub struct Tree {
     pub root: String,
@@ -337,6 +364,10 @@ pub struct Tree {
     pub text: TextEngine,
     images: HashMap<String, ImageData>,
     svgs: HashMap<String, crate::svg::SvgScene>,
+    virtual_measurements: HashMap<String, HashMap<String, f64>>,
+    pending_layout_events: Vec<Value>,
+    pending_interaction_events: Vec<Value>,
+    virtual_focus: Option<(String, String)>,
     stacking: HashMap<String, f32>,
     window_chrome_suppressed: bool,
     pub dirty: Dirty,
@@ -445,6 +476,10 @@ impl Tree {
             text: TextEngine::new(),
             images: HashMap::new(),
             svgs: HashMap::new(),
+            virtual_measurements: HashMap::new(),
+            pending_layout_events: Vec::new(),
+            pending_interaction_events: Vec::new(),
+            virtual_focus: None,
             stacking: HashMap::new(),
             window_chrome_suppressed: false,
             dirty: Dirty::all(),
@@ -560,6 +595,7 @@ impl Tree {
             structure_dirty = prev.structure_dirty || child_ids != prev.children;
             layout_dirty = prev.layout_dirty
                 || node.kind != prev.node.kind
+                || node.virtual_list != prev.node.virtual_list
                 || LAYOUT_KEYS
                     .iter()
                     .any(|key| node.style[*key] != prev.node.style[*key]);
@@ -615,6 +651,45 @@ impl Tree {
             self.svgs.remove(&node.id);
         }
         let id = node.id.clone();
+        let virtual_anchor = if node.virtual_list.is_some() {
+            previous
+                .as_ref()
+                .and_then(|entry| entry.virtual_anchor.clone())
+        } else {
+            None
+        };
+        let virtual_following_tail = node.virtual_list.as_ref().is_some_and(|metadata| {
+            metadata.follow_tail
+                && previous.as_ref().is_none_or(|entry| {
+                    !entry
+                        .node
+                        .virtual_list
+                        .as_ref()
+                        .is_some_and(|previous| previous.follow_tail)
+                        || entry.virtual_following_tail
+                })
+        });
+        let virtual_initial_layout = node.virtual_list.is_some()
+            && previous.as_ref().is_none_or(|entry| {
+                entry.node.virtual_list.is_none() || entry.virtual_initial_layout
+            });
+        let virtual_scroll_generation = if node.virtual_list.is_some() {
+            previous
+                .as_ref()
+                .map_or(0, |entry| entry.virtual_scroll_generation)
+        } else {
+            0
+        };
+        let scroll = previous.as_ref().map(|e| e.scroll).unwrap_or_else(|| {
+            node.control
+                .as_ref()
+                .filter(|control| {
+                    node.virtual_list.is_some()
+                        && control.role == "virtualList"
+                        && control.value.is_finite()
+                })
+                .map_or(0.0, |control| control.value.max(0.0))
+        });
         self.entries.insert(
             id,
             Entry {
@@ -629,8 +704,12 @@ impl Tree {
                 bounds: previous.as_ref().map(|e| e.bounds).unwrap_or(BoxRect::ZERO),
                 scroll_x: previous.as_ref().map(|e| e.scroll_x).unwrap_or(0.0),
                 scroll_max_x: previous.as_ref().map(|e| e.scroll_max_x).unwrap_or(0.0),
-                scroll: previous.as_ref().map(|e| e.scroll).unwrap_or(0.0),
+                scroll,
                 scroll_max: previous.as_ref().map(|e| e.scroll_max).unwrap_or(0.0),
+                virtual_anchor,
+                virtual_following_tail,
+                virtual_initial_layout,
+                virtual_scroll_generation,
             },
         );
     }
@@ -952,6 +1031,308 @@ impl Tree {
                 .is_some_and(|entry| entry.node.kind == "svg")
         });
     }
+    fn virtual_rows(&self, list_id: &str) -> Option<Vec<(String, String)>> {
+        let list = self.entries.get(list_id)?;
+        let metadata = list.node.virtual_list.as_ref()?;
+        let content_id = list.children.first()?;
+        let content = self.entries.get(content_id)?;
+        let first_row = usize::from(metadata.window_start > 0);
+        let row_count = metadata.rendered_keys.len();
+        if content.children.len() < first_row + row_count {
+            return None;
+        }
+        Some(
+            metadata
+                .rendered_keys
+                .iter()
+                .cloned()
+                .zip(
+                    content.children[first_row..first_row + row_count]
+                        .iter()
+                        .cloned(),
+                )
+                .collect(),
+        )
+    }
+
+    fn virtual_parked_row(&self, list_id: &str) -> Option<(String, String)> {
+        let list = self.entries.get(list_id)?;
+        let metadata = list.node.virtual_list.as_ref()?;
+        let retained_key = metadata.retained_key.as_ref()?;
+        let content_id = list.children.first()?;
+        let content = self.entries.get(content_id)?;
+        let index = usize::from(metadata.window_start > 0)
+            + metadata.rendered_keys.len()
+            + usize::from(metadata.window_end < metadata.item_count);
+        Some((retained_key.clone(), content.children.get(index)?.clone()))
+    }
+
+    pub(crate) fn is_virtual_parked(&self, id: &str) -> bool {
+        let mut current = id.to_string();
+        loop {
+            let Some(parent_id) = self
+                .entries
+                .get(&current)
+                .and_then(|entry| entry.parent.clone())
+            else {
+                return false;
+            };
+            if let Some(list_id) = self
+                .entries
+                .get(&parent_id)
+                .and_then(|entry| entry.parent.as_deref())
+                && self
+                    .virtual_parked_row(list_id)
+                    .is_some_and(|(_, row_id)| row_id == current)
+            {
+                return true;
+            }
+            current = parent_id;
+        }
+    }
+
+    fn focused_virtual_row(&self) -> Option<(String, String)> {
+        let mut current = self.focused.clone()?;
+        loop {
+            let parent_id = self.entries.get(&current)?.parent.clone()?;
+            if let Some(list_id) = self
+                .entries
+                .get(&parent_id)
+                .and_then(|entry| entry.parent.as_deref())
+                && self
+                    .entries
+                    .get(list_id)
+                    .and_then(|entry| entry.node.virtual_list.as_ref())
+                    .is_some()
+            {
+                if let Some((key, _)) = self
+                    .virtual_rows(list_id)
+                    .and_then(|rows| rows.into_iter().find(|(_, row_id)| row_id == &current))
+                {
+                    return Some((list_id.to_string(), key));
+                }
+                if let Some((key, row_id)) = self.virtual_parked_row(list_id)
+                    && row_id == current
+                {
+                    return Some((list_id.to_string(), key));
+                }
+            }
+            current = parent_id;
+        }
+    }
+
+    fn sync_virtual_focus(&mut self) {
+        let next = self.focused_virtual_row();
+        let previous = self.virtual_focus.clone();
+        if previous == next {
+            return;
+        }
+        if let Some((previous_list, _)) = &previous
+            && next
+                .as_ref()
+                .is_none_or(|(next_list, _)| next_list != previous_list)
+        {
+            self.pending_interaction_events.push(json!({
+                "type":"virtualListFocus", "id":previous_list, "key":Value::Null
+            }));
+        }
+        if let Some((list_id, key)) = &next {
+            self.pending_interaction_events.push(json!({
+                "type":"virtualListFocus", "id":list_id, "key":key
+            }));
+        }
+        self.virtual_focus = next;
+    }
+    fn current_virtual_anchor(&self, list_id: &str) -> Option<VirtualRowAnchor> {
+        let list = self.entries.get(list_id)?;
+        let metadata = list.node.virtual_list.as_ref()?;
+        if list.rect.height() <= 0.0 {
+            return None;
+        }
+        let rows = self.virtual_rows(list_id)?;
+        let viewport_top = list.rect.y0 + list.scroll;
+        let viewport_bottom = list.rect.y1 + list.scroll;
+        let edge = if metadata.alignment == "bottom" {
+            VirtualAnchorEdge::Bottom
+        } else {
+            VirtualAnchorEdge::Top
+        };
+        let (_, row_id) = match edge {
+            VirtualAnchorEdge::Top => rows
+                .iter()
+                .find(|(_, row_id)| {
+                    self.entries.get(row_id).is_some_and(|row| {
+                        row.rect.height() > 0.0 && row.rect.y1 > viewport_top + 1e-6
+                    })
+                })
+                .or_else(|| rows.last())?,
+            VirtualAnchorEdge::Bottom => rows
+                .iter()
+                .rev()
+                .find(|(_, row_id)| {
+                    self.entries.get(row_id).is_some_and(|row| {
+                        row.rect.height() > 0.0 && row.rect.y0 < viewport_bottom - 1e-6
+                    })
+                })
+                .or_else(|| rows.first())?,
+        };
+        let row = self.entries.get(row_id)?;
+        (row.rect.height() > 0.0).then(|| VirtualRowAnchor {
+            row_id: row_id.clone(),
+            viewport_delta: match edge {
+                VirtualAnchorEdge::Top => row.rect.y0 - viewport_top,
+                VirtualAnchorEdge::Bottom => row.rect.y1 - viewport_bottom,
+            },
+            edge,
+        })
+    }
+    fn refresh_virtual_anchor(&mut self, list_id: &str) {
+        let anchor = self.current_virtual_anchor(list_id);
+        if let Some(list) = self.entries.get_mut(list_id) {
+            list.virtual_anchor = anchor;
+            list.virtual_initial_layout = false;
+        }
+    }
+    fn refresh_virtual_anchors(&mut self) {
+        let list_ids: Vec<String> = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.node.virtual_list.is_some())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for list_id in list_ids {
+            self.refresh_virtual_anchor(&list_id);
+        }
+    }
+    fn restore_virtual_anchors(&mut self) {
+        let lists: Vec<VirtualListRestore> = self
+            .entries
+            .iter()
+            .filter_map(|(list_id, entry)| {
+                let metadata = entry.node.virtual_list.as_ref()?;
+                Some(VirtualListRestore {
+                    list_id: list_id.clone(),
+                    anchor: entry.virtual_anchor.clone(),
+                    following_tail: entry.virtual_following_tail,
+                    initial_layout: entry.virtual_initial_layout,
+                    bottom_aligned: metadata.alignment == "bottom",
+                    scroll_request: metadata
+                        .scroll_request
+                        .as_ref()
+                        .filter(|request| request.generation > entry.virtual_scroll_generation)
+                        .cloned(),
+                })
+            })
+            .collect();
+        for VirtualListRestore {
+            list_id,
+            anchor,
+            following_tail,
+            initial_layout,
+            bottom_aligned,
+            scroll_request,
+        } in lists
+        {
+            let Some(list) = self.entries.get(&list_id) else {
+                continue;
+            };
+            let desired = if let Some(request) = &scroll_request {
+                request.offset
+            } else if following_tail || (initial_layout && bottom_aligned) {
+                list.scroll_max
+            } else if let Some(anchor) = anchor {
+                let Some(row) = self.entries.get(&anchor.row_id) else {
+                    continue;
+                };
+                match anchor.edge {
+                    VirtualAnchorEdge::Top => row.rect.y0 - list.rect.y0 - anchor.viewport_delta,
+                    VirtualAnchorEdge::Bottom => row.rect.y1 - list.rect.y1 - anchor.viewport_delta,
+                }
+            } else {
+                continue;
+            };
+            let next = desired.clamp(0.0, list.scroll_max);
+            let changed = (next - list.scroll).abs() > 1e-6;
+            let (scroll_x, max_x, max_y) = (list.scroll_x, list.scroll_max_x, list.scroll_max);
+            let list = self.entries.get_mut(&list_id).unwrap();
+            list.scroll = next;
+            if let Some(request) = &scroll_request {
+                list.virtual_scroll_generation = request.generation;
+                list.virtual_following_tail = list
+                    .node
+                    .virtual_list
+                    .as_ref()
+                    .is_some_and(|metadata| metadata.follow_tail)
+                    && (next - max_y).abs() <= 0.5;
+            }
+            if changed {
+                self.dirty.paint = true;
+            }
+            if !changed && scroll_request.is_none() {
+                continue;
+            }
+            self.pending_layout_events.push(json!({
+                "type":"scroll", "id":list_id, "offset":next, "max":max_y,
+                "offsetX":scroll_x, "offsetY":next, "maxX":max_x, "maxY":max_y
+            }));
+        }
+    }
+    fn measure_virtual_rows(&mut self) {
+        let active: HashSet<String> = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.node.virtual_list.is_some())
+            .map(|(id, _)| id.clone())
+            .collect();
+        self.virtual_measurements
+            .retain(|id, _| active.contains(id));
+
+        for list_id in active {
+            let Some(rows) = self.virtual_rows(&list_id) else {
+                continue;
+            };
+            let measured: Vec<(String, f64)> = rows
+                .into_iter()
+                .filter_map(|(key, row_id)| {
+                    let height = self.entries.get(&row_id)?.rect.height();
+                    (height.is_finite() && height > 0.0).then_some((key, height))
+                })
+                .collect();
+            let cache = self
+                .virtual_measurements
+                .entry(list_id.clone())
+                .or_default();
+            let mut changed = Vec::new();
+            for (key, height) in measured {
+                if cache
+                    .get(&key)
+                    .is_some_and(|previous| (previous - height).abs() <= 0.25)
+                {
+                    continue;
+                }
+                if !cache.contains_key(&key)
+                    && cache.len() >= MAX_VIRTUAL_MEASUREMENTS_PER_LIST
+                    && let Some(oldest) = cache.keys().next().cloned()
+                {
+                    cache.remove(&oldest);
+                }
+                cache.insert(key.clone(), height);
+                changed.push(json!({"key":key,"height":height}));
+            }
+            if !changed.is_empty() {
+                self.pending_layout_events.push(json!({
+                    "type":"virtualListLayout", "id":list_id, "items":changed
+                }));
+            }
+        }
+    }
+    pub fn take_layout_events(&mut self) -> Vec<Value> {
+        std::mem::take(&mut self.pending_layout_events)
+    }
+
+    pub fn take_interaction_events(&mut self) -> Vec<Value> {
+        std::mem::take(&mut self.pending_interaction_events)
+    }
     pub fn compute(&mut self, width: f32, height: f32) -> Result<(), String> {
         if !self.dirty.layout && !self.dirty.text {
             return Ok(());
@@ -1023,6 +1404,9 @@ impl Tree {
             )
             .map_err(|e| e.to_string())?;
         self.positions(&self.root.clone(), (0.0, 0.0))?;
+        self.restore_virtual_anchors();
+        self.measure_virtual_rows();
+        self.refresh_virtual_anchors();
         self.ensure_focused_textarea_caret_visible();
         self.layouts += 1;
         self.dirty.layout = false;
@@ -1849,13 +2233,15 @@ impl Tree {
         true
     }
     fn accessibility_interactive(&self, id: &str) -> bool {
-        self.interactive(id)
+        !self.is_virtual_parked(id)
+            && self.interactive(id)
             && self
                 .active_modal()
                 .is_none_or(|modal| self.is_descendant_of(id, modal))
     }
     fn accessibility_in_scope(&self, id: &str) -> bool {
         self.entries.contains_key(id)
+            && !self.is_virtual_parked(id)
             && self
                 .active_modal()
                 .is_none_or(|modal| self.is_descendant_of(id, modal))
@@ -1876,6 +2262,7 @@ impl Tree {
         let mut group_choice = HashMap::<String, String>::new();
         for id in &self.order {
             if !self.interactive(id)
+                || self.is_virtual_parked(id)
                 || !self.entries[id].node.focusable
                 || modal.is_some_and(|modal| !self.is_descendant_of(id, modal))
             {
@@ -1907,6 +2294,7 @@ impl Tree {
             .iter()
             .filter(|id| {
                 self.interactive(id)
+                    && !self.is_virtual_parked(id)
                     && self.entries[*id].node.focusable
                     && modal.is_none_or(|modal| self.is_descendant_of(id, modal))
                     && self
@@ -1945,6 +2333,7 @@ impl Tree {
             self.caret = self.entries[id].node.value.as_deref().map_or(0, str::len);
             self.dirty.paint = true;
         }
+        let mut virtual_scrolls = Vec::new();
         let mut ancestor = self.entries[id].parent.clone();
         while let Some(parent_id) = ancestor {
             if self.entries[&parent_id].node.kind == "scroll"
@@ -1969,13 +2358,30 @@ impl Tree {
                 let next_x = (entry.scroll_x + delta_x).clamp(0.0, entry.scroll_max_x);
                 let next_y = (entry.scroll + delta_y).clamp(0.0, entry.scroll_max);
                 if next_x != entry.scroll_x || next_y != entry.scroll {
+                    let variable_list = entry.node.virtual_list.is_some();
+                    let follows_tail = entry
+                        .node
+                        .virtual_list
+                        .as_ref()
+                        .is_some_and(|metadata| metadata.follow_tail);
                     entry.scroll_x = next_x;
                     entry.scroll = next_y;
+                    if variable_list {
+                        entry.virtual_following_tail =
+                            follows_tail && (next_y - entry.scroll_max).abs() <= 0.5;
+                    }
                     self.dirty.paint = true;
+                    if variable_list {
+                        virtual_scrolls.push(parent_id.clone());
+                    }
                 }
             }
             ancestor = self.entries[&parent_id].parent.clone();
         }
+        for list_id in virtual_scrolls {
+            self.refresh_virtual_anchor(&list_id);
+        }
+        self.sync_virtual_focus();
         blurred
     }
 
@@ -2053,6 +2459,7 @@ impl Tree {
         if changed {
             self.dirty.paint = true;
         }
+        self.sync_virtual_focus();
     }
 
     pub(crate) fn active_modal(&self) -> Option<&str> {
@@ -2326,6 +2733,7 @@ impl Tree {
             self.selection_anchor = None;
             self.dirty.paint = true;
         }
+        self.sync_virtual_focus();
         blurred
     }
     pub fn pointer_down(&mut self) -> Vec<Value> {
@@ -2563,6 +2971,30 @@ impl Tree {
         let x = self.entries.get(id).map_or(0.0, |entry| entry.scroll_x);
         self.scroll_to_2d(id, x, offset)
     }
+    pub fn request_virtual_scroll_to_item(
+        &self,
+        id: &str,
+        index: usize,
+        offset: f64,
+    ) -> Result<Vec<Value>, String> {
+        if !offset.is_finite() {
+            return Err("VirtualList scrollToItem offset must be finite".into());
+        }
+        let metadata = self
+            .entries
+            .get(id)
+            .and_then(|entry| entry.node.virtual_list.as_ref())
+            .ok_or_else(|| format!("scrollToItem target is not a variable VirtualList: {id}"))?;
+        if index >= metadata.item_count {
+            return Err(format!(
+                "VirtualList scrollToItem index {index} is outside itemCount {}",
+                metadata.item_count
+            ));
+        }
+        Ok(vec![json!({
+            "type":"virtualListScrollToItem", "id":id, "index":index, "offset":offset
+        })])
+    }
     fn scroll_to_2d(&mut self, id: &str, offset_x: f64, offset_y: f64) -> Vec<Value> {
         if !offset_x.is_finite() || !offset_y.is_finite() {
             return vec![];
@@ -2575,6 +3007,15 @@ impl Tree {
         }
         entry.scroll_x = next_x;
         entry.scroll = next_y;
+        let variable_list = entry.node.virtual_list.is_some();
+        if variable_list {
+            entry.virtual_following_tail = entry
+                .node
+                .virtual_list
+                .as_ref()
+                .is_some_and(|metadata| metadata.follow_tail)
+                && (next_y - entry.scroll_max).abs() <= 0.5;
+        }
         if !entry
             .node
             .control
@@ -2589,11 +3030,15 @@ impl Tree {
             } else {
                 (next_y, entry.scroll_max)
             };
-        vec![json!({
+        let events = vec![json!({
             "type":"scroll", "id":id, "offset":offset, "max":max,
             "offsetX":next_x, "offsetY":next_y,
             "maxX":entry.scroll_max_x, "maxY":entry.scroll_max
-        })]
+        })];
+        if variable_list {
+            self.refresh_virtual_anchor(id);
+        }
+        events
     }
 
     fn ime_display(&self, id: &str) -> Option<ImeDisplay> {
@@ -4001,8 +4446,26 @@ impl Tree {
         self.snapshot_node(&self.root, Vec2::ZERO, &mut result);
         result
     }
+    fn virtual_list_anchor_snapshot(&self, id: &str) -> Option<Value> {
+        let list = self.entries.get(id)?;
+        let metadata = list.node.virtual_list.as_ref()?;
+        let rows = self.virtual_rows(id)?;
+        let top = list.rect.y0 + list.scroll;
+        let (offset, (key, row_id)) = rows.iter().enumerate().find(|(_, (_, row_id))| {
+            self.entries
+                .get(row_id)
+                .is_some_and(|row| row.rect.height() > 0.0 && row.rect.y1 > top + 1e-6)
+        })?;
+        let row = self.entries.get(row_id)?;
+        Some(json!({
+            "index": metadata.window_start + offset,
+            "key": key,
+            "offset": (top - row.rect.y0).max(0.0)
+        }))
+    }
     fn snapshot_node(&self, id: &str, offset: Vec2, out: &mut Vec<Value>) {
         let e = &self.entries[id];
+        let virtual_list_anchor = self.virtual_list_anchor_snapshot(id);
         out.push(json!({
             "id":id,"kind":e.node.kind,
             "x":e.rect.x0-offset.x,"y":e.rect.y0-offset.y,
@@ -4010,7 +4473,8 @@ impl Tree {
             "scroll":e.scroll,"scrollMax":e.scroll_max,
             "scrollX":e.scroll_x,"scrollY":e.scroll,
             "scrollMaxX":e.scroll_max_x,"scrollMaxY":e.scroll_max,
-            "text":e.node.display_text(),"control":e.node.control
+            "text":e.node.display_text(),"control":e.node.control,
+            "virtualListAnchor":virtual_list_anchor
         }));
         for child in &e.children {
             self.snapshot_node(child, offset + Vec2::new(e.scroll_x, e.scroll), out);

@@ -3,9 +3,10 @@ import type { NativeCommand, NativeEvent, SceneDocument } from "../../protocol/s
 import { createApp, type AppErrorEvent } from "./app";
 import type { NativeBridge } from "./bridge";
 import { Slider } from "./controls";
-import { Button, Column, Input, ScrollArea, Window } from "./components";
+import { Button, Column, Input, ScrollArea, Text, Window } from "./components";
 import { InputOTP } from "./form-controls";
 import { Svg } from "./components/svg";
+import { VirtualList } from "./virtual-list";
 import type { ComponentAdapter } from "./component-adapter";
 import type { VNode } from "./jsx-runtime";
 
@@ -210,6 +211,221 @@ describe("controlled native reconciliation", () => {
     await Bun.sleep(0);
     expect(scalar).toEqual([[30, 300]]);
     expect(positions).toEqual([{ x: 20, y: 30, maxX: 200, maxY: 300 }]);
+  });
+
+  test("native variable-list measurements feed the next keyed window through normal event dispatch", async () => {
+    const bridge = new FakeBridge();
+    let offset = 0;
+    const items = ["a", "b", "c", "d"];
+    const app = createApp(() => (
+      <Window>
+        <VirtualList
+          id="measured-list"
+          items={items}
+          estimatedItemHeight={40}
+          height={60}
+          offset={offset}
+          overscan={0}
+          keyForItem={item => item}
+          onScroll={next => { offset = next; }}
+          renderItem={item => <Text id={`measured-${item}`}>{item}</Text>}
+        />
+      </Window>
+    ), { bridge });
+    await app.ready;
+
+    bridge.emit({
+      type: "virtualListLayout",
+      id: "measured-list",
+      items: [{ key: "s:a", height: 20 }, { key: "s:b", height: 80 }],
+    });
+    await Bun.sleep(0);
+    bridge.commands.length = 0;
+
+    bridge.emit({
+      type: "scroll",
+      id: "measured-list",
+      offset: 90,
+      max: 120,
+      offsetX: 0,
+      offsetY: 90,
+      maxX: 0,
+      maxY: 120,
+    });
+    await Bun.sleep(0);
+
+    expect(offset).toBe(90);
+    const command = bridge.commands.at(-1);
+    expect(command?.type).toBe("mutate");
+    if (command?.type !== "mutate") throw new Error("expected measured virtual-list mutation");
+    const listPatch = command.mutations.find(
+      mutation => mutation.type === "patch" && mutation.node.id === "measured-list",
+    );
+    expect(listPatch?.type).toBe("patch");
+    if (listPatch?.type === "patch") {
+      expect(listPatch.node.virtualList?.renderedKeys).toEqual(["s:b", "s:c", "s:d"]);
+    }
+  });
+
+  test("native virtual-list focus keeps the focused row mounted when it scrolls outside the window", async () => {
+    const bridge = new FakeBridge();
+    let offset = 0;
+    const items = ["a", "b", "c", "d", "e"];
+    const app = createApp(() => (
+      <Window>
+        <VirtualList
+          id="focus-event-list"
+          items={items}
+          estimatedItemHeight={40}
+          height={80}
+          offset={offset}
+          overscan={0}
+          keyForItem={item => item}
+          onScroll={next => { offset = next; }}
+          renderItem={item => <Text id={`focus-event-${item}`}>{item}</Text>}
+        />
+      </Window>
+    ), { bridge });
+    await app.ready;
+
+    bridge.emit({ type: "virtualListFocus", id: "focus-event-list", key: "s:b" });
+    await Bun.sleep(0);
+    bridge.commands.length = 0;
+
+    bridge.emit({
+      type: "scroll",
+      id: "focus-event-list",
+      offset: 120,
+      max: 120,
+      offsetX: 0,
+      offsetY: 120,
+      maxX: 0,
+      maxY: 120,
+    });
+    await Bun.sleep(0);
+
+    expect(offset).toBe(120);
+    const command = bridge.commands.at(-1);
+    expect(command?.type).toBe("mutate");
+    if (command?.type !== "mutate") throw new Error("expected focused virtual-list mutation");
+    const listPatch = command.mutations.find(
+      mutation => mutation.type === "patch" && mutation.node.id === "focus-event-list",
+    );
+    expect(listPatch?.type).toBe("patch");
+    if (listPatch?.type === "patch") {
+      expect(listPatch.node.virtualList?.retainedKey).toBe("s:b");
+      expect(listPatch.node.virtualList?.renderedKeys).toEqual(["s:d", "s:e"]);
+    }
+  });
+
+  test("scrollToItem uses a generation-tagged variable-list request and acknowledges through scroll", async () => {
+    const bridge = new FakeBridge();
+    let offset = 0;
+    const items = ["a", "b", "c", "d", "e", "f"];
+    const app = createApp(() => (
+      <Window>
+        <VirtualList
+          id="imperative-list"
+          items={items}
+          estimatedItemHeight={40}
+          height={80}
+          offset={offset}
+          overscan={0}
+          keyForItem={item => item}
+          onScroll={next => { offset = next; }}
+          renderItem={item => <Text id={`imperative-${item}`}>{item}</Text>}
+        />
+      </Window>
+    ), { bridge });
+    await app.ready;
+
+    app.scrollToItem("imperative-list", 3, 5);
+    expect(bridge.commands.at(-1)).toEqual({
+      type: "scrollToItem",
+      id: "imperative-list",
+      index: 3,
+      offset: 5,
+    });
+    expect(() => app.scrollToItem("imperative-list", -1)).toThrow(RangeError);
+    bridge.commands.length = 0;
+
+    bridge.emit({ type: "virtualListScrollToItem", id: "imperative-list", index: 3, offset: 5 });
+    await Bun.sleep(0);
+    const requested = bridge.commands.at(-1);
+    expect(requested?.type).toBe("mutate");
+    if (requested?.type !== "mutate") throw new Error("expected scrollToItem window mutation");
+    const requestPatch = requested.mutations.find(
+      mutation => mutation.type === "patch" && mutation.node.id === "imperative-list",
+    );
+    expect(requestPatch?.type).toBe("patch");
+    if (requestPatch?.type === "patch") {
+      expect(requestPatch.node.virtualList?.scrollRequest).toEqual({ generation: 1, offset: 125 });
+      expect(requestPatch.node.virtualList?.renderedKeys).toContain("s:d");
+    }
+
+    bridge.commands.length = 0;
+    bridge.emit({
+      type: "scroll",
+      id: "imperative-list",
+      offset: 125,
+      max: 160,
+      offsetX: 0,
+      offsetY: 125,
+      maxX: 0,
+      maxY: 160,
+    });
+    await Bun.sleep(0);
+    expect(offset).toBe(125);
+    const acknowledged = bridge.commands.at(-1);
+    expect(acknowledged?.type).toBe("patch");
+    if (acknowledged?.type === "patch") {
+      expect(acknowledged.nodes.find(node => node.id === "imperative-list")?.virtualList?.scrollRequest).toBeUndefined();
+    }
+  });
+
+  test("separate apps do not share variable VirtualList measurements for the same id", async () => {
+    const firstBridge = new FakeBridge();
+    const first = createApp(() => (
+      <Window>
+        <VirtualList
+          id="shared-list-id"
+          items={["same", "first"]}
+          estimatedItemHeight={40}
+          height={40}
+          offset={0}
+          overscan={0}
+          keyForItem={item => item}
+          onScroll={() => {}}
+          renderItem={item => <Text>{item}</Text>}
+        />
+      </Window>
+    ), { bridge: firstBridge });
+    await first.ready;
+    firstBridge.emit({
+      type: "virtualListLayout",
+      id: "shared-list-id",
+      items: [{ key: "s:same", height: 80 }],
+    });
+
+    const secondBridge = new FakeBridge();
+    const second = createApp(() => (
+      <Window>
+        <VirtualList
+          id="shared-list-id"
+          items={["same", "second"]}
+          estimatedItemHeight={40}
+          height={40}
+          offset={40}
+          overscan={0}
+          keyForItem={item => item}
+          onScroll={() => {}}
+          renderItem={item => <Text>{item}</Text>}
+        />
+      </Window>
+    ), { bridge: secondBridge });
+    await second.ready;
+
+    expect(secondBridge.document?.root.children[0]?.virtualList?.renderedKeys).toEqual(["s:second"]);
   });
 
   test("InputOTP filters native edits and patches rejected characters back out", async () => {

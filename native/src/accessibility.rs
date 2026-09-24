@@ -166,6 +166,9 @@ impl AccessibilityTree {
     }
 
     fn hidden(tree: &Tree, id: &str, modal: Option<&str>) -> bool {
+        if tree.is_virtual_parked(id) {
+            return true;
+        }
         let mut current = Some(id);
         while let Some(current_id) = current {
             let entry = &tree.entries[current_id];
