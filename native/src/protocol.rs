@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 31;
+pub const VERSION: u32 = 32;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -87,6 +87,8 @@ pub struct Node {
     pub portal: bool,
     #[serde(default)]
     pub dismiss_on_outside: bool,
+    #[serde(default)]
+    pub labelled_by: Vec<String>,
     #[serde(default)]
     pub close_intercept: bool,
     #[serde(default = "default_true")]

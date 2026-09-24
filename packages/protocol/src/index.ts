@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 4;
-export const PROTOCOL_VERSION = 31;
+export const PROTOCOL_VERSION = 32;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter";
@@ -55,6 +55,7 @@ export interface NativeNode {
   rovingGroup?: string;
   portal?: boolean;
   dismissOnOutside?: boolean;
+  labelledBy?: string[];
   closeIntercept?: boolean;
   dragRegion?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "close";

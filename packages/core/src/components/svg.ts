@@ -3,6 +3,7 @@ import { Fragment, _nativeJsx, jsx, type BaseProps, type Child, type VNode } fro
 import { theme } from "../theme";
 
 const SVG_ELEMENT = "__tarve_svg_element";
+const SVG_INTRINSIC_ELEMENTS = new Set(["path", "circle", "ellipse", "g", "line", "polygon", "polyline", "rect"]);
 
 export interface SvgProps extends BaseProps {
   size?: number;
@@ -64,7 +65,31 @@ function collect(value: Child, result: SvgNode[]): void {
     collect(value.type(value.props), result);
     return;
   }
-  if (value.type !== SVG_ELEMENT) throw new Error("Svg children must be Path, Circle, Ellipse, Line, Polyline, Polygon or SvgRect.");
+  if (typeof value.type === "string" && SVG_INTRINSIC_ELEMENTS.has(value.type)) {
+    const { children, ...props } = value.props;
+    const attrs: SvgAttributes = {};
+    for (const [key, attr] of Object.entries(props)) {
+      if (key === "key" || attr === undefined) continue;
+      if (typeof attr !== "string" && typeof attr !== "number") {
+        throw new TypeError(`SVG <${value.type}> attribute ${key} must be a string or number.`);
+      }
+      attrs[key] = attr;
+    }
+    if (value.type === "g") {
+      const nested: SvgNode[] = [];
+      collect(children, nested);
+      result.push(["g", attrs, nested]);
+      return;
+    }
+    if (children != null && children !== false) {
+      throw new Error(`SVG <${value.type}> cannot contain child nodes.`);
+    }
+    result.push([value.type as SvgNode[0], attrs]);
+    return;
+  }
+  if (value.type !== SVG_ELEMENT) {
+    throw new Error("Svg children must be SVG geometry elements such as path/circle/rect or Tarve Path/Circle/SvgRect components.");
+  }
   result.push([value.props.tag as SvgNode[0], { ...value.props.attrs }]);
 }
 

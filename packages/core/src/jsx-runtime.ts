@@ -39,6 +39,14 @@ export interface SpanProps extends Omit<BaseProps, "style"> {
   color?: string;
 }
 export type ParagraphProps = SpanProps;
+export type HeadingProps = SpanProps;
+export interface IntrinsicLabelProps extends Omit<BaseProps, "style"> {
+  style?: IntrinsicStyle;
+  htmlFor?: string;
+  required?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+}
 export interface ImgProps extends Omit<BaseProps, "style" | "children"> {
   style?: IntrinsicStyle;
   src: string;
@@ -85,6 +93,64 @@ export interface IntrinsicSvgProps extends Omit<BaseProps, "style"> {
   strokeLinejoin?: "miter" | "round" | "bevel";
   nodes?: readonly SvgNode[];
 }
+export interface IntrinsicSvgElementProps {
+  key?: string | number;
+  id?: string;
+  fill?: string;
+  fillRule?: "nonzero" | "evenodd";
+  fillOpacity?: number | string;
+  stroke?: string;
+  strokeWidth?: number | string;
+  strokeLinecap?: "butt" | "round" | "square";
+  strokeLinejoin?: "miter" | "round" | "bevel";
+  strokeOpacity?: number | string;
+  strokeDasharray?: number | string;
+  strokeDashoffset?: number | string;
+  opacity?: number | string;
+  transform?: string;
+  vectorEffect?: string;
+}
+export interface IntrinsicSvgPathProps extends IntrinsicSvgElementProps { d: string }
+export interface IntrinsicSvgCircleProps extends IntrinsicSvgElementProps { cx: number | string; cy: number | string; r: number | string }
+export interface IntrinsicSvgEllipseProps extends IntrinsicSvgElementProps { cx: number | string; cy: number | string; rx: number | string; ry: number | string }
+export interface IntrinsicSvgLineProps extends IntrinsicSvgElementProps { x1: number | string; y1: number | string; x2: number | string; y2: number | string }
+export interface IntrinsicSvgPolylineProps extends IntrinsicSvgElementProps { points: string }
+export interface IntrinsicSvgPolygonProps extends IntrinsicSvgElementProps { points: string }
+export interface IntrinsicSvgRectProps extends IntrinsicSvgElementProps {
+  x?: number | string;
+  y?: number | string;
+  width: number | string;
+  height: number | string;
+  rx?: number | string;
+  ry?: number | string;
+}
+export interface IntrinsicSvgGroupProps extends IntrinsicSvgElementProps { children?: Child }
+export interface IntrinsicOptionProps {
+  key?: string | number;
+  value: string;
+  disabled?: boolean;
+  children?: Child;
+}
+export interface IntrinsicSelectProps extends Omit<BaseProps, "style"> {
+  style?: IntrinsicStyle;
+  value?: string;
+  placeholder?: string;
+  disabled?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  onChange?: (value: string) => void;
+  onValueChange?: (value: string) => void;
+}
+export interface IntrinsicProgressProps extends Omit<BaseProps, "style" | "children"> {
+  style?: IntrinsicStyle;
+  value: number;
+  max?: number;
+  label?: string;
+}
+export interface IntrinsicHrProps extends Omit<BaseProps, "style" | "children"> {
+  style?: IntrinsicStyle;
+  orientation?: "horizontal" | "vertical";
+}
 export type Component<P = any> = (props: P) => VNode;
 export interface VNode { type: Component | string; props: Record<string, any>; key?: string | number }
 const NATIVE_VNODE = Symbol("tarve.native-vnode");
@@ -110,10 +176,29 @@ export namespace JSX {
     div: DivProps;
     span: SpanProps;
     p: ParagraphProps;
+    h1: HeadingProps;
+    h2: HeadingProps;
+    h3: HeadingProps;
+    h4: HeadingProps;
+    h5: HeadingProps;
+    h6: HeadingProps;
+    label: IntrinsicLabelProps;
     img: ImgProps;
     input: IntrinsicInputProps;
     textarea: IntrinsicTextareaProps;
     button: IntrinsicButtonProps;
     svg: IntrinsicSvgProps;
+    path: IntrinsicSvgPathProps;
+    circle: IntrinsicSvgCircleProps;
+    ellipse: IntrinsicSvgEllipseProps;
+    line: IntrinsicSvgLineProps;
+    polyline: IntrinsicSvgPolylineProps;
+    polygon: IntrinsicSvgPolygonProps;
+    rect: IntrinsicSvgRectProps;
+    g: IntrinsicSvgGroupProps;
+    select: IntrinsicSelectProps;
+    option: IntrinsicOptionProps;
+    progress: IntrinsicProgressProps;
+    hr: IntrinsicHrProps;
   }
 }

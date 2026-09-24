@@ -7,12 +7,14 @@
     "counter": "bun counter.tsx",
     "components": "bun components.tsx",
     "forms": "bun forms.tsx",
+    "intrinsics": "bun intrinsics.tsx",
     "large-list": "bun large-list.tsx",
     "check": "tsc --noEmit",
     "build:basic": "bun run tarve build basic.tsx --outfile dist/Basic.exe",
     "build:counter": "bun run tarve build counter.tsx --outfile dist/Counter.exe",
     "build:components": "bun run tarve build components.tsx --outfile dist/Components.exe",
     "build:forms": "bun run tarve build forms.tsx --outfile dist/Forms.exe",
+    "build:intrinsics": "bun run tarve build intrinsics.tsx --outfile dist/Intrinsics.exe",
     "build:large-list": "bun run tarve build large-list.tsx --outfile dist/LargeList.exe"
   },
   "dependencies": {

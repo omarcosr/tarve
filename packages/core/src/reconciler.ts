@@ -9,10 +9,22 @@ import { Image } from "./components/image";
 import { Input, TextArea } from "./components/input";
 import { Button } from "./components/button";
 import { Svg } from "./components/svg";
+import { Select } from "./select";
+import { Progress, Separator } from "./controls";
+import { Label } from "./form-controls";
 export interface Handlers { onClick?: () => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onScrollPosition?: (position: ScrollPosition) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void }
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode> }
 const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter"]);
 const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
+const svgIntrinsicElements = new Set(["path", "circle", "ellipse", "g", "line", "polygon", "polyline", "rect"]);
+const headingPreset = {
+  h1: { size: 32, weight: 700 },
+  h2: { size: 24, weight: 700 },
+  h3: { size: 20, weight: 600 },
+  h4: { size: 18, weight: 600 },
+  h5: { size: 16, weight: 600 },
+  h6: { size: 14, weight: 600 },
+} as const;
 function canonicalizeIntrinsicStyle(style: Record<string, any> | undefined): Record<string, any> {
   const result = { ...style };
   if (result.direction === undefined && result.flexDirection !== undefined) result.direction = result.flexDirection;
@@ -38,6 +50,8 @@ export function compileTree(
   const handlers = new Map<string, Handlers>();
   const ids = new Set<string>();
   const nodes = new Map<string, NativeNode>();
+  const labelAssociations = new Map<string, string[]>();
+  const labelableTargets = new Map<string, string>();
   let windowOptions: WindowOptions | undefined;
   let selectedTheme: ThemeDefinition = lightTheme;
   function visit(child: Child, path: string, group?: string): NativeNode[] {
@@ -61,6 +75,16 @@ export function compileTree(
       return visit(adapted, path, group);
     }
     if (typeof child.type === "function") return visit(child.type(child.props), path, group);
+    if (!_isNativeVNode(child) && child.type in headingPreset) {
+      const props = child.props as Parameters<typeof Text>[0];
+      const preset = headingPreset[child.type as keyof typeof headingPreset];
+      return visit(Text({
+        ...props,
+        size: props.size ?? preset.size,
+        weight: props.weight ?? preset.weight,
+        style: canonicalizeIntrinsicStyle(props.style),
+      }), path, group);
+    }
     if (!_isNativeVNode(child) && (child.type === "span" || child.type === "p")) {
       const props = child.props as Parameters<typeof Text>[0];
       return visit(Text({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
@@ -84,6 +108,61 @@ export function compileTree(
     if (!_isNativeVNode(child) && child.type === "svg") {
       const props = child.props as Parameters<typeof Svg>[0];
       return visit(Svg({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+    }
+    if (!_isNativeVNode(child) && typeof child.type === "string" && svgIntrinsicElements.has(child.type)) {
+      throw new Error(`SVG element <${child.type}> must be a child of <svg>.`);
+    }
+    if (!_isNativeVNode(child) && child.type === "label") {
+      const { htmlFor, ...rawProps } = child.props;
+      const id = rawProps.id ?? path;
+      if (htmlFor) {
+        const labels = labelAssociations.get(String(htmlFor)) ?? [];
+        labels.push(String(id));
+        labelAssociations.set(String(htmlFor), labels);
+      }
+      const props = rawProps as Parameters<typeof Label>[0];
+      return visit(Label({ ...props, id: String(id), style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+    }
+    if (!_isNativeVNode(child) && child.type === "select") {
+      const { children, onChange, onValueChange, ...rawProps } = child.props;
+      const id = String(rawProps.id ?? path);
+      const optionNodes = Array.isArray(children) ? children.flat(Infinity) : [children];
+      const options = optionNodes
+        .filter(option => option != null && option !== false && option !== true)
+        .map(option => {
+          if (typeof option !== "object" || Array.isArray(option) || option.type !== "option") {
+            throw new Error("select children must be option elements.");
+          }
+          if (option.props.value === undefined) throw new Error("option requires a value.");
+          return {
+            value: String(option.props.value),
+            label: textContent(option.props.children),
+            disabled: option.props.disabled === true,
+          };
+        });
+      labelableTargets.set(id, `${id}-trigger`);
+      const props = rawProps as Omit<Parameters<typeof Select>[0], "options" | "id" | "onValueChange">;
+      return visit(Select({
+        ...props,
+        id,
+        options,
+        style: canonicalizeIntrinsicStyle(props.style),
+        onValueChange: (value) => {
+          onValueChange?.(value);
+          onChange?.(value);
+        },
+      }), path, group);
+    }
+    if (!_isNativeVNode(child) && child.type === "option") {
+      throw new Error("option must be a direct child of select.");
+    }
+    if (!_isNativeVNode(child) && child.type === "progress") {
+      const props = child.props as Parameters<typeof Progress>[0];
+      return visit(Progress({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+    }
+    if (!_isNativeVNode(child) && child.type === "hr") {
+      const props = child.props as Parameters<typeof Separator>[0];
+      return visit(Separator({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
     }
     const isIntrinsicDiv = child.type === "div";
     const nativeType = isIntrinsicDiv ? "view" : child.type;
@@ -158,10 +237,18 @@ export function compileTree(
       ...(p.dragRegion !== undefined ? { dragRegion: p.dragRegion } : {}),
       ...(p.windowAction !== undefined ? { windowAction: p.windowAction } : {}),
     };
+    if (nativeType === "input" || nativeType === "textarea") labelableTargets.set(id, id);
     nodes.set(id, node);
     return [node];
   }
   const roots = visit(element, "root");
+  for (const [targetId, labelIds] of labelAssociations) {
+    const nativeTargetId = labelableTargets.get(targetId);
+    if (!nativeTargetId) throw new Error(`label htmlFor references unknown or unsupported target: ${targetId}`);
+    const target = nodes.get(nativeTargetId);
+    if (!target) throw new Error(`label htmlFor target did not compile: ${targetId}`);
+    target.labelledBy = [...new Set([...(target.labelledBy ?? []), ...labelIds])];
+  }
   if (roots.length !== 1 || roots[0].kind !== "window" || !windowOptions) throw new Error("render() requires one Window root.");
   const titleBars = [...nodes.values()].filter(node => node.kind === "titlebar");
   if (titleBars.length > 1) throw new Error("Window can contain only one TitleBar.");
@@ -203,7 +290,7 @@ export function diffTrees(previous: CompiledTree, next: CompiledTree): NativeNod
       || old.children.some((child, index) => child.id !== node.children[index].id)) return null;
     if (old.text !== node.text || old.src !== node.src || old.fit !== node.fit || !sameValue(old.svg, node.svg)
       || old.value !== node.value || old.placeholder !== node.placeholder || old.inputType !== node.inputType || old.scrollSpeed !== node.scrollSpeed || old.scrollOrientation !== node.scrollOrientation || old.disabled !== node.disabled
-      || old.modal !== node.modal || old.rovingGroup !== node.rovingGroup || old.portal !== node.portal || old.dismissOnOutside !== node.dismissOnOutside || old.closeIntercept !== node.closeIntercept || old.focusable !== node.focusable
+      || old.modal !== node.modal || old.rovingGroup !== node.rovingGroup || old.portal !== node.portal || old.dismissOnOutside !== node.dismissOnOutside || !sameValue(old.labelledBy, node.labelledBy) || old.closeIntercept !== node.closeIntercept || old.focusable !== node.focusable
       || old.dragRegion !== node.dragRegion || old.windowAction !== node.windowAction
       || !sameFields(old.control ?? {}, node.control ?? {})
       || !sameStyle(old.style, node.style)) {

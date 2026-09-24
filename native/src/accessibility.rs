@@ -540,6 +540,17 @@ impl AccessibilityTree {
                 }
             }
 
+            if !tarve_node.labelled_by.is_empty() {
+                let labels: Vec<NodeId> = tarve_node
+                    .labelled_by
+                    .iter()
+                    .filter_map(|label| self.ids.get(label).copied())
+                    .collect();
+                if !labels.is_empty() {
+                    node.set_labelled_by(labels);
+                }
+            }
+
             match tarve_node.kind.as_str() {
                 "text" if !tarve_node.text.is_empty() => node.set_value(&tarve_node.text),
                 "button"
@@ -1165,6 +1176,24 @@ mod tests {
         assert!(input.labelled_by().is_empty());
         assert!(input.described_by().is_empty());
         assert_eq!(input.description(), None);
+    }
+
+    #[test]
+    fn explicit_labelled_by_projects_intrinsic_label_relations() {
+        let root = node(json!({
+            "id":"root","kind":"window","children":[
+                {"id":"email-label","kind":"view","control":{"role":"label","label":"Email address"},"children":[]},
+                {"id":"email","kind":"input","inputType":"email","labelledBy":["email-label"],"children":[]}
+            ]
+        }));
+        let mut tree = Tree::new(root);
+        tree.compute(320.0, 160.0).unwrap();
+        let mut builder = AccessibilityTree::default();
+        let update = builder.build(&mut tree, "Example", 1.0);
+        let by_id: HashMap<_, _> = update.nodes.into_iter().collect();
+        let input = &by_id[&builder.ids["email"]];
+        assert_eq!(input.role(), Role::EmailInput);
+        assert_eq!(input.labelled_by(), &[builder.ids["email-label"]]);
     }
 
     #[test]

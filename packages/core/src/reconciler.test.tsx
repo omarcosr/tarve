@@ -164,8 +164,8 @@ describe("native TSX protocol", () => {
           <button id="action" variant="secondary" onClick={() => { clicked++; }} style={{ backgroundColor: "#123456" }}>Save</button>
           <textarea id="notes" value="Hello" placeholder="Notes" onChange={(value) => { changed = value; }} style={{ color: "#eeeeee" }} />
           <svg id="vector-intrinsic" size={32} viewBox="0 0 24 24" color="#abcdef">
-            <Circle cx={12} cy={12} r={10} />
-            <Path d="M6 12h12" />
+            <circle cx={12} cy={12} r={10} />
+            <path d="M6 12h12" />
           </svg>
         </div>
       </Window>,
@@ -194,6 +194,34 @@ describe("native TSX protocol", () => {
     expect(clicked).toBe(1);
     expect(changed).toBe("Updated");
   });
+  test("intrinsic svg accepts HTML-like lowercase geometry and nested groups", () => {
+    const tree = compileTree(
+      <Window>
+        <svg id="html-svg" width={64} height={40} viewBox="0 0 64 40" fill="none" stroke="#123456">
+          <g transform="translate(2 2)" opacity={0.8}>
+            <rect x={0} y={0} width={20} height={16} rx={3} />
+            <circle cx={32} cy={8} r={7} fill="#abcdef" />
+            <ellipse cx={48} cy={8} rx={8} ry={5} />
+            <line x1={0} y1={24} x2={18} y2={36} />
+            <polyline points="22,36 30,24 38,36" />
+            <polygon points="42,36 50,24 58,36" />
+            <path d="M4 20h52" strokeWidth={3} strokeLinecap="round" />
+          </g>
+        </svg>
+      </Window>,
+    );
+    const svg = tree.nodes.get("html-svg")!;
+    expect(svg.kind).toBe("svg");
+    expect(svg.svg).toContain('<g transform="translate(2 2)" opacity="0.8">');
+    expect(svg.svg).toContain('<rect x="0" y="0" width="20" height="16" rx="3"/>');
+    expect(svg.svg).toContain('<circle cx="32" cy="8" r="7" fill="#abcdef"/>');
+    expect(svg.svg).toContain('<ellipse cx="48" cy="8" rx="8" ry="5"/>');
+    expect(svg.svg).toContain('<line x1="0" y1="24" x2="18" y2="36"/>');
+    expect(svg.svg).toContain('<polyline points="22,36 30,24 38,36"/>');
+    expect(svg.svg).toContain('<polygon points="42,36 50,24 58,36"/>');
+    expect(svg.svg).toContain('<path d="M4 20h52" stroke-width="3" stroke-linecap="round"/>');
+    expect(() => compileTree(<Window><path d="M0 0" /></Window>)).toThrow("must be a child of <svg>");
+  });
   test("intrinsic button preserves composed Button semantics", () => {
     const tree = compileTree(
       <Window>
@@ -208,6 +236,68 @@ describe("native TSX protocol", () => {
     expect(button.control?.role).toBe("button");
     expect(button.control?.label).toBe("Create");
     expect(button.children.map(child => child.id)).toEqual(["button-icon", "button-label"]);
+  });
+  test("heading, hr and progress intrinsics preserve native Tarve semantics", () => {
+    const tree = compileTree(
+      <Window>
+        <div>
+          <h1 id="heading-1">Title</h1>
+          <h3 id="heading-3" size={22} style={{ color: "#123456" }}>Section</h3>
+          <hr id="separator" />
+          <progress id="upload" value={75} max={200} label="Upload progress" />
+        </div>
+      </Window>,
+    );
+    expect(tree.nodes.get("heading-1")?.kind).toBe("text");
+    expect(tree.nodes.get("heading-1")?.style.fontSize).toBe(32);
+    expect(tree.nodes.get("heading-1")?.style.fontWeight).toBe(700);
+    expect(tree.nodes.get("heading-3")?.style.fontSize).toBe(22);
+    expect(tree.nodes.get("heading-3")?.style.fontWeight).toBe(600);
+    expect(tree.nodes.get("heading-3")?.style.foreground).toBe("#123456");
+    expect(tree.nodes.get("separator")?.style.height).toBe(1);
+    expect(tree.nodes.get("separator")?.style.width).toBe("100%");
+    expect(tree.nodes.get("upload")?.control).toEqual({
+      role: "progress", label: "Upload progress", value: 75, min: 0, max: 200,
+    });
+    expect(tree.nodes.get("upload")?.children[0]?.style.width).toBe("37.5%");
+  });
+  test("select and option intrinsics build the existing Select control and dispatch onChange", () => {
+    let changed = "";
+    const tree = compileTree(
+      <Window>
+        <select id="country" value="br" open onChange={(value) => { changed = value; }}>
+          <option value="br">Brazil</option>
+          <option value="jp">Japan</option>
+          <option value="us" disabled>United States</option>
+        </select>
+      </Window>,
+    );
+    expect(tree.nodes.get("country-trigger")?.control).toEqual({ role: "select", label: "Brazil", expanded: true });
+    expect(tree.nodes.get("country-option-br")?.control).toEqual({ role: "option", label: "Brazil", selected: true });
+    expect(tree.nodes.get("country-option-us")?.disabled).toBe(true);
+    tree.handlers.get("country-option-jp")?.onClick?.();
+    expect(changed).toBe("jp");
+    expect(() => compileTree(<Window><option value="x">X</option></Window>)).toThrow("option must be a direct child of select");
+    expect(() => compileTree(<Window><select><span>Invalid</span></select></Window>)).toThrow("select children must be option elements");
+  });
+  test("label htmlFor creates an explicit accessible labelledBy relation", () => {
+    const tree = compileTree(
+      <Window>
+        <div>
+          <label id="email-label" htmlFor="email">Email address</label>
+          <input id="email" type="email" />
+          <label id="country-label" htmlFor="country">Country</label>
+          <select id="country" value="br">
+            <option value="br">Brazil</option>
+          </select>
+        </div>
+      </Window>,
+    );
+    expect(tree.nodes.get("email-label")?.control).toEqual({ role: "label", label: "Email address" });
+    expect(tree.nodes.get("email")?.labelledBy).toEqual(["email-label"]);
+    expect(tree.nodes.get("country-trigger")?.labelledBy).toEqual(["country-label"]);
+    expect(() => compileTree(<Window><label htmlFor="missing">Missing</label></Window>))
+      .toThrow("label htmlFor references unknown or unsupported target: missing");
   });
   test("Svg serializes TSX geometry and Icon accepts external SVG node data", () => {
     type ExternalIconNode = ["circle" | "ellipse" | "g" | "line" | "path" | "polygon" | "polyline" | "rect", Record<string, string>][];
@@ -372,7 +462,7 @@ describe("native TSX protocol", () => {
   test("Window close requests stay in JS handlers while native receives an intercept flag", () => {
     let requested = false;
     const tree = compileTree(<Window onCloseRequest={() => { requested = true; }}><Text>Hello</Text></Window>);
-    expect(tree.document.version).toBe(31);
+    expect(tree.document.version).toBe(32);
     expect(tree.document.root.closeIntercept).toBe(true);
     expect(JSON.stringify(tree.document)).not.toContain("onCloseRequest");
     tree.handlers.get(tree.document.root.id)?.onCloseRequest?.({ defaultPrevented: false, preventDefault() {} });
