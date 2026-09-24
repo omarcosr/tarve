@@ -1,9 +1,12 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use vello::{
     Glyph, Scene,
     kurbo::{Affine, Shape, Stroke},
-    peniko::{Color, Fill, FontData, ImageBrush, ImageData, ImageFormat},
+    peniko::{Blob, Color, Fill, FontData, ImageAlphaType, ImageBrush, ImageData, ImageFormat},
 };
 use vello_cpu::{
     Image as CpuImage, ImageSource as CpuImageSource, Pixmap, RenderContext, Resources,
@@ -80,22 +83,43 @@ impl PaintTarget for Scene {
     }
 }
 
+pub(crate) struct CpuCachedImage {
+    data: Blob<u8>,
+    width: u32,
+    height: u32,
+    format: ImageFormat,
+    alpha_type: ImageAlphaType,
+    pixmap: Arc<Pixmap>,
+}
+
+impl CpuCachedImage {
+    fn matches(&self, image: &ImageData) -> bool {
+        self.data.id() == image.data.id()
+            && self.width == image.width
+            && self.height == image.height
+            && self.format == image.format
+            && self.alpha_type == image.alpha_type
+    }
+}
+
 pub(crate) struct CpuPaintTarget<'a> {
     context: &'a mut RenderContext,
     resources: &'a mut Resources,
-    images: &'a mut HashMap<String, Arc<Pixmap>>,
+    images: &'a mut HashMap<String, CpuCachedImage>,
+    used_images: HashSet<String>,
 }
 
 impl<'a> CpuPaintTarget<'a> {
     pub(crate) fn new(
         context: &'a mut RenderContext,
         resources: &'a mut Resources,
-        images: &'a mut HashMap<String, Arc<Pixmap>>,
+        images: &'a mut HashMap<String, CpuCachedImage>,
     ) -> Self {
         Self {
             context,
             resources,
             images,
+            used_images: HashSet::new(),
         }
     }
 
@@ -125,6 +149,10 @@ impl<'a> CpuPaintTarget<'a> {
         }
         Some(Pixmap::from_parts(pixels, width, height))
     }
+
+    pub(crate) fn finish(self) {
+        self.images.retain(|key, _| self.used_images.contains(key));
+    }
 }
 
 impl PaintTarget for CpuPaintTarget<'_> {
@@ -153,12 +181,29 @@ impl PaintTarget for CpuPaintTarget<'_> {
     }
 
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine) {
-        if !self.images.contains_key(key)
-            && let Some(pixmap) = Self::image_pixmap(image)
-        {
-            self.images.insert(key.to_string(), Arc::new(pixmap));
+        let stale = self
+            .images
+            .get(key)
+            .is_none_or(|cached| !cached.matches(image));
+        if stale {
+            let Some(pixmap) = Self::image_pixmap(image) else {
+                self.images.remove(key);
+                return;
+            };
+            self.images.insert(
+                key.to_string(),
+                CpuCachedImage {
+                    data: image.data.clone(),
+                    width: image.width,
+                    height: image.height,
+                    format: image.format,
+                    alpha_type: image.alpha_type,
+                    pixmap: Arc::new(pixmap),
+                },
+            );
         }
-        let Some(pixmap) = self.images.get(key).cloned() else {
+        self.used_images.insert(key.to_string());
+        let Some(pixmap) = self.images.get(key).map(|cached| cached.pixmap.clone()) else {
             return;
         };
         self.context.set_transform(transform);
@@ -223,5 +268,41 @@ mod tests {
         let center = pixmap.data()[8 * 16 + 8];
         assert_eq!(center.to_u8_array(), [255, 0, 0, 255]);
         assert_eq!(pixmap.data()[0].to_u8_array(), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn cpu_image_cache_replaces_changed_pixels_and_evicts_unused_keys() {
+        let image = |rgba: [u8; 4]| ImageData {
+            data: Blob::new(Arc::new(rgba.repeat(4))),
+            format: ImageFormat::Rgba8,
+            alpha_type: ImageAlphaType::Alpha,
+            width: 2,
+            height: 2,
+        };
+        let first = image([255, 0, 0, 255]);
+        let second = image([0, 255, 0, 255]);
+        let unused = image([0, 0, 255, 255]);
+        let mut context = RenderContext::new(8, 8);
+        let mut resources = Resources::new();
+        let mut images = HashMap::new();
+
+        {
+            let mut target = CpuPaintTarget::new(&mut context, &mut resources, &mut images);
+            target.draw_image("same", &first, Affine::IDENTITY);
+            target.draw_image("unused", &unused, Affine::IDENTITY);
+            target.finish();
+        }
+        assert_eq!(images.len(), 2);
+        let first_id = images["same"].data.id();
+
+        {
+            let mut target = CpuPaintTarget::new(&mut context, &mut resources, &mut images);
+            target.draw_image("same", &second, Affine::IDENTITY);
+            target.finish();
+        }
+        assert_eq!(images.len(), 1);
+        assert_eq!(images["same"].data.id(), second.data.id());
+        assert_ne!(images["same"].data.id(), first_id);
+        assert!(!images.contains_key("unused"));
     }
 }

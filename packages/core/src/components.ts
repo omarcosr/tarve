@@ -12,6 +12,11 @@ export { Pressable } from "./components/pressable";
 export type { PressableProps } from "./components/pressable";
 export { Icon } from "./components/icon";
 export type { IconName, IconProps } from "./components/icon";
+export { Svg, Path, Circle, Ellipse, Line, Polyline, Polygon, SvgRect } from "./components/svg";
+export type {
+  SvgProps, PathProps, CircleProps, EllipseProps, LineProps, PolylineProps, PolygonProps, RectProps,
+  SvgAttributes, SvgNode,
+} from "./components/svg";
 export { Text } from "./components/text";
 export type { TextProps } from "./components/text";
 export { Button } from "./components/button";

@@ -1,0 +1,28 @@
+{
+  "name": "@tarve/react-icons",
+  "version": "0.1.0",
+  "description": "React icon-library adapters for Tarve",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./react-svg": "./src/react-svg.ts",
+    "./lucide": "./src/lucide.ts",
+    "./phosphor": "./src/phosphor.ts"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "tarve": "^0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "tarve": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "bun": ">=1.4.0"
+  }
+}

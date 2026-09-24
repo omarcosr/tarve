@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { Window, Column, Row, Text, Button, Icon, Input, TitleBar, Modal, Pressable } from "./components";
+import { Window, Column, Row, Text, Button, Icon, Svg, Path, Circle, Input, TitleBar, Modal, Pressable } from "./components";
 import { compileTree, diffTrees } from "./reconciler";
 import { createTheme, darkTheme, lightTheme, Theme, theme } from "./theme";
+import type { ComponentAdapter } from "./component-adapter";
+import type { VNode } from "./jsx-runtime";
 
 describe("native TSX protocol", () => {
   test("compiles function components, flattens children, and keeps callbacks outside JSON", () => {
@@ -18,6 +20,43 @@ describe("native TSX protocol", () => {
     expect(compileTree(<Window />).document.renderer).toBe("auto");
     expect(compileTree(<Window />, false, "cpu").document.renderer).toBe("cpu");
     expect(compileTree(<Window />, false, "gpu").document.renderer).toBe("gpu");
+  });
+  test("Svg serializes TSX geometry and Icon accepts external SVG node data", () => {
+    type ExternalIconNode = ["circle" | "ellipse" | "g" | "line" | "path" | "polygon" | "polyline" | "rect", Record<string, string>][];
+    const iconNode: ExternalIconNode = [
+      ["circle", { cx: "12", cy: "12", r: "9" }],
+      ["path", { d: "M8 12.5 10.7 15 16 9" }],
+    ];
+    const tree = compileTree(
+      <Window>
+        <Svg id="vector" size={32} viewBox="0 0 24 24">
+          <Circle cx={12} cy={12} r={10} />
+          <Path d="M6 12h12" />
+        </Svg>
+        <Icon id="external-icon" iconNode={iconNode} size={20} />
+      </Window>,
+    );
+    const vector = tree.nodes.get("vector")!;
+    expect(vector.kind).toBe("svg");
+    expect(vector.children).toEqual([]);
+    expect(vector.svg).toContain('viewBox="0 0 24 24"');
+    expect(vector.svg).toContain('data-tarve-current-color="1"');
+    expect(vector.svg).toContain('<circle cx="12" cy="12" r="10"/>');
+    expect(vector.svg).toContain('<path d="M6 12h12"/>');
+    expect(tree.nodes.get("external-icon")?.kind).toBe("svg");
+    expect(tree.nodes.get("external-icon")?.svg).toContain('<circle cx="12" cy="12" r="9"/>');
+    expect(tree.nodes.get("external-icon")?.svg).toContain('<path d="M8 12.5 10.7 15 16 9"/>');
+  });
+  test("component adapters translate foreign component types before normal component execution", () => {
+    const ForeignComponent = () => { throw new Error("foreign component executed directly"); };
+    const foreignNode: VNode = { type: ForeignComponent, props: { id: "foreign", size: 18 } };
+    const adapter: ComponentAdapter = ({ type, props }) => type === ForeignComponent
+      ? Svg({ id: String(props.id), size: Number(props.size), nodes: [["circle", { cx: 12, cy: 12, r: 10 }]] })
+      : undefined;
+    const tree = compileTree(Window({ children: foreignNode }), false, "auto", [adapter]);
+    expect(tree.nodes.get("foreign")?.kind).toBe("svg");
+    expect(tree.nodes.get("foreign")?.style.width).toBe(18);
+    expect(() => compileTree(Window({ children: foreignNode }))).toThrow("foreign component executed directly");
   });
   test("Button keeps text buttons native and compiles composed children into one semantic pressable", () => {
     const tree = compileTree(
@@ -145,7 +184,7 @@ describe("native TSX protocol", () => {
   test("Window close requests stay in JS handlers while native receives an intercept flag", () => {
     let requested = false;
     const tree = compileTree(<Window onCloseRequest={() => { requested = true; }}><Text>Hello</Text></Window>);
-    expect(tree.document.version).toBe(30);
+    expect(tree.document.version).toBe(31);
     expect(tree.document.root.closeIntercept).toBe(true);
     expect(JSON.stringify(tree.document)).not.toContain("onCloseRequest");
     tree.handlers.get(tree.document.root.id)?.onCloseRequest?.({ defaultPrevented: false, preventDefault() {} });

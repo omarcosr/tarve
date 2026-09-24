@@ -3,6 +3,7 @@ import { BunFfiBridge, type NativeBridge } from "./bridge";
 import { compileTree, diffTrees, type CompiledTree } from "./reconciler";
 import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
 import type { VNode } from "./jsx-runtime";
+import type { ComponentAdapter } from "./component-adapter";
 
 export type AppErrorSource =
   | "render"
@@ -25,6 +26,8 @@ export interface AppOptions {
   debug?: boolean;
   /** Native renderer selected when the app starts. Explicit cpu/gpu wins over TARVE_RENDERER. */
   renderer?: Renderer;
+  /** Optional adapters that translate foreign component types into Tarve VNodes. */
+  componentAdapters?: readonly ComponentAdapter[];
   bridge?: NativeBridge;
   onError?: (event: AppErrorEvent) => void;
 }
@@ -207,7 +210,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
       let next: CompiledTree;
       try {
-        next = compileTree(view(), options.debug, options.renderer ?? "auto");
+        next = compileTree(view(), options.debug, options.renderer ?? "auto", options.componentAdapters);
         if (committed.document.window.decorations !== next.document.window.decorations) {
           throw new Error("Adding or removing TitleBar after the native window has been created is not supported. Recreate the Window instead.");
         }
@@ -514,7 +517,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   };
 
   try {
-    committed = compileTree(view(), options.debug, options.renderer ?? "auto");
+    committed = compileTree(view(), options.debug, options.renderer ?? "auto", options.componentAdapters);
     observed = nativeShadow(committed);
   } catch (error) {
     const startupError = reportError(error, { source: "render", event: "startup" });

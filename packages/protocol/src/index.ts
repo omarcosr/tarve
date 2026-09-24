@@ -1,9 +1,15 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 3;
-export const PROTOCOL_VERSION = 30;
+export const PROTOCOL_VERSION = 31;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
-export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "scroll" | "input" | "textarea" | "pressable" | "icon" | "slider" | "splitter";
+export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter";
+export type SvgElementName = "path" | "circle" | "ellipse" | "g" | "line" | "polygon" | "polyline" | "rect";
+export type SvgAttributeValue = string | number;
+export type SvgAttributes = Record<string, SvgAttributeValue>;
+export type SvgNode =
+  | readonly [SvgElementName, SvgAttributes]
+  | readonly [SvgElementName, SvgAttributes, readonly SvgNode[]];
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
 export type OutlineStyle = "dotted" | "dashed" | "solid" | "double" | "groove" | "ridge" | "inset" | "outset" | "none" | "hidden";
 export interface StateStyle {
@@ -39,6 +45,7 @@ export interface Control {
 export interface NativeNode {
   id: string; kind: NodeKind; style: Style; children: NativeNode[];
   text?: string; src?: string; fit?: "cover" | "contain"; disabled?: boolean;
+  svg?: string;
   value?: string; placeholder?: string;
   inputType?: "text" | "password" | "email" | "number" | "search" | "tel" | "url";
   scrollSpeed?: number;

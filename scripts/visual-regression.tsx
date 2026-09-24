@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { strict as assert } from "node:assert";
+import { lucideReactAdapter, phosphorReactAdapter, reactSvgAdapter } from "@tarve/react-icons";
 import { App as ShowcaseApp } from "../examples/components-view";
 
 // Runtime must use the freshly packed package installed into examples/node_modules.
@@ -9,7 +10,10 @@ import { App as ShowcaseApp } from "../examples/components-view";
 const installedTarveModule = "../examples/node_modules/tarve/dist/npm/index.js";
 const { createApp } = await import(installedTarveModule) as typeof import("../packages/core/src/index");
 
-const app = createApp(ShowcaseApp, { debug: true });
+const app = createApp(ShowcaseApp, {
+  debug: true,
+  componentAdapters: [reactSvgAdapter, lucideReactAdapter, phosphorReactAdapter],
+});
 const out = resolve("dist");
 mkdirSync(out, { recursive: true });
 
@@ -26,7 +30,29 @@ try {
 
   const chart = byId.get("demo-chart");
   const empty = byId.get("demo-empty");
+  const svgImage = byId.get("demo-svg-image");
+  const inlineSvg = byId.get("demo-inline-svg");
+  const lucideReactCamera = byId.get("demo-lucide-react-camera");
+  const heroiconsCamera = byId.get("demo-heroicons-camera");
+  const phosphorCamera = byId.get("demo-phosphor-camera");
+  const tablerCamera = byId.get("demo-tabler-camera");
+  const lucideIcons = byId.get("demo-lucide-icons");
+  const lucideIconNames = ["house", "user", "bell", "heart", "download", "mail"];
   assert(chart && empty, "Showcase chart/next-section nodes are missing");
+  assert(svgImage && inlineSvg && lucideReactCamera && heroiconsCamera && phosphorCamera && tablerCamera && lucideIcons,
+    "Showcase SVG/external icon library nodes are missing");
+  assert.equal(svgImage.kind, "image");
+  assert.equal(inlineSvg.kind, "svg");
+  assert.equal(lucideReactCamera.kind, "svg", "Direct lucide-react component must compile to native SVG");
+  assert.equal(heroiconsCamera.kind, "svg", "Direct Heroicons component must compile to native SVG");
+  assert.equal(phosphorCamera.kind, "svg", "Direct Phosphor component must compile to native SVG");
+  assert.equal(tablerCamera.kind, "svg", "Direct Tabler component must compile to native SVG");
+  assert(Math.abs(svgImage.width - 220) < 0.5 && Math.abs(svgImage.height - 124) < 0.5,
+    `SVG image has unexpected layout: ${svgImage.width}x${svgImage.height}`);
+  for (const name of lucideIconNames) {
+    const icon = byId.get(`demo-icon-${name}`);
+    assert(icon && icon.kind === "svg", `Missing Lucide-style icon: ${name}`);
+  }
   assert(chart.height === 180, "Chart height changed unexpectedly: " + chart.height);
   assert(chart.y + chart.height <= empty.y + 0.5,
     "Chart overlaps the following section: chartBottom=" + (chart.y + chart.height) + ", emptyTop=" + empty.y);
@@ -173,6 +199,16 @@ try {
       kind: composedButton.kind,
       role: composedButton.control?.role,
       label: composedButton.control?.label,
+    },
+    svgIcons: {
+      svg: `${svgImage.width}x${svgImage.height}`,
+      externalLibraries: {
+        lucide: `${lucideReactCamera.width}x${lucideReactCamera.height}`,
+        heroicons: `${heroiconsCamera.width}x${heroiconsCamera.height}`,
+        phosphor: `${phosphorCamera.width}x${phosphorCamera.height}`,
+        tabler: `${tablerCamera.width}x${tablerCamera.height}`,
+      },
+      icons: lucideIconNames,
     },
     horizontalScroll: {
       offsetX: Number((horizontalAfter.scrollX ?? 0).toFixed(1)),

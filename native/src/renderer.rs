@@ -1,6 +1,9 @@
 #[cfg(target_os = "windows")]
 use crate::d3d11::{D3d11Error, D3d11Graphics, D3d11PaintTarget};
-use crate::{paint::CpuPaintTarget, protocol::RendererPreference};
+use crate::{
+    paint::{CpuCachedImage, CpuPaintTarget},
+    protocol::RendererPreference,
+};
 use softbuffer::{Context as SoftContext, Surface as SoftSurface};
 use std::{
     collections::HashMap,
@@ -569,7 +572,7 @@ struct CpuGraphics {
     surface: SoftSurface<Arc<Window>, Arc<Window>>,
     context: CpuRenderContext,
     resources: CpuResources,
-    images: HashMap<String, Arc<vello_cpu::Pixmap>>,
+    images: HashMap<String, CpuCachedImage>,
     width: u32,
     height: u32,
     prepared: bool,
@@ -614,6 +617,7 @@ impl CpuGraphics {
         let mut target =
             CpuPaintTarget::new(&mut self.context, &mut self.resources, &mut self.images);
         paint(&mut target);
+        target.finish();
         self.context.flush();
         self.prepared = true;
         Ok(())

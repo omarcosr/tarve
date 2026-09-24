@@ -1,5 +1,5 @@
-export { Window, View, Row, Column, Portal, Pressable, Icon, Text, Button, Image, Scroll, ScrollArea, Input, TextArea, TitleBar, Modal, Dialog } from "./components";
-export type { WindowProps, WindowCloseRequestEvent, ViewProps, PortalProps, PressableProps, IconName, IconProps, TextProps, ButtonProps, ImageProps, ScrollProps, ScrollAreaProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
+export { Window, View, Row, Column, Portal, Pressable, Icon, Svg, Path, Circle, Ellipse, Line, Polyline, Polygon, SvgRect, Text, Button, Image, Scroll, ScrollArea, Input, TextArea, TitleBar, Modal, Dialog } from "./components";
+export type { WindowProps, WindowCloseRequestEvent, ViewProps, PortalProps, PressableProps, IconName, IconProps, SvgProps, SvgNode, SvgAttributes, PathProps, CircleProps, EllipseProps, LineProps, PolylineProps, PolygonProps, RectProps, TextProps, ButtonProps, ImageProps, ScrollProps, ScrollAreaProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
 export { Checkbox, Switch, RadioGroup, Slider, Card, Badge, Separator, Progress, Tabs, Accordion } from "./controls";
 export type { CheckboxProps, SwitchProps, RadioOption, RadioGroupProps, SliderProps, CardProps, BadgeProps, SeparatorProps, ProgressProps, TabItem, TabsProps, AccordionItem, AccordionProps } from "./controls";
 export { VirtualList } from "./virtual-list";
@@ -18,6 +18,7 @@ export { normalizeHotkey } from "./hotkeys";
 export type { HotkeyHandler } from "./hotkeys";
 export { createApp, render } from "./app";
 export type { AppErrorEvent, AppErrorSource, AppHandle, AppOptions } from "./app";
+export type { ComponentAdapter, ComponentAdapterInput } from "./component-adapter";
 export { theme, Theme, lightTheme, darkTheme, createTheme, buttonVariants } from "./theme";
 export type { ThemeColors, ThemeFocusOutline, ThemeDefinition, ThemeOverrides, ButtonVariant } from "./theme";
 export { Style } from "./style";

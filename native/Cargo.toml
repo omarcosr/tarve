@@ -19,6 +19,7 @@ pollster = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+resvg = { version = "=0.48.1", default-features = false }
 unicode-segmentation = "1.12"
 arboard = { version = "3.6", default-features = false }
 bytemuck = "=1.25.0"

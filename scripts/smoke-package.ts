@@ -11,10 +11,14 @@ await copyFile(join(root, "tests/fixtures/consumer.tsx"), join(directory, "app.t
 await copyFile(join(root, "examples/assets/studio.png"), join(directory, "fixture.png"));
 const examples = join(directory, "examples");
 await mkdir(join(examples, "assets"), { recursive: true });
-for (const file of ["package.json", "tsconfig.json", "basic.tsx", "basic-view.tsx", "components.tsx", "components-view.tsx", "counter.tsx", "forms.tsx", "forms-view.tsx", "large-list.tsx", "large-list-view.tsx"]) {
+for (const file of [
+  "package.json", "tsconfig.json", "basic.tsx", "basic-view.tsx", "components.tsx", "components-view.tsx",
+  "counter.tsx", "forms.tsx", "forms-view.tsx", "large-list.tsx", "large-list-view.tsx",
+]) {
   await copyFile(join(root, "examples", file), join(examples, file));
 }
 await copyFile(join(root, "examples/assets/studio.png"), join(examples, "assets/studio.png"));
+await copyFile(join(root, "examples/assets/vector-scene.svg"), join(examples, "assets/vector-scene.svg"));
 await Bun.write(join(directory, "package.json"), JSON.stringify({ name: "tarve-consumer-test", private: true, type: "module" }));
 await Bun.write(join(directory, "tsconfig.json"), JSON.stringify({ compilerOptions: {
   target: "ESNext", module: "ESNext", moduleResolution: "Bundler", strict: true, noEmit: true,
@@ -49,8 +53,19 @@ async function run(command: string[], cwd = directory, runtimeEnv = env): Promis
   finally { clearTimeout(timer); }
 }
 await run([process.execPath, "add", "./tarve.tgz"]);
+const reactIconsPackage = await Bun.file(join(root, "packages/react-icons/package.json")).json() as { version: string };
+await run([process.execPath, "pm", "pack", "--ignore-scripts", "--destination", directory], join(root, "packages/react-icons"));
+await run([process.execPath, "add", `./tarve-react-icons-${reactIconsPackage.version}.tgz`]);
 const bunTypes = await Bun.file(join(root, "node_modules/@types/bun/package.json")).json();
 const typescript = await Bun.file(join(root, "node_modules/typescript/package.json")).json();
+const examplePackage = await Bun.file(join(root, "examples/package.json")).json() as { dependencies?: Record<string, string> };
+const externalPackages: string[] = [];
+for (const name of Object.keys(examplePackage.dependencies ?? {})) {
+  if (name.startsWith("@tarve/")) continue;
+  const installed = await Bun.file(join(root, "examples/node_modules", ...name.split("/"), "package.json")).json() as { version: string };
+  externalPackages.push(`${name}@${installed.version}`);
+}
+if (externalPackages.length) await run([process.execPath, "add", ...externalPackages]);
 await run([process.execPath, "add", "--dev", `@types/bun@${bunTypes.version}`, `typescript@${typescript.version}`]);
 await run([process.execPath, join(directory, "node_modules/typescript/bin/tsc"), "--noEmit"]);
 await run([process.execPath, join(directory, "node_modules/typescript/bin/tsc"), "-p", join(examples, "tsconfig.json"), "--noEmit"]);

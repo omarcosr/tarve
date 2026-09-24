@@ -117,7 +117,7 @@ describe("advanced controls", () => {
     tree.handlers.get("quiz-submit")?.onClick?.();
     expect(events).toEqual(["side:settings", "collapsed:true", "name:John", "submit"]);
     expect(tree.nodes.get("side-items")?.kind).toBe("scroll");
-    expect(tree.nodes.get("side-icon-home")?.kind).toBe("icon");
+    expect(tree.nodes.get("side-icon-home")?.kind).toBe("svg");
     expect(() => compileTree(<Window><Sidebar width={0} items={[]} /></Window>)).toThrow(RangeError);
   });
 

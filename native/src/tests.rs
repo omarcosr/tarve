@@ -23,6 +23,7 @@ fn abi_and_json_protocol_versions_fail_independently() {
     );
 }
 use serde_json::json;
+use std::sync::Arc;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::CursorIcon;
@@ -1356,6 +1357,70 @@ fn removed_images_are_released_from_cache() {
     tree.update(root(vec![]));
     assert_eq!(tree.image_cache_len(), 0);
     let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn svg_images_decode_into_the_retained_image_cache() {
+    let path = std::env::temp_dir().join(format!("tarve-svg-image-{}.svg", std::process::id()));
+    std::fs::write(
+        &path,
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="16" viewBox="0 0 24 16"><rect width="24" height="16" rx="3" fill="#18181b"/><path d="M4 9l4 3 8-8" fill="none" stroke="#fafafa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>"##,
+    )
+    .unwrap();
+    let mut image = node("svg", "image", json!({"width":24,"height":16}), vec![]);
+    image.src = path.to_string_lossy().into_owned();
+    let mut tree = Tree::new(root(vec![image]));
+    tree.compute(24.0, 16.0).unwrap();
+    assert_eq!(tree.image_cache_len(), 1);
+    assert!(
+        tree.warnings.is_empty(),
+        "SVG decode warnings: {:?}",
+        tree.warnings
+    );
+    tree.scene(1.0);
+    std::fs::remove_file(path).unwrap();
+    tree.dirty.paint = true;
+    tree.scene(1.0);
+    assert_eq!(
+        tree.image_cache_len(),
+        1,
+        "decoded SVG pixels must remain CPU-owned"
+    );
+}
+
+#[test]
+fn declarative_svg_is_parsed_by_usvg_once_and_reconciled_by_source() {
+    let source_a = r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" color="#000000" data-tarve-current-color="1" fill="none" stroke="currentColor"><path d="M4 12h16"/></svg>"##;
+    let source_b = r##"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" color="#000000" data-tarve-current-color="1" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="8"/></svg>"##;
+
+    let mut vector = node("vector", "svg", json!({"width":24,"height":24}), vec![]);
+    vector.svg = source_a.to_string();
+    let mut tree = Tree::new(root(vec![vector.clone()]));
+    assert_eq!(tree.svg_cache_len(), 1);
+    assert!(tree.warnings.is_empty());
+    let first = tree.svg_cache_scene("vector").unwrap();
+
+    tree.update(root(vec![vector.clone()]));
+    let same_source = tree.svg_cache_scene("vector").unwrap();
+    assert!(
+        Arc::ptr_eq(&same_source, &first),
+        "unchanged SVG source must reuse its parsed usvg tree"
+    );
+
+    vector.svg = source_b.to_string();
+    tree.update(root(vec![vector]));
+    let changed = tree.svg_cache_scene("vector").unwrap();
+    assert!(
+        !Arc::ptr_eq(&changed, &first),
+        "changed SVG source must be reparsed"
+    );
+
+    tree.update(root(vec![]));
+    assert_eq!(
+        tree.svg_cache_len(),
+        0,
+        "removed SVG nodes must release cached usvg trees"
+    );
 }
 
 #[test]

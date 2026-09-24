@@ -4,7 +4,7 @@
     "strict": true, "noEmit": true, "skipLibCheck": true,
     "jsx": "react-jsx", "jsxImportSource": "tarve",
     "types": ["bun"], "allowImportingTsExtensions": true,
-    "paths": { "tarve": ["./packages/core/src/index.ts"], "tarve/*": ["./packages/core/src/*"], "@tarve/core": ["./packages/core/src/index.ts"], "@tarve/core/*": ["./packages/core/src/*"], "@tarve/protocol": ["./packages/protocol/src/index.ts"] }
+    "paths": { "tarve": ["./packages/core/src/index.ts"], "tarve/*": ["./packages/core/src/*"], "@tarve/core": ["./packages/core/src/index.ts"], "@tarve/core/*": ["./packages/core/src/*"], "@tarve/protocol": ["./packages/protocol/src/index.ts"], "@tarve/react-icons": ["./packages/react-icons/src/index.ts"], "@tarve/react-icons/*": ["./packages/react-icons/src/*"] }
   },
   "include": ["packages", "scripts"]
 }

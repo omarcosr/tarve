@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 30;
+pub const VERSION: u32 = 31;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -67,6 +67,8 @@ pub struct Node {
     pub src: String,
     #[serde(default)]
     pub fit: String,
+    #[serde(default)]
+    pub svg: String,
     #[serde(default)]
     pub disabled: bool,
     pub value: Option<String>,
@@ -311,7 +313,7 @@ pub fn validate(root: &Node) -> Result<(), String> {
             "input",
             "textarea",
             "pressable",
-            "icon",
+            "svg",
             "slider",
             "splitter",
         ]

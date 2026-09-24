@@ -38,6 +38,8 @@ describe("desktop controls", () => {
         { key: "score", header: "Score", sortable: true },
       ]} /></Window>);
     expect(tree.nodes.get("grid")?.control?.role).toBe("grid");
+    expect(tree.nodes.get("grid")?.style.background).toBeDefined();
+    expect(tree.nodes.get("grid-header")?.style.background).toBe("#00000000");
     expect(tree.nodes.has("grid-row-2")).toBe(true);
     expect(tree.nodes.has("grid-row-3")).toBe(true);
     expect(tree.nodes.get("grid-row-3")?.control?.role).toBe("option");

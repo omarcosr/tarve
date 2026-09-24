@@ -5,6 +5,9 @@ import type { NativeBridge } from "./bridge";
 import { Slider } from "./controls";
 import { Button, Input, ScrollArea, Window } from "./components";
 import { InputOTP } from "./form-controls";
+import { Svg } from "./components/svg";
+import type { ComponentAdapter } from "./component-adapter";
+import type { VNode } from "./jsx-runtime";
 
 class FakeBridge implements NativeBridge {
   commands: NativeCommand[] = [];
@@ -53,6 +56,19 @@ describe("controlled native reconciliation", () => {
     const autoApp = createApp(() => <Window />, { bridge: autoBridge });
     await autoApp.ready;
     expect(autoBridge.document?.renderer).toBe("auto");
+  });
+
+  test("createApp forwards component adapters without knowing foreign libraries", async () => {
+    const bridge = new FakeBridge();
+    const foreignType = { library: "external" };
+    const foreignNode: VNode = { type: foreignType as never, props: { id: "adapted" } };
+    const adapter: ComponentAdapter = ({ type, props }) => type === foreignType
+      ? Svg({ id: String(props.id), size: 16, nodes: [["circle", { cx: 12, cy: 12, r: 9 }]] })
+      : undefined;
+    const app = createApp(() => Window({ children: foreignNode }), { bridge, componentAdapters: [adapter] });
+    await app.ready;
+    expect(bridge.document?.root.children[0]?.kind).toBe("svg");
+    expect(bridge.document?.root.children[0]?.id).toBe("adapted");
   });
 
   test("registerHotkey normalizes shortcuts and unsubscribes cleanly", async () => {

@@ -98,7 +98,7 @@ let open = false;
 
 ### Controles de aplicação
 
-`Input`, `Checkbox`, `Switch`, `RadioGroup`, `Select`, `Slider`, `TextArea`, `Card`, `Badge`, `Separator`, `Progress`, `Tabs` e `Accordion` estão disponíveis em `tarve`. Os controles de seleção recebem o valor atual e notificam alterações por callback; o app guarda esse valor em seu estado. `Pressable`, `Icon` e `Portal` permitem compor controles próprios. Consulte `examples/forms-view.tsx` para um formulário com clique, foco e teclado.
+`Input`, `Checkbox`, `Switch`, `RadioGroup`, `Select`, `Slider`, `TextArea`, `Card`, `Badge`, `Separator`, `Progress`, `Tabs` e `Accordion` estão disponíveis em `tarve`. Os controles de seleção recebem o valor atual e notificam alterações por callback; o app guarda esse valor em seu estado. `Pressable`, `Svg`, `Icon` e `Portal` permitem compor controles próprios. Consulte `examples/forms-view.tsx` para um formulário com clique, foco e teclado.
 
 O kit também inclui `Tooltip`, `Popover`, `DropdownMenu`, `ContextMenu`, `Combobox`, `Command`, `CommandPalette`, `AlertDialog`, `Sheet`, `Toast`, `Toaster`, `Skeleton`, `Spinner`, `Avatar`, `Breadcrumb`, `Pagination`, `Collapsible`, `Table`, `DataTable`, `TreeView`, `DataGrid`, `Menubar`, `HoverCard`, `Calendar` e `DatePicker`. Popups usam a primitive nativa de portal: continuam ancorados pelo layout do trigger, mas escapam do clipping de `Scroll`, participam do hit-test acima do conteúdo normal e podem fechar por clique fora. Triggers interativos existentes são preservados em vez de embrulhados em outro controle; menus/combobox/command usam roving focus nativo com teclado. `ContextMenu` abre por clique direito nativo.
 
@@ -402,7 +402,51 @@ Na inicialização, a DLL e as imagens usadas são extraídas para `%TEMP%\tarve
 
 O ponto de entrada é o próprio app, `examples/basic.tsx`. O exemplo contém apenas interface, estado e execução normal. O CLI do pacote incorpora o runtime nativo automaticamente. `bun run build:exe --entry examples/basic.tsx --outfile dist/Basic.exe` é o comando de manutenção equivalente neste repositório; em um projeto consumidor, use `bun run tarve build basic.tsx --outfile dist/Basic.exe`.
 
-Importe imagens com `import image from "./image.png" with { type: "file" }` e use `<Image src={image} />`; o core cuida da extração quando necessário. Caminhos relativos de imagens são resolvidos em relação ao arquivo de entrada. Testes de distribuição ficam em `scripts/`, fora do executável de produção.
+Importe imagens com `import image from "./image.png" with { type: "file" }` (ou `.jpg`/`.svg`) e use `<Image src={image} />`; o core cuida da extração quando necessário. SVGs locais são rasterizados pelo backend nativo a partir do arquivo vetorial e compartilham o mesmo `Image`/`fit` de PNG/JPEG. Caminhos relativos de imagens são resolvidos em relação ao arquivo de entrada. Testes de distribuição ficam em `scripts/`, fora do executável de produção.
+
+Para vetores de interface, prefira SVG declarativo em TSX. O Rust não conhece nomes de ícones. O core serializa a geometria para SVG e `usvg` faz parsing/normalização quando o source muda; variantes de `currentColor` são normalizadas sob demanda e mantidas em um cache pequeno por node. Geometria simples continua vetorial e o `PaintTarget` reutiliza os paths normalizados em CPU, D3D11 ou Vello; se a árvore usar recursos que exigem composição fora desse contrato (como gradients, patterns, clip/mask/filter, blend/isolation, imagem ou texto embutidos), `resvg` gera um fallback raster no tamanho físico efetivamente desenhado e mantém apenas um pequeno conjunto de variantes cacheadas, em vez de rasterizar a cada frame ou descartar silenciosamente o conteúdo:
+
+```tsx
+import { Svg, Path, Circle, Icon, type SvgNode } from "tarve";
+
+const externalIcon: readonly SvgNode[] = [
+  ["circle", { cx: 12, cy: 12, r: 9 }],
+  ["path", { d: "M8 12.5 10.7 15 16 9" }],
+];
+
+<Svg size={24} viewBox="0 0 24 24">
+  <Circle cx={12} cy={12} r={10} />
+  <Path d="M6 12h12" />
+</Svg>
+
+<Icon iconNode={externalIcon} size={20} />
+```
+
+`Icon` mantém alguns nomes compactos por compatibilidade, mas esses nomes são resolvidos em TypeScript. `iconNode` aceita árvores SVG externas, inclusive nós aninhados. O core não conhece React, Lucide, Heroicons ou qualquer outra biblioteca. Para componentes de terceiros, registre um `ComponentAdapter`: ele recebe o tipo/props estrangeiros e, quando reconhece o componente, retorna um `VNode` Tarve.
+
+```tsx
+import { Camera as LucideCamera } from "lucide-react";
+import { CameraIcon as HeroCamera } from "@heroicons/react/24/outline";
+import { Camera as PhosphorCamera } from "@phosphor-icons/react";
+import { IconCamera as TablerCamera } from "@tabler/icons-react";
+import { lucideReactAdapter, phosphorReactAdapter, reactSvgAdapter } from "@tarve/react-icons";
+import { render, Row, Window } from "tarve";
+
+await render(() => (
+  <Window>
+    <Row gap={12}>
+      <LucideCamera size={28} strokeWidth={1.8} />
+      <HeroCamera width={28} height={28} />
+      <PhosphorCamera size={28} weight="duotone" />
+      <TablerCamera size={28} stroke={1.8} />
+    </Row>
+  </Window>
+), {
+  componentAdapters: [reactSvgAdapter, lucideReactAdapter, phosphorReactAdapter],
+});
+```
+
+Os adapters ficam no pacote opcional `@tarve/react-icons`, separado de `packages/core`: `reactSvgAdapter` cobre componentes `forwardRef` que já retornam um `<svg>` estático (como Heroicons e Tabler), enquanto Lucide e Phosphor usam adapters pequenos para seus wrappers próprios. `@tarve/react-icons` não depende de React nem das bibliotecas de ícones; o app instala apenas as que usa. O Tarve core não tenta renderizar React nem possui branches por biblioteca. SVGs completos carregados por `<Image src={...}>` continuam usando `usvg` + `resvg`; `Svg`/`Icon` seguem o caminho vetorial normalmente e só usam o fallback `resvg` quando a árvore normalizada contém recursos que o `PaintTarget` simples não representa.
 
 ## API
 
@@ -429,6 +473,7 @@ packages/core/src/       componentes, JSX runtime, tema, reconciliação, app
   bridge/                bun:ffi e polling FIFO não bloqueante de eventos
 packages/core/build.ts   empacotador reutilizável para apps
 packages/core/cli.ts     comando tarve build
+packages/react-icons/    adapters opcionais para bibliotecas React de ícones
 packages/protocol/src/   contrato TypeScript versionado
 native/src/              bridge C, protocolo Rust, árvore/layout/input, texto, renderer, janela
 native/include/tarve.h   contrato C e ownership dos buffers
@@ -447,6 +492,6 @@ Medições e limites do benchmark estão em `PERFORMANCE.md`. O acompanhamento d
 
 ## Escopo do bootstrap
 
-Uma janela por processo. `Input` e `TextArea` oferecem edição Unicode e IME completo; a árvore nativa também expõe UI Automation/AccessKit no Windows. Botões aceitam Tab/Shift+Tab e Enter/Espaço; `Button` mantém o caminho nativo compacto para texto simples e também aceita composição de ícones, texto e layouts aninhados como um único controle semântico. `ScrollArea` possui clipping e scrollbars nativos vertical, horizontal ou bidirecional. Imagens locais PNG/JPEG usam `cover` ou `contain`.
+Uma janela por processo. `Input` e `TextArea` oferecem edição Unicode e IME completo; a árvore nativa também expõe UI Automation/AccessKit no Windows. Botões aceitam Tab/Shift+Tab e Enter/Espaço; `Button` mantém o caminho nativo compacto para texto simples e também aceita composição de ícones, texto e layouts aninhados como um único controle semântico. `ScrollArea` possui clipping e scrollbars nativos vertical, horizontal ou bidirecional. Imagens locais PNG/JPEG/SVG usam `cover` ou `contain`; SVGs de UI podem ser declarados em TSX e `Icon` aceita dados vetoriais externos via `iconNode`.
 
 `bun:ffi` é o transporte escolhido para este projeto Bun. Sua API ainda é marcada experimental pelo Bun; a ABI explícita, buffers do chamador e polling não bloqueante evitam reentrância/callbacks nativos cross-thread no runtime principal. Referências: [Bun FFI](https://bun.com/docs/runtime/ffi), [Taffy](https://docs.rs/taffy/0.14.0), [Parley](https://docs.rs/parley/0.11.1), [Vello](https://docs.rs/vello/0.10.0).

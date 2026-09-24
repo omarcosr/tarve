@@ -6,6 +6,8 @@ use crate::{
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
+    fs,
+    path::Path,
     sync::Arc,
 };
 use taffy::prelude::*;
@@ -42,6 +44,60 @@ const LAYOUT_KEYS: &[&str] = &[
     "bottom",
     "left",
 ];
+const MAX_SVG_RASTER_DIMENSION: u32 = 4096;
+
+fn load_image_data(path: &str) -> Result<ImageData, String> {
+    let extension = Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default();
+    if extension.eq_ignore_ascii_case("svg") {
+        return load_svg_image(path);
+    }
+    let image = image::open(path).map_err(|error| error.to_string())?;
+    let rgba = image.to_rgba8();
+    Ok(ImageData {
+        width: rgba.width(),
+        height: rgba.height(),
+        format: ImageFormat::Rgba8,
+        alpha_type: ImageAlphaType::Alpha,
+        data: Blob::new(Arc::new(rgba.into_raw())),
+    })
+}
+
+fn load_svg_image(path: &str) -> Result<ImageData, String> {
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    let options = resvg::usvg::Options {
+        resources_dir: fs::canonicalize(path)
+            .ok()
+            .and_then(|resolved| resolved.parent().map(Path::to_path_buf)),
+        ..resvg::usvg::Options::default()
+    };
+    let tree = resvg::usvg::Tree::from_data(&bytes, &options).map_err(|error| error.to_string())?;
+    let intrinsic = tree.size().to_int_size();
+    let largest = intrinsic.width().max(intrinsic.height()).max(1);
+    let scale = if largest > MAX_SVG_RASTER_DIMENSION {
+        MAX_SVG_RASTER_DIMENSION as f32 / largest as f32
+    } else {
+        1.0
+    };
+    let width = ((intrinsic.width() as f32 * scale).round() as u32).max(1);
+    let height = ((intrinsic.height() as f32 * scale).round() as u32).max(1);
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
+        .ok_or_else(|| format!("SVG raster target is too large: {width}x{height}"))?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    Ok(ImageData {
+        width,
+        height,
+        format: ImageFormat::Rgba8,
+        alpha_type: ImageAlphaType::AlphaPremultiplied,
+        data: Blob::new(Arc::new(pixmap.take())),
+    })
+}
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct Dirty {
@@ -247,6 +303,7 @@ pub struct Tree {
     layout: TaffyTree<String>,
     pub text: TextEngine,
     images: HashMap<String, ImageData>,
+    svgs: HashMap<String, crate::svg::SvgScene>,
     stacking: HashMap<String, f32>,
     window_chrome_suppressed: bool,
     pub dirty: Dirty,
@@ -351,6 +408,7 @@ impl Tree {
             layout: TaffyTree::new(),
             text: TextEngine::new(),
             images: HashMap::new(),
+            svgs: HashMap::new(),
             stacking: HashMap::new(),
             window_chrome_suppressed: false,
             dirty: Dirty::all(),
@@ -414,6 +472,7 @@ impl Tree {
                     .is_some_and(|id| self.entries.contains_key(id))
         });
         self.prune_images();
+        self.prune_svgs();
         let restore_focus = self.modal_focus_transition(previous_modal, previous_focus);
         self.prune_interaction();
         if let Some(id) = restore_focus {
@@ -491,22 +550,30 @@ impl Tree {
             self.dirty = Dirty::all();
         }
         if node.kind == "image" && !self.images.contains_key(&node.src) {
-            match image::open(&node.src) {
+            match load_image_data(&node.src) {
                 Ok(image) => {
-                    let rgba = image.to_rgba8();
-                    self.images.insert(
-                        node.src.clone(),
-                        ImageData {
-                            width: rgba.width(),
-                            height: rgba.height(),
-                            format: ImageFormat::Rgba8,
-                            alpha_type: ImageAlphaType::Alpha,
-                            data: Blob::new(Arc::new(rgba.into_raw())),
-                        },
-                    );
+                    self.images.insert(node.src.clone(), image);
                 }
                 Err(e) => self.warnings.push(format!("Image '{}': {e}", node.src)),
             }
+        }
+        if node.kind == "svg" {
+            let changed = previous
+                .as_ref()
+                .is_none_or(|entry| entry.node.svg != node.svg || entry.node.kind != node.kind);
+            if changed || !self.svgs.contains_key(&node.id) {
+                match crate::svg::compile(&node.svg) {
+                    Ok(scene) => {
+                        self.svgs.insert(node.id.clone(), scene);
+                    }
+                    Err(error) => {
+                        self.svgs.remove(&node.id);
+                        self.warnings.push(format!("SVG '{}': {error}", node.id));
+                    }
+                }
+            }
+        } else {
+            self.svgs.remove(&node.id);
         }
         let id = node.id.clone();
         self.entries.insert(
@@ -551,6 +618,7 @@ impl Tree {
             self.reconcile_node(node, children, Some(previous));
         }
         self.prune_images();
+        self.prune_svgs();
         let restore_focus = self.modal_focus_transition(previous_modal, previous_focus);
         self.prune_interaction();
         if let Some(id) = restore_focus {
@@ -620,6 +688,13 @@ impl Tree {
             .map(|entry| entry.node.src.clone())
             .collect();
         self.images.retain(|src, _| used.contains(src));
+    }
+    fn prune_svgs(&mut self) {
+        self.svgs.retain(|id, _| {
+            self.entries
+                .get(id)
+                .is_some_and(|entry| entry.node.kind == "svg")
+        });
     }
     pub fn compute(&mut self, width: f32, height: f32) -> Result<(), String> {
         if !self.dirty.layout && !self.dirty.text {
@@ -1142,13 +1217,14 @@ impl Tree {
             }
             target.pop_layer();
         }
-        if node.kind == "icon" {
-            crate::icons::draw(
+        if node.kind == "svg"
+            && let Some(scene) = self.svgs.get(id).cloned()
+        {
+            crate::svg::draw(
                 target,
-                &node.text,
+                &scene,
                 rect,
                 color(visual_string(&node, "foreground", "#18181b", state)),
-                node.number("strokeWidth", 1.75) as f64,
                 scale,
             );
         }
@@ -3170,6 +3246,14 @@ impl Tree {
     #[cfg(test)]
     pub(crate) fn image_cache_len(&self) -> usize {
         self.images.len()
+    }
+    #[cfg(test)]
+    pub(crate) fn svg_cache_len(&self) -> usize {
+        self.svgs.len()
+    }
+    #[cfg(test)]
+    pub(crate) fn svg_cache_scene(&self, id: &str) -> Option<crate::svg::SvgScene> {
+        self.svgs.get(id).cloned()
     }
     #[cfg(test)]
     pub(crate) fn resolved_visual_string(&self, id: &str, key: &str, fallback: &str) -> String {

@@ -3,9 +3,10 @@ import { Fragment, type Child, type VNode } from "./jsx-runtime";
 import { lightTheme, resolveThemeColor, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
 import type { WindowCloseRequestEvent } from "./components";
+import type { ComponentAdapter } from "./component-adapter";
 export interface Handlers { onClick?: () => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onScrollPosition?: (position: ScrollPosition) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void }
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode> }
-const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "button", "image", "scroll", "input", "textarea", "pressable", "icon", "slider", "splitter"]);
+const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter"]);
 const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
 function textContent(value: Child): string {
   if (Array.isArray(value)) return value.map(textContent).join("");
@@ -13,7 +14,12 @@ function textContent(value: Child): string {
   if (typeof value === "object") throw new Error("Text/Button children must be strings or numbers.");
   return String(value);
 }
-export function compileTree(element: VNode, debug = false, renderer: Renderer = "auto"): CompiledTree {
+export function compileTree(
+  element: VNode,
+  debug = false,
+  renderer: Renderer = "auto",
+  componentAdapters: readonly ComponentAdapter[] = [],
+): CompiledTree {
   const handlers = new Map<string, Handlers>();
   const ids = new Set<string>();
   const nodes = new Map<string, NativeNode>();
@@ -33,6 +39,12 @@ export function compileTree(element: VNode, debug = false, renderer: Renderer = 
       return [node];
     }
     if (child.type === Fragment || child.type === "fragment") return visit(child.props.children, path, group);
+    for (const adapter of componentAdapters) {
+      const adapted = adapter({ type: child.type, props: child.props, key: child.key });
+      if (!adapted) continue;
+      if (adapted === child) throw new Error("Component adapter returned the same VNode instance.");
+      return visit(adapted, path, group);
+    }
     if (typeof child.type === "function") return visit(child.type(child.props), path, group);
     if (!kinds.has(child.type)) throw new Error(`Unknown native component: ${child.type}`);
     const p = child.props;
@@ -72,7 +84,7 @@ export function compileTree(element: VNode, debug = false, renderer: Renderer = 
     const node: NativeNode = { id, kind: child.type as NativeNode["kind"], style,
       children: isText ? [] : visit(p.children, `${path}/children`, childGroup),
       ...(isText ? { text: textContent(p.children) } : {}),
-      ...(child.type === "icon" ? { text: p.name } : {}),
+      ...(p.svg !== undefined ? { svg: p.svg } : {}),
       ...(control ? { control } : {}),
       ...(p.src !== undefined ? { src: nativeAssetPath(p.src), fit: p.fit ?? "cover" } : {}),
       ...(p.value !== undefined ? { value: p.value } : {}),
@@ -133,7 +145,7 @@ export function diffTrees(previous: CompiledTree, next: CompiledTree): NativeNod
     const old = previous.nodes.get(id);
     if (!old || old.kind !== node.kind || old.children.length !== node.children.length
       || old.children.some((child, index) => child.id !== node.children[index].id)) return null;
-    if (old.text !== node.text || old.src !== node.src || old.fit !== node.fit
+    if (old.text !== node.text || old.src !== node.src || old.fit !== node.fit || !sameValue(old.svg, node.svg)
       || old.value !== node.value || old.placeholder !== node.placeholder || old.inputType !== node.inputType || old.scrollSpeed !== node.scrollSpeed || old.scrollOrientation !== node.scrollOrientation || old.disabled !== node.disabled
       || old.modal !== node.modal || old.rovingGroup !== node.rovingGroup || old.portal !== node.portal || old.dismissOnOutside !== node.dismissOnOutside || old.closeIntercept !== node.closeIntercept || old.focusable !== node.focusable
       || old.dragRegion !== node.dragRegion || old.windowAction !== node.windowAction

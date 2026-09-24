@@ -7,8 +7,10 @@ export interface ProductVersionState {
   root: string;
   core: string;
   protocolPackage: string;
+  reactIcons: string;
   bunCore: string;
   bunProtocol: string;
+  bunReactIcons: string;
   native: string;
   cargoLock: string;
 }
@@ -76,10 +78,11 @@ export function assertValidSemver(version: string): void {
 }
 
 export async function readProductVersions(root: string): Promise<ProductVersionState> {
-  const [rootPackage, corePackage, protocolPackage, bunLock, cargoToml, cargoLock] = await Promise.all([
+  const [rootPackage, corePackage, protocolPackage, reactIconsPackage, bunLock, cargoToml, cargoLock] = await Promise.all([
     Bun.file(join(root, "package.json")).json() as Promise<{ version?: string }>,
     Bun.file(join(root, "packages/core/package.json")).json() as Promise<{ version?: string }>,
     Bun.file(join(root, "packages/protocol/package.json")).json() as Promise<{ version?: string }>,
+    Bun.file(join(root, "packages/react-icons/package.json")).json() as Promise<{ version?: string }>,
     readFile(join(root, "bun.lock"), "utf8"),
     readFile(join(root, "native/Cargo.toml"), "utf8"),
     readFile(join(root, "native/Cargo.lock"), "utf8"),
@@ -89,8 +92,10 @@ export async function readProductVersions(root: string): Promise<ProductVersionS
     root: rootPackage.version ?? "",
     core: corePackage.version ?? "",
     protocolPackage: protocolPackage.version ?? "",
+    reactIcons: reactIconsPackage.version ?? "",
     bunCore: bunWorkspaceVersion(bunLock, "packages/core") ?? "",
     bunProtocol: bunWorkspaceVersion(bunLock, "packages/protocol") ?? "",
+    bunReactIcons: bunWorkspaceVersion(bunLock, "packages/react-icons") ?? "",
     native: cargoPackageValue(cargoToml, "version") ?? "",
     cargoLock: lock ?? "",
   };
@@ -109,7 +114,7 @@ export function assertVersionsSynchronized(state: ProductVersionState): string {
 
 export async function setProductVersion(root: string, version: string): Promise<void> {
   assertValidSemver(version);
-  for (const relative of ["package.json", "packages/core/package.json", "packages/protocol/package.json"]) {
+  for (const relative of ["package.json", "packages/core/package.json", "packages/protocol/package.json", "packages/react-icons/package.json"]) {
     const path = join(root, relative);
     const manifest = await Bun.file(path).json() as Record<string, unknown>;
     manifest.version = version;
@@ -119,6 +124,7 @@ export async function setProductVersion(root: string, version: string): Promise<
   let bunLock = await readFile(bunLockPath, "utf8");
   bunLock = replaceBunWorkspaceVersion(bunLock, "packages/core", version);
   bunLock = replaceBunWorkspaceVersion(bunLock, "packages/protocol", version);
+  bunLock = replaceBunWorkspaceVersion(bunLock, "packages/react-icons", version);
   await writeFile(bunLockPath, bunLock);
   const cargoTomlPath = join(root, "native/Cargo.toml");
   await writeFile(cargoTomlPath, replaceCargoPackageValue(await readFile(cargoTomlPath, "utf8"), "version", version));

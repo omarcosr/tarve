@@ -274,7 +274,7 @@ export function DataGrid<T>({
   };
   const header = jsx(Row, {
     ...(id ? { id: `${id}-header` } : {}),
-    style: { width: "100%", height: 38, shrink: 0, borderWidth: { bottom: 1 }, borderColor: c.border, background: c.card },
+    style: { width: "100%", height: 38, shrink: 0, borderWidth: { bottom: 1 }, borderColor: c.border, background: "#00000000" },
     children: columns.map(column => {
       const active = sort?.column === column.key;
       const content: Child = [
@@ -341,7 +341,7 @@ export function DataGrid<T>({
     ...props,
     ...(id ? { id } : {}),
     control: { role: "grid", orientation: "vertical", label: "Data grid" },
-    style: { width: "100%", height, borderWidth: 1, borderColor: c.border, radius: theme.radius.md, ...style },
+    style: { width: "100%", height, borderWidth: 1, borderColor: c.border, radius: theme.radius.md, background: c.card, ...style },
     children: [header, body],
   });
 }

@@ -1,3 +1,7 @@
+import { Camera } from 'lucide-react';
+import { CameraIcon as HeroCamera } from "@heroicons/react/24/outline";
+import { Camera as PhosphorCamera } from "@phosphor-icons/react";
+import { IconCamera as TablerCamera } from "@tabler/icons-react";
 import {
   Alert,
   AspectRatio,
@@ -7,6 +11,7 @@ import {
   ButtonGroup,
   Carousel,
   Chart,
+  Circle,
   Column,
   DataGrid,
   Direction,
@@ -14,6 +19,7 @@ import {
   Empty,
   Field,
   Icon,
+  Image,
   Input,
   InputGroup,
   InputOTP,
@@ -25,12 +31,14 @@ import {
   MessageScroller,
   NativeSelect,
   NavigationMenu,
+  Path,
   Questionnaire,
   Resizable,
   Row,
   Scroll,
   ScrollArea,
   Sidebar,
+  Svg,
   Text,
   TextArea,
   TitleBar,
@@ -44,8 +52,9 @@ import {
   type Child,
   type QuestionnaireAnswer,
   type Style,
+  type SvgNode,
 } from "tarve";
-
+import vectorScene from "./assets/vector-scene.svg" with { type: "file" };
 const c = theme.colors;
 
 const panel: Style = {
@@ -97,6 +106,15 @@ let imeInput = "";
 let imeNotes = "";
 let imeAligned = "";
 
+const lucideStyleIcons: { id: string; label: string; iconNode: readonly SvgNode[] }[] = [
+  { id: "house", label: "House", iconNode: [["path", { d: "M3 10.8 12 3l9 7.8V21h-6v-7H9v7H3z" }]] },
+  { id: "user", label: "User", iconNode: [["circle", { cx: 12, cy: 8, r: 4 }], ["path", { d: "M4 21a8 8 0 0 1 16 0" }]] },
+  { id: "bell", label: "Bell", iconNode: [["path", { d: "M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" }]] },
+  { id: "heart", label: "Heart", iconNode: [["path", { d: "M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z" }]] },
+  { id: "download", label: "Download", iconNode: [["path", { d: "M12 3v12m0 0 4-4m-4 4-4-4M4 21h16" }]] },
+  { id: "mail", label: "Mail", iconNode: [["rect", { x: 3, y: 5, width: 18, height: 14, rx: 2 }], ["path", { d: "m3 7 9 6 9-6" }]] },
+];
+
 const gridRows = [
   { id: 1, name: "Renderer", area: "Rust", status: "Ready" },
   { id: 2, name: "Components", area: "TypeScript", status: "Active" },
@@ -129,6 +147,9 @@ const questionnaireQuestions = [
     ],
   },
 ];
+
+
+let emailAddress = "hello@example.com";
 
 export function App() {
   return (
@@ -178,6 +199,54 @@ export function App() {
                   </Column>
                 </Button>
               </Row>
+            </Section>
+
+            <Section title="SVG + Icons" description="Native SVG plus external icon libraries through pluggable component adapters.">
+              <Column gap={14}>
+                <Row gap={14} align="center">
+                  <View style={{ width: 220, height: 124, shrink: 0, background: c.muted, borderWidth: 1, borderColor: c.border, radius: 10 }}>
+                    <Image id="demo-svg-image" src={vectorScene} width={220} height={124} fit="contain" style={{ radius: 10 }} />
+                  </View>
+                  <Column gap={7} flex={1}>
+                    <Text weight={650}>File SVG + declarative TSX</Text>
+                    <Text size={11} color={c.mutedForeground}>Image can load a .svg file, while Svg/Path/Circle declare vector geometry directly in TSX.</Text>
+                    <Svg id="demo-inline-svg" size={48} viewBox="0 0 24 24" color={c.foreground} strokeWidth={1.8}>
+                      <Circle cx={12} cy={12} r={9} />
+                      <Path d="M8 12.5 10.7 15 16 9" />
+                    </Svg>
+                    <Row gap={8}>
+                      <Button size="sm"><Icon iconNode={lucideStyleIcons[4].iconNode} /><Text>Export</Text></Button>
+                      <Button size="sm" variant="outline"><Icon iconNode={lucideStyleIcons[5].iconNode} /><Text>Mail</Text></Button>
+                    </Row>
+                  </Column>
+                </Row>
+                <Row id="demo-external-icon-libraries" gap={10} style={{ wrap: true }}>
+                  <Column gap={5} align="center" style={{ width: 100, padding: 10, background: c.muted, radius: 8 }}>
+                    <Camera id="demo-lucide-react-camera" size={28} strokeWidth={1.8} />
+                    <Text size={10} color={c.mutedForeground}>Lucide</Text>
+                  </Column>
+                  <Column gap={5} align="center" style={{ width: 100, padding: 10, background: c.muted, radius: 8 }}>
+                    <HeroCamera id="demo-heroicons-camera" width={28} height={28} />
+                    <Text size={10} color={c.mutedForeground}>Heroicons</Text>
+                  </Column>
+                  <Column gap={5} align="center" style={{ width: 100, padding: 10, background: c.muted, radius: 8 }}>
+                    <PhosphorCamera id="demo-phosphor-camera" size={28} weight="duotone" />
+                    <Text size={10} color={c.mutedForeground}>Phosphor</Text>
+                  </Column>
+                  <Column gap={5} align="center" style={{ width: 100, padding: 10, background: c.muted, radius: 8 }}>
+                    <TablerCamera id="demo-tabler-camera" size={28} stroke={1.8} />
+                    <Text size={10} color={c.mutedForeground}>Tabler</Text>
+                  </Column>
+                </Row>
+                <View id="demo-lucide-icons" style={{ display: "grid", columns: 3, gap: 8 }}>
+                  {lucideStyleIcons.map(({ id, label, iconNode }) => (
+                    <Column key={id} gap={5} align="center" style={{ padding: 9, background: c.muted, radius: 8 }}>
+                      <Icon id={`demo-icon-${id}`} iconNode={iconNode} size={20} strokeWidth={1.8} />
+                      <Text size={10} color={c.mutedForeground}>{label}</Text>
+                    </Column>
+                  ))}
+                </View>
+              </Column>
             </Section>
 
             <Section title="Horizontal ScrollArea" description="Horizontal and bidirectional native scrolling with wheel/trackpad support.">
@@ -250,7 +319,7 @@ export function App() {
 
             <Section title="Field" description="Label, description, validation and control layout.">
               <Field label="Email address" description="We only use this for account notifications." required>
-                <Input type="email" value="hello@example.com" />
+                <Input type="email" value={emailAddress} onChange={(value) => { emailAddress = value; }} />
               </Field>
               <Field label="Password" description="Choose a strong password." required>
                 <Input type="password" value="secret" />
