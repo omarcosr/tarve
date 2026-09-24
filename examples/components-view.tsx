@@ -26,6 +26,7 @@ import {
   Item,
   Kbd,
   Label,
+  Link,
   Marker,
   Message,
   MessageScroller,
@@ -41,6 +42,7 @@ import {
   Svg,
   Text,
   TextArea,
+  theme,
   TitleBar,
   Toggle,
   ToggleGroup,
@@ -48,7 +50,6 @@ import {
   Typography,
   View,
   Window,
-  theme,
   type Child,
   type QuestionnaireAnswer,
   type Style,
@@ -305,6 +306,17 @@ export function App() {
               <Column gap={10}>
                 <Button id="open-drawer" onClick={() => { drawerOpen = true; }}>Open drawer</Button>
                 <Text size={12} color={c.mutedForeground} style={{ userSelect: "text" }}>The drawer opens from the bottom and uses the native modal overlay.</Text>
+                <Link href="https://example.com" style={{
+                  // color: "#ff00ff",
+                  hover: {
+                    color: "#ff00ff"
+                  }
+                }}>
+                  <Row gap={6}>
+                    {/* <Icon name="book" /> */}
+                    <Text>Documentation</Text>
+                  </Row>
+                </Link>
               </Column>
             </Section>
 

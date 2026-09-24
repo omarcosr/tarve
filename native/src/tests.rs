@@ -477,6 +477,82 @@ fn hover_and_color_update_do_not_invalidate_layout_or_text() {
 }
 
 #[test]
+fn focus_visible_distinguishes_pointer_focus_from_keyboard_focus() {
+    let mut button = node(
+        "button",
+        "button",
+        json!({
+            "width":100,
+            "height":36,
+            "focus":{"background":"#123456"},
+            "focusVisible":{"outlineWidth":2,"outlineColor":"#8b5cf6"}
+        }),
+        vec![],
+    );
+    button.text = "Link-like control".into();
+    let mut tree = Tree::new(root(vec![button]));
+    tree.compute(300.0, 200.0).unwrap();
+
+    tree.pointer_move(20.0, 15.0);
+    tree.pointer_down();
+    tree.pointer_up();
+    assert_eq!(tree.focused.as_deref(), Some("button"));
+    assert!(!tree.focus_visible);
+    assert_eq!(
+        tree.resolved_visual_string("button", "background", "#00000000"),
+        "#123456",
+        "ordinary focus styles still apply after pointer focus"
+    );
+    assert_eq!(
+        tree.resolved_visual_number("button", "outlineWidth", 0.0),
+        0.0,
+        "pointer focus must not show the focus-visible ring"
+    );
+
+    tree.key("Tab");
+    assert_eq!(tree.focused.as_deref(), Some("button"));
+    assert!(tree.focus_visible);
+    assert_eq!(
+        tree.resolved_visual_number("button", "outlineWidth", 0.0),
+        2.0,
+        "keyboard focus must show the focus-visible ring"
+    );
+
+    tree.pointer_down();
+    assert!(!tree.focus_visible, "pointer modality hides the ring again");
+}
+
+#[test]
+fn semantic_link_foreground_and_hover_inherit_into_nested_text() {
+    let root: Node = serde_json::from_value(json!({
+        "id":"root","kind":"window","style":{},"children":[
+            {
+                "id":"link","kind":"pressable",
+                "style":{
+                    "width":180,"height":36,
+                    "foreground":"#2563eb",
+                    "hover":{"foreground":"#dc2626"}
+                },
+                "control":{"role":"link","label":"Documentation"},
+                "children":[
+                    {
+                        "id":"row","kind":"row","style":{},"children":[
+                            {"id":"label","kind":"text","text":"Documentation","style":{"foreground":"#18181b"},"children":[]}
+                        ]
+                    }
+                ]
+            }
+        ]
+    }))
+    .unwrap();
+    let mut tree = Tree::new(root);
+    tree.compute(300.0, 120.0).unwrap();
+    assert_eq!(tree.resolved_text_foreground("label", "#18181b"), "#2563eb");
+    tree.pointer_move(20.0, 18.0);
+    assert_eq!(tree.resolved_text_foreground("label", "#18181b"), "#dc2626");
+}
+
+#[test]
 fn otp_slot_focus_follows_the_native_input_caret() {
     let mut input = node(
         "otp-input",
@@ -1469,6 +1545,73 @@ fn protocol_rejects_duplicate_ids() {
 fn protocol_rejects_invalid_user_select_values() {
     let invalid = node("bad", "text", json!({"userSelect":"maybe"}), vec![]);
     assert!(protocol::validate(&root(vec![invalid])).is_err());
+}
+
+#[test]
+fn protocol_validates_text_decoration_values_and_keeps_updates_paint_only() {
+    for decoration in ["none", "underline", "overline", "line-through"] {
+        let mut label = node(
+            "label",
+            "text",
+            json!({"width":180,"fontSize":16,"textDecoration":decoration}),
+            vec![],
+        );
+        label.text = "Decorated text".into();
+        assert!(protocol::validate(&root(vec![label])).is_ok());
+    }
+    let invalid = node("bad", "text", json!({"textDecoration":"blink"}), vec![]);
+    assert!(protocol::validate(&root(vec![invalid])).is_err());
+    let invalid_hover = node(
+        "bad-hover",
+        "text",
+        json!({"hover":{"textDecoration":"wavy"}}),
+        vec![],
+    );
+    assert!(protocol::validate(&root(vec![invalid_hover])).is_err());
+
+    let mut label = node(
+        "label",
+        "text",
+        json!({"width":180,"fontSize":16,"textDecoration":"underline"}),
+        vec![],
+    );
+    label.text = "Decorated text".into();
+    let mut tree = Tree::new(root(vec![label.clone()]));
+    tree.compute(240.0, 100.0).unwrap();
+    tree.scene(1.0);
+    label.style["textDecoration"] = json!("line-through");
+    tree.update(root(vec![label]));
+    assert!(tree.dirty.paint);
+    assert!(!tree.dirty.layout);
+    assert!(!tree.dirty.text);
+    tree.scene(1.0);
+}
+
+#[test]
+fn semantic_links_activate_with_enter_but_not_space() {
+    let link: Node = serde_json::from_value(json!({
+        "id":"link",
+        "kind":"pressable",
+        "style":{},
+        "children":[],
+        "control":{"role":"link","label":"Docs"}
+    }))
+    .unwrap();
+    let mut tree = Tree::new(root(vec![link]));
+    tree.compute(240.0, 100.0).unwrap();
+    tree.focus("link");
+    assert!(tree.key("Space").is_empty());
+    assert_eq!(tree.key("Enter"), vec![json!({"type":"click","id":"link"})]);
+}
+
+#[test]
+fn external_targets_require_absolute_uri_syntax() {
+    assert!(bridge::validate_external_target("https://example.com").is_ok());
+    assert!(bridge::validate_external_target("mailto:hello@example.com").is_ok());
+    assert!(bridge::validate_external_target("tel:+5511999999999").is_ok());
+    assert!(bridge::validate_external_target("relative/path").is_err());
+    assert!(bridge::validate_external_target("1invalid:value").is_err());
+    assert!(bridge::validate_external_target("https://example.com\0bad").is_err());
 }
 
 #[test]

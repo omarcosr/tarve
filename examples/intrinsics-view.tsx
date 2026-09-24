@@ -51,7 +51,13 @@ export function App() {
               <p style={{ color: c.mutedForeground }}>
                 Familiar text, media, form and vector primitives rendered directly by Tarve.
               </p>
-              <span style={{ color: c.foreground, fontWeight: 600 }}>div · span · p · img · input · textarea · button · svg</span>
+              <span style={{ color: c.foreground, fontWeight: 600 }}>div · span · p · a · img · input · textarea · button · svg</span>
+              <a href="https://github.com" style={{ color: c.primary }}>
+                Open an external link
+              </a>
+              <span style={{ color: c.mutedForeground, textDecoration: "line-through" }}>
+                textDecoration also supports line-through and overline
+              </span>
               <span style={{ color: c.success }}>● Protocol-backed and accessibility-aware</span>
             </div>
             <svg size={44} viewBox="0 0 24 24" color={c.primary}>

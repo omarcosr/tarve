@@ -44,6 +44,7 @@ describe("form and visual controls", () => {
     expect([...tree.nodes.values()].filter(node => node.kind === "input")).toHaveLength(1);
     expect(tree.nodes.get("otp-input")?.value).toBe("12");
     expect(tree.nodes.get("otp-input")?.style.focus?.outlineWidth).toBe(0);
+    expect(tree.nodes.get("otp-input")?.style.focusVisible?.outlineWidth).toBe(0);
     expect(tree.nodes.get("otp")?.style.width).toBe(168);
     expect(tree.nodes.get("otp-slot-0")?.children[0]?.text).toBe("1");
     expect(Array.from({ length: 4 }, (_, index) => tree.nodes.get(`otp-slot-${index}`)?.style.width)).toEqual([36, 36, 36, 36]);
@@ -57,7 +58,7 @@ describe("form and visual controls", () => {
       { width: 1, color: "#e4e4e7" },
     ]);
     expect(tree.nodes.get("otp-slot-0")?.control).toEqual({ role: "otpSlot", group: "otp-input", value: 0, max: 3 });
-    expect(tree.nodes.get("otp-slot-2")?.style.focus).toMatchObject({
+    expect(tree.nodes.get("otp-slot-2")?.style.focusVisible).toMatchObject({
       outlineWidth: 2,
       outlineOffset: 2,
       outlineStyle: "solid",

@@ -1,5 +1,5 @@
-export { Window, View, Row, Column, Portal, Pressable, Icon, Svg, Path, Circle, Ellipse, Line, Polyline, Polygon, SvgRect, Text, Button, Image, Scroll, ScrollArea, Input, TextArea, TitleBar, Modal, Dialog } from "./components";
-export type { WindowProps, WindowCloseRequestEvent, ViewProps, PortalProps, PressableProps, IconName, IconProps, SvgProps, SvgNode, SvgAttributes, PathProps, CircleProps, EllipseProps, LineProps, PolylineProps, PolygonProps, RectProps, TextProps, ButtonProps, ImageProps, ScrollProps, ScrollAreaProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
+export { Window, View, Row, Column, Portal, Pressable, Link, Icon, Svg, Path, Circle, Ellipse, Line, Polyline, Polygon, SvgRect, Text, Button, Image, Scroll, ScrollArea, Input, TextArea, TitleBar, Modal, Dialog } from "./components";
+export type { WindowProps, WindowCloseRequestEvent, ViewProps, PortalProps, PressableProps, LinkProps, IconName, IconProps, SvgProps, SvgNode, SvgAttributes, PathProps, CircleProps, EllipseProps, LineProps, PolylineProps, PolygonProps, RectProps, TextProps, ButtonProps, ImageProps, ScrollProps, ScrollAreaProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
 export { Checkbox, Switch, RadioGroup, Slider, Card, Badge, Separator, Progress, Tabs, Accordion } from "./controls";
 export type { CheckboxProps, SwitchProps, RadioOption, RadioGroupProps, SliderProps, CardProps, BadgeProps, SeparatorProps, ProgressProps, TabItem, TabsProps, AccordionItem, AccordionProps } from "./controls";
 export { VirtualList } from "./virtual-list";
@@ -22,7 +22,7 @@ export type { ComponentAdapter, ComponentAdapterInput } from "./component-adapte
 export { theme, Theme, lightTheme, darkTheme, createTheme, buttonVariants } from "./theme";
 export type { ThemeColors, ThemeFocusOutline, ThemeDefinition, ThemeOverrides, ButtonVariant } from "./theme";
 export { Style } from "./style";
-export type { StateStyle, OutlineStyle, UserSelect, Renderer, WindowPosition, WindowPositionPreset, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition } from "../../protocol/src/index";
+export type { StateStyle, OutlineStyle, UserSelect, TextDecoration, Renderer, WindowPosition, WindowPositionPreset, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition } from "../../protocol/src/index";
 export type { VNode, Child } from "./jsx-runtime";
-export { BunFfiBridge } from "./bridge";
+export { BunFfiBridge, openExternal } from "./bridge";
 export type { NativeBridge, BunFfiBridgeOptions } from "./bridge";

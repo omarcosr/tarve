@@ -99,6 +99,7 @@ impl AccessibilityTree {
         if let Some(control) = &node.control {
             return match control.role.as_str() {
                 "button" => Role::Button,
+                "link" => Role::Link,
                 "checkbox" => Role::CheckBox,
                 "switch" => Role::Switch,
                 "radio" => Role::RadioButton,
@@ -886,6 +887,27 @@ mod tests {
         assert!(!locked.supports_action(Action::SetTextSelection));
         let normal = &by_id[&builder.ids["normal"]];
         assert!(normal.supports_action(Action::SetTextSelection));
+    }
+
+    #[test]
+    fn semantic_link_projects_as_uia_hyperlink_and_is_invokable() {
+        let root = node(json!({
+            "id":"root","kind":"window","children":[
+                {
+                    "id":"docs","kind":"pressable","style":{},"children":[],
+                    "control":{"role":"link","label":"Documentation"}
+                }
+            ]
+        }));
+        let mut tree = Tree::new(root);
+        tree.compute(320.0, 120.0).unwrap();
+        let mut builder = AccessibilityTree::default();
+        let update = builder.build(&mut tree, "Example", 1.0);
+        let by_id: HashMap<_, _> = update.nodes.into_iter().collect();
+        let link = &by_id[&builder.ids["docs"]];
+        assert_eq!(link.role(), Role::Link);
+        assert_eq!(link.label(), Some("Documentation"));
+        assert!(link.supports_action(Action::Click));
     }
 
     #[test]

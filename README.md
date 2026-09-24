@@ -323,6 +323,60 @@ Text selection can be controlled with the CSS-like `userSelect` style:
 
 Supported values are `auto`, `text`, `none` and `all`. Tarve defaults normal UI text and chrome to `none`, matching native-app behavior where labels are not selectable. Editable `Input` and `TextArea` controls remain text-selectable by default. `auto` follows the nearest explicit ancestor selection mode; without one, it resolves to the native default for that node kind. Use `text` to opt normal UI text into partial selection, or `all` to make a subtree select atomically. `Button` and `Pressable` also serialize `none` explicitly so dragging labels does not interfere with normal control activation.
 
+Links use the platform's registered handler and expose native hyperlink accessibility semantics. The component API is:
+
+```tsx
+import { Link } from "tarve";
+
+<Link href="https://example.com/docs">Documentation</Link>
+<Link href="mailto:hello@example.com">Email support</Link>
+```
+
+The HTML-like intrinsic delegates to the same `Link` implementation:
+
+```tsx
+<a href="https://example.com/docs">Documentation</a>
+<a href="mailto:hello@example.com">Email support</a>
+```
+
+`Link`/`<a>` are focusable, activate with Enter, use the pointer cursor and default to an underline. Space does not activate links. Composed children are supported; Tarve derives the accessibility label from descendant text, or you can provide `label` on `Link` / `ariaLabel` on `<a>`. The same OS integration is available imperatively with `openExternal("https://example.com")`.
+
+`Link` and HTML-like intrinsics accept CSS-like `color` / `backgroundColor` aliases both at the base style and inside visual states. For links, the resolved foreground is inherited by nested text so hover colors work with composed children too:
+
+```tsx
+<Link
+  href="https://example.com/docs"
+  style={{
+    color: "#2563eb",
+    hover: { color: "#1d4ed8" },
+  }}
+>
+  <Row gap={6}><Text>Documentation</Text></Row>
+</Link>
+```
+
+Text decoration is paint-only and supports `none`, `underline`, `overline` and `line-through`:
+
+```tsx
+<Text style={{ textDecoration: "underline" }}>Underlined</Text>
+<Text style={{ textDecoration: "line-through" }}>Removed</Text>
+```
+
+Decorations propagate through descendant text, so setting `textDecoration` on a link/container also decorates nested text without affecting Taffy layout or Parley shaping.
+
+Interactive controls use input-modality-aware focus styling. `focus` applies whenever a control owns focus, while `focusVisible` applies only when the focus indicator should be shown (for example after Tab/keyboard or accessibility focus). The theme's default focus ring uses `focusVisible`, so clicking a `Link`, `Button` or `Pressable` does not leave a keyboard-style outline behind:
+
+```tsx
+<Button style={{
+  focus: { background: theme.colors.muted },
+  focusVisible: { outlineWidth: 3 },
+}}>
+  Save
+</Button>
+```
+
+Existing outline overrides inside `focus` remain compatible: Tarve also applies those outline fields to the generated `focusVisible` ring unless an explicit `focusVisible` override is provided.
+
 Borders can use one width for every side or independent widths, using the same inset shape as `padding` and `margin`:
 
 ```tsx

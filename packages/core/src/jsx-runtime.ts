@@ -1,13 +1,22 @@
-import type { Control, Style, SvgNode } from "../../protocol/src/index";
+import type { Control, StateStyle, Style, SvgNode } from "../../protocol/src/index";
 export type Child = VNode | string | number | boolean | null | undefined | Child[];
 export interface BaseProps { id?: string; key?: string | number; children?: Child; style?: Style; rovingGroup?: boolean }
-export type IntrinsicStyle = Style & {
+export type IntrinsicStateStyle = StateStyle & {
+  backgroundColor?: string;
+  color?: string;
+};
+export type IntrinsicStyle = Omit<Style, "hover" | "focus" | "focusVisible" | "active" | "disabled"> & {
   /** CSS-like alias for Tarve's native `direction`. */
   flexDirection?: Style["direction"];
   /** CSS-like alias for Tarve's native `background`. */
   backgroundColor?: string;
   /** CSS-like alias for Tarve's native `foreground`. */
   color?: string;
+  hover?: IntrinsicStateStyle;
+  focus?: IntrinsicStateStyle;
+  focusVisible?: IntrinsicStateStyle;
+  active?: IntrinsicStateStyle;
+  disabled?: IntrinsicStateStyle;
 };
 export type DivStyle = IntrinsicStyle;
 export interface DivProps extends Omit<BaseProps, "style"> {
@@ -76,6 +85,14 @@ export interface IntrinsicButtonProps extends Omit<BaseProps, "style"> {
   size?: "sm" | "default" | "lg";
   disabled?: boolean;
   control?: Control;
+  onClick?: () => void;
+  onHover?: (hovered: boolean) => void;
+}
+export interface IntrinsicAnchorProps extends Omit<BaseProps, "style"> {
+  style?: IntrinsicStyle;
+  href: string;
+  ariaLabel?: string;
+  disabled?: boolean;
   onClick?: () => void;
   onHover?: (hovered: boolean) => void;
 }
@@ -187,6 +204,7 @@ export namespace JSX {
     input: IntrinsicInputProps;
     textarea: IntrinsicTextareaProps;
     button: IntrinsicButtonProps;
+    a: IntrinsicAnchorProps;
     svg: IntrinsicSvgProps;
     path: IntrinsicSvgPathProps;
     circle: IntrinsicSvgCircleProps;

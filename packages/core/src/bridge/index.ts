@@ -21,6 +21,29 @@ export function assertNativeAbiVersion(actual: number): void {
   }
 }
 
+function nativeLibraryError(library: ReturnType<typeof openLibrary>): Error {
+  const bytes = new Uint8Array(4096);
+  const length = library.symbols.tarve_last_error(bytes, bytes.length);
+  return new Error(new TextDecoder().decode(bytes.subarray(0, Math.max(0, length))));
+}
+
+/** Open an absolute URI with the operating system's registered handler. */
+export function openExternal(target: string): void {
+  if (typeof target !== "string" || target.trim().length === 0) {
+    throw new TypeError("openExternal target must be a non-empty absolute URI");
+  }
+  const library = openLibrary(nativePath());
+  try {
+    assertNativeAbiVersion(library.symbols.tarve_abi_version());
+    const payload = new TextEncoder().encode(target);
+    if (library.symbols.tarve_open_external(payload, payload.length) !== 0) {
+      throw nativeLibraryError(library);
+    }
+  } finally {
+    library.close();
+  }
+}
+
 export interface PolledNativeEvent {
   buffer: Uint8Array<ArrayBufferLike>;
   event?: NativeEvent;
@@ -75,9 +98,7 @@ export class BunFfiBridge implements NativeBridge {
   constructor(private readonly options: BunFfiBridgeOptions = {}) {}
 
   private error(): Error {
-    const bytes = new Uint8Array(4096);
-    const length = this.library!.symbols.tarve_last_error(bytes, bytes.length);
-    return new Error(new TextDecoder().decode(bytes.subarray(0, Math.max(0, length))));
+    return nativeLibraryError(this.library!);
   }
 
   private drainEventQueue(onEvent: (event: NativeEvent) => void): void {

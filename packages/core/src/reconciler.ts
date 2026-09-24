@@ -1,13 +1,15 @@
 import { PROTOCOL_VERSION, type NativeNode, type Renderer, type SceneDocument, type ScrollPosition, type WindowOptions } from "../../protocol/src/index";
-import { Fragment, _isNativeVNode, type Child, type VNode } from "./jsx-runtime";
+import { Fragment, _isNativeVNode, type Child, type IntrinsicAnchorProps, type VNode } from "./jsx-runtime";
 import { lightTheme, resolveThemeColor, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
 import type { WindowCloseRequestEvent } from "./components";
 import type { ComponentAdapter } from "./component-adapter";
+import { canonicalizeIntrinsicStyle } from "./intrinsic-style";
 import { Text } from "./components/text";
 import { Image } from "./components/image";
 import { Input, TextArea } from "./components/input";
 import { Button } from "./components/button";
+import { Link } from "./components/link";
 import { Svg } from "./components/svg";
 import { Select } from "./select";
 import { Progress, Separator } from "./controls";
@@ -25,15 +27,14 @@ const headingPreset = {
   h5: { size: 16, weight: 600 },
   h6: { size: 14, weight: 600 },
 } as const;
-function canonicalizeIntrinsicStyle(style: Record<string, any> | undefined): Record<string, any> {
-  const result = { ...style };
-  if (result.direction === undefined && result.flexDirection !== undefined) result.direction = result.flexDirection;
-  if (result.background === undefined && result.backgroundColor !== undefined) result.background = result.backgroundColor;
-  if (result.foreground === undefined && result.color !== undefined) result.foreground = result.color;
-  delete result.flexDirection;
-  delete result.backgroundColor;
-  delete result.color;
-  return result;
+
+function focusOutlineOverrides(style: NonNullable<NativeNode["style"]["focus"]> | undefined) {
+  if (!style) return {};
+  const { outlineWidth, outlineColor, outlineOffset, outlineRadius, outlineStyle } = style;
+  return Object.fromEntries(
+    Object.entries({ outlineWidth, outlineColor, outlineOffset, outlineRadius, outlineStyle })
+      .filter(([, value]) => value !== undefined),
+  );
 }
 function textContent(value: Child): string {
   if (Array.isArray(value)) return value.map(textContent).join("");
@@ -104,6 +105,14 @@ export function compileTree(
     if (!_isNativeVNode(child) && child.type === "button") {
       const props = child.props as Parameters<typeof Button>[0];
       return visit(Button({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+    }
+    if (!_isNativeVNode(child) && child.type === "a") {
+      const { ariaLabel, style, ...props } = child.props as IntrinsicAnchorProps;
+      return visit(Link({
+        ...props,
+        label: ariaLabel,
+        style: canonicalizeIntrinsicStyle(style),
+      }), path, group);
     }
     if (!_isNativeVNode(child) && child.type === "svg") {
       const props = child.props as Parameters<typeof Svg>[0];
@@ -205,11 +214,12 @@ export function compileTree(
       ? { ...divShorthands, ...canonicalizeIntrinsicStyle(p.style) }
       : { ...p.style };
     if ((interactiveKinds.has(nativeType) && p.focusable !== false) || control?.role === "otpSlot") {
-      rawStyle.focus = {
+      rawStyle.focusVisible = {
         outlineColor: theme.colors.ring,
         ...lightTheme.focusOutline,
         ...selectedTheme.focusOutline,
-        ...p.style?.focus,
+        ...focusOutlineOverrides(p.style?.focus),
+        ...p.style?.focusVisible,
       };
     }
     const style = resolveThemeStyle(rawStyle, selectedTheme);

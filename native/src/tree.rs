@@ -120,6 +120,7 @@ struct VisualState {
     hovered: bool,
     active: bool,
     focused: bool,
+    focus_visible: bool,
     disabled: bool,
 }
 
@@ -215,6 +216,16 @@ fn visual_value<'a>(node: &'a Node, key: &str, state: VisualState) -> &'a Value 
 
     if state.focused
         && let Some(candidate) = node.style.get("focus").and_then(|style| style.get(key))
+        && !candidate.is_null()
+    {
+        value = candidate;
+    }
+
+    if state.focus_visible
+        && let Some(candidate) = node
+            .style
+            .get("focusVisible")
+            .and_then(|style| style.get(key))
         && !candidate.is_null()
     {
         value = candidate;
@@ -331,6 +342,7 @@ pub struct Tree {
     pub dirty: Dirty,
     pub hovered: Option<String>,
     pub focused: Option<String>,
+    pub(crate) focus_visible: bool,
     pressed: Option<String>,
     scroll_drag: Option<ScrollDrag>,
     pub mouse: (f64, f64),
@@ -438,6 +450,7 @@ impl Tree {
             dirty: Dirty::all(),
             hovered: None,
             focused: None,
+            focus_visible: false,
             pressed: None,
             scroll_drag: None,
             mouse: (-1.0, -1.0),
@@ -951,8 +964,54 @@ impl Tree {
             hovered: self.hovered.as_deref() == Some(id),
             active: self.pressed.as_deref() == Some(id) && self.hovered.as_deref() == Some(id),
             focused: self.focused.as_deref() == Some(id) || otp_slot_focused,
+            focus_visible: (self.focused.as_deref() == Some(id) || otp_slot_focused)
+                && self.focus_visible,
             disabled: node.disabled,
         }
+    }
+
+    fn text_decoration_for(&self, id: &str) -> String {
+        let mut current = Some(id);
+        while let Some(current_id) = current {
+            let Some(entry) = self.entries.get(current_id) else {
+                break;
+            };
+            let state = self.visual_state_for(current_id, &entry.node);
+            if let Some(value) = visual_value(&entry.node, "textDecoration", state).as_str() {
+                return value.to_string();
+            }
+            current = entry.parent.as_deref();
+        }
+        "none".into()
+    }
+
+    fn link_foreground_for(&self, id: &str) -> Option<String> {
+        let mut current = self.entries.get(id)?.parent.as_deref();
+        while let Some(current_id) = current {
+            let entry = self.entries.get(current_id)?;
+            if entry
+                .node
+                .control
+                .as_ref()
+                .is_some_and(|control| control.role == "link")
+            {
+                let state = self.visual_state_for(current_id, &entry.node);
+                return Some(
+                    visual_string(&entry.node, "foreground", "#18181b", state).to_string(),
+                );
+            }
+            current = entry.parent.as_deref();
+        }
+        None
+    }
+
+    pub(crate) fn resolved_text_foreground(&self, id: &str, fallback: &str) -> String {
+        if let Some(link_foreground) = self.link_foreground_for(id) {
+            return link_foreground;
+        }
+        let entry = &self.entries[id];
+        let state = self.visual_state_for(id, &entry.node);
+        visual_string(&entry.node, "foreground", fallback, state).to_string()
     }
     fn paint_node<P: PaintTarget>(
         &mut self,
@@ -1132,9 +1191,11 @@ impl Tree {
             let foreground = if matches!(node.kind.as_str(), "input" | "textarea")
                 && render_node.value.as_deref().unwrap_or("").is_empty()
             {
-                visual_string(&node, "placeholderColor", "#a1a1aa", state)
+                visual_string(&node, "placeholderColor", "#a1a1aa", state).to_string()
+            } else if node.kind == "text" {
+                self.resolved_text_foreground(id, "#18181b")
             } else {
-                visual_string(&node, "foreground", "#18181b", state)
+                visual_string(&node, "foreground", "#18181b", state).to_string()
             };
             target.push_clip(Fill::NonZero, transform, &shape);
             if node.kind == "text"
@@ -1224,9 +1285,36 @@ impl Tree {
                 &render_node,
                 (x, y),
                 available_width,
-                color(foreground),
+                color(&foreground),
                 scale,
             );
+            let decoration = self.text_decoration_for(id);
+            if decoration != "none" {
+                let display_text = render_node.display_text();
+                if !display_text.is_empty() {
+                    let wrap_width = matches!(node.kind.as_str(), "text" | "textarea")
+                        .then_some(available_width);
+                    let thickness =
+                        f64::from((node.number("fontSize", 14.0) * 0.06).clamp(1.0, 2.0));
+                    for line in
+                        self.text
+                            .range_rects(&render_node.id, 0, display_text.len(), wrap_width)
+                    {
+                        let line_y = match decoration.as_str() {
+                            "underline" => y + line.y1 - thickness,
+                            "overline" => y + line.y0,
+                            "line-through" => y + (line.y0 + line.y1) * 0.5 - thickness * 0.5,
+                            _ => continue,
+                        };
+                        target.fill(
+                            Fill::NonZero,
+                            transform,
+                            color(&foreground),
+                            &BoxRect::new(x + line.x0, line_y, x + line.x1, line_y + thickness),
+                        );
+                    }
+                }
+            }
             if matches!(node.kind.as_str(), "input" | "textarea")
                 && self.focused.as_deref() == Some(id)
                 && self.user_select_mode(id) != UserSelectMode::None
@@ -1611,7 +1699,16 @@ impl Tree {
             .cloned()
             .collect()
     }
-    pub fn focus(&mut self, id: &str) -> Option<String> {
+    fn set_focus_visible(&mut self, visible: bool) {
+        if self.focus_visible != visible {
+            self.focus_visible = visible;
+            if self.focused.is_some() {
+                self.dirty.paint = true;
+            }
+        }
+    }
+
+    fn focus_with_visibility(&mut self, id: &str, visible: bool) -> Option<String> {
         let modal = self.active_modal();
         if !self.interactive(id)
             || !self.entries[id].node.focusable
@@ -1619,6 +1716,7 @@ impl Tree {
         {
             return None;
         }
+        self.set_focus_visible(visible);
         let mut blurred = None;
         if self.focused.as_deref() != Some(id) {
             self.ime_cancel();
@@ -1663,6 +1761,10 @@ impl Tree {
         }
         blurred
     }
+
+    pub fn focus(&mut self, id: &str) -> Option<String> {
+        self.focus_with_visibility(id, true)
+    }
     fn prune_interaction(&mut self) {
         let keep_hovered = self
             .hovered
@@ -1699,6 +1801,7 @@ impl Tree {
         if !keep_focused {
             self.ime_cancel();
             self.focused = None;
+            self.focus_visible = false;
             self.caret = 0;
             self.selection_anchor = None;
             self.text_dragging = false;
@@ -2000,6 +2103,7 @@ impl Tree {
         self.static_text_dragging = false;
         self.ime_cancel();
         let blurred = self.focused.take();
+        self.focus_visible = false;
         if blurred.is_some() || self.pressed.take().is_some() {
             self.caret = 0;
             self.selection_anchor = None;
@@ -2008,6 +2112,7 @@ impl Tree {
         blurred
     }
     pub fn pointer_down(&mut self) -> Vec<Value> {
+        self.set_focus_visible(false);
         if let Some(id) = self.outside_dismissal_at_pointer() {
             self.pressed = None;
             self.text_dragging = false;
@@ -2028,7 +2133,7 @@ impl Tree {
         self.pressed = self.hovered.clone();
         let mut events = vec![];
         if let Some(id) = self.hovered.clone() {
-            if let Some(blurred) = self.focus(&id) {
+            if let Some(blurred) = self.focus_with_visibility(&id, false) {
                 events.push(json!({"type":"blur", "id":blurred}));
             }
             if matches!(self.entries[&id].node.kind.as_str(), "input" | "textarea") {
@@ -2621,6 +2726,7 @@ impl Tree {
         self.static_selected_text()
     }
     pub fn key(&mut self, key: &str) -> Vec<Value> {
+        self.set_focus_visible(true);
         if key == "Tab" || key == "ShiftTab" {
             let ids = self.focus_order();
             if !ids.is_empty() {
@@ -2693,8 +2799,13 @@ impl Tree {
         {
             return vec![json!({"type":"key", "id":id, "key":key})];
         }
-        if matches!(self.entries[&id].node.kind.as_str(), "button" | "pressable")
-            && (key == "Enter" || key == "Space")
+        let node = &self.entries[&id].node;
+        let is_link = node
+            .control
+            .as_ref()
+            .is_some_and(|control| control.role == "link");
+        if matches!(node.kind.as_str(), "button" | "pressable")
+            && (key == "Enter" || (key == "Space" && !is_link))
         {
             return vec![json!({"type":"click", "id": id})];
         }

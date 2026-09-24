@@ -10,6 +10,8 @@ export { Window } from "./components/window";
 export type { WindowProps, WindowCloseRequestEvent } from "./components/window";
 export { Pressable } from "./components/pressable";
 export type { PressableProps } from "./components/pressable";
+export { Link } from "./components/link";
+export type { LinkProps } from "./components/link";
 export { Icon } from "./components/icon";
 export type { IconName, IconProps } from "./components/icon";
 export { Svg, Path, Circle, Ellipse, Line, Polyline, Polygon, SvgRect } from "./components/svg";

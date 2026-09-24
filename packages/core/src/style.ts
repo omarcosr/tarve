@@ -2,7 +2,7 @@ import type { Style as ProtocolStyle } from "../../protocol/src/index";
 
 export type Style = ProtocolStyle;
 
-const stateKeys = ["hover", "focus", "active", "disabled"] as const;
+const stateKeys = ["hover", "focus", "focusVisible", "active", "disabled"] as const;
 
 function mergeStyles(styles: readonly (ProtocolStyle | null | undefined | false)[]): ProtocolStyle {
   const result: ProtocolStyle = {};

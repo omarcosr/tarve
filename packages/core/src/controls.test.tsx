@@ -134,7 +134,7 @@ describe("control kit", () => {
     expect(area?.value).toBe("first\nsecond");
     expect(area?.placeholder).toBe("Notes");
     expect(area?.style.height).toBe(120);
-    expect(area?.style.focus?.outlineStyle).toBe("solid");
+    expect(area?.style.focusVisible?.outlineStyle).toBe("solid");
     expect(tree.handlers.get("notes")?.onChange).toBeFunction();
   });
 });

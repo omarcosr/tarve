@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const NATIVE_ABI_VERSION = 4;
-export const PROTOCOL_VERSION = 33;
+export const NATIVE_ABI_VERSION = 5;
+export const PROTOCOL_VERSION = 35;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter";
@@ -13,11 +13,13 @@ export type SvgNode =
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
 export type OutlineStyle = "dotted" | "dashed" | "solid" | "double" | "groove" | "ridge" | "inset" | "outset" | "none" | "hidden";
 export type UserSelect = "auto" | "text" | "none" | "all";
+export type TextDecoration = "none" | "underline" | "overline" | "line-through";
 export interface StateStyle {
   background?: string; foreground?: string; borderColor?: string; radius?: number;
   outlineWidth?: number; outlineColor?: string; outlineOffset?: number; outlineRadius?: number; outlineStyle?: OutlineStyle;
   placeholderColor?: string; selectionColor?: string; caretColor?: string;
   scrollbarColor?: string; placeholderBackground?: string; thumbColor?: string;
+  textDecoration?: TextDecoration;
 }
 export interface Style extends StateStyle {
   width?: Length; height?: Length; minWidth?: Length; minHeight?: Length;
@@ -31,11 +33,11 @@ export interface Style extends StateStyle {
   borderWidth?: Insets;
   radius?: number; fontSize?: number; fontWeight?: number; fontFamily?: string;
   lineHeight?: number; textAlign?: "start" | "center" | "end";
-  hover?: StateStyle; focus?: StateStyle; active?: StateStyle; disabled?: StateStyle;
+  hover?: StateStyle; focus?: StateStyle; focusVisible?: StateStyle; active?: StateStyle; disabled?: StateStyle;
   strokeWidth?: number; pointerEvents?: "auto" | "block"; userSelect?: UserSelect;
 }
 export interface Control {
-  role: "button" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "navigation" | "menuitem" | "tree" | "treeitem" | "grid" | "row" | "toggle" | "togglegroup" | "slider" | "progress" | "virtualList" | "select" | "group" | "field" | "alert" | "status" | "label" | "option" | "otpSlot";
+  role: "button" | "link" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "navigation" | "menuitem" | "tree" | "treeitem" | "grid" | "row" | "toggle" | "togglegroup" | "slider" | "progress" | "virtualList" | "select" | "group" | "field" | "alert" | "status" | "label" | "option" | "otpSlot";
   label?: string; checked?: boolean; selected?: boolean; expanded?: boolean; group?: string;
   orientation?: "horizontal" | "vertical";
   value?: number; min?: number; max?: number; step?: number;

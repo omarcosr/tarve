@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 33;
+pub const VERSION: u32 = 35;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -304,6 +304,26 @@ pub fn validate(root: &Node) -> Result<(), String> {
                 return Err(format!("Invalid userSelect on {}: {value}", n.id));
             }
         }
+        for (name, style) in [("style", &n.style)].into_iter().chain(
+            ["hover", "focus", "focusVisible", "active", "disabled"]
+                .into_iter()
+                .filter_map(|name| n.style.get(name).map(|style| (name, style))),
+        ) {
+            if let Some(value) = style.get("textDecoration") {
+                let Some(value) = value.as_str() else {
+                    return Err(format!(
+                        "textDecoration must be a string in {name} on {}",
+                        n.id
+                    ));
+                };
+                if !matches!(value, "none" | "underline" | "overline" | "line-through") {
+                    return Err(format!(
+                        "Invalid textDecoration in {name} on {}: {value}",
+                        n.id
+                    ));
+                }
+            }
+        }
         Ok(())
     }
     fn walk(n: &Node, ids: &mut HashSet<String>, depth: usize) -> Result<(), String> {
@@ -366,6 +386,26 @@ pub fn validate_patch(nodes: &[Node]) -> Result<(), String> {
             };
             if !matches!(value, "auto" | "text" | "none" | "all") {
                 return Err(format!("Invalid userSelect on {}: {value}", node.id));
+            }
+        }
+        for (name, style) in [("style", &node.style)].into_iter().chain(
+            ["hover", "focus", "focusVisible", "active", "disabled"]
+                .into_iter()
+                .filter_map(|name| node.style.get(name).map(|style| (name, style))),
+        ) {
+            if let Some(value) = style.get("textDecoration") {
+                let Some(value) = value.as_str() else {
+                    return Err(format!(
+                        "textDecoration must be a string in {name} on {}",
+                        node.id
+                    ));
+                };
+                if !matches!(value, "none" | "underline" | "overline" | "line-through") {
+                    return Err(format!(
+                        "Invalid textDecoration in {name} on {}: {value}",
+                        node.id
+                    ));
+                }
             }
         }
         if node.id.is_empty() || !ids.insert(&node.id) || !node.children.is_empty() {

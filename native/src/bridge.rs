@@ -221,7 +221,7 @@ struct Host {
 }
 static HOST: OnceLock<Mutex<Option<Host>>> = OnceLock::new();
 static LAST_ERROR: Mutex<String> = Mutex::new(String::new());
-pub const ABI_VERSION: u32 = 4;
+pub const ABI_VERSION: u32 = 5;
 fn host() -> &'static Mutex<Option<Host>> {
     HOST.get_or_init(|| Mutex::new(None))
 }
@@ -257,6 +257,72 @@ pub(crate) fn validate_protocol_version(version: u32) -> Result<(), String> {
     } else {
         Err("Protocol version mismatch".into())
     }
+}
+
+pub(crate) fn validate_external_target(target: &str) -> Result<(), String> {
+    let target = target.trim();
+    if target.is_empty() || target.len() > 32_768 || target.contains('\0') {
+        return Err("External target must be a non-empty URI up to 32768 bytes".into());
+    }
+    let Some(colon) = target.find(':') else {
+        return Err("External target must be an absolute URI with a scheme".into());
+    };
+    let scheme = &target[..colon];
+    if scheme.is_empty()
+        || !scheme.as_bytes()[0].is_ascii_alphabetic()
+        || !scheme
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
+    {
+        return Err("External target has an invalid URI scheme".into());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn open_external(target: &str) -> Result<(), String> {
+    use std::ptr;
+    use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+
+    validate_external_target(target)?;
+    let operation: Vec<u16> = "open".encode_utf16().chain([0]).collect();
+    let target: Vec<u16> = target.trim().encode_utf16().chain([0]).collect();
+    let result = unsafe {
+        ShellExecuteW(
+            ptr::null_mut(),
+            operation.as_ptr(),
+            target.as_ptr(),
+            ptr::null(),
+            ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if result as isize <= 32 {
+        return Err(format!(
+            "Could not open external URI (ShellExecuteW code {})",
+            result as isize
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn open_external(target: &str) -> Result<(), String> {
+    validate_external_target(target)?;
+    Err("Opening external URIs is not supported on this platform".into())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tarve_open_external(ptr: *const u8, len: u32) -> i32 {
+    guard(|| {
+        if ptr.is_null() || len == 0 || len > 32_768 {
+            return Err("Invalid external URI buffer".into());
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+        let target = std::str::from_utf8(bytes).map_err(|_| "External URI must be UTF-8")?;
+        open_external(target)?;
+        Ok(0)
+    })
 }
 
 #[unsafe(no_mangle)]

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Window, View, Column, Row, Text, Button, Icon, Svg, Path, Circle, Image, Input, TextArea, TitleBar, Modal, Pressable } from "./components";
+import { Window, View, Column, Row, Text, Button, Link, Icon, Svg, Path, Circle, Image, Input, TextArea, TitleBar, Modal, Pressable } from "./components";
 import { compileTree, diffTrees } from "./reconciler";
 import { createTheme, darkTheme, lightTheme, Theme, theme } from "./theme";
 import type { ComponentAdapter } from "./component-adapter";
@@ -32,6 +32,20 @@ describe("native TSX protocol", () => {
     expect(tree.nodes.get("selectable")?.style.userSelect).toBe("all");
     expect(tree.nodes.get("button")?.style.userSelect).toBe("none");
     expect(tree.nodes.get("pressable")?.style.userSelect).toBe("none");
+  });
+  test("Text accepts CSS-like color aliases in base and visual states", () => {
+    const tree = compileTree(
+      <Window>
+        <Text id="colored-text" style={{ color: "#2563eb", hover: { color: "#dc2626" } }}>
+          Colored
+        </Text>
+      </Window>,
+    );
+    const text = tree.nodes.get("colored-text")!;
+    expect(text.style.foreground).toBe("#2563eb");
+    expect(text.style.hover?.foreground).toBe("#dc2626");
+    expect((text.style as Record<string, unknown>).color).toBeUndefined();
+    expect((text.style.hover as Record<string, unknown>).color).toBeUndefined();
   });
   test("intrinsic div compiles to a native view with CSS-like aliases", () => {
     let entered = 0;
@@ -112,6 +126,59 @@ describe("native TSX protocol", () => {
     const after = compileTree(<Window><div id="box" style={{ backgroundColor: "#222222" }} /></Window>);
     expect(diffTrees(before, after)?.map(node => node.id)).toEqual(["box"]);
     expect(diffTrees(before, after)?.[0].kind).toBe("view");
+  });
+  test("intrinsic a compiles to a semantic native link with text decoration", () => {
+    const tree = compileTree(
+      <Window>
+        <a
+          id="docs-link"
+          href="https://example.com/docs"
+          style={{ color: "#2563eb", hover: { color: "#dc2626" }, textDecoration: "line-through" }}
+        >
+          Documentation
+        </a>
+      </Window>,
+    );
+    const link = tree.nodes.get("docs-link")!;
+    expect(link.kind).toBe("pressable");
+    expect(link.control).toMatchObject({ role: "link", label: "Documentation" });
+    expect(link.style.userSelect).toBe("none");
+    expect(link.style.textDecoration).toBe("line-through");
+    expect(link.style.foreground).toBe("#2563eb");
+    expect(link.style.hover?.foreground).toBe("#dc2626");
+    expect((link.style as Record<string, unknown>).color).toBeUndefined();
+    expect((link.style.hover as Record<string, unknown>).color).toBeUndefined();
+    expect(link.children).toHaveLength(1);
+    expect(link.children[0].kind).toBe("text");
+    expect(link.children[0].style.foreground).toBe("#2563eb");
+    expect(tree.handlers.get("docs-link")?.onClick).toBeFunction();
+
+    const defaultLink = compileTree(<Window><a id="default-link" href="mailto:hello@example.com">Email us</a></Window>);
+    expect(defaultLink.nodes.get("default-link")?.style.textDecoration).toBe("underline");
+
+    const component = compileTree(
+      <Window>
+        <Link
+          id="docs-link"
+          href="https://example.com/docs"
+          style={{ color: "#2563eb", hover: { color: "#dc2626" }, textDecoration: "line-through" }}
+        >
+          Documentation
+        </Link>
+      </Window>,
+    );
+    expect(diffTrees(tree, component)).toEqual([]);
+
+    const composed = compileTree(
+      <Window>
+        <Link id="composed-link" href="https://example.com" style={{ color: "#2563eb", hover: { color: "#dc2626" } }}>
+          <Row><Text>Nested documentation</Text></Row>
+        </Link>
+      </Window>,
+    );
+    expect(composed.nodes.get("composed-link")?.control).toMatchObject({ role: "link", label: "Nested documentation" });
+    expect(composed.nodes.get("composed-link")?.style.foreground).toBe("#2563eb");
+    expect(composed.nodes.get("composed-link")?.style.hover?.foreground).toBe("#dc2626");
   });
   test("span, img and input intrinsics reuse the existing native component semantics", () => {
     let changed = "";
@@ -474,7 +541,7 @@ describe("native TSX protocol", () => {
   test("Window close requests stay in JS handlers while native receives an intercept flag", () => {
     let requested = false;
     const tree = compileTree(<Window onCloseRequest={() => { requested = true; }}><Text>Hello</Text></Window>);
-    expect(tree.document.version).toBe(33);
+    expect(tree.document.version).toBe(35);
     expect(tree.document.root.closeIntercept).toBe(true);
     expect(JSON.stringify(tree.document)).not.toContain("onCloseRequest");
     tree.handlers.get(tree.document.root.id)?.onCloseRequest?.({ defaultPrevented: false, preventDefault() {} });
@@ -546,8 +613,8 @@ describe("native TSX protocol", () => {
       </Window>,
     );
     expect(tree.document.root.style.background).toBe(darkTheme.colors.background);
-    expect(tree.nodes.get("button")?.style.focus?.outlineWidth).toBe(0);
-    expect(tree.nodes.get("button")?.style.focus?.outlineStyle).toBe("none");
+    expect(tree.nodes.get("button")?.style.focusVisible?.outlineWidth).toBe(0);
+    expect(tree.nodes.get("button")?.style.focusVisible?.outlineStyle).toBe("none");
   });
   test("literal colors remain literal when a theme is active", () => {
     const tree = compileTree(
@@ -568,11 +635,11 @@ describe("native TSX protocol", () => {
     const tree = compileTree(
       <Window theme={custom}>
         <Button id="themed-focus">Save</Button>
-        <Input id="local-focus" style={{ focus: { outlineWidth: 3 } }} />
+        <Input id="local-focus" style={{ focus: { background: "#123456", outlineWidth: 3 } }} />
         <Pressable id="not-focusable" focusable={false}>No focus</Pressable>
       </Window>,
     );
-    expect(tree.nodes.get("themed-focus")?.style.focus).toEqual({
+    expect(tree.nodes.get("themed-focus")?.style.focusVisible).toEqual({
       outlineWidth: 1,
       outlineColor: "#8b5cf6",
       outlineOffset: 0,
@@ -580,19 +647,23 @@ describe("native TSX protocol", () => {
       outlineStyle: "dashed",
     });
     expect(tree.nodes.get("local-focus")?.style.focus).toEqual({
+      background: "#123456",
+      outlineWidth: 3,
+    });
+    expect(tree.nodes.get("local-focus")?.style.focusVisible).toEqual({
       outlineWidth: 3,
       outlineColor: "#8b5cf6",
       outlineOffset: 0,
       outlineRadius: 4,
       outlineStyle: "dashed",
     });
-    expect(tree.nodes.get("not-focusable")?.style.focus).toBeUndefined();
+    expect(tree.nodes.get("not-focusable")?.style.focusVisible).toBeUndefined();
   });
   test("focus outline can be disabled globally by the theme", () => {
     const noOutline = createTheme({ focusOutline: { outlineWidth: 0, outlineStyle: "none" } });
     const tree = compileTree(<Window theme={noOutline}><Button id="button">Save</Button></Window>);
-    expect(tree.nodes.get("button")?.style.focus?.outlineWidth).toBe(0);
-    expect(tree.nodes.get("button")?.style.focus?.outlineStyle).toBe("none");
+    expect(tree.nodes.get("button")?.style.focusVisible?.outlineWidth).toBe(0);
+    expect(tree.nodes.get("button")?.style.focusVisible?.outlineStyle).toBe("none");
   });
   test("borderWidth supports independent widths on all four sides", () => {
     const tree = compileTree(

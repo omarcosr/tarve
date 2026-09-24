@@ -31,7 +31,7 @@ lyon_tessellation = "=1.0.22"
 rfd = { version = "=0.17.2", default-features = false, features = ["common-controls-v6"] }
 swash = { version = "=0.2.10", default-features = false, features = ["std", "render"] }
 windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common"] }
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 # Upstream accesskit_windows 0.35.0 does not expose AccessKit Invalid through
 # UIA_IsDataValidForFormPropertyId, so keep the Windows provider patch local.
