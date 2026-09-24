@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Window, Column, Row, Text, Button, Icon, Svg, Path, Circle, Input, TitleBar, Modal, Pressable } from "./components";
+import { Window, View, Column, Row, Text, Button, Icon, Svg, Path, Circle, Image, Input, TextArea, TitleBar, Modal, Pressable } from "./components";
 import { compileTree, diffTrees } from "./reconciler";
 import { createTheme, darkTheme, lightTheme, Theme, theme } from "./theme";
 import type { ComponentAdapter } from "./component-adapter";
@@ -20,6 +20,194 @@ describe("native TSX protocol", () => {
     expect(compileTree(<Window />).document.renderer).toBe("auto");
     expect(compileTree(<Window />, false, "cpu").document.renderer).toBe("cpu");
     expect(compileTree(<Window />, false, "gpu").document.renderer).toBe("gpu");
+  });
+  test("intrinsic div compiles to a native view with CSS-like aliases", () => {
+    let entered = 0;
+    let left = 0;
+    let hovered: boolean | undefined;
+    let clicks = 0;
+    const tree = compileTree(
+      <Window>
+        <div
+          id="intrinsic-div"
+          gap={4}
+          padding={6}
+          align="center"
+          justify="between"
+          style={{
+            display: "flex",
+            flexDirection: "row",
+            backgroundColor: "#123456",
+            color: "#abcdef",
+            gap: 9,
+          }}
+          onClick={() => { clicks++; }}
+          onHover={(value) => { hovered = value; }}
+          onMouseEnter={() => { entered++; }}
+          onMouseLeave={() => { left++; }}
+        >
+          <Text id="inside-div">Hello</Text>
+        </div>
+      </Window>,
+    );
+    const div = tree.nodes.get("intrinsic-div")!;
+    expect(div.kind).toBe("view");
+    expect(div.style.direction).toBe("row");
+    expect(div.style.background).toBe("#123456");
+    expect(div.style.foreground).toBe("#abcdef");
+    expect(div.style.gap).toBe(9);
+    expect(div.style.padding).toBe(6);
+    expect(div.style.align).toBe("center");
+    expect(div.style.justify).toBe("between");
+    expect((div.style as Record<string, unknown>).flexDirection).toBeUndefined();
+    expect((div.style as Record<string, unknown>).backgroundColor).toBeUndefined();
+    expect((div.style as Record<string, unknown>).color).toBeUndefined();
+    expect(div.children.map(child => child.id)).toEqual(["inside-div"]);
+    tree.handlers.get("intrinsic-div")?.onClick?.();
+    tree.handlers.get("intrinsic-div")?.onHover?.(true);
+    expect({ clicks, hovered, entered, left }).toEqual({ clicks: 1, hovered: true, entered: 1, left: 0 });
+    tree.handlers.get("intrinsic-div")?.onHover?.(false);
+    expect({ hovered, entered, left }).toEqual({ hovered: false, entered: 1, left: 1 });
+  });
+  test("intrinsic div canonicalizes to the same native shape as View and preserves Tarve style precedence", () => {
+    const intrinsic = compileTree(
+      <Window>
+        <div
+          id="box"
+          gap={4}
+          style={{
+            gap: 8,
+            flexDirection: "row",
+            direction: "column",
+            backgroundColor: "#ff0000",
+            background: "#00ff00",
+            color: "#111111",
+            foreground: "#222222",
+          }}
+        />
+      </Window>,
+    );
+    const explicit = compileTree(
+      <Window>
+        <View id="box" style={{ gap: 8, direction: "column", background: "#00ff00", foreground: "#222222" }} />
+      </Window>,
+    );
+    expect(diffTrees(intrinsic, explicit)).toEqual([]);
+    expect(intrinsic.nodes.get("box")?.style).toEqual(explicit.nodes.get("box")?.style);
+  });
+  test("intrinsic div alias changes produce ordinary view patches instead of structural replacements", () => {
+    const before = compileTree(<Window><div id="box" style={{ backgroundColor: "#111111" }} /></Window>);
+    const after = compileTree(<Window><div id="box" style={{ backgroundColor: "#222222" }} /></Window>);
+    expect(diffTrees(before, after)?.map(node => node.id)).toEqual(["box"]);
+    expect(diffTrees(before, after)?.[0].kind).toBe("view");
+  });
+  test("span, img and input intrinsics reuse the existing native component semantics", () => {
+    let changed = "";
+    const intrinsic = compileTree(
+      <Window>
+        <div>
+          <span id="label" style={{ color: "#abcdef" }}>Hello</span>
+          <img id="picture" src="./fixtures/pixel.png" width={40} height={24} fit="contain" style={{ backgroundColor: "#101010" }} />
+          <input
+            id="field"
+            type="email"
+            value="hello@example.com"
+            placeholder="Email"
+            style={{ color: "#eeeeee", backgroundColor: "#222222" }}
+            onChange={(value) => { changed = value; }}
+          />
+        </div>
+      </Window>,
+    );
+    const explicit = compileTree(
+      <Window>
+        <View>
+          <Text id="label" style={{ foreground: "#abcdef" }}>Hello</Text>
+          <Image id="picture" src="./fixtures/pixel.png" width={40} height={24} fit="contain" style={{ background: "#101010" }} />
+          <Input
+            id="field"
+            type="email"
+            value="hello@example.com"
+            placeholder="Email"
+            style={{ foreground: "#eeeeee", background: "#222222" }}
+          />
+        </View>
+      </Window>,
+    );
+    expect(diffTrees(intrinsic, explicit)).toEqual([]);
+    expect(intrinsic.nodes.get("label")?.kind).toBe("text");
+    expect(intrinsic.nodes.get("picture")?.kind).toBe("image");
+    expect(intrinsic.nodes.get("field")?.kind).toBe("input");
+    expect(intrinsic.nodes.get("field")?.inputType).toBe("email");
+    expect((intrinsic.nodes.get("label")?.style as Record<string, unknown>).color).toBeUndefined();
+    expect((intrinsic.nodes.get("picture")?.style as Record<string, unknown>).backgroundColor).toBeUndefined();
+    expect((intrinsic.nodes.get("field")?.style as Record<string, unknown>).color).toBeUndefined();
+    intrinsic.handlers.get("field")?.onChange?.("next@example.com");
+    expect(changed).toBe("next@example.com");
+  });
+  test("intrinsic input keeps Input validation and defaults", () => {
+    const tree = compileTree(<Window><input id="field" placeholder="Value" /></Window>);
+    const field = tree.nodes.get("field")!;
+    expect(field.kind).toBe("input");
+    expect(field.inputType).toBe("text");
+    expect(field.style.height).toBe(38);
+    expect(field.style.minWidth).toBe(120);
+    expect(() => compileTree(<Window><input type="number" value="12x" /></Window>)).toThrow("valid numeric edit value");
+  });
+  test("p, button, textarea and svg intrinsics reuse their Tarve components", () => {
+    let clicked = 0;
+    let changed = "";
+    const intrinsic = compileTree(
+      <Window>
+        <div>
+          <p id="paragraph" style={{ color: "#345678" }}>Paragraph</p>
+          <button id="action" variant="secondary" onClick={() => { clicked++; }} style={{ backgroundColor: "#123456" }}>Save</button>
+          <textarea id="notes" value="Hello" placeholder="Notes" onChange={(value) => { changed = value; }} style={{ color: "#eeeeee" }} />
+          <svg id="vector-intrinsic" size={32} viewBox="0 0 24 24" color="#abcdef">
+            <Circle cx={12} cy={12} r={10} />
+            <Path d="M6 12h12" />
+          </svg>
+        </div>
+      </Window>,
+    );
+    const explicit = compileTree(
+      <Window>
+        <View>
+          <Text id="paragraph" style={{ foreground: "#345678" }}>Paragraph</Text>
+          <Button id="action" variant="secondary" style={{ background: "#123456" }}>Save</Button>
+          <TextArea id="notes" value="Hello" placeholder="Notes" style={{ foreground: "#eeeeee" }} />
+          <Svg id="vector-intrinsic" size={32} viewBox="0 0 24 24" color="#abcdef">
+            <Circle cx={12} cy={12} r={10} />
+            <Path d="M6 12h12" />
+          </Svg>
+        </View>
+      </Window>,
+    );
+    expect(diffTrees(intrinsic, explicit)).toEqual([]);
+    expect(intrinsic.nodes.get("paragraph")?.kind).toBe("text");
+    expect(intrinsic.nodes.get("action")?.kind).toBe("button");
+    expect(intrinsic.nodes.get("notes")?.kind).toBe("textarea");
+    expect(intrinsic.nodes.get("vector-intrinsic")?.kind).toBe("svg");
+    expect(intrinsic.nodes.get("vector-intrinsic")?.svg).toContain('<circle cx="12" cy="12" r="10"/>');
+    intrinsic.handlers.get("action")?.onClick?.();
+    intrinsic.handlers.get("notes")?.onChange?.("Updated");
+    expect(clicked).toBe(1);
+    expect(changed).toBe("Updated");
+  });
+  test("intrinsic button preserves composed Button semantics", () => {
+    const tree = compileTree(
+      <Window>
+        <button id="composed-intrinsic">
+          <Icon id="button-icon" name="plus" />
+          <span id="button-label">Create</span>
+        </button>
+      </Window>,
+    );
+    const button = tree.nodes.get("composed-intrinsic")!;
+    expect(button.kind).toBe("pressable");
+    expect(button.control?.role).toBe("button");
+    expect(button.control?.label).toBe("Create");
+    expect(button.children.map(child => child.id)).toEqual(["button-icon", "button-label"]);
   });
   test("Svg serializes TSX geometry and Icon accepts external SVG node data", () => {
     type ExternalIconNode = ["circle" | "ellipse" | "g" | "line" | "path" | "polygon" | "polyline" | "rect", Record<string, string>][];

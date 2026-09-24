@@ -1,5 +1,5 @@
 import type { SvgAttributes, SvgNode } from "../../../protocol/src/index";
-import { Fragment, jsx, type BaseProps, type Child, type VNode } from "../jsx-runtime";
+import { Fragment, _nativeJsx, jsx, type BaseProps, type Child, type VNode } from "../jsx-runtime";
 import { theme } from "../theme";
 
 const SVG_ELEMENT = "__tarve_svg_element";
@@ -130,7 +130,7 @@ export function Svg({
   const elements = [...nodes];
   collect(children, elements);
   const normalizedViewBox = normalizeViewBox(viewBox);
-  return jsx("svg", {
+  return _nativeJsx("svg", {
     ...props,
     style: { width: size ?? width ?? 24, height: size ?? height ?? 24, shrink: 0, foreground: color, ...style },
     svg: serializeSvg(normalizedViewBox, fill, stroke, strokeWidth, strokeLinecap, strokeLinejoin, elements),

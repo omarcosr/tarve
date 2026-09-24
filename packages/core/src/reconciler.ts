@@ -1,13 +1,28 @@
 import { PROTOCOL_VERSION, type NativeNode, type Renderer, type SceneDocument, type ScrollPosition, type WindowOptions } from "../../protocol/src/index";
-import { Fragment, type Child, type VNode } from "./jsx-runtime";
+import { Fragment, _isNativeVNode, type Child, type VNode } from "./jsx-runtime";
 import { lightTheme, resolveThemeColor, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
 import type { WindowCloseRequestEvent } from "./components";
 import type { ComponentAdapter } from "./component-adapter";
+import { Text } from "./components/text";
+import { Image } from "./components/image";
+import { Input, TextArea } from "./components/input";
+import { Button } from "./components/button";
+import { Svg } from "./components/svg";
 export interface Handlers { onClick?: () => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onScrollPosition?: (position: ScrollPosition) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void }
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode> }
 const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter"]);
 const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
+function canonicalizeIntrinsicStyle(style: Record<string, any> | undefined): Record<string, any> {
+  const result = { ...style };
+  if (result.direction === undefined && result.flexDirection !== undefined) result.direction = result.flexDirection;
+  if (result.background === undefined && result.backgroundColor !== undefined) result.background = result.backgroundColor;
+  if (result.foreground === undefined && result.color !== undefined) result.foreground = result.color;
+  delete result.flexDirection;
+  delete result.backgroundColor;
+  delete result.color;
+  return result;
+}
 function textContent(value: Child): string {
   if (Array.isArray(value)) return value.map(textContent).join("");
   if (value == null || typeof value === "boolean") return "";
@@ -46,12 +61,38 @@ export function compileTree(
       return visit(adapted, path, group);
     }
     if (typeof child.type === "function") return visit(child.type(child.props), path, group);
-    if (!kinds.has(child.type)) throw new Error(`Unknown native component: ${child.type}`);
+    if (!_isNativeVNode(child) && (child.type === "span" || child.type === "p")) {
+      const props = child.props as Parameters<typeof Text>[0];
+      return visit(Text({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+    }
+    if (!_isNativeVNode(child) && child.type === "img") {
+      const props = child.props as Parameters<typeof Image>[0];
+      return visit(Image({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+    }
+    if (!_isNativeVNode(child) && child.type === "input") {
+      const props = child.props as Parameters<typeof Input>[0];
+      return visit(Input({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+    }
+    if (!_isNativeVNode(child) && child.type === "textarea") {
+      const props = child.props as Parameters<typeof TextArea>[0];
+      return visit(TextArea({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+    }
+    if (!_isNativeVNode(child) && child.type === "button") {
+      const props = child.props as Parameters<typeof Button>[0];
+      return visit(Button({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+    }
+    if (!_isNativeVNode(child) && child.type === "svg") {
+      const props = child.props as Parameters<typeof Svg>[0];
+      return visit(Svg({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+    }
+    const isIntrinsicDiv = child.type === "div";
+    const nativeType = isIntrinsicDiv ? "view" : child.type;
+    if (!kinds.has(nativeType)) throw new Error(`Unknown native component: ${child.type}`);
     const p = child.props;
     const id = p.id ?? path;
     if (ids.has(id)) throw new Error(`Duplicate node id: ${id}`);
     ids.add(id);
-    if (child.type === "window") {
+    if (nativeType === "window") {
       if (windowOptions) throw new Error("This bootstrap supports one Window per app.");
       selectedTheme = p.theme ?? lightTheme;
       windowOptions = { title: p.title ?? "Tarve", width: p.width ?? 1120, height: p.height ?? 820,
@@ -59,7 +100,14 @@ export function compileTree(
         background: resolveThemeColor(p.style?.background ?? theme.colors.background, selectedTheme),
         decorations: true, resizable: p.resizable ?? true, position: p.position ?? "center", debug };
     }
-    handlers.set(id, { onClick: p.onClick, onContextMenu: p.onContextMenu, onOutsideClick: p.onOutsideClick, onHover: p.onHover, onChange: p.onChange, onValueChange: p.onValueChange, onScroll: p.onScroll, onScrollPosition: p.onScrollPosition, onEscape: p.onEscape, onKeyDown: p.onKeyDown, onBlur: p.onBlur, onCloseRequest: p.onCloseRequest });
+    const hoverHandler = isIntrinsicDiv && (p.onMouseEnter || p.onMouseLeave)
+      ? (entered: boolean) => {
+          p.onHover?.(entered);
+          if (entered) p.onMouseEnter?.();
+          else p.onMouseLeave?.();
+        }
+      : p.onHover;
+    handlers.set(id, { onClick: p.onClick, onContextMenu: p.onContextMenu, onOutsideClick: p.onOutsideClick, onHover: hoverHandler, onChange: p.onChange, onValueChange: p.onValueChange, onScroll: p.onScroll, onScrollPosition: p.onScrollPosition, onEscape: p.onEscape, onKeyDown: p.onKeyDown, onBlur: p.onBlur, onCloseRequest: p.onCloseRequest });
     const control = p.control ? { ...p.control } : undefined;
     const childGroup = control?.role === "radiogroup" || control?.role === "tablist" || control?.role === "navigation" || control?.role === "togglegroup"
       || control?.role === "tree" || control?.role === "grid" ? id : group;
@@ -67,9 +115,17 @@ export function compileTree(
       || control.role === "treeitem" || control.role === "row");
     if ((semanticRoving || p.rovingGroup === true) && control) control.group = group;
     const rovingGroup = group && (p.rovingGroup === true || semanticRoving) ? group : undefined;
-    const isText = child.type === "text" || child.type === "button";
-    const rawStyle = { ...p.style };
-    if ((interactiveKinds.has(child.type) && p.focusable !== false) || control?.role === "otpSlot") {
+    const isText = nativeType === "text" || nativeType === "button";
+    const divShorthands = isIntrinsicDiv
+      ? Object.fromEntries(
+          Object.entries({ gap: p.gap, padding: p.padding, flex: p.flex, align: p.align, justify: p.justify })
+            .filter(([, value]) => value !== undefined),
+        )
+      : {};
+    const rawStyle = isIntrinsicDiv
+      ? { ...divShorthands, ...canonicalizeIntrinsicStyle(p.style) }
+      : { ...p.style };
+    if ((interactiveKinds.has(nativeType) && p.focusable !== false) || control?.role === "otpSlot") {
       rawStyle.focus = {
         outlineColor: theme.colors.ring,
         ...lightTheme.focusOutline,
@@ -81,7 +137,7 @@ export function compileTree(
     for (const key of ["padding", "margin"] as const) {
       if (style[key] && typeof style[key] === "object") style[key] = { ...style[key] };
     }
-    const node: NativeNode = { id, kind: child.type as NativeNode["kind"], style,
+    const node: NativeNode = { id, kind: nativeType as NativeNode["kind"], style,
       children: isText ? [] : visit(p.children, `${path}/children`, childGroup),
       ...(isText ? { text: textContent(p.children) } : {}),
       ...(p.svg !== undefined ? { svg: p.svg } : {}),
@@ -97,7 +153,7 @@ export function compileTree(
       ...(rovingGroup ? { rovingGroup } : {}),
       ...(p.portal !== undefined ? { portal: p.portal } : {}),
       ...(p.dismissOnOutside !== undefined ? { dismissOnOutside: p.dismissOnOutside } : {}),
-      ...(child.type === "window" && p.onCloseRequest !== undefined ? { closeIntercept: true } : {}),
+      ...(nativeType === "window" && p.onCloseRequest !== undefined ? { closeIntercept: true } : {}),
       ...(p.focusable !== undefined ? { focusable: p.focusable } : {}),
       ...(p.dragRegion !== undefined ? { dragRegion: p.dragRegion } : {}),
       ...(p.windowAction !== undefined ? { windowAction: p.windowAction } : {}),

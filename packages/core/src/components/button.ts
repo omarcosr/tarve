@@ -1,5 +1,5 @@
 import type { Control, Style } from "../../../protocol/src/index";
-import { jsx, type BaseProps, type Child, type VNode } from "../jsx-runtime";
+import { _nativeJsx, jsx, type BaseProps, type Child, type VNode } from "../jsx-runtime";
 import { buttonVariants, theme, type ButtonVariant } from "../theme";
 import { Icon } from "./icon";
 import { Text } from "./text";
@@ -45,6 +45,20 @@ function composedContent(child: Child, foreground: string): Child {
         size: props.size ?? 14,
         weight: props.weight ?? 500,
         ...(props.color === undefined && props.style?.foreground === undefined ? { color: foreground } : {}),
+      },
+    };
+  }
+  if (child.type === "span" || child.type === "p") {
+    return {
+      ...child,
+      type: Text,
+      props: {
+        ...props,
+        size: props.size ?? 14,
+        weight: props.weight ?? 500,
+        ...(props.color === undefined && props.style?.foreground === undefined && props.style?.color === undefined
+          ? { color: foreground }
+          : {}),
       },
     };
   }
@@ -109,7 +123,7 @@ export function Button({ variant = "default", size = "default", style, disabled,
   };
 
   if (textOnlyContent(children)) {
-    return jsx("button", {
+    return _nativeJsx("button", {
       ...props,
       children,
       control,
@@ -126,7 +140,7 @@ export function Button({ variant = "default", size = "default", style, disabled,
     ? buttonStyle.disabled?.foreground ?? buttonStyle.foreground ?? theme.colors.foreground
     : buttonStyle.foreground ?? theme.colors.foreground;
 
-  return jsx("pressable", {
+  return _nativeJsx("pressable", {
     ...props,
     children: composedContent(children, foreground),
     control: semanticControl,

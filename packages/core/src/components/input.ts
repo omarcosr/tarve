@@ -1,4 +1,4 @@
-import { jsx, type BaseProps, type VNode } from "../jsx-runtime";
+import { _nativeJsx, type BaseProps, type VNode } from "../jsx-runtime";
 import { theme } from "../theme";
 
 export type InputType = "text" | "password" | "email" | "number" | "search" | "tel" | "url";
@@ -19,7 +19,7 @@ export function Input({ type = "text", value, style, ...props }: InputProps): VN
   if (type === "number" && value !== undefined && !numberEditPattern.test(value)) {
     throw new TypeError("Input type=number value must be a valid numeric edit value");
   }
-  return jsx("input", {
+  return _nativeJsx("input", {
     ...props,
     value,
     inputType: type,
@@ -51,7 +51,7 @@ export interface TextAreaProps extends BaseProps {
 }
 
 export function TextArea({ style, ...props }: TextAreaProps): VNode {
-  return jsx("textarea", {
+  return _nativeJsx("textarea", {
     ...props,
     style: {
       width: "100%",
