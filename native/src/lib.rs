@@ -2,6 +2,8 @@
 mod accessibility;
 mod bridge;
 mod controls;
+#[cfg(target_os = "windows")]
+mod d3d11;
 mod icons;
 mod paint;
 mod protocol;

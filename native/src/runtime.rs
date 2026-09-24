@@ -971,26 +971,38 @@ impl App {
         }
         Ok(result)
     }
-    fn prepare(&mut self) -> Result<bool, String> {
+    fn prepare(&mut self) -> Result<bool, RenderError> {
         let Some(window) = &self.window else {
             return Ok(false);
         };
         let scale = window.scale_factor();
         let physical = window.inner_size();
         let size = window.inner_size().to_logical::<f32>(scale);
-        self.tree.compute(size.width, size.height)?;
+        self.tree
+            .compute(size.width, size.height)
+            .map_err(RenderError::Fatal)?;
         let content_changed = self.tree.dirty.paint;
         if content_changed {
             let tree = &mut self.tree;
-            let cpu_prepared = match &mut self.graphics {
-                GraphicsState::Ready(graphics) => {
-                    graphics.prepare_cpu_frame(physical.width, physical.height, |target| {
-                        tree.paint(scale, target)
-                    })?
+            let mut retained_prepared = false;
+            if let GraphicsState::Ready(graphics) = &mut self.graphics {
+                #[cfg(target_os = "windows")]
+                {
+                    retained_prepared = graphics.prepare_d3d11_frame(
+                        physical.width,
+                        physical.height,
+                        |target| tree.paint(scale, target),
+                    )?;
                 }
-                _ => false,
-            };
-            if !cpu_prepared {
+                if !retained_prepared {
+                    retained_prepared = graphics
+                        .prepare_cpu_frame(physical.width, physical.height, |target| {
+                            tree.paint(scale, target)
+                        })
+                        .map_err(RenderError::Fatal)?;
+                }
+            }
+            if !retained_prepared {
                 self.scene = self.tree.scene(scale);
             }
         }
@@ -998,6 +1010,17 @@ impl App {
             self.events.push(error(message));
         }
         Ok(content_changed)
+    }
+
+    fn handle_render_error(&mut self, event_loop: &ActiveEventLoop, error: RenderError) {
+        match error {
+            RenderError::RecoverDevice(message) => {
+                if self.start_graphics_recovery(event_loop, message) {
+                    self.try_graphics_recovery(event_loop);
+                }
+            }
+            RenderError::Fatal(message) => self.fail(event_loop, message),
+        }
     }
     fn fail(&mut self, event_loop: &ActiveEventLoop, message: String) {
         self.fatal = Some(message);
@@ -1025,7 +1048,7 @@ impl App {
         let content_changed = match self.prepare() {
             Ok(content_changed) => content_changed,
             Err(error) => {
-                self.fail(event_loop, error);
+                self.handle_render_error(event_loop, error);
                 return;
             }
         };
@@ -1069,12 +1092,7 @@ impl App {
                 }
                 self.sync_control_flow(event_loop);
             }
-            Err(RenderError::RecoverDevice(message)) => {
-                if self.start_graphics_recovery(event_loop, message) {
-                    self.try_graphics_recovery(event_loop);
-                }
-            }
-            Err(RenderError::Fatal(message)) => self.fail(event_loop, message),
+            Err(error) => self.handle_render_error(event_loop, error),
         }
     }
     fn sync_cursor(&mut self) {
@@ -1228,7 +1246,12 @@ impl ApplicationHandler<Command> for App {
             let state = std::mem::replace(&mut self.graphics, GraphicsState::Fatal);
             match state {
                 GraphicsState::Suspended(checkpoint) => {
-                    match Graphics::new(window, self.document.renderer) {
+                    let result = if let Some(previous_backend) = checkpoint.backend {
+                        Graphics::recover(window, previous_backend)
+                    } else {
+                        Graphics::new(window, self.document.renderer)
+                    };
+                    match result {
                         Ok(mut graphics) => {
                             let generation = checkpoint.generation.saturating_add(1).max(1);
                             graphics.restore_counters(checkpoint.frames, generation);
@@ -1270,7 +1293,7 @@ impl ApplicationHandler<Command> for App {
                         self.apply_initial_window_position(event_loop, &window, false);
                         self.sync_custom_window_chrome();
                         if let Err(error) = self.prepare() {
-                            self.fail(event_loop, error);
+                            self.handle_render_error(event_loop, error);
                             return;
                         }
                         self.initialize_accessibility(event_loop, window.as_ref());
@@ -1320,7 +1343,7 @@ impl ApplicationHandler<Command> for App {
             }
             Command::Inspect { request_id } => {
                 if let Err(e) = self.prepare() {
-                    self.fail(event_loop, e);
+                    self.handle_render_error(event_loop, e);
                     return;
                 }
                 if let Some(window) = &self.window {
@@ -1353,7 +1376,10 @@ impl ApplicationHandler<Command> for App {
             Command::Capture { path, request_id } if self.document.window.debug => {
                 let background = self.root_color("background", &self.document.window.background);
                 let result = match self.prepare() {
-                    Err(error) => Err(CaptureError::Request(error)),
+                    Err(RenderError::RecoverDevice(message)) => {
+                        Err(CaptureError::RecoverDevice(message))
+                    }
+                    Err(RenderError::Fatal(message)) => Err(CaptureError::FatalGpu(message)),
                     Ok(_) => match &mut self.graphics {
                         GraphicsState::Ready(graphics) => {
                             graphics.capture(&self.scene, color(&background), &path)
@@ -1496,8 +1522,14 @@ impl ApplicationHandler<Command> for App {
             WindowEvent::CloseRequested => self.request_close(event_loop),
             WindowEvent::Resized(size) => {
                 if size.width > 0 && size.height > 0 {
-                    if let GraphicsState::Ready(graphics) = &mut self.graphics {
-                        graphics.resize(size.width, size.height);
+                    let resize_error = if let GraphicsState::Ready(graphics) = &mut self.graphics {
+                        graphics.resize(size.width, size.height).err()
+                    } else {
+                        None
+                    };
+                    if let Some(error) = resize_error {
+                        self.handle_render_error(event_loop, error);
+                        return;
                     }
                     self.tree.dirty.layout = true;
                     self.tree.dirty.paint = true;

@@ -247,12 +247,29 @@ try {
   $env:TARVE_NATIVE = $nativeDll
   $process = Start-Process -FilePath $bun -ArgumentList @($entry) -WorkingDirectory $Root -WindowStyle Hidden -PassThru
 
-  $desktop = [System.Windows.Automation.AutomationElement]::RootElement
   $window = Wait-Until -Message "Tarve accessibility window" -Probe {
-    $candidate = Find-ByName -RootElement $desktop -Name "Tarve Accessibility Smoke"
-    if ($candidate -and $candidate.Current.ProcessId -eq $process.Id) { $candidate } else { $null }
+    $process.Refresh()
+    if ($process.HasExited) {
+      throw "Accessibility smoke app exited before exposing its window (exit $($process.ExitCode))"
+    }
+    $handle = $process.MainWindowHandle
+    if ($handle -eq 0) { return $null }
+    try {
+      $candidate = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$handle)
+      if ($candidate -and $candidate.Current.Name -eq "Tarve Accessibility Smoke" -and $candidate.Current.ProcessId -eq $process.Id) {
+        $candidate
+      } else {
+        $null
+      }
+    } catch {
+      $null
+    }
   }
   Assert-True ($window.Current.ControlType -eq [System.Windows.Automation.ControlType]::Window) "root must publish ControlType.Window"
+  $window.SetFocus()
+  $null = Wait-Until -Message "Tarve accessibility window keyboard focus" -Probe {
+    if ($window.Current.HasKeyboardFocus) { $window } else { $null }
+  }
 
   $email = Wait-ByNameAndType -RootElement $window -Name "Email address" -ControlType ([System.Windows.Automation.ControlType]::Edit)
   Assert-True ([bool]$email.GetCurrentPropertyValue([System.Windows.Automation.AutomationElement]::IsRequiredForFormProperty)) "Field.required must reach UIA"

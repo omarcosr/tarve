@@ -1,12 +1,12 @@
 # Tarve
 
-GUI nativa para **Bun + TypeScript/TSX**, com **Taffy** (Flex/Grid), **Parley** (shaping, medição e quebra de texto) e renderer selecionável: **Vello/WGPU** (GPU) ou **vello_cpu + softbuffer** (baixo consumo de memória). Janela Win32 via Winit. O tema padrão usa a linguagem visual shadcn: zinc, superfícies claras, bordas discretas, raios de 6–12 px e Segoe UI.
+GUI nativa para **Bun + TypeScript/TSX**, com **Taffy** (Flex/Grid), **Parley** (shaping, medição e quebra de texto) e renderer selecionável. No Windows, o backend GPU padrão é **D3D11 + DXGI nativo**; **Vello/WGPU** permanece como fallback/escape hatch, e **vello_cpu + softbuffer** oferece o caminho de menor consumo de memória. Janela Win32 via Winit. O tema padrão usa a linguagem visual shadcn: zinc, superfícies claras, bordas discretas, raios de 6–12 px e Segoe UI.
 
 Licenciado sob a **Apache License 2.0**. Consulte [`LICENSE`](LICENSE).
 
 ## Rodar no Windows
 
-Pré-requisitos para desenvolver o Tarve: Bun 1.4+, Rust estável com target `x86_64-pc-windows-msvc` e Visual Studio Build Tools com C++/Windows SDK. O renderer GPU exige DirectX 12 ou Vulkan; o renderer CPU não exige compute shaders.
+Pré-requisitos para desenvolver o Tarve: Bun 1.4+, Rust estável com target `x86_64-pc-windows-msvc` e Visual Studio Build Tools com C++/Windows SDK. O renderer GPU padrão no Windows exige D3D11 feature level 11.0; o renderer legado Vello/WGPU pode usar DirectX 12 ou Vulkan. O renderer CPU não exige compute shaders.
 
 ```powershell
 cd A:\tarve
@@ -26,7 +26,7 @@ const app = createApp(App, {
 });
 ```
 
-`renderer` aceita `"cpu"`, `"gpu"` ou `"auto"`. `"cpu"` usa `vello_cpu + softbuffer`; `"gpu"` usa Vello/WGPU; `"auto"` é o padrão e seleciona GPU salvo quando `TARVE_RENDERER` é usado como override de desenvolvimento/CI.
+`renderer` aceita `"cpu"`, `"gpu"` ou `"auto"`. `"cpu"` usa `vello_cpu + softbuffer`. No Windows, `"gpu"` usa o backend nativo D3D11/DXGI por padrão e cai para Vello/WGPU sobre DX12 se a inicialização D3D11 falhar; fora do Windows, o caminho GPU permanece Vello/WGPU. `"auto"` é o padrão e seleciona GPU salvo quando `TARVE_RENDERER` é usado como override de desenvolvimento/CI.
 
 Uma escolha explícita no app tem prioridade sobre o ambiente. Por exemplo, `renderer: "cpu"` continua CPU mesmo se `TARVE_RENDERER=gpu`. O env permanece disponível para testar apps que usam `renderer: "auto"`:
 
@@ -36,6 +36,8 @@ bun examples/counter.tsx
 ```
 
 No env também são aceitos `software` e `softbuffer` como aliases de `cpu`. Um valor desconhecido falha explicitamente quando o app está em `"auto"`; uma escolha explícita `"cpu"`/`"gpu"` não depende do valor do env.
+
+`WGPU_BACKEND` continua disponível como escape hatch de desenvolvimento. No Windows, defini-lo força o backend legado Vello/WGPU em vez do D3D11 nativo, por exemplo `$env:WGPU_BACKEND="dx12"`. Isso é útil para comparação e diagnóstico; não é necessário no uso normal.
 
 ## Usar como pacote npm
 
@@ -394,7 +396,7 @@ bun run build:exe
 bun run smoke:exe
 ```
 
-Distribua apenas **`dist/Tarve.exe`**. O build compila Rust em release e incorpora o runtime Bun, o app, a DLL e a imagem. O runtime C da DLL usa link estático: o destinatário não precisa instalar Bun, Node, Rust ou o redistribuível do Visual C++. O executável Windows x64 abre diretamente a janela, sem console; `renderer: "gpu"` precisa de driver compatível com Vello/WGPU, enquanto `renderer: "cpu"` usa o renderer software. Os pré-requisitos de compilação acima são necessários apenas na máquina de build.
+Distribua apenas **`dist/Tarve.exe`**. O build compila Rust em release e incorpora o runtime Bun, o app, a DLL e a imagem. O runtime C da DLL usa link estático: o destinatário não precisa instalar Bun, Node, Rust ou o redistribuível do Visual C++. O executável Windows x64 abre diretamente a janela, sem console; `renderer: "gpu"` usa D3D11/DXGI nativo por padrão e mantém Vello/WGPU como fallback, enquanto `renderer: "cpu"` usa o renderer software. Os pré-requisitos de compilação acima são necessários apenas na máquina de build.
 
 Na inicialização, a DLL e as imagens usadas são extraídas para `%TEMP%\tarve-assets`, em diretórios identificados e verificados por SHA-256. Isso dá ao carregador do Windows e ao backend Rust caminhos físicos para os arquivos incorporados. Os caminhos ficam em cache durante a execução.
 

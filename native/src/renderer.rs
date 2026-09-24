@@ -1,3 +1,5 @@
+#[cfg(target_os = "windows")]
+use crate::d3d11::{D3d11Error, D3d11Graphics, D3d11PaintTarget};
 use crate::{paint::CpuPaintTarget, protocol::RendererPreference};
 use softbuffer::{Context as SoftContext, Surface as SoftSurface};
 use std::{
@@ -105,6 +107,23 @@ fn classify_vello_error(error: vello::Error) -> RenderError {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn classify_d3d11_render_error(error: D3d11Error) -> RenderError {
+    match error {
+        D3d11Error::RecoverDevice(message) => RenderError::RecoverDevice(message),
+        D3d11Error::FatalGpu(message) | D3d11Error::Request(message) => RenderError::Fatal(message),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn classify_d3d11_capture_error(error: D3d11Error) -> CaptureError {
+    match error {
+        D3d11Error::RecoverDevice(message) => CaptureError::RecoverDevice(message),
+        D3d11Error::FatalGpu(message) => CaptureError::FatalGpu(message),
+        D3d11Error::Request(message) => CaptureError::Request(message),
+    }
+}
+
 #[derive(Default)]
 struct GraphicsSignals {
     fault: Mutex<Option<GraphicsFault>>,
@@ -181,9 +200,9 @@ impl GpuGraphics {
         #[cfg(target_os = "windows")]
         {
             let (first, second) = if previous_backend == wgpu::Backend::Vulkan {
-                (wgpu::Backends::DX12, wgpu::Backends::VULKAN)
-            } else {
                 (wgpu::Backends::VULKAN, wgpu::Backends::DX12)
+            } else {
+                (wgpu::Backends::DX12, wgpu::Backends::VULKAN)
             };
             Self::new_with_backends(window.clone(), Some(first)).or_else(|first_error| {
                 Self::new_with_backends(window, Some(second)).map_err(|second_error| {
@@ -509,6 +528,8 @@ impl GpuGraphics {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RendererBackend {
+    #[cfg(target_os = "windows")]
+    D3d11,
     Gpu(wgpu::Backend),
     Cpu,
 }
@@ -706,6 +727,8 @@ fn flatten_rgba_for_softbuffer(pixels: &mut [u32], background: vello::peniko::Co
 }
 
 enum GraphicsImpl {
+    #[cfg(target_os = "windows")]
+    D3d11(Box<D3d11Graphics>),
     Gpu(Box<GpuGraphics>),
     Cpu(Box<CpuGraphics>),
 }
@@ -720,7 +743,7 @@ impl Graphics {
     pub fn new(window: Arc<Window>, preference: RendererPreference) -> Result<Self, String> {
         let backend =
             match resolve_renderer(preference, std::env::var_os("TARVE_RENDERER").as_deref())? {
-                ResolvedRenderer::Gpu => GraphicsImpl::Gpu(Box::new(GpuGraphics::new(window)?)),
+                ResolvedRenderer::Gpu => Self::new_gpu_backend(window)?,
                 ResolvedRenderer::Cpu => GraphicsImpl::Cpu(Box::new(CpuGraphics::new(window)?)),
             };
         Ok(Self {
@@ -732,6 +755,18 @@ impl Graphics {
 
     pub fn recover(window: Arc<Window>, previous_backend: RendererBackend) -> Result<Self, String> {
         let backend = match previous_backend {
+            #[cfg(target_os = "windows")]
+            RendererBackend::D3d11 => D3d11Graphics::new(window.clone())
+                .map(|graphics| GraphicsImpl::D3d11(Box::new(graphics)))
+                .or_else(|d3d11_error| {
+                    GpuGraphics::new_with_backends(window, Some(wgpu::Backends::DX12))
+                        .map(|graphics| GraphicsImpl::Gpu(Box::new(graphics)))
+                        .map_err(|vello_error| {
+                            format!(
+                                "D3D11 GPU recovery failed: {d3d11_error}; Vello/DX12 fallback failed: {vello_error}"
+                            )
+                        })
+                })?,
             RendererBackend::Gpu(previous) => {
                 GraphicsImpl::Gpu(Box::new(GpuGraphics::recover(window, previous)?))
             }
@@ -759,9 +794,27 @@ impl Graphics {
 
     pub(crate) fn backend(&self) -> RendererBackend {
         match &self.backend {
+            #[cfg(target_os = "windows")]
+            GraphicsImpl::D3d11(_) => RendererBackend::D3d11,
             GraphicsImpl::Gpu(graphics) => RendererBackend::Gpu(graphics.backend()),
             GraphicsImpl::Cpu(_) => RendererBackend::Cpu,
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn prepare_d3d11_frame(
+        &mut self,
+        width: u32,
+        height: u32,
+        paint: impl FnOnce(&mut D3d11PaintTarget<'_>),
+    ) -> Result<bool, RenderError> {
+        let GraphicsImpl::D3d11(graphics) = &mut self.backend else {
+            return Ok(false);
+        };
+        graphics
+            .prepare(width, height, paint)
+            .map_err(classify_d3d11_render_error)?;
+        Ok(true)
     }
 
     pub(crate) fn prepare_cpu_frame(
@@ -779,15 +832,21 @@ impl Graphics {
 
     pub(crate) fn take_fault(&self) -> Option<GraphicsFault> {
         match &self.backend {
+            #[cfg(target_os = "windows")]
+            GraphicsImpl::D3d11(_) => None,
             GraphicsImpl::Gpu(graphics) => graphics.take_fault(),
             GraphicsImpl::Cpu(_) => None,
         }
     }
 
-    pub fn resize(&mut self, width: u32, height: u32) -> bool {
+    pub fn resize(&mut self, width: u32, height: u32) -> Result<bool, RenderError> {
         match &mut self.backend {
-            GraphicsImpl::Gpu(graphics) => graphics.resize(width, height),
-            GraphicsImpl::Cpu(graphics) => graphics.resize(width, height),
+            #[cfg(target_os = "windows")]
+            GraphicsImpl::D3d11(graphics) => graphics
+                .resize(width, height)
+                .map_err(classify_d3d11_render_error),
+            GraphicsImpl::Gpu(graphics) => Ok(graphics.resize(width, height)),
+            GraphicsImpl::Cpu(graphics) => Ok(graphics.resize(width, height)),
         }
     }
 
@@ -798,6 +857,11 @@ impl Graphics {
         content_changed: bool,
     ) -> Result<PresentResult, RenderError> {
         let result = match &mut self.backend {
+            #[cfg(target_os = "windows")]
+            GraphicsImpl::D3d11(graphics) => graphics
+                .render(background)
+                .map(|()| PresentResult::Presented)
+                .map_err(classify_d3d11_render_error),
             GraphicsImpl::Gpu(graphics) => graphics.render(scene, background),
             GraphicsImpl::Cpu(graphics) => graphics.render(background, content_changed),
         }?;
@@ -814,9 +878,35 @@ impl Graphics {
         path: &str,
     ) -> Result<(), CaptureError> {
         match &mut self.backend {
+            #[cfg(target_os = "windows")]
+            GraphicsImpl::D3d11(graphics) => graphics
+                .capture(background, path)
+                .map_err(classify_d3d11_capture_error),
             GraphicsImpl::Gpu(graphics) => graphics.capture(scene, background, path),
             GraphicsImpl::Cpu(graphics) => graphics.capture(background, path),
         }
+    }
+
+    fn new_gpu_backend(window: Arc<Window>) -> Result<GraphicsImpl, String> {
+        #[cfg(target_os = "windows")]
+        {
+            // Explicit WGPU_BACKEND remains an escape hatch for debugging the legacy Vello path.
+            if std::env::var_os("WGPU_BACKEND").is_none() {
+                match D3d11Graphics::new(window.clone()) {
+                    Ok(graphics) => return Ok(GraphicsImpl::D3d11(Box::new(graphics))),
+                    Err(d3d11_error) => {
+                        return GpuGraphics::new_with_backends(window, Some(wgpu::Backends::DX12))
+                            .map(|graphics| GraphicsImpl::Gpu(Box::new(graphics)))
+                            .map_err(|vello_error| {
+                                format!(
+                                    "Native D3D11 renderer failed: {d3d11_error}; Vello/DX12 fallback failed: {vello_error}"
+                                )
+                            });
+                    }
+                }
+            }
+        }
+        GpuGraphics::new(window).map(|graphics| GraphicsImpl::Gpu(Box::new(graphics)))
     }
 }
 
