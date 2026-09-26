@@ -572,6 +572,15 @@ fn diff_line_height(node: &Node) -> f32 {
 
 const DIFF_ACCENT_WIDTH: f64 = 3.0;
 const DIFF_MARKER_WIDTH: f64 = 24.0;
+const CODE_GUTTER_PADDING: f32 = 8.0;
+// Shaped monospace digits keep a small right side-bearing. Nudging only the
+// number paint origin makes the visible ink sit at the intended optical gap
+// while leaving source geometry, clipping, scrolling, and hit-testing intact.
+const CODE_GUTTER_OPTICAL_X: f64 = 1.0;
+// Consolas digits sit optically a touch higher than braces and lowercase code
+// at the same mathematical baseline. Keep the typographic baseline math exact,
+// then move only the painted gutter ink by one physical pixel.
+const CODE_GUTTER_OPTICAL_Y_PX: f64 = 1.0;
 
 fn diff_content_inset(node: &Node, max_line_number: u32) -> f64 {
     f64::from(diff_gutter_width(node, max_line_number)) * 2.0
@@ -692,8 +701,10 @@ impl TextEngine {
                 gutters.push(gutter);
             }
             let widest_number = gutters.iter().map(Layout::width).fold(0.0_f32, f32::max);
-            self.code_gutter_widths
-                .insert(node.id.clone(), (widest_number + 16.0).ceil());
+            self.code_gutter_widths.insert(
+                node.id.clone(),
+                (widest_number + CODE_GUTTER_PADDING * 2.0).ceil(),
+            );
             self.code_gutter_layouts.insert(node.id.clone(), gutters);
         } else {
             self.code_gutter_layouts.remove(&node.id);
@@ -1059,9 +1070,9 @@ impl TextEngine {
         if node.kind == "code" && node.show_line_numbers {
             let gutter_color = crate::tree::color(node.string("gutterColor", "#8b949e"));
             if let Some(gutters) = self.code_gutter_layouts.get(&node.id) {
-                // Place each independent number layout so its baseline lands
-                // exactly on the source line baseline. Keeping identical font
-                // metrics above also makes the glyph boxes visually align.
+                // First align every number to the exact source baseline, then
+                // apply a one-physical-pixel optical correction to the painted
+                // gutter only. Source geometry and hit testing stay unchanged.
                 let y_offsets = code_gutter_y_offsets(layout, gutters);
                 for (gutter, y_offset) in gutters.iter().zip(y_offsets) {
                     let width = f64::from(gutter.width());
@@ -1069,8 +1080,11 @@ impl TextEngine {
                         target,
                         gutter,
                         (
-                            origin.0 + f64::from(gutter_width) - width - 8.0,
-                            origin.1 + y_offset,
+                            origin.0 + f64::from(gutter_width)
+                                - width
+                                - f64::from(CODE_GUTTER_PADDING)
+                                + CODE_GUTTER_OPTICAL_X,
+                            origin.1 + y_offset + CODE_GUTTER_OPTICAL_Y_PX / scale.max(0.01),
                         ),
                         gutter_color,
                         scale,
@@ -1975,7 +1989,7 @@ fn estimated_code_gutter_width(node: &Node) -> f32 {
     }
     // `prepare` replaces this estimate with the actual shaped width.
     let digits = node.text.split('\n').count().max(1).to_string().len() as f32;
-    (digits * node.number("fontSize", 13.0) * 0.62 + 16.0).ceil()
+    (digits * node.number("fontSize", 13.0) * 0.62 + CODE_GUTTER_PADDING * 2.0).ceil()
 }
 
 fn diff_gutter_width(node: &Node, max_line_number: u32) -> f32 {
@@ -2147,7 +2161,7 @@ mod rich_measure_tests {
     }
 
     #[test]
-    fn code_gutter_paints_beside_source_on_the_same_raster_baseline() {
+    fn code_gutter_paints_beside_source_with_optical_raster_alignment() {
         // Use the same glyph in the gutter and source so this checks the final
         // paint coordinates, not only Parley's abstract line metrics. This is
         // the regression that was visible in rich-content-view: a correct
@@ -2187,17 +2201,20 @@ mod rich_measure_tests {
             let (source_id, _, source_y) = source.first_glyph.expect("source glyph");
             assert_eq!(gutter_id, source_id, "same digit must use the same glyph");
             assert!(
-                (gutter_y - source_y).abs() < 0.001,
-                "line {} raster baselines differ: gutter {gutter_y}, source {source_y}",
-                line + 1
+                ((gutter_y - source_y) - CODE_GUTTER_OPTICAL_Y_PX).abs() < 0.001,
+                "line {} gutter raster offset {} != optical offset {}",
+                line + 1,
+                gutter_y - source_y,
+                CODE_GUTTER_OPTICAL_Y_PX
             );
 
             let gutter_right = gutter.origin.0 + f64::from(gutters[line].width());
+            let expected_gap = f64::from(CODE_GUTTER_PADDING) - CODE_GUTTER_OPTICAL_X;
             assert!(
-                source.origin.0 - gutter_right >= 7.9,
-                "line {} gutter overlaps source: gutter right {gutter_right}, source origin {}",
+                ((source.origin.0 - gutter_right) - expected_gap).abs() < 0.001,
+                "line {} gutter gap {} != expected {expected_gap}",
                 line + 1,
-                source.origin.0
+                source.origin.0 - gutter_right
             );
         }
         assert!(
@@ -2267,13 +2284,16 @@ mod rich_measure_tests {
 
         let gutters = &engine.code_gutter_layouts["code"];
         let widest_number = gutters.iter().map(Layout::width).fold(0.0_f32, f32::max);
-        let expected = (widest_number + 16.0).ceil();
+        let expected = (widest_number + CODE_GUTTER_PADDING * 2.0).ceil();
         assert_eq!(engine.code_gutter_width(&node), expected);
 
-        let right_edge = f64::from(expected) - 8.0;
+        let right_edge =
+            f64::from(expected) - f64::from(CODE_GUTTER_PADDING) + CODE_GUTTER_OPTICAL_X;
         for index in [0_usize, 9, 99, 119] {
             let gutter = &gutters[index];
-            let x = f64::from(expected) - f64::from(gutter.width()) - 8.0;
+            let x =
+                f64::from(expected) - f64::from(gutter.width()) - f64::from(CODE_GUTTER_PADDING)
+                    + CODE_GUTTER_OPTICAL_X;
             assert!(
                 (x + f64::from(gutter.width()) - right_edge).abs() < 0.001,
                 "line {} must right-align to the same gutter edge",
