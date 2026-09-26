@@ -13,7 +13,7 @@
     "large-list": "bun large-list.tsx",
     "studio": "bun studio.tsx",
     "performance": "bun performance.tsx",
-    "check": "tsc --noEmit",
+    "check": "bun node_modules/typescript/bin/tsc --noEmit",
     "build:basic": "bun run tarve build basic.tsx --outfile dist/Basic.exe",
     "build:counter": "bun run tarve build counter.tsx --outfile dist/Counter.exe",
     "build:components": "bun run tarve build components.tsx --outfile dist/Components.exe",
@@ -26,10 +26,10 @@
     "build:performance": "bun run tarve build performance.tsx --outfile dist/Performance.exe"
   },
   "dependencies": {
-    "@tarve/react-icons": "file:../packages/react-icons",
     "@heroicons/react": "^2.2.0",
     "@phosphor-icons/react": "^2.1.10",
     "@tabler/icons-react": "^3.48.0",
+    "@tarve/react-icons": "file:../packages/react-icons",
     "lucide-react": "^1.47.0"
   },
   "devDependencies": {

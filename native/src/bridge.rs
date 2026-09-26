@@ -152,16 +152,121 @@ mod wake_pipe {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(unix)]
+mod wake_pipe {
+    use std::{
+        fs,
+        io::{self, Write},
+        os::unix::{fs::PermissionsExt, net::{UnixListener, UnixStream}},
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+
+    static NEXT_SOCKET_ID: AtomicU64 = AtomicU64::new(1);
+
+    pub struct WakePipe {
+        listener: Option<UnixListener>,
+        stream: Option<UnixStream>,
+        path: PathBuf,
+        name: String,
+    }
+
+    impl WakePipe {
+        pub fn new() -> Result<Self, String> {
+            let directory = std::env::temp_dir();
+            for _ in 0..64 {
+                let id = NEXT_SOCKET_ID.fetch_add(1, Ordering::Relaxed);
+                let path = directory.join(format!("tarve-events-{}-{id}.sock", std::process::id()));
+                match UnixListener::bind(&path) {
+                    Ok(listener) => {
+                        listener.set_nonblocking(true).map_err(|error| error.to_string())?;
+                        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+                            .map_err(|error| error.to_string())?;
+                        let name = path
+                            .to_str()
+                            .ok_or("Native event socket path is not valid UTF-8")?
+                            .to_owned();
+                        return Ok(Self {
+                            listener: Some(listener),
+                            stream: None,
+                            path,
+                            name,
+                        });
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::AddrInUse => continue,
+                    Err(error) => {
+                        return Err(format!("Could not create native event socket: {error}"));
+                    }
+                }
+            }
+            Err("Could not allocate a unique native event socket path".into())
+        }
+
+        pub fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn ensure_connected(&mut self) -> bool {
+            if self.stream.is_some() {
+                return true;
+            }
+            let Some(listener) = self.listener.as_ref() else {
+                return false;
+            };
+            loop {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        if stream.set_nonblocking(true).is_err() {
+                            return false;
+                        }
+                        self.stream = Some(stream);
+                        return true;
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => return false,
+                    Err(_) => return false,
+                }
+            }
+        }
+
+        pub fn signal(&mut self) {
+            if !self.ensure_connected() {
+                return;
+            }
+            let result = self.stream.as_mut().expect("connected stream").write(&[1]);
+            match result {
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    // The socket already contains an unread wake hint.
+                }
+                Err(_) => {
+                    self.stream = None;
+                }
+            }
+        }
+
+        pub fn close(&mut self) {
+            self.stream = None;
+            self.listener = None;
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+
+    impl Drop for WakePipe {
+        fn drop(&mut self) {
+            self.close();
+        }
+    }
+}
+
+#[cfg(all(not(target_os = "windows"), not(unix)))]
 mod wake_pipe {
     pub struct WakePipe;
     impl WakePipe {
         pub fn new() -> Result<Self, String> {
-            Err("Native event wake pipe is only supported on Windows".into())
+            Err("Native event wake transport is not supported on this platform".into())
         }
-        pub fn name(&self) -> &str {
-            ""
-        }
+        pub fn name(&self) -> &str { "" }
         pub fn signal(&mut self) {}
         pub fn close(&mut self) {}
     }
@@ -309,6 +414,21 @@ fn open_external(target: &str) -> Result<(), String> {
 #[cfg(not(target_os = "windows"))]
 fn open_external(target: &str) -> Result<(), String> {
     validate_external_target(target)?;
+    #[cfg(target_os = "linux")]
+    {
+        let target = target.trim();
+        match std::process::Command::new("xdg-open").arg(target).spawn() {
+            Ok(_) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("Could not open external URI with xdg-open: {error}")),
+        }
+        std::process::Command::new("gio")
+            .args(["open", target])
+            .spawn()
+            .map_err(|error| format!("Could not open external URI with gio: {error}"))?;
+        return Ok(());
+    }
+    #[cfg(not(target_os = "linux"))]
     Err("Opening external URIs is not supported on this platform".into())
 }
 
@@ -370,7 +490,7 @@ pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
             .map_err(|e| e.to_string())?;
         let proxy = rx
             .recv()
-            .map_err(|_| "Could not initialize native event loop".to_string())?;
+            .map_err(|_| "Could not initialize native event loop".to_string())??;
         *state = Some(Host {
             proxy,
             events,
@@ -380,7 +500,8 @@ pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
     })
 }
 
-/// Returns the UTF-8 Windows named-pipe path used only to wake the Bun event loop.
+/// Returns the UTF-8 local IPC path used only to wake the Bun event loop.
+/// Windows uses a named pipe; Unix platforms use a Unix domain socket.
 /// Events themselves remain in the native FIFO and are consumed by tarve_poll_event().
 /// A negative value is the required capacity and leaves the name unchanged for retry.
 #[unsafe(no_mangle)]
@@ -657,5 +778,45 @@ mod tests {
             queue.clear();
         }
         assert_eq!(drained, TOTAL, "every queued event must remain drainable");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod unix_tests {
+    use super::Events;
+    use std::{
+        io::{ErrorKind, Read},
+        os::unix::net::UnixStream,
+        path::Path,
+    };
+
+    #[test]
+    fn unix_socket_wakes_once_per_empty_to_nonempty_queue_transition() {
+        let events = Events::new().expect("wake socket");
+        let name = events.wake_pipe_name();
+        let mut client = UnixStream::connect(&name).expect("connect wake socket client");
+        client.set_nonblocking(true).expect("nonblocking wake socket client");
+
+        events.push(serde_json::json!({"type":"first"}));
+        let mut byte = [0u8; 1];
+        client.read_exact(&mut byte).expect("read first wake");
+        assert_eq!(byte, [1]);
+
+        events.push(serde_json::json!({"type":"second"}));
+        let error = client.read(&mut byte).expect_err("queued bursts must coalesce wake signals");
+        assert_eq!(error.kind(), ErrorKind::WouldBlock);
+
+        events
+            .queue
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+        events.push(serde_json::json!({"type":"third"}));
+        client.read_exact(&mut byte).expect("read rearmed wake");
+        assert_eq!(byte, [1]);
+
+        drop(client);
+        drop(events);
+        assert!(!Path::new(&name).exists(), "wake socket must be removed on drop");
     }
 }

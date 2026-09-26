@@ -2,9 +2,9 @@
 
 Native desktop UI for **Bun + TypeScript/TSX**.
 
-Tarve turns a TSX tree into a retained native interface. It does not use a browser, DOM, or React runtime. Layout is handled by **Taffy**, text shaping and editing by **Parley**, and rendering is selectable between a native Windows GPU path and a low-memory CPU path.
+Tarve turns a TSX tree into a retained native interface. It does not use a browser, DOM, or React runtime. Layout is handled by **Taffy**, text shaping and editing by **Parley**, and rendering is selectable between GPU and low-memory CPU paths.
 
-> **Current supported target:** Windows x64
+> **Current supported targets:** Windows x64 and Linux x64
 >
 > **Runtime:** Bun 1.4+
 >
@@ -17,12 +17,12 @@ Tarve turns a TSX tree into a retained native interface. It does not use a brows
 - Native TSX UI with a dedicated `tarve` JSX runtime.
 - Retained Taffy Flexbox/Grid layout with incremental property and structural updates.
 - Parley text shaping, selection, clipboard, caret handling, IME composition, and Unicode-aware editing.
-- Native Windows D3D11/DXGI renderer by default, with Vello/WGPU fallback and a `vello_cpu + softbuffer` CPU renderer.
+- Native Windows D3D11/DXGI renderer with Vello/WGPU fallback; Linux uses Vello/WGPU. Both platforms provide a `vello_cpu + softbuffer` CPU renderer.
 - shadcn-inspired components and semantic light/dark theme tokens.
 - Native Markdown, syntax-highlighted Code, and Diff leaves designed for large documents.
 - Fixed-height, measured variable-height, and externally windowed `VirtualList` modes.
 - Windows UI Automation accessibility through AccessKit.
-- Global hotkeys, native file dialogs, custom title bars, window positioning, and standalone `.exe` builds.
+- Global hotkeys, native file dialogs, custom title bars, window positioning, and standalone Windows/Linux builds.
 - Event-driven Bun/native bridge with no continuous idle polling.
 
 ## Installation
@@ -89,10 +89,14 @@ bun app.tsx
 
 ## Build a standalone executable
 
-The package CLI compiles a Tarve application into a standalone Windows x64 executable and embeds the native runtime.
+The package CLI compiles a Tarve application into a standalone executable for the current supported host and embeds the native runtime. Windows produces a `.exe`; Linux produces an ELF executable with no required extension.
 
 ```powershell
 bun run tarve build app.tsx --outfile dist/App.exe
+```
+
+```bash
+bun run tarve build app.tsx --outfile dist/App
 ```
 
 The build API is also exported:
@@ -102,7 +106,7 @@ import { build } from "tarve/build";
 
 await build({
   entrypoint: "app.tsx",
-  outfile: "dist/App.exe",
+  outfile: process.platform === "win32" ? "dist/App.exe" : "dist/App",
   name: "My App"
 });
 ```
@@ -111,11 +115,11 @@ await build({
 
 `createApp` accepts `renderer: "auto" | "gpu" | "cpu"`.
 
-| Mode | Windows behavior |
-| --- | --- |
-| `auto` | Default. Uses GPU unless `TARVE_RENDERER` overrides it for development or CI. |
-| `gpu` | Uses the native D3D11/DXGI renderer. Tarve can fall back to the Vello/WGPU GPU path if native GPU initialization or recovery fails. |
-| `cpu` | Uses `vello_cpu + softbuffer`; useful for low-memory or software-rendered workloads. |
+| Mode | Windows | Linux |
+| --- | --- | --- |
+| `auto` | Uses the native D3D11/DXGI GPU renderer by default. | Uses the Vello/WGPU GPU renderer by default. |
+| `gpu` | Uses D3D11/DXGI with Vello/WGPU fallback for initialization or recovery failures. | Uses Vello/WGPU with the platform graphics backend selected by WGPU. |
+| `cpu` | Uses `vello_cpu + softbuffer`. | Uses `vello_cpu + softbuffer`. |
 
 ```tsx
 const app = createApp(App, {
@@ -123,7 +127,7 @@ const app = createApp(App, {
 });
 ```
 
-An explicit renderer in `createApp` takes precedence over `TARVE_RENDERER`. `WGPU_BACKEND` is a development/diagnostic escape hatch on Windows that selects the legacy Vello/WGPU path instead of the normal D3D11 renderer.
+An explicit renderer in `createApp` takes precedence over `TARVE_RENDERER`. `WGPU_BACKEND` can select a WGPU backend for development and diagnostics. On Windows, setting it also selects the Vello/WGPU path instead of the normal D3D11 renderer.
 
 ## Components
 
@@ -258,7 +262,7 @@ Variable lists retain measured heights by key and can keep a focused editor row 
 
 `Input` and `TextArea` use native text editing over Parley, including caret placement, selection, clipboard operations, grapheme-aware deletion, IME composition, wrapping, and scrolling. Password input remains masked in rendering and accessibility output.
 
-On Windows, Tarve projects the native tree through AccessKit/UI Automation with roles, names, values, states, actions, focus, text ranges, selection, scroll ranges, live regions, and field relationships.
+On Windows, Tarve projects the native tree through AccessKit/UI Automation with roles, names, values, states, actions, focus, text ranges, selection, scroll ranges, live regions, and field relationships. Linux input and rendering are supported, but the AccessKit accessibility bridge is currently Windows-only.
 
 ## Desktop APIs
 
@@ -302,7 +306,7 @@ Render `TitleBar` inside `Window` to opt into Tarve-managed window chrome:
 </Window>
 ```
 
-Tarve keeps native dragging, resize hit testing, minimize/maximize/close behavior, Windows 11 corner handling, and maximized/fullscreen border behavior.
+Tarve keeps native dragging, resize hit testing, and minimize/maximize/close behavior on supported platforms. Windows additionally applies Windows 11 corner and maximized/fullscreen border handling.
 
 ## Icons
 
@@ -365,12 +369,20 @@ All example UI copy and example documentation is written in English.
 
 ## Developing Tarve
 
-Building the native library requires:
+Building the native library requires Bun 1.4+ and Rust stable.
 
-- Windows x64
-- Bun 1.4+
-- Rust stable with the `x86_64-pc-windows-msvc` target
-- Visual Studio Build Tools with C++ tooling and the Windows SDK
+On Windows x64, install Visual Studio Build Tools with C++ tooling and the Windows SDK and use the `x86_64-pc-windows-msvc` Rust target.
+
+On Debian/Ubuntu Linux x64, install the native build dependencies first:
+
+```bash
+sudo apt install build-essential pkg-config libx11-dev libxkbcommon-dev \
+  libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev
+```
+
+Linux file dialogs use the XDG desktop portal through `rfd`. Opening external links uses `xdg-open` when available and falls back to `gio open`.
+
+On WSLg, Tarve prefers winit's X11 backend when `DISPLAY` is available; native Linux keeps winit's normal Wayland/X11 auto-selection. This avoids WSLg-specific Wayland `Broken pipe` event-loop failures without changing backend selection on ordinary Linux desktops.
 
 ```powershell
 bun install
@@ -378,6 +390,8 @@ bun run build:native
 bun run check
 bun run test
 ```
+
+`bun run pack` stages the native library for the host platform. The signed release pipeline documented in `RELEASE.md` is still Windows-focused; Linux runtime, source builds, local packages, and standalone executables are supported independently of that release pipeline.
 
 Run the full package, executable, accessibility, and visual release gate with:
 
@@ -393,7 +407,7 @@ Additional project documentation:
 
 ## Current scope
 
-Tarve is pre-1.0 and currently targets **Windows x64**. The current application bootstrap model uses one native app/window lifetime per process; multi-window support is not yet part of the public runtime model.
+Tarve is pre-1.0 and currently targets **Windows x64 and Linux x64**. The current application bootstrap model uses one native app/window lifetime per process; multi-window support is not yet part of the public runtime model. Accessibility integration remains Windows-only for now.
 
 ## License
 

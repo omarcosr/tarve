@@ -2,6 +2,7 @@ node_modules/
 native/target/
 native/bin/
 native/win32-x64/
+native/linux-x64/
 dist/
 work/
 *.log

@@ -16,8 +16,8 @@ export interface BuildOptions {
 
 /** Compile an ordinary Tarve app. No production entrypoint or app-side bridge setup is needed. */
 export async function build(options: BuildOptions): Promise<string> {
-  if (process.platform !== "win32" || process.arch !== "x64") {
-    throw new Error("Tarve executable distribution currently supports Windows x64.");
+  if (!(["win32", "linux"] as NodeJS.Platform[]).includes(process.platform) || process.arch !== "x64") {
+    throw new Error(`Tarve executable distribution is not supported for ${process.platform}-${process.arch}.`);
   }
   const entrypoint = resolve(options.entrypoint);
   const packageMetadata = await Bun.file(resolve(import.meta.dir, "../../package.json")).json() as { version?: string };
@@ -25,8 +25,11 @@ export async function build(options: BuildOptions): Promise<string> {
     throw new Error("Tarve package version is missing.");
   }
   const name = options.name ?? basename(entrypoint).replace(/\.[^.]+$/, "");
-  const outfile = resolve(options.outfile ?? `dist/${name}.exe`);
+  const executableSuffix = process.platform === "win32" ? ".exe" : "";
+  const outfile = resolve(options.outfile ?? `dist/${name}${executableSuffix}`);
   const library = resolve(options.nativeLibrary ?? nativePath());
+  const nativeName = process.platform === "win32" ? "tarve_native.dll" : "libtarve_native.so";
+  const compileTarget = process.platform === "win32" ? "bun-windows-x64" : "bun-linux-x64";
   const assetsModule = fileURLToPath(import.meta.resolve("#tarve/assets"));
   const sourceDirectory = join(import.meta.dir, "src");
   const repositorySource = existsSync(join(sourceDirectory, "index.ts"));
@@ -44,7 +47,7 @@ export async function build(options: BuildOptions): Promise<string> {
         contents: [
           `import library from ${JSON.stringify(library)} with { type: "file" };`,
           `import { materializeAsset } from ${JSON.stringify(assetsModule)};`,
-          'export function nativePath() { return materializeAsset(library, "tarve_native.dll"); }',
+          `export function nativePath() { return materializeAsset(library, ${JSON.stringify(nativeName)}); }`,
         ].join("\n"),
       }));
     },
@@ -57,11 +60,13 @@ export async function build(options: BuildOptions): Promise<string> {
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
     minify: true,
     compile: {
-      target: "bun-windows-x64",
+      target: compileTarget,
       outfile,
       autoloadDotenv: false,
       autoloadBunfig: false,
-      windows: { hideConsole: true, title: name, version: options.version ?? packageMetadata.version, description: `${name} — native Tarve application` },
+      ...(process.platform === "win32" ? {
+        windows: { hideConsole: true, title: name, version: options.version ?? packageMetadata.version, description: `${name} — native Tarve application` },
+      } : {}),
     },
   });
   if (!result.success) throw new AggregateError(result.logs, "Could not compile the Tarve application");

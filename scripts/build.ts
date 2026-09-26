@@ -15,9 +15,10 @@ const { values } = parseArgs({ args: process.argv.slice(2), options: {
 const executable = values.exe;
 const release = !!(executable || values.release);
 const entrypoint = values.entry ? resolve(process.cwd(), values.entry) : join(root, "examples/basic.tsx");
-const outfile = values.outfile ? resolve(process.cwd(), values.outfile) : join(root, "dist/Tarve.exe");
-if (executable && (process.platform !== "win32" || process.arch !== "x64")) {
-  throw new Error("The production executable currently targets Windows x64. Build it on Windows x64.");
+const executableSuffix = process.platform === "win32" ? ".exe" : "";
+const outfile = values.outfile ? resolve(process.cwd(), values.outfile) : join(root, `dist/Tarve${executableSuffix}`);
+if (executable && (!(["win32", "linux"] as NodeJS.Platform[]).includes(process.platform) || process.arch !== "x64")) {
+  throw new Error(`Production executables are not supported for ${process.platform}-${process.arch}.`);
 }
 const prebuiltNative = process.env.TARVE_PREBUILT_NATIVE?.trim();
 const nativeArtifact = prebuiltNative ? resolve(prebuiltNative) : await buildNative(release);
@@ -39,7 +40,7 @@ if (!release) {
   await mkdir(join(root, "dist"), { recursive: true });
   const metadata = await Bun.file(join(root, "package.json")).json();
   const result = await build({ entrypoint, outfile, name: parse(outfile).name, version: metadata.version, nativeLibrary: nativeArtifact });
-  console.log(`Standalone Windows executable: ${result}`);
+  console.log(`Standalone ${process.platform}-${process.arch} executable: ${result}`);
 } else {
   await mkdir(join(root, "dist/assets"), { recursive: true });
   for (const [entry, naming] of [["examples/basic.tsx", "basic.js"]]) {

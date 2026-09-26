@@ -216,7 +216,10 @@ impl GpuGraphics {
             })
         }
         #[cfg(not(target_os = "windows"))]
-        Self::new_with_backends(window, None)
+        {
+            let _ = previous_backend;
+            Self::new_with_backends(window, None)
+        }
     }
 
     fn new_with_backends(

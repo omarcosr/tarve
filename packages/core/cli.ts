@@ -13,7 +13,8 @@ const { values, positionals } = parseArgs({
   },
 });
 if (values.help || positionals.length === 0) {
-  console.log("Usage: tarve build <app.tsx> [--outfile dist/App.exe] [--name App] [--version 1.0.0]");
+  const defaultOutput = process.platform === "win32" ? "dist/App.exe" : "dist/App";
+  console.log(`Usage: tarve build <app.tsx> [--outfile ${defaultOutput}] [--name App] [--version 1.0.0]`);
 } else if (positionals[0] === "build" && positionals.length === 2) {
   console.log(await build({ entrypoint: positionals[1], ...values }));
 } else {
