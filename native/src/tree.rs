@@ -1,12 +1,17 @@
 use crate::{
     paint::PaintTarget,
     protocol::{Node, TreeMutation},
-    text::{AccessibilityTextLine, TEXT_KEYS, TextEngine},
+    rich::{self, DiffRow, DiffRowKind, RichContent},
+    text::{
+        AccessibilityTextLine, DiffPaintArea, DiffPaintDecorations, TEXT_KEYS, TextEngine,
+        TextPaintHighlight,
+    },
 };
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    ops::Range,
     path::Path,
     sync::Arc,
 };
@@ -46,6 +51,35 @@ const LAYOUT_KEYS: &[&str] = &[
 ];
 const MAX_SVG_RASTER_DIMENSION: u32 = 4096;
 const MAX_VIRTUAL_MEASUREMENTS_PER_LIST: usize = 100_000;
+
+fn utf16_to_byte(text: &str, offset: usize) -> Option<usize> {
+    let mut units = 0;
+    for (byte, character) in text.char_indices() {
+        if units == offset {
+            return Some(byte);
+        }
+        units += character.len_utf16();
+        if units > offset {
+            return None;
+        }
+    }
+    (units == offset).then_some(text.len())
+}
+
+fn is_search_word_char(ch: char) -> bool {
+    ch.is_alphabetic() || ch.is_numeric() || ch == '_'
+}
+
+fn reveal_delta(start: f64, end: f64, viewport_start: f64, viewport_end: f64, margin: f64) -> f64 {
+    let margin = margin.min(((viewport_end - viewport_start) / 4.0).max(0.0));
+    if start < viewport_start + margin {
+        start - viewport_start - margin
+    } else if end > viewport_end - margin {
+        end - viewport_end + margin
+    } else {
+        0.0
+    }
+}
 
 fn load_image_data(path: &str) -> Result<ImageData, String> {
     let extension = Path::new(path)
@@ -356,12 +390,29 @@ pub struct Entry {
     virtual_initial_layout: bool,
     virtual_scroll_generation: u64,
 }
+struct HighlightMatchCache {
+    content: String,
+    query: String,
+    ranges: Vec<crate::protocol::TextHighlightRange>,
+    case_sensitive: bool,
+    whole_word: bool,
+    matches: Vec<Range<usize>>,
+}
+
 pub struct Tree {
     pub root: String,
     pub entries: HashMap<String, Entry>,
     pub order: Vec<String>,
     layout: TaffyTree<String>,
     pub text: TextEngine,
+    pub(crate) highlight_ranges: HashMap<String, Vec<TextPaintHighlight>>,
+    highlight_counts: HashMap<String, usize>,
+    highlight_count_queries: HashMap<String, (String, bool, bool)>,
+    highlight_focus: HashMap<String, (String, usize, String, usize)>,
+    highlight_match_cache: HashMap<String, HighlightMatchCache>,
+    #[cfg(test)]
+    pub highlight_searches: u64,
+    highlight_dirty: bool,
     images: HashMap<String, ImageData>,
     svgs: HashMap<String, crate::svg::SvgScene>,
     virtual_measurements: HashMap<String, HashMap<String, f64>>,
@@ -375,6 +426,8 @@ pub struct Tree {
     pub focused: Option<String>,
     pub(crate) focus_visible: bool,
     pressed: Option<String>,
+    pressed_link: Option<(String, String)>,
+    pressed_diff_row: Option<(String, usize)>,
     scroll_drag: Option<ScrollDrag>,
     pub mouse: (f64, f64),
     caret: usize,
@@ -474,6 +527,14 @@ impl Tree {
             order: Vec::new(),
             layout: TaffyTree::new(),
             text: TextEngine::new(),
+            highlight_ranges: HashMap::new(),
+            highlight_counts: HashMap::new(),
+            highlight_count_queries: HashMap::new(),
+            highlight_focus: HashMap::new(),
+            highlight_match_cache: HashMap::new(),
+            #[cfg(test)]
+            highlight_searches: 0,
+            highlight_dirty: true,
             images: HashMap::new(),
             svgs: HashMap::new(),
             virtual_measurements: HashMap::new(),
@@ -487,6 +548,8 @@ impl Tree {
             focused: None,
             focus_visible: false,
             pressed: None,
+            pressed_link: None,
+            pressed_diff_row: None,
             scroll_drag: None,
             mouse: (-1.0, -1.0),
             caret: 0,
@@ -568,10 +631,91 @@ impl Tree {
         }
     }
     fn reconcile_node(&mut self, mut node: Node, child_ids: Vec<String>, previous: Option<Entry>) {
+        let rich_changed = previous.as_ref().is_none_or(|prev| {
+            node.kind != prev.node.kind
+                || node.source != prev.node.source
+                || node.text != prev.node.text && node.kind != "markdown" && node.kind != "diff"
+                || node.language != prev.node.language
+                || node.path != prev.node.path
+                || node.word_diff != prev.node.word_diff
+                || node.collapsed_paths != prev.node.collapsed_paths
+                || node.max_lines != prev.node.max_lines
+                || node.old_text != prev.node.old_text
+                || node.new_text != prev.node.new_text
+        });
+        if !rich_changed {
+            if let Some(prev) = &previous {
+                node.rich = prev.node.rich.clone();
+                if matches!(node.kind.as_str(), "markdown" | "diff") {
+                    node.text = prev.node.text.clone();
+                }
+            }
+        } else {
+            match node.kind.as_str() {
+                "markdown" => {
+                    let (plain, rich) = rich::markdown(&node.source);
+                    node.text = plain;
+                    node.rich = Some(Arc::new(rich));
+                }
+                "code" => {
+                    node.rich = Some(Arc::new(rich::code(
+                        &node.text,
+                        (!node.language.is_empty()).then_some(node.language.as_str()),
+                        (!node.path.is_empty()).then_some(node.path.as_str()),
+                    )))
+                }
+                "diff" => match rich::diff(
+                    &node.source,
+                    node.old_text.as_deref(),
+                    node.new_text.as_deref(),
+                    node.word_diff,
+                    &node.collapsed_paths,
+                    node.max_lines,
+                ) {
+                    Ok((patch, rich)) => {
+                        node.text = rich.display_text().unwrap_or(patch);
+                        node.rich = Some(Arc::new(rich));
+                    }
+                    Err(error) => {
+                        self.warnings.push(format!("Diff '{}': {error}", node.id));
+                        node.text = format!("Invalid diff: {error}");
+                        node.rich = Some(Arc::new(RichContent::Diff {
+                            rows: vec![DiffRow {
+                                text: node.text.clone(),
+                                range: 0..node.text.len(),
+                                kind: DiffRowKind::Meta,
+                                emphasis: Vec::new(),
+                                syntax: Vec::new(),
+                                old_line: None,
+                                new_line: None,
+                                file_path: None,
+                                hidden_lines: None,
+                                file_header: false,
+                            }],
+                            max_columns: node.text.chars().count(),
+                            max_line_number: 0,
+                        }));
+                    }
+                },
+                _ => {}
+            }
+        }
+        if previous.as_ref().is_none_or(|prev| {
+            node.kind != prev.node.kind
+                || node.text != prev.node.text
+                || node.highlight != prev.node.highlight
+                || node.style != prev.node.style
+                || node.value != prev.node.value
+                || node.src != prev.node.src
+                || child_ids != prev.children
+        }) {
+            self.highlight_dirty = true;
+        }
         let mut layout_dirty = true;
         let mut structure_dirty = true;
         let mut measure_dirty = true;
         if let Some(prev) = &previous {
+            let syntax_theme_changed = node.syntax_theme != prev.node.syntax_theme;
             if let Some(incoming) = node.value.as_deref()
                 && let Some(ime) = self
                     .ime
@@ -600,21 +744,26 @@ impl Tree {
                     .iter()
                     .any(|key| node.style[*key] != prev.node.style[*key]);
             measure_dirty = prev.measure_dirty
+                || rich_changed
                 || node.src != prev.node.src
                 || node.kind != prev.node.kind
                 || node.display_text() != prev.node.display_text()
+                || syntax_theme_changed
                 || TEXT_KEYS
                     .iter()
                     .any(|key| node.style[*key] != prev.node.style[*key]);
             if structure_dirty || layout_dirty || measure_dirty {
                 self.dirty.layout = true;
             }
-            if node.display_text() != prev.node.display_text()
+            if rich_changed
+                || node.display_text() != prev.node.display_text()
+                || syntax_theme_changed
                 || TEXT_KEYS
                     .iter()
                     .any(|key| node.style[*key] != prev.node.style[*key])
             {
                 self.text.layouts.remove(&node.id);
+                self.text.diff_layouts.remove(&node.id);
                 self.dirty.text = true;
                 self.dirty.layout = true;
             }
@@ -924,6 +1073,7 @@ impl Tree {
             if entry.children != children {
                 entry.children = children;
                 entry.structure_dirty = true;
+                self.highlight_dirty = true;
                 self.dirty.layout = true;
                 self.dirty.paint = true;
             }
@@ -937,6 +1087,7 @@ impl Tree {
                     .expect("retained layout node exists");
             }
             self.svgs.remove(&id);
+            self.highlight_dirty = true;
         }
         for (id, entry) in &mut self.entries {
             entry.parent = parents.get(id).cloned();
@@ -1335,6 +1486,10 @@ impl Tree {
     }
     pub fn compute(&mut self, width: f32, height: f32) -> Result<(), String> {
         if !self.dirty.layout && !self.dirty.text {
+            if self.highlight_dirty {
+                self.resolve_highlights();
+                self.highlight_dirty = false;
+            }
             return Ok(());
         }
         for entry in self.entries.values() {
@@ -1367,7 +1522,8 @@ impl Tree {
                             let node = &nodes[id].node;
                             let mut measured = Size::ZERO;
                             if node.is_text() {
-                                let max_width = if node.kind == "text" {
+                                let max_width = if matches!(node.kind.as_str(), "text" | "markdown")
+                                {
                                     known.width.or(match available.width {
                                         AvailableSpace::Definite(w) => Some(w),
                                         AvailableSpace::MinContent => Some(0.0),
@@ -1377,6 +1533,12 @@ impl Tree {
                                     None
                                 };
                                 let (w, h) = text.measure(id, max_width);
+                                measured = Size {
+                                    width: w + crate::text::code_gutter_width(node),
+                                    height: h,
+                                };
+                            } else if node.kind == "diff" {
+                                let (w, h) = text.measure_diff(node);
                                 measured = Size {
                                     width: w,
                                     height: h,
@@ -1408,6 +1570,8 @@ impl Tree {
         self.measure_virtual_rows();
         self.refresh_virtual_anchors();
         self.ensure_focused_textarea_caret_visible();
+        self.resolve_highlights();
+        self.highlight_dirty = false;
         self.layouts += 1;
         self.dirty.layout = false;
         self.dirty.text = false;
@@ -1485,6 +1649,15 @@ impl Tree {
                 "horizontal" | "both"
             ) {
             layout.scroll_width() as f64
+        } else if entry.node.kind == "code" {
+            let pad = entry.node.insets("padding");
+            let border = entry.node.insets("borderWidth");
+            let viewport =
+                (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0);
+            (self.text.measure(id, None).0 as f64
+                + f64::from(crate::text::code_gutter_width(&entry.node))
+                - viewport)
+                .max(0.0)
         } else {
             0.0
         };
@@ -1522,7 +1695,315 @@ impl Tree {
         self.paint(scale, &mut scene);
         scene
     }
+    fn resolve_highlights(&mut self) {
+        self.highlight_ranges.clear();
+        let mut counts = HashMap::new();
+        let mut queries = HashMap::new();
+        let mut focus = HashMap::new();
+        let mut focus_requests = Vec::new();
+        let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+        for id in &self.order {
+            let entry = &self.entries[id];
+            if entry.rect.width() <= 0.0
+                || entry.rect.height() <= 0.0
+                || !matches!(
+                    entry.node.kind.as_str(),
+                    "text" | "markdown" | "code" | "diff"
+                )
+            {
+                continue;
+            }
+            let mut ancestor = Some(id.as_str());
+            while let Some(candidate) = ancestor {
+                let parent = &self.entries[candidate];
+                if parent.node.highlight.is_some() {
+                    groups
+                        .entry(candidate.to_string())
+                        .or_default()
+                        .push(id.clone());
+                    break;
+                }
+                ancestor = parent.parent.as_deref();
+            }
+        }
+        for (owner_id, leaves) in groups {
+            let Some(highlight) = self.entries[&owner_id].node.highlight.as_ref() else {
+                continue;
+            };
+            let mut content = String::new();
+            let mut segments = Vec::<(String, Range<usize>)>::new();
+            let mut previous: Option<&str> = None;
+            for id in &leaves {
+                let entry = &self.entries[id];
+                if entry.node.text.is_empty() {
+                    continue;
+                }
+                if let Some(previous_id) = previous {
+                    let before = &self.entries[previous_id];
+                    let adjacent = before.parent == entry.parent
+                        && (before.rect.y0 - entry.rect.y0).abs() <= 2.0
+                        && (before.rect.x1 - entry.rect.x0).abs() <= 2.0
+                        && !before.node.text.ends_with('\n')
+                        && !entry.node.text.starts_with('\n');
+                    if !adjacent {
+                        content.push('\n');
+                    }
+                }
+                let start = content.len();
+                content.push_str(&entry.node.text);
+                segments.push((id.clone(), start..content.len()));
+                previous = Some(id);
+            }
+            if content.is_empty() {
+                continue;
+            }
+            let cached = self.highlight_match_cache.get(&owner_id).filter(|cached| {
+                cached.content == content
+                    && cached.query == highlight.query
+                    && cached.ranges == highlight.ranges
+                    && cached.case_sensitive == highlight.case_sensitive
+                    && cached.whole_word == highlight.whole_word
+            });
+            let matches: Vec<Range<usize>> = if let Some(cached) = cached {
+                cached.matches.clone()
+            } else {
+                #[cfg(test)]
+                {
+                    self.highlight_searches += 1;
+                }
+                let matches: Vec<Range<usize>> = if !highlight.query.is_empty()
+                    && highlight.query.len() <= 4096
+                {
+                    let Ok(pattern) = regex::RegexBuilder::new(&regex::escape(&highlight.query))
+                        .case_insensitive(!highlight.case_sensitive)
+                        .build()
+                    else {
+                        continue;
+                    };
+                    pattern
+                        .find_iter(&content)
+                        .filter(|found| {
+                            !highlight.whole_word
+                                || (content[..found.start()]
+                                    .chars()
+                                    .next_back()
+                                    .is_none_or(|ch| !is_search_word_char(ch))
+                                    && content[found.end()..]
+                                        .chars()
+                                        .next()
+                                        .is_none_or(|ch| !is_search_word_char(ch)))
+                        })
+                        .take(50_000)
+                        .map(|found| found.range())
+                        .collect()
+                } else {
+                    highlight
+                        .ranges
+                        .iter()
+                        .filter_map(|range| {
+                            let start = utf16_to_byte(&content, range.start)?;
+                            let end = utf16_to_byte(&content, range.end)?;
+                            (start < end).then_some(start..end)
+                        })
+                        .take(50_000)
+                        .collect()
+                };
+                self.highlight_match_cache.insert(
+                    owner_id.clone(),
+                    HighlightMatchCache {
+                        content,
+                        query: highlight.query.clone(),
+                        ranges: highlight.ranges.clone(),
+                        case_sensitive: highlight.case_sensitive,
+                        whole_word: highlight.whole_word,
+                        matches: matches.clone(),
+                    },
+                );
+                matches
+            };
+            counts.insert(owner_id.clone(), matches.len());
+            queries.insert(
+                owner_id.clone(),
+                (
+                    highlight.query.clone(),
+                    highlight.case_sensitive,
+                    highlight.whole_word,
+                ),
+            );
+            if let Some(index) = highlight.active_index
+                && let Some(found) = matches.get(index)
+                && let Some((id, segment)) = segments
+                    .iter()
+                    .find(|(_, segment)| segment.start < found.end && found.start < segment.end)
+            {
+                let start = found.start.max(segment.start) - segment.start;
+                let end = found.end.min(segment.end) - segment.start;
+                let signature = (highlight.query.clone(), index, id.clone(), start);
+                if self.highlight_focus.get(&owner_id) != Some(&signature) {
+                    focus_requests.push((id.clone(), start..end));
+                }
+                focus.insert(owner_id.clone(), signature);
+            }
+            for (index, found) in matches.into_iter().enumerate() {
+                let wash = if highlight.active_index == Some(index) {
+                    highlight.active_color.as_deref().unwrap_or("#ffbd2e")
+                } else {
+                    highlight.color.as_deref().unwrap_or("#fff2a8")
+                };
+                let first = segments.partition_point(|(_, segment)| segment.end <= found.start);
+                for (id, segment) in segments.iter().skip(first) {
+                    if segment.start >= found.end {
+                        break;
+                    }
+                    let start = found.start.max(segment.start);
+                    let end = found.end.min(segment.end);
+                    if start < end {
+                        self.highlight_ranges.entry(id.clone()).or_default().push(
+                            TextPaintHighlight {
+                                range: start - segment.start..end - segment.start,
+                                color: color(wash),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+        for (id, count) in &counts {
+            if self.highlight_counts.get(id) != Some(count)
+                || self.highlight_count_queries.get(id) != queries.get(id)
+            {
+                let (query, case_sensitive, whole_word) = &queries[id];
+                self.pending_layout_events.push(json!({
+                    "type":"highlight", "id":id, "matchCount":count,
+                    "query":query, "caseSensitive":case_sensitive, "wholeWord":whole_word
+                }));
+            }
+        }
+        for id in self.highlight_counts.keys() {
+            if !counts.contains_key(id) && self.entries.contains_key(id) {
+                let (query, case_sensitive, whole_word) = &self.highlight_count_queries[id];
+                self.pending_layout_events.push(json!({
+                    "type":"highlight", "id":id, "matchCount":0,
+                    "query":query, "caseSensitive":case_sensitive, "wholeWord":whole_word
+                }));
+            }
+        }
+        for ranges in self.highlight_ranges.values_mut() {
+            ranges.sort_by_key(|highlight| highlight.range.start);
+        }
+        self.highlight_counts = counts;
+        self.highlight_match_cache
+            .retain(|id, _| self.highlight_counts.contains_key(id));
+        self.highlight_count_queries = queries;
+        self.highlight_focus = focus;
+        for (id, range) in focus_requests {
+            self.scroll_highlight_into_view(&id, range);
+        }
+    }
+
+    fn scroll_highlight_into_view(&mut self, id: &str, range: Range<usize>) {
+        let Some(entry) = self.entries.get(id) else {
+            return;
+        };
+        let node = entry.node.clone();
+        let rect = entry.rect;
+        let pad = node.insets("padding");
+        let border = node.insets("borderWidth");
+        let (left, top, right, bottom) = if node.kind == "diff" {
+            let Some(RichContent::Diff { rows, .. }) = node.rich.as_deref() else {
+                return;
+            };
+            let Some(row) = rows
+                .iter()
+                .position(|row| row.range.start < range.end && range.start < row.range.end)
+            else {
+                return;
+            };
+            let line_height =
+                (node.number("fontSize", 13.0) * node.number("lineHeight", 1.5)).max(1.0) as f64;
+            (
+                0.0,
+                row as f64 * line_height,
+                rect.width(),
+                (row + 1) as f64 * line_height,
+            )
+        } else {
+            let width =
+                (rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
+            if node.kind == "markdown" {
+                self.text
+                    .reveal_markdown_range(id, range.start, range.end, width);
+            }
+            let wrap = (node.kind != "code").then_some(width);
+            let Some(wash) = self
+                .text
+                .range_rects(id, range.start, range.end, wrap)
+                .into_iter()
+                .next()
+            else {
+                return;
+            };
+            (wash.x0, wash.y0, wash.x1, wash.y1)
+        };
+        let offset = self.ancestor_scroll_offset(id);
+        let gutter = if node.kind == "code" {
+            f64::from(crate::text::code_gutter_width(&node))
+        } else {
+            0.0
+        };
+        let mut target = BoxRect::new(
+            rect.x0 + pad[3] as f64 + border[3] as f64 + gutter + left - offset.x,
+            rect.y0 + pad[0] as f64 + border[0] as f64 + top - offset.y,
+            rect.x0 + pad[3] as f64 + border[3] as f64 + gutter + right - offset.x,
+            rect.y0 + pad[0] as f64 + border[0] as f64 + bottom - offset.y,
+        );
+        if node.kind == "code" && self.entries[id].scroll_max_x > 0.0 {
+            let viewport = self.visible_rect(id).unwrap();
+            let current = self.entries[id].scroll_x;
+            target = target + Vec2::new(-current, 0.0);
+            let desired = current
+                + reveal_delta(
+                    target.x0,
+                    target.x1,
+                    viewport.x0 + gutter,
+                    viewport.x1,
+                    12.0,
+                );
+            let events = self.scroll_to_2d(id, desired, self.entries[id].scroll);
+            target = target + Vec2::new(current - self.entries[id].scroll_x, 0.0);
+            self.pending_layout_events.extend(events);
+        }
+        let mut parent = self.entries[id].parent.clone();
+        while let Some(parent_id) = parent {
+            let entry = &self.entries[&parent_id];
+            let next = entry.parent.clone();
+            if entry.node.kind == "scroll" {
+                let viewport = self.visible_rect(&parent_id).unwrap();
+                let old_x = entry.scroll_x;
+                let old_y = entry.scroll;
+                let dx = if entry.scroll_max_x > 0.0 {
+                    reveal_delta(target.x0, target.x1, viewport.x0, viewport.x1, 12.0)
+                } else {
+                    0.0
+                };
+                let dy = if entry.scroll_max > 0.0 {
+                    reveal_delta(target.y0, target.y1, viewport.y0, viewport.y1, 12.0)
+                } else {
+                    0.0
+                };
+                let events = self.scroll_to_2d(&parent_id, old_x + dx, old_y + dy);
+                let updated = &self.entries[&parent_id];
+                target = target + Vec2::new(old_x - updated.scroll_x, old_y - updated.scroll);
+                self.pending_layout_events.extend(events);
+            }
+            parent = next;
+        }
+    }
     pub(crate) fn paint<P: PaintTarget>(&mut self, scale: f64, target: &mut P) {
+        if self.highlight_dirty {
+            self.resolve_highlights();
+            self.highlight_dirty = false;
+        }
         self.painted_nodes = 0;
         let root_rect = self.entries[&self.root].rect;
         self.paint_node(&self.root.clone(), Vec2::ZERO, scale, root_rect, target);
@@ -1772,20 +2253,23 @@ impl Tree {
                     as f32;
             let (tw, th) = self.text.measure(
                 &render_node.id,
-                if matches!(node.kind.as_str(), "text" | "textarea") {
+                if matches!(node.kind.as_str(), "text" | "markdown" | "textarea") {
                     Some(available_width)
                 } else {
                     None
                 },
             );
-            let mut x = rect.x0 + pad[3] as f64 + border[3];
-            let y = if node.kind == "text" {
+            let gutter = f64::from(crate::text::code_gutter_width(&node));
+            let mut x = rect.x0 + pad[3] as f64 + border[3] + gutter
+                - if node.kind == "code" { scroll_x } else { 0.0 };
+            let y = if matches!(node.kind.as_str(), "text" | "markdown" | "code") {
                 rect.y0 + pad[0] as f64 + border[0]
             } else if node.kind == "textarea" {
                 rect.y0 + pad[0] as f64 + border[0] - scroll
             } else {
                 rect.y0 + (rect.height() - th as f64) / 2.0
             };
+            let visible_text_y = (clip.y0.max(rect.y0) - y, clip.y1.min(rect.y1) - y);
             if node.kind == "button" {
                 x = rect.x0 + (rect.width() - tw as f64) / 2.0;
             }
@@ -1793,18 +2277,68 @@ impl Tree {
                 && render_node.value.as_deref().unwrap_or("").is_empty()
             {
                 visual_string(&node, "placeholderColor", "#a1a1aa", state).to_string()
-            } else if node.kind == "text" {
+            } else if matches!(node.kind.as_str(), "text" | "markdown" | "code") {
                 self.resolved_text_foreground(id, "#18181b")
             } else {
                 visual_string(&node, "foreground", "#18181b", state).to_string()
             };
             target.push_clip(Fill::NonZero, transform, &shape);
-            if node.kind == "text"
+            if node.kind == "markdown" {
+                self.text.draw_markdown_blocks(
+                    target,
+                    &render_node,
+                    (x, y),
+                    available_width,
+                    scale,
+                    visible_text_y,
+                );
+            }
+            if matches!(node.kind.as_str(), "text" | "markdown" | "code") {
+                let wrap_width = (node.kind != "code").then_some(available_width);
+                let visible_markdown_bytes = (node.kind == "markdown")
+                    .then(|| {
+                        self.text.markdown_visible_byte_range(
+                            &render_node.id,
+                            available_width,
+                            visible_text_y,
+                        )
+                    })
+                    .flatten();
+                if let Some(highlights) = self.highlight_ranges.get(id) {
+                    for highlight in highlights {
+                        if visible_markdown_bytes.as_ref().is_some_and(|visible| {
+                            highlight.range.end <= visible.start
+                                || highlight.range.start >= visible.end
+                        }) {
+                            continue;
+                        }
+                        for wash in self.text.range_rects(
+                            &render_node.id,
+                            highlight.range.start,
+                            highlight.range.end,
+                            wrap_width,
+                        ) {
+                            target.fill(
+                                Fill::NonZero,
+                                transform,
+                                highlight.color,
+                                &BoxRect::new(x + wash.x0, y + wash.y0, x + wash.x1, y + wash.y1),
+                            );
+                        }
+                    }
+                }
+            }
+            if matches!(node.kind.as_str(), "text" | "markdown" | "code")
                 && let Some((start, end)) = self.static_selection_range_for(id)
             {
-                for selection in
-                    self.text_range_rects(&node, id, &node.text, start, end, Some(available_width))
-                {
+                for selection in self.text_range_rects(
+                    &node,
+                    id,
+                    &node.text,
+                    start,
+                    end,
+                    (node.kind != "code").then_some(available_width),
+                ) {
                     target.fill(
                         Fill::NonZero,
                         transform,
@@ -1884,8 +2418,11 @@ impl Tree {
             self.text.draw(
                 target,
                 &render_node,
-                (x, y),
-                available_width,
+                crate::text::TextDrawArea {
+                    origin: (x, y),
+                    width: available_width,
+                    visible_y: visible_text_y,
+                },
                 color(&foreground),
                 scale,
             );
@@ -1893,7 +2430,7 @@ impl Tree {
             if decoration != "none" {
                 let display_text = render_node.display_text();
                 if !display_text.is_empty() {
-                    let wrap_width = matches!(node.kind.as_str(), "text" | "textarea")
+                    let wrap_width = matches!(node.kind.as_str(), "text" | "markdown" | "textarea")
                         .then_some(available_width);
                     let thickness =
                         f64::from((node.number("fontSize", 14.0) * 0.06).clamp(1.0, 2.0));
@@ -2034,6 +2571,34 @@ impl Tree {
         if node.kind == "scroll" {
             target.pop_layer();
         }
+        if node.kind == "diff" {
+            let pad = node.insets("padding");
+            let inner = (
+                rect.x0 + pad[3] as f64 + border[3],
+                rect.y0 + pad[0] as f64 + border[0],
+            );
+            target.push_clip(Fill::NonZero, transform, &shape);
+            self.text.draw_diff(
+                target,
+                &node,
+                DiffPaintArea {
+                    rect,
+                    clip: clip.intersect(rect),
+                    origin: inner,
+                },
+                color(visual_string(&node, "foreground", "#18181b", state)),
+                DiffPaintDecorations {
+                    selection: self.static_selection_range_for(id),
+                    highlights: self
+                        .highlight_ranges
+                        .get(id)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]),
+                },
+                scale,
+            );
+            target.pop_layer();
+        }
         if matches!(node.kind.as_str(), "scroll" | "textarea") && scroll_max > 0.0 {
             let track = rect.height() - 12.0;
             let thumb = (track * rect.height() / (rect.height() + scroll_max)).max(28.0);
@@ -2144,8 +2709,10 @@ impl Tree {
                 SelectableTextHit::Miss => {}
             }
         }
-        if entry.node.kind == "text"
-            && self.user_select_mode(id) != UserSelectMode::None
+        if matches!(
+            entry.node.kind.as_str(),
+            "text" | "markdown" | "code" | "diff"
+        ) && self.user_select_mode(id) != UserSelectMode::None
             && rect.contains(self.mouse)
         {
             return SelectableTextHit::Text(id.to_string());
@@ -2209,7 +2776,7 @@ impl Tree {
                 || blocks_pointer
                 || entry.node.modal
         } else {
-            entry.node.interactive() || blocks_pointer
+            entry.node.interactive() || entry.node.kind == "markdown" || blocks_pointer
         };
         (eligible && rect.contains(self.mouse)).then(|| id.to_string())
     }
@@ -2737,6 +3304,8 @@ impl Tree {
         blurred
     }
     pub fn pointer_down(&mut self) -> Vec<Value> {
+        self.pressed_link = None;
+        self.pressed_diff_row = None;
         self.set_focus_visible(false);
         if let Some(id) = self.outside_dismissal_at_pointer() {
             self.pressed = None;
@@ -2754,6 +3323,20 @@ impl Tree {
             return self.drag_scrollbar(&id, axis, grab);
         }
         let selectable_text = self.selectable_text_hit_root();
+        if let Some(id) = selectable_text.as_deref()
+            && let Some(href) = self.markdown_link_at_pointer(id)
+        {
+            self.pressed_link = Some((id.to_string(), href));
+        }
+        if let Some(id) = selectable_text.as_deref()
+            && self
+                .entries
+                .get(id)
+                .is_some_and(|entry| entry.node.kind == "diff")
+            && let Some(index) = self.diff_row_index_at_pointer(id)
+        {
+            self.pressed_diff_row = Some((id.to_string(), index));
+        }
         self.hovered = self.hit_root(false);
         self.pressed = self.hovered.clone();
         let mut events = vec![];
@@ -2823,10 +3406,12 @@ impl Tree {
         if self.selection_anchor == Some(self.caret) {
             self.selection_anchor = None;
         }
-        if self.static_selected_text().is_none() {
+        let has_selection = self.static_selected_text().is_some();
+        if !has_selection {
             self.static_selection = None;
         }
         if self.scroll_drag.take().is_some() {
+            self.pressed_link = None;
             return vec![];
         }
         self.hovered = self.hit_root(false);
@@ -2838,6 +3423,40 @@ impl Tree {
                 out.push(json!({"type":"click", "id":id}));
             }
             self.dirty.paint = true;
+        }
+        if let Some((id, href)) = self.pressed_link.take()
+            && !has_selection
+            && self.selectable_text_hit_root().as_deref() == Some(id.as_str())
+            && self.markdown_link_at_pointer(&id).as_deref() == Some(href.as_str())
+        {
+            out.push(json!({"type":"markdownLink", "id":id, "href":href}));
+        }
+        if !has_selection
+            && let Some((id, pressed_index)) = self.pressed_diff_row.take()
+            && self.selectable_text_hit_root().as_deref() == Some(id.as_str())
+            && self.diff_row_index_at_pointer(&id) == Some(pressed_index)
+            && let Some(RichContent::Diff { rows, .. }) = self.entries[&id].node.rich.as_deref()
+            && let Some(row) = rows.get(pressed_index)
+        {
+            if row.file_header {
+                if let Some(path) = &row.file_path {
+                    out.push(json!({"type":"diffToggleFile", "id":id, "path":path}));
+                }
+            } else if row.kind == DiffRowKind::ShowMore {
+                if let Some(hidden) = row.hidden_lines {
+                    out.push(json!({"type":"diffShowMore", "id":id, "hidden":hidden, "path":row.file_path}));
+                }
+            } else if matches!(
+                row.kind,
+                DiffRowKind::Added | DiffRowKind::Removed | DiffRowKind::Context
+            ) {
+                out.push(json!({
+                    "type":"diffLineClick", "id":id, "text":row.text,
+                    "oldLine":row.old_line, "newLine":row.new_line, "path":row.file_path
+                }));
+            }
+        } else {
+            self.pressed_diff_row = None;
         }
         out
     }
@@ -2856,6 +3475,26 @@ impl Tree {
         self.wheel_2d(0.0, delta)
     }
     pub fn wheel_2d(&mut self, delta_x: f64, delta_y: f64) -> Vec<Value> {
+        if let Some(id) = self.hit_root(false)
+            && let Some(entry) = self.entries.get(&id)
+            && entry.node.kind == "markdown"
+            && let Some(rect) = self.visible_rect(&id)
+        {
+            let pad = entry.node.insets("padding");
+            let border = entry.node.insets("borderWidth");
+            let width =
+                (rect.width() - f64::from(pad[1] + pad[3] + border[1] + border[3])).max(0.0) as f32;
+            let y = (self.mouse.1 - rect.y0 - f64::from(pad[0] + border[0])) as f32;
+            let delta = if delta_x.abs() > f64::EPSILON {
+                delta_x
+            } else {
+                delta_y
+            };
+            if self.text.scroll_markdown_block(&id, y, width, delta as f32) {
+                self.dirty.paint = true;
+                return vec![];
+            }
+        }
         if let Some(id) = self.hit_root(true) {
             let entry = &self.entries[&id];
             let speed = if entry.node.kind == "scroll" {
@@ -2865,6 +3504,14 @@ impl Tree {
             };
             let (dx, dy) = match entry.node.kind.as_str() {
                 "textarea" => (0.0, delta_y),
+                "code" => {
+                    let horizontal = if delta_x.abs() > f64::EPSILON {
+                        delta_x
+                    } else {
+                        delta_y
+                    };
+                    (horizontal, 0.0)
+                }
                 "scroll" => match entry.node.scroll_orientation.as_str() {
                     "horizontal" => {
                         let horizontal = if delta_x.abs() > f64::EPSILON {
@@ -3411,7 +4058,7 @@ impl Tree {
             if let Some(selection) = self.static_selection.clone() {
                 let id = selection.focus_id;
                 if let Some(entry) = self.entries.get(&id)
-                    && entry.node.kind == "text"
+                    && matches!(entry.node.kind.as_str(), "text" | "markdown" | "code")
                     && self.user_select_mode(&id) != UserSelectMode::None
                 {
                     let atomic_root = (self.user_select_mode(&id) == UserSelectMode::All)
@@ -4225,26 +4872,87 @@ impl Tree {
 
     fn static_text_index_from_pointer(&mut self, id: &str) -> Option<usize> {
         let entry = self.entries.get(id)?;
-        if entry.node.kind != "text" || self.user_select_mode(id) == UserSelectMode::None {
+        if !matches!(
+            entry.node.kind.as_str(),
+            "text" | "markdown" | "code" | "diff"
+        ) || self.user_select_mode(id) == UserSelectMode::None
+        {
             return None;
         }
         let node = entry.node.clone();
         let rect = self.visible_rect(id).unwrap_or(entry.rect);
         let pad = node.insets("padding");
         let border = node.insets("borderWidth");
+        if node.kind == "diff" {
+            let x = (self.mouse.0 - rect.x0 - pad[3] as f64 - border[3] as f64).max(0.0) as f32;
+            let y = (self.mouse.1 - rect.y0 - pad[0] as f64 - border[0] as f64).max(0.0) as f32;
+            return self.text.diff_index_at(&node, x, y);
+        }
         let width =
             (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
-        let x = (self.mouse.0 - rect.x0 - pad[3] as f64 - border[3] as f64).max(0.0) as f32;
+        let x = (self.mouse.0
+            - rect.x0
+            - pad[3] as f64
+            - border[3] as f64
+            - f64::from(crate::text::code_gutter_width(&node))
+            + if node.kind == "code" {
+                entry.scroll_x
+            } else {
+                0.0
+            })
+        .max(0.0) as f32;
         let y = (self.mouse.1 - rect.y0 - pad[0] as f64 - border[0] as f64).max(0.0) as f32;
         self.text.prepare(&node);
-        let index = self.text.index_at(id, x, y, Some(width))?;
+        let index = self
+            .text
+            .index_at(id, x, y, (node.kind != "code").then_some(width))?;
         Some(floor_boundary(&node.text, index.min(node.text.len())))
+    }
+
+    fn markdown_link_at_pointer(&mut self, id: &str) -> Option<String> {
+        if self.entries.get(id)?.node.kind != "markdown" {
+            return None;
+        }
+        let index = self.static_text_index_from_pointer(id)?;
+        let RichContent::Text { spans, .. } = self.entries[id].node.rich.as_ref()?.as_ref() else {
+            return None;
+        };
+        spans
+            .iter()
+            .find(|span| span.href.is_some() && span.range.contains(&index))
+            .and_then(|span| span.href.clone())
+    }
+
+    fn diff_row_index_at_pointer(&self, id: &str) -> Option<usize> {
+        let entry = self.entries.get(id)?;
+        if entry.node.kind != "diff" {
+            return None;
+        }
+        let rect = self.visible_rect(id).unwrap_or(entry.rect);
+        let pad = entry.node.insets("padding");
+        let border = entry.node.insets("borderWidth");
+        let y = self.mouse.1 - rect.y0 - pad[0] as f64 - border[0] as f64;
+        if y < 0.0 {
+            return None;
+        }
+        let line_height = f64::from(
+            (entry.node.number("fontSize", 13.0) * entry.node.number("lineHeight", 1.5)).max(1.0),
+        );
+        let index = (y / line_height).floor() as usize;
+        let RichContent::Diff { rows, .. } = entry.node.rich.as_ref()?.as_ref() else {
+            return None;
+        };
+        (index < rows.len()).then_some(index)
     }
 
     fn static_selection_range_for(&self, id: &str) -> Option<(usize, usize)> {
         let selection = self.static_selection.as_ref()?;
         let entry = self.entries.get(id)?;
-        if entry.node.kind != "text" || self.user_select_mode(id) == UserSelectMode::None {
+        if !matches!(
+            entry.node.kind.as_str(),
+            "text" | "markdown" | "code" | "diff"
+        ) || self.user_select_mode(id) == UserSelectMode::None
+        {
             return None;
         }
         let value = &entry.node.text;
@@ -4305,11 +5013,16 @@ impl Tree {
             let Some((start, end)) = self.static_selection_range_for(id) else {
                 continue;
             };
-            let text = &self.entries[id].node.text;
-            if let Some(part) = text.get(start..end)
+            let node = &self.entries[id].node;
+            let part = node
+                .rich
+                .as_ref()
+                .and_then(|rich| rich.copy_text(&node.text, start..end))
+                .or_else(|| node.text.get(start..end).map(str::to_string));
+            if let Some(part) = part
                 && !part.is_empty()
             {
-                parts.push(part.to_string());
+                parts.push(part);
             }
         }
         (!parts.is_empty()).then(|| parts.join("\n"))

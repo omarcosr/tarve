@@ -1,5 +1,5 @@
-export { Window, View, Row, Column, Portal, Pressable, Link, Icon, Svg, Path, Circle, Ellipse, Line, Polyline, Polygon, SvgRect, Text, Button, Image, Scroll, ScrollArea, Input, TextArea, TitleBar, Modal, Dialog } from "./components";
-export type { WindowProps, WindowCloseRequestEvent, ViewProps, PortalProps, PressableProps, LinkProps, IconName, IconProps, SvgProps, SvgNode, SvgAttributes, PathProps, CircleProps, EllipseProps, LineProps, PolylineProps, PolygonProps, RectProps, TextProps, ButtonProps, ImageProps, ScrollProps, ScrollAreaProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
+export { Window, View, Row, Column, Portal, Pressable, Link, Icon, Svg, Path, Circle, Ellipse, Line, Polyline, Polygon, SvgRect, Text, Markdown, Code, Diff, Button, Image, Scroll, ScrollArea, Input, TextArea, TitleBar, Modal, Dialog } from "./components";
+export type { WindowProps, WindowCloseRequestEvent, ViewProps, PortalProps, PressableProps, LinkProps, IconName, IconProps, SvgProps, SvgNode, SvgAttributes, PathProps, CircleProps, EllipseProps, LineProps, PolylineProps, PolygonProps, RectProps, TextProps, MarkdownProps, CodeProps, DiffProps, ButtonProps, ImageProps, ScrollProps, ScrollAreaProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
 export { Checkbox, Switch, RadioGroup, Slider, Card, Badge, Separator, Progress, Tabs, Accordion } from "./controls";
 export type { CheckboxProps, SwitchProps, RadioOption, RadioGroupProps, SliderProps, CardProps, BadgeProps, SeparatorProps, ProgressProps, TabItem, TabsProps, AccordionItem, AccordionProps } from "./controls";
 export { VirtualList } from "./virtual-list";
@@ -15,6 +15,8 @@ export * from "./advanced-controls";
 export * from "./chat-controls";
 export * from "./desktop-controls";
 export { normalizeHotkey } from "./hotkeys";
+export { createTextSearchController, findRanges } from "./text-search";
+export type { FindRangesOptions, TextSearchOptions, TextSearchController, TextSearchSnapshot } from "./text-search";
 export type { HotkeyHandler } from "./hotkeys";
 export { createApp, render } from "./app";
 export type { AppErrorEvent, AppErrorSource, AppHandle, AppOptions } from "./app";

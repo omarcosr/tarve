@@ -38,6 +38,7 @@ export function Input({ type = "text", value, style, ...props }: InputProps): VN
       fontFamily: theme.font.family,
       lineHeight: theme.font.lineHeight,
       fontSize: theme.font.size,
+      userSelect: "text",
       ...style,
     },
   });
@@ -70,6 +71,7 @@ export function TextArea({ style, ...props }: TextAreaProps): VNode {
       fontFamily: theme.font.family,
       lineHeight: theme.font.lineHeight,
       fontSize: theme.font.size,
+      userSelect: "text",
       ...style,
     },
   });

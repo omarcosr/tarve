@@ -421,6 +421,11 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       let handled = false;
       let succeeded = true;
       if (event.type === "click" && handlers?.onClick) { handled = true; succeeded = invokeHandler("click", event.id, handlers.onClick); }
+      if (event.type === "markdownLink" && handlers?.onMarkdownLink) { handled = true; succeeded = invokeHandler("markdownLink", event.id, handlers.onMarkdownLink as (...args: never[]) => void, event.href as never); }
+      if (event.type === "diffToggleFile" && handlers?.onDiffToggleFile) { handled = true; succeeded = invokeHandler("diffToggleFile", event.id, handlers.onDiffToggleFile as (...args: never[]) => void, event.path as never); }
+      if (event.type === "diffShowMore" && handlers?.onDiffShowMore) { handled = true; succeeded = invokeHandler("diffShowMore", event.id, handlers.onDiffShowMore as (...args: never[]) => void, event.hidden as never, (event.path ?? undefined) as never); }
+      if (event.type === "diffLineClick" && handlers?.onDiffLineClick) { handled = true; succeeded = invokeHandler("diffLineClick", event.id, handlers.onDiffLineClick as (...args: never[]) => void, { text: event.text, path: event.path ?? undefined, oldLine: event.oldLine ?? undefined, newLine: event.newLine ?? undefined } as never); }
+      if (event.type === "highlight" && handlers?.onHighlight) { handled = true; succeeded = invokeHandler("highlight", event.id, handlers.onHighlight as (...args: never[]) => void, { matchCount: event.matchCount, query: event.query, caseSensitive: event.caseSensitive, wholeWord: event.wholeWord } as never); }
       if (event.type === "context" && handlers?.onContextMenu) { handled = true; succeeded = invokeHandler("context", event.id, handlers.onContextMenu as (...args: never[]) => void, { x: event.x, y: event.y } as never); }
       if (event.type === "outside" && handlers?.onOutsideClick) { handled = true; succeeded = invokeHandler("outside", event.id, handlers.onOutsideClick); }
       if (event.type === "change" && handlers?.onChange) { handled = true; succeeded = invokeHandler("change", event.id, handlers.onChange as (...args: never[]) => void, event.value as never); }

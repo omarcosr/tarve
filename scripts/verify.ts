@@ -11,6 +11,7 @@ const steps = [
   "smoke",
   "smoke:controls",
   "smoke:virtual-list",
+  "smoke:rich-content",
   ...(process.platform === "win32" && process.arch === "x64" ? ["smoke:accessibility"] : []),
   "pack",
   "smoke:package",

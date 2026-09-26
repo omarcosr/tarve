@@ -2063,6 +2063,649 @@ fn user_select_none_inherits_through_auto_and_explicit_text_can_override_it() {
 }
 
 #[test]
+fn native_markdown_and_code_retain_single_nodes_and_select_rendered_text() {
+    let mut markdown = node(
+        "markdown",
+        "markdown",
+        json!({"width":240,"userSelect":"text"}),
+        vec![],
+    );
+    markdown.source = "# Hello **world**\n\nA [link](https://example.com).".into();
+    let mut code = node(
+        "code",
+        "code",
+        json!({"width":240,"userSelect":"text"}),
+        vec![],
+    );
+    code.text = "const answer = 42;".into();
+    code.language = "js".into();
+    let mut tree = Tree::new(root(vec![markdown, code]));
+    tree.compute(320.0, 200.0).unwrap();
+    tree.scene(1.0);
+    assert_eq!(tree.layout_node_count(), 3);
+    assert!(tree.entries["markdown"].node.text.contains("Hello world"));
+    assert!(!tree.entries["markdown"].node.text.contains("**"));
+    assert!(tree.text.layouts.contains_key("markdown"));
+    assert!(tree.text.layouts.contains_key("code"));
+
+    let rect = tree.entries["code"].rect;
+    tree.pointer_move(rect.x0 + 2.0, rect.y0 + 8.0);
+    tree.pointer_down();
+    tree.pointer_move(rect.x0 + 95.0, rect.y0 + 8.0);
+    tree.pointer_up();
+    assert!(
+        tree.selected_text()
+            .is_some_and(|text| text.starts_with("const"))
+    );
+    let previous_shapes = tree.text.shapes;
+    let mut updated = node(
+        "markdown",
+        "markdown",
+        json!({"width":240,"userSelect":"text"}),
+        vec![],
+    );
+    updated.source = "# Updated document".into();
+    tree.patch(vec![updated]).unwrap();
+    tree.compute(320.0, 200.0).unwrap();
+    assert_eq!(tree.entries["markdown"].node.text, "Updated document");
+    assert_eq!(tree.text.shapes, previous_shapes + 1);
+    assert_eq!(tree.layout_node_count(), 3);
+}
+
+#[test]
+fn native_diff_shapes_only_visible_lines_and_reuses_leaf_identity() {
+    let old = String::new();
+    let new = (0..2500).map(|i| format!("line {i}\n")).collect::<String>();
+    let mut diff = node("diff", "diff", json!({"shrink":0}), vec![]);
+    diff.old_text = Some(old);
+    diff.new_text = Some(new);
+    let scroll = node("scroll", "scroll", json!({"height":120}), vec![diff]);
+    let mut tree = Tree::new(root(vec![scroll]));
+    tree.compute(420.0, 180.0).unwrap();
+    tree.scene(1.0);
+    assert_eq!(tree.layout_node_count(), 3);
+    let first: Vec<_> = tree.text.diff_layouts["diff"].keys().copied().collect();
+    assert!(!first.is_empty() && first.len() < 30);
+    tree.pointer_move(20.0, 40.0);
+    tree.wheel(80_000.0);
+    tree.scene(1.0);
+    let second = &tree.text.diff_layouts["diff"];
+    assert!(!second.is_empty() && second.len() < 30);
+    assert!(second.keys().all(|index| !first.contains(index)));
+    assert_eq!(tree.layout_node_count(), 3);
+}
+
+#[test]
+fn native_diff_gutter_selection_copies_content_without_line_numbers() {
+    let mut diff = node(
+        "diff",
+        "diff",
+        json!({"width":460,"userSelect":"text"}),
+        vec![],
+    );
+    diff.source = "--- a/demo.rs\n+++ b/demo.rs\n@@ -1 +1 @@\n-old value\n+new value\n".into();
+    let mut tree = Tree::new(root(vec![diff]));
+    tree.compute(500.0, 160.0).unwrap();
+    tree.scene(1.0);
+    let rect = tree.entries["diff"].rect;
+    let line_height = 13.0 * 1.5;
+    let removed_y = rect.y0 + line_height * 3.0 + line_height / 2.0;
+    let added_y = rect.y0 + line_height * 4.0 + line_height / 2.0;
+    tree.pointer_move(rect.x0 + 4.0, removed_y);
+    tree.pointer_down();
+    tree.pointer_move(rect.x0 + 440.0, added_y);
+    tree.pointer_up();
+    let selected = tree.selected_text().unwrap();
+    assert_eq!(selected, "-old value\n+new value");
+    assert!(!selected.contains("1 1"));
+}
+
+#[test]
+fn native_diff_file_toggle_and_show_more_emit_events_from_one_leaf() {
+    let mut diff = node(
+        "diff",
+        "diff",
+        json!({"width":460,"userSelect":"text"}),
+        vec![],
+    );
+    diff.source = "diff --git a/demo.rs b/demo.rs\n--- a/demo.rs\n+++ b/demo.rs\n@@ -1,2 +1,2 @@\n-old\n+new\n same\n".into();
+    diff.max_lines = Some(1);
+    let mut tree = Tree::new(root(vec![diff]));
+    tree.compute(500.0, 200.0).unwrap();
+    tree.scene(1.0);
+    assert_eq!(tree.layout_node_count(), 2);
+    let rect = tree.entries["diff"].rect;
+    let line_height = 13.0 * 1.5;
+    tree.pointer_move(rect.x0 + 8.0, rect.y0 + line_height / 2.0);
+    tree.pointer_down();
+    let events = tree.pointer_up();
+    assert!(
+        events
+            .iter()
+            .any(|event| event == &json!({"type":"diffToggleFile","id":"diff","path":"demo.rs"}))
+    );
+    let rows = match tree.entries["diff"].node.rich.as_deref().unwrap() {
+        crate::rich::RichContent::Diff { rows, .. } => rows,
+        _ => panic!("expected diff"),
+    };
+    let show_more = rows
+        .iter()
+        .position(|row| row.kind == crate::rich::DiffRowKind::ShowMore)
+        .unwrap();
+    tree.pointer_move(
+        rect.x0 + 8.0,
+        rect.y0 + line_height * (show_more as f64 + 0.5),
+    );
+    tree.pointer_down();
+    let events = tree.pointer_up();
+    assert!(
+        events.iter().any(|event| event
+            == &json!({"type":"diffShowMore","id":"diff","hidden":2,"path":"demo.rs"}))
+    );
+}
+
+#[test]
+fn inherited_highlight_matches_across_adjacent_text_and_rich_leaves() {
+    let mut first = node("first", "text", json!({}), vec![]);
+    first.text = "Hello ".into();
+    let mut second = node("second", "text", json!({}), vec![]);
+    second.text = "Tommy".into();
+    let mut code = node("code", "code", json!({}), vec![]);
+    code.text = "const needle = 1;".into();
+    let mut markdown = node("markdown", "markdown", json!({}), vec![]);
+    markdown.source = "**needle**".into();
+    let mut diff = node("diff", "diff", json!({}), vec![]);
+    diff.source = "--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old\n+needle\n".into();
+    let row = node("row", "row", json!({}), vec![first, second]);
+    let mut scene_root = root(vec![row, code, markdown, diff]);
+    scene_root.highlight =
+        Some(serde_json::from_value(json!({"query":"needle","activeIndex":1})).unwrap());
+    let mut tree = Tree::new(scene_root);
+    tree.compute(600.0, 260.0).unwrap();
+    assert!(tree.take_layout_events().iter().any(|event| event
+        == &json!({
+            "type":"highlight", "id":"root", "matchCount":3,
+            "query":"needle", "caseSensitive":false, "wholeWord":false
+        })));
+    tree.scene(1.0);
+    assert_eq!(tree.highlight_ranges["code"][0].range, 6..12);
+    assert_eq!(tree.highlight_ranges["markdown"][0].range, 0..6);
+    assert_eq!(tree.highlight_ranges["diff"][0].range, 48..54);
+
+    let mut cross_root = root(vec![node(
+        "row",
+        "row",
+        json!({}),
+        vec![
+            {
+                let mut value = node("a", "text", json!({}), vec![]);
+                value.text = "Hello ".into();
+                value
+            },
+            {
+                let mut value = node("b", "text", json!({}), vec![]);
+                value.text = "Tommy".into();
+                value
+            },
+        ],
+    )]);
+    cross_root.highlight = Some(serde_json::from_value(json!({"query":"Hello Tommy"})).unwrap());
+    let mut tree = Tree::new(cross_root);
+    tree.compute(600.0, 100.0).unwrap();
+    tree.scene(1.0);
+    assert_eq!(tree.highlight_ranges["a"][0].range, 0..6);
+    assert_eq!(tree.highlight_ranges["b"][0].range, 0..5);
+}
+
+#[test]
+fn whole_word_highlight_skips_embedded_words() {
+    let mut text = node("text", "text", json!({}), vec![]);
+    text.text = "Cat catalog cat_ cat!".into();
+    text.highlight = Some(serde_json::from_value(json!({"query":"cat","wholeWord":true})).unwrap());
+    let mut tree = Tree::new(root(vec![text]));
+    tree.compute(300.0, 80.0).unwrap();
+    assert_eq!(tree.highlight_ranges["text"].len(), 2);
+    assert!(
+        tree.take_layout_events()
+            .contains(&json!({"type":"highlight","id":"text","matchCount":2,"query":"cat","caseSensitive":false,"wholeWord":true}))
+    );
+}
+
+#[test]
+fn active_highlight_scrolls_into_view_and_navigation_reveals_another_match() {
+    let mut code = node("code", "code", json!({"width":300,"height":300}), vec![]);
+    code.text = format!("target\n{}target", "filler\n".repeat(12));
+    code.highlight =
+        Some(serde_json::from_value(json!({"query":"target","activeIndex":1})).unwrap());
+    let scroll = node(
+        "scroll",
+        "scroll",
+        json!({"width":160,"height":65}),
+        vec![code.clone()],
+    );
+    let mut tree = Tree::new(root(vec![scroll]));
+    tree.compute(300.0, 120.0).unwrap();
+    assert!(tree.entries["scroll"].scroll > 100.0);
+    let before = tree.entries["scroll"].scroll;
+    code.highlight =
+        Some(serde_json::from_value(json!({"query":"target","activeIndex":0})).unwrap());
+    tree.patch(vec![code]).unwrap();
+    tree.compute(300.0, 120.0).unwrap();
+    assert!(tree.entries["scroll"].scroll < before);
+}
+
+#[test]
+fn active_highlight_reveals_horizontal_code_and_diff_rows() {
+    let mut code = node("code", "code", json!({"width":90}), vec![]);
+    code.text = format!("{}target", "prefix_".repeat(20));
+    code.highlight =
+        Some(serde_json::from_value(json!({"query":"target","activeIndex":0})).unwrap());
+    let mut tree = Tree::new(root(vec![code]));
+    tree.compute(180.0, 70.0).unwrap();
+    assert!(tree.entries["code"].scroll_x > 0.0);
+
+    let mut diff = node("diff", "diff", json!({"width":240,"height":400}), vec![]);
+    diff.source = format!(
+        "--- a/demo.txt\n+++ b/demo.txt\n@@ -1,14 +1,15 @@\n{}+target\n",
+        " context\n".repeat(14)
+    );
+    diff.highlight =
+        Some(serde_json::from_value(json!({"query":"target","activeIndex":0})).unwrap());
+    let scroll = node(
+        "scroll",
+        "scroll",
+        json!({"width":240,"height":65}),
+        vec![diff],
+    );
+    let mut tree = Tree::new(root(vec![scroll]));
+    tree.compute(300.0, 120.0).unwrap();
+    assert!(tree.entries["scroll"].scroll > 100.0);
+}
+
+#[test]
+fn inherited_active_highlight_reveals_a_long_diff() {
+    let mut diff = node("diff", "diff", json!({"height":40000}), vec![]);
+    diff.old_text = Some(String::new());
+    diff.new_text = Some(format!("{}answer\n", "line\n".repeat(2000)));
+    let scroll = node("scroll", "scroll", json!({"height":80}), vec![diff]);
+    let mut scene = root(vec![scroll]);
+    scene.highlight =
+        Some(serde_json::from_value(json!({"query":"answer","activeIndex":0})).unwrap());
+    let mut tree = Tree::new(scene);
+    tree.compute(300.0, 120.0).unwrap();
+    assert!(tree.entries["scroll"].scroll > 1000.0);
+}
+
+#[test]
+fn patching_inherited_active_index_reveals_later_diff_match() {
+    let mut top = node("top", "text", json!({}), vec![]);
+    top.text = "answer answer answer".into();
+    let mut diff = node("diff", "diff", json!({"height":40000}), vec![]);
+    diff.old_text = Some(String::new());
+    diff.new_text = Some(format!("{}answer\n", "line\n".repeat(2000)));
+    let scroll = node("scroll", "scroll", json!({"height":80}), vec![diff]);
+    let mut scene = root(vec![top, scroll]);
+    scene.highlight =
+        Some(serde_json::from_value(json!({"query":"answer","activeIndex":0})).unwrap());
+    let mut tree = Tree::new(scene.clone());
+    tree.compute(300.0, 120.0).unwrap();
+    assert_eq!(tree.entries["scroll"].scroll, 0.0);
+    scene.highlight =
+        Some(serde_json::from_value(json!({"query":"answer","activeIndex":3})).unwrap());
+    scene.children.clear();
+    tree.patch(vec![scene]).unwrap();
+    tree.compute(300.0, 120.0).unwrap();
+    assert!(tree.entries["scroll"].scroll > 1000.0);
+}
+
+#[test]
+fn explicit_highlight_ranges_use_utf16_boundaries() {
+    let mut text = node("text", "text", json!({}), vec![]);
+    text.text = "a😀b".into();
+    text.highlight = Some(
+        serde_json::from_value(json!({
+            "ranges":[{"start":2,"end":3},{"start":3,"end":4}]
+        }))
+        .unwrap(),
+    );
+    let mut tree = Tree::new(root(vec![text]));
+    tree.compute(300.0, 80.0).unwrap();
+    tree.scene(1.0);
+    assert_eq!(tree.highlight_ranges["text"].len(), 1);
+    assert_eq!(tree.highlight_ranges["text"][0].range, 5..6);
+}
+
+#[test]
+fn diff_explicit_highlights_are_sorted_for_visible_row_lookup() {
+    let mut diff = node("diff", "diff", json!({"width":300}), vec![]);
+    diff.source = "--- a/demo.txt\n+++ b/demo.txt\n@@ -1 +1 @@\n-old\n+new\n".into();
+    let mut tree = Tree::new(root(vec![diff.clone()]));
+    tree.compute(350.0, 150.0).unwrap();
+    let display = tree.entries["diff"].node.text.clone();
+    let old = display.find("old").unwrap();
+    let new = display.find("new").unwrap();
+    diff.highlight = Some(
+        serde_json::from_value(json!({
+            "ranges":[
+                {"start":new,"end":new+3},
+                {"start":old,"end":old+3},
+                {"start":old+1,"end":new+1}
+            ]
+        }))
+        .unwrap(),
+    );
+    tree.patch(vec![diff]).unwrap();
+    tree.compute(350.0, 150.0).unwrap();
+    let ranges = &tree.highlight_ranges["diff"];
+    assert_eq!(ranges.len(), 3);
+    assert!(
+        ranges
+            .windows(2)
+            .all(|pair| pair[0].range.start <= pair[1].range.start)
+    );
+    tree.scene(1.0);
+}
+
+#[test]
+fn highlight_patches_update_paint_without_rebuilding_text_layout() {
+    let mut text = node("text", "text", json!({}), vec![]);
+    text.text = "alpha beta".into();
+    text.highlight = Some(serde_json::from_value(json!({"query":"alpha"})).unwrap());
+    let mut tree = Tree::new(root(vec![text.clone()]));
+    tree.compute(300.0, 80.0).unwrap();
+    tree.scene(1.0);
+    let shapes = tree.text.shapes;
+    let searches = tree.highlight_searches;
+    assert_eq!(tree.highlight_ranges["text"][0].range, 0..5);
+    tree.take_layout_events();
+    text.highlight.as_mut().unwrap().active_index = Some(0);
+    text.highlight.as_mut().unwrap().color = Some("#ffff00".into());
+    tree.patch(vec![text.clone()]).unwrap();
+    tree.compute(300.0, 80.0).unwrap();
+    assert_eq!(tree.highlight_searches, searches);
+    text.highlight = Some(serde_json::from_value(json!({"query":"beta"})).unwrap());
+    tree.patch(vec![text]).unwrap();
+    tree.compute(300.0, 80.0).unwrap();
+    tree.scene(1.0);
+    assert_eq!(tree.highlight_ranges["text"][0].range, 6..10);
+    assert_eq!(tree.highlight_searches, searches + 1);
+    assert_eq!(tree.text.shapes, shapes);
+    assert!(
+        tree.take_layout_events()
+            .contains(&json!({"type":"highlight","id":"text","matchCount":1,"query":"beta","caseSensitive":false,"wholeWord":false}))
+    );
+    let mut missing = node("text", "text", json!({}), vec![]);
+    missing.text = "alpha beta".into();
+    missing.highlight = Some(serde_json::from_value(json!({"query":"absent"})).unwrap());
+    tree.patch(vec![missing]).unwrap();
+    tree.compute(300.0, 80.0).unwrap();
+    assert!(tree.take_layout_events().iter().any(|event| event
+        == &json!({
+            "type":"highlight", "id":"text", "matchCount":0,
+            "query":"absent", "caseSensitive":false, "wholeWord":false
+        })));
+}
+
+#[test]
+fn unrelated_control_updates_do_not_repeat_text_search() {
+    let mut text = node("text", "searchable", json!({}), vec![]);
+    text.text = "alpha beta gamma".into();
+    text.highlight = Some(serde_json::from_value(json!({"query":"beta"})).unwrap());
+    let button = node("button", "button", json!({}), vec![]);
+    let mut tree = Tree::new(root(vec![text, button.clone()]));
+    tree.compute(320.0, 100.0).unwrap();
+    let searches = tree.highlight_searches;
+    let mut updated = button;
+    updated.disabled = true;
+    tree.patch(vec![updated]).unwrap();
+    tree.compute(320.0, 100.0).unwrap();
+    assert_eq!(tree.highlight_searches, searches);
+}
+
+#[test]
+fn syntax_theme_patch_rebuilds_paint_layout_without_reparsing_rich_content() {
+    let mut diff = node("diff", "diff", json!({"width":460}), vec![]);
+    diff.source = "--- a/demo.rs\n+++ b/demo.rs\n@@ -1 +1 @@\n-old\n+new\n".into();
+    let mut tree = Tree::new(root(vec![diff.clone()]));
+    tree.compute(500.0, 160.0).unwrap();
+    tree.scene(1.0);
+    let parsed = tree.entries["diff"].node.rich.as_ref().unwrap().clone();
+    assert!(!tree.text.diff_layouts["diff"].is_empty());
+    diff.syntax_theme = json!({"keyword":"#ff00aa"});
+    tree.patch(vec![diff]).unwrap();
+    assert!(Arc::ptr_eq(
+        &parsed,
+        tree.entries["diff"].node.rich.as_ref().unwrap()
+    ));
+    assert!(!tree.text.diff_layouts.contains_key("diff"));
+    tree.compute(500.0, 160.0).unwrap();
+    tree.scene(1.0);
+    assert!(!tree.text.diff_layouts["diff"].is_empty());
+}
+
+#[test]
+fn markdown_link_click_emits_url_without_interrupting_text_selection() {
+    let mut markdown = node(
+        "markdown",
+        "markdown",
+        json!({"width":250,"userSelect":"text"}),
+        vec![],
+    );
+    markdown.source = "Go [here](https://example.com).".into();
+    let mut tree = Tree::new(root(vec![markdown]));
+    tree.compute(300.0, 80.0).unwrap();
+    let rect = tree.entries["markdown"].rect;
+    let link_rect = tree
+        .text
+        .range_rects("markdown", 3, 7, Some(rect.width() as f32))[0];
+    let x = rect.x0 + (link_rect.x0 + link_rect.x1) * 0.5;
+    let y = rect.y0 + (link_rect.y0 + link_rect.y1) * 0.5;
+    tree.pointer_move(x, y);
+    tree.pointer_down();
+    let events = tree.pointer_up();
+    assert!(events.iter().any(|event| event
+        == &json!({
+            "type":"markdownLink", "id":"markdown", "href":"https://example.com"
+        })));
+}
+
+#[test]
+fn wide_markdown_blocks_scroll_within_one_leaf_and_keep_text_positions() {
+    let mut markdown = node(
+        "markdown",
+        "markdown",
+        json!({"width":140,"userSelect":"text"}),
+        vec![],
+    );
+    markdown.source = "Before the block.\n\n```txt\n0123456789abcdefghijklmnopqrstuvwxyz\n```\n\nAfter the block.".into();
+    let mut tree = Tree::new(root(vec![markdown]));
+    tree.compute(180.0, 300.0).unwrap();
+    let display = tree.entries["markdown"].node.text.clone();
+    let rect = tree.entries["markdown"].rect;
+    let width = rect.width() as f32;
+    let lines = tree
+        .text
+        .accessibility_lines("markdown", &display, Some(width));
+    let code = display.find("0123456789").unwrap();
+    let code_line = lines
+        .iter()
+        .find(|line| line.byte_range.start <= code && code < line.byte_range.end)
+        .unwrap();
+    let y = ((code_line.y0 + code_line.y1) / 2.0) as f32;
+    let before = tree
+        .text
+        .index_at("markdown", 50.0, y, Some(width))
+        .unwrap();
+    tree.pointer_move(rect.x0 + 50.0, rect.y0 + f64::from(y));
+    tree.wheel_2d(70.0, 0.0);
+    let after = tree
+        .text
+        .index_at("markdown", 50.0, y, Some(width))
+        .unwrap();
+    assert!(
+        after > before,
+        "horizontal wheel must move the code block hit target"
+    );
+    let lines_after = tree
+        .text
+        .accessibility_lines("markdown", &display, Some(width));
+    assert_eq!(
+        lines_after
+            .iter()
+            .map(|line| line.byte_range.clone())
+            .collect::<Vec<_>>(),
+        lines
+            .iter()
+            .map(|line| line.byte_range.clone())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        tree.text
+            .reveal_markdown_range("markdown", code, code + 4, width)
+    );
+    assert_eq!(
+        tree.text
+            .index_at("markdown", 50.0, y, Some(width))
+            .unwrap(),
+        before
+    );
+    assert_eq!(tree.entries["markdown"].children.len(), 0);
+}
+
+#[test]
+fn wide_markdown_table_scrolls_without_moving_following_paragraph() {
+    let mut markdown = node(
+        "markdown",
+        "markdown",
+        json!({"width":130,"userSelect":"text"}),
+        vec![],
+    );
+    markdown.source = "| Name | Value |\n| --- | ---: |\n| A | 123456789012345678901234567890 |\n\nThe following paragraph stays in place.".into();
+    let mut tree = Tree::new(root(vec![markdown]));
+    tree.compute(180.0, 300.0).unwrap();
+    let display = tree.entries["markdown"].node.text.clone();
+    let width = tree.entries["markdown"].rect.width() as f32;
+    let lines = tree
+        .text
+        .accessibility_lines("markdown", &display, Some(width));
+    let table_byte = display.find("1234567890").unwrap();
+    let table_y = lines
+        .iter()
+        .find(|line| line.byte_range.start <= table_byte && table_byte < line.byte_range.end)
+        .unwrap()
+        .y0 as f32
+        + 8.0;
+    let paragraph_byte = display.find("following paragraph").unwrap();
+    let paragraph_y = lines
+        .iter()
+        .find(|line| {
+            line.byte_range.start <= paragraph_byte && paragraph_byte < line.byte_range.end
+        })
+        .unwrap()
+        .y0 as f32
+        + 8.0;
+    let before_table = tree
+        .text
+        .index_at("markdown", 50.0, table_y, Some(width))
+        .unwrap();
+    let before_paragraph = tree
+        .text
+        .index_at("markdown", 50.0, paragraph_y, Some(width))
+        .unwrap();
+    assert!(
+        tree.text
+            .scroll_markdown_block("markdown", table_y, width, 80.0)
+    );
+    assert!(
+        tree.text
+            .index_at("markdown", 50.0, table_y, Some(width))
+            .unwrap()
+            > before_table
+    );
+    assert_eq!(
+        tree.text
+            .index_at("markdown", 50.0, paragraph_y, Some(width))
+            .unwrap(),
+        before_paragraph
+    );
+}
+
+#[test]
+fn long_markdown_paints_only_visible_lines_in_one_leaf() {
+    let mut markdown = node("markdown", "markdown", json!({"width":240}), vec![]);
+    markdown.source = (0..5_000)
+        .map(|index| format!("Line {index} in a large document.\n\n"))
+        .collect();
+    markdown.highlight = Some(serde_json::from_value(json!({"query":"Line"})).unwrap());
+    let scroll = node(
+        "scroll",
+        "scroll",
+        json!({"width":260,"height":140}),
+        vec![markdown],
+    );
+    let mut tree = Tree::new(root(vec![scroll]));
+    tree.compute(300.0, 200.0).unwrap();
+    assert!(tree.entries["scroll"].scroll_max > 10_000.0);
+    assert_eq!(tree.highlight_ranges["markdown"].len(), 5_000);
+    tree.scene(1.0);
+    assert!(
+        tree.text.markdown_painted_lines < 20,
+        "offscreen Markdown lines must not emit glyph commands"
+    );
+    assert_eq!(tree.entries["markdown"].children.len(), 0);
+}
+
+#[test]
+fn markdown_accessibility_keeps_bidi_runs_and_global_offsets() {
+    let mut markdown = node(
+        "markdown",
+        "markdown",
+        json!({"width":260,"userSelect":"text"}),
+        vec![],
+    );
+    markdown.source = "English שלום world\n\n```txt\ncode sample\n```".into();
+    let mut tree = Tree::new(root(vec![markdown]));
+    tree.compute(300.0, 200.0).unwrap();
+    let display = tree.entries["markdown"].node.text.clone();
+    let lines = tree
+        .text
+        .accessibility_lines("markdown", &display, Some(260.0));
+    assert!(lines.iter().any(|line| line.right_to_left));
+    assert!(lines.iter().any(|line| !line.right_to_left));
+    let code = display.find("code sample").unwrap();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.byte_range.start <= code && code < line.byte_range.end)
+    );
+    assert!(
+        lines
+            .windows(2)
+            .all(|pair| pair[0].byte_range.start <= pair[1].byte_range.start)
+    );
+}
+
+#[test]
+fn active_search_reveals_match_inside_wide_markdown_fence() {
+    let mut markdown = node("markdown", "markdown", json!({"width":140}), vec![]);
+    markdown.source = format!("```txt\n{}target\n```", "a".repeat(100));
+    markdown.highlight =
+        Some(serde_json::from_value(json!({"query":"target","activeIndex":0})).unwrap());
+    let mut tree = Tree::new(root(vec![markdown]));
+    tree.compute(180.0, 100.0).unwrap();
+    let display = &tree.entries["markdown"].node.text;
+    let start = display.find("target").unwrap();
+    let wash = tree
+        .text
+        .range_rects("markdown", start, start + 6, Some(140.0));
+    assert!(
+        !wash.is_empty(),
+        "active result must be visible after horizontal reveal"
+    );
+    assert!(wash.iter().all(|rect| rect.x0 >= 0.0 && rect.x1 <= 140.0));
+}
+
+#[test]
 fn protocol_rejects_duplicate_ids() {
     let leaf = node("same", "view", json!({}), vec![]);
     assert!(protocol::validate(&root(vec![leaf.clone(), leaf])).is_err());

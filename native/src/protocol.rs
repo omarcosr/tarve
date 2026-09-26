@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashSet;
+use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 37;
+pub const VERSION: u32 = 41;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -76,6 +77,29 @@ pub struct VirtualListScrollRequest {
     pub offset: f64,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TextHighlightRange {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TextHighlight {
+    #[serde(default)]
+    pub query: String,
+    #[serde(default)]
+    pub ranges: Vec<TextHighlightRange>,
+    pub active_index: Option<usize>,
+    #[serde(default)]
+    pub case_sensitive: bool,
+    #[serde(default)]
+    pub whole_word: bool,
+    pub color: Option<String>,
+    pub active_color: Option<String>,
+}
+
 fn default_virtual_list_alignment() -> String {
     "top".into()
 }
@@ -91,6 +115,28 @@ pub struct Node {
     pub children: Vec<Node>,
     #[serde(default)]
     pub text: String,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub language: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub show_line_numbers: bool,
+    #[serde(default)]
+    pub syntax_theme: Value,
+    #[serde(default = "default_true")]
+    pub word_diff: bool,
+    #[serde(default)]
+    pub collapsed_paths: Vec<String>,
+    pub max_lines: Option<usize>,
+    #[serde(default)]
+    pub old_text: Option<String>,
+    #[serde(default)]
+    pub new_text: Option<String>,
+    pub highlight: Option<TextHighlight>,
+    #[serde(skip)]
+    pub rich: Option<Arc<crate::rich::RichContent>>,
     #[serde(default)]
     pub src: String,
     #[serde(default)]
@@ -155,7 +201,10 @@ impl Node {
         self.style[key].as_str().unwrap_or(fallback)
     }
     pub fn is_text(&self) -> bool {
-        matches!(self.kind.as_str(), "text" | "button" | "input" | "textarea")
+        matches!(
+            self.kind.as_str(),
+            "text" | "markdown" | "code" | "button" | "input" | "textarea"
+        )
     }
     pub fn interactive(&self) -> bool {
         !self.disabled
@@ -386,6 +435,9 @@ pub fn validate(root: &Node) -> Result<(), String> {
             "row",
             "column",
             "text",
+            "markdown",
+            "code",
+            "diff",
             "button",
             "image",
             "scroll",
@@ -433,6 +485,9 @@ pub fn validate_mutations(mutations: &[TreeMutation]) -> Result<(), String> {
                     "row",
                     "column",
                     "text",
+                    "markdown",
+                    "code",
+                    "diff",
                     "button",
                     "image",
                     "scroll",
@@ -561,6 +616,15 @@ pub fn validate_file_dialog(mode: &str, options: &FileDialogOptions) -> Result<(
 }
 
 fn validate_control(node: &Node) -> Result<(), String> {
+    if matches!(node.kind.as_str(), "markdown" | "code" | "diff") && !node.children.is_empty() {
+        return Err(format!("{} must be a leaf node", node.kind));
+    }
+    if node.kind == "diff"
+        && ((node.source.is_empty() && (node.old_text.is_none() || node.new_text.is_none()))
+            || (!node.source.is_empty() && (node.old_text.is_some() || node.new_text.is_some())))
+    {
+        return Err("Diff requires a patch or oldText/newText".into());
+    }
     if node.kind == "scroll" && (!node.scroll_speed.is_finite() || node.scroll_speed <= 0.0) {
         return Err("Scroll speed must be finite and greater than zero".into());
     }

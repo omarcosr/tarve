@@ -14,6 +14,7 @@ await mkdir(join(examples, "assets"), { recursive: true });
 for (const file of [
   "package.json", "tsconfig.json", "basic.tsx", "basic-view.tsx", "components.tsx", "components-view.tsx",
   "counter.tsx", "forms.tsx", "forms-view.tsx", "intrinsics.tsx", "intrinsics-view.tsx", "large-list.tsx", "large-list-view.tsx",
+  "rich-content.tsx", "rich-content-view.tsx",
 ]) {
   await copyFile(join(root, "examples", file), join(examples, file));
 }
@@ -25,7 +26,7 @@ await Bun.write(join(directory, "tsconfig.json"), JSON.stringify({ compilerOptio
   jsx: "react-jsx", jsxImportSource: "tarve", types: ["bun", "tarve/assets"],
 }, include: ["*.tsx", "*.ts"] }));
 await Bun.write(join(directory, "types.test.ts"), [
-  'import type { AppErrorEvent, AppHandle, AppOptions, ButtonProps, DataGridProps, FileDialogOptions, ScrollProps, TreeViewProps } from "tarve";',
+  'import type { AppErrorEvent, AppHandle, AppOptions, ButtonProps, CodeProps, DataGridProps, DiffProps, FileDialogOptions, MarkdownProps, ScrollProps, TreeViewProps } from "tarve";',
   'import type { NativeNode } from "tarve/protocol";',
   '// @ts-expect-error An invalid variant must be rejected by the installed declarations.',
   'const invalid: ButtonProps = { variant: "not-a-variant" };',
@@ -38,6 +39,12 @@ await Bun.write(join(directory, "types.test.ts"), [
   'const opened: Promise<string | undefined> = app.openFileDialog(dialog);',
   'const grid: DataGridProps<{ id: number; name: string }> = { columns: [{ key: "name", header: "Name", sortable: true }], rows: [], rowKey: row => row.id };',
   'const tree: TreeViewProps = { nodes: [{ id: "root", label: "Root" }] };',
+  'const markdown: MarkdownProps = { source: "# Heading", onLinkClick: href => { const url: string = href; void url; } };',
+  'const code: CodeProps = { code: "const n = 1", language: "js" };',
+  'const diff: DiffProps = { oldText: "before", newText: "after" };',
+  'const nativeMarkdown: NativeNode["source"] = markdown.source;',
+  'const nativeCode: NativeNode["language"] = code.language;',
+  'const nativeDiff: NativeNode["newText"] = diff.newText;',
   '// @ts-expect-error Scroll speed must remain numeric in the installed declarations.',
   'const invalidScroll: ScrollProps = { speed: "fast" };',
 ].join("\n"));
@@ -77,7 +84,7 @@ assert.equal(source.executable, false);
 assert.equal(source.nativeControls, true);
 assert.equal(source.virtualList, true);
 await run([process.execPath, "run", "tarve", "build", "app.tsx", "--outfile", "App.exe"]);
-for (const [entry, outfile] of [["counter.tsx", "Counter.exe"], ["basic.tsx", "Basic.exe"], ["components.tsx", "Components.exe"], ["forms.tsx", "Forms.exe"], ["intrinsics.tsx", "Intrinsics.exe"], ["large-list.tsx", "LargeList.exe"]]) {
+for (const [entry, outfile] of [["counter.tsx", "Counter.exe"], ["basic.tsx", "Basic.exe"], ["components.tsx", "Components.exe"], ["forms.tsx", "Forms.exe"], ["intrinsics.tsx", "Intrinsics.exe"], ["large-list.tsx", "LargeList.exe"], ["rich-content.tsx", "RichContent.exe"]]) {
   await run([process.execPath, "run", "tarve", "build", entry, "--outfile", join(directory, "example-build", outfile)], examples);
 }
 const portable = join(directory, "portable");
@@ -92,4 +99,4 @@ assert.equal(executable.result, "PASS");
 assert.equal(executable.executable, true);
 assert.equal(executable.nativeControls, true);
 assert.equal(executable.virtualList, true);
-console.log(JSON.stringify({ result: "PASS", directory, checks: ["npm tarball install", "independent example TypeScript configuration", "all six examples compile from an external directory", "source execution without Rust", "installed tarve build CLI", "standalone EXE with empty cache", "native events, controls, virtual list and local images", "zero idle frames"], source, executable }, null, 2));
+console.log(JSON.stringify({ result: "PASS", directory, checks: ["npm tarball install", "independent example TypeScript configuration", "all seven examples compile from an external directory", "source execution without Rust", "installed tarve build CLI", "standalone EXE with empty cache", "native events, controls, virtual list, rich content and local images", "zero idle frames"], source, executable }, null, 2));

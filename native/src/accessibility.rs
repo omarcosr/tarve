@@ -131,7 +131,7 @@ impl AccessibilityTree {
         }
         match node.kind.as_str() {
             "titlebar" => Role::TitleBar,
-            "text" => Role::Label,
+            "text" | "markdown" | "code" | "diff" => Role::Label,
             "image" => Role::Image,
             "button" => Role::Button,
             "input" => match node.input_type.as_str() {
@@ -556,7 +556,19 @@ impl AccessibilityTree {
             }
 
             match tarve_node.kind.as_str() {
-                "text" if !tarve_node.text.is_empty() => node.set_value(&tarve_node.text),
+                "markdown" if !tarve_node.text.is_empty() => {
+                    let value = tarve_node
+                        .rich
+                        .as_ref()
+                        .and_then(|rich| {
+                            rich.accessibility_text(&tarve_node.text, 0..tarve_node.text.len())
+                        })
+                        .unwrap_or_else(|| tarve_node.text.clone());
+                    node.set_value(value);
+                }
+                "text" | "code" | "diff" if !tarve_node.text.is_empty() => {
+                    node.set_value(&tarve_node.text)
+                }
                 "button"
                     if tarve_node
                         .control

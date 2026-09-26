@@ -1,4 +1,4 @@
-import type { StateStyle, Style } from "../../protocol/src/index";
+import type { StateStyle, Style, SyntaxTheme } from "../../protocol/src/index";
 
 export interface ThemeColors {
   background: string;
@@ -38,11 +38,13 @@ export interface ThemeColors {
 
 export interface ThemeDefinition {
   colors: ThemeColors;
+  syntax: SyntaxTheme;
   focusOutline?: ThemeFocusOutline;
 }
 
 export interface ThemeOverrides {
   colors?: Partial<ThemeColors>;
+  syntax?: Partial<SyntaxTheme>;
   focusOutline?: Partial<ThemeFocusOutline>;
 }
 
@@ -58,6 +60,13 @@ const defaultFocusOutline: ThemeFocusOutline = {
 
 export const lightTheme: ThemeDefinition = {
   focusOutline: { ...defaultFocusOutline },
+  syntax: {
+    comment: "#6e7781", keyword: "#cf222e", string: "#0a3069", stringSpecial: "#0550ae", escape: "#953800",
+    number: "#0550ae", boolean: "#0550ae", typeName: "#8250df", typeBuiltin: "#8250df", constructor: "#8250df",
+    function: "#8250df", functionBuiltin: "#6639ba", macro: "#8250df", property: "#953800", constant: "#0550ae",
+    variable: "#24292f", variableSpecial: "#953800", parameter: "#24292f", operator: "#cf222e", punctuation: "#57606a",
+    tag: "#116329", attribute: "#0550ae", label: "#953800", embedded: "#24292f", invalid: "#cf222e",
+  },
   colors: {
     background: "#fafafa",
     card: "#ffffff",
@@ -97,6 +106,13 @@ export const lightTheme: ThemeDefinition = {
 
 export const darkTheme: ThemeDefinition = {
   focusOutline: { ...defaultFocusOutline },
+  syntax: {
+    comment: "#8b949e", keyword: "#ff7b72", string: "#a5d6ff", stringSpecial: "#79c0ff", escape: "#ffa657",
+    number: "#79c0ff", boolean: "#79c0ff", typeName: "#d2a8ff", typeBuiltin: "#d2a8ff", constructor: "#d2a8ff",
+    function: "#d2a8ff", functionBuiltin: "#bc8cff", macro: "#d2a8ff", property: "#ffa657", constant: "#79c0ff",
+    variable: "#c9d1d9", variableSpecial: "#ffa657", parameter: "#c9d1d9", operator: "#ff7b72", punctuation: "#8b949e",
+    tag: "#7ee787", attribute: "#79c0ff", label: "#ffa657", embedded: "#c9d1d9", invalid: "#f85149",
+  },
   colors: {
     background: "#09090b",
     card: "#09090b",
@@ -137,6 +153,7 @@ export const darkTheme: ThemeDefinition = {
 export function createTheme(overrides: ThemeOverrides = {}, base: ThemeDefinition = lightTheme): ThemeDefinition {
   return {
     colors: { ...base.colors, ...overrides.colors },
+    syntax: { ...base.syntax, ...overrides.syntax },
     focusOutline: { ...defaultFocusOutline, ...base.focusOutline, ...overrides.focusOutline },
   };
 }

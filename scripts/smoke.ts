@@ -14,6 +14,22 @@ function node(snapshot: Snapshot, id: string): NodeSnapshot {
   assert(item, `Missing node: ${id}`); return item;
 }
 async function settle(): Promise<Snapshot> { await Bun.sleep(120); return app.inspect(); }
+async function waitForFrameQuiescence(): Promise<Snapshot> {
+  const deadline = performance.now() + 3_000;
+  let previous = await app.inspect();
+  let stableSince = performance.now();
+  while (performance.now() < deadline) {
+    await Bun.sleep(50);
+    const current = await app.inspect();
+    if (current.frames !== previous.frames || current.layouts !== previous.layouts || current.paints !== previous.paints) {
+      stableSince = performance.now();
+    } else if (performance.now() - stableSince >= 250) {
+      return current;
+    }
+    previous = current;
+  }
+  throw new Error("Native frame stream did not become idle");
+}
 async function click(id: string): Promise<Snapshot> {
   const box = node(await app.inspect(), id);
   app.debug({ type: "input", action: "move", x: box.x + box.width / 2, y: box.y + box.height / 2 });
@@ -110,8 +126,7 @@ try {
   assert(resized.layouts > scrolled.layouts, "Resize must reflow");
   await app.capture(resolve("work/resized.png"));
   app.debug({ type: "input", action: "move", x: -1, y: -1 });
-  await settle();
-  const idleBefore = await app.inspect();
+  const idleBefore = await waitForFrameQuiescence();
   await Bun.sleep(500);
   const idleAfter = await app.inspect();
   assert.equal(idleAfter.frames, idleBefore.frames, "Idle window must not run a frame loop");

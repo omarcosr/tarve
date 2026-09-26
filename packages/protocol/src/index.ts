@@ -1,9 +1,9 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 37;
+export const PROTOCOL_VERSION = 41;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
-export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter";
+export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "markdown" | "code" | "diff" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter";
 export type SvgElementName = "path" | "circle" | "ellipse" | "g" | "line" | "polygon" | "polyline" | "rect";
 export type SvgAttributeValue = string | number;
 export type SvgAttributes = Record<string, SvgAttributeValue>;
@@ -14,6 +14,23 @@ export type Insets = number | { top?: number; right?: number; bottom?: number; l
 export type OutlineStyle = "dotted" | "dashed" | "solid" | "double" | "groove" | "ridge" | "inset" | "outset" | "none" | "hidden";
 export type UserSelect = "auto" | "text" | "none" | "all";
 export type TextDecoration = "none" | "underline" | "overline" | "line-through";
+export interface SyntaxTheme {
+  comment: string; keyword: string; string: string; stringSpecial: string; escape: string;
+  number: string; boolean: string; typeName: string; typeBuiltin: string; constructor: string;
+  function: string; functionBuiltin: string; macro: string; property: string; constant: string;
+  variable: string; variableSpecial: string; parameter: string; operator: string; punctuation: string;
+  tag: string; attribute: string; label: string; embedded: string; invalid: string;
+}
+export interface TextHighlightRange { start: number; end: number }
+export interface TextHighlight {
+  query?: string;
+  ranges?: TextHighlightRange[];
+  activeIndex?: number;
+  caseSensitive?: boolean;
+  wholeWord?: boolean;
+  color?: string;
+  activeColor?: string;
+}
 export interface StateStyle {
   background?: string; foreground?: string; borderColor?: string; radius?: number;
   outlineWidth?: number; outlineColor?: string; outlineOffset?: number; outlineRadius?: number; outlineStyle?: OutlineStyle;
@@ -33,6 +50,9 @@ export interface Style extends StateStyle {
   borderWidth?: Insets;
   radius?: number; fontSize?: number; fontWeight?: number; fontFamily?: string;
   lineHeight?: number; textAlign?: "start" | "center" | "end";
+  taskMarkerColor?: string; taskMarkerCheckColor?: string;
+  markdownCodeBackground?: string; markdownQuoteBackground?: string; markdownQuoteAccent?: string;
+  markdownTableHeaderBackground?: string; markdownTableRule?: string;
   hover?: StateStyle; focus?: StateStyle; focusVisible?: StateStyle; active?: StateStyle; disabled?: StateStyle;
   strokeWidth?: number; pointerEvents?: "auto" | "block"; userSelect?: UserSelect;
 }
@@ -60,7 +80,11 @@ export interface VirtualListMeasurement { key: string; height: number }
 export interface VirtualListAnchor { index: number; key: string; offset: number }
 export interface NativeNode {
   id: string; kind: NodeKind; style: Style; children: NativeNode[];
-  text?: string; src?: string; fit?: "cover" | "contain"; disabled?: boolean;
+  text?: string; source?: string; language?: string; path?: string; oldText?: string; newText?: string;
+  showLineNumbers?: boolean; syntaxTheme?: Partial<SyntaxTheme>;
+  wordDiff?: boolean; collapsedPaths?: string[]; maxLines?: number;
+  highlight?: TextHighlight;
+  src?: string; fit?: "cover" | "contain"; disabled?: boolean;
   svg?: string;
   value?: string; placeholder?: string;
   inputType?: "text" | "password" | "email" | "number" | "search" | "tel" | "url";
@@ -141,6 +165,11 @@ export type NativeEvent =
   | { type: "virtualListLayout"; id: string; items: VirtualListMeasurement[] }
   | { type: "virtualListScrollToItem"; id: string; index: number; offset: number }
   | { type: "virtualListFocus"; id: string; key: string | null }
+  | { type: "markdownLink"; id: string; href: string }
+  | { type: "diffToggleFile"; id: string; path: string }
+  | { type: "diffShowMore"; id: string; hidden: number; path?: string | null }
+  | { type: "diffLineClick"; id: string; text: string; path?: string | null; oldLine?: number | null; newLine?: number | null }
+  | { type: "highlight"; id: string; matchCount: number; query?: string; caseSensitive?: boolean; wholeWord?: boolean }
   | { type: "hover"; id: string; entered: boolean }
   | { type: "key"; id: string; key: string }
   | { type: "blur"; id: string }

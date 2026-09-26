@@ -59,7 +59,7 @@ bun run tarve build app.tsx --outfile dist/MeuApp.exe
 
 Configure `tsconfig.json` com `"jsx": "react-jsx"`, `"jsxImportSource": "tarve"`, `"moduleResolution": "Bundler"` e `"types": ["bun", "tarve/assets"]`. A API pública é importada de `tarve`; o build também está disponível como `import { build } from "tarve/build"`.
 
-`examples/counter.tsx` mostra o app mínimo, `examples/basic.tsx` reúne os componentes iniciais, `examples/forms.tsx` demonstra controles de formulário e `examples/large-list.tsx` mostra registros com lista virtual. Exemplos usam a mesma API instalada, sem configurar manualmente a DLL. Eventos nativos ficam em uma fila FIFO na DLL; um named pipe do Windows acorda o event loop apenas quando a fila passa de vazia para não vazia, e o runtime Bun principal então a drena com `tarve_poll_event()` não bloqueante. Não há um segundo Bun Worker dedicado ao pump de eventos.
+`examples/counter.tsx` mostra o app mínimo, `examples/basic.tsx` reúne os componentes iniciais, `examples/forms.tsx` demonstra controles de formulário, `examples/large-list.tsx` mostra registros com lista virtual e `examples/rich-content.tsx` reúne Markdown, código destacado e diff nativo longo. Exemplos usam a mesma API instalada, sem configurar manualmente a DLL. Eventos nativos ficam em uma fila FIFO na DLL; um named pipe do Windows acorda o event loop apenas quando a fila passa de vazia para não vazia, e o runtime Bun principal então a drena com `tarve_poll_event()` não bloqueante. Não há um segundo Bun Worker dedicado ao pump de eventos.
 
 `examples/` é um projeto Bun consumidor: tem `package.json` e `tsconfig.json` próprios e importa somente a API pública. Após publicar `tarve@0.1.0` no registry, instale o pacote:
 
@@ -75,7 +75,7 @@ bun run tarve build counter.tsx --outfile dist/Counter.exe
 bun run tarve build basic.tsx --outfile dist/Basic.exe
 ```
 
-Antes da publicação, `bun run smoke:package` copia os exemplos para uma pasta temporária fora do repositório, instala o tarball npm local, verifica o `tsconfig.json` independente e compila os quatro `.exe` com o CLI instalado. Para trabalhar na árvore de desenvolvimento, `bun run setup:examples` instala esse tarball em `examples/node_modules` sem registrar um caminho local no manifesto. Uma cópia própria dos exemplos pode instalar `A:/tarve/dist/tarve-0.1.0.tgz` com `bun add`; o código continua igual.
+Antes da publicação, `bun run smoke:package` copia os exemplos para uma pasta temporária fora do repositório, instala o tarball npm local, verifica o `tsconfig.json` independente e compila os sete `.exe` com o CLI instalado, incluindo `RichContent.exe`. Para trabalhar na árvore de desenvolvimento, `bun run setup:examples` instala esse tarball em `examples/node_modules` sem registrar um caminho local no manifesto. Uma cópia própria dos exemplos pode instalar `A:/tarve/dist/tarve-0.1.0.tgz` com `bun add`; o código continua igual.
 
 ### Modal / Dialog
 
@@ -103,6 +103,18 @@ let open = false;
 O kit também inclui `Tooltip`, `Popover`, `DropdownMenu`, `ContextMenu`, `Combobox`, `Command`, `CommandPalette`, `AlertDialog`, `Sheet`, `Toast`, `Toaster`, `Skeleton`, `Spinner`, `Avatar`, `Breadcrumb`, `Pagination`, `Collapsible`, `Table`, `DataTable`, `TreeView`, `DataGrid`, `Menubar`, `HoverCard`, `Calendar` e `DatePicker`. Popups usam a primitive nativa de portal: continuam ancorados pelo layout do trigger, mas escapam do clipping de `Scroll`, participam do hit-test acima do conteúdo normal e podem fechar por clique fora. Triggers interativos existentes são preservados em vez de embrulhados em outro controle; menus/combobox/command usam roving focus nativo com teclado. `ContextMenu` abre por clique direito nativo.
 
 A camada de componentes também cobre `Alert`, `AspectRatio`, `ButtonGroup`, `Carousel`, `Chart`, `Drawer`, `Empty`, `Field`, `InputGroup`, `InputOTP`, `Item`, `Kbd`, `Label`, `NativeSelect`, `NavigationMenu`, `Resizable`, `Sidebar`, `Toggle`, `ToggleGroup`, `Typography`, `Direction`, `Questionnaire`, `Attachment`, `Bubble`, `Marker`, `Message` e `MessageScroller`. Eles usam as mesmas primitives e tokens do tema; `Resizable` usa um splitter nativo controlado com drag e teclado, e `Chart` renderiza barras com primitives existentes, sem dependência externa.
+
+`Markdown`, `Code` e `Diff` são nós folha nativos para documentos grandes. `Markdown` recebe `source` e suporta sintaxe GFM (tabelas com alinhamento de células, cabeçalho e regras pintados nativamente, tarefas, links, listas, citações e blocos de código); HTML embutido aparece como texto literal. Links abrem a URI pelo sistema ou chamam `onLinkClick`. `Code` recebe `code`, `language` e opcionalmente `path` para destacar sintaxe com Syntect. Os três permitem seleção e cópia de conteúdo sem incluir gutters. `Diff` recebe um patch unificado/git em `source` ou `oldText` e `newText`; calcula o patch nativamente, destaca linhas e palavras alteradas e molda apenas as linhas visíveis dentro de `Scroll`. `collapsedPaths`, `maxLines`, `onToggleFile`, `onShowMore` e `onLineClick` controlam a interação sem criar nós extras. `onShowMore` recebe `(hiddenLines, path?)`; `onLineClick` recebe texto, caminho e números de linha da linha clicada. A prop `highlight` pode ser aplicada a um contêiner para buscar nas folhas `Text`, `Markdown`, `Code` e `Diff` descendentes, inclusive através de folhas adjacentes na mesma linha. `wholeWord` e `caseSensitive` refinam a busca; `activeIndex` destaca e revela a ocorrência ativa, `onHighlight` informa `matchCount` e `ranges` aceita offsets UTF-16 explícitos. `createTextSearchController` fornece `next`, `previous`, `goTo` e uma `props` pronta para o contêiner; `findRanges` calcula ranges UTF-16 para buscas locais. Os três usam Parley e o mesmo caminho de pintura nos renderers CPU, D3D11 e Vello. Execute `bun run smoke:rich-content` para validar automaticamente CPU, D3D11 e Vello/DX12.
+
+Tabelas e blocos de código Markdown largos rolam horizontalmente com a roda do mouse sobre o bloco. A seleção, a busca e as posições de acessibilidade acompanham o deslocamento dentro do mesmo leaf.
+
+```tsx
+<Column highlight={{ query: search, activeIndex: currentMatch }} onHighlight={({ matchCount }) => setMatchCount(matchCount)}>
+  <Markdown source={document} />
+  <Code code={snippet} language="tsx" showLineNumbers />
+  <Diff source={patch} maxLines={expanded ? undefined : 80} onShowMore={() => setExpanded(true)} />
+</Column>
+```
 
 `List` e `VirtualList` são componentes distintos. `List` é a lista normal: mantém todos os itens montados, aceita alturas diferentes por item e pode receber `items`/`renderItem` ou `children`. `VirtualList` é a opção para coleções grandes: usa linhas de altura fixa e mantém na árvore nativa apenas a faixa visível mais o overscan.
 

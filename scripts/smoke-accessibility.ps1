@@ -367,6 +367,10 @@ try {
   $modalFocus = [System.Windows.Automation.AutomationElement]::FocusedElement
   Assert-True ($modalFocus.Current.ProcessId -eq $process.Id) "opening modal must move UIA focus into the app"
   Assert-True ($modalFocus.Current.Name -eq "Dialog value") "modal fallback focus must initialize the first editable control"
+  $null = Wait-Until -Message "modal edit TextPattern selection" -Probe {
+    $selection = $dialogText.GetSelection()
+    if ($selection.Length -eq 1) { $dialogInput } else { $null }
+  }
   $dialogSelection = $dialogText.GetSelection()
   Assert-True ($dialogSelection.Length -eq 1) "modal edit must publish a single TextPattern selection"
   $dialogSelectedText = $dialogSelection[0].GetText(-1)

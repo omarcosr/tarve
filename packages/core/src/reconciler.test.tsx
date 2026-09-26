@@ -4,6 +4,7 @@ import { compileTree, diffTreeMutations, diffTrees } from "./reconciler";
 import { createTheme, darkTheme, lightTheme, Theme, theme } from "./theme";
 import type { ComponentAdapter } from "./component-adapter";
 import type { VNode } from "./jsx-runtime";
+import { PROTOCOL_VERSION } from "../../protocol/src/index";
 
 describe("native TSX protocol", () => {
   test("compiles function components, flattens children, and keeps callbacks outside JSON", () => {
@@ -27,11 +28,15 @@ describe("native TSX protocol", () => {
         <Text id="selectable" style={{ userSelect: "all" }}>Selectable</Text>
         <Button id="button">Button</Button>
         <Pressable id="pressable"><Text>Pressable</Text></Pressable>
+        <Pressable id="editor-shell"><Input id="input" value="Editable" /><TextArea id="textarea" value="Editable" /></Pressable>
       </Window>,
     );
     expect(tree.nodes.get("selectable")?.style.userSelect).toBe("all");
     expect(tree.nodes.get("button")?.style.userSelect).toBe("none");
     expect(tree.nodes.get("pressable")?.style.userSelect).toBe("none");
+    expect(tree.nodes.get("editor-shell")?.style.userSelect).toBe("none");
+    expect(tree.nodes.get("input")?.style.userSelect).toBe("text");
+    expect(tree.nodes.get("textarea")?.style.userSelect).toBe("text");
   });
   test("Text accepts CSS-like color aliases in base and visual states", () => {
     const tree = compileTree(
@@ -582,7 +587,7 @@ describe("native TSX protocol", () => {
   test("Window close requests stay in JS handlers while native receives an intercept flag", () => {
     let requested = false;
     const tree = compileTree(<Window onCloseRequest={() => { requested = true; }}><Text>Hello</Text></Window>);
-    expect(tree.document.version).toBe(37);
+    expect(tree.document.version).toBe(PROTOCOL_VERSION);
     expect(tree.document.root.closeIntercept).toBe(true);
     expect(JSON.stringify(tree.document)).not.toContain("onCloseRequest");
     tree.handlers.get(tree.document.root.id)?.onCloseRequest?.({ defaultPrevented: false, preventDefault() {} });

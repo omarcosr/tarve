@@ -21,6 +21,8 @@ export type {
 } from "./components/svg";
 export { Text } from "./components/text";
 export type { TextProps } from "./components/text";
+export { Markdown, Code, Diff } from "./components/rich-content";
+export type { MarkdownProps, CodeProps, DiffProps } from "./components/rich-content";
 export { Button } from "./components/button";
 export type { ButtonProps } from "./components/button";
 export { Image } from "./components/image";

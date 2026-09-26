@@ -1,0 +1,13 @@
+diff --git a/src/api.ts b/src/api.ts
+--- a/src/api.ts
++++ b/src/api.ts
+@@ -1,5 +1,7 @@
+ export interface Request {
+-  timeout: number;
++  timeoutMs: number;
++  retryCount?: number;
+ }
+ 
+-export const defaultTimeout = 1000;
++export const defaultTimeout = 2500;
++export const maxRetries = 3;

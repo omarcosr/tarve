@@ -3,7 +3,7 @@ import type { NativeCommand, NativeEvent, SceneDocument } from "../../protocol/s
 import { createApp, type AppErrorEvent } from "./app";
 import type { NativeBridge } from "./bridge";
 import { Slider } from "./controls";
-import { Button, Column, Input, ScrollArea, Text, Window } from "./components";
+import { Button, Column, Diff, Input, ScrollArea, Text, Window } from "./components";
 import { InputOTP } from "./form-controls";
 import { Svg } from "./components/svg";
 import { VirtualList } from "./virtual-list";
@@ -42,6 +42,34 @@ class FakeBridge implements NativeBridge {
 }
 
 describe("controlled native reconciliation", () => {
+  test("Diff callbacks receive the file associated with each row", async () => {
+    const bridge = new FakeBridge();
+    const shown: Array<[number, string | undefined]> = [];
+    const lines: Array<{ text: string; path?: string; oldLine?: number; newLine?: number }> = [];
+    const app = createApp(() => Window({ children: Diff({
+      id: "patch", source: "--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new\n",
+      onShowMore: (hidden, path) => shown.push([hidden, path]),
+      onLineClick: event => lines.push(event),
+    }) }), { bridge });
+    await app.ready;
+    bridge.emit({ type: "diffShowMore", id: "patch", hidden: 5, path: "a.rs" });
+    bridge.emit({ type: "diffLineClick", id: "patch", text: "+new", path: "a.rs", newLine: 1 });
+    expect(shown).toEqual([[5, "a.rs"]]);
+    expect(lines).toEqual([{ text: "+new", path: "a.rs", oldLine: undefined, newLine: 1 }]);
+    app.close();
+  });
+  test("native highlight counts reach the declaring container", async () => {
+    const bridge = new FakeBridge();
+    const counts: number[] = [];
+    const app = createApp(() => <Window highlight={{ query: "needle" }} onHighlight={({ matchCount }) => counts.push(matchCount)}>
+      <Text>needle</Text>
+    </Window>, { bridge });
+    await app.ready;
+    bridge.emit({ type: "highlight", id: "root", matchCount: 1 });
+    expect(counts).toEqual([1]);
+    app.close();
+  });
+
   test("createApp forwards renderer selection and defaults to auto", async () => {
     const cpuBridge = new FakeBridge();
     const cpuApp = createApp(() => <Window />, { bridge: cpuBridge, renderer: "cpu" });
