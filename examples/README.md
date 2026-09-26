@@ -1,28 +1,49 @@
-# Exemplos Tarve
+# Tarve examples
 
-Este diretório é um projeto Bun consumidor do pacote npm `tarve`. Os exemplos importam apenas `tarve` e arquivos de mídia locais; o `tsconfig.json` não herda configuração do repositório.
+This directory is a standalone Bun consumer project for the `tarve` npm package. The examples import only public package APIs and local media assets; their `tsconfig.json` does not inherit repository configuration.
 
-Após a publicação de `tarve@0.1.0`, instale o pacote neste projeto:
+From the repository root, build the local package and install its tarball into this consumer project:
+
+```powershell
+bun run pack
+bun run setup:examples
+cd examples
+bun run check
+```
+
+Run an example with one of the package scripts:
+
+```powershell
+bun run counter
+bun run basic
+bun run components
+bun run forms
+bun run intrinsics
+bun run large-list
+bun run rich-content
+bun run diff
+```
+
+The examples cover:
+
+- `counter`: a minimal native app plus global hotkeys, file/folder dialogs, save dialogs, and cancellable `Window.onCloseRequest`.
+- `basic`: core layout, text, buttons, images, scrolling, and common controls.
+- `components`: the broader component set, including `TreeView` and `DataGrid`.
+- `forms`: input and form controls.
+- `intrinsics`: Tarve JSX intrinsics such as `div`, `span`, `p`, `img`, `input`, `textarea`, `button`, `label`, `select`, `progress`, headings, and lowercase SVG elements.
+- `large-list`: virtualized list behavior.
+- `rich-content`: GFM Markdown, syntax-highlighted TypeScript, native code line numbers, and generated diffs.
+- `diff`: an interactive patch review with file sections, search, word-level changes, selectable text, collapsible files, and visible-line limits. **Open .patch / .diff** accepts Git patches and unified diffs up to 8 MB.
+
+Build any example as a standalone Windows executable with the package CLI:
+
+```powershell
+bun run tarve build counter.tsx --outfile dist/Counter.exe
+bun run tarve build rich-content.tsx --outfile dist/RichContent.exe
+```
+
+When consuming a published package instead of the repository tarball:
 
 ```powershell
 bun add tarve@0.1.0
-bun run check
-bun run counter
-bun run components
-bun run rich-content
-bun run diff
-bun run intrinsics
-bun run tarve build counter.tsx --outfile dist/Counter.exe
-bun run tarve build basic.tsx --outfile dist/Basic.exe
-bun run tarve build components.tsx --outfile dist/Components.exe
-bun run tarve build rich-content.tsx --outfile dist/RichContent.exe
-bun run tarve build intrinsics.tsx --outfile dist/Intrinsics.exe
 ```
-
-`components` também demonstra `TreeView` e `DataGrid`. `intrinsics` demonstra a sintaxe JSX nativa (`div`, `span`, `p`, `img`, `input`, `textarea`, `button`, `svg` com `path`/`circle`/`rect`/outros filhos SVG lowercase, `label`, `select`/`option`, `progress`, `hr` e `h1`–`h6`). `counter` demonstra APIs de desktop que dependem do `AppHandle`: hotkey global (`Ctrl+S`), open/open-multiple/folder/save dialogs nativos e `Window.onCloseRequest` cancelável.
-
-`rich-content` reúne um documento GFM, código TypeScript com destaque de sintaxe e um diff gerado de 180 linhas dentro de uma área de rolagem.
-
-`diff` abre uma revisão interativa inspirada no [exemplo Diff do GPUix](https://github.com/remorses/gpuix/blob/main/examples/diff.tsx): dois hunks TSX, um arquivo TOML, busca, destaque por palavra, seleção/cópia sem gutters, collapse por arquivo e controle de linhas visíveis. Use **Abrir .patch / .diff** para selecionar um patch Git ou unified diff (até 8 MB). Há outros patches em `examples/patches/`. Execute `bun run diff` dentro de `examples/` após `bun run setup:examples` na raiz.
-
-Antes da publicação, rode `bun run pack` na raiz e instale o tarball npm em uma cópia independente desta pasta com `bun add A:/tarve/dist/tarve-0.1.0.tgz`. Na árvore de desenvolvimento, `bun run setup:examples` instala esse mesmo tarball sem gravar uma dependência de caminho local no `package.json` dos exemplos. A verificação `bun run smoke:package` copia os exemplos para uma pasta temporária e compila os sete executáveis fora do repositório, incluindo `RichContent.exe`.

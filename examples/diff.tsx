@@ -9,15 +9,15 @@ connectRefresh(() => app.update());
 connectOpenPatch(async () => {
   try {
     const path = await app.openFileDialog({
-      title: "Abrir patch Git ou unified diff",
+      title: "Open a Git patch or unified diff",
       filters: [{ name: "Patches", extensions: ["patch", "diff"] }],
     });
     if (!path) return;
-    if ((await stat(path)).size > 8 * 1024 * 1024) throw new Error("O patch excede o limite de 8 MB deste exemplo.");
+    if ((await stat(path)).size > 8 * 1024 * 1024) throw new Error("The patch exceeds this example's 8 MB limit.");
     const source = new TextDecoder("utf-8", { fatal: true }).decode(await readFile(path));
     setPatchSource(normalizePatch(source), basename(path));
   } catch (error) {
-    setPatchError(`Não foi possível abrir o patch: ${error instanceof Error ? error.message : String(error)}`);
+    setPatchError(`Could not open the patch: ${error instanceof Error ? error.message : String(error)}`);
   }
 });
 await app.ready;
