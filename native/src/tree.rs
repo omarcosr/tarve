@@ -691,7 +691,9 @@ impl Tree {
                                 file_path: None,
                                 hidden_lines: None,
                                 file_header: false,
+                                gutter_digits: 1,
                             }],
+                            files: Vec::new(),
                             max_columns: node.text.chars().count(),
                             max_line_number: 0,
                         }));
@@ -1534,7 +1536,7 @@ impl Tree {
                                 };
                                 let (w, h) = text.measure(id, max_width);
                                 measured = Size {
-                                    width: w + crate::text::code_gutter_width(node),
+                                    width: w + text.code_gutter_inset(node),
                                     height: h,
                                 };
                             } else if node.kind == "diff" {
@@ -1655,7 +1657,7 @@ impl Tree {
             let viewport =
                 (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0);
             (self.text.measure(id, None).0 as f64
-                + f64::from(crate::text::code_gutter_width(&entry.node))
+                + f64::from(self.text.code_gutter_inset(&entry.node))
                 - viewport)
                 .max(0.0)
         } else {
@@ -1947,7 +1949,7 @@ impl Tree {
         };
         let offset = self.ancestor_scroll_offset(id);
         let gutter = if node.kind == "code" {
-            f64::from(crate::text::code_gutter_width(&node))
+            f64::from(self.text.code_gutter_inset(&node))
         } else {
             0.0
         };
@@ -2259,7 +2261,7 @@ impl Tree {
                     None
                 },
             );
-            let gutter = f64::from(crate::text::code_gutter_width(&node));
+            let gutter = f64::from(self.text.code_gutter_width(&node));
             let mut x = rect.x0 + pad[3] as f64 + border[3] + gutter
                 - if node.kind == "code" { scroll_x } else { 0.0 };
             let y = if matches!(node.kind.as_str(), "text" | "markdown" | "code") {
@@ -2283,6 +2285,11 @@ impl Tree {
                 visual_string(&node, "foreground", "#18181b", state).to_string()
             };
             target.push_clip(Fill::NonZero, transform, &shape);
+            let code_source_clip = (node.kind == "code").then(|| {
+                let left = rect.x0 + pad[3] as f64 + border[3] + gutter;
+                let right = (rect.x1 - pad[1] as f64 - border[1]).max(left);
+                BoxRect::new(left, rect.y0, right, rect.y1)
+            });
             if node.kind == "markdown" {
                 self.text.draw_markdown_blocks(
                     target,
@@ -2292,6 +2299,9 @@ impl Tree {
                     scale,
                     visible_text_y,
                 );
+            }
+            if let Some(source_clip) = code_source_clip {
+                target.push_clip(Fill::NonZero, transform, &source_clip);
             }
             if matches!(node.kind.as_str(), "text" | "markdown" | "code") {
                 let wrap_width = (node.kind != "code").then_some(available_width);
@@ -2351,6 +2361,9 @@ impl Tree {
                         ),
                     );
                 }
+            }
+            if code_source_clip.is_some() {
+                target.pop_layer();
             }
             if matches!(node.kind.as_str(), "input" | "textarea")
                 && self.focused.as_deref() == Some(id)
@@ -2419,15 +2432,26 @@ impl Tree {
                 target,
                 &render_node,
                 crate::text::TextDrawArea {
-                    origin: (x, y),
+                    // Code paint owns the gutter and horizontal scroll offset.
+                    // Keep its paint origin fixed at the content box so line
+                    // numbers do not slide away when the code scrolls.
+                    origin: if node.kind == "code" {
+                        (x - gutter + scroll_x, y)
+                    } else {
+                        (x, y)
+                    },
                     width: available_width,
                     visible_y: visible_text_y,
+                    scroll_x: if node.kind == "code" { scroll_x } else { 0.0 },
                 },
                 color(&foreground),
                 scale,
             );
             let decoration = self.text_decoration_for(id);
             if decoration != "none" {
+                if let Some(source_clip) = code_source_clip {
+                    target.push_clip(Fill::NonZero, transform, &source_clip);
+                }
                 let display_text = render_node.display_text();
                 if !display_text.is_empty() {
                     let wrap_width = matches!(node.kind.as_str(), "text" | "markdown" | "textarea")
@@ -2451,6 +2475,9 @@ impl Tree {
                             &BoxRect::new(x + line.x0, line_y, x + line.x1, line_y + thickness),
                         );
                     }
+                }
+                if code_source_clip.is_some() {
+                    target.pop_layer();
                 }
             }
             if matches!(node.kind.as_str(), "input" | "textarea")
@@ -2773,6 +2800,7 @@ impl Tree {
         let eligible = if scroll_only {
             (matches!(entry.node.kind.as_str(), "scroll" | "textarea")
                 && (entry.scroll_max > 0.0 || entry.scroll_max_x > 0.0))
+                || (entry.node.kind == "code" && entry.scroll_max_x > 0.0)
                 || blocks_pointer
                 || entry.node.modal
         } else {
@@ -4894,7 +4922,7 @@ impl Tree {
             - rect.x0
             - pad[3] as f64
             - border[3] as f64
-            - f64::from(crate::text::code_gutter_width(&node))
+            - f64::from(self.text.code_gutter_width(&node))
             + if node.kind == "code" {
                 entry.scroll_x
             } else {

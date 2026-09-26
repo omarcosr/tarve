@@ -200,6 +200,11 @@ impl Node {
     pub fn string<'a>(&'a self, key: &str, fallback: &'a str) -> &'a str {
         self.style[key].as_str().unwrap_or(fallback)
     }
+    /// A string style key that is absent by default. `None` means "do not paint
+    /// this layer at all", which is how a row opts out of a background wash.
+    pub fn optional_string<'a>(&'a self, key: &str) -> Option<&'a str> {
+        self.style[key].as_str().filter(|value| !value.is_empty())
+    }
     pub fn is_text(&self) -> bool {
         matches!(
             self.kind.as_str(),
@@ -619,11 +624,24 @@ fn validate_control(node: &Node) -> Result<(), String> {
     if matches!(node.kind.as_str(), "markdown" | "code" | "diff") && !node.children.is_empty() {
         return Err(format!("{} must be a leaf node", node.kind));
     }
-    if node.kind == "diff"
-        && ((node.source.is_empty() && (node.old_text.is_none() || node.new_text.is_none()))
-            || (!node.source.is_empty() && (node.old_text.is_some() || node.new_text.is_some())))
-    {
-        return Err("Diff requires a patch or oldText/newText".into());
+    if node.kind == "diff" {
+        // `old_text`/`new_text` default to empty strings so the protocol can
+        // carry them unconditionally, so their presence cannot be the test.
+        // What matters is that the caller supplied exactly one coherent input:
+        // a patch, a text pair, or nothing at all — and nothing at all is the
+        // legitimate "no changes" state, not an error.
+        let has_patch = !node.source.is_empty();
+        let has_pair = node
+            .new_text
+            .as_deref()
+            .is_some_and(|text| !text.is_empty())
+            || node
+                .old_text
+                .as_deref()
+                .is_some_and(|text| !text.is_empty());
+        if has_patch && has_pair {
+            return Err("Diff accepts a patch or oldText/newText, not both".into());
+        }
     }
     if node.kind == "scroll" && (!node.scroll_speed.is_finite() || node.scroll_speed <= 0.0) {
         return Err("Scroll speed must be finite and greater than zero".into());

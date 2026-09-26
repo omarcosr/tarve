@@ -18,14 +18,28 @@ export function nativePath(): string {
   };
   const name = names[process.platform];
   if (!name) throw new Error(`Unsupported native platform: ${process.platform}`);
+
+  if (process.env.TARVE_NATIVE) return process.env.TARVE_NATIVE;
+
+  // Inside the repository, prefer the content-addressed debug build published
+  // by `bun run build:native`. This covers both direct source execution and the
+  // bundled `dist/npm/runtime.js` used by the examples, without affecting an
+  // installed npm package (those locations simply do not exist there).
+  for (const directory of [
+    resolve(import.meta.dir, "../../../../native/bin"),
+    resolve(import.meta.dir, "../../native/bin"),
+  ]) {
+    const path = developmentLibrary(directory);
+    if (path && existsSync(path)) return path;
+  }
+
   const installed = [
-    process.env.TARVE_NATIVE,
     join(import.meta.dir, name),
     resolve(import.meta.dir, "../../native", `${process.platform}-${process.arch}`, name),
   ];
   const found = installed.find((path): path is string => !!path && existsSync(path));
   if (found) return found;
-  for (const directory of [resolve(import.meta.dir, "../../../../native/bin"), resolve("native/bin")]) {
+  for (const directory of [resolve("native/bin")]) {
     const path = developmentLibrary(directory) ?? join(directory, name);
     if (existsSync(path)) return path;
   }

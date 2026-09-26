@@ -24,6 +24,17 @@ export interface ThemeColors {
   ringSoft: string;
   success: string;
   successMuted: string;
+  /** Diff washes. A wash is a background tint, not an action colour: a
+   * saturated `destructive` red behind a line of code is unreadable, so the
+   * diff carries its own low-chroma tokens. */
+  diffAddBackground: string;
+  diffAddEmphasisBackground: string;
+  diffAddForeground: string;
+  diffAddAccent: string;
+  diffRemoveBackground: string;
+  diffRemoveEmphasisBackground: string;
+  diffRemoveForeground: string;
+  diffRemoveAccent: string;
   disabled: string;
   disabledForeground: string;
   placeholder: string;
@@ -91,6 +102,14 @@ export const lightTheme: ThemeDefinition = {
     ringSoft: "#aeaeb6",
     success: "#15803d",
     successMuted: "#f0fdf4",
+    diffAddBackground: "#dcfce7",
+    diffAddEmphasisBackground: "#bbf7d0",
+    diffAddForeground: "#14532d",
+    diffAddAccent: "#15803d",
+    diffRemoveBackground: "#fee2e2",
+    diffRemoveEmphasisBackground: "#fecaca",
+    diffRemoveForeground: "#7f1d1d",
+    diffRemoveAccent: "#dc2626",
     disabled: "#e4e4e7",
     disabledForeground: "#a1a1aa",
     placeholder: "#a1a1aa",
@@ -137,6 +156,14 @@ export const darkTheme: ThemeDefinition = {
     ringSoft: "#b1b1b5",
     success: "#4ade80",
     successMuted: "#052e16",
+    diffAddBackground: "#052e16",
+    diffAddEmphasisBackground: "#14532d",
+    diffAddForeground: "#a7f3d0",
+    diffAddAccent: "#4ade80",
+    diffRemoveBackground: "#450a0a",
+    diffRemoveEmphasisBackground: "#7f1d1d",
+    diffRemoveForeground: "#fecaca",
+    diffRemoveAccent: "#f87171",
     disabled: "#27272a",
     disabledForeground: "#71717a",
     placeholder: "#71717a",

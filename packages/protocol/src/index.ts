@@ -53,6 +53,17 @@ export interface Style extends StateStyle {
   taskMarkerColor?: string; taskMarkerCheckColor?: string;
   markdownCodeBackground?: string; markdownQuoteBackground?: string; markdownQuoteAccent?: string;
   markdownTableHeaderBackground?: string; markdownTableRule?: string;
+  /** Markdown surfaces. Each colour falls back to the active theme when unset. */
+  markdownCodeColor?: string; markdownQuoteColor?: string;
+  markdownLinkColor?: string; markdownInlineCodeColor?: string; markdownMutedColor?: string;
+  /** Diff row colours. Omit a background key to paint no layer at all. */
+  diffHeaderBackground?: string; diffHeaderForeground?: string;
+  diffNoticeBackground?: string; diffNoticeForeground?: string;
+  diffHunkBackground?: string; diffHunkForeground?: string;
+  diffAddedBackground?: string; diffAddedEmphasisBackground?: string; diffAddedForeground?: string; diffAddedAccent?: string;
+  diffRemovedBackground?: string; diffRemovedEmphasisBackground?: string; diffRemovedForeground?: string; diffRemovedAccent?: string;
+  /** Line-number gutter colour, for `diff` and for `code`. */
+  diffGutterColor?: string; gutterColor?: string;
   hover?: StateStyle; focus?: StateStyle; focusVisible?: StateStyle; active?: StateStyle; disabled?: StateStyle;
   strokeWidth?: number; pointerEvents?: "auto" | "block"; userSelect?: UserSelect;
 }

@@ -9,11 +9,28 @@ import {
   Text,
   TitleBar,
   Window,
+  lightTheme,
   theme,
   type Child,
 } from "tarve";
 
 const c = theme.colors;
+
+// A git patch exercising what a real review depends on: file status, a
+// per-file gutter and a word-level change. The hunk header counts must match
+// the body exactly, or a strict patch parser rejects the whole file.
+const patch = [
+  "diff --git a/README.md b/README.md",
+  "index 111..222 100644",
+  "--- a/README.md",
+  "+++ b/README.md",
+  "@@ -1,3 +1,4 @@",
+  " # Example",
+  " ",
+  "-Run the application.",
+  "+Run the application with `bun start`.",
+  "+Open a patch to inspect the changes.",
+].join("\n");
 
 const beforeLines = Array.from(
   { length: 180 },
@@ -44,7 +61,7 @@ function Panel({ title, description, children }: { title: string; description: s
 
 export function App() {
   return (
-    <Window title="Tarve — Rich content" width={1040} height={900} minWidth={760} minHeight={620} position="center">
+    <Window title="Tarve — Rich content" width={1040} height={980} minWidth={760} minHeight={620} position="center" theme={lightTheme}>
       <TitleBar title="Tarve — Rich content" />
       <Scroll id="rich-content-page" flex={1}>
         <Column gap={18} padding={24} style={{ width: "100%" }}>
@@ -62,23 +79,39 @@ export function App() {
             />
           </Panel>
 
-          <Panel title="Code" description="Syntect highlighting with native selection and copy.">
+          <Panel title="Code" description="Syntect highlighting with a native gutter and selection.">
             <Code
               id="rich-code"
+              showLineNumbers
               language="typescript"
               code={'export interface Project {\n  name: string;\n  status: "ready" | "building";\n}\n\nexport function label(project: Project): string {\n  return `${project.name}: ${project.status}`;\n}'}
               style={{ padding: 14, background: c.muted, radius: 8 }}
             />
           </Panel>
 
-          <Panel title="Diff" description="Generated from old/new text; changed lines and words are highlighted.">
+          <Panel title="Diff" description="A git patch with file status, per-file gutters and word emphasis.">
             <Scroll
               id="rich-diff-scroll"
               orientation="vertical"
-              style={{ height: 300, width: "100%", borderWidth: 1, borderColor: c.border, radius: 8 }}
+              style={{ height: 320, width: "100%", borderWidth: 1, borderColor: c.border, radius: 8 }}
             >
               <Diff
                 id="rich-diff"
+                source={patch}
+                wordDiff
+                style={{ padding: 8, width: "100%", fontSize: 12 }}
+              />
+            </Scroll>
+          </Panel>
+
+          <Panel title="Generated diff" description="Computed from old and new text; changed lines and words are highlighted.">
+            <Scroll
+              id="rich-generated-diff-scroll"
+              orientation="vertical"
+              style={{ height: 260, width: "100%", borderWidth: 1, borderColor: c.border, radius: 8 }}
+            >
+              <Diff
+                id="rich-generated-diff"
                 oldText={`${beforeLines.join("\n")}\n`}
                 newText={`${afterLines.join("\n")}\n`}
                 style={{ padding: 8, width: "100%", fontSize: 12 }}

@@ -5,11 +5,41 @@ use comrak::{
     nodes::{AstNode, ListType, NodeValue, TableAlignment},
     parse_document,
 };
-use diffy::patch_set::{ParseOptions, PatchSet};
-use similar::{ChangeTag, TextDiff};
-use std::{collections::HashMap, ops::Range};
+use diffy::create_patch;
+use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
+
+/// A semantic role resolved to a colour at paint time.
+///
+/// The parser never bakes a hex literal: a role keeps the same document
+/// correct under a light and a dark theme, and a style override can retint it
+/// without reparsing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToneRole {
+    /// Fenced code block body.
+    Code,
+    /// Inline `code` span.
+    InlineCode,
+    /// Hyperlink text.
+    Link,
+    /// Block quote body.
+    Quote,
+    /// Image alt text and other de-emphasised prose.
+    Muted,
+}
+
+impl ToneRole {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Code => "markdownCodeColor",
+            Self::InlineCode => "markdownInlineCodeColor",
+            Self::Link => "markdownLinkColor",
+            Self::Quote => "markdownQuoteColor",
+            Self::Muted => "markdownMutedColor",
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Span {
@@ -19,7 +49,7 @@ pub struct Span {
     pub italic: bool,
     pub mono: bool,
     pub font_family: Option<String>,
-    pub tone: Option<String>,
+    pub role: Option<ToneRole>,
     pub syntax: Option<HighlightKind>,
     pub underline: bool,
     pub strike: bool,
@@ -57,7 +87,7 @@ impl Span {
             italic: false,
             mono: false,
             font_family: None,
-            tone: None,
+            role: None,
             syntax: None,
             underline: false,
             strike: false,
@@ -69,6 +99,7 @@ impl Span {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiffRowKind {
     Header,
+    Notice,
     Hunk,
     Context,
     Added,
@@ -77,11 +108,66 @@ pub enum DiffRowKind {
     ShowMore,
 }
 
+impl DiffRowKind {
+    /// Content rows carry a `+`/`-`/space marker and real source text. Every
+    /// other kind is chrome: a header, a hunk banner, a notice or the
+    /// show-more affordance.
+    pub fn is_content(self) -> bool {
+        matches!(self, Self::Context | Self::Added | Self::Removed)
+    }
+}
+
+/// What the patch says happened to the file. Drives the notice rows and lets a
+/// deleted or renamed file keep a usable path for collapse and highlighting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DiffFileStatus {
+    Added,
+    Deleted,
+    Modified,
+    Renamed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiffFile {
+    /// Display path: the post-change side, with the `b/` prefix stripped.
+    pub path: String,
+    /// Pre-change path, present when a rename or a delete moves the file.
+    pub old_path: Option<String>,
+    pub status: DiffFileStatus,
+    /// A binary file has no line rows to show, only a notice.
+    pub binary: bool,
+    /// Largest line number on either side. Sizes this file's gutter so a
+    /// five-digit file does not widen the gutter of every other file.
+    pub max_line: u32,
+}
+
+impl DiffFile {
+    /// Human-readable rows derived from the status, the binary flag and the
+    /// rename source.
+    pub fn notices(&self) -> Vec<String> {
+        let mut notices = Vec::new();
+        match self.status {
+            DiffFileStatus::Added => notices.push("New file".into()),
+            DiffFileStatus::Deleted => notices.push("Deleted file".into()),
+            DiffFileStatus::Renamed => {
+                let from = self.old_path.as_deref().unwrap_or("?");
+                notices.push(format!("Renamed from {from}"));
+            }
+            DiffFileStatus::Modified => {}
+        }
+        if self.binary {
+            notices.push("Binary file — contents not shown".into());
+        }
+        notices
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiffRow {
     pub text: String,
     pub range: Range<usize>,
     pub kind: DiffRowKind,
+    /// Byte ranges inside `text` that changed against the paired line.
     pub emphasis: Vec<Range<usize>>,
     pub syntax: Vec<syntax::HighlightSpan>,
     pub old_line: Option<u32>,
@@ -89,14 +175,13 @@ pub struct DiffRow {
     pub file_path: Option<String>,
     pub hidden_lines: Option<usize>,
     pub file_header: bool,
+    /// Gutter digits for the owning file, so each file sizes its own gutter.
+    pub gutter_digits: u8,
 }
 
 impl DiffRow {
     pub fn content_offset(&self) -> usize {
-        usize::from(matches!(
-            self.kind,
-            DiffRowKind::Added | DiffRowKind::Removed | DiffRowKind::Context
-        ))
+        usize::from(self.kind.is_content())
     }
 
     pub fn content_text(&self) -> &str {
@@ -113,6 +198,9 @@ pub enum RichContent {
     },
     Diff {
         rows: Vec<DiffRow>,
+        /// Per-file metadata, in patch order. A row's `file_path` indexes here
+        /// for gutter sizing; an absent path means the row precedes any file.
+        files: Vec<DiffFile>,
         max_columns: usize,
         max_line_number: u32,
     },
@@ -195,11 +283,15 @@ fn render_table<'a>(
     }
     writer.breaks(2);
     let table_start = writer.text.len();
+    // Column padding is bounded by a total budget. Past it the table keeps its
+    // separators but drops the padding, which is ugly but honest, rather than
+    // silently pretending the columns still line up.
+    const ALIGNMENT_BUDGET: usize = 4 * 1024 * 1024;
     let align_columns = widths
         .iter()
         .try_fold(0usize, |sum, width| sum.checked_add(*width))
         .and_then(|width| width.checked_mul(rows.len()))
-        .is_some_and(|bytes| bytes <= 4 * 1024 * 1024);
+        .is_some_and(|bytes| bytes <= ALIGNMENT_BUDGET);
     let mut row_ranges = Vec::new();
     let mut header_row = None;
     for (header, cells) in rows {
@@ -268,6 +360,8 @@ fn render_node<'a>(node: &'a AstNode<'a>, writer: &mut Writer, depth: usize) {
             let start = writer.text.len();
             render_children(node, writer, depth);
             let mut span = Span::at(start..writer.text.len());
+            // Sizes are multiples of the leaf font size, so a document keeps its
+            // proportions at any base size and a style override still wins.
             span.size = Some(match heading.level {
                 1 => 2.0,
                 2 => 1.7,
@@ -286,12 +380,15 @@ fn render_node<'a>(node: &'a AstNode<'a>, writer: &mut Writer, depth: usize) {
         NodeValue::BlockQuote => {
             writer.breaks(2);
             let block_start = writer.text.len();
-            writer.push("│ ");
             let start = writer.text.len();
+            // No `│` marker glyph. The accent bar is painted from the block
+            // extent, so a written marker would sit on the first line only,
+            // stay behind on every wrapped line, and leak into copy and screen
+            // readers as a stray pipe.
             render_children(node, writer, depth + 1);
             let mut span = Span::at(start..writer.text.len());
             span.italic = true;
-            span.tone = Some("#64748b".into());
+            span.role = Some(ToneRole::Quote);
             writer.span(span);
             writer.blocks.push(MarkdownBlock {
                 range: block_start..writer.text.len(),
@@ -348,7 +445,10 @@ fn render_node<'a>(node: &'a AstNode<'a>, writer: &mut Writer, depth: usize) {
             writer.push(literal);
             let mut span = Span::at(start..writer.text.len());
             span.mono = true;
-            span.tone = Some("#334155".into());
+            // A role, not a hex literal: the same document has to stay legible
+            // under a light and a dark theme, and a style override must be able
+            // to retint it without reparsing.
+            span.role = Some(ToneRole::Code);
             writer.span(span);
             let language = block.info.split_whitespace().next().unwrap_or("");
             for mut span in code_spans(literal, (!language.is_empty()).then_some(language), None) {
@@ -372,7 +472,7 @@ fn render_node<'a>(node: &'a AstNode<'a>, writer: &mut Writer, depth: usize) {
             writer.push(&code.literal);
             let mut span = Span::at(start..writer.text.len());
             span.mono = true;
-            span.tone = Some("#be185d".into());
+            span.role = Some(ToneRole::InlineCode);
             writer.span(span);
         }
         NodeValue::Emph
@@ -389,11 +489,11 @@ fn render_node<'a>(node: &'a AstNode<'a>, writer: &mut Writer, depth: usize) {
                 NodeValue::Strikethrough => span.strike = true,
                 NodeValue::Link(link) => {
                     span.underline = true;
-                    span.tone = Some("#0969da".into());
+                    span.role = Some(ToneRole::Link);
                     span.href = Some(link.url);
                 }
                 NodeValue::Image(_) => {
-                    span.tone = Some("#64748b".into());
+                    span.role = Some(ToneRole::Muted);
                 }
                 _ => unreachable!(),
             }
@@ -521,31 +621,66 @@ impl RichContent {
         Some(result)
     }
 
-    /// Text exposed to copy/selection consumers. Task markers are paint-only decoration.
+    /// Text exposed to copy/selection consumers. Paint-only decoration is
+    /// dropped: task markers, and for a diff the `+`/`-`/space markers, the
+    /// line-number gutters and every chrome row.
     pub fn copy_text(&self, text: &str, range: Range<usize>) -> Option<String> {
-        self.map_task_markers(text, range, |_| "", true)
+        let RichContent::Diff { rows, .. } = self else {
+            return self.map_task_markers(text, range, |_| "", true);
+        };
+        let mut lines = Vec::new();
+        for row in rows.iter().filter(|row| {
+            row.kind.is_content() && row.range.end > range.start && row.range.start < range.end
+        }) {
+            // A partially selected line contributes only the selected part.
+            let start = range.start.max(row.range.start + row.content_offset()) - row.range.start;
+            let end = range.end.min(row.range.end) - row.range.start;
+            if let Some(slice) = row.text.get(start..end) {
+                lines.push(slice.to_string());
+            }
+        }
+        (!lines.is_empty()).then(|| lines.join("\n"))
     }
 
-    /// Text exposed to assistive technology keeps task state without depending on symbol glyphs.
+    /// Text exposed to assistive technology keeps task state without depending
+    /// on symbol glyphs, and speaks a diff line with its side and number.
     pub fn accessibility_text(&self, text: &str, range: Range<usize>) -> Option<String> {
-        self.map_task_markers(
-            text,
-            range,
-            |checked| if checked { "[x]" } else { "[ ]" },
-            false,
-        )
+        let RichContent::Diff { rows, .. } = self else {
+            return self.map_task_markers(
+                text,
+                range,
+                |checked| if checked { "[x]" } else { "[ ]" },
+                false,
+            );
+        };
+        let mut lines = Vec::new();
+        for row in rows.iter().filter(|row| {
+            row.kind.is_content() && row.range.end > range.start && row.range.start < range.end
+        }) {
+            let side = match row.kind {
+                DiffRowKind::Added => "added",
+                DiffRowKind::Removed => "removed",
+                _ => "context",
+            };
+            let number = row.new_line.or(row.old_line).unwrap_or(0);
+            lines.push(format!("{side} line {number}: {}", row.content_text()));
+        }
+        (!lines.is_empty()).then(|| lines.join("\n"))
     }
 
+    /// The joined display text that selection, search and copy all address.
     pub fn display_text(&self) -> Option<String> {
         let RichContent::Diff { rows, .. } = self else {
             return None;
         };
-        Some(
-            rows.iter()
-                .map(|row| row.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
+        let mut text = String::new();
+        for row in rows {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&row.text);
+        }
+        Some(text)
     }
 }
 
@@ -565,31 +700,117 @@ fn diff_kind(line: &str) -> DiffRowKind {
     }
 }
 
-fn emphasize_pair(old: &mut DiffRow, new: &mut DiffRow) {
-    let old_body = old.text.strip_prefix('-').unwrap_or(&old.text);
-    let new_body = new.text.strip_prefix('+').unwrap_or(&new.text);
-    if old_body.len() > 65_536 || new_body.len() > 65_536 {
-        return;
-    }
-    let diff = TextDiff::from_words(old_body, new_body);
-    let (mut old_at, mut new_at) = (1, 1);
-    for change in diff.iter_all_changes() {
-        let len = change.value().len();
-        match change.tag() {
-            ChangeTag::Equal => {
-                old_at += len;
-                new_at += len;
-            }
-            ChangeTag::Delete => {
-                old.emphasis.push(old_at..old_at + len);
-                old_at += len;
-            }
-            ChangeTag::Insert => {
-                new.emphasis.push(new_at..new_at + len);
-                new_at += len;
+/// Annotate paired delete/add runs with the byte ranges that actually changed.
+///
+/// Only runs of the same length are paired. Pairing an unequal run by index
+/// compares line 3 against line 7 and produces a confident, wrong highlight,
+/// which is worse than no highlight at all.
+fn emphasize_pairs(rows: &mut [DiffRow]) {
+    let mut index = 0;
+    while index < rows.len() {
+        if rows[index].kind != DiffRowKind::Removed {
+            index += 1;
+            continue;
+        }
+        let removed_start = index;
+        while index < rows.len() && rows[index].kind == DiffRowKind::Removed {
+            index += 1;
+        }
+        let added_start = index;
+        while index < rows.len() && rows[index].kind == DiffRowKind::Added {
+            index += 1;
+        }
+        let removed = removed_start..added_start;
+        let added = added_start..index;
+        if removed.len() == added.len() {
+            for offset in 0..removed.len() {
+                let old_body = rows[removed.start + offset]
+                    .text
+                    .strip_prefix('-')
+                    .unwrap_or(&rows[removed.start + offset].text)
+                    .to_string();
+                let new_body = rows[added.start + offset]
+                    .text
+                    .strip_prefix('+')
+                    .unwrap_or(&rows[added.start + offset].text)
+                    .to_string();
+                let (old_ranges, new_ranges) = word_diff(&old_body, &new_body);
+                rows[removed.start + offset].emphasis = old_ranges;
+                rows[added.start + offset].emphasis = new_ranges;
             }
         }
     }
+}
+
+/// Byte ranges that differ between two lines, as (old ranges, new ranges).
+///
+/// A common-prefix / common-suffix trim on token boundaries. Not a full LCS:
+/// for single-line edits the trim produces the same answer far more cheaply,
+/// and a diff viewer runs this on every changed pair. The prefix and suffix are
+/// trimmed on whole tokens, so a changed word is never split down the middle.
+///
+/// Each side collapses to a single span: the changed tokens of one line are
+/// contiguous once the common affixes are removed, and a one-element `Vec` per
+/// side is what the paint layer consumes.
+fn word_diff(old: &str, new: &str) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
+    if old == new {
+        return (Vec::new(), Vec::new());
+    }
+    let old_words = split_words(old);
+    let new_words = split_words(new);
+    let mut prefix = 0;
+    while prefix < old_words.len()
+        && prefix < new_words.len()
+        && old[old_words[prefix].clone()] == new[new_words[prefix].clone()]
+    {
+        prefix += 1;
+    }
+    let mut suffix = 0;
+    while suffix < old_words.len() - prefix
+        && suffix < new_words.len() - prefix
+        && old[old_words[old_words.len() - 1 - suffix].clone()]
+            == new[new_words[new_words.len() - 1 - suffix].clone()]
+    {
+        suffix += 1;
+    }
+    // The changed tokens of one line are contiguous once the common affixes are
+    // removed, so each side is at most one span.
+    let collapse = |words: &[Range<usize>]| -> Option<Range<usize>> {
+        let changed = &words[prefix..words.len() - suffix];
+        match (changed.first(), changed.last()) {
+            (Some(first), Some(last)) => Some(first.start..last.end),
+            _ => None,
+        }
+    };
+    (
+        collapse(&old_words).into_iter().collect(),
+        collapse(&new_words).into_iter().collect(),
+    )
+}
+
+/// Byte ranges of the tokens in a line. A run of word characters is one token;
+/// every other character is its own token, so `foo(x)` and `foo(y)` differ in
+/// exactly the two bracket tokens instead of the whole expression.
+fn split_words(line: &str) -> Vec<Range<usize>> {
+    let mut words = Vec::new();
+    let mut start: Option<usize> = None;
+    for (index, character) in line.char_indices() {
+        let is_word = character.is_alphanumeric() || character == '_';
+        match (is_word, start) {
+            (true, None) => start = Some(index),
+            (false, Some(begin)) => {
+                words.push(begin..index);
+                start = None;
+                words.push(index..index + character.len_utf8());
+            }
+            (false, None) => words.push(index..index + character.len_utf8()),
+            (true, Some(_)) => {}
+        }
+    }
+    if let Some(begin) = start {
+        words.push(begin..line.len());
+    }
+    words
 }
 
 fn parse_hunk_starts(line: &str) -> Option<(u32, u32)> {
@@ -600,14 +821,45 @@ fn parse_hunk_starts(line: &str) -> Option<(u32, u32)> {
     Some((parse(old)?, parse(new)?))
 }
 
+/// Split a `diff --git a/… b/…` tail into its two paths.
+///
+/// Git only quotes a path when it contains control characters, unusual bytes
+/// or a `"`, so **spaces are normally left unquoted**. Splitting on the first
+/// whitespace therefore truncates `a/my file.txt b/my file.txt` to `my`, which
+/// then breaks collapse, extension-based language detection and per-file
+/// highlighting. The unquoted case splits on the last ` b/`, which is git's own
+/// convention: a path may contain spaces but the two sides are still separable
+/// from the right.
+fn git_diff_paths(rest: &str) -> Option<(String, String)> {
+    if rest.starts_with('"') {
+        let (left, tail) = git_path_token(rest)?;
+        let (right, _) = git_path_token(tail.trim_start())?;
+        return Some((left, right));
+    }
+    if let Some(index) = rest.rfind(" b/") {
+        let (left, right) = rest.split_at(index);
+        return Some((left.trim().to_string(), right.trim_start().to_string()));
+    }
+    // A single unquoted path, or a pair with no `b/` prefix.
+    let mut parts = rest.split_whitespace();
+    let left = parts.next()?.to_string();
+    match parts.next() {
+        Some(right) => Some((left, right.to_string())),
+        None => Some((left.clone(), left)),
+    }
+}
+
+fn strip_side_prefix(path: &str, prefix: &str) -> String {
+    path.strip_prefix(prefix).unwrap_or(path).to_string()
+}
+
 fn git_path(line: &str) -> Option<String> {
     if let Some(rest) = line.strip_prefix("diff --git ") {
-        let (_, rest) = git_path_token(rest)?;
-        let (right, _) = git_path_token(rest.trim_start())?;
-        return Some(right.strip_prefix("b/").unwrap_or(&right).to_string());
+        let (_, right) = git_diff_paths(rest)?;
+        return Some(strip_side_prefix(&right, "b/"));
     }
     let (path, _) = git_path_token(line.strip_prefix("+++ ")?.trim())?;
-    Some(path.strip_prefix("b/").unwrap_or(&path).to_string())
+    Some(strip_side_prefix(&path, "b/"))
 }
 
 fn git_path_token(input: &str) -> Option<(String, &str)> {
@@ -670,7 +922,7 @@ fn display_columns(text: &str) -> usize {
 
 fn old_path(line: &str) -> Option<String> {
     let (path, _) = git_path_token(line.strip_prefix("--- ")?.trim())?;
-    Some(path.strip_prefix("a/").unwrap_or(&path).to_string())
+    Some(strip_side_prefix(&path, "a/"))
 }
 
 fn highlight_diff_side(rows: &mut [DiffRow], path: &str, old: bool) {
@@ -714,24 +966,40 @@ fn highlight_diff_side(rows: &mut [DiffRow], path: &str, old: bool) {
     }
 }
 
-fn highlight_diff_rows(rows: &mut [DiffRow], old_paths: &HashMap<String, String>) {
-    let mut start = 0;
+/// Highlight both sides of the diff, per file.
+///
+/// A diff interleaves two versions of one file, so each side is reconstructed
+/// from its own rows and highlighted separately. A deleted line then gets the
+/// colours its own version of the file implies, which a single joined parse
+/// cannot produce.
+///
+/// Only the visible rows are joined. Padding the gaps between hunks with blank
+/// lines would keep the indexes aligned but not the parser state, and a hunk at
+/// line 600,000 would blow past the syntax byte limit and leave the whole file
+/// unhighlighted. Syntax state that the patch never contained — a block comment
+/// opened above the first hunk — is inherently unrecoverable.
+fn highlight_files(rows: &mut [DiffRow], files: &[ParsedFile]) {
+    let mut start = 0usize;
     while start < rows.len() {
         let Some(path) = rows[start].file_path.clone() else {
             start += 1;
             continue;
         };
+        if rows[start].kind == DiffRowKind::ShowMore {
+            start += 1;
+            continue;
+        }
         let mut end = start + 1;
         while end < rows.len() && rows[end].file_path.as_deref() == Some(path.as_str()) {
             end += 1;
         }
+        let Some(parsed) = files.iter().find(|file| file.file.path == path) else {
+            start = end;
+            continue;
+        };
         let file = &mut rows[start..end];
-        highlight_diff_side(
-            file,
-            old_paths.get(&path).map(String::as_str).unwrap_or(&path),
-            true,
-        );
-        highlight_diff_side(file, &path, false);
+        highlight_diff_side(file, &parsed.old_path_for_syntax, true);
+        highlight_diff_side(file, &parsed.file.path, false);
         start = end;
     }
 }
@@ -745,216 +1013,397 @@ pub fn diff(
     max_lines: Option<usize>,
 ) -> Result<(String, RichContent), String> {
     let patch = match (old_text, new_text) {
-        (Some(old), Some(new)) => diffy::create_patch(old, new).to_string(),
+        // A patch wins whenever there is one. `oldText`/`newText` default to
+        // empty strings so the protocol can carry them unconditionally, and an
+        // empty default must not be mistaken for a request to diff two empty
+        // texts and discard the patch the caller actually passed.
+        (Some(_), Some(_)) if !source.is_empty() => source.to_string(),
+        (Some(old), Some(new)) => create_patch(old, new).to_string(),
         _ => source.to_string(),
     };
-    let format = if patch.starts_with("diff --git ") {
-        ParseOptions::gitdiff()
-    } else {
-        ParseOptions::unidiff()
-    };
-    for file in PatchSet::parse(&patch, format) {
-        file.map_err(|error| error.to_string())?;
+    // A patch is a stream and a truncated one is normal while `git diff` is
+    // still writing, so accept whatever parsed instead of discarding the
+    // document. Only text with no hunk at all is rejected.
+    let files = parse_patch(&patch);
+    if files.is_empty() && !patch.trim().is_empty() {
+        return Err("no unified diff hunk was found".into());
     }
-    let mut rows = Vec::<DiffRow>::new();
-    let mut current_path: Option<String> = None;
-    let mut current_old_path: Option<String> = None;
-    let mut old_paths = HashMap::new();
-    let mut old_line = None::<u32>;
-    let mut new_line = None::<u32>;
-    let mut max_line_number = 0u32;
-    let mut file_header: Option<usize> = None;
-    let mut file_additions = 0usize;
-    let mut file_deletions = 0usize;
+    let mut rows = flatten_rows(&files, collapsed_paths, max_lines);
+    highlight_files(&mut rows, &files);
+    if word_diff {
+        emphasize_pairs(&mut rows);
+    }
+    assign_ranges(&mut rows);
 
-    let finalize_file =
-        |rows: &mut [DiffRow], header: Option<usize>, additions: usize, deletions: usize| {
-            if let Some(index) = header
-                && let Some(row) = rows.get_mut(index)
-            {
-                row.text = format!("{}    +{additions} −{deletions}", row.text);
-            }
-        };
-
-    for raw in patch.lines() {
-        let line = raw.trim_end_matches('\r');
-        if line.starts_with("diff --git ") {
-            finalize_file(&mut rows, file_header, file_additions, file_deletions);
-            file_additions = 0;
-            file_deletions = 0;
-            current_path = git_path(line);
-            current_old_path = None;
-            let path = current_path.clone().unwrap_or_else(|| line.to_string());
-            file_header = Some(rows.len());
-            rows.push(DiffRow {
-                text: path,
-                range: 0..0,
-                kind: DiffRowKind::Header,
-                emphasis: Vec::new(),
-                syntax: Vec::new(),
-                old_line: None,
-                new_line: None,
-                file_path: current_path.clone(),
-                hidden_lines: None,
-                file_header: true,
-            });
-            continue;
-        }
-        if line.starts_with("--- ") {
-            current_old_path = old_path(line);
-        }
-        if line.starts_with("+++ ") {
-            current_path = git_path(line)
-                .filter(|path| path != "/dev/null")
-                .or(current_path)
-                .or_else(|| current_old_path.clone());
-            if let (Some(path), Some(old)) = (&current_path, &current_old_path) {
-                old_paths.insert(path.clone(), old.clone());
-            }
-        }
-        if let Some((old, new)) = parse_hunk_starts(line) {
-            old_line = Some(old);
-            new_line = Some(new);
-        }
-        let kind = diff_kind(line);
-        let (row_old, row_new) = match kind {
-            DiffRowKind::Removed => {
-                let current = old_line;
-                old_line = old_line.map(|line| line.saturating_add(1));
-                file_deletions += 1;
-                (current, None)
-            }
-            DiffRowKind::Added => {
-                let current = new_line;
-                new_line = new_line.map(|line| line.saturating_add(1));
-                file_additions += 1;
-                (None, current)
-            }
-            DiffRowKind::Context => {
-                let old = old_line;
-                let new = new_line;
-                old_line = old_line.map(|line| line.saturating_add(1));
-                new_line = new_line.map(|line| line.saturating_add(1));
-                (old, new)
-            }
-            _ => (None, None),
-        };
-        max_line_number = max_line_number
-            .max(row_old.unwrap_or(0))
-            .max(row_new.unwrap_or(0));
-        let row = DiffRow {
-            text: line.to_string(),
-            range: 0..0,
-            kind,
-            emphasis: Vec::new(),
-            syntax: Vec::new(),
-            old_line: row_old,
-            new_line: row_new,
-            file_path: current_path.clone(),
-            hidden_lines: None,
-            file_header: false,
-        };
-        rows.push(row);
-    }
-    finalize_file(&mut rows, file_header, file_additions, file_deletions);
-    highlight_diff_rows(&mut rows, &old_paths);
-    let mut index = 0;
-    while word_diff && index < rows.len() {
-        if rows[index].kind != DiffRowKind::Removed {
-            index += 1;
-            continue;
-        }
-        let removed_start = index;
-        while index < rows.len() && rows[index].kind == DiffRowKind::Removed {
-            index += 1;
-        }
-        let added_start = index;
-        while index < rows.len() && rows[index].kind == DiffRowKind::Added {
-            index += 1;
-        }
-        let count = (added_start - removed_start).min(index - added_start);
-        for offset in 0..count {
-            let (left, right) = rows.split_at_mut(added_start + offset);
-            emphasize_pair(&mut left[removed_start + offset], &mut right[0]);
-        }
-    }
-    if !collapsed_paths.is_empty() || max_lines.is_some() {
-        let mut filtered = Vec::with_capacity(rows.len());
-        let mut current_file: Option<String> = None;
-        let mut collapsed = false;
-        let mut visible_lines = 0usize;
-        let mut hidden_lines = 0usize;
-        let flush_hidden =
-            |filtered: &mut Vec<DiffRow>, file: &Option<String>, hidden: &mut usize| {
-                if *hidden == 0 {
-                    return;
-                }
-                filtered.push(DiffRow {
-                    text: format!("Show {} more lines", *hidden),
-                    range: 0..0,
-                    kind: DiffRowKind::ShowMore,
-                    emphasis: Vec::new(),
-                    syntax: Vec::new(),
-                    old_line: None,
-                    new_line: None,
-                    file_path: file.clone(),
-                    hidden_lines: Some(*hidden),
-                    file_header: false,
-                });
-                *hidden = 0;
-            };
-        for row in rows {
-            let file_changed = row.file_path != current_file && row.file_path.is_some();
-            if file_changed {
-                flush_hidden(&mut filtered, &current_file, &mut hidden_lines);
-                current_file = row.file_path.clone();
-                collapsed = current_file
-                    .as_ref()
-                    .is_some_and(|path| collapsed_paths.iter().any(|candidate| candidate == path));
-                visible_lines = 0;
-            }
-            if row.kind == DiffRowKind::Header && row.file_path.is_some() {
-                filtered.push(row);
-                continue;
-            }
-            if collapsed {
-                continue;
-            }
-            if matches!(
-                row.kind,
-                DiffRowKind::Added | DiffRowKind::Removed | DiffRowKind::Context
-            ) {
-                if max_lines.is_some_and(|limit| visible_lines >= limit) {
-                    hidden_lines += 1;
-                    continue;
-                }
-                visible_lines += 1;
-            }
-            filtered.push(row);
-        }
-        flush_hidden(&mut filtered, &current_file, &mut hidden_lines);
-        rows = filtered;
-    }
-    let mut text_offset = 0usize;
-    for row in &mut rows {
-        row.range = text_offset..text_offset + row.text.len();
-        text_offset = row.range.end.saturating_add(1);
-    }
     let max_columns = rows
         .iter()
+        .filter(|row| row.kind.is_content())
         .map(|row| display_columns(row.content_text()))
+        .max()
+        .unwrap_or(0);
+    let max_line_number = files
+        .iter()
+        .map(|file| file.file.max_line)
         .max()
         .unwrap_or(0);
     Ok((
         patch,
         RichContent::Diff {
             rows,
+            files: files.into_iter().map(|file| file.file).collect(),
             max_columns,
             max_line_number,
         },
     ))
 }
 
+/// Everything one `diff --git` section contributes, before rows are flattened.
+struct ParsedFile {
+    file: DiffFile,
+    /// Path used to detect the language of the pre-change side. A rename or a
+    /// delete means it differs from `file.path`.
+    old_path_for_syntax: String,
+    rows: Vec<DiffRow>,
+    additions: usize,
+    deletions: usize,
+}
+
+impl ParsedFile {
+    fn new(path: String, old_path: Option<String>) -> Self {
+        let old_path_for_syntax = old_path.clone().unwrap_or_else(|| path.clone());
+        Self {
+            file: DiffFile {
+                path,
+                old_path,
+                status: DiffFileStatus::Modified,
+                binary: false,
+                max_line: 0,
+            },
+            old_path_for_syntax,
+            rows: Vec::new(),
+            additions: 0,
+            deletions: 0,
+        }
+    }
+
+    /// Gutter width for this file alone, so a five-digit file does not widen
+    /// the gutter of every other file in the patch.
+    fn digits(&self) -> u8 {
+        digit_count(self.file.max_line)
+    }
+}
+
+fn digit_count(value: u32) -> u8 {
+    let mut digits = 1u8;
+    let mut remaining = value;
+    while remaining >= 10 {
+        remaining /= 10;
+        digits += 1;
+    }
+    digits
+}
+
+/// Parse a patch into per-file sections. Tolerates a missing `diff --git`
+/// preamble, quoted paths, renames, binary markers and a truncated tail.
+fn parse_patch(patch: &str) -> Vec<ParsedFile> {
+    let mut files: Vec<ParsedFile> = Vec::new();
+    let mut old_line: Option<u32> = None;
+    let mut new_line: Option<u32> = None;
+    let mut pending_new_path: Option<String> = None;
+    let mut pending_old_path: Option<String> = None;
+    let mut in_hunk = false;
+
+    for raw in patch.lines() {
+        let line = raw.trim_end_matches('\r');
+        if line.starts_with("diff --git ") {
+            let (old, new) = git_diff_paths(line.trim_start_matches("diff --git "))
+                .unwrap_or_else(|| (String::new(), String::new()));
+            let mut file = ParsedFile::new(
+                strip_side_prefix(&new, "b/"),
+                Some(strip_side_prefix(&old, "a/")),
+            );
+            if file.file.path.is_empty() {
+                file.file.path = file.file.old_path.clone().unwrap_or_default();
+            }
+            files.push(file);
+            pending_new_path = None;
+            pending_old_path = None;
+            old_line = None;
+            new_line = None;
+            in_hunk = false;
+            continue;
+        }
+
+        // A patch with no `diff --git` preamble still needs a home for its rows.
+        if files.is_empty() && (line.starts_with("@@") || line.starts_with("--- ")) {
+            files.push(ParsedFile::new(String::new(), None));
+        }
+        let Some(file) = files.last_mut() else {
+            continue;
+        };
+
+        if let Some((old, new)) = parse_hunk_starts(line) {
+            old_line = Some(old);
+            new_line = Some(new);
+            in_hunk = true;
+            file.push_row(DiffRowKind::Hunk, line, None, None, 1);
+            continue;
+        }
+
+        // Inside a hunk, `+`/`-`/space are content and `\` is a marker. Anything
+        // else means the hunk ended and the line starts a new header.
+        if in_hunk {
+            let marker = line.chars().next();
+            if matches!(marker, Some('+') | Some('-') | Some(' ') | Some('\\')) {
+                let kind = diff_kind(line);
+                let (row_old, row_new) = match kind {
+                    DiffRowKind::Added => {
+                        let current = new_line;
+                        new_line = new_line.map(|value| value.saturating_add(1));
+                        file.additions += 1;
+                        (None, current)
+                    }
+                    DiffRowKind::Removed => {
+                        let current = old_line;
+                        old_line = old_line.map(|value| value.saturating_add(1));
+                        file.deletions += 1;
+                        (current, None)
+                    }
+                    DiffRowKind::Context => {
+                        let current = (old_line, new_line);
+                        old_line = old_line.map(|value| value.saturating_add(1));
+                        new_line = new_line.map(|value| value.saturating_add(1));
+                        (current.0, current.1)
+                    }
+                    _ => (None, None),
+                };
+                file.file.max_line = file
+                    .file
+                    .max_line
+                    .max(row_old.unwrap_or(0))
+                    .max(row_new.unwrap_or(0));
+                file.push_row(kind, line, row_old, row_new, 1);
+                continue;
+            }
+            in_hunk = false;
+        }
+        read_file_header(file, line, &mut pending_new_path, &mut pending_old_path);
+    }
+    files
+}
+
+/// Read one non-hunk patch line as file metadata.
+///
+/// `index`, `old mode`, `new mode` and `similarity index` are plumbing with
+/// nothing to show, so they are dropped instead of painted as if they were
+/// source lines.
+fn read_file_header(
+    file: &mut ParsedFile,
+    line: &str,
+    pending_new_path: &mut Option<String>,
+    pending_old_path: &mut Option<String>,
+) {
+    if line.starts_with("--- ") {
+        let path = old_path(line);
+        // `--- /dev/null` is how git spells "this file did not exist before".
+        if path.is_none() {
+            file.file.status = DiffFileStatus::Added;
+        } else {
+            *pending_old_path = path;
+        }
+    } else if line.starts_with("+++ ") {
+        *pending_new_path = git_path(line).filter(|path| path != "/dev/null");
+    } else if line.starts_with("new file mode") {
+        file.file.status = DiffFileStatus::Added;
+    } else if line.starts_with("deleted file mode") {
+        file.file.status = DiffFileStatus::Deleted;
+    } else if let Some(from) = line.strip_prefix("rename from ") {
+        file.file.old_path = Some(from.trim().to_string());
+        file.file.status = DiffFileStatus::Renamed;
+    } else if let Some(to) = line.strip_prefix("rename to ") {
+        file.file.path = to.trim().to_string();
+        file.file.status = DiffFileStatus::Renamed;
+    } else if line.starts_with("Binary files") || line.starts_with("GIT binary patch") {
+        file.file.binary = true;
+    }
+    // A rename carries its own authoritative pair, so the `---`/`+++` lines
+    // must not overwrite it.
+    if file.file.status != DiffFileStatus::Renamed
+        && let Some(path) = pending_old_path.clone()
+    {
+        file.file.old_path = Some(path);
+    }
+    if let Some(path) = pending_new_path.clone() {
+        file.file.path = path;
+    } else if file.file.path.is_empty()
+        && let Some(path) = file.file.old_path.clone()
+    {
+        // A deleted file has no `+++` side, so its own path is the only label
+        // collapse and language detection can use.
+        file.file.path = path;
+    }
+}
+
+impl ParsedFile {
+    fn push_row(
+        &mut self,
+        kind: DiffRowKind,
+        text: &str,
+        old_line: Option<u32>,
+        new_line: Option<u32>,
+        gutter_digits: u8,
+    ) {
+        let path = self.file.path.clone();
+        self.rows.push(DiffRow {
+            text: text.to_string(),
+            range: 0..0,
+            kind,
+            emphasis: Vec::new(),
+            syntax: Vec::new(),
+            old_line,
+            new_line,
+            file_path: Some(path),
+            hidden_lines: None,
+            file_header: false,
+            gutter_digits,
+        });
+    }
+}
+
+/// Flatten files into paint rows.
+///
+/// Collapsing a file **removes** its body rows rather than hiding them, so a
+/// collapsed ten-thousand-line file costs exactly one row. `max_lines` is a
+/// preview of the whole patch: once the budget is spent the remaining files
+/// are not emitted and a single show-more row reports what is left.
+fn flatten_rows(
+    files: &[ParsedFile],
+    collapsed_paths: &[String],
+    max_lines: Option<usize>,
+) -> Vec<DiffRow> {
+    let mut rows = Vec::new();
+    let mut budget = max_lines;
+    let mut truncated_at: Option<(usize, String)> = None;
+
+    'files: for parsed in files {
+        let collapsed = is_collapsed(parsed, collapsed_paths);
+        let digits = parsed.digits();
+        let mut header = DiffRow {
+            text: parsed.file.path.clone(),
+            range: 0..0,
+            kind: DiffRowKind::Header,
+            emphasis: Vec::new(),
+            syntax: Vec::new(),
+            old_line: None,
+            new_line: None,
+            file_path: Some(parsed.file.path.clone()),
+            hidden_lines: None,
+            file_header: true,
+            gutter_digits: digits,
+        };
+        if parsed.additions > 0 || parsed.deletions > 0 {
+            header.text = format!(
+                "{}    +{} −{}",
+                header.text, parsed.additions, parsed.deletions
+            );
+        }
+        rows.push(header);
+        if collapsed {
+            continue;
+        }
+
+        for notice in parsed.file.notices() {
+            rows.push(DiffRow {
+                text: notice,
+                range: 0..0,
+                kind: DiffRowKind::Notice,
+                emphasis: Vec::new(),
+                syntax: Vec::new(),
+                old_line: None,
+                new_line: None,
+                file_path: Some(parsed.file.path.clone()),
+                hidden_lines: None,
+                file_header: false,
+                gutter_digits: digits,
+            });
+        }
+
+        for row in &parsed.rows {
+            if budget == Some(0) {
+                truncated_at = Some((rows.len(), parsed.file.path.clone()));
+                break 'files;
+            }
+            let mut row = row.clone();
+            row.gutter_digits = digits;
+            if row.kind.is_content() {
+                budget = budget.map(|value| value - 1);
+            }
+            rows.push(row);
+        }
+    }
+
+    if let Some((index, path)) = truncated_at {
+        let hidden = count_hidden_lines(files, collapsed_paths, max_lines.unwrap_or(0));
+        rows.truncate(index);
+        if hidden > 0 {
+            rows.push(DiffRow {
+                text: format!("Show {hidden} more lines"),
+                range: 0..0,
+                kind: DiffRowKind::ShowMore,
+                emphasis: Vec::new(),
+                syntax: Vec::new(),
+                old_line: None,
+                new_line: None,
+                // The owning file travels with the row so the click event can
+                // name the patch the reader is looking at.
+                file_path: (!path.is_empty()).then_some(path),
+                hidden_lines: Some(hidden),
+                file_header: false,
+                gutter_digits: 1,
+            });
+        }
+    }
+    rows
+}
+
+fn is_collapsed(parsed: &ParsedFile, collapsed_paths: &[String]) -> bool {
+    !parsed.file.path.is_empty()
+        && collapsed_paths
+            .iter()
+            .any(|candidate| candidate == &parsed.file.path)
+}
+
+/// Content rows the budget did not show, across every file it did not reach.
+fn count_hidden_lines(files: &[ParsedFile], collapsed_paths: &[String], budget: usize) -> usize {
+    let mut seen = 0usize;
+    let mut hidden = 0usize;
+    for parsed in files {
+        if is_collapsed(parsed, collapsed_paths) {
+            continue;
+        }
+        for row in &parsed.rows {
+            if !row.kind.is_content() {
+                continue;
+            }
+            if seen < budget {
+                seen += 1;
+            } else {
+                hidden += 1;
+            }
+        }
+    }
+    hidden
+}
+
+/// Give every row its slice of the joined display text, which is what
+/// selection, search, copy and accessibility all address.
+fn assign_ranges(rows: &mut [DiffRow]) {
+    let mut offset = 0usize;
+    for row in rows.iter_mut() {
+        row.range = offset..offset + row.text.len();
+        offset = row.range.end.saturating_add(1);
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1227,9 +1676,45 @@ mod tests {
         let copied = rich
             .copy_text(&display, first.range.start..last.range.end)
             .unwrap();
-        assert_eq!(copied, display[first.range.start..last.range.end]);
-        assert!(!copied.contains("diff --git"));
-        assert!(!copied.contains("@@ -1"));
+        // Only the source line reaches the clipboard: no `+`/`-` marker, no
+        // gutter, no hunk banner, no file name and no show-more chrome.
+        assert_eq!(copied, "old");
+        assert!(!copied.contains("Show"));
+        assert!(!copied.contains("@@"));
+        assert!(!copied.contains("demo.rs"));
+    }
+
+    #[test]
+    fn diff_copy_spans_lines_and_skips_chrome() {
+        let patch = "diff --git a/demo.rs b/demo.rs\n--- a/demo.rs\n+++ b/demo.rs\n@@ -1,3 +1,3 @@\n one\n-old\n+new\n last\n";
+        let (_, rich) = diff(patch, None, None, false, &[], None).unwrap();
+        let display = rich.display_text().unwrap();
+        let RichContent::Diff { rows, .. } = &rich else {
+            panic!("expected diff rows");
+        };
+        let span = |kind: DiffRowKind| {
+            rows.iter()
+                .find(|row| row.kind == kind)
+                .expect("row kind present")
+                .range
+                .clone()
+        };
+        let copied = rich
+            .copy_text(
+                &display,
+                span(DiffRowKind::Context).start..span(DiffRowKind::Removed).end,
+            )
+            .unwrap();
+        assert_eq!(copied, "one\nold");
+        let spoken = rich.accessibility_text(&display, 0..display.len()).unwrap();
+        assert!(spoken.contains("context line 1: one"), "{spoken}");
+        assert!(spoken.contains("removed line 2: old"), "{spoken}");
+        assert!(spoken.contains("added line 2: new"), "{spoken}");
+        // A selection that touches only chrome copies nothing at all.
+        assert!(
+            rich.copy_text(&display, 0..span(DiffRowKind::Hunk).start)
+                .is_none()
+        );
     }
 
     #[test]
@@ -1282,5 +1767,160 @@ mod tests {
         assert_eq!(display_columns("漢"), 2);
         assert_eq!(display_columns("a\tb"), 5);
         assert_eq!(display_columns("👩‍💻"), 2);
+    }
+
+    #[test]
+    fn unquoted_git_paths_with_spaces_split_on_the_last_b_slash() {
+        // Git does not quote a path just because it has a space, so the naive
+        // "split on the first whitespace" parse truncates the name to "my".
+        assert_eq!(
+            git_path("diff --git a/my file.txt b/my file.txt"),
+            Some("my file.txt".into())
+        );
+        assert_eq!(
+            git_path("diff --git a/src/my notes.md b/src/my notes.md"),
+            Some("src/my notes.md".into())
+        );
+        assert_eq!(
+            git_path("diff --git a/only.txt only.txt"),
+            Some("only.txt".into())
+        );
+    }
+
+    #[test]
+    fn word_diff_isolates_the_changed_token_only() {
+        let (old, new) = word_diff("const b = 2", "const b = 3");
+        assert_eq!(old.len(), 1);
+        assert_eq!(new.len(), 1);
+        assert_eq!(&"const b = 2"[old[0].clone()], "2");
+        assert_eq!(&"const b = 3"[new[0].clone()], "3");
+        // Punctuation is its own token, so only the argument is highlighted.
+        let (old, new) = word_diff("call(x)", "call(y)");
+        assert_eq!(&"call(x)"[old[0].clone()], "x");
+        assert_eq!(&"call(y)"[new[0].clone()], "y");
+        assert!(word_diff("same", "same").0.is_empty());
+    }
+
+    #[test]
+    fn word_diff_pairs_only_runs_of_equal_length() {
+        // One deletion and three insertions: pairing by index would compare the
+        // removed line against an unrelated addition and paint a wrong answer.
+        let patch = "diff --git a/demo.rs b/demo.rs\n--- a/demo.rs\n+++ b/demo.rs\n@@ -1,2 +1,4 @@\n one\n-gone\n+alpha\n+beta\n+gamma\n";
+        let (_, rich) = diff(patch, None, None, true, &[], None).unwrap();
+        let RichContent::Diff { rows, .. } = rich else {
+            panic!("expected diff")
+        };
+        let removed = rows
+            .iter()
+            .find(|row| row.kind == DiffRowKind::Removed)
+            .unwrap();
+        assert!(removed.emphasis.is_empty());
+        // Equal-length runs still get the highlight.
+        let patch = "diff --git a/demo.rs b/demo.rs\n--- a/demo.rs\n+++ b/demo.rs\n@@ -1,2 +1,2 @@\n one\n-gone value\n+new value\n";
+        let (_, rich) = diff(patch, None, None, true, &[], None).unwrap();
+        let RichContent::Diff { rows, .. } = rich else {
+            panic!("expected diff")
+        };
+        let removed = rows
+            .iter()
+            .find(|row| row.kind == DiffRowKind::Removed)
+            .unwrap();
+        assert!(!removed.emphasis.is_empty());
+    }
+
+    #[test]
+    fn diff_reports_added_deleted_renamed_and_binary_files() {
+        let patch = concat!(
+            "diff --git a/new.rs b/new.rs\nnew file mode 100644\n--- /dev/null\n+++ b/new.rs\n@@ -0,0 +1 @@\n+added\n",
+            "diff --git a/gone.rs b/gone.rs\ndeleted file mode 100644\n--- a/gone.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-removed\n",
+            "diff --git a/old.rs b/new-name.rs\nrename from old.rs\nrename to new-name.rs\n--- a/old.rs\n+++ b/new-name.rs\n@@ -1 +1 @@\n-a\n+b\n",
+            "diff --git a/logo.png b/logo.png\nBinary files a/logo.png and b/logo.png differ\n",
+        );
+        let (_, rich) = diff(patch, None, None, false, &[], None).unwrap();
+        let RichContent::Diff { rows, files, .. } = rich else {
+            panic!("expected diff")
+        };
+        assert_eq!(files.len(), 4);
+        assert_eq!(files[0].status, DiffFileStatus::Added);
+        assert_eq!(files[1].status, DiffFileStatus::Deleted);
+        // A deleted file has no `+++` side, so it keeps its own path.
+        assert_eq!(files[1].path, "gone.rs");
+        assert_eq!(files[2].status, DiffFileStatus::Renamed);
+        assert_eq!(files[2].path, "new-name.rs");
+        assert_eq!(files[2].old_path.as_deref(), Some("old.rs"));
+        assert!(files[3].binary);
+        let notices: Vec<_> = rows
+            .iter()
+            .filter(|row| row.kind == DiffRowKind::Notice)
+            .map(|row| row.text.as_str())
+            .collect();
+        assert!(notices.contains(&"New file"), "{notices:?}");
+        assert!(notices.contains(&"Deleted file"), "{notices:?}");
+        assert!(notices.contains(&"Renamed from old.rs"), "{notices:?}");
+        assert!(
+            notices.iter().any(|notice| notice.contains("Binary file")),
+            "{notices:?}"
+        );
+        // `index`, mode and other plumbing lines are never painted.
+        assert!(!rows.iter().any(|row| row.text.starts_with("index ")));
+    }
+
+    #[test]
+    fn each_file_sizes_its_own_gutter() {
+        let patch = concat!(
+            "diff --git a/small.rs b/small.rs\n--- a/small.rs\n+++ b/small.rs\n@@ -1 +1 @@\n-a\n+b\n",
+            "diff --git a/big.rs b/big.rs\n--- a/big.rs\n+++ b/big.rs\n@@ -90000 +90000 @@\n-c\n+d\n",
+        );
+        let (_, rich) = diff(patch, None, None, false, &[], None).unwrap();
+        let RichContent::Diff { rows, .. } = rich else {
+            panic!("expected diff")
+        };
+        let digits = |path: &str| {
+            rows.iter()
+                .find(|row| row.file_path.as_deref() == Some(path) && row.kind.is_content())
+                .map(|row| row.gutter_digits)
+        };
+        assert_eq!(digits("small.rs"), Some(1));
+        assert_eq!(digits("big.rs"), Some(5));
+    }
+
+    #[test]
+    fn max_lines_is_a_whole_patch_preview_that_reports_the_remainder() {
+        let patch = concat!(
+            "diff --git a/one.txt b/one.txt\n--- a/one.txt\n+++ b/one.txt\n@@ -1,2 +1,2 @@\n-a\n+b\n c\n",
+            "diff --git a/two.txt b/two.txt\n--- a/two.txt\n+++ b/two.txt\n@@ -1,2 +1,2 @@\n-d\n+e\n f\n",
+        );
+        let (_, rich) = diff(patch, None, None, false, &[], Some(1)).unwrap();
+        let RichContent::Diff { rows, .. } = rich else {
+            panic!("expected diff")
+        };
+        let content = rows.iter().filter(|row| row.kind.is_content()).count();
+        assert_eq!(content, 1, "the budget is spent after one line");
+        let show_more = rows
+            .iter()
+            .find(|row| row.kind == DiffRowKind::ShowMore)
+            .expect("a show-more row");
+        // The patch holds six content rows and the budget is one, so five were
+        // cut: the rest of the first file plus both lines of the second.
+        assert_eq!(show_more.hidden_lines, Some(5));
+        // The show-more row names its file so the click event can report it.
+        assert_eq!(show_more.file_path.as_deref(), Some("one.txt"));
+        // A file the budget never reached is not emitted at all.
+        assert!(!rows.iter().any(|row| row.text.contains("two.txt")));
+    }
+
+    #[test]
+    fn a_truncated_patch_keeps_what_parsed() {
+        // `git diff` is a stream: a half-written patch must still render.
+        let patch = "diff --git a/demo.rs b/demo.rs\n--- a/demo.rs\n+++ b/demo.rs\n@@ -1,3 +1,3 @@\n one\n-old\n";
+        let (_, rich) = diff(patch, None, None, false, &[], None).unwrap();
+        let RichContent::Diff { rows, .. } = rich else {
+            panic!("expected diff")
+        };
+        assert!(rows.iter().any(|row| row.kind == DiffRowKind::Context));
+        assert!(rows.iter().any(|row| row.kind == DiffRowKind::Removed));
+        // Text with no hunk at all is still an error worth reporting.
+        assert!(diff("not a patch at all", None, None, false, &[], None).is_err());
+        assert!(diff("", None, None, false, &[], None).is_ok());
     }
 }

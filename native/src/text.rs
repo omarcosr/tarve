@@ -1,7 +1,10 @@
 use crate::{
     paint::{PaintGlyph, PaintTarget},
     protocol::Node,
-    rich::{DiffRow, DiffRowKind, MarkdownBlock, MarkdownBlockKind, RichContent, Span, TaskMarker},
+    rich::{
+        DiffRow, DiffRowKind, MarkdownBlock, MarkdownBlockKind, RichContent, Span, TaskMarker,
+        ToneRole,
+    },
     syntax::HighlightKind,
 };
 use parley::{
@@ -9,7 +12,11 @@ use parley::{
     PositionedLayoutItem, StyleProperty,
     layout::{Affinity, Cursor, Selection},
 };
-use std::{collections::HashMap, ops::Range};
+use serde_json::Value;
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Range,
+};
 use unicode_segmentation::UnicodeSegmentation;
 use vello::{
     kurbo::{Affine, BezPath, Rect, RoundedRect, Stroke},
@@ -29,6 +36,7 @@ pub struct TextDrawArea {
     pub origin: (f64, f64),
     pub width: f32,
     pub visible_y: (f64, f64),
+    pub scroll_x: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -225,7 +233,10 @@ pub struct TextEngine {
     markdown_metrics: HashMap<String, (Option<f32>, (f32, f32))>,
     markdown_block_widths: HashMap<String, HashMap<usize, f32>>,
     pub(crate) diff_layouts: HashMap<String, HashMap<usize, DiffRowLayouts>>,
-    code_gutter_layouts: HashMap<String, Vec<Layout<TextBrush>>>,
+    pub(crate) code_gutter_layouts: HashMap<String, Vec<Layout<TextBrush>>>,
+    code_gutter_widths: HashMap<String, f32>,
+    /// `Code` blocks, which are measured unwrapped and scroll sideways.
+    unwrapped_code: HashSet<String>,
     diff_column_widths: HashMap<String, (String, f32, f32)>,
     pub shapes: u64,
     #[cfg(test)]
@@ -401,6 +412,47 @@ fn syntax_color(node: &Node, kind: HighlightKind) -> &str {
         .unwrap_or(default_syntax_color(kind))
 }
 
+/// Colour for a semantic markdown role.
+///
+/// The parser emits a role, never a hex literal, so one document stays correct
+/// under a light and a dark theme. A style key overrides the fallback.
+fn role_color(node: &Node, role: ToneRole) -> &str {
+    let fallback = match role {
+        ToneRole::Code => node.string("foreground", "#24292f"),
+        ToneRole::InlineCode => "#0a3069",
+        ToneRole::Link => "#0969da",
+        ToneRole::Quote => node.string("mutedForeground", "#57606a"),
+        ToneRole::Muted => node.string("mutedForeground", "#57606a"),
+    };
+    node.string(role.key(), fallback)
+}
+
+/// Background and foreground for a diff row kind, both overridable per style.
+fn diff_row_colors(node: &Node, kind: DiffRowKind) -> (Option<&str>, Option<&str>) {
+    let (background, foreground) = match kind {
+        DiffRowKind::Header => ("diffHeaderBackground", "diffHeaderForeground"),
+        DiffRowKind::Notice => ("diffNoticeBackground", "diffNoticeForeground"),
+        DiffRowKind::Hunk => ("diffHunkBackground", "diffHunkForeground"),
+        DiffRowKind::Added => ("diffAddedBackground", "diffAddedForeground"),
+        DiffRowKind::Removed => ("diffRemovedBackground", "diffRemovedForeground"),
+        DiffRowKind::Context | DiffRowKind::Meta | DiffRowKind::ShowMore => ("", ""),
+    };
+    (
+        node.optional_string(background),
+        node.optional_string(foreground),
+    )
+}
+
+/// Accent bar colour for a changed row. Context rows keep an invisible spacer so
+/// the columns always line up.
+fn diff_accent_color(node: &Node, kind: DiffRowKind) -> Option<&str> {
+    match kind {
+        DiffRowKind::Added => Some(node.string("diffAddedAccent", "#2da44e")),
+        DiffRowKind::Removed => Some(node.string("diffRemovedAccent", "#cf222e")),
+        _ => None,
+    }
+}
+
 fn push_span(
     builder: &mut parley::RangedBuilder<'_, TextBrush>,
     span: &Span,
@@ -437,9 +489,9 @@ fn push_span(
             StyleProperty::Brush(TextBrush(Some(syntax_color(node, kind).to_string()))),
             range.clone(),
         );
-    } else if let Some(tone) = &span.tone {
+    } else if let Some(role) = span.role {
         builder.push(
-            StyleProperty::Brush(TextBrush(Some(tone.clone()))),
+            StyleProperty::Brush(TextBrush(Some(role_color(node, role).to_string()))),
             range.clone(),
         );
     }
@@ -527,16 +579,6 @@ fn diff_content_inset(node: &Node, max_line_number: u32) -> f64 {
         + DIFF_MARKER_WIDTH
 }
 
-fn diff_colors(kind: DiffRowKind) -> (Option<&'static str>, Option<&'static str>) {
-    match kind {
-        DiffRowKind::Header => (Some("#f6f8fa"), Some("#57606a")),
-        DiffRowKind::Hunk => (Some("#ddf4ff"), Some("#0969da")),
-        DiffRowKind::Added => (Some("#dafbe1"), Some("#116329")),
-        DiffRowKind::Removed => (Some("#ffebe9"), Some("#cf222e")),
-        DiffRowKind::Context | DiffRowKind::Meta | DiffRowKind::ShowMore => (None, None),
-    }
-}
-
 impl TextEngine {
     pub fn new() -> Self {
         Self {
@@ -549,6 +591,8 @@ impl TextEngine {
             markdown_block_widths: HashMap::new(),
             diff_layouts: HashMap::new(),
             code_gutter_layouts: HashMap::new(),
+            code_gutter_widths: HashMap::new(),
+            unwrapped_code: HashSet::new(),
             diff_column_widths: HashMap::new(),
             shapes: 0,
             #[cfg(test)]
@@ -564,6 +608,11 @@ impl TextEngine {
         let content = node.display_text();
         let mut style_signature = node.signature(TEXT_KEYS);
         style_signature.push(node.syntax_theme.clone());
+        // The gutter is a node field, not a style key, so it has to join the
+        // signature explicitly. Without it a node that turns line numbers on
+        // keeps the geometry of the unnumbered block and paints the code
+        // underneath its own numbers.
+        style_signature.push(Value::Bool(node.show_line_numbers));
         let signature = (content.clone(), style_signature);
         if self.layouts.contains_key(&node.id) && self.signatures.get(&node.id) == Some(&signature)
         {
@@ -608,9 +657,20 @@ impl TextEngine {
             }
         }
         let mut layout = builder.build(&content);
+        // `Code` never wraps, so the line breaking has to happen here rather
+        // than being deferred to paint. `draw` also breaks, but a caller that
+        // only measures — the a11y pass, the hit test, a snapshot — must see the
+        // same line structure, or the gutter numbers a different set of lines
+        // than the text does.
         layout.break_all_lines(None);
         if node.kind == "code" && node.show_line_numbers {
-            let gutter_size = (node.number("fontSize", 13.0) * 0.88).max(9.0);
+            // Keep the gutter on the exact same typographic grid as the code.
+            // A smaller standalone layout can share the mathematical baseline
+            // and still look vertically offset because its glyph box and line
+            // box use different metrics.
+            let gutter_size = node.number("fontSize", 13.0);
+            let gutter_line_height = node.number("lineHeight", 1.5);
+            let gutter_weight = node.number("fontWeight", 400.0);
             let family = node.string("fontFamily", "Consolas").to_string();
             let line_count = content.split('\n').count().max(1);
             let mut gutters = Vec::with_capacity(line_count);
@@ -620,16 +680,32 @@ impl TextEngine {
                     .context
                     .ranged_builder(&mut self.fonts, &number, 1.0, true);
                 gutter.push_default(StyleProperty::FontSize(gutter_size));
+                gutter.push_default(StyleProperty::FontWeight(FontWeight::new(gutter_weight)));
                 gutter.push_default(StyleProperty::FontFamily(FontFamily::Source(
                     family.clone().into(),
+                )));
+                gutter.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
+                    gutter_line_height,
                 )));
                 let mut gutter = gutter.build(&number);
                 gutter.break_all_lines(None);
                 gutters.push(gutter);
             }
+            let widest_number = gutters.iter().map(Layout::width).fold(0.0_f32, f32::max);
+            self.code_gutter_widths
+                .insert(node.id.clone(), (widest_number + 16.0).ceil());
             self.code_gutter_layouts.insert(node.id.clone(), gutters);
         } else {
             self.code_gutter_layouts.remove(&node.id);
+            self.code_gutter_widths.remove(&node.id);
+        }
+        if node.kind == "code" {
+            // A `Code` block is measured as its own content and scrolls
+            // sideways. Recording that here keeps measurement, paint and the
+            // hit test agreeing, whether or not the gutter is on.
+            self.unwrapped_code.insert(node.id.clone());
+        } else {
+            self.unwrapped_code.remove(&node.id);
         }
         self.layouts.insert(node.id.clone(), layout);
         self.markdown_lines.remove(&node.id);
@@ -730,7 +806,7 @@ impl TextEngine {
             return Some(*dimensions);
         }
         let lines = self.markdown_lines.get_mut(id)?;
-        let mut y = 0.0;
+        let mut y: f32 = 0.0;
         let mut max_width: f32 = 0.0;
         let mut block_widths = HashMap::<usize, f32>::new();
         for line in lines {
@@ -875,6 +951,8 @@ impl TextEngine {
             .retain(|id, _| self.layouts.contains_key(id));
         self.diff_layouts.retain(|id, _| keep(id));
         self.code_gutter_layouts.retain(|id, _| keep(id));
+        self.code_gutter_widths.retain(|id, _| keep(id));
+        self.unwrapped_code.retain(|id| keep(id));
         self.diff_column_widths.retain(|id, _| keep(id));
     }
     pub fn measure(&mut self, id: &str, width: Option<f32>) -> (f32, f32) {
@@ -889,6 +967,17 @@ impl TextEngine {
         let Some(layout) = self.layouts.get_mut(id) else {
             return (0.0, 0.0);
         };
+        // A `Code` block never wraps: its width is its content and the block
+        // scrolls sideways instead. Measuring it at a viewport width would
+        // reflow the source into fewer, taller lines, which desynchronises the
+        // line-number gutter from the text. The height comes from the ink rather
+        // than from `Layout::height`, which under-reports a block whose lines
+        // include blanks and would size the node too small to hold what it
+        // draws. Both apply with and without a gutter, so turning the line
+        // numbers on or off never resizes the block.
+        if self.unwrapped_code.contains(id) {
+            return (layout.width().ceil(), code_content_height(layout));
+        }
         layout.break_all_lines(width.map(|w| w.max(0.0)));
         (layout.width().ceil(), layout.height().ceil())
     }
@@ -904,6 +993,7 @@ impl TextEngine {
             origin,
             width,
             visible_y,
+            scroll_x,
         } = area;
         if node.kind == "markdown" {
             #[cfg(test)]
@@ -953,6 +1043,7 @@ impl TextEngine {
             }
             return;
         }
+        let gutter_width = self.code_gutter_width(node);
         let Some(layout) = self.layouts.get_mut(&node.id) else {
             return;
         };
@@ -966,26 +1057,50 @@ impl TextEngine {
         let align = alignment_for_node(node);
         layout.align(align, parley::AlignmentOptions::default());
         if node.kind == "code" && node.show_line_numbers {
-            let gutter_width = code_gutter_width(node);
-            let line_height = f64::from(
-                (node.number("fontSize", 13.0) * node.number("lineHeight", 1.5)).max(1.0),
-            );
             let gutter_color = crate::tree::color(node.string("gutterColor", "#8b949e"));
             if let Some(gutters) = self.code_gutter_layouts.get(&node.id) {
-                for (index, gutter) in gutters.iter().enumerate() {
+                // Place each independent number layout so its baseline lands
+                // exactly on the source line baseline. Keeping identical font
+                // metrics above also makes the glyph boxes visually align.
+                let y_offsets = code_gutter_y_offsets(layout, gutters);
+                for (gutter, y_offset) in gutters.iter().zip(y_offsets) {
                     let width = f64::from(gutter.width());
                     draw_layout(
                         target,
                         gutter,
                         (
                             origin.0 + f64::from(gutter_width) - width - 8.0,
-                            origin.1 + index as f64 * line_height,
+                            origin.1 + y_offset,
                         ),
                         gutter_color,
                         scale,
                     );
                 }
             }
+            // Keep horizontal scrolling inside the source column. The outer
+            // node clip includes the fixed gutter, so without a second clip a
+            // scrolled line can paint back across its own line numbers.
+            let source_left = origin.0 + f64::from(gutter_width);
+            let source_right = (origin.0 + f64::from(width)).max(source_left);
+            target.push_clip(
+                Fill::NonZero,
+                Affine::scale(scale),
+                &Rect::new(
+                    source_left,
+                    origin.1 + visible_y.0,
+                    source_right,
+                    origin.1 + visible_y.1,
+                ),
+            );
+            draw_layout(
+                target,
+                layout,
+                (source_left - scroll_x, origin.1),
+                color,
+                scale,
+            );
+            target.pop_layer();
+            return;
         }
         if node.kind == "markdown"
             && let Some(rich) = &node.rich
@@ -1007,6 +1122,11 @@ impl TextEngine {
                 scale,
             );
         }
+        let origin = if node.kind == "code" {
+            (origin.0 - scroll_x, origin.1)
+        } else {
+            origin
+        };
         draw_layout(target, layout, origin, color, scale);
     }
 
@@ -1172,11 +1292,15 @@ impl TextEngine {
             rows,
             max_columns,
             max_line_number,
+            ..
         } = rich.as_ref()
         else {
             return (0.0, 0.0);
         };
         let line_height = diff_line_height(node);
+        // The widest gutter in the patch bounds the content inset, so every
+        // file's code column starts at the same x and the rows stay aligned
+        // even though each file sizes its own gutter.
         let gutter = diff_gutter_width(node, *max_line_number);
         let family = node.string("fontFamily", "Consolas");
         let size = node.number("fontSize", 13.0);
@@ -1221,12 +1345,7 @@ impl TextEngine {
         let Some(rich) = &node.rich else {
             return;
         };
-        let RichContent::Diff {
-            rows,
-            max_line_number,
-            ..
-        } = rich.as_ref()
-        else {
+        let RichContent::Diff { rows, .. } = rich.as_ref() else {
             return;
         };
         let line_height = f64::from(diff_line_height(node));
@@ -1270,7 +1389,7 @@ impl TextEngine {
                 .unwrap();
             layouts.content.break_all_lines(None);
             let y = area.origin.1 + index as f64 * line_height;
-            let (background, text_color) = diff_colors(row.kind);
+            let (background, text_color) = diff_row_colors(node, row.kind);
             if let Some(background) = background {
                 target.fill(
                     Fill::NonZero,
@@ -1279,22 +1398,18 @@ impl TextEngine {
                     &Rect::new(area.rect.x0, y, area.rect.x1, y + line_height),
                 );
             }
-            let gutter = f64::from(diff_gutter_width(node, *max_line_number));
+            let gutter = f64::from(diff_gutter_width(node, row.gutter_digits as u32));
             let marker_width = DIFF_MARKER_WIDTH;
             let accent_width = DIFF_ACCENT_WIDTH;
             let old_x = area.origin.0 + accent_width;
             let new_x = old_x + gutter;
             let marker_x = new_x + gutter;
             let text_x = marker_x + marker_width;
-            if matches!(row.kind, DiffRowKind::Added | DiffRowKind::Removed) {
+            if let Some(accent) = diff_accent_color(node, row.kind) {
                 target.fill(
                     Fill::NonZero,
                     Affine::scale(scale),
-                    crate::tree::color(if row.kind == DiffRowKind::Added {
-                        "#2da44e"
-                    } else {
-                        "#cf222e"
-                    }),
+                    crate::tree::color(accent),
                     &Rect::new(
                         area.rect.x0,
                         y,
@@ -1339,9 +1454,9 @@ impl TextEngine {
                 );
                 for (box_rect, _) in Selection::new(anchor, focus).geometry(&layouts.content) {
                     let fill = if row.kind == DiffRowKind::Added {
-                        "#acf2bd"
+                        node.string("diffAddedEmphasisBackground", "#bbf7d0")
                     } else {
-                        "#ffd8d3"
+                        node.string("diffRemovedEmphasisBackground", "#fecaca")
                     };
                     target.fill(
                         Fill::NonZero,
@@ -1504,12 +1619,7 @@ impl TextEngine {
     }
 
     pub fn diff_index_at(&mut self, node: &Node, x: f32, y: f32) -> Option<usize> {
-        let RichContent::Diff {
-            rows,
-            max_line_number,
-            ..
-        } = node.rich.as_ref()?.as_ref()
-        else {
+        let RichContent::Diff { rows, .. } = node.rich.as_ref()?.as_ref() else {
             return None;
         };
         let line_height = diff_line_height(node);
@@ -1529,7 +1639,9 @@ impl TextEngine {
                 .or_default()
                 .insert(index, layout);
         }
-        let content_inset = diff_content_inset(node, *max_line_number) as f32;
+        // The same per-file gutter the row was painted with, so a click maps to
+        // the same character the reader sees under the pointer.
+        let content_inset = diff_content_inset(node, row.gutter_digits as u32) as f32;
         if x < content_inset {
             return Some(row.range.start);
         }
@@ -1811,14 +1923,59 @@ impl TextEngine {
         result.sort_by_key(|run| (run.byte_range.start, run.byte_range.end));
         result
     }
+
+    /// Horizontal space reserved for a `Code` line-number gutter.
+    ///
+    /// After `prepare`, this is derived from the widest actually shaped number,
+    /// plus 8px of padding on each side. The fallback only covers geometry
+    /// queries that happen before the text engine has prepared the node.
+    pub fn code_gutter_width(&self, node: &Node) -> f32 {
+        if node.kind != "code" || !node.show_line_numbers {
+            return 0.0;
+        }
+        self.code_gutter_widths
+            .get(&node.id)
+            .copied()
+            .unwrap_or_else(|| estimated_code_gutter_width(node))
+    }
+
+    pub fn code_gutter_inset(&self, node: &Node) -> f32 {
+        self.code_gutter_width(node)
+    }
 }
 
-pub fn code_gutter_width(node: &Node) -> f32 {
+/// Origin offsets that make each gutter number share the exact baseline of the
+/// source line it labels.
+fn code_gutter_y_offsets(layout: &Layout<TextBrush>, gutters: &[Layout<TextBrush>]) -> Vec<f64> {
+    layout
+        .lines()
+        .zip(gutters)
+        .filter_map(|(line, gutter)| {
+            let gutter_baseline = gutter.lines().next()?.metrics().baseline;
+            Some(f64::from(line.metrics().baseline) - f64::from(gutter_baseline))
+        })
+        .collect()
+}
+
+/// Height a `Code` block needs to hold every line it draws.
+fn code_content_height(layout: &mut Layout<TextBrush>) -> f32 {
+    // Parley exposes absolute block coordinates for every shaped line. The
+    // bottom of the last line is the full painted extent; cursor y0 plus
+    // descent only covers part of that box and clips short multi-line blocks.
+    layout
+        .lines()
+        .map(|line| line.metrics().block_max_coord)
+        .fold(layout.height(), f32::max)
+        .ceil()
+}
+
+fn estimated_code_gutter_width(node: &Node) -> f32 {
     if node.kind != "code" || !node.show_line_numbers {
         return 0.0;
     }
+    // `prepare` replaces this estimate with the actual shaped width.
     let digits = node.text.split('\n').count().max(1).to_string().len() as f32;
-    (digits * node.number("fontSize", 13.0) * 0.62 + 16.0).max(32.0)
+    (digits * node.number("fontSize", 13.0) * 0.62 + 16.0).ceil()
 }
 
 fn diff_gutter_width(node: &Node, max_line_number: u32) -> f32 {
@@ -1830,6 +1987,420 @@ fn diff_gutter_width(node: &Node, max_line_number: u32) -> f32 {
 mod rich_measure_tests {
     use super::*;
     use std::sync::Arc;
+
+    #[derive(Debug)]
+    struct GlyphRunProbe {
+        origin: (f64, f64),
+        first_glyph: Option<(u32, f64, f64)>,
+    }
+
+    #[derive(Default)]
+    struct ProbeTarget {
+        runs: Vec<GlyphRunProbe>,
+        clips: Vec<Rect>,
+        pops: usize,
+    }
+
+    impl PaintTarget for ProbeTarget {
+        fn fill<S: vello::kurbo::Shape>(
+            &mut self,
+            _fill: Fill,
+            _transform: Affine,
+            _color: Color,
+            _shape: &S,
+        ) {
+        }
+
+        fn stroke<S: vello::kurbo::Shape>(
+            &mut self,
+            _stroke: &Stroke,
+            _transform: Affine,
+            _color: Color,
+            _shape: &S,
+        ) {
+        }
+
+        fn push_clip<S: vello::kurbo::Shape>(
+            &mut self,
+            _fill: Fill,
+            _transform: Affine,
+            shape: &S,
+        ) {
+            self.clips.push(shape.bounding_box());
+        }
+
+        fn pop_layer(&mut self) {
+            self.pops += 1;
+        }
+
+        fn draw_image(
+            &mut self,
+            _key: &str,
+            _image: &vello::peniko::ImageData,
+            _transform: Affine,
+        ) {
+        }
+
+        fn draw_glyphs(
+            &mut self,
+            _font: &vello::peniko::FontData,
+            _font_size: f32,
+            _normalized_coords: &[i16],
+            transform: Affine,
+            _color: Color,
+            glyphs: &[PaintGlyph],
+        ) {
+            let coeffs = transform.as_coeffs();
+            let origin = (coeffs[4], coeffs[5]);
+            let first_glyph = glyphs.first().map(|glyph| {
+                (
+                    glyph.id,
+                    origin.0 + f64::from(glyph.x),
+                    origin.1 + f64::from(glyph.y),
+                )
+            });
+            self.runs.push(GlyphRunProbe {
+                origin,
+                first_glyph,
+            });
+        }
+    }
+
+    #[test]
+    fn a_code_gutter_number_shares_its_lines_baseline() {
+        // Every number is its own Parley layout, but it must use the same font
+        // metrics as the source so baseline alignment also looks aligned.
+        let mut node: Node = serde_json::from_value(serde_json::json!({
+            "id":"code", "kind":"code", "showLineNumbers":true,
+            "text":"alpha\n\nbravo\n\ncharlie",
+            "style":{"fontFamily":"Consolas","fontSize":13,"lineHeight":1.5}
+        }))
+        .unwrap();
+        node.rich = Some(Arc::new(crate::rich::code(&node.text, None, None)));
+        let mut engine = TextEngine::new();
+        engine.prepare(&node);
+        let layout = engine.layouts.get("code").expect("layout prepared");
+        let count = layout.lines().count();
+        // Parley may fold a run of blank lines, so the shaped line count is the
+        // authority and the gutter must be built from it, not from a count of
+        // `\n` in the source. A gutter longer than the layout would number lines
+        // that do not exist; one shorter drops the tail of the file.
+        assert_eq!(engine.code_gutter_layouts["code"].len(), count);
+        // A folded blank line is exactly the case that made the numbers skip:
+        // every source line still needs a number, so the gutter is built from
+        // the source and each number lands on the line that owns it.
+        let source_lines = node.text.split('\n').count();
+        assert_eq!(
+            engine.code_gutter_layouts["code"].len(),
+            source_lines,
+            "every source line needs a number: layout has {count}, source has {source_lines}"
+        );
+        assert!(
+            count >= 4,
+            "the sample must still shape into several lines, got {count}"
+        );
+        let source_baselines: Vec<f64> = layout
+            .lines()
+            .map(|line| f64::from(line.metrics().baseline))
+            .collect();
+        let gutters = &engine.code_gutter_layouts["code"];
+        let offsets = code_gutter_y_offsets(layout, gutters);
+        assert_eq!(offsets.len(), source_baselines.len());
+
+        for (index, ((source_baseline, offset), gutter)) in source_baselines
+            .iter()
+            .zip(&offsets)
+            .zip(gutters)
+            .enumerate()
+        {
+            let gutter_baseline = f64::from(
+                gutter
+                    .lines()
+                    .next()
+                    .expect("gutter number has one line")
+                    .metrics()
+                    .baseline,
+            );
+            let painted_baseline = offset + gutter_baseline;
+            assert!(
+                (painted_baseline - source_baseline).abs() < 0.001,
+                "line {} gutter baseline {painted_baseline} != source baseline {source_baseline}",
+                index + 1
+            );
+        }
+
+        let source_first_baseline = source_baselines[0];
+        for gutter in gutters {
+            let gutter_baseline = f64::from(
+                gutter
+                    .lines()
+                    .next()
+                    .expect("gutter number has one line")
+                    .metrics()
+                    .baseline,
+            );
+            assert!(
+                (gutter_baseline - source_first_baseline).abs() < 0.001,
+                "code and gutter must use identical relative baseline metrics: {gutter_baseline} != {source_first_baseline}"
+            );
+        }
+    }
+
+    #[test]
+    fn code_gutter_paints_beside_source_on_the_same_raster_baseline() {
+        // Use the same glyph in the gutter and source so this checks the final
+        // paint coordinates, not only Parley's abstract line metrics. This is
+        // the regression that was visible in rich-content-view: a correct
+        // line count can still look wrong when the two columns are translated
+        // independently at paint time.
+        let mut node: Node = serde_json::from_value(serde_json::json!({
+            "id":"code", "kind":"code", "showLineNumbers":true,
+            "text":"1\n2",
+            "style":{"fontFamily":"Consolas","fontSize":13,"lineHeight":1.5}
+        }))
+        .unwrap();
+        node.rich = Some(Arc::new(crate::rich::code(&node.text, None, None)));
+        let mut engine = TextEngine::new();
+        engine.prepare(&node);
+
+        let mut target = ProbeTarget::default();
+        let origin = (11.0, 17.0);
+        engine.draw(
+            &mut target,
+            &node,
+            TextDrawArea {
+                origin,
+                width: 200.0,
+                visible_y: (0.0, 200.0),
+                scroll_x: 0.0,
+            },
+            Color::from_rgb8(0, 0, 0),
+            1.0,
+        );
+
+        assert_eq!(target.runs.len(), 4, "two gutter and two source glyph runs");
+        let gutters = &engine.code_gutter_layouts["code"];
+        for line in 0..2 {
+            let gutter = &target.runs[line];
+            let source = &target.runs[line + 2];
+            let (gutter_id, _, gutter_y) = gutter.first_glyph.expect("gutter glyph");
+            let (source_id, _, source_y) = source.first_glyph.expect("source glyph");
+            assert_eq!(gutter_id, source_id, "same digit must use the same glyph");
+            assert!(
+                (gutter_y - source_y).abs() < 0.001,
+                "line {} raster baselines differ: gutter {gutter_y}, source {source_y}",
+                line + 1
+            );
+
+            let gutter_right = gutter.origin.0 + f64::from(gutters[line].width());
+            assert!(
+                source.origin.0 - gutter_right >= 7.9,
+                "line {} gutter overlaps source: gutter right {gutter_right}, source origin {}",
+                line + 1,
+                source.origin.0
+            );
+        }
+        assert!(
+            (target.runs[2].origin.0 - (origin.0 + f64::from(engine.code_gutter_width(&node))))
+                .abs()
+                < 0.001,
+            "source column must start after the full gutter"
+        );
+    }
+
+    #[test]
+    fn scrolled_code_source_is_clipped_after_the_fixed_code_gutter() {
+        let mut node: Node = serde_json::from_value(serde_json::json!({
+            "id":"code", "kind":"code", "showLineNumbers":true,
+            "text":"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+            "style":{"fontFamily":"Consolas","fontSize":13,"lineHeight":1.5}
+        }))
+        .unwrap();
+        node.rich = Some(Arc::new(crate::rich::code(&node.text, None, None)));
+        let mut engine = TextEngine::new();
+        engine.prepare(&node);
+
+        let mut target = ProbeTarget::default();
+        let origin = (11.0, 17.0);
+        let width = 120.0;
+        engine.draw(
+            &mut target,
+            &node,
+            TextDrawArea {
+                origin,
+                width,
+                visible_y: (0.0, 80.0),
+                scroll_x: 48.0,
+            },
+            Color::from_rgb8(0, 0, 0),
+            1.0,
+        );
+
+        let gutter = f64::from(engine.code_gutter_width(&node));
+        assert_eq!(target.clips.len(), 1, "source needs one dedicated clip");
+        let clip = target.clips[0];
+        assert!((clip.x0 - (origin.0 + gutter)).abs() < 0.001);
+        assert!((clip.x1 - (origin.0 + f64::from(width))).abs() < 0.001);
+        assert_eq!(target.pops, 1, "source clip must be balanced");
+        let source = target.runs.last().expect("source glyph run");
+        assert!(
+            source.origin.0 < clip.x0,
+            "the regression sample must scroll source ink behind the clip boundary"
+        );
+    }
+
+    #[test]
+    fn code_gutter_width_comes_from_the_widest_shaped_number() {
+        let text = (1..=120)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut node: Node = serde_json::from_value(serde_json::json!({
+            "id":"code", "kind":"code", "showLineNumbers":true,
+            "text":text,
+            "style":{"fontFamily":"Consolas","fontSize":13,"lineHeight":1.5}
+        }))
+        .unwrap();
+        node.rich = Some(Arc::new(crate::rich::code(&node.text, None, None)));
+        let mut engine = TextEngine::new();
+        engine.prepare(&node);
+
+        let gutters = &engine.code_gutter_layouts["code"];
+        let widest_number = gutters.iter().map(Layout::width).fold(0.0_f32, f32::max);
+        let expected = (widest_number + 16.0).ceil();
+        assert_eq!(engine.code_gutter_width(&node), expected);
+
+        let right_edge = f64::from(expected) - 8.0;
+        for index in [0_usize, 9, 99, 119] {
+            let gutter = &gutters[index];
+            let x = f64::from(expected) - f64::from(gutter.width()) - 8.0;
+            assert!(
+                (x + f64::from(gutter.width()) - right_edge).abs() < 0.001,
+                "line {} must right-align to the same gutter edge",
+                index + 1
+            );
+        }
+    }
+
+    #[test]
+    fn toggling_the_gutter_rebuilds_the_code_layout() {
+        // The gutter is a node field, not a style key. If it stays out of the
+        // layout signature, a node that switches it on keeps the unnumbered
+        // geometry and the code paints underneath its own numbers.
+        let mut engine = TextEngine::new();
+        let build = |show: bool| Node {
+            id: "code".into(),
+            kind: "code".into(),
+            show_line_numbers: show,
+            text: "alpha\nbravo\ncharlie".into(),
+            style: serde_json::json!({ "fontFamily": "Consolas", "fontSize": 13 }),
+            ..serde_json::from_value(serde_json::json!({
+                "id":"code", "kind":"code", "text":"alpha\nbravo\ncharlie"
+            }))
+            .unwrap()
+        };
+        let mut plain = build(false);
+        plain.rich = Some(Arc::new(crate::rich::code(&plain.text, None, None)));
+        engine.prepare(&plain);
+        assert!(!engine.code_gutter_layouts.contains_key("code"));
+
+        let mut guttered = build(true);
+        guttered.rich = Some(Arc::new(crate::rich::code(&guttered.text, None, None)));
+        engine.prepare(&guttered);
+        assert_eq!(
+            engine.code_gutter_layouts["code"].len(),
+            3,
+            "turning the gutter on must build a number per line"
+        );
+        // And back off again, so a toggle in either direction is safe.
+        engine.prepare(&plain);
+        assert!(!engine.code_gutter_layouts.contains_key("code"));
+    }
+
+    #[test]
+    fn measuring_a_code_block_does_not_change_its_line_count() {
+        // The measurement path re-breaks the layout. If that reflows a `Code`
+        // block, the gutter — which numbers the lines it built at prepare time —
+        // labels a different set of lines than the one paint draws, and the tail
+        // of the file loses its numbers.
+        let mut node: Node = serde_json::from_value(serde_json::json!({
+            "id":"code", "kind":"code", "showLineNumbers":true,
+            "text":"alpha\n\nbravo\ncharlie",
+            "style":{"fontFamily":"Consolas","fontSize":13,"lineHeight":1.5}
+        }))
+        .unwrap();
+        node.rich = Some(Arc::new(crate::rich::code(&node.text, None, None)));
+        let mut engine = TextEngine::new();
+        engine.prepare(&node);
+        let before = engine.layouts["code"].lines().count();
+        let gutters = engine.code_gutter_layouts["code"].len();
+        assert_eq!(before, gutters);
+        // Measure at several widths, exactly as layout and paint do.
+        for width in [None, Some(200.0_f32), Some(1000.0), Some(40.0)] {
+            let _ = engine.measure("code", width);
+            assert_eq!(
+                engine.layouts["code"].lines().count(),
+                before,
+                "measuring at {width:?} must not reflow a Code block"
+            );
+        }
+    }
+
+    #[test]
+    fn two_line_code_measurement_covers_the_last_line_box() {
+        let mut node: Node = serde_json::from_value(serde_json::json!({
+            "id":"code", "kind":"code",
+            "text":"const answer = 42;\nconsole.log(answer);",
+            "style":{"fontFamily":"Consolas","fontSize":13,"lineHeight":1.5}
+        }))
+        .unwrap();
+        node.rich = Some(Arc::new(crate::rich::code(&node.text, Some("js"), None)));
+        let mut engine = TextEngine::new();
+        engine.prepare(&node);
+        let expected_bottom = engine.layouts["code"]
+            .lines()
+            .last()
+            .expect("two-line code must shape lines")
+            .metrics()
+            .block_max_coord
+            .ceil();
+        let (_, measured_height) = engine.measure("code", Some(760.0));
+        assert_eq!(measured_height, expected_bottom);
+        assert!(
+            measured_height >= 13.0 * 1.5 * 2.0 * 0.9,
+            "two code lines were clipped into {measured_height}px"
+        );
+    }
+
+    #[test]
+    fn the_code_gutter_inset_is_reserved_by_measurement() {
+        let mut with: Node = serde_json::from_value(serde_json::json!({
+            "id":"a", "kind":"code", "showLineNumbers":true, "text":"alpha\nbravo",
+            "style":{"fontFamily":"Consolas","fontSize":13}
+        }))
+        .unwrap();
+        let mut without = with.clone();
+        without.id = "b".into();
+        without.show_line_numbers = false;
+        with.rich = Some(Arc::new(crate::rich::code(&with.text, None, None)));
+        without.rich = Some(Arc::new(crate::rich::code(&without.text, None, None)));
+        let mut engine = TextEngine::new();
+        engine.prepare(&with);
+        engine.prepare(&without);
+        let inset = engine.code_gutter_inset(&with);
+        assert!(inset > 0.0, "a guttered block must reserve space");
+        assert_eq!(engine.code_gutter_inset(&without), 0.0);
+        // TextEngine measures only the source column. The tree adds the gutter
+        // inset to that width when it measures the leaf and computes scrollMaxX.
+        let source_width = engine.measure("a", None).0;
+        let plain = engine.measure("b", None).0;
+        assert_eq!(source_width, plain);
+        let guttered = source_width + inset;
+        assert!(
+            guttered > plain,
+            "gutter must widen the block: {guttered} vs {plain}"
+        );
+    }
 
     #[test]
     fn diff_column_measure_covers_shaped_wide_rows_without_shaping_every_row() {
