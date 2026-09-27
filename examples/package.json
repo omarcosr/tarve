@@ -11,6 +11,8 @@
     "forms": "bun forms.tsx",
     "intrinsics": "bun intrinsics.tsx",
     "large-list": "bun large-list.tsx",
+    "studio": "bun studio.tsx",
+    "performance": "bun performance.tsx",
     "check": "tsc --noEmit",
     "build:basic": "bun run tarve build basic.tsx --outfile dist/Basic.exe",
     "build:counter": "bun run tarve build counter.tsx --outfile dist/Counter.exe",
@@ -19,7 +21,9 @@
     "build:diff": "bun run tarve build diff.tsx --outfile dist/Diff.exe",
     "build:forms": "bun run tarve build forms.tsx --outfile dist/Forms.exe",
     "build:intrinsics": "bun run tarve build intrinsics.tsx --outfile dist/Intrinsics.exe",
-    "build:large-list": "bun run tarve build large-list.tsx --outfile dist/LargeList.exe"
+    "build:large-list": "bun run tarve build large-list.tsx --outfile dist/LargeList.exe",
+    "build:studio": "bun run tarve build studio.tsx --outfile dist/Studio.exe",
+    "build:performance": "bun run tarve build performance.tsx --outfile dist/Performance.exe"
   },
   "dependencies": {
     "@tarve/react-icons": "file:../packages/react-icons",
