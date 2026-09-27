@@ -2,6 +2,6 @@ import { createApp } from "tarve";
 import { App, connectPerformance } from "./performance-view";
 
 const app = createApp(App);
-connectPerformance(() => app.update());
+connectPerformance(app);
 await app.ready;
 await app.closed;
