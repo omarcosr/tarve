@@ -23,6 +23,7 @@ import {
   View,
   Window,
   darkTheme,
+  lightTheme,
   theme,
   type Child,
   type DataGridKey,
@@ -54,6 +55,7 @@ export const componentRows: ComponentRow[] = [
   layoutMs: Number((0.02 + ((index * 37) % 26) / 100).toFixed(2)),
 }));
 
+const FRAME_MS = 1000 / 120;
 const nativeKinds = new Set<ComponentRow["kind"]>(["rich", "data"]);
 
 export const appSource = `import { Window, Row, DataGrid, Markdown } from "tarve";
@@ -122,15 +124,38 @@ let vsync = true;
 let overscan = 8;
 let documentTab = "code";
 let status = "Ready";
+let dark = true;
+let openedFile: { name: string; path: string; text: string } | undefined;
 
 let refresh = () => {};
 let buildExecutable: () => Promise<string> = async () => {
   throw new Error("No build handler connected.");
 };
+let pickFile: () => Promise<{ name: string; path: string; text: string } | undefined> = async () => undefined;
 
-export function connectStudio(options: { refresh: () => void; build: () => Promise<string> }) {
+export function connectStudio(options: {
+  refresh: () => void;
+  build: () => Promise<string>;
+  openFile: () => Promise<{ name: string; path: string; text: string } | undefined>;
+}) {
   refresh = options.refresh;
   buildExecutable = options.build;
+  pickFile = options.openFile;
+}
+
+async function openFile() {
+  try {
+    const file = await pickFile();
+    if (!file) { status = "Open cancelled"; }
+    else {
+      openedFile = file;
+      documentTab = "code";
+      status = `Opened ${file.path}`;
+    }
+  } catch (error) {
+    status = `Could not open the file: ${error instanceof Error ? error.message : String(error)}`;
+  }
+  refresh();
 }
 
 async function runBuild() {
@@ -183,8 +208,11 @@ function Inspector() {
         <Slider id="inspector-overscan" label="Overscan" value={overscan} min={0} max={32} onValueChange={value => { overscan = value; }} style={{ width: "100%" }} />
       </Column>
       <Column gap={6} style={{ width: "100%" }}>
-        <Text size={12} color={c.mutedForeground}>Frame budget used</Text>
-        <Progress label="Frame budget used" value={row ? Math.round(row.layoutMs / 8.33 * 100 * 10) : 0} max={100} />
+        <Row justify="between" style={{ width: "100%" }}>
+          <Text size={12} color={c.mutedForeground}>Share of a 120 Hz frame</Text>
+          <Text size={12}>{row ? `${(row.layoutMs / FRAME_MS * 100).toFixed(1)}%` : "—"}</Text>
+        </Row>
+        <Progress label="Layout share of a 120 Hz frame" value={row ? row.layoutMs : 0} max={FRAME_MS} />
       </Column>
     </Column>
   );
@@ -212,9 +240,11 @@ function ComponentGrid() {
       columns={[
         { key: "name", header: "Component", sortable: true, searchable: true },
         {
-          key: "kind",
+          key: "status",
           header: "Status",
           sortable: true,
+          // Sort and filter on the label the badge shows, not the raw kind.
+          value: row => (nativeKinds.has(row.kind) ? "native" : "stable"),
           render: row => <Badge variant={nativeKinds.has(row.kind) ? "default" : "secondary"}>{nativeKinds.has(row.kind) ? "native" : "stable"}</Badge>,
         },
         { key: "layoutMs", header: "Layout", sortable: true, value: row => row.layoutMs, render: row => <Text size={13}>{row.layoutMs.toFixed(2)} ms</Text> },
@@ -239,21 +269,25 @@ function Toolbar() {
         id="studio-new"
         open={menuOpen}
         onOpenChange={open => { menuOpen = open; }}
-        trigger={<Text size={13} weight={600}>+  New</Text>}
+        trigger={<Text size={13} weight={600}>Actions</Text>}
         side="bottom"
         items={[
-          { value: "window", label: "New window", icon: "plus", shortcut: "Ctrl N" },
-          { value: "open", label: "Open file…", icon: "folder", shortcut: "Ctrl O" },
-          { value: "build", label: "Build executable…", icon: "download", shortcut: "Ctrl B" },
-          { value: "theme", label: "Toggle theme", icon: "star", shortcut: "Ctrl T" },
-          { value: "preferences", label: "Preferences", icon: "settings", shortcut: "Ctrl ," },
+          { value: "open", label: "Open file…", icon: "folder" },
+          { value: "build", label: "Build executable…", icon: "download" },
+          { value: "theme", label: dark ? "Light theme" : "Dark theme", icon: "star" },
+          { value: "sidebar", label: sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar", icon: "chevron-left" },
         ]}
         onSelect={value => {
           if (value === "build") {
             buildState = { phase: "idle" };
             dialogOpen = true;
-          } else {
-            status = `Selected “${value}”`;
+          } else if (value === "open") {
+            void openFile();
+          } else if (value === "theme") {
+            dark = !dark;
+            status = `${dark ? "Dark" : "Light"} theme`;
+          } else if (value === "sidebar") {
+            sidebarCollapsed = !sidebarCollapsed;
           }
         }}
       />
@@ -270,8 +304,8 @@ function Documents() {
       items={[
         {
           value: "code",
-          label: "app.tsx",
-          content: <Code id="studio-code" code={appSource} language="tsx" showLineNumbers style={{ width: "100%", padding: 14, background: c.muted, radius: 8 }} />,
+          label: openedFile?.name ?? "app.tsx",
+          content: <Code id="studio-code" code={openedFile?.text ?? appSource} path={openedFile?.path ?? "app.tsx"} showLineNumbers style={{ width: "100%", padding: 14, background: c.muted, radius: 8 }} />,
         },
         {
           value: "readme",
@@ -325,7 +359,7 @@ function BuildDialog() {
 
 export function App() {
   return (
-    <Window title="Tarve Studio" width={1280} height={820} minWidth={900} minHeight={600} position="center" theme={darkTheme}>
+    <Window title="Tarve Studio" width={1280} height={820} minWidth={900} minHeight={600} position="center" theme={dark ? darkTheme : lightTheme}>
       <TitleBar title="Tarve Studio" />
       <Row flex={1} gap={0} style={{ width: "100%" }}>
         <Sidebar
