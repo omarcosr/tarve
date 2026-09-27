@@ -18,6 +18,12 @@ import {
 // The performance sequence from the launch film: a 100,000-row VirtualList
 // that flies to a row at high speed, plus a card grid that reflows live as the
 // native window is resized.
+//
+// Native scroll position is owned by the runtime: a VirtualList `offset` only
+// mirrors it. Programmatic scrolling therefore goes through
+// `app.scrollToItem`, which needs a keyed VirtualList (`id` +
+// `estimatedItemHeight`). The windowed form mounts only the rows around the
+// viewport, so 100,000 rows cost the same per update as 60.
 
 const c = theme.colors;
 
@@ -27,9 +33,12 @@ const NOUN = ["Pipeline", "Surface", "Node", "Batch", "Viewport", "Tree", "Queue
 export const ROW_COUNT = 100_000;
 export const ROW_HEIGHT = 48;
 export const LIST_HEIGHT = 560;
+export const LIST_ID = "performance-list";
+// Rows mounted above and below the viewport.
+const WINDOW_MARGIN = 24;
 export const TARGET_ROW = 84_216;
 
-export interface Row {
+export interface ListItem {
   index: number;
   title: string;
   node: string;
@@ -44,7 +53,7 @@ function mix(n: number): number {
   return (x ^ (x >>> 16)) >>> 0;
 }
 
-export const rows: Row[] = Array.from({ length: ROW_COUNT }, (_, index) => {
+export const rows: ListItem[] = Array.from({ length: ROW_COUNT }, (_, index) => {
   const h = mix(index);
   return {
     index,
@@ -64,36 +73,50 @@ let flightTimer: ReturnType<typeof setInterval> | undefined;
 let lastFlight = "";
 
 let refresh = () => {};
-export function connectPerformance(update: () => void) { refresh = update; }
+let scrollToItem: (id: string, index: number, offset?: number) => void = () => {};
+export function connectPerformance(app: { update(): void; scrollToItem(id: string, index: number, offset?: number): void }) {
+  refresh = () => app.update();
+  scrollToItem = (id, index, offset) => app.scrollToItem(id, index, offset);
+}
 
 const maxOffset = () => ROW_COUNT * ROW_HEIGHT - LIST_HEIGHT;
 const clampOffset = (value: number) => Math.max(0, Math.min(value, maxOffset()));
 const easeInOutQuint = (t: number) => (t < 0.5 ? 16 * t ** 5 : 1 - (-2 * t + 2) ** 5 / 2);
 
-/** Animates the controlled VirtualList offset, one app update per ~8 ms tick. */
-export function flyTo(row: number, duration = 900) {
-  const to = clampOffset(Math.max(0, Math.min(row, ROW_COUNT - 1)) * ROW_HEIGHT);
-  flight = { from: offset, to, started: performance.now(), duration };
-  if (flightTimer) clearInterval(flightTimer);
-  const frames: number[] = [];
-  flightTimer = setInterval(() => {
-    if (!flight) return;
-    const now = performance.now();
-    frames.push(now);
-    const k = Math.min(1, (now - flight.started) / flight.duration);
-    offset = flight.from + (flight.to - flight.from) * easeInOutQuint(k);
-    if (k >= 1) {
-      clearInterval(flightTimer);
-      flightTimer = undefined;
-      const rate = frames.length > 1 ? (frames.length - 1) / ((frames[frames.length - 1] - frames[0]) / 1000) : 0;
-      lastFlight = `${Math.abs(flight.to - flight.from) / ROW_HEIGHT | 0} rows in ${flight.duration} ms · ${rate.toFixed(0)} updates/s`;
-      flight = undefined;
-    }
-    refresh();
-  }, 8);
+function scrollListTo(position: number) {
+  offset = clampOffset(position);
+  const index = Math.floor(offset / ROW_HEIGHT);
+  scrollToItem(LIST_ID, index, offset - index * ROW_HEIGHT);
 }
 
-function ListRow({ row, target }: { row: Row; target: boolean }) {
+function stopFlight() {
+  if (flightTimer) clearInterval(flightTimer);
+  flightTimer = undefined;
+  flight = undefined;
+}
+
+/** Eases the list to `row` with one native scroll request per ~16 ms tick. */
+export function flyTo(row: number, duration = 900) {
+  stopFlight();
+  const to = clampOffset(Math.max(0, Math.min(Math.floor(row), ROW_COUNT - 1)) * ROW_HEIGHT);
+  flight = { from: offset, to, started: performance.now(), duration };
+  let ticks = 0;
+  flightTimer = setInterval(() => {
+    if (!flight) return;
+    ticks++;
+    const elapsed = performance.now() - flight.started;
+    const k = Math.min(1, elapsed / flight.duration);
+    scrollListTo(flight.from + (flight.to - flight.from) * easeInOutQuint(k));
+    if (k >= 1) {
+      const rows = Math.round(Math.abs(flight.to - flight.from) / ROW_HEIGHT);
+      lastFlight = `${rows.toLocaleString("en-US")} rows in ${Math.round(elapsed)} ms · ${Math.round(ticks / (elapsed / 1000))} scroll updates/s`;
+      stopFlight();
+    }
+    refresh();
+  }, 16);
+}
+
+function ListRow({ row, target }: { row: ListItem; target: boolean }) {
   const accent = row.index % 5 === 0;
   return (
     <Row
@@ -125,7 +148,7 @@ function Card({ name, index }: { name: string; index: number }) {
     <Column
       gap={8}
       padding={10}
-      style={{ width: 170, flex: 1, background: c.card, borderWidth: 1, borderColor: c.border, radius: 10 }}
+      style={{ width: 176, shrink: 0, background: c.card, borderWidth: 1, borderColor: c.border, radius: 10 }}
     >
       <View style={{ width: "100%", height: 56, radius: 6, background: index % 4 === 1 ? c.primary : c.muted }} />
       <Text size={13} weight={500}>{name}</Text>
@@ -138,6 +161,8 @@ export function App() {
   const first = Math.floor(offset / ROW_HEIGHT);
   const visible = Math.ceil(LIST_HEIGHT / ROW_HEIGHT);
   const target = Number.parseInt(jumpText.replace(/[^0-9]/g, ""), 10);
+  const windowStart = Math.max(0, first - WINDOW_MARGIN);
+  const windowEnd = Math.min(ROW_COUNT, first + visible + WINDOW_MARGIN);
   return (
     <Window title="Tarve — 100,000 rows" width={1080} height={820} minWidth={560} minHeight={600} position="center" theme={darkTheme}>
       <TitleBar title="Tarve — 100,000 rows" />
@@ -166,14 +191,15 @@ export function App() {
             </Row>
             <View style={{ width: "100%", borderWidth: 1, borderColor: c.border, radius: 10, background: c.card }}>
               <VirtualList
-                id="performance-list"
-                items={rows}
-                itemHeight={ROW_HEIGHT}
+                id={LIST_ID}
+                items={rows.slice(windowStart, windowEnd)}
+                itemCount={ROW_COUNT}
+                windowStart={windowStart}
+                estimatedItemHeight={ROW_HEIGHT}
                 height={LIST_HEIGHT}
                 offset={offset}
-                overscan={4}
                 keyForItem={row => row.index}
-                onScroll={next => { offset = next; flight = undefined; if (flightTimer) { clearInterval(flightTimer); flightTimer = undefined; } }}
+                onScroll={next => { if (!flight) offset = next; }}
                 renderItem={row => <ListRow row={row} target={row.index === target} />}
               />
             </View>
