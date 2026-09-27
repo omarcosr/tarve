@@ -68,7 +68,7 @@ if (args.stills) {
   const first = Math.round(from * fps), last = Math.round(to * fps);
   const enc = spawn(ffmpeg, [
     '-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'png', '-i', '-',
-    '-c:v', 'libx264', '-preset', args.preset || 'slow', '-crf', String(args.crf || 14), '-tune', 'grain',
+    '-c:v', 'libx264', '-preset', args.preset || 'slow', '-crf', String(args.crf || 20),
     '-pix_fmt', 'yuv420p', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
     '-movflags', '+faststart', outFile,
   ], { stdio: ['pipe', 'inherit', 'inherit'] });
