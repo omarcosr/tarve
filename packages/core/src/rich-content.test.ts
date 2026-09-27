@@ -18,6 +18,22 @@ test("rich content compiles as native leaves and patches changed sources", () =>
   expect(diffTrees(first, view("# Updated"))?.map(node => node.id)).toEqual(["doc"]);
 });
 
+test("Code and Diff use a portable monospace default without blocking explicit families", () => {
+  const defaults = compileTree(jsx(Window, { children: [
+    jsx(Code, { id: "code", code: "const n = 1" }),
+    jsx(Diff, { id: "diff", oldText: "a\n", newText: "b\n" }),
+  ] }));
+  expect(defaults.nodes.get("code")?.style.fontFamily).toBe("monospace");
+  expect(defaults.nodes.get("diff")?.style.fontFamily).toBe("monospace");
+
+  const custom = compileTree(jsx(Window, { children: [
+    jsx(Code, { id: "code", code: "const n = 1", style: { fontFamily: "Fira Code" } }),
+    jsx(Diff, { id: "diff", oldText: "a\n", newText: "b\n", style: { fontFamily: "JetBrains Mono" } }),
+  ] }));
+  expect(custom.nodes.get("code")?.style.fontFamily).toBe("Fira Code");
+  expect(custom.nodes.get("diff")?.style.fontFamily).toBe("JetBrains Mono");
+});
+
 test("Diff rejects ambiguous or incomplete input but accepts an empty patch", () => {
   // No source and no text pair: there is nothing to diff.
   expect(() => Diff({})).toThrow();

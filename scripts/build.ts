@@ -50,7 +50,7 @@ if (!release) {
   const library = `${parse(name).name}-${hash}${parse(name).ext}`;
   if (!existsSync(join(directory, library))) await copyFile(nativeArtifact, join(directory, library));
   const temporary = join(directory, `${randomUUID()}.json`);
-  await writeFile(temporary, JSON.stringify({ library }));
+  await writeFile(temporary, JSON.stringify({ target: hostTarget, library }));
   await rename(temporary, join(directory, "current.json"));
 } else if (executable) {
   await mkdir(join(root, "dist"), { recursive: true });

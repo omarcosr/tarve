@@ -202,7 +202,7 @@ export const theme = {
   colors: refs,
   space: { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 },
   radius: { sm: 6, md: 8, lg: 12 },
-  font: { family: "Segoe UI", size: 14, lineHeight: 1.5 },
+  font: { family: "system-ui", size: 14, lineHeight: 1.5 },
 } as const;
 
 export function resolveThemeColor(value: string, selected: ThemeDefinition): string {

@@ -722,7 +722,12 @@ impl CpuGraphics {
 }
 
 fn should_rasterize_cpu_frame(content_changed: bool, buffer_age: u8) -> bool {
-    content_changed || buffer_age == 0
+    // softbuffer's age is the number of presents since this exact back buffer
+    // was last shown. Only age 1 is guaranteed to contain the immediately
+    // previous frame. Older buffers may predate a repaint, and age 0 has
+    // unspecified contents, so both must be fully rasterized unless we keep a
+    // damage history for every intervening frame.
+    content_changed || buffer_age != 1
 }
 
 fn flatten_rgba_bytes(pixels: &mut [u8], background: vello::peniko::Color) {
@@ -1042,6 +1047,14 @@ mod tests {
         assert!(should_rasterize_cpu_frame(true, 1));
         assert!(should_rasterize_cpu_frame(false, 0));
         assert!(!should_rasterize_cpu_frame(false, 1));
+        assert!(
+            should_rasterize_cpu_frame(false, 2),
+            "an age-2 back buffer contains the frame before the last present and can be stale",
+        );
+        assert!(
+            should_rasterize_cpu_frame(false, 3),
+            "older back buffers must be repainted when no damage history is tracked",
+        );
     }
 
     #[test]

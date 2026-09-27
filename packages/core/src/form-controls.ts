@@ -361,7 +361,7 @@ export function Typography({ variant = "p", children, style, ...props }: Typogra
     large: { fontSize: 16, fontWeight: 600 },
     small: { fontSize: 12, fontWeight: 500 },
     muted: { fontSize: 13, fontWeight: 400, foreground: c.mutedForeground },
-    code: { fontSize: 12, fontWeight: 500, fontFamily: "Consolas", background: c.muted },
+    code: { fontSize: 12, fontWeight: 500, fontFamily: "monospace", background: c.muted },
     blockquote: { fontSize: 14, fontWeight: 400, foreground: c.mutedForeground, borderWidth: { left: 3 }, borderColor: c.border,
       padding: { left: 12 } },
   };

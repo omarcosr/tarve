@@ -1,12 +1,27 @@
 import { existsSync, readFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
-import { hostBuildTarget, targetConfig } from "../../targets";
+import { basename, extname, join, parse, resolve } from "node:path";
+import { hostBuildTarget, isBuildTarget, targetConfig, type BuildTarget } from "../../targets";
 
-function developmentLibrary(directory: string): string | undefined {
+export function developmentLibrary(directory: string, target: BuildTarget): string | undefined {
   const manifest = join(directory, "current.json");
   if (!existsSync(manifest)) return undefined;
-  const { library } = JSON.parse(readFileSync(manifest, "utf8"));
+  const { library, target: manifestTarget } = JSON.parse(readFileSync(manifest, "utf8"));
   if (typeof library !== "string" || basename(library) !== library) throw new Error("Invalid Tarve native build manifest");
+  if (manifestTarget !== undefined) {
+    if (typeof manifestTarget !== "string" || !isBuildTarget(manifestTarget)) throw new Error("Invalid Tarve native build manifest");
+    if (manifestTarget !== target) return undefined;
+  } else {
+    // Legacy manifests predate the target field. Only trust one whose
+    // content-addressed filename matches the current host runtime.
+    const expected = targetConfig(target).nativeName;
+    const expectedExtension = extname(expected).toLowerCase();
+    const expectedStem = parse(expected).name;
+    const candidateExtension = extname(library).toLowerCase();
+    const candidateStem = parse(library).name;
+    if (candidateExtension !== expectedExtension || (candidateStem !== expectedStem && !candidateStem.startsWith(`${expectedStem}-`))) {
+      return undefined;
+    }
+  }
   return join(directory, library);
 }
 
@@ -25,18 +40,19 @@ export function nativePath(): string {
     resolve(import.meta.dir, "../../../../native/bin"),
     resolve(import.meta.dir, "../../native/bin"),
   ]) {
-    const path = developmentLibrary(directory);
+    const path = developmentLibrary(directory, target);
     if (path && existsSync(path)) return path;
   }
 
   const installed = [
     join(import.meta.dir, name),
     resolve(import.meta.dir, "../../native", config.nativeDirectory, name),
+    resolve(import.meta.dir, "../../../../native", config.nativeDirectory, name),
   ];
   const found = installed.find((path): path is string => !!path && existsSync(path));
   if (found) return found;
   for (const directory of [resolve("native/bin")]) {
-    const path = developmentLibrary(directory) ?? join(directory, name);
+    const path = developmentLibrary(directory, target) ?? join(directory, name);
     if (existsSync(path)) return path;
   }
   throw new Error(`Tarve native library missing for ${process.platform}-${process.arch}. In the repository, run bun run build:native.`);

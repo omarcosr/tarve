@@ -29,15 +29,13 @@ for (const entry of metadata.files) {
   await cp(source, join(packageLink, entry), { recursive: true });
 }
 
-// Bun only needs an executable .bin entry for `bun run tarve ...`. Keep this launcher
-// as plain text so the local examples do not depend on Bun's package-manager shims.
+// The repository is commonly shared between Windows and WSL, so the examples must
+// remain runnable from either host after setup runs on either one. Keep both launchers
+// instead of publishing only the shim for the host that happened to run setup.
 for (const name of ["tarve", "tarve.exe", "tarve.bunx", "tarve.cmd"]) {
   await rm(join(bin, name), { force: true });
 }
 const launcher = join(bin, "tarve");
 await writeFile(launcher, '#!/usr/bin/env bun\nimport "../tarve/dist/npm/cli.js";\n');
-if (process.platform === "win32") {
-  await writeFile(join(bin, "tarve.cmd"), '@echo off\r\nbun "%~dp0\\..\\tarve\\dist\\npm\\cli.js" %*\r\n');
-} else {
-  await chmod(launcher, 0o755);
-}
+await writeFile(join(bin, "tarve.cmd"), '@echo off\r\nbun "%~dp0\\..\\tarve\\dist\\npm\\cli.js" %*\r\n');
+if (process.platform !== "win32") await chmod(launcher, 0o755);
