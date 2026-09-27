@@ -14,6 +14,20 @@ function node(snapshot: Snapshot, id: string): NodeSnapshot {
   assert(item, `Missing node: ${id}`); return item;
 }
 async function settle(): Promise<Snapshot> { await Bun.sleep(120); return app.inspect(); }
+async function hover(id: string): Promise<Snapshot> {
+  const box = node(await app.inspect(), id);
+  let latest: Snapshot | undefined;
+  // Keep synthetic pointer input and its diagnostic snapshot adjacent in the
+  // native command queue. A real desktop cursor (notably under WSLg) can move
+  // over the window while the smoke test is sleeping and legitimately replace
+  // tree.hovered with whatever is under the physical pointer.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    app.debug({ type: "input", action: "move", x: box.x + 10, y: box.y + 10 });
+    latest = await app.inspect();
+    if (latest.hovered === id) return latest;
+  }
+  return latest!;
+}
 async function waitForFrameQuiescence(): Promise<Snapshot> {
   const deadline = performance.now() + 3_000;
   let previous = await app.inspect();
@@ -57,12 +71,10 @@ try {
   const light = await click("theme-toggle");
   assert.equal(light.layouts, beforeTheme.layouts, "Switching back to light must remain paint-only");
   assert.equal(light.shapes, beforeTheme.shapes, "Switching back to light must not reshape text");
-  const button = node(light, "new-project");
-  app.debug({ type: "input", action: "move", x: button.x + 10, y: button.y + 10 });
-  const hover = await settle();
-  assert.equal(hover.hovered, "new-project");
-  assert.equal(hover.layouts, light.layouts, "Hover must not recompute layout");
-  assert.equal(hover.shapes, light.shapes, "Hover must not reshape text");
+  const hovered = await hover("new-project");
+  assert.equal(hovered.hovered, "new-project");
+  assert.equal(hovered.layouts, light.layouts, "Hover must not recompute layout");
+  assert.equal(hovered.shapes, light.shapes, "Hover must not reshape text");
   await app.capture(resolve("work/hover.png"));
   const clicked = await click("new-project");
   assert.equal(node(clicked, "save-status").text, "Project 1 created", "Click must roundtrip through Bun and update Rust");

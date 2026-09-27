@@ -75,7 +75,7 @@ export function Code(props: CodeProps): VNode {
   return jsx("code", {
     ...props,
     style: {
-      fontFamily: "Consolas",
+      fontFamily: "monospace",
       fontSize: 13,
       // Keep the default 13px face on an integral 20px baseline grid. A 1.5
       // multiplier produces 19.5px rows, which alternates 19/20px after
@@ -115,7 +115,7 @@ export function Diff(props: DiffProps): VNode {
     wordDiff: props.wordDiff ?? true,
     collapsedPaths: props.collapsedPaths ?? [],
     style: {
-      fontFamily: "Consolas",
+      fontFamily: "monospace",
       fontSize: 14,
       lineHeight: 1.5,
       foreground: theme.colors.foreground,

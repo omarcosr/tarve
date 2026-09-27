@@ -4,29 +4,60 @@ import { mkdir } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nativePath } from "#tarve/runtime";
+import { BUILD_TARGETS, hostBuildTarget, isBuildTarget, targetConfig, type BuildTarget } from "./targets";
+
+export { BUILD_TARGETS, hostBuildTarget, isBuildTarget, nativeDirectoryForBuildTarget, nativeRelativePath, targetConfig, type BuildTarget } from "./targets";
 
 export interface BuildOptions {
   entrypoint: string;
   outfile?: string;
   name?: string;
   version?: string;
+  target?: BuildTarget;
   /** Override for building the repository against a freshly compiled release library. */
   nativeLibrary?: string;
 }
 
+function resolveNativeLibrary(target: BuildTarget, override?: string): string {
+  if (override) {
+    const path = resolve(override);
+    if (!existsSync(path)) throw new Error(`Tarve native library does not exist: ${path}`);
+    return path;
+  }
+
+  const config = targetConfig(target);
+  const hostTarget = hostBuildTarget();
+  if (hostTarget === target) {
+    try { return nativePath(); }
+    catch { /* Fall through to the staged release artifact. */ }
+  }
+
+  const candidates = [
+    join(import.meta.dir, config.nativeName),
+    resolve(import.meta.dir, "../../native", config.nativeDirectory, config.nativeName),
+  ];
+  const found = candidates.find(existsSync);
+  if (found) return found;
+  throw new Error(
+    `Tarve native library missing for ${target}. Expected ${config.nativeName} in native/${config.nativeDirectory}. ` +
+    "Use a Tarve package containing that target runtime or pass nativeLibrary explicitly.",
+  );
+}
+
 /** Compile an ordinary Tarve app. No production entrypoint or app-side bridge setup is needed. */
 export async function build(options: BuildOptions): Promise<string> {
-  if (process.platform !== "win32" || process.arch !== "x64") {
-    throw new Error("Tarve executable distribution currently supports Windows x64.");
-  }
+  const target = options.target ?? hostBuildTarget();
+  if (!target) throw new Error(`Tarve executable distribution is not supported for ${process.platform}-${process.arch}. Pass an explicit supported target when cross-compiling.`);
+  if (!isBuildTarget(target)) throw new TypeError(`Unsupported Tarve build target: ${String(target)}. Expected ${BUILD_TARGETS.join(" or ")}.`);
+  const config = targetConfig(target);
   const entrypoint = resolve(options.entrypoint);
   const packageMetadata = await Bun.file(resolve(import.meta.dir, "../../package.json")).json() as { version?: string };
   if (typeof packageMetadata.version !== "string" || packageMetadata.version.length === 0) {
     throw new Error("Tarve package version is missing.");
   }
   const name = options.name ?? basename(entrypoint).replace(/\.[^.]+$/, "");
-  const outfile = resolve(options.outfile ?? `dist/${name}.exe`);
-  const library = resolve(options.nativeLibrary ?? nativePath());
+  const outfile = resolve(options.outfile ?? `dist/${name}${config.executableSuffix}`);
+  const library = resolveNativeLibrary(target, options.nativeLibrary);
   const assetsModule = fileURLToPath(import.meta.resolve("#tarve/assets"));
   const sourceDirectory = join(import.meta.dir, "src");
   const repositorySource = existsSync(join(sourceDirectory, "index.ts"));
@@ -44,7 +75,7 @@ export async function build(options: BuildOptions): Promise<string> {
         contents: [
           `import library from ${JSON.stringify(library)} with { type: "file" };`,
           `import { materializeAsset } from ${JSON.stringify(assetsModule)};`,
-          'export function nativePath() { return materializeAsset(library, "tarve_native.dll"); }',
+          `export function nativePath() { return materializeAsset(library, ${JSON.stringify(config.nativeName)}); }`,
         ].join("\n"),
       }));
     },
@@ -57,11 +88,13 @@ export async function build(options: BuildOptions): Promise<string> {
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
     minify: true,
     compile: {
-      target: "bun-windows-x64",
+      target: config.bunTarget,
       outfile,
       autoloadDotenv: false,
       autoloadBunfig: false,
-      windows: { hideConsole: true, title: name, version: options.version ?? packageMetadata.version, description: `${name} — native Tarve application` },
+      ...(config.platform === "win32" ? {
+        windows: { hideConsole: true, title: name, version: options.version ?? packageMetadata.version, description: `${name} — native Tarve application` },
+      } : {}),
     },
   });
   if (!result.success) throw new AggregateError(result.logs, "Could not compile the Tarve application");

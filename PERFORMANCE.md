@@ -1,6 +1,6 @@
 # Performance measurements
 
-Run `bun run build:exe` followed by `bun run bench` on Windows x64. The benchmark uses the Rust release library, opens a real GPU-backed window, and writes `work/benchmark.json`.
+Run `bun run build` followed by `bun run bench`. The benchmark uses the host Rust release library, opens a real GPU-backed window, and writes `work/benchmark.json`.
 
 ## Current measurement
 

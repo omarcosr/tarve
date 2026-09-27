@@ -5,12 +5,12 @@ export interface PackageCleanupResult {
   removed: string[];
 }
 
-export async function cleanPackageOutputs(root: string): Promise<PackageCleanupResult> {
+export async function cleanPackageOutputs(root: string, nativeTarget?: string): Promise<PackageCleanupResult> {
   const targets = [
     join(root, "dist", "npm"),
     join(root, "dist", "types"),
-    join(root, "native", "win32-x64"),
   ];
+  if (nativeTarget) targets.push(join(root, "native", nativeTarget));
   const removed: string[] = [];
 
   for (const target of targets) {

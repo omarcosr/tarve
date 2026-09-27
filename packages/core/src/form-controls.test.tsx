@@ -32,6 +32,7 @@ describe("form and visual controls", () => {
     expect(tree.nodes.get("code")?.kind).toBe("text");
     expect(tree.nodes.get("code")?.style.foreground).toBe("#123456");
     expect(tree.nodes.get("code")?.style.fontSize).toBe(15);
+    expect(tree.nodes.get("code")?.style.fontFamily).toBe("monospace");
     expect(tree.nodes.get("alert")?.style.borderColor).toBe("#dc2626");
     expect(() => compileTree(<Window><AspectRatio ratio={0} /></Window>)).toThrow(RangeError);
     expect(() => compileTree(<Window><AspectRatio ratio={1} width={0} /></Window>)).toThrow(RangeError);

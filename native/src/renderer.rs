@@ -179,6 +179,15 @@ struct GpuGraphics {
     backend: wgpu::Backend,
     surface_failure_streak: u16,
 }
+
+fn supports_vello_float16_packing(
+    features: wgpu::Features,
+    downlevel: wgpu::DownlevelFlags,
+) -> bool {
+    features.contains(wgpu::Features::SHADER_F16)
+        || downlevel.contains(wgpu::DownlevelFlags::SHADER_F16_IN_F32)
+}
+
 impl GpuGraphics {
     pub fn new(window: Arc<Window>) -> Result<Self, String> {
         if std::env::var_os("WGPU_BACKEND").is_some() {
@@ -216,7 +225,10 @@ impl GpuGraphics {
             })
         }
         #[cfg(not(target_os = "windows"))]
-        Self::new_with_backends(window, None)
+        {
+            let _ = previous_backend;
+            Self::new_with_backends(window, None)
+        }
     }
 
     fn new_with_backends(
@@ -240,10 +252,21 @@ impl GpuGraphics {
             Some(&surface),
         ))
         .map_err(|e| e.to_string())?;
-        let optional_features = wgpu::Features::CLEAR_TEXTURE | wgpu::Features::PIPELINE_CACHE;
+        let adapter_features = adapter.features();
+        let downlevel = adapter.get_downlevel_capabilities();
+        if !supports_vello_float16_packing(adapter_features, downlevel.flags) {
+            let info = adapter.get_info();
+            return Err(format!(
+                "Vello GPU renderer is unsupported by {} ({:?}): the adapter exposes neither SHADER_F16 nor SHADER_F16_IN_F32",
+                info.name, info.backend
+            ));
+        }
+        let optional_features = wgpu::Features::CLEAR_TEXTURE
+            | wgpu::Features::PIPELINE_CACHE
+            | wgpu::Features::SHADER_F16;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: None,
-            required_features: adapter.features() & optional_features,
+            required_features: adapter_features & optional_features,
             required_limits: wgpu::Limits::default(),
             memory_hints: wgpu::MemoryHints::MemoryUsage,
             ..Default::default()
@@ -699,7 +722,12 @@ impl CpuGraphics {
 }
 
 fn should_rasterize_cpu_frame(content_changed: bool, buffer_age: u8) -> bool {
-    content_changed || buffer_age == 0
+    // softbuffer's age is the number of presents since this exact back buffer
+    // was last shown. Only age 1 is guaranteed to contain the immediately
+    // previous frame. Older buffers may predate a repaint, and age 0 has
+    // unspecified contents, so both must be fully rasterized unless we keep a
+    // damage history for every intervening frame.
+    content_changed || buffer_age != 1
 }
 
 fn flatten_rgba_bytes(pixels: &mut [u8], background: vello::peniko::Color) {
@@ -745,11 +773,21 @@ pub struct Graphics {
 
 impl Graphics {
     pub fn new(window: Arc<Window>, preference: RendererPreference) -> Result<Self, String> {
-        let backend =
-            match resolve_renderer(preference, std::env::var_os("TARVE_RENDERER").as_deref())? {
-                ResolvedRenderer::Gpu => Self::new_gpu_backend(window)?,
-                ResolvedRenderer::Cpu => GraphicsImpl::Cpu(Box::new(CpuGraphics::new(window)?)),
-            };
+        let renderer_env = std::env::var_os("TARVE_RENDERER");
+        let backend = match resolve_renderer(preference, renderer_env.as_deref())? {
+            ResolvedRenderer::Gpu => match Self::new_gpu_backend(window.clone()) {
+                Ok(graphics) => graphics,
+                Err(gpu_error) if preference == RendererPreference::Auto && renderer_env.is_none() => {
+                    GraphicsImpl::Cpu(Box::new(CpuGraphics::new(window).map_err(|cpu_error| {
+                        format!(
+                            "GPU renderer unavailable: {gpu_error}; CPU fallback failed: {cpu_error}"
+                        )
+                    })?))
+                }
+                Err(error) => return Err(error),
+            },
+            ResolvedRenderer::Cpu => GraphicsImpl::Cpu(Box::new(CpuGraphics::new(window)?)),
+        };
         Ok(Self {
             backend,
             frames: 0,
@@ -942,11 +980,27 @@ mod tests {
     use super::{
         CpuGraphics, GraphicsFault, GraphicsFaultKind, GraphicsSignals, ResolvedRenderer,
         SurfaceIssue, flatten_rgba_bytes, flatten_rgba_for_softbuffer, resolve_renderer,
-        should_rasterize_cpu_frame, surface_failure_threshold,
+        should_rasterize_cpu_frame, supports_vello_float16_packing, surface_failure_threshold,
     };
     use crate::protocol::RendererPreference;
     use std::ffi::OsStr;
     use vello::peniko::Color;
+
+    #[test]
+    fn vello_requires_float16_packing_capability() {
+        assert!(supports_vello_float16_packing(
+            vello::wgpu::Features::SHADER_F16,
+            vello::wgpu::DownlevelFlags::empty()
+        ));
+        assert!(supports_vello_float16_packing(
+            vello::wgpu::Features::empty(),
+            vello::wgpu::DownlevelFlags::SHADER_F16_IN_F32
+        ));
+        assert!(!supports_vello_float16_packing(
+            vello::wgpu::Features::empty(),
+            vello::wgpu::DownlevelFlags::empty()
+        ));
+    }
 
     #[test]
     fn renderer_preference_honors_app_config_before_environment() {
@@ -993,6 +1047,14 @@ mod tests {
         assert!(should_rasterize_cpu_frame(true, 1));
         assert!(should_rasterize_cpu_frame(false, 0));
         assert!(!should_rasterize_cpu_frame(false, 1));
+        assert!(
+            should_rasterize_cpu_frame(false, 2),
+            "an age-2 back buffer contains the frame before the last present and can be stale",
+        );
+        assert!(
+            should_rasterize_cpu_frame(false, 3),
+            "older back buffers must be repainted when no damage history is tracked",
+        );
     }
 
     #[test]

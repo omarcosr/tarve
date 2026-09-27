@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
+import { BUILD_TARGETS } from "../packages/core/targets";
 import { assertReleasePolicy } from "./release-policy";
 
 const root = resolve(import.meta.dir, "..");
@@ -9,6 +10,7 @@ describe("repository release policy", () => {
     const state = await assertReleasePolicy(root);
     expect(state.license).toBe("Apache-2.0");
     expect(state.distribution).toBe("open-source");
+    expect(state.targets).toEqual([...BUILD_TARGETS]);
     expect(state.protocolVersion).not.toBe(state.nativeAbiVersion);
   });
 

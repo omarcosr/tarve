@@ -7,6 +7,11 @@ import { VirtualList } from "./virtual-list";
 import { compileTree, diffTrees } from "./reconciler";
 
 describe("control kit", () => {
+  test("uses the portable system UI family for default text", () => {
+    const tree = compileTree(<Window><Text id="default-font">123</Text></Window>);
+    expect(tree.nodes.get("default-font")?.style.fontFamily).toBe("system-ui");
+  });
+
   test("exposes state and labels to native controls while keeping callbacks in Bun", () => {
     const view = (checked: boolean, value: number) => compileTree(
       <Window>

@@ -6,11 +6,13 @@ use crate::{
     renderer::{
         CaptureError, Graphics, GraphicsFaultKind, PresentResult, RenderError, RendererBackend,
     },
-    tree::{AccessibilityScrollAlignment, Tree, color},
+    tree::{Tree, color},
 };
 
 #[cfg(target_os = "windows")]
 use crate::accessibility::AccessibilityBridge;
+#[cfg(target_os = "windows")]
+use crate::tree::AccessibilityScrollAlignment;
 #[cfg(target_os = "windows")]
 use accesskit::{Action, ActionData, ActionRequest, ScrollHint, ScrollUnit};
 #[cfg(target_os = "windows")]
@@ -31,7 +33,7 @@ fn accessibility_scroll_alignment(
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn run_file_dialog(
     window: Option<&Arc<Window>>,
     mode: &str,
@@ -77,13 +79,13 @@ fn run_file_dialog(
         .collect())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn run_file_dialog(
     _window: Option<&Arc<Window>>,
     _mode: &str,
     _options: FileDialogOptions,
 ) -> Result<Vec<String>, String> {
-    Err("Native file dialogs are currently supported on Windows only".into())
+    Err("Native file dialogs are not supported on this platform".into())
 }
 
 fn shortcut_key_name(key: &Key) -> Option<String> {
@@ -342,10 +344,23 @@ fn configure_custom_window_chrome(_: &Window, _: &str, _: bool) -> Result<(), St
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn should_force_x11_on_wsl(kernel_release: &str, display: Option<&str>) -> bool {
+    display.is_some_and(|value| !value.is_empty())
+        && kernel_release.to_ascii_lowercase().contains("microsoft")
+}
+
+#[cfg(target_os = "linux")]
+fn prefer_x11_on_wsl() -> bool {
+    let kernel_release = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
+    let display = std::env::var("DISPLAY").ok();
+    should_force_x11_on_wsl(&kernel_release, display.as_deref())
+}
+
 pub fn run(
     document: Document,
     events: Arc<Events>,
-    ready: SyncSender<EventLoopProxy<Command>>,
+    ready: SyncSender<Result<EventLoopProxy<Command>, String>>,
 ) -> Result<(), String> {
     let mut builder = EventLoop::<Command>::with_user_event();
     #[cfg(target_os = "windows")]
@@ -357,11 +372,27 @@ pub fn run(
     {
         use winit::platform::x11::EventLoopBuilderExtX11;
         builder.with_any_thread(true);
+        // WSLg exposes both Wayland and X11, but its Wayland connection can
+        // terminate winit's event loop with EPIPE for larger retained trees.
+        // Prefer the stable X11 transport only on WSL; native Linux keeps
+        // winit's normal backend auto-selection.
+        if prefer_x11_on_wsl() {
+            builder.with_x11();
+        }
     }
-    let event_loop = builder.build().map_err(|e| e.to_string())?;
+    let event_loop = match builder.build() {
+        Ok(event_loop) => event_loop,
+        Err(error) => {
+            let message = format!("Could not initialize native event loop: {error}");
+            let _ = ready.send(Err(message.clone()));
+            return Err(message);
+        }
+    };
     event_loop.set_control_flow(ControlFlow::Wait);
     let event_proxy = event_loop.create_proxy();
-    ready.send(event_proxy.clone()).map_err(|e| e.to_string())?;
+    ready
+        .send(Ok(event_proxy.clone()))
+        .map_err(|e| e.to_string())?;
     let tree = Tree::new(document.root.clone());
     let mut app = App {
         document,
@@ -380,6 +411,7 @@ pub fn run(
         ime_enabled: false,
         last_titlebar_click: None,
         close_request_pending: false,
+        #[cfg(target_os = "windows")]
         event_proxy,
         #[cfg(target_os = "windows")]
         accessibility: None,
@@ -408,6 +440,7 @@ struct App {
     ime_enabled: bool,
     last_titlebar_click: Option<(Instant, (f64, f64))>,
     close_request_pending: bool,
+    #[cfg(target_os = "windows")]
     event_proxy: EventLoopProxy<Command>,
     #[cfg(target_os = "windows")]
     accessibility: Option<AccessibilityBridge>,
@@ -1760,5 +1793,34 @@ impl ApplicationHandler<Command> for App {
         }
         self.sync_cursor();
         self.redraw();
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_backend_tests {
+    use super::should_force_x11_on_wsl;
+
+    #[test]
+    fn forces_x11_only_for_wsl_with_a_display() {
+        assert!(should_force_x11_on_wsl(
+            "6.18.33.2-microsoft-standard-WSL2",
+            Some(":0")
+        ));
+        assert!(should_force_x11_on_wsl(
+            "5.15.167.4-MICROSOFT-standard-WSL2",
+            Some(":0")
+        ));
+        assert!(!should_force_x11_on_wsl(
+            "6.18.0-generic",
+            Some(":0")
+        ));
+        assert!(!should_force_x11_on_wsl(
+            "6.18.33.2-microsoft-standard-WSL2",
+            None
+        ));
+        assert!(!should_force_x11_on_wsl(
+            "6.18.33.2-microsoft-standard-WSL2",
+            Some("")
+        ));
     }
 }

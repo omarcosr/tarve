@@ -573,7 +573,7 @@ export function App() {
                   <Input
                     id="demo-ime-input"
                     value={imeInput}
-                    placeholder="Compose 日本語 / 中文 / 한국어…"
+                    placeholder="Compose Japanese / Chinese / Korean text…"
                     onChange={(value) => { imeInput = value; }}
                   />
                 </Field>

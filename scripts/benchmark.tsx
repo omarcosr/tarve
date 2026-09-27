@@ -4,9 +4,13 @@ import { cpus } from "node:os";
 import { resolve } from "node:path";
 import { Button, Column, Row, Scroll, Text, Window, createApp, BunFfiBridge } from "tarve";
 import { compileTree, diffTrees } from "../packages/core/src/reconciler";
+import { hostBuildTarget, targetConfig } from "../packages/core/targets";
 
 const rows = 2000;
 const samples = 60;
+const hostTarget = hostBuildTarget();
+if (!hostTarget) throw new Error(`Benchmark is not supported for ${process.platform}-${process.arch}`);
+const hostConfig = targetConfig(hostTarget);
 let revision = 0;
 function App() {
   return <Window title="Tarve performance measurement" width={1024} height={760}>
@@ -24,7 +28,7 @@ function App() {
   </Window>;
 }
 const start = performance.now();
-const app = createApp(App, { debug: true, bridge: new BunFfiBridge({ libraryPath: resolve("native/target/release/tarve_native.dll") }) });
+const app = createApp(App, { debug: true, bridge: new BunFfiBridge({ libraryPath: resolve("native/target/release", hostConfig.nativeName) }) });
 const errors: string[] = [];
 app.onEvent(event => { if (event.type === "error") errors.push(event.message); });
 

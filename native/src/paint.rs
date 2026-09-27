@@ -245,6 +245,10 @@ impl PaintTarget for CpuPaintTarget<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        protocol::Node,
+        text::{TextDrawArea, TextEngine},
+    };
     use vello::kurbo::{Affine, Rect};
 
     #[test]
@@ -304,5 +308,57 @@ mod tests {
         assert_eq!(images["same"].data.id(), second.data.id());
         assert_ne!(images["same"].data.id(), first_id);
         assert!(!images.contains_key("unused"));
+    }
+
+    #[test]
+    fn cpu_target_rasterizes_default_ui_digits_at_stats_weights() {
+        for weight in [400.0, 500.0, 650.0] {
+            let node: Node = serde_json::from_value(serde_json::json!({
+                "id": format!("digits-{weight}"),
+                "kind": "text",
+                "text": "0123456789",
+                "style": {
+                    "fontFamily": "system-ui",
+                    "fontSize": 27,
+                    "fontWeight": weight,
+                    "lineHeight": 1.5
+                }
+            }))
+            .unwrap();
+            let mut text = TextEngine::new();
+            text.prepare(&node);
+
+            let mut context = RenderContext::new(256, 64);
+            let mut resources = Resources::new();
+            let mut images = HashMap::new();
+            {
+                let mut target = CpuPaintTarget::new(&mut context, &mut resources, &mut images);
+                text.draw(
+                    &mut target,
+                    &node,
+                    TextDrawArea {
+                        origin: (2.0, 2.0),
+                        width: 252.0,
+                        visible_y: (0.0, 64.0),
+                        scroll_x: 0.0,
+                    },
+                    Color::from_rgb8(20, 20, 20),
+                    1.0,
+                );
+                target.finish();
+            }
+            context.flush();
+            let mut pixmap = Pixmap::new(256, 64);
+            context.render(&mut pixmap, &mut resources);
+            let painted = pixmap
+                .data()
+                .iter()
+                .filter(|pixel| pixel.to_u8_array()[3] != 0)
+                .count();
+            assert!(
+                painted > 100,
+                "default UI digits must rasterize through the CPU renderer at weight {weight}; got {painted} painted pixels"
+            );
+        }
     }
 }

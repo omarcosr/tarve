@@ -8,8 +8,8 @@ use crate::{
     syntax::HighlightKind,
 };
 use parley::{
-    FontContext, FontFamily, FontStyle, FontWeight, Layout, LayoutContext, LineHeight,
-    PositionedLayoutItem, StyleProperty,
+    FontContext, FontFamily, FontStyle, FontWeight, GenericFamily, Layout, LayoutContext,
+    LineHeight, PositionedLayoutItem, StyleProperty,
     layout::{Affinity, Cursor, Selection},
 };
 use serde_json::Value;
@@ -224,6 +224,39 @@ pub const TEXT_KEYS: &[&str] = &[
     "lineHeight",
     "textAlign",
 ];
+
+fn node_font_family(node: &Node, fallback: GenericFamily) -> FontFamily<'_> {
+    node.optional_string("fontFamily")
+        .map(font_family_from_name)
+        .unwrap_or_else(|| fallback.into())
+}
+
+fn font_family_from_name(family: &str) -> FontFamily<'_> {
+    match GenericFamily::parse(family) {
+        // Fontconfig's `system-ui` mapping is not equally reliable across
+        // Linux distributions. Preserve the native UI family elsewhere while
+        // using the portable sans-serif generic on Linux.
+        Some(GenericFamily::SystemUi) => default_ui_generic_family().into(),
+        Some(generic) => generic.into(),
+        None => FontFamily::Source(family.into()),
+    }
+}
+
+fn default_ui_generic_family() -> GenericFamily {
+    // Fontconfig does not map the CSS-like `system-ui` generic consistently
+    // across Linux distributions. In particular, a bad system-ui match can
+    // force otherwise basic characters into per-glyph fallback faces. The
+    // standard `sans-serif` generic is the portable Fontconfig UI fallback.
+    // Keep the native system UI family on platforms where the mapping is
+    // provided directly by the OS font backend (for example Segoe UI on
+    // Windows).
+    if cfg!(target_os = "linux") {
+        GenericFamily::SansSerif
+    } else {
+        GenericFamily::SystemUi
+    }
+}
+
 pub struct TextEngine {
     fonts: FontContext,
     context: LayoutContext<TextBrush>,
@@ -474,13 +507,13 @@ fn push_span(
     }
     if span.mono {
         builder.push(
-            StyleProperty::FontFamily(FontFamily::Source("Consolas".into())),
+            StyleProperty::FontFamily(GenericFamily::Monospace.into()),
             range.clone(),
         );
     }
     if let Some(font_family) = &span.font_family {
         builder.push(
-            StyleProperty::FontFamily(FontFamily::Source(font_family.clone().into())),
+            StyleProperty::FontFamily(font_family_from_name(font_family)),
             range.clone(),
         );
     }
@@ -577,9 +610,9 @@ const CODE_GUTTER_PADDING: f32 = 8.0;
 // number paint origin makes the visible ink sit at the intended optical gap
 // while leaving source geometry, clipping, scrolling, and hit-testing intact.
 const CODE_GUTTER_OPTICAL_X: f64 = 1.0;
-// Consolas digits sit optically a touch higher than braces and lowercase code
-// at the same mathematical baseline. Keep the typographic baseline math exact,
-// then move only the painted gutter ink by one physical pixel.
+// Monospace digits can sit optically a touch higher than braces and lowercase
+// code at the same mathematical baseline. Keep the typographic baseline math
+// exact, then move only the painted gutter ink by one physical pixel.
 const CODE_GUTTER_OPTICAL_Y_PX: f64 = 1.0;
 
 fn diff_content_inset(node: &Node, max_line_number: u32) -> f64 {
@@ -652,8 +685,9 @@ impl TextEngine {
         builder.push_default(StyleProperty::FontWeight(FontWeight::new(
             node.number("fontWeight", 400.0),
         )));
-        builder.push_default(StyleProperty::FontFamily(FontFamily::Source(
-            node.string("fontFamily", "Segoe UI").into(),
+        builder.push_default(StyleProperty::FontFamily(node_font_family(
+            node,
+            default_ui_generic_family(),
         )));
         builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
             node.number("lineHeight", 1.5),
@@ -680,7 +714,7 @@ impl TextEngine {
             let gutter_size = node.number("fontSize", 13.0);
             let gutter_line_height = node.number("lineHeight", 1.5);
             let gutter_weight = node.number("fontWeight", 400.0);
-            let family = node.string("fontFamily", "Consolas").to_string();
+            let family = node.string("fontFamily", "monospace").to_string();
             let line_count = content.split('\n').count().max(1);
             let mut gutters = Vec::with_capacity(line_count);
             for line in 1..=line_count {
@@ -690,9 +724,7 @@ impl TextEngine {
                     .ranged_builder(&mut self.fonts, &number, 1.0, true);
                 gutter.push_default(StyleProperty::FontSize(gutter_size));
                 gutter.push_default(StyleProperty::FontWeight(FontWeight::new(gutter_weight)));
-                gutter.push_default(StyleProperty::FontFamily(FontFamily::Source(
-                    family.clone().into(),
-                )));
+                gutter.push_default(StyleProperty::FontFamily(font_family_from_name(&family)));
                 gutter.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
                     gutter_line_height,
                 )));
@@ -759,8 +791,9 @@ impl TextEngine {
             builder.push_default(StyleProperty::FontWeight(FontWeight::new(
                 node.number("fontWeight", 400.0),
             )));
-            builder.push_default(StyleProperty::FontFamily(FontFamily::Source(
-                node.string("fontFamily", "Segoe UI").into(),
+            builder.push_default(StyleProperty::FontFamily(node_font_family(
+                node,
+                default_ui_generic_family(),
             )));
             builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
                 node.number("lineHeight", 1.5),
@@ -1316,7 +1349,7 @@ impl TextEngine {
         // file's code column starts at the same x and the rows stay aligned
         // even though each file sizes its own gutter.
         let gutter = diff_gutter_width(node, *max_line_number);
-        let family = node.string("fontFamily", "Consolas");
+        let family = node.string("fontFamily", "monospace");
         let size = node.number("fontSize", 13.0);
         let column_width = match self.diff_column_widths.get(&node.id) {
             Some((cached_family, cached_size, width))
@@ -1328,7 +1361,7 @@ impl TextEngine {
                 let mut builder = self.context.ranged_builder(&mut self.fonts, "W", 1.0, true);
                 builder.push_default(StyleProperty::FontSize(size));
                 builder.push_default(StyleProperty::FontWeight(FontWeight::new(700.0)));
-                builder.push_default(StyleProperty::FontFamily(FontFamily::Source(family.into())));
+                builder.push_default(StyleProperty::FontFamily(font_family_from_name(family)));
                 let mut reference = builder.build("W");
                 reference.break_all_lines(None);
                 let width = reference.width().max(size * 0.62);
@@ -1566,8 +1599,8 @@ impl TextEngine {
             self.context
                 .ranged_builder(&mut self.fonts, row.content_text(), 1.0, true);
         builder.push_default(StyleProperty::FontSize(node.number("fontSize", 13.0)));
-        builder.push_default(StyleProperty::FontFamily(FontFamily::Source(
-            node.string("fontFamily", "Consolas").into(),
+        builder.push_default(StyleProperty::FontFamily(font_family_from_name(
+            node.string("fontFamily", "monospace"),
         )));
         builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
             node.number("lineHeight", 1.5),
@@ -1623,8 +1656,8 @@ impl TextEngine {
         builder.push_default(StyleProperty::FontSize(
             (node.number("fontSize", 13.0) * 0.88).max(9.0),
         ));
-        builder.push_default(StyleProperty::FontFamily(FontFamily::Source(
-            node.string("fontFamily", "Consolas").into(),
+        builder.push_default(StyleProperty::FontFamily(font_family_from_name(
+            node.string("fontFamily", "monospace"),
         )));
         builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
             node.number("lineHeight", 1.5),
@@ -2001,6 +2034,37 @@ fn diff_gutter_width(node: &Node, max_line_number: u32) -> f32 {
 mod rich_measure_tests {
     use super::*;
     use std::sync::Arc;
+
+    #[test]
+    fn css_generic_font_families_are_resolved_as_generics() {
+        let node = |family: &str| -> Node {
+            serde_json::from_value(serde_json::json!({
+                "id": "font-family",
+                "kind": "text",
+                "text": "123",
+                "style": { "fontFamily": family }
+            }))
+            .unwrap()
+        };
+
+        let system = node("system-ui");
+        assert_eq!(
+            node_font_family(&system, GenericFamily::Serif),
+            FontFamily::from(default_ui_generic_family())
+        );
+
+        let monospace = node("monospace");
+        assert_eq!(
+            node_font_family(&monospace, GenericFamily::Serif),
+            FontFamily::from(GenericFamily::Monospace)
+        );
+
+        let named = node("Segoe UI");
+        assert_eq!(
+            node_font_family(&named, GenericFamily::Serif),
+            FontFamily::Source("Segoe UI".into())
+        );
+    }
 
     #[derive(Debug)]
     struct GlyphRunProbe {

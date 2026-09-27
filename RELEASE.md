@@ -1,6 +1,8 @@
 # Tarve release policy
 
-Tarve currently ships for **Windows x64**. The release process is intentionally fail-closed: a release tag must match the product version, the complete verification gate must pass, and official Windows binaries must carry a valid timestamped Authenticode signature.
+Tarve currently ships for **Windows x64 and Linux x64**. The release process is intentionally fail-closed: a release tag must match the product version, the complete verification gate must pass, and official Windows binaries must carry a valid timestamped Authenticode signature. The npm package stages both native runtimes so `tarve build --target windows-x64|linux-x64` can cross-compile application executables.
+
+The npm artifact is universal across those two targets: Linux CI builds `libtarve_native.so`, Windows CI builds `tarve_native.dll`, and packaging only proceeds after both are staged. A single-platform Tarve package is rejected instead of being published with a target that would fail later at application build time.
 
 ## License and distribution
 

@@ -1,9 +1,10 @@
 import { resolve } from "node:path";
+import { parseArgs } from "node:util";
 const root = resolve(import.meta.dir, "..");
-const build = Bun.spawn([process.execPath, "run", "pack"], { cwd: root, stdout: "inherit", stderr: "inherit" });
-if (await build.exited !== 0) process.exit(1);
+const { values } = parseArgs({ args: process.argv.slice(2), options: { entry: { type: "string" } } });
+if (!values.entry) throw new Error("--entry is required.");
 const install = Bun.spawn([process.execPath, "scripts/setup-examples.ts"], { cwd: root, stdout: "inherit", stderr: "inherit" });
 if (await install.exited !== 0) process.exit(1);
-const app = Bun.spawn([process.execPath, "--watch", "examples/basic.tsx"], { cwd: root, stdout: "inherit", stderr: "inherit" });
+const app = Bun.spawn([process.execPath, "--watch", resolve(process.cwd(), values.entry)], { cwd: root, stdout: "inherit", stderr: "inherit" });
 process.on("SIGINT", () => app.kill());
 process.exit(await app.exited);
