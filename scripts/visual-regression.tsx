@@ -6,9 +6,9 @@ import { lucideReactAdapter, phosphorReactAdapter, reactSvgAdapter } from "@tarv
 import { App as ShowcaseApp } from "../examples/components-view";
 
 // Runtime must use the freshly packed package installed into examples/node_modules.
-// Keep the specifier dynamic so TypeScript does not try to resolve declarations from
-// the package's internal JS path; the workspace public API supplies compile-time types.
-const installedTarveModule = "../examples/node_modules/tarve/dist/npm/index.js";
+// Resolve through Bun's package resolver from the consumer project instead of knowing
+// Tarve's node_modules or dist layout.
+const installedTarveModule = Bun.resolveSync("tarve", resolve(import.meta.dir, "../examples"));
 const { createApp } = await import(installedTarveModule) as typeof import("../packages/core/src/index");
 
 const app = createApp(ShowcaseApp, {

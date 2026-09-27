@@ -2,10 +2,15 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { nativeRelativePath, targetConfig } from "../packages/core/targets";
 import { assertSigningEnvironment, signWindowsFiles, signingRequested, verifyWindowsSignatures } from "./authenticode";
 import { assertReleasePolicy } from "./release-policy";
 
 const root = resolve(import.meta.dir, "..");
+const windowsConfig = targetConfig("windows-x64");
+const windowsNativeRelative = nativeRelativePath("windows-x64");
+const linuxNativeRelative = nativeRelativePath("linux-x64");
+const fromRoot = (path: string) => join(root, ...path.split("/"));
 
 async function run(args: string[], env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const child = Bun.spawn(args, { cwd: root, env, stdout: "inherit", stderr: "inherit" });
@@ -44,11 +49,12 @@ for (const name of [
 await run([bun, "run", "package"], unsignedEnv);
 
 const executable = join(root, "dist/Tarve.exe");
-const library = join(root, "native/win32-x64/tarve_native.dll");
-const releaseLibrary = join(root, "native/target/release/tarve_native.dll");
+const library = fromRoot(windowsNativeRelative);
+const linuxLibrary = fromRoot(linuxNativeRelative);
+const releaseLibrary = join(root, "native/target/release", windowsConfig.nativeName);
 const tarball = join(root, "dist", `tarve-${policy.version}.tgz`);
 await signWindowsFiles([releaseLibrary, library]);
-await run([bun, "run", "build:exe"], { ...unsignedEnv, TARVE_PREBUILT_NATIVE: releaseLibrary });
+await run([bun, "run", "build:example"], { ...unsignedEnv, TARVE_PREBUILT_NATIVE: releaseLibrary });
 await signWindowsFiles([executable]);
 await run([bun, "run", "pack"], { ...unsignedEnv, TARVE_SKIP_PREPACK: "1" });
 
@@ -57,13 +63,17 @@ const directSignatures = await verifyWindowsSignatures([executable, library, rel
 const extraction = await mkdtemp(join(tmpdir(), "tarve-release-verify-"));
 try {
   await run(["tar", "-xzf", tarball, "-C", extraction]);
-  const packedLibrary = join(extraction, "package/native/win32-x64/tarve_native.dll");
+  const packedLibrary = join(extraction, "package", ...windowsNativeRelative.split("/"));
+  const packedLinuxLibrary = join(extraction, "package", ...linuxNativeRelative.split("/"));
   const packedSignatures = await verifyWindowsSignatures([packedLibrary], true);
+  if (await sha256(packedLinuxLibrary) !== await sha256(linuxLibrary)) {
+    throw new Error("Packed Linux native runtime does not match the staged release artifact.");
+  }
   const manifest = {
     product: "tarve",
     version: policy.version,
     tag,
-    target: policy.target,
+    targets: policy.targets,
     license: policy.license,
     distribution: policy.distribution,
     protocolVersion: policy.protocolVersion,
@@ -71,17 +81,18 @@ try {
     commit: process.env.GITHUB_SHA ?? null,
     artifacts: [
       { file: "Tarve.exe", sha256: await sha256(executable) },
-      { file: "native/win32-x64/tarve_native.dll", sha256: await sha256(library) },
+      { file: windowsNativeRelative, sha256: await sha256(library) },
+      { file: linuxNativeRelative, sha256: await sha256(linuxLibrary) },
       { file: `tarve-${policy.version}.tgz`, sha256: await sha256(tarball) },
     ],
     signatures: [...directSignatures, ...packedSignatures].map(signature => ({
       file: signature.path.endsWith("Tarve.exe")
         ? "Tarve.exe"
         : signature.path.includes("release-verify-")
-          ? "package/native/win32-x64/tarve_native.dll"
+          ? `package/${windowsNativeRelative}`
           : signature.path.includes("target")
-            ? "embedded-native/tarve_native.dll"
-            : "native/win32-x64/tarve_native.dll",
+            ? `embedded-native/${windowsConfig.nativeName}`
+            : windowsNativeRelative,
       status: signature.status,
       signerSubject: signature.signerSubject,
       thumbprint: signature.thumbprint,

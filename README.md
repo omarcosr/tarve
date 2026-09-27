@@ -89,7 +89,7 @@ bun app.tsx
 
 ## Build a standalone executable
 
-The package CLI compiles a Tarve application into a standalone executable for the current supported host and embeds the native runtime. Windows produces a `.exe`; Linux produces an ELF executable with no required extension.
+The package CLI compiles a Tarve application into a standalone executable and embeds the native runtime. Windows produces a `.exe`; Linux produces an ELF executable with no required extension. The target defaults to the current host. Published Tarve packages contain both Windows x64 and Linux x64 native runtimes, so `--target` can switch between those targets without rebuilding Tarve's Rust runtime.
 
 ```powershell
 bun run tarve build app.tsx --outfile dist/App.exe
@@ -99,6 +99,15 @@ bun run tarve build app.tsx --outfile dist/App.exe
 bun run tarve build app.tsx --outfile dist/App
 ```
 
+Cross-compile explicitly from either Windows x64 or Linux x64:
+
+```bash
+bun run tarve build app.tsx --target windows-x64 --outfile dist/App.exe
+bun run tarve build app.tsx --target linux-x64 --outfile dist/App
+```
+
+Tarve's release/package pipeline builds each native runtime on its native OS and assembles both into the same npm package. Repository maintainers can stage one runtime with `bun run package:native`; `bun run package` intentionally refuses to create an incomplete single-platform package.
+
 The build API is also exported:
 
 ```ts
@@ -106,7 +115,8 @@ import { build } from "tarve/build";
 
 await build({
   entrypoint: "app.tsx",
-  outfile: process.platform === "win32" ? "dist/App.exe" : "dist/App",
+  target: "linux-x64",
+  outfile: "dist/App",
   name: "My App"
 });
 ```
@@ -352,7 +362,6 @@ Recoverable callback, listener, hotkey, bridge, request, dialog, and update fail
 The `examples/` directory is an independent Bun consumer project using only public Tarve APIs.
 
 ```powershell
-bun run pack
 bun run setup:examples
 cd examples
 bun run check
@@ -364,6 +373,8 @@ bun run large-list
 bun run rich-content
 bun run diff
 ```
+
+`setup:examples` builds host-local package staging itself; it does not require the universal publishable tarball.
 
 All example UI copy and example documentation is written in English.
 
@@ -391,7 +402,7 @@ bun run check
 bun run test
 ```
 
-`bun run pack` stages the native library for the host platform. The signed release pipeline documented in `RELEASE.md` is still Windows-focused; Linux runtime, source builds, local packages, and standalone executables are supported independently of that release pipeline.
+`bun run package:local` stages JS, declarations, and the native runtime for the current host for local development. `bun run package` is the publishable universal package gate and requires both Windows x64 and Linux x64 runtimes. The signed release pipeline documented in `RELEASE.md` assembles both runtimes into the same npm artifact while applying Authenticode only to Windows binaries.
 
 Run the full package, executable, accessibility, and visual release gate with:
 

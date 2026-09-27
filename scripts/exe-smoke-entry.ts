@@ -1,4 +1,4 @@
-import { App } from "../examples/basic-view";
+import { App } from "../tests/fixtures/exe-smoke-app";
 import { createApp } from "@tarve/core";
 import { verifyExecutable } from "./verify-executable";
 

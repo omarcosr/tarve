@@ -8,7 +8,7 @@ use crate::{
     syntax::HighlightKind,
 };
 use parley::{
-    FontContext, FontFamily, FontStyle, FontWeight, Layout, LayoutContext, LineHeight,
+    FontContext, FontFamily, FontStyle, FontWeight, GenericFamily, Layout, LayoutContext, LineHeight,
     PositionedLayoutItem, StyleProperty,
     layout::{Affinity, Cursor, Selection},
 };
@@ -224,6 +224,13 @@ pub const TEXT_KEYS: &[&str] = &[
     "lineHeight",
     "textAlign",
 ];
+
+fn node_font_family(node: &Node, fallback: GenericFamily) -> FontFamily<'_> {
+    node.optional_string("fontFamily")
+        .map(|family| FontFamily::Source(family.into()))
+        .unwrap_or_else(|| fallback.into())
+}
+
 pub struct TextEngine {
     fonts: FontContext,
     context: LayoutContext<TextBrush>,
@@ -652,8 +659,9 @@ impl TextEngine {
         builder.push_default(StyleProperty::FontWeight(FontWeight::new(
             node.number("fontWeight", 400.0),
         )));
-        builder.push_default(StyleProperty::FontFamily(FontFamily::Source(
-            node.string("fontFamily", "Segoe UI").into(),
+        builder.push_default(StyleProperty::FontFamily(node_font_family(
+            node,
+            GenericFamily::SystemUi,
         )));
         builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
             node.number("lineHeight", 1.5),
@@ -759,8 +767,9 @@ impl TextEngine {
             builder.push_default(StyleProperty::FontWeight(FontWeight::new(
                 node.number("fontWeight", 400.0),
             )));
-            builder.push_default(StyleProperty::FontFamily(FontFamily::Source(
-                node.string("fontFamily", "Segoe UI").into(),
+            builder.push_default(StyleProperty::FontFamily(node_font_family(
+                node,
+                GenericFamily::SystemUi,
             )));
             builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
                 node.number("lineHeight", 1.5),

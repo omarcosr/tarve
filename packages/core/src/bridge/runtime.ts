@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { hostBuildTarget, targetConfig } from "../../targets";
 
 function developmentLibrary(directory: string): string | undefined {
   const manifest = join(directory, "current.json");
@@ -11,20 +12,15 @@ function developmentLibrary(directory: string): string | undefined {
 
 /** File resolution for development and npm installs; the app compiler embeds the native library. */
 export function nativePath(): string {
-  const names: Record<string, string> = {
-    win32: "tarve_native.dll",
-    darwin: "libtarve_native.dylib",
-    linux: "libtarve_native.so",
-  };
-  const name = names[process.platform];
-  if (!name) throw new Error(`Unsupported native platform: ${process.platform}`);
+  const target = hostBuildTarget();
+  if (!target) throw new Error(`Unsupported native platform: ${process.platform}-${process.arch}`);
+  const config = targetConfig(target);
+  const name = config.nativeName;
 
   if (process.env.TARVE_NATIVE) return process.env.TARVE_NATIVE;
 
   // Inside the repository, prefer the content-addressed debug build published
-  // by `bun run build:native`. This covers both direct source execution and the
-  // bundled `dist/npm/runtime.js` used by the examples, without affecting an
-  // installed npm package (those locations simply do not exist there).
+  // by `bun run build:native`. Installed packages do not contain these locations.
   for (const directory of [
     resolve(import.meta.dir, "../../../../native/bin"),
     resolve(import.meta.dir, "../../native/bin"),
@@ -35,7 +31,7 @@ export function nativePath(): string {
 
   const installed = [
     join(import.meta.dir, name),
-    resolve(import.meta.dir, "../../native", `${process.platform}-${process.arch}`, name),
+    resolve(import.meta.dir, "../../native", config.nativeDirectory, name),
   ];
   const found = installed.find((path): path is string => !!path && existsSync(path));
   if (found) return found;

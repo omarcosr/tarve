@@ -1,4 +1,4 @@
-name: Signed Windows Release
+name: Tarve Release
 
 on:
   push:
@@ -13,8 +13,45 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  linux-x64-native:
+    name: Linux x64 native runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install Linux native dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build Linux package runtime
+        run: bun run package:native
+
+      - name: Upload Linux runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarve-linux-x64-native
+          if-no-files-found: error
+          retention-days: 1
+          path: native/linux-x64/libtarve_native.so
+
   windows-x64-release:
     name: Windows x64 signed release
+    needs: linux-x64-native
     runs-on: windows-latest
     timeout-minutes: 60
 
@@ -42,6 +79,12 @@ jobs:
 
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
+
+      - name: Download Linux runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: tarve-linux-x64-native
+          path: native/linux-x64
 
       - name: Validate release ref and version policy
         shell: pwsh
@@ -81,6 +124,7 @@ jobs:
             dist/tarve-*.tgz
             dist/release-manifest.json
             native/win32-x64/tarve_native.dll
+            native/linux-x64/libtarve_native.so
 
       - name: Publish GitHub release
         shell: pwsh
@@ -95,6 +139,7 @@ jobs:
             $tarball,
             "dist/release-manifest.json",
             "native/win32-x64/tarve_native.dll",
+            "native/linux-x64/libtarve_native.so",
             "--verify-tag",
             "--generate-notes",
             "--title", "Tarve $env:GITHUB_REF_NAME"

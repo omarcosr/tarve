@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { BUILD_TARGETS, type BuildTarget } from "../packages/core/targets";
 import { assertVersionsSynchronized, readProductVersions } from "./version-policy";
 
 export interface ReleasePolicyState {
@@ -7,7 +8,7 @@ export interface ReleasePolicyState {
   tag?: string;
   license: "Apache-2.0";
   distribution: "open-source";
-  target: "win32-x64";
+  targets: BuildTarget[];
   protocolVersion: number;
   nativeAbiVersion: number;
 }
@@ -97,7 +98,7 @@ export async function assertReleasePolicy(root: string, tag?: string): Promise<R
     ...(tag === undefined ? {} : { tag }),
     license: "Apache-2.0",
     distribution: "open-source",
-    target: "win32-x64",
+    targets: [...BUILD_TARGETS],
     protocolVersion: tsProtocolVersion,
     nativeAbiVersion: tsAbiVersion,
   };

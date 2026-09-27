@@ -1,8 +1,9 @@
 import { mkdir, copyFile, readFile, rename, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { basename, parse, resolve, join } from "node:path";
+import { basename, dirname, parse, resolve, join } from "node:path";
 import { build } from "../packages/core/build";
+import { BUILD_TARGETS, hostBuildTarget, isBuildTarget, targetConfig, type BuildTarget } from "../packages/core/targets";
 import { parseArgs } from "node:util";
 import { buildNative } from "./native";
 
@@ -11,19 +12,34 @@ const { values } = parseArgs({ args: process.argv.slice(2), options: {
   exe: { type: "boolean" }, release: { type: "boolean" },
   entry: { type: "string" },
   outfile: { type: "string" },
+  target: { type: "string" },
 } });
 const executable = values.exe;
 const release = !!(executable || values.release);
-const entrypoint = values.entry ? resolve(process.cwd(), values.entry) : join(root, "examples/basic.tsx");
-const executableSuffix = process.platform === "win32" ? ".exe" : "";
-const outfile = values.outfile ? resolve(process.cwd(), values.outfile) : join(root, `dist/Tarve${executableSuffix}`);
-if (executable && (!(["win32", "linux"] as NodeJS.Platform[]).includes(process.platform) || process.arch !== "x64")) {
-  throw new Error(`Production executables are not supported for ${process.platform}-${process.arch}.`);
+if (values.target !== undefined && !isBuildTarget(values.target)) {
+  throw new Error(`Unsupported target: ${values.target}. Expected ${BUILD_TARGETS.join(" or ")}.`);
 }
+const hostTarget = hostBuildTarget();
+const target = (values.target as BuildTarget | undefined) ?? hostTarget;
+if (executable && !target) throw new Error(`Production executables are not supported for ${process.platform}-${process.arch} without an explicit --target.`);
+if (values.target && !executable) throw new Error("--target is only supported with --exe in the repository build script.");
+if (executable && !values.entry) throw new Error("--entry is required with --exe.");
+if (values.entry && !executable) throw new Error("--entry is only supported with --exe.");
+const executableSuffix = target ? targetConfig(target).executableSuffix : "";
+const outfile = values.outfile ? resolve(process.cwd(), values.outfile) : join(root, `dist/Tarve${executableSuffix}`);
 const prebuiltNative = process.env.TARVE_PREBUILT_NATIVE?.trim();
-const nativeArtifact = prebuiltNative ? resolve(prebuiltNative) : await buildNative(release);
+const crossConfig = target && hostTarget && target !== hostTarget ? targetConfig(target) : undefined;
+const crossNative = crossConfig ? join(root, "native", crossConfig.nativeDirectory, crossConfig.nativeName) : undefined;
+const nativeArtifact = prebuiltNative
+  ? resolve(prebuiltNative)
+  : crossNative
+    ? crossNative
+    : await buildNative(release);
 if (prebuiltNative && (!release || !existsSync(nativeArtifact))) {
   throw new Error("TARVE_PREBUILT_NATIVE must point to an existing release native library.");
+}
+if (crossNative && !existsSync(nativeArtifact)) {
+  throw new Error(`Cross-compilation runtime missing for ${target}: ${nativeArtifact}. Build/stage that target runtime first.`);
 }
 const name = basename(nativeArtifact);
 if (!release) {
@@ -39,14 +55,11 @@ if (!release) {
 } else if (executable) {
   await mkdir(join(root, "dist"), { recursive: true });
   const metadata = await Bun.file(join(root, "package.json")).json();
-  const result = await build({ entrypoint, outfile, name: parse(outfile).name, version: metadata.version, nativeLibrary: nativeArtifact });
-  console.log(`Standalone ${process.platform}-${process.arch} executable: ${result}`);
+  const result = await build({ entrypoint: resolve(process.cwd(), values.entry!), outfile, name: parse(outfile).name, version: metadata.version, nativeLibrary: nativeArtifact, target });
+  console.log(`Standalone ${target} executable: ${result}`);
 } else {
-  await mkdir(join(root, "dist/assets"), { recursive: true });
-  for (const [entry, naming] of [["examples/basic.tsx", "basic.js"]]) {
-    const result = await Bun.build({ entrypoints: [join(root, entry)], outdir: join(root, "dist"), naming, target: "bun", minify: false });
-    if (!result.success) { console.error(result.logs); process.exit(1); }
-  }
-  await copyFile(nativeArtifact, join(root, "dist", name));
+  const output = values.outfile ? resolve(process.cwd(), values.outfile) : join(root, "dist", name);
+  await mkdir(dirname(output), { recursive: true });
+  await copyFile(nativeArtifact, output);
 }
 console.log(`Tarve native ${release ? "release" : "debug"} build ready.`);
