@@ -405,6 +405,8 @@ pub fn run(
         fatal: None,
         ready_emitted: false,
         presentation_retry_at: None,
+        motion_epoch: Instant::now(),
+        motion_test_clock: false,
         graphics_recovery_episodes: 0,
         graphics_stable_since: None,
         ime_target: None,
@@ -434,6 +436,8 @@ struct App {
     fatal: Option<String>,
     ready_emitted: bool,
     presentation_retry_at: Option<Instant>,
+    motion_epoch: Instant,
+    motion_test_clock: bool,
     graphics_recovery_episodes: usize,
     graphics_stable_since: Option<Instant>,
     ime_target: Option<String>,
@@ -838,6 +842,26 @@ impl App {
             window.request_redraw();
         }
     }
+    fn emit_motion_events(&mut self) {
+        let events = self.tree.take_motion_events();
+        self.emit(events);
+    }
+    fn advance_live_motion(&mut self) {
+        if self.motion_test_clock {
+            return;
+        }
+        let now_ms = self.motion_epoch.elapsed().as_secs_f64() * 1000.0;
+        self.tree.advance_motion(now_ms);
+        self.emit_motion_events();
+    }
+    fn motion_deadline(&self, now: Instant) -> Option<Instant> {
+        if self.motion_test_clock {
+            return None;
+        }
+        let next_ms = self.tree.next_motion_tick_ms()?;
+        let delta_ms = (next_ms - self.tree.motion_time_ms()).max(0.0);
+        Some(now + Duration::from_secs_f64(delta_ms / 1000.0))
+    }
     fn request_present_now(&mut self) {
         self.presentation_retry_at = None;
         if let Some(window) = &self.window {
@@ -859,12 +883,15 @@ impl App {
         let present_at = self
             .presentation_retry_at
             .filter(|deadline| *deadline > now);
-        match (recovery_at, present_at) {
-            (Some(a), Some(b)) => event_loop.set_control_flow(ControlFlow::WaitUntil(a.min(b))),
-            (Some(deadline), None) | (None, Some(deadline)) => {
-                event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-            }
-            (None, None) => event_loop.set_control_flow(ControlFlow::Wait),
+        let motion_at = self.motion_deadline(now);
+        let deadline = [recovery_at, present_at, motion_at]
+            .into_iter()
+            .flatten()
+            .min();
+        if let Some(deadline) = deadline {
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
         }
     }
     fn start_graphics_recovery(&mut self, event_loop: &ActiveEventLoop, cause: String) -> bool {
@@ -937,7 +964,7 @@ impl App {
         };
         recovery.attempts = recovery.attempts.saturating_add(1);
         let result = if let Some(previous_backend) = recovery.checkpoint.backend {
-            Graphics::recover(window, previous_backend)
+            Graphics::recover(window, previous_backend, self.document.renderer)
         } else {
             Graphics::new(window, self.document.renderer)
         };
@@ -1082,6 +1109,7 @@ impl App {
         if self.handle_graphics_fault(event_loop) {
             return;
         }
+        self.advance_live_motion();
         let content_changed = match self.prepare() {
             Ok(content_changed) => content_changed,
             Err(error) => {
@@ -1294,7 +1322,7 @@ impl ApplicationHandler<Command> for App {
             match state {
                 GraphicsState::Suspended(checkpoint) => {
                     let result = if let Some(previous_backend) = checkpoint.backend {
-                        Graphics::recover(window, previous_backend)
+                        Graphics::recover(window, previous_backend, self.document.renderer)
                     } else {
                         Graphics::new(window, self.document.renderer)
                     };
@@ -1338,6 +1366,7 @@ impl ApplicationHandler<Command> for App {
                     Ok(graphics) => {
                         self.graphics = GraphicsState::Ready(Box::new(graphics));
                         self.window = Some(window.clone());
+                        self.motion_epoch = Instant::now();
                         self.apply_initial_window_position(event_loop, &window, false);
                         self.sync_custom_window_chrome();
                         if let Err(error) = self.prepare() {
@@ -1364,6 +1393,12 @@ impl ApplicationHandler<Command> for App {
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, command: Command) {
         let mut accessibility_changed = false;
+        // `motionAdvance` is the hand-off to the deterministic test clock. Do not
+        // sample wall time immediately before applying it, otherwise the first
+        // deterministic step depends on how long the command spent in transit.
+        if !matches!(&command, Command::MotionAdvance { .. }) {
+            self.advance_live_motion();
+        }
         match command {
             Command::Patch { nodes } => {
                 let chrome_changed = nodes.iter().any(|node| {
@@ -1433,7 +1468,8 @@ impl ApplicationHandler<Command> for App {
                     self.events.push(json!({"type":"inspect", "requestId":request_id, "snapshot": {
                         "frames": frames, "layouts":self.tree.layouts, "shapes":self.tree.text.shapes, "paints":self.tree.paints,
                         "hovered":self.tree.hovered, "focused":self.tree.focused, "nodes":self.tree.snapshots(), "width":size.width, "height":size.height, "scale":window.scale_factor(),
-                        "layoutNodes":self.tree.layout_node_count(), "layoutNodesCreated":self.tree.layout_nodes_created, "measureCalls":self.tree.measure_calls, "paintedNodes":self.tree.painted_nodes
+                        "layoutNodes":self.tree.layout_node_count(), "layoutNodesCreated":self.tree.layout_nodes_created, "measureCalls":self.tree.measure_calls, "paintedNodes":self.tree.painted_nodes,
+                        "activeMotions":self.tree.active_motion_count()
                     }}));
                 }
             }
@@ -1487,6 +1523,31 @@ impl ApplicationHandler<Command> for App {
                 }
                 if self.handle_graphics_fault(event_loop) {
                     return;
+                }
+            }
+            Command::MotionAdvance {
+                milliseconds,
+                request_id,
+            } if self.document.window.debug => {
+                if !milliseconds.is_finite() || !(0.0..=60_000.0).contains(&milliseconds) {
+                    self.events.push(json!({
+                        "type":"motionAdvanced",
+                        "requestId":request_id,
+                        "milliseconds":milliseconds,
+                        "activeMotions":self.tree.active_motion_count(),
+                        "error":"motionAdvance milliseconds must be finite and between 0 and 60000"
+                    }));
+                } else {
+                    self.motion_test_clock = true;
+                    let next = self.tree.motion_time_ms() + milliseconds;
+                    self.tree.advance_motion(next);
+                    self.emit_motion_events();
+                    self.events.push(json!({
+                        "type":"motionAdvanced",
+                        "requestId":request_id,
+                        "milliseconds":milliseconds,
+                        "activeMotions":self.tree.active_motion_count()
+                    }));
                 }
             }
             Command::FileDialog { mode, options, request_id } => {
@@ -1556,6 +1617,7 @@ impl ApplicationHandler<Command> for App {
         }
         self.sync_cursor();
         self.redraw();
+        self.sync_control_flow(event_loop);
     }
     fn suspended(&mut self, event_loop: &ActiveEventLoop) {
         let state = std::mem::replace(&mut self.graphics, GraphicsState::Fatal);
@@ -1579,10 +1641,17 @@ impl ApplicationHandler<Command> for App {
             &self.graphics,
             GraphicsState::Recovering(recovery) if recovery.next_attempt <= now
         );
+        let motion_due = !self.motion_test_clock
+            && self.tree.next_motion_tick_ms().is_some_and(|deadline| {
+                deadline <= self.motion_epoch.elapsed().as_secs_f64() * 1000.0 + 0.001
+            });
         if present_due {
             self.presentation_retry_at = None;
         }
-        if (present_due || recovery_due)
+        if motion_due {
+            self.advance_live_motion();
+        }
+        if (present_due || recovery_due || motion_due)
             && let Some(window) = &self.window
         {
             window.request_redraw();

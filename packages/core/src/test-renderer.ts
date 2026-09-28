@@ -190,6 +190,11 @@ export class TestRenderer {
     return this.app.capture(path);
   }
 
+  /** Advance the deterministic native motion clock without sleeping. */
+  advanceMotion(milliseconds: number): Promise<void> {
+    return this.app.advanceMotion(milliseconds);
+  }
+
   close(): void {
     this.app.close();
   }
@@ -241,7 +246,8 @@ export class TestRenderer {
         && current.frames === previous.frames
         && current.layouts === previous.layouts
         && current.paints === previous.paints
-        && current.shapes === previous.shapes;
+        && current.shapes === previous.shapes
+        && current.activeMotions === 0;
       stable = same ? stable + 1 : 0;
       previous = current;
       return stable >= stableSamples ? current : false;

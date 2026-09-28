@@ -4,6 +4,8 @@ export { Checkbox, Switch, RadioGroup, Slider, Card, Badge, Separator, Progress,
 export type { CheckboxProps, SwitchProps, RadioOption, RadioGroupProps, SliderProps, CardProps, BadgeProps, SeparatorProps, ProgressProps, TabItem, TabsProps, AccordionItem, AccordionProps } from "./controls";
 export { VirtualList } from "./virtual-list";
 export type { VirtualListProps } from "./virtual-list";
+export { AnimatePresence } from "./motion";
+export type { AnimatePresenceProps } from "./motion";
 export { List } from "./list";
 export type { ListProps } from "./list";
 export { Select } from "./select";
@@ -28,7 +30,7 @@ export type { ComponentAdapter, ComponentAdapterInput } from "./component-adapte
 export { theme, Theme, lightTheme, darkTheme, createTheme, buttonVariants } from "./theme";
 export type { ThemeColors, ThemeFocusOutline, ThemeDefinition, ThemeOverrides, ButtonVariant } from "./theme";
 export { Style } from "./style";
-export type { StateStyle, OutlineStyle, UserSelect, TextDecoration, Renderer, WindowPosition, WindowPositionPreset, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition } from "../../protocol/src/index";
+export type { StateStyle, OutlineStyle, UserSelect, TextDecoration, Renderer, WindowPosition, WindowPositionPreset, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition, MotionProperty, MotionEasing, MotionTransition, MotionTransitions, MotionValues } from "../../protocol/src/index";
 export type { VNode, Child } from "./jsx-runtime";
 export { BunFfiBridge, openExternal } from "./bridge";
 export type { NativeBridge, BunFfiBridgeOptions } from "./bridge";

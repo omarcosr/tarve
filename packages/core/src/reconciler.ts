@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION, type NativeNode, type Renderer, type SceneDocument, type ScrollPosition, type TreeMutation, type VirtualListMeasurement, type WindowOptions } from "../../protocol/src/index";
+import { PROTOCOL_VERSION, type MotionProperty, type NativeNode, type Renderer, type SceneDocument, type ScrollPosition, type TreeMutation, type VirtualListMeasurement, type WindowOptions } from "../../protocol/src/index";
 import { Fragment, _isNativeVNode, type Child, type IntrinsicAnchorProps, type VNode } from "./jsx-runtime";
 import { lightTheme, resolveThemeColor, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
@@ -15,7 +15,7 @@ import { Select } from "./select";
 import { Progress, Separator } from "./controls";
 import { Label } from "./form-controls";
 import { withRenderScope } from "./render-scope";
-export interface Handlers { onClick?: () => void; onMarkdownLink?: (href: string) => void; onDiffToggleFile?: (path: string) => void; onDiffShowMore?: (hidden: number, path?: string) => void; onDiffLineClick?: (event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void; onHighlight?: (event: { matchCount: number }) => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onScrollPosition?: (position: ScrollPosition) => void; onVirtualListLayout?: (items: VirtualListMeasurement[]) => void; onVirtualListScrollToItem?: (index: number, offset: number) => void; onVirtualListFocus?: (key: string | null) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void }
+export interface Handlers { onClick?: () => void; onMarkdownLink?: (href: string) => void; onDiffToggleFile?: (path: string) => void; onDiffShowMore?: (hidden: number, path?: string) => void; onDiffLineClick?: (event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void; onHighlight?: (event: { matchCount: number }) => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onScrollPosition?: (position: ScrollPosition) => void; onVirtualListLayout?: (items: VirtualListMeasurement[]) => void; onVirtualListScrollToItem?: (index: number, offset: number) => void; onVirtualListFocus?: (key: string | null) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void; onTransitionEnd?: (event: { property: MotionProperty }) => void }
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode> }
 const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "markdown", "code", "diff", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter"]);
 const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
@@ -202,7 +202,7 @@ export function compileTree(
           else p.onMouseLeave?.();
         }
       : p.onHover;
-    handlers.set(id, { onClick: p.onClick, onMarkdownLink: p.onMarkdownLink, onDiffToggleFile: p.onToggleFile, onDiffShowMore: p.onShowMore, onDiffLineClick: p.onLineClick, onHighlight: p.onHighlight, onContextMenu: p.onContextMenu, onOutsideClick: p.onOutsideClick, onHover: hoverHandler, onChange: p.onChange, onValueChange: p.onValueChange, onScroll: p.onScroll, onScrollPosition: p.onScrollPosition, onVirtualListLayout: p.onVirtualListLayout, onVirtualListScrollToItem: p.onVirtualListScrollToItem, onVirtualListFocus: p.onVirtualListFocus, onEscape: p.onEscape, onKeyDown: p.onKeyDown, onBlur: p.onBlur, onCloseRequest: p.onCloseRequest });
+    handlers.set(id, { onClick: p.onClick, onMarkdownLink: p.onMarkdownLink, onDiffToggleFile: p.onToggleFile, onDiffShowMore: p.onShowMore, onDiffLineClick: p.onLineClick, onHighlight: p.onHighlight, onContextMenu: p.onContextMenu, onOutsideClick: p.onOutsideClick, onHover: hoverHandler, onChange: p.onChange, onValueChange: p.onValueChange, onScroll: p.onScroll, onScrollPosition: p.onScrollPosition, onVirtualListLayout: p.onVirtualListLayout, onVirtualListScrollToItem: p.onVirtualListScrollToItem, onVirtualListFocus: p.onVirtualListFocus, onEscape: p.onEscape, onKeyDown: p.onKeyDown, onBlur: p.onBlur, onCloseRequest: p.onCloseRequest, onTransitionEnd: p.onTransitionEnd });
     const control = p.control ? { ...p.control } : undefined;
     const childGroup = control?.role === "radiogroup" || control?.role === "tablist" || control?.role === "navigation" || control?.role === "togglegroup"
       || control?.role === "tree" || control?.role === "grid" ? id : group;
@@ -273,6 +273,7 @@ export function compileTree(
       ...(p.focusable !== undefined ? { focusable: p.focusable } : {}),
       ...(p.dragRegion !== undefined ? { dragRegion: p.dragRegion } : {}),
       ...(p.windowAction !== undefined ? { windowAction: p.windowAction } : {}),
+      ...(p.motionFrom !== undefined ? { motionFrom: { ...p.motionFrom } } : {}),
     };
     if (nativeType === "input" || nativeType === "textarea") labelableTargets.set(id, id);
     nodes.set(id, node);
@@ -330,7 +331,7 @@ function nodePropertiesChanged(old: NativeNode, node: NativeNode): boolean {
     || old.src !== node.src || old.fit !== node.fit || !sameValue(old.svg, node.svg)
     || old.value !== node.value || old.placeholder !== node.placeholder || old.inputType !== node.inputType || old.scrollSpeed !== node.scrollSpeed || old.scrollOrientation !== node.scrollOrientation || !sameValue(old.virtualList, node.virtualList) || old.disabled !== node.disabled
     || old.modal !== node.modal || old.rovingGroup !== node.rovingGroup || old.portal !== node.portal || old.dismissOnOutside !== node.dismissOnOutside || !sameValue(old.labelledBy, node.labelledBy) || old.closeIntercept !== node.closeIntercept || old.focusable !== node.focusable
-    || old.dragRegion !== node.dragRegion || old.windowAction !== node.windowAction
+    || old.dragRegion !== node.dragRegion || old.windowAction !== node.windowAction || !sameValue(old.motionFrom, node.motionFrom)
     || !sameValue(old.highlight, node.highlight)
     || !sameFields(old.control ?? {}, node.control ?? {})
     || !sameStyle(old.style, node.style);

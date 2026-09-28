@@ -2107,6 +2107,14 @@ mod rich_measure_tests {
             self.clips.push(shape.bounding_box());
         }
 
+        fn push_opacity<S: vello::kurbo::Shape>(
+            &mut self,
+            _alpha: f32,
+            _transform: Affine,
+            _shape: &S,
+        ) {
+        }
+
         fn pop_layer(&mut self) {
             self.pops += 1;
         }

@@ -14,6 +14,7 @@ function snapshot(): Snapshot {
     layouts: 1,
     shapes: 2,
     paints: 1,
+    activeMotions: 0,
     hovered: null,
     focused: null,
     width: 400,
@@ -46,6 +47,8 @@ class AutomationBridge implements NativeBridge {
       this.listener?.({ type: "inspect", requestId: command.requestId, snapshot: this.current });
     } else if (command.type === "capture") {
       this.listener?.({ type: "captured", requestId: command.requestId, path: command.path });
+    } else if (command.type === "motionAdvance") {
+      this.listener?.({ type: "motionAdvanced", requestId: command.requestId, milliseconds: command.milliseconds, activeMotions: 0 });
     }
   }
 
@@ -107,6 +110,34 @@ describe("public TestRenderer automation", () => {
     let ready = false;
     setTimeout(() => { ready = true; }, 0);
     await expect(waitFor(() => ready || false, { interval: 0, timeout: 250 })).resolves.toBe(true);
+  });
+
+  test("advanceMotion drives the deterministic native motion command", async () => {
+    const bridge = new AutomationBridge();
+    const renderer = await createTestRenderer(() => <Window />, { bridge });
+    await renderer.advanceMotion(120);
+    expect(bridge.commands.at(-1)).toMatchObject({ type: "motionAdvance", milliseconds: 120 });
+    renderer.close();
+  });
+
+  test("advanceMotion flushes a queued declarative update before stepping native time", async () => {
+    const bridge = new AutomationBridge();
+    let width = 100;
+    const renderer = await createTestRenderer(
+      () => <Window><Text id="motion-target" style={{ width }}>{"Motion"}</Text></Window>,
+      { bridge },
+    );
+    bridge.commands.length = 0;
+
+    width = 200;
+    renderer.app.update();
+    await renderer.advanceMotion(50);
+
+    expect(bridge.commands[0]?.type).toBe("patch");
+    if (bridge.commands[0]?.type !== "patch") throw new Error("expected property patch before motion step");
+    expect(bridge.commands[0].nodes.find(node => node.id === "motion-target")?.style.width).toBe(200);
+    expect(bridge.commands[1]).toMatchObject({ type: "motionAdvance", milliseconds: 50 });
+    renderer.close();
   });
 
   test("launchTestProcess exposes requested output pipes", async () => {

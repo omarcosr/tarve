@@ -214,8 +214,14 @@ pub(crate) struct D3d11Graphics {
 
 pub(crate) struct D3d11PaintTarget<'a> {
     graphics: &'a mut D3d11Graphics,
-    clips: Vec<Option<(u32, u32)>>,
+    layers: Vec<D3d11PaintLayer>,
     suppressed_clips: usize,
+    opacity: f32,
+}
+
+enum D3d11PaintLayer {
+    Clip(Option<(u32, u32)>),
+    Opacity(f32),
 }
 
 impl D3d11Graphics {
@@ -347,8 +353,9 @@ impl D3d11Graphics {
         }
         let mut target = D3d11PaintTarget {
             graphics: self,
-            clips: Vec::with_capacity(8),
+            layers: Vec::with_capacity(8),
             suppressed_clips: 0,
+            opacity: 1.0,
         };
         paint(&mut target);
         self.images.retain(|key, _| self.used_images.contains(key));
@@ -911,7 +918,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             &geometry.vertices,
             &geometry.indices,
             transform,
-            color,
+            color.multiply_alpha(self.opacity),
             0.0,
             |_| [0.0, 0.0],
         );
@@ -960,7 +967,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             &geometry.vertices,
             &geometry.indices,
             transform,
-            color,
+            color.multiply_alpha(self.opacity),
             0.0,
             |_| [0.0, 0.0],
         );
@@ -974,8 +981,8 @@ impl PaintTarget for D3d11PaintTarget<'_> {
     }
 
     fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S) {
-        if self.suppressed_clips > 0 || self.clips.len() >= u8::MAX as usize {
-            self.clips.push(None);
+        if self.suppressed_clips > 0 || self.layers.len() >= u8::MAX as usize {
+            self.layers.push(D3d11PaintLayer::Clip(None));
             self.suppressed_clips = self.suppressed_clips.saturating_add(1);
             return;
         }
@@ -994,7 +1001,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             )
             .is_err()
         {
-            self.clips.push(None);
+            self.layers.push(D3d11PaintLayer::Clip(None));
             self.suppressed_clips = self.suppressed_clips.saturating_add(1);
             return;
         }
@@ -1007,26 +1014,37 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             |_| [0.0, 0.0],
         );
         if count == 0 {
-            self.clips.push(None);
+            self.layers.push(D3d11PaintLayer::Clip(None));
             self.suppressed_clips = self.suppressed_clips.saturating_add(1);
             return;
         }
         self.graphics
             .commands
             .push(DrawCommand::PushClip { first, count });
-        self.clips.push(Some((first, count)));
+        self.layers
+            .push(D3d11PaintLayer::Clip(Some((first, count))));
+    }
+
+    fn push_opacity<S: Shape>(&mut self, alpha: f32, _transform: Affine, _shape: &S) {
+        let previous = self.opacity;
+        self.layers.push(D3d11PaintLayer::Opacity(previous));
+        self.opacity = (previous * alpha.clamp(0.0, 1.0)).clamp(0.0, 1.0);
     }
 
     fn pop_layer(&mut self) {
-        let Some(clip) = self.clips.pop() else {
+        let Some(layer) = self.layers.pop() else {
             return;
         };
-        if let Some((first, count)) = clip {
-            self.graphics
-                .commands
-                .push(DrawCommand::PopClip { first, count });
-        } else {
-            self.suppressed_clips = self.suppressed_clips.saturating_sub(1);
+        match layer {
+            D3d11PaintLayer::Clip(Some((first, count))) => {
+                self.graphics
+                    .commands
+                    .push(DrawCommand::PopClip { first, count });
+            }
+            D3d11PaintLayer::Clip(None) => {
+                self.suppressed_clips = self.suppressed_clips.saturating_sub(1);
+            }
+            D3d11PaintLayer::Opacity(previous) => self.opacity = previous,
         }
     }
 
@@ -1048,7 +1066,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         self.graphics.append_quad_points(
             corners.map(|point| [point.x as f32, point.y as f32]),
             [0.0, 0.0, 1.0, 1.0],
-            Color::WHITE,
+            Color::WHITE.multiply_alpha(self.opacity),
             1.0,
             TextureRef::Image(view),
         );
@@ -1102,7 +1120,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             self.graphics.append_quad_points(
                 [[x0, y0], [x1, y0], [x1, y1], [x0, y1]],
                 entry.uv,
-                color,
+                color.multiply_alpha(self.opacity),
                 2.0,
                 TextureRef::Glyph(view),
             );

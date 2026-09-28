@@ -4179,3 +4179,178 @@ fn right_click_emits_context_event_with_pointer_position() {
     assert_eq!(events[0]["x"], 24.0);
     assert_eq!(events[0]["y"], 16.0);
 }
+
+#[test]
+fn native_motion_interpolates_layout_and_stops_scheduling_after_completion() {
+    let panel: Node = serde_json::from_value(json!({
+        "id":"panel",
+        "kind":"view",
+        "style":{
+            "width":200,
+            "height":40,
+            "opacity":1,
+            "radius":12,
+            "transition":{
+                "width":{"duration":100,"easing":"linear"},
+                "opacity":{"duration":100,"easing":"linear"},
+                "radius":{"duration":100,"easing":"linear"}
+            }
+        },
+        "motionFrom":{"width":100,"opacity":0,"radius":0},
+        "children":[]
+    }))
+    .unwrap();
+    let mut tree = Tree::new(root(vec![panel]));
+    tree.compute(400.0, 200.0).unwrap();
+    assert!((tree.entries["panel"].rect.width() - 100.0).abs() < 0.01);
+    assert_eq!(tree.active_motion_count(), 3);
+    assert!(tree.next_motion_tick_ms().is_some());
+
+    tree.advance_motion(50.0);
+    tree.compute(400.0, 200.0).unwrap();
+    assert!((tree.entries["panel"].rect.width() - 150.0).abs() < 0.05);
+    assert_eq!(tree.active_motion_count(), 3);
+
+    tree.advance_motion(100.0);
+    tree.compute(400.0, 200.0).unwrap();
+    assert!((tree.entries["panel"].rect.width() - 200.0).abs() < 0.01);
+    assert_eq!(tree.active_motion_count(), 0);
+    assert_eq!(tree.next_motion_tick_ms(), None);
+    let mut properties: Vec<String> = tree
+        .take_motion_events()
+        .into_iter()
+        .filter_map(|event| event["property"].as_str().map(str::to_string))
+        .collect();
+    properties.sort();
+    assert_eq!(properties, vec!["opacity", "radius", "width"]);
+}
+
+#[test]
+fn native_motion_retargets_from_the_current_visual_value_without_a_jump() {
+    let mut tree = Tree::new(root(vec![node(
+        "panel",
+        "view",
+        json!({"width":100,"height":40}),
+        vec![],
+    )]));
+    tree.compute(400.0, 200.0).unwrap();
+
+    tree.patch(vec![node(
+        "panel",
+        "view",
+        json!({"width":200,"height":40,"transition":{"width":{"duration":100,"easing":"linear"}}}),
+        vec![],
+    )])
+    .unwrap();
+    tree.advance_motion(40.0);
+    tree.compute(400.0, 200.0).unwrap();
+    assert!((tree.entries["panel"].rect.width() - 140.0).abs() < 0.05);
+
+    tree.patch(vec![node(
+        "panel",
+        "view",
+        json!({"width":300,"height":40,"transition":{"width":{"duration":100,"easing":"linear"}}}),
+        vec![],
+    )])
+    .unwrap();
+    tree.compute(400.0, 200.0).unwrap();
+    assert!((tree.entries["panel"].rect.width() - 140.0).abs() < 0.05);
+
+    tree.advance_motion(70.0);
+    tree.compute(400.0, 200.0).unwrap();
+    assert!((tree.entries["panel"].rect.width() - 188.0).abs() < 0.1);
+    tree.advance_motion(140.0);
+    tree.compute(400.0, 200.0).unwrap();
+    assert!((tree.entries["panel"].rect.width() - 300.0).abs() < 0.01);
+    assert_eq!(tree.active_motion_count(), 0);
+}
+
+#[test]
+fn native_motion_honors_delay_and_treats_zero_duration_as_immediate() {
+    let mut tree = Tree::new(root(vec![node(
+        "panel",
+        "view",
+        json!({"width":100,"height":40}),
+        vec![],
+    )]));
+    tree.compute(400.0, 200.0).unwrap();
+
+    tree.patch(vec![node(
+        "panel",
+        "view",
+        json!({"width":200,"height":40,"transition":{"width":{"duration":100,"delay":50,"easing":"linear"}}}),
+        vec![],
+    )])
+    .unwrap();
+    tree.advance_motion(49.0);
+    tree.compute(400.0, 200.0).unwrap();
+    assert!((tree.entries["panel"].rect.width() - 100.0).abs() < 0.01);
+    tree.advance_motion(100.0);
+    tree.compute(400.0, 200.0).unwrap();
+    assert!((tree.entries["panel"].rect.width() - 150.0).abs() < 0.05);
+    tree.advance_motion(150.0);
+    tree.compute(400.0, 200.0).unwrap();
+    assert!((tree.entries["panel"].rect.width() - 200.0).abs() < 0.01);
+
+    tree.patch(vec![node(
+        "panel",
+        "view",
+        json!({"width":260,"height":40,"transition":{"width":{"duration":0,"easing":"linear"}}}),
+        vec![],
+    )])
+    .unwrap();
+    tree.compute(400.0, 200.0).unwrap();
+    assert!((tree.entries["panel"].rect.width() - 260.0).abs() < 0.01);
+    assert_eq!(tree.active_motion_count(), 0);
+}
+
+#[test]
+fn removing_a_node_cancels_its_motion_without_a_stale_completion() {
+    let mut tree = Tree::new(root(vec![node(
+        "panel",
+        "view",
+        json!({"width":100,"height":40}),
+        vec![],
+    )]));
+    tree.compute(400.0, 200.0).unwrap();
+    tree.patch(vec![node(
+        "panel",
+        "view",
+        json!({"width":200,"height":40,"transition":{"width":{"duration":100,"easing":"linear"}}}),
+        vec![],
+    )])
+    .unwrap();
+    tree.advance_motion(40.0);
+    assert_eq!(tree.active_motion_count(), 1);
+
+    tree.mutate(vec![
+        TreeMutation::Children {
+            id: "root".into(),
+            children: vec![],
+        },
+        TreeMutation::Remove { id: "panel".into() },
+    ])
+    .unwrap();
+    tree.advance_motion(200.0);
+    assert_eq!(tree.active_motion_count(), 0);
+    assert!(tree.take_motion_events().is_empty());
+}
+
+#[test]
+fn protocol_rejects_invalid_native_motion_values_without_tightening_static_opacity() {
+    let clamped_static_opacity = root(vec![node(
+        "panel",
+        "view",
+        json!({"opacity":1.5}),
+        vec![],
+    )]);
+    protocol::validate(&clamped_static_opacity).unwrap();
+
+    let invalid_transition = root(vec![node(
+        "panel",
+        "view",
+        json!({"transition":{"opacity":{"duration":100,"easing":"spring"}}}),
+        vec![],
+    )]);
+    assert!(protocol::validate(&invalid_transition).unwrap_err().contains("Unsupported transition easing"));
+}

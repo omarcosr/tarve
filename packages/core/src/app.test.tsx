@@ -9,6 +9,7 @@ import { Svg } from "./components/svg";
 import { VirtualList } from "./virtual-list";
 import type { ComponentAdapter } from "./component-adapter";
 import type { VNode } from "./jsx-runtime";
+import { AnimatePresence } from "./motion";
 
 class FakeBridge implements NativeBridge {
   commands: NativeCommand[] = [];
@@ -42,6 +43,161 @@ class FakeBridge implements NativeBridge {
 }
 
 describe("controlled native reconciliation", () => {
+  test("native motion completion reaches the node handler", async () => {
+    const bridge = new FakeBridge();
+    const completed: string[] = [];
+    const app = createApp(() => (
+      <Window>
+        <Column id="motion-panel" onTransitionEnd={({ property }) => completed.push(property)} />
+      </Window>
+    ), { bridge });
+    await app.ready;
+    bridge.emit({ type: "motionComplete", id: "motion-panel", property: "opacity" });
+    expect(completed).toEqual(["opacity"]);
+    app.close();
+  });
+
+  test("AnimatePresence removes an exiting native node only after motion completion", async () => {
+    const bridge = new FakeBridge();
+    let present = true;
+    const app = createApp(() => (
+      <Window>
+        <AnimatePresence
+          id="presence"
+          present={present}
+          exit={{ opacity: 0 }}
+          transition={{ opacity: { duration: 120, easing: "easeOut" } }}
+        >
+          <Column id="panel" style={{ opacity: 1, width: 100, height: 40 }} />
+        </AnimatePresence>
+      </Window>
+    ), { bridge });
+    await app.ready;
+    bridge.commands.length = 0;
+
+    present = false;
+    app.update();
+    await Bun.sleep(0);
+    const exiting = bridge.commands.at(-1);
+    expect(exiting?.type).toBe("patch");
+    if (exiting?.type !== "patch") throw new Error("expected exit patch");
+    expect(exiting.nodes.find(node => node.id === "panel")?.style.opacity).toBe(0);
+
+    bridge.emit({ type: "motionComplete", id: "panel", property: "opacity" });
+    await Bun.sleep(0);
+    const removed = bridge.commands.at(-1);
+    expect(removed?.type).toBe("mutate");
+    if (removed?.type !== "mutate") throw new Error("expected presence removal mutation");
+    expect(removed.mutations).toContainEqual({ type: "remove", id: "panel" });
+    app.close();
+  });
+
+  test("AnimatePresence waits for every animated exit property", async () => {
+    const bridge = new FakeBridge();
+    let present = true;
+    const app = createApp(() => (
+      <Window>
+        <AnimatePresence
+          id="presence-multiple"
+          present={present}
+          exit={{ opacity: 0, width: 40 }}
+          transition={{
+            opacity: { duration: 120, easing: "linear" },
+            width: { duration: 120, easing: "linear" },
+          }}
+        >
+          <Column id="multi-panel" style={{ opacity: 1, width: 100, height: 40 }} />
+        </AnimatePresence>
+      </Window>
+    ), { bridge });
+    await app.ready;
+    bridge.commands.length = 0;
+
+    present = false;
+    app.update();
+    await Bun.sleep(0);
+    expect(bridge.commands.at(-1)?.type).toBe("patch");
+    const beforeCompletion = bridge.commands.length;
+
+    bridge.emit({ type: "motionComplete", id: "multi-panel", property: "opacity" });
+    await Bun.sleep(0);
+    expect(bridge.commands.length).toBe(beforeCompletion);
+
+    bridge.emit({ type: "motionComplete", id: "multi-panel", property: "width" });
+    await Bun.sleep(0);
+    const removed = bridge.commands.at(-1);
+    expect(removed?.type).toBe("mutate");
+    if (removed?.type !== "mutate") throw new Error("expected presence removal mutation");
+    expect(removed.mutations).toContainEqual({ type: "remove", id: "multi-panel" });
+    app.close();
+  });
+
+  test("AnimatePresence removes immediately when the exit transition has zero duration", async () => {
+    const bridge = new FakeBridge();
+    let present = true;
+    const app = createApp(() => (
+      <Window>
+        <AnimatePresence
+          id="presence-immediate"
+          present={present}
+          exit={{ opacity: 0 }}
+          transition={{ opacity: { duration: 0 } }}
+        >
+          <Column id="immediate-panel" style={{ opacity: 1, width: 100, height: 40 }} />
+        </AnimatePresence>
+      </Window>
+    ), { bridge });
+    await app.ready;
+    bridge.commands.length = 0;
+
+    present = false;
+    app.update();
+    await Bun.sleep(0);
+    const removed = bridge.commands.at(-1);
+    expect(removed?.type).toBe("mutate");
+    if (removed?.type !== "mutate") throw new Error("expected immediate presence removal mutation");
+    expect(removed.mutations).toContainEqual({ type: "remove", id: "immediate-panel" });
+    app.close();
+  });
+
+  test("AnimatePresence still removes an exited node when the user transition handler throws", async () => {
+    const bridge = new FakeBridge();
+    const errors: AppErrorEvent[] = [];
+    let present = true;
+    const app = createApp(() => (
+      <Window>
+        <AnimatePresence
+          id="presence-throwing-handler"
+          present={present}
+          exit={{ opacity: 0 }}
+          transition={{ opacity: { duration: 100, easing: "linear" } }}
+        >
+          <Column
+            id="throwing-panel"
+            style={{ opacity: 1, width: 100, height: 40 }}
+            onTransitionEnd={() => { throw new Error("transition callback failed"); }}
+          />
+        </AnimatePresence>
+      </Window>
+    ), { bridge, onError: event => errors.push(event) });
+    await app.ready;
+    bridge.commands.length = 0;
+
+    present = false;
+    app.update();
+    await Bun.sleep(0);
+    bridge.emit({ type: "motionComplete", id: "throwing-panel", property: "opacity" });
+    await Bun.sleep(0);
+
+    expect(errors.at(-1)?.source).toBe("event-handler");
+    expect(errors.at(-1)?.event).toBe("motionComplete");
+    const removed = bridge.commands.at(-1);
+    expect(removed?.type).toBe("mutate");
+    if (removed?.type !== "mutate") throw new Error("expected presence removal after callback failure");
+    expect(removed.mutations).toContainEqual({ type: "remove", id: "throwing-panel" });
+    app.close();
+  });
+
   test("Diff callbacks receive the file associated with each row", async () => {
     const bridge = new FakeBridge();
     const shown: Array<[number, string | undefined]> = [];

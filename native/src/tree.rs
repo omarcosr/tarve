@@ -51,6 +51,90 @@ const LAYOUT_KEYS: &[&str] = &[
     "bottom",
     "left",
 ];
+const MOTION_PROPERTIES: &[&str] = &[
+    "width", "height", "top", "right", "bottom", "left", "opacity", "radius",
+];
+const MOTION_FRAME_MS: f64 = 1000.0 / 60.0;
+
+#[derive(Clone, Copy, Debug)]
+enum MotionEasing {
+    Linear,
+    Ease,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+}
+
+#[derive(Clone, Debug)]
+struct MotionTrack {
+    from: f32,
+    to: f32,
+    current: f32,
+    start_ms: f64,
+    duration_ms: f64,
+    easing: MotionEasing,
+}
+
+impl MotionTrack {
+    fn value_at(&self, now_ms: f64) -> (f32, bool) {
+        if now_ms <= self.start_ms {
+            return (self.from, false);
+        }
+        let progress = ((now_ms - self.start_ms) / self.duration_ms).clamp(0.0, 1.0);
+        let eased = match self.easing {
+            MotionEasing::Linear => progress,
+            MotionEasing::Ease => progress * progress * (3.0 - 2.0 * progress),
+            MotionEasing::EaseIn => progress * progress * progress,
+            MotionEasing::EaseOut => 1.0 - (1.0 - progress).powi(3),
+            MotionEasing::EaseInOut => {
+                if progress < 0.5 {
+                    4.0 * progress * progress * progress
+                } else {
+                    1.0 - (-2.0 * progress + 2.0).powi(3) / 2.0
+                }
+            }
+        };
+        let value = self.from as f64 + (self.to - self.from) as f64 * eased;
+        (value as f32, progress >= 1.0)
+    }
+
+    fn end_ms(&self) -> f64 {
+        self.start_ms + self.duration_ms
+    }
+}
+
+fn motion_transition(node: &Node, property: &str) -> Option<(f64, f64, MotionEasing)> {
+    let transitions = node.style.get("transition")?.as_object()?;
+    let config = transitions
+        .get(property)
+        .or_else(|| transitions.get("all"))?
+        .as_object()?;
+    let duration = config.get("duration").and_then(Value::as_f64).unwrap_or(200.0);
+    let delay = config.get("delay").and_then(Value::as_f64).unwrap_or(0.0);
+    if !duration.is_finite() || duration <= 0.0 || !delay.is_finite() || delay < 0.0 {
+        return None;
+    }
+    let easing = match config.get("easing").and_then(Value::as_str).unwrap_or("ease") {
+        "linear" => MotionEasing::Linear,
+        "easeIn" => MotionEasing::EaseIn,
+        "easeOut" => MotionEasing::EaseOut,
+        "easeInOut" => MotionEasing::EaseInOut,
+        _ => MotionEasing::Ease,
+    };
+    Some((duration, delay, easing))
+}
+
+fn motion_target(node: &Node, property: &str) -> Option<f32> {
+    node.style
+        .get(property)
+        .and_then(Value::as_f64)
+        .map(|value| value as f32)
+        .filter(|value| value.is_finite())
+}
+
+fn motion_is_layout(property: &str) -> bool {
+    matches!(property, "width" | "height" | "top" | "right" | "bottom" | "left")
+}
 const MAX_SVG_RASTER_DIMENSION: u32 = 4096;
 const MAX_VIRTUAL_MEASUREMENTS_PER_LIST: usize = 100_000;
 const MAX_IMAGE_DIMENSION: u32 = 16_384;
@@ -435,6 +519,32 @@ fn visual_number(node: &Node, key: &str, fallback: f32, state: VisualState) -> f
         .unwrap_or(fallback)
 }
 
+fn visual_state_overrides(node: &Node, key: &str, state: VisualState) -> bool {
+    (state.hovered
+        && !state.disabled
+        && node.style.get("hover").and_then(|style| style.get(key)).is_some_and(|value| !value.is_null()))
+        || (state.active
+            && !state.disabled
+            && node.style.get("active").and_then(|style| style.get(key)).is_some_and(|value| !value.is_null()))
+        || (state.focused
+            && node.style.get("focus").and_then(|style| style.get(key)).is_some_and(|value| !value.is_null()))
+        || (state.focus_visible
+            && node.style.get("focusVisible").and_then(|style| style.get(key)).is_some_and(|value| !value.is_null()))
+        || (state.disabled
+            && node.style.get("disabled").and_then(|style| style.get(key)).is_some_and(|value| !value.is_null()))
+}
+
+fn visual_motion_number(entry: &Entry, key: &str, fallback: f32, state: VisualState) -> f32 {
+    if visual_state_overrides(&entry.node, key, state) {
+        return visual_number(&entry.node, key, fallback, state);
+    }
+    entry
+        .motions
+        .get(key)
+        .map(|track| track.current)
+        .unwrap_or_else(|| visual_number(&entry.node, key, fallback, state))
+}
+
 fn visual_optional_number(node: &Node, key: &str, state: VisualState) -> Option<f64> {
     visual_value(node, key, state).as_f64()
 }
@@ -514,6 +624,89 @@ pub struct Entry {
     virtual_following_tail: bool,
     virtual_initial_layout: bool,
     virtual_scroll_generation: u64,
+    motions: HashMap<String, MotionTrack>,
+}
+
+fn motion_tracks_for_node(
+    node: &Node,
+    previous: Option<&Entry>,
+    now_ms: f64,
+) -> HashMap<String, MotionTrack> {
+    let mut motions = previous
+        .map(|entry| entry.motions.clone())
+        .unwrap_or_default();
+
+    for property in MOTION_PROPERTIES {
+        let target = motion_target(node, property);
+        if let Some(previous) = previous {
+            let previous_target = motion_target(&previous.node, property);
+            if target == previous_target {
+                if motion_transition(node, property).is_none() {
+                    motions.remove(*property);
+                }
+                continue;
+            }
+
+            let current = motions
+                .get(*property)
+                .map(|track| track.current)
+                .or(previous_target)
+                .or_else(|| match *property {
+                    "width" if previous.rect.width().is_finite() => Some(previous.rect.width() as f32),
+                    "height" if previous.rect.height().is_finite() => Some(previous.rect.height() as f32),
+                    "opacity" => Some(1.0),
+                    "radius" => Some(0.0),
+                    _ => None,
+                });
+            motions.remove(*property);
+            let (Some(from), Some(to), Some((duration_ms, delay_ms, easing))) =
+                (current, target, motion_transition(node, property))
+            else {
+                continue;
+            };
+            if (from - to).abs() <= f32::EPSILON {
+                continue;
+            }
+            motions.insert(
+                (*property).to_string(),
+                MotionTrack {
+                    from,
+                    to,
+                    current: from,
+                    start_ms: now_ms + delay_ms,
+                    duration_ms,
+                    easing,
+                },
+            );
+        } else {
+            let from = node
+                .motion_from
+                .get(*property)
+                .and_then(Value::as_f64)
+                .map(|value| value as f32)
+                .filter(|value| value.is_finite());
+            let (Some(from), Some(to), Some((duration_ms, delay_ms, easing))) =
+                (from, target, motion_transition(node, property))
+            else {
+                continue;
+            };
+            if (from - to).abs() <= f32::EPSILON {
+                continue;
+            }
+            motions.insert(
+                (*property).to_string(),
+                MotionTrack {
+                    from,
+                    to,
+                    current: from,
+                    start_ms: now_ms + delay_ms,
+                    duration_ms,
+                    easing,
+                },
+            );
+        }
+    }
+    motions
 }
 struct HighlightMatchCache {
     content: String,
@@ -543,6 +736,8 @@ pub struct Tree {
     virtual_measurements: HashMap<String, HashMap<String, f64>>,
     pending_layout_events: Vec<Value>,
     pending_interaction_events: Vec<Value>,
+    pending_motion_events: Vec<Value>,
+    motion_time_ms: f64,
     virtual_focus: Option<(String, String)>,
     stacking: HashMap<String, f32>,
     window_chrome_suppressed: bool,
@@ -665,6 +860,8 @@ impl Tree {
             virtual_measurements: HashMap::new(),
             pending_layout_events: Vec::new(),
             pending_interaction_events: Vec::new(),
+            pending_motion_events: Vec::new(),
+            motion_time_ms: 0.0,
             virtual_focus: None,
             stacking: HashMap::new(),
             window_chrome_suppressed: false,
@@ -706,6 +903,63 @@ impl Tree {
         self.dirty.layout = true;
         self.dirty.paint = true;
         true
+    }
+    pub fn advance_motion(&mut self, now_ms: f64) {
+        if !now_ms.is_finite() {
+            return;
+        }
+        self.motion_time_ms = self.motion_time_ms.max(now_ms);
+        let mut completed = Vec::new();
+        for (id, entry) in &mut self.entries {
+            let properties: Vec<String> = entry.motions.keys().cloned().collect();
+            for property in properties {
+                let Some(track) = entry.motions.get_mut(&property) else {
+                    continue;
+                };
+                let (value, done) = track.value_at(self.motion_time_ms);
+                let changed = (track.current - value).abs() > 0.0001;
+                track.current = value;
+                if changed || done {
+                    if motion_is_layout(&property) {
+                        entry.layout_dirty = true;
+                        self.dirty.layout = true;
+                    }
+                    self.dirty.paint = true;
+                }
+                if done {
+                    completed.push((id.clone(), property));
+                }
+            }
+        }
+        for (id, property) in completed {
+            if let Some(entry) = self.entries.get_mut(&id) {
+                entry.motions.remove(&property);
+            }
+            self.pending_motion_events
+                .push(json!({"type":"motionComplete", "id":id, "property":property}));
+        }
+    }
+    pub fn active_motion_count(&self) -> usize {
+        self.entries.values().map(|entry| entry.motions.len()).sum()
+    }
+    pub fn next_motion_tick_ms(&self) -> Option<f64> {
+        self.entries
+            .values()
+            .flat_map(|entry| entry.motions.values())
+            .map(|track| {
+                if self.motion_time_ms < track.start_ms {
+                    track.start_ms
+                } else {
+                    (self.motion_time_ms + MOTION_FRAME_MS).min(track.end_ms())
+                }
+            })
+            .min_by(f64::total_cmp)
+    }
+    pub fn take_motion_events(&mut self) -> Vec<Value> {
+        std::mem::take(&mut self.pending_motion_events)
+    }
+    pub fn motion_time_ms(&self) -> f64 {
+        self.motion_time_ms
     }
     pub fn update(&mut self, root: Node) {
         let previous_modal = self.active_modal().map(str::to_string);
@@ -995,6 +1249,7 @@ impl Tree {
                 })
                 .map_or(0.0, |control| control.value.max(0.0))
         });
+        let motions = motion_tracks_for_node(&node, previous.as_ref(), self.motion_time_ms);
         self.entries.insert(
             id,
             Entry {
@@ -1015,6 +1270,7 @@ impl Tree {
                 virtual_following_tail,
                 virtual_initial_layout,
                 virtual_scroll_generation,
+                motions,
             },
         );
     }
@@ -1745,7 +2001,7 @@ impl Tree {
         let suppress_root_chrome = self.window_chrome_suppressed && id == self.root;
         let entry = self.entries.get_mut(id).unwrap();
         let style = if entry.layout_dirty || entry.layout_id.is_none() || viewport.is_some() {
-            let mut style = layout_style(&entry.node, suppress_root_chrome);
+            let mut style = layout_style(entry, suppress_root_chrome);
             if let Some((w, h)) = viewport {
                 style.size = Size {
                     width: length(w),
@@ -2295,9 +2551,17 @@ impl Tree {
         let radius = if suppress_root_chrome {
             0.0
         } else {
-            visual_number(&node, "radius", 0.0, state) as f64
+            visual_motion_number(entry, "radius", 0.0, state) as f64
         };
         let shape = RoundedRect::from_rect(rect, radius);
+        let opacity = visual_motion_number(entry, "opacity", 1.0, state).clamp(0.0, 1.0);
+        if opacity <= 0.0001 {
+            return;
+        }
+        let opacity_layer = opacity < 0.9999;
+        if opacity_layer {
+            target.push_opacity(opacity, transform, &clip);
+        }
         let bg = visual_string(&node, "background", "#00000000", state);
         if bg != "#00000000" {
             target.fill(Fill::NonZero, transform, color(bg), &shape);
@@ -2808,6 +3072,9 @@ impl Tree {
                 color(visual_string(&node, "scrollbarColor", "#d4d4d8", state)),
                 &RoundedRect::new(left, rect.y1 - 7.0, left + thumb, rect.y1 - 3.0, 2.0),
             );
+        }
+        if opacity_layer {
+            target.pop_layer();
         }
     }
     fn hit_root(&self, scroll_only: bool) -> Option<String> {
@@ -5782,7 +6049,20 @@ fn limit(v: &Value) -> LengthPercentageAuto {
     }
     auto()
 }
-fn layout_style(node: &Node, suppress_border: bool) -> Style {
+fn motion_dimension(entry: &Entry, key: &str) -> Dimension {
+    entry
+        .motions
+        .get(key)
+        .map_or_else(|| dimension(&entry.node.style[key]), |track| length(track.current))
+}
+fn motion_limit(entry: &Entry, key: &str) -> LengthPercentageAuto {
+    entry
+        .motions
+        .get(key)
+        .map_or_else(|| limit(&entry.node.style[key]), |track| length(track.current))
+}
+fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
+    let node = &entry.node;
     let pad = node.insets("padding");
     let margin = node.insets("margin");
     let border = if suppress_border {
@@ -5820,14 +6100,14 @@ fn layout_style(node: &Node, suppress_border: bool) -> Style {
             Position::Relative
         },
         inset: Rect {
-            top: limit(&node.style["top"]),
-            right: limit(&node.style["right"]),
-            bottom: limit(&node.style["bottom"]),
-            left: limit(&node.style["left"]),
+            top: motion_limit(entry, "top"),
+            right: motion_limit(entry, "right"),
+            bottom: motion_limit(entry, "bottom"),
+            left: motion_limit(entry, "left"),
         },
         size: Size {
-            width: dimension(&node.style["width"]),
-            height: dimension(&node.style["height"]),
+            width: motion_dimension(entry, "width"),
+            height: motion_dimension(entry, "height"),
         },
         min_size: Size {
             width: limit(&node.style["minWidth"]),

@@ -143,7 +143,7 @@ await build({
 | Mode | Windows | Linux |
 | --- | --- | --- |
 | `auto` | Uses the native D3D11/DXGI GPU renderer by default. | Uses the Vello/WGPU GPU renderer by default. |
-| `gpu` | Uses D3D11/DXGI with Vello/WGPU fallback for initialization or recovery failures. | Uses Vello/WGPU with the platform graphics backend selected by WGPU. |
+| `gpu` | Uses D3D11/DXGI with Vello/WGPU fallback for initialization or recovery failures. If Vello cannot run on the available adapter, falls back to CPU. | Uses Vello/WGPU with the platform graphics backend selected by WGPU. If the adapter lacks Vello's required shader features, falls back to CPU. |
 | `cpu` | Uses `vello_cpu + softbuffer`. | Uses `vello_cpu + softbuffer`. |
 
 ```tsx
@@ -152,7 +152,7 @@ const app = createApp(App, {
 });
 ```
 
-An explicit renderer in `createApp` takes precedence over `TARVE_RENDERER`. `WGPU_BACKEND` can select a WGPU backend for development and diagnostics. On Windows, setting it also selects the Vello/WGPU path instead of the normal D3D11 renderer.
+An explicit renderer in `createApp` takes precedence over `TARVE_RENDERER`. `WGPU_BACKEND` can select a WGPU backend for development and diagnostics. On Windows, setting it also selects the Vello/WGPU path instead of the normal D3D11 renderer. An explicit `WGPU_BACKEND` keeps GPU failures strict instead of silently falling back to CPU, which makes backend-specific diagnostics reliable.
 
 ## Components
 
@@ -198,6 +198,52 @@ function App() {
 ```
 
 Create derived themes with `createTheme` or `Theme.create`. Theme tokens cover surfaces, foregrounds, borders, focus outlines, selection, caret, scrollbars, modal overlays, rich-content colors, and control states.
+
+## Native motion
+
+Tarve transitions retained native values without a Bun timer or per-frame TSX render. Bun sends the new target once; Rust owns interpolation, layout/paint invalidation, frame scheduling, retargeting, and completion.
+
+The first motion surface supports numeric `width`, `height`, `top`, `right`, `bottom`, `left`, `opacity`, and `radius`. Transitions can use `linear`, `ease`, `easeIn`, `easeOut`, or `easeInOut`, with optional duration and delay in milliseconds.
+
+```tsx
+<View
+  id="details-panel"
+  motionFrom={{ opacity: 0, width: 240 }}
+  onTransitionEnd={({ property }) => {
+    console.log(`${property} finished`);
+  }}
+  style={{
+    width: expanded ? 420 : 280,
+    opacity: expanded ? 1 : 0.72,
+    radius: 16,
+    transition: {
+      width: { duration: 220, easing: "easeOut" },
+      opacity: { duration: 160, easing: "linear" },
+      radius: { duration: 220, easing: "easeOut" },
+    },
+  }}
+/>
+```
+
+Changing a target while it is already moving retargets from the current interpolated value, so the node does not jump back to its previous declarative target. `motionFrom` is mount-only: it provides the initial numeric value when a native node is first created.
+
+Use `AnimatePresence` when a node must stay mounted long enough to finish an exit transition. Keep the presence boundary rendered and toggle `present`; removing the boundary itself cannot retain its child for exit.
+
+```tsx
+<AnimatePresence
+  id="details-presence"
+  present={detailsOpen}
+  enter={{ opacity: 0 }}
+  exit={{ opacity: 0 }}
+  transition={{ opacity: { duration: 180, easing: "easeOut" } }}
+>
+  <Card id="details-card" style={{ opacity: 1 }}>
+    <Text>Project details</Text>
+  </Card>
+</AnimatePresence>
+```
+
+Base numeric style targets participate in native motion. Interactive `hover`, `focus`, `focusVisible`, `active`, and `disabled` overrides are still applied immediately rather than creating state-transition tracks.
 
 ## Rich content
 
@@ -367,11 +413,17 @@ await test.waitFor((snapshot) =>
   snapshot.nodes.some((node) => node.text === "Saved") || false
 );
 
+// After an interaction or app update starts a transition:
+await test.advanceMotion(50);
+const midpoint = await test.inspect();
+
 await test.capture("dist/saved.png");
 test.close();
 ```
 
-Use `launchTestProcess` to isolate CPU/GPU test runs in child processes. `readPngRgba`, `comparePngCaptures`, and `assertPngMatches` are reusable pixel-regression helpers; Tarve's own visual smoke test uses the same public PNG decoder.
+`advanceMotion(milliseconds)` first flushes any queued declarative update, then advances the native motion clock without sleeping. Once used, that app instance stays on deterministic motion time, which makes intermediate geometry and captures reproducible. `waitForIdle()` also waits for `activeMotions === 0`.
+
+Use `launchTestProcess` to isolate CPU/GPU test runs in child processes. `readPngRgba`, `comparePngCaptures`, and `assertPngMatches` are reusable pixel-regression helpers; Tarve's own visual smoke tests use the same public PNG decoder.
 
 ## Custom title bar
 

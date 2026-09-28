@@ -1,8 +1,19 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 42;
+export const PROTOCOL_VERSION = 43;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
+export type MotionProperty = "width" | "height" | "top" | "right" | "bottom" | "left" | "opacity" | "radius";
+export type MotionEasing = "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut";
+export interface MotionTransition {
+  /** Duration in milliseconds. Defaults to 200 when omitted. */
+  duration?: number;
+  /** Delay in milliseconds. Defaults to 0. */
+  delay?: number;
+  easing?: MotionEasing;
+}
+export type MotionTransitions = Partial<Record<MotionProperty | "all", MotionTransition>>;
+export type MotionValues = Partial<Record<MotionProperty, number>>;
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "markdown" | "code" | "diff" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter";
 export type SvgElementName = "path" | "circle" | "ellipse" | "g" | "line" | "polygon" | "polyline" | "rect";
 export type SvgAttributeValue = string | number;
@@ -33,6 +44,7 @@ export interface TextHighlight {
 }
 export interface StateStyle {
   background?: string; foreground?: string; borderColor?: string; radius?: number;
+  opacity?: number;
   outlineWidth?: number; outlineColor?: string; outlineOffset?: number; outlineRadius?: number; outlineStyle?: OutlineStyle;
   placeholderColor?: string; selectionColor?: string; caretColor?: string;
   scrollbarColor?: string; placeholderBackground?: string; thumbColor?: string;
@@ -49,6 +61,8 @@ export interface Style extends StateStyle {
   zIndex?: number;
   borderWidth?: Insets;
   radius?: number; fontSize?: number; fontWeight?: number; fontFamily?: string;
+  /** Native retained transitions. Bun sends the target once; Rust owns interpolation. */
+  transition?: MotionTransitions;
   lineHeight?: number; textAlign?: "start" | "center" | "end";
   taskMarkerColor?: string; taskMarkerCheckColor?: string;
   markdownCodeBackground?: string; markdownQuoteBackground?: string; markdownQuoteAccent?: string;
@@ -114,6 +128,8 @@ export interface NativeNode {
   closeIntercept?: boolean;
   dragRegion?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "close";
+  /** Optional initial numeric values used only when the native node is first mounted. */
+  motionFrom?: MotionValues;
 }
 export type ScrollOrientation = "vertical" | "horizontal" | "both";
 export interface ScrollPosition { x: number; y: number; maxX: number; maxY: number }
@@ -153,6 +169,7 @@ export type NativeCommand =
   | { type: "inspect"; requestId: string }
   | { type: "resize"; width: number; height: number }
   | { type: "capture"; path: string; requestId: string }
+  | { type: "motionAdvance"; milliseconds: number; requestId: string }
   | { type: "fileDialog"; mode: FileDialogMode; options: FileDialogOptions; requestId: string }
   | { type: "input"; action: "move" | "down" | "up" | "wheel" | "text" | "key"; x?: number; y?: number; delta?: number; deltaX?: number; deltaY?: number; text?: string };
 export interface NodeSnapshot {
@@ -165,6 +182,7 @@ export interface NodeSnapshot {
 export interface Snapshot {
   layoutNodes: number; layoutNodesCreated: number; measureCalls: number; paintedNodes: number;
   frames: number; layouts: number; shapes: number; paints: number;
+  activeMotions: number;
   hovered: string | null; focused: string | null; nodes: NodeSnapshot[];
   width: number; height: number; scale: number;
 }
@@ -193,5 +211,7 @@ export type NativeEvent =
   | { type: "error"; message: string }
   | { type: "inspect"; requestId: string; snapshot: Snapshot }
   | { type: "captured"; requestId: string; path: string; error?: string }
+  | { type: "motionComplete"; id: string; property: MotionProperty }
+  | { type: "motionAdvanced"; requestId: string; milliseconds: number; activeMotions: number; error?: string }
   | { type: "fileDialog"; requestId: string; paths: string[]; error?: string }
   | { type: "frame"; frames: number };

@@ -1,7 +1,18 @@
-import type { Control, StateStyle, Style, SvgNode, TextHighlight } from "../../protocol/src/index";
+import type { Control, MotionProperty, MotionValues, StateStyle, Style, SvgNode, TextHighlight } from "../../protocol/src/index";
 import type { ImageSource } from "./components/image";
 export type Child = VNode | string | number | boolean | null | undefined | Child[];
-export interface BaseProps { id?: string; key?: string | number; children?: Child; style?: Style; rovingGroup?: boolean; highlight?: TextHighlight; onHighlight?: (event: { matchCount: number }) => void }
+export interface BaseProps {
+  id?: string;
+  key?: string | number;
+  children?: Child;
+  style?: Style;
+  rovingGroup?: boolean;
+  highlight?: TextHighlight;
+  onHighlight?: (event: { matchCount: number }) => void;
+  /** Initial numeric values for a native enter transition. */
+  motionFrom?: MotionValues;
+  onTransitionEnd?: (event: { property: MotionProperty }) => void;
+}
 export type IntrinsicStateStyle = StateStyle & {
   backgroundColor?: string;
   color?: string;

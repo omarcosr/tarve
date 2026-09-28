@@ -20,6 +20,7 @@ bun run components
 bun run forms
 bun run intrinsics
 bun run large-list
+bun run motion
 bun run rich-content
 bun run diff
 bun run studio
@@ -34,6 +35,7 @@ The examples cover:
 - `forms`: input and form controls.
 - `intrinsics`: Tarve JSX intrinsics such as `div`, `span`, `p`, `img`, `input`, `textarea`, `button`, `label`, `select`, `progress`, headings, and lowercase SVG elements.
 - `large-list`: virtualized list behavior.
+- `motion`: native retained transitions with `motionFrom`, numeric size/opacity/radius animation, easing curves, mid-flight retargeting, `onTransitionEnd`, and `AnimatePresence` enter/exit lifetime handling.
 - `rich-content`: GFM Markdown, syntax-highlighted TypeScript, native code line numbers, and generated diffs.
 - `studio`: the Tarve Studio app from the launch film. A searchable, sortable `DataGrid`, an **Actions** `DropdownMenu` (open a source file into the `Code` tab, a **Build executable…** `Dialog` that compiles the example with `tarve/build`, a runtime dark/light theme switch), a `Sidebar`, a `Resizable` inspector with `Switch`, `Slider` and `Progress`, and `Tabs` holding `Code`, `Markdown` and `Diff`.
 - `performance`: the performance sequence from the launch film. A 100,000-row `VirtualList` whose **Fly to row** button animates the controlled offset to any row, and a card grid that reflows live as you resize the window.

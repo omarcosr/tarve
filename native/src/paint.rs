@@ -24,6 +24,7 @@ pub(crate) trait PaintTarget {
     fn fill<S: Shape>(&mut self, fill: Fill, transform: Affine, color: Color, shape: &S);
     fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S);
     fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S);
+    fn push_opacity<S: Shape>(&mut self, alpha: f32, transform: Affine, shape: &S);
     fn pop_layer(&mut self);
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine);
     fn draw_glyphs(
@@ -48,6 +49,16 @@ impl PaintTarget for Scene {
 
     fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S) {
         self.push_clip_layer(fill, transform, shape);
+    }
+
+    fn push_opacity<S: Shape>(&mut self, alpha: f32, transform: Affine, shape: &S) {
+        self.push_layer(
+            Fill::NonZero,
+            vello::peniko::BlendMode::default(),
+            alpha.clamp(0.0, 1.0),
+            transform,
+            shape,
+        );
     }
 
     fn pop_layer(&mut self) {
@@ -174,6 +185,18 @@ impl PaintTarget for CpuPaintTarget<'_> {
         self.context.set_fill_rule(fill);
         self.context.set_transform(transform);
         self.context.push_clip_layer(&shape.to_path(0.1));
+    }
+
+    fn push_opacity<S: Shape>(&mut self, alpha: f32, transform: Affine, shape: &S) {
+        self.context.set_fill_rule(Fill::NonZero);
+        self.context.set_transform(transform);
+        self.context.push_layer(
+            Some(&shape.to_path(0.1)),
+            None,
+            Some(alpha.clamp(0.0, 1.0)),
+            None,
+            None,
+        );
     }
 
     fn pop_layer(&mut self) {

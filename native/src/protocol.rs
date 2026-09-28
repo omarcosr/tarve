@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 42;
+pub const VERSION: u32 = 43;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -202,6 +202,8 @@ pub struct Node {
     pub drag_region: bool,
     #[serde(default)]
     pub window_action: String,
+    #[serde(default)]
+    pub motion_from: Value,
 }
 
 fn default_true() -> bool {
@@ -392,6 +394,11 @@ pub enum Command {
         #[serde(rename = "requestId")]
         request_id: String,
     },
+    MotionAdvance {
+        milliseconds: f64,
+        #[serde(rename = "requestId")]
+        request_id: String,
+    },
     FileDialog {
         mode: String,
         #[serde(default)]
@@ -424,6 +431,64 @@ impl From<accesskit_winit::Event> for Command {
     }
 }
 
+const MOTION_PROPERTIES: &[&str] = &[
+    "width", "height", "top", "right", "bottom", "left", "opacity", "radius",
+];
+
+fn validate_motion(node: &Node) -> Result<(), String> {
+    if let Some(value) = node.style.get("transition") {
+        let Some(transitions) = value.as_object() else {
+            return Err(format!("transition must be an object on {}", node.id));
+        };
+        for (property, value) in transitions {
+            if property != "all" && !MOTION_PROPERTIES.contains(&property.as_str()) {
+                return Err(format!("Unsupported transition property on {}: {property}", node.id));
+            }
+            let Some(config) = value.as_object() else {
+                return Err(format!("transition.{property} must be an object on {}", node.id));
+            };
+            for key in config.keys() {
+                if !matches!(key.as_str(), "duration" | "delay" | "easing") {
+                    return Err(format!("Unsupported transition option on {}: {property}.{key}", node.id));
+                }
+            }
+            for key in ["duration", "delay"] {
+                if let Some(value) = config.get(key) {
+                    let Some(value) = value.as_f64().filter(|value| value.is_finite()) else {
+                        return Err(format!("transition.{property}.{key} must be a finite number on {}", node.id));
+                    };
+                    if !(0.0..=600_000.0).contains(&value) {
+                        return Err(format!("transition.{property}.{key} must be between 0 and 600000 on {}", node.id));
+                    }
+                }
+            }
+            if let Some(easing) = config.get("easing") {
+                let Some(easing) = easing.as_str() else {
+                    return Err(format!("transition.{property}.easing must be a string on {}", node.id));
+                };
+                if !matches!(easing, "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut") {
+                    return Err(format!("Unsupported transition easing on {}: {easing}", node.id));
+                }
+            }
+        }
+    }
+
+    if !node.motion_from.is_null() {
+        let Some(values) = node.motion_from.as_object() else {
+            return Err(format!("motionFrom must be an object on {}", node.id));
+        };
+        for (property, value) in values {
+            if !MOTION_PROPERTIES.contains(&property.as_str()) {
+                return Err(format!("Unsupported motionFrom property on {}: {property}", node.id));
+            }
+            if value.as_f64().is_none_or(|value| !value.is_finite()) {
+                return Err(format!("motionFrom.{property} must be a finite number on {}", node.id));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn validate(root: &Node) -> Result<(), String> {
     fn validate_style(n: &Node) -> Result<(), String> {
         if let Some(value) = n.style.get("userSelect") {
@@ -454,6 +519,7 @@ pub fn validate(root: &Node) -> Result<(), String> {
                 }
             }
         }
+        validate_motion(n)?;
         Ok(())
     }
     fn walk(n: &Node, ids: &mut HashSet<String>, depth: usize) -> Result<(), String> {
@@ -573,6 +639,7 @@ pub fn validate_patch(nodes: &[Node]) -> Result<(), String> {
     let mut ids = HashSet::new();
     for node in nodes {
         validate_control(node)?;
+        validate_motion(node)?;
         if let Some(value) = node.style.get("userSelect") {
             let Some(value) = value.as_str() else {
                 return Err(format!("userSelect must be a string on {}", node.id));

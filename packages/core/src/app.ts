@@ -51,6 +51,8 @@ export interface AppHandle {
   onEvent(listener: (event: NativeEvent) => void): () => void;
   inspect(): Promise<Snapshot>;
   capture(path: string): Promise<void>;
+  /** Advance the native deterministic motion clock. Requires debug mode. */
+  advanceMotion(milliseconds: number): Promise<void>;
   debug(command: DiagnosticInput): void;
 }
 
@@ -264,6 +266,15 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     });
   }
 
+  async function flushQueuedUpdate(): Promise<void> {
+    while (queued && !ended && !closing) {
+      // `update()` batches rendering in a microtask. Request-style APIs that
+      // inspect or advance native state must cross that boundary first so the
+      // request is ordered after the declarative patch on the bridge.
+      await Promise.resolve();
+    }
+  }
+
   function invokeHandler(event: string, targetId: string | undefined, handler: (...args: never[]) => void, ...args: never[]): boolean {
     try {
       handler(...args);
@@ -464,8 +475,23 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (event.type === "hover" && handlers?.onHover) { handled = true; succeeded = invokeHandler("hover", event.id, handlers.onHover as (...args: never[]) => void, event.entered as never); }
       if (event.type === "key" && handlers?.onKeyDown) { handled = true; succeeded = invokeHandler("key", event.id, handlers.onKeyDown as (...args: never[]) => void, event.key as never); }
       if (event.type === "blur" && handlers?.onBlur) { handled = true; succeeded = invokeHandler("blur", event.id, handlers.onBlur); }
+      if (event.type === "motionComplete" && handlers?.onTransitionEnd) {
+        handled = true;
+        succeeded = invokeHandler(
+          "motionComplete",
+          event.id,
+          handlers.onTransitionEnd as (...args: never[]) => void,
+          { property: event.property } as never,
+        );
+      }
 
-      if (!succeeded) restoreCommitted();
+      if (!succeeded) {
+        // Motion completion is a notification, not an optimistic native edit.
+        // Presence bookkeeping may already have completed before a user callback
+        // throws, so still render once to let retained exit nodes be removed.
+        if (event.type === "motionComplete") update();
+        else restoreCommitted();
+      }
       else if (handled || optimisticEdit) update();
     }
   }
@@ -531,6 +557,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       return () => { listeners.delete(listener); };
     },
     async inspect(): Promise<Snapshot> {
+      if (queued) await flushQueuedUpdate();
       const event = await request({ type: "inspect", requestId: crypto.randomUUID() });
       if (event.type !== "inspect") {
         const error = reportError(new Error("Unexpected native response"), { source: "request", event: "inspect" });
@@ -540,6 +567,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     },
     async capture(path: string): Promise<void> {
       if (!options.debug) throw new Error("Enable debug to capture the rendered scene");
+      if (queued) await flushQueuedUpdate();
       const event = await request({ type: "capture", path, requestId: crypto.randomUUID() });
       if (event.type !== "captured") {
         const error = reportError(new Error("Unexpected native capture response"), { source: "request", event: "capture" });
@@ -547,6 +575,22 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       }
       if (event.error) {
         const error = reportError(new Error(event.error), { source: "request", event: "capture" });
+        throw error;
+      }
+    },
+    async advanceMotion(milliseconds: number): Promise<void> {
+      if (!options.debug) throw new Error("Enable debug to advance native motion");
+      if (!Number.isFinite(milliseconds) || milliseconds < 0 || milliseconds > 60_000) {
+        throw new RangeError("advanceMotion milliseconds must be finite and between 0 and 60000");
+      }
+      if (queued) await flushQueuedUpdate();
+      const event = await request({ type: "motionAdvance", milliseconds, requestId: crypto.randomUUID() });
+      if (event.type !== "motionAdvanced") {
+        const error = reportError(new Error("Unexpected native motion response"), { source: "request", event: "motionAdvance" });
+        throw error;
+      }
+      if (event.error) {
+        const error = reportError(new Error(event.error), { source: "request", event: "motionAdvance" });
         throw error;
       }
     },

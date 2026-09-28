@@ -5,8 +5,41 @@ import { createTheme, darkTheme, lightTheme, Theme, theme } from "./theme";
 import type { ComponentAdapter } from "./component-adapter";
 import type { VNode } from "./jsx-runtime";
 import { PROTOCOL_VERSION } from "../../protocol/src/index";
+import { AnimatePresence } from "./motion";
 
 describe("native TSX protocol", () => {
+  test("serializes native motion targets and retains exit content until completion", () => {
+    const scope = {};
+    let present = true;
+    const scene = () => (
+      <Window>
+        <AnimatePresence
+          id="panel-presence"
+          present={present}
+          enter={{ opacity: 0 }}
+          exit={{ opacity: 0 }}
+          transition={{ opacity: { duration: 180, easing: "easeOut" } }}
+        >
+          <View id="motion-panel" style={{ opacity: 1, width: 120, height: 40 }} />
+        </AnimatePresence>
+      </Window>
+    );
+
+    const entered = compileTree(scene(), false, "auto", [], scope);
+    expect(entered.nodes.get("motion-panel")?.motionFrom).toEqual({ opacity: 0 });
+    expect(entered.nodes.get("motion-panel")?.style.transition).toEqual({
+      opacity: { duration: 180, easing: "easeOut" },
+    });
+
+    present = false;
+    const exiting = compileTree(scene(), false, "auto", [], scope);
+    expect(exiting.nodes.get("motion-panel")?.style.opacity).toBe(0);
+    exiting.handlers.get("motion-panel")?.onTransitionEnd?.({ property: "opacity" });
+
+    const removed = compileTree(scene(), false, "auto", [], scope);
+    expect(removed.nodes.has("motion-panel")).toBe(false);
+  });
+
   test("compiles function components, flattens children, and keeps callbacks outside JSON", () => {
     let clicked = false;
     const tree = compileTree(<Window title="Test"><Column>{null}<Text>Hello {2}</Text><Button id="button" onClick={() => { clicked = true; }}>Click</Button><Input id="input" value="Olá"/></Column></Window>);

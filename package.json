@@ -87,6 +87,7 @@
     "smoke:controls": "bun run build:native && bun run setup:examples && bun scripts/smoke-controls.ts",
     "smoke:virtual-list": "bun run build:native && bun run setup:examples && bun scripts/smoke-virtual-list.ts",
     "smoke:rich-content": "bun run build:native && bun scripts/smoke-rich-content.ts",
+    "smoke:motion": "bun run build:native && bun scripts/smoke-motion.tsx",
     "smoke:accessibility": "bun run build:native && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-accessibility.ps1",
     "smoke:exe": "bun scripts/smoke-exe.ts",
     "smoke:package": "bun scripts/smoke-package.ts",

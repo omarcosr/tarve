@@ -590,6 +590,27 @@ fn resolve_renderer(
     }
 }
 
+const VELLO_UNSUPPORTED_ADAPTER_ERROR: &str = "Vello GPU renderer is unsupported by";
+
+fn should_fallback_to_cpu(
+    preference: RendererPreference,
+    renderer_env: Option<&std::ffi::OsStr>,
+    wgpu_backend_explicit: bool,
+    gpu_error: &str,
+) -> bool {
+    if preference == RendererPreference::Auto && renderer_env.is_none() {
+        return true;
+    }
+
+    // `renderer: "gpu"` is a GPU preference for applications, but an adapter that
+    // cannot compile Vello's required shaders must not make the whole application
+    // unusable when the CPU renderer is available. Keep an explicit WGPU backend
+    // strict so diagnostics and backend-specific smoke tests still fail loudly.
+    preference == RendererPreference::Gpu
+        && !wgpu_backend_explicit
+        && gpu_error.contains(VELLO_UNSUPPORTED_ADAPTER_ERROR)
+}
+
 struct CpuGraphics {
     _soft_context: SoftContext<Arc<Window>>,
     surface: SoftSurface<Arc<Window>, Arc<Window>>,
@@ -774,10 +795,18 @@ pub struct Graphics {
 impl Graphics {
     pub fn new(window: Arc<Window>, preference: RendererPreference) -> Result<Self, String> {
         let renderer_env = std::env::var_os("TARVE_RENDERER");
+        let wgpu_backend_explicit = std::env::var_os("WGPU_BACKEND").is_some();
         let backend = match resolve_renderer(preference, renderer_env.as_deref())? {
             ResolvedRenderer::Gpu => match Self::new_gpu_backend(window.clone()) {
                 Ok(graphics) => graphics,
-                Err(gpu_error) if preference == RendererPreference::Auto && renderer_env.is_none() => {
+                Err(gpu_error)
+                    if should_fallback_to_cpu(
+                        preference,
+                        renderer_env.as_deref(),
+                        wgpu_backend_explicit,
+                        &gpu_error,
+                    ) =>
+                {
                     GraphicsImpl::Cpu(Box::new(CpuGraphics::new(window).map_err(|cpu_error| {
                         format!(
                             "GPU renderer unavailable: {gpu_error}; CPU fallback failed: {cpu_error}"
@@ -795,24 +824,48 @@ impl Graphics {
         })
     }
 
-    pub fn recover(window: Arc<Window>, previous_backend: RendererBackend) -> Result<Self, String> {
-        let backend = match previous_backend {
+    pub fn recover(
+        window: Arc<Window>,
+        previous_backend: RendererBackend,
+        preference: RendererPreference,
+    ) -> Result<Self, String> {
+        let renderer_env = std::env::var_os("TARVE_RENDERER");
+        let wgpu_backend_explicit = std::env::var_os("WGPU_BACKEND").is_some();
+        let recovered = match previous_backend {
             #[cfg(target_os = "windows")]
             RendererBackend::D3d11 => D3d11Graphics::new(window.clone())
                 .map(|graphics| GraphicsImpl::D3d11(Box::new(graphics)))
                 .or_else(|d3d11_error| {
-                    GpuGraphics::new_with_backends(window, Some(wgpu::Backends::DX12))
+                    GpuGraphics::new_with_backends(window.clone(), Some(wgpu::Backends::DX12))
                         .map(|graphics| GraphicsImpl::Gpu(Box::new(graphics)))
                         .map_err(|vello_error| {
                             format!(
                                 "D3D11 GPU recovery failed: {d3d11_error}; Vello/DX12 fallback failed: {vello_error}"
                             )
                         })
-                })?,
-            RendererBackend::Gpu(previous) => {
-                GraphicsImpl::Gpu(Box::new(GpuGraphics::recover(window, previous)?))
+                }),
+            RendererBackend::Gpu(previous) => GpuGraphics::recover(window.clone(), previous)
+                .map(|graphics| GraphicsImpl::Gpu(Box::new(graphics))),
+            RendererBackend::Cpu => CpuGraphics::new(window.clone())
+                .map(|graphics| GraphicsImpl::Cpu(Box::new(graphics))),
+        };
+        let backend = match recovered {
+            Ok(graphics) => graphics,
+            Err(gpu_error)
+                if should_fallback_to_cpu(
+                    preference,
+                    renderer_env.as_deref(),
+                    wgpu_backend_explicit,
+                    &gpu_error,
+                ) =>
+            {
+                GraphicsImpl::Cpu(Box::new(CpuGraphics::new(window).map_err(|cpu_error| {
+                    format!(
+                        "GPU renderer recovery failed: {gpu_error}; CPU fallback failed: {cpu_error}"
+                    )
+                })?))
             }
-            RendererBackend::Cpu => GraphicsImpl::Cpu(Box::new(CpuGraphics::new(window)?)),
+            Err(error) => return Err(error),
         };
         Ok(Self {
             backend,
@@ -980,7 +1033,8 @@ mod tests {
     use super::{
         CpuGraphics, GraphicsFault, GraphicsFaultKind, GraphicsSignals, ResolvedRenderer,
         SurfaceIssue, flatten_rgba_bytes, flatten_rgba_for_softbuffer, resolve_renderer,
-        should_rasterize_cpu_frame, supports_vello_float16_packing, surface_failure_threshold,
+        should_fallback_to_cpu, should_rasterize_cpu_frame, supports_vello_float16_packing,
+        surface_failure_threshold,
     };
     use crate::protocol::RendererPreference;
     use std::ffi::OsStr;
@@ -1033,6 +1087,43 @@ mod tests {
             resolve_renderer(RendererPreference::Cpu, Some(OsStr::new("unknown"))).unwrap(),
             ResolvedRenderer::Cpu
         );
+    }
+
+    #[test]
+    fn unsupported_vello_adapter_falls_back_without_masking_explicit_backend_failures() {
+        let unsupported = "Vello GPU renderer is unsupported by llvmpipe (Vulkan): the adapter exposes neither SHADER_F16 nor SHADER_F16_IN_F32";
+        let other_failure = "GPU device request failed";
+
+        assert!(should_fallback_to_cpu(
+            RendererPreference::Auto,
+            None,
+            false,
+            other_failure,
+        ));
+        assert!(!should_fallback_to_cpu(
+            RendererPreference::Auto,
+            Some(OsStr::new("gpu")),
+            false,
+            other_failure,
+        ));
+        assert!(should_fallback_to_cpu(
+            RendererPreference::Gpu,
+            None,
+            false,
+            unsupported,
+        ));
+        assert!(!should_fallback_to_cpu(
+            RendererPreference::Gpu,
+            None,
+            true,
+            unsupported,
+        ));
+        assert!(!should_fallback_to_cpu(
+            RendererPreference::Gpu,
+            None,
+            false,
+            other_failure,
+        ));
     }
 
     #[test]
