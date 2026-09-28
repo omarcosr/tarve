@@ -78,6 +78,9 @@ jobs:
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install example dependencies
+        run: bun run install:examples
+
       - name: Check locked Rust dependency graph
         run: cargo check --manifest-path native/Cargo.toml --locked
 

@@ -2,6 +2,8 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 const steps = [
+  // examples/ is type-checked by `check` and has its own lockfile (icon packages).
+  "install:examples",
   "release:policy",
   "check",
   "lint",

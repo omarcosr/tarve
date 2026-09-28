@@ -98,6 +98,7 @@
     "check": "bun node_modules/typescript/bin/tsc --noEmit",
     "lint": "cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings",
     "setup:examples": "bun scripts/setup-examples.ts",
+    "install:examples": "bun install --cwd examples --frozen-lockfile",
     "verify": "bun scripts/verify.ts",
     "release:check": "bun run verify",
     "release:policy": "bun scripts/release-policy.ts",

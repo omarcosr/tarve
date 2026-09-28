@@ -14,6 +14,7 @@ async function run(args: string[], cwd: string): Promise<void> {
 // node_modules entry can otherwise leave the examples on an older CLI/runtime.
 await run(["run", "package:local"], root);
 const examples = join(root, "examples");
+await run(["install", "--frozen-lockfile"], examples);
 const modules = join(examples, "node_modules");
 const packageLink = join(modules, "tarve");
 const bin = join(modules, ".bin");
