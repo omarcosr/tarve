@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { nativeRelativePath, targetConfig } from "../packages/core/targets";
+import { createNativeCompatibilityManifest, writeNativeRuntimeManifest } from "../packages/core/native-runtime";
 import { assertSigningEnvironment, signWindowsFiles, signingRequested, verifyWindowsSignatures } from "./authenticode";
 import { assertReleasePolicy } from "./release-policy";
 
@@ -54,6 +55,11 @@ const linuxLibrary = fromRoot(linuxNativeRelative);
 const releaseLibrary = join(root, "native/target/release", windowsConfig.nativeName);
 const tarball = join(root, "dist", `tarve-${policy.version}.tgz`);
 await signWindowsFiles([releaseLibrary, library]);
+await writeNativeRuntimeManifest(
+  library,
+  "windows-x64",
+  await createNativeCompatibilityManifest(root, policy.version),
+);
 await run([bun, "run", "build:example"], { ...unsignedEnv, TARVE_PREBUILT_NATIVE: releaseLibrary });
 await signWindowsFiles([executable]);
 await run([bun, "run", "pack"], { ...unsignedEnv, TARVE_SKIP_PREPACK: "1" });

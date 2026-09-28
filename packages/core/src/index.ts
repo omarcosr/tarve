@@ -1,5 +1,5 @@
-export { Window, View, Row, Column, Portal, Pressable, Link, Icon, Svg, Path, Circle, Ellipse, Line, Polyline, Polygon, SvgRect, Text, Markdown, Code, Diff, Button, Image, Scroll, ScrollArea, Input, TextArea, TitleBar, Modal, Dialog } from "./components";
-export type { WindowProps, WindowCloseRequestEvent, ViewProps, PortalProps, PressableProps, LinkProps, IconName, IconProps, SvgProps, SvgNode, SvgAttributes, PathProps, CircleProps, EllipseProps, LineProps, PolylineProps, PolygonProps, RectProps, TextProps, MarkdownProps, CodeProps, DiffProps, ButtonProps, ImageProps, ScrollProps, ScrollAreaProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
+export { Window, View, Row, Column, Portal, Pressable, Link, Icon, Svg, Path, Circle, Ellipse, Line, Polyline, Polygon, SvgRect, Text, Markdown, Code, Diff, Button, Image, clearImageSourceCache, loadImageSource, Scroll, ScrollArea, Input, TextArea, TitleBar, Modal, Dialog } from "./components";
+export type { WindowProps, WindowCloseRequestEvent, ViewProps, PortalProps, PressableProps, LinkProps, IconName, IconProps, SvgProps, SvgNode, SvgAttributes, PathProps, CircleProps, EllipseProps, LineProps, PolylineProps, PolygonProps, RectProps, TextProps, MarkdownProps, CodeProps, DiffProps, ButtonProps, ImageBytesSource, ImageHttpCacheMode, ImageProps, ImageRgbaSource, ImageSource, LoadImageSourceOptions, ScrollProps, ScrollAreaProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
 export { Checkbox, Switch, RadioGroup, Slider, Card, Badge, Separator, Progress, Tabs, Accordion } from "./controls";
 export type { CheckboxProps, SwitchProps, RadioOption, RadioGroupProps, SliderProps, CardProps, BadgeProps, SeparatorProps, ProgressProps, TabItem, TabsProps, AccordionItem, AccordionProps } from "./controls";
 export { VirtualList } from "./virtual-list";
@@ -20,6 +20,10 @@ export type { FindRangesOptions, TextSearchOptions, TextSearchController, TextSe
 export type { HotkeyHandler } from "./hotkeys";
 export { createApp, render } from "./app";
 export type { AppErrorEvent, AppErrorSource, AppHandle, AppOptions } from "./app";
+export { TestRenderer, Locator, createTestRenderer, launchTestProcess, waitFor } from "./test-renderer";
+export type { Point, RoleLocatorOptions, TestProcess, TestProcessOptions, TestRendererOptions, TextLocatorOptions, WaitForOptions, WheelOptions } from "./test-renderer";
+export { assertPngMatches, comparePngCaptures, compareRgbaImages, readPngRgba } from "./visual-testing";
+export type { PixelComparison, PixelComparisonOptions, RgbaImage } from "./visual-testing";
 export type { ComponentAdapter, ComponentAdapterInput } from "./component-adapter";
 export { theme, Theme, lightTheme, darkTheme, createTheme, buttonVariants } from "./theme";
 export type { ThemeColors, ThemeFocusOutline, ThemeDefinition, ThemeOverrides, ButtonVariant } from "./theme";

@@ -108,6 +108,21 @@ bun run tarve build app.tsx --target linux-x64 --outfile dist/App
 
 Tarve's release/package pipeline builds each native runtime on its native OS and assembles both into the same npm package. Repository maintainers can stage one runtime with `bun run package:native`; `bun run package` intentionally refuses to create an incomplete single-platform package.
 
+Each staged native runtime carries compatibility metadata containing its target, native ABI, JSON protocol version, source fingerprint, and binary hash. Cross-compilation validates that metadata before embedding the runtime, so a stale Linux `.so` cannot be combined with newer JavaScript (or vice versa). After native/protocol changes, rebuild the affected runtime on that OS with `bun run package:native` before cross-compiling from the other OS.
+
+To build the Linux runtime on Ubuntu or WSL, install the native toolchain once:
+
+```bash
+apt-get update
+apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev curl ca-certificates
+curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+source "$HOME/.cargo/env"
+cargo --version
+bun run package:native
+```
+
+Rustup installs Cargo per user. If you switch between a normal WSL user and `root`, install/activate Rust for the user that actually runs `bun run package:native`, or run the build from the same user where Rustup was installed.
+
 The build API is also exported:
 
 ```ts
@@ -220,6 +235,37 @@ Create derived themes with `createTheme` or `Theme.create`. Theme tokens cover s
 
 `createTextSearchController` and `findRanges` provide search/navigation helpers for `Text`, `Markdown`, `Code`, and `Diff`.
 
+## Images
+
+`Image` accepts local paths, data URLs, encoded PNG/JPEG/WebP/SVG bytes, and raw RGBA8 pixels. Raw RGBA is sent directly to the native image cache, so live pixel updates do not require a PNG encode/decode round trip.
+
+```tsx
+<Image
+  src={{
+    rgba: previewPixels,
+    width: 640,
+    height: 360,
+    cacheKey: "live-preview",
+  }}
+  width={640}
+  height={360}
+  fit="contain"
+/>
+```
+
+HTTP(S) loading is explicit and asynchronous. `loadImageSource` supports `AbortSignal`, payload limits, and a bounded in-process LRU cache:
+
+```tsx
+const controller = new AbortController();
+const avatar = await loadImageSource("https://example.com/avatar.webp", {
+  signal: controller.signal,
+});
+
+render(() => <Image src={avatar} width={96} height={96} fit="cover" />);
+```
+
+The native decoded-image cache is bounded and renderer-side image caches retain only images used by the current scene/frame.
+
 ## Lists and virtualization
 
 `List` keeps all items mounted and is appropriate for normal collections.
@@ -268,6 +314,8 @@ Variable-height example:
 
 Variable lists retain measured heights by key and can keep a focused editor row alive while normal windowing moves it outside the visible range.
 
+Native text search and copy operate on the mounted logical window. A retained editor row that is parked only to preserve focus is excluded from search, copy, accessibility, and tab order. For an externally windowed data set, search the full logical data set in the application/provider, call `scrollToItem` for the chosen result, and apply the native highlight after that row mounts.
+
 ## Native input and accessibility
 
 `Input` and `TextArea` use native text editing over Parley, including caret placement, selection, clipboard operations, grapheme-aware deletion, IME composition, wrapping, and scrolling. Password input remains masked in rendering and accessibility output.
@@ -302,6 +350,28 @@ unregisterSave();
 Other `AppHandle` APIs include `update`, `close`, `focus`, `scrollToItem`, event listeners, debug inspection, and deterministic screen capture.
 
 `Window.onCloseRequest` can cancel a user-initiated close with `event.preventDefault()`. `Window.position` accepts centered/edge/corner presets or explicit logical desktop coordinates.
+
+## Automation and visual regression
+
+`TestRenderer` exposes the supported automation surface over the same native renderer used by applications. It provides ID/text/role locators, pointer and keyboard actions, `waitFor`, `waitForIdle`, capture, and an optional hidden-window mode for CI runs that still require a real renderer surface.
+
+```tsx
+const test = await createTestRenderer(App, {
+  renderer: "cpu",
+  headless: true,
+});
+
+await test.getByRole("button", { name: "Save" }).click();
+await test.getById("project-name").fill("Tarve demo");
+await test.waitFor((snapshot) =>
+  snapshot.nodes.some((node) => node.text === "Saved") || false
+);
+
+await test.capture("dist/saved.png");
+test.close();
+```
+
+Use `launchTestProcess` to isolate CPU/GPU test runs in child processes. `readPngRgba`, `comparePngCaptures`, and `assertPngMatches` are reusable pixel-regression helpers; Tarve's own visual smoke test uses the same public PNG decoder.
 
 ## Custom title bar
 

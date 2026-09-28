@@ -11,6 +11,7 @@ use crate::{
     },
     tree::Tree,
 };
+use base64::Engine as _;
 
 #[test]
 fn abi_and_json_protocol_versions_fail_independently() {
@@ -23,7 +24,7 @@ fn abi_and_json_protocol_versions_fail_independently() {
     );
 }
 use serde_json::json;
-use std::sync::Arc;
+use std::{io::Cursor, sync::Arc};
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::CursorIcon;
@@ -2284,6 +2285,82 @@ fn inherited_highlight_matches_across_adjacent_text_and_rich_leaves() {
 }
 
 #[test]
+fn virtual_list_search_excludes_the_parked_retained_row() {
+    let mut visible_text = node("visible-text", "text", json!({}), vec![]);
+    visible_text.text = "needle visible".into();
+    let visible_row = node(
+        "visible-row",
+        "row",
+        json!({"height":40,"shrink":0}),
+        vec![visible_text],
+    );
+    let after = node(
+        "after",
+        "row",
+        json!({"height":40,"shrink":0}),
+        vec![],
+    );
+    let mut parked_text = node("parked-text", "text", json!({}), vec![]);
+    parked_text.text = "needle parked".into();
+    let parked_row = node(
+        "parked-row",
+        "row",
+        json!({
+            "position":"absolute",
+            "top":-1_000_000,
+            "left":0,
+            "width":"100%",
+            "height":40,
+            "shrink":0
+        }),
+        vec![parked_text],
+    );
+    let content = node(
+        "content",
+        "column",
+        json!({"width":"100%"}),
+        vec![visible_row, after, parked_row],
+    );
+    let mut list = node(
+        "list",
+        "scroll",
+        json!({"width":240,"height":80}),
+        vec![content],
+    );
+    list.control =
+        Some(serde_json::from_value(json!({"role":"virtualList","value":0})).unwrap());
+    list.virtual_list = Some(
+        serde_json::from_value(json!({
+            "estimatedItemHeight":40,
+            "itemCount":2,
+            "windowStart":0,
+            "windowEnd":1,
+            "renderedKeys":["s:visible"],
+            "retainedKey":"s:parked"
+        }))
+        .unwrap(),
+    );
+    list.highlight = Some(serde_json::from_value(json!({"query":"needle"})).unwrap());
+
+    let mut tree = Tree::new(root(vec![list]));
+    tree.compute(300.0, 140.0).unwrap();
+    assert!(tree.is_virtual_parked("parked-row"));
+    assert!(tree.is_virtual_parked("parked-text"));
+    tree.scene(1.0);
+
+    assert_eq!(tree.highlight_ranges["visible-text"].len(), 1);
+    assert!(!tree.highlight_ranges.contains_key("parked-text"));
+    assert!(tree.take_layout_events().contains(&json!({
+        "type":"highlight",
+        "id":"list",
+        "matchCount":1,
+        "query":"needle",
+        "caseSensitive":false,
+        "wholeWord":false
+    })));
+}
+
+#[test]
 fn whole_word_highlight_skips_embedded_words() {
     let mut text = node("text", "text", json!({}), vec![]);
     text.text = "Cat catalog cat_ cat!".into();
@@ -3169,6 +3246,80 @@ fn removed_images_are_released_from_cache() {
     tree.update(root(vec![]));
     assert_eq!(tree.image_cache_len(), 0);
     let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn raw_rgba_updates_replace_pixels_under_a_stable_cache_key() {
+    let mut dynamic = node("dynamic", "image", json!({"width":1,"height":1}), vec![]);
+    dynamic.image = Some(
+        serde_json::from_value(json!({
+            "kind":"rgba",
+            "key":"live-preview",
+            "data":"/wAA/w==",
+            "width":1,
+            "height":1
+        }))
+        .unwrap(),
+    );
+    let mut tree = Tree::new(root(vec![dynamic.clone()]));
+    assert_eq!(tree.image_cache_bytes("live-preview"), Some(vec![255, 0, 0, 255]));
+
+    dynamic.image = Some(
+        serde_json::from_value(json!({
+            "kind":"rgba",
+            "key":"live-preview",
+            "data":"AP8A/w==",
+            "width":1,
+            "height":1
+        }))
+        .unwrap(),
+    );
+    tree.update(root(vec![dynamic]));
+    assert_eq!(tree.image_cache_len(), 1);
+    assert_eq!(tree.image_cache_bytes("live-preview"), Some(vec![0, 255, 0, 255]));
+    assert!(tree.warnings.is_empty());
+}
+
+#[test]
+fn encoded_png_bytes_decode_without_a_filesystem_source() {
+    let pixels = image::RgbaImage::from_raw(1, 1, vec![12, 34, 56, 255]).unwrap();
+    let mut encoded = Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(pixels)
+        .write_to(&mut encoded, image::ImageFormat::Png)
+        .unwrap();
+    let data = base64::engine::general_purpose::STANDARD.encode(encoded.into_inner());
+    let mut inline = node("inline", "image", json!({"width":1,"height":1}), vec![]);
+    inline.image = Some(
+        serde_json::from_value(json!({
+            "kind":"encoded",
+            "key":"inline-png",
+            "data":data,
+            "mediaType":"image/png"
+        }))
+        .unwrap(),
+    );
+
+    let tree = Tree::new(root(vec![inline]));
+    assert_eq!(tree.image_cache_bytes("inline-png"), Some(vec![12, 34, 56, 255]));
+    assert!(tree.warnings.is_empty());
+}
+
+#[test]
+fn dynamic_images_reject_oversized_dimensions_before_entering_the_cache() {
+    let mut oversized = node("oversized", "image", json!({"width":1,"height":1}), vec![]);
+    oversized.image = Some(
+        serde_json::from_value(json!({
+            "kind":"rgba",
+            "key":"oversized",
+            "data":"/wAA/w==",
+            "width":20000,
+            "height":1
+        }))
+        .unwrap(),
+    );
+    let tree = Tree::new(root(vec![oversized]));
+    assert_eq!(tree.image_cache_len(), 0);
+    assert!(tree.warnings.iter().any(|warning| warning.contains("dimensions")));
 }
 
 #[test]

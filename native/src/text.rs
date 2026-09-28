@@ -2258,7 +2258,7 @@ mod rich_measure_tests {
 
         assert_eq!(target.runs.len(), 4, "two gutter and two source glyph runs");
         let gutters = &engine.code_gutter_layouts["code"];
-        for line in 0..2 {
+        for (line, gutter_layout) in gutters.iter().enumerate().take(2) {
             let gutter = &target.runs[line];
             let source = &target.runs[line + 2];
             let (gutter_id, _, gutter_y) = gutter.first_glyph.expect("gutter glyph");
@@ -2272,7 +2272,7 @@ mod rich_measure_tests {
                 CODE_GUTTER_OPTICAL_Y_PX
             );
 
-            let gutter_right = gutter.origin.0 + f64::from(gutters[line].width());
+            let gutter_right = gutter.origin.0 + f64::from(gutter_layout.width());
             let expected_gap = f64::from(CODE_GUTTER_PADDING) - CODE_GUTTER_OPTICAL_X;
             assert!(
                 ((source.origin.0 - gutter_right) - expected_gap).abs() < 0.001,

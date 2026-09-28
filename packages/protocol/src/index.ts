@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 41;
+export const PROTOCOL_VERSION = 42;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "markdown" | "code" | "diff" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter";
@@ -89,13 +89,16 @@ export interface VirtualListLayout {
 }
 export interface VirtualListMeasurement { key: string; height: number }
 export interface VirtualListAnchor { index: number; key: string; offset: number }
+export type NativeImageSource =
+  | { kind: "encoded"; key: string; data: string; mediaType?: string }
+  | { kind: "rgba"; key: string; data: string; width: number; height: number; premultiplied?: boolean };
 export interface NativeNode {
   id: string; kind: NodeKind; style: Style; children: NativeNode[];
   text?: string; source?: string; language?: string; path?: string; oldText?: string; newText?: string;
   showLineNumbers?: boolean; syntaxTheme?: Partial<SyntaxTheme>;
   wordDiff?: boolean; collapsedPaths?: string[]; maxLines?: number;
   highlight?: TextHighlight;
-  src?: string; fit?: "cover" | "contain"; disabled?: boolean;
+  src?: string; image?: NativeImageSource; fit?: "cover" | "contain"; disabled?: boolean;
   svg?: string;
   value?: string; placeholder?: string;
   inputType?: "text" | "password" | "email" | "number" | "search" | "tel" | "url";
@@ -122,6 +125,8 @@ export type WindowPosition = WindowPositionPreset | { x: number; y: number };
 export interface WindowOptions {
   title: string; width: number; height: number; minWidth: number; minHeight: number;
   background: string; decorations: boolean; resizable: boolean; position?: WindowPosition; debug?: boolean;
+  /** Test/runtime option: keep the native desktop window hidden. */
+  visible?: boolean;
 }
 export interface SceneDocument { version: number; renderer: Renderer; window: WindowOptions; root: NativeNode }
 export type TreeMutation =

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 41;
+pub const VERSION: u32 = 42;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -105,6 +105,33 @@ fn default_virtual_list_alignment() -> String {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ImageSource {
+    Encoded {
+        key: String,
+        data: String,
+        #[serde(default)]
+        media_type: String,
+    },
+    Rgba {
+        key: String,
+        data: String,
+        width: u32,
+        height: u32,
+        #[serde(default)]
+        premultiplied: bool,
+    },
+}
+
+impl ImageSource {
+    pub fn key(&self) -> &str {
+        match self {
+            Self::Encoded { key, .. } | Self::Rgba { key, .. } => key,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Node {
     pub id: String,
@@ -139,6 +166,7 @@ pub struct Node {
     pub rich: Option<Arc<crate::rich::RichContent>>,
     #[serde(default)]
     pub src: String,
+    pub image: Option<ImageSource>,
     #[serde(default)]
     pub fit: String,
     #[serde(default)]
@@ -289,6 +317,8 @@ pub struct WindowOptions {
     pub position: Option<WindowPosition>,
     #[serde(default)]
     pub debug: bool,
+    #[serde(default = "default_true")]
+    pub visible: bool,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub struct Document {

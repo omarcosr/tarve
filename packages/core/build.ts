@@ -5,6 +5,12 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nativePath } from "#tarve/runtime";
 import { BUILD_TARGETS, hostBuildTarget, isBuildTarget, targetConfig, type BuildTarget } from "./targets";
+import {
+  NATIVE_COMPATIBILITY_MANIFEST_NAME,
+  assertNativeRuntimeCompatible,
+  createNativeCompatibilityManifest,
+  readNativeCompatibilityManifest,
+} from "./native-runtime";
 
 export { BUILD_TARGETS, hostBuildTarget, isBuildTarget, nativeDirectoryForBuildTarget, nativeRelativePath, targetConfig, type BuildTarget } from "./targets";
 
@@ -61,6 +67,14 @@ export async function build(options: BuildOptions): Promise<string> {
   const assetsModule = fileURLToPath(import.meta.resolve("#tarve/assets"));
   const sourceDirectory = join(import.meta.dir, "src");
   const repositorySource = existsSync(join(sourceDirectory, "index.ts"));
+  const expectedCompatibility = repositorySource
+    ? await createNativeCompatibilityManifest(resolve(import.meta.dir, "../.."), packageMetadata.version)
+    : await readNativeCompatibilityManifest(join(import.meta.dir, NATIVE_COMPATIBILITY_MANIFEST_NAME));
+  const requireRuntimeManifest = target !== hostBuildTarget()
+    || (!options.nativeLibrary && !repositorySource);
+  if (requireRuntimeManifest) {
+    await assertNativeRuntimeCompatible(library, target, expectedCompatibility);
+  }
   const runtime: BunPlugin = {
     name: "tarve-native-runtime",
     setup(builder) {

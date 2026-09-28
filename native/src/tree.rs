@@ -1,18 +1,20 @@
 use crate::{
     paint::PaintTarget,
-    protocol::{Node, TreeMutation},
+    protocol::{ImageSource, Node, TreeMutation},
     rich::{self, DiffRow, DiffRowKind, RichContent},
     text::{
         AccessibilityTextLine, DiffPaintArea, DiffPaintDecorations, TEXT_KEYS, TextEngine,
         TextPaintHighlight,
     },
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    io::Cursor,
     ops::Range,
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 use taffy::prelude::*;
@@ -51,6 +53,11 @@ const LAYOUT_KEYS: &[&str] = &[
 ];
 const MAX_SVG_RASTER_DIMENSION: u32 = 4096;
 const MAX_VIRTUAL_MEASUREMENTS_PER_LIST: usize = 100_000;
+const MAX_IMAGE_DIMENSION: u32 = 16_384;
+const MAX_IMAGE_ENCODED_BYTES: usize = 64 * 1024 * 1024;
+const MAX_IMAGE_DECODED_BYTES: usize = 64 * 1024 * 1024;
+const MAX_IMAGE_CACHE_BYTES: usize = 256 * 1024 * 1024;
+const MAX_IMAGE_BASE64_BYTES: usize = MAX_IMAGE_ENCODED_BYTES.div_ceil(3) * 4;
 
 fn utf16_to_byte(text: &str, offset: usize) -> Option<usize> {
     let mut units = 0;
@@ -81,7 +88,128 @@ fn reveal_delta(start: f64, end: f64, viewport_start: f64, viewport_end: f64, ma
     }
 }
 
-fn load_image_data(path: &str) -> Result<ImageData, String> {
+fn image_cache_key(node: &Node) -> Option<&str> {
+    node.image
+        .as_ref()
+        .map(ImageSource::key)
+        .or_else(|| (!node.src.is_empty()).then_some(node.src.as_str()))
+}
+
+fn validate_image_shape(width: u32, height: u32, byte_len: usize) -> Result<(), String> {
+    if width == 0 || height == 0 || width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION {
+        return Err(format!(
+            "image dimensions {width}x{height} exceed the supported 1..={MAX_IMAGE_DIMENSION} range"
+        ));
+    }
+    let expected = width as usize * height as usize * 4;
+    if expected > MAX_IMAGE_DECODED_BYTES {
+        return Err(format!(
+            "decoded image requires {expected} bytes; limit is {MAX_IMAGE_DECODED_BYTES}"
+        ));
+    }
+    if byte_len != expected {
+        return Err(format!(
+            "RGBA image has {byte_len} bytes; expected {expected} for {width}x{height}"
+        ));
+    }
+    Ok(())
+}
+
+fn rgba_image_data(
+    width: u32,
+    height: u32,
+    bytes: Vec<u8>,
+    premultiplied: bool,
+) -> Result<ImageData, String> {
+    validate_image_shape(width, height, bytes.len())?;
+    Ok(ImageData {
+        width,
+        height,
+        format: ImageFormat::Rgba8,
+        alpha_type: if premultiplied {
+            ImageAlphaType::AlphaPremultiplied
+        } else {
+            ImageAlphaType::Alpha
+        },
+        data: Blob::new(Arc::new(bytes)),
+    })
+}
+
+fn decode_raster_image(bytes: &[u8]) -> Result<ImageData, String> {
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_ENCODED_BYTES {
+        return Err(format!(
+            "encoded image size must be 1..={MAX_IMAGE_ENCODED_BYTES} bytes"
+        ));
+    }
+    let mut reader = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|error| error.to_string())?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_IMAGE_DIMENSION);
+    limits.max_image_height = Some(MAX_IMAGE_DIMENSION);
+    limits.max_alloc = Some((MAX_IMAGE_DECODED_BYTES * 2) as u64);
+    reader.limits(limits);
+    let image = reader.decode().map_err(|error| error.to_string())?;
+    let rgba = image.to_rgba8();
+    rgba_image_data(rgba.width(), rgba.height(), rgba.into_raw(), false)
+}
+
+fn looks_like_svg(bytes: &[u8]) -> bool {
+    let trimmed = bytes
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .map_or(bytes, |index| &bytes[index..]);
+    trimmed.starts_with(b"<svg") || trimmed.starts_with(b"<?xml")
+}
+
+fn load_image_data(node: &Node) -> Result<ImageData, String> {
+    if let Some(source) = &node.image {
+        return match source {
+            ImageSource::Encoded {
+                data, media_type, ..
+            } => {
+                if data.len() > MAX_IMAGE_BASE64_BYTES {
+                    return Err(format!(
+                        "base64 image data exceeds the {MAX_IMAGE_BASE64_BYTES} byte transport limit"
+                    ));
+                }
+                let bytes = BASE64_STANDARD
+                    .decode(data)
+                    .map_err(|error| format!("invalid base64 image data: {error}"))?;
+                if bytes.len() > MAX_IMAGE_ENCODED_BYTES {
+                    return Err(format!(
+                        "encoded image exceeds the {MAX_IMAGE_ENCODED_BYTES} byte limit"
+                    ));
+                }
+                if media_type.eq_ignore_ascii_case("image/svg+xml") || looks_like_svg(&bytes) {
+                    load_svg_data(&bytes, None)
+                } else {
+                    decode_raster_image(&bytes)
+                }
+            }
+            ImageSource::Rgba {
+                data,
+                width,
+                height,
+                premultiplied,
+                ..
+            } => {
+                if data.len() > MAX_IMAGE_BASE64_BYTES {
+                    return Err(format!(
+                        "base64 RGBA data exceeds the {MAX_IMAGE_BASE64_BYTES} byte transport limit"
+                    ));
+                }
+                let bytes = BASE64_STANDARD
+                    .decode(data)
+                    .map_err(|error| format!("invalid base64 RGBA data: {error}"))?;
+                rgba_image_data(*width, *height, bytes, *premultiplied)
+            }
+        };
+    }
+    load_image_path(&node.src)
+}
+
+fn load_image_path(path: &str) -> Result<ImageData, String> {
     let extension = Path::new(path)
         .extension()
         .and_then(|extension| extension.to_str())
@@ -89,26 +217,29 @@ fn load_image_data(path: &str) -> Result<ImageData, String> {
     if extension.eq_ignore_ascii_case("svg") {
         return load_svg_image(path);
     }
-    let image = image::open(path).map_err(|error| error.to_string())?;
-    let rgba = image.to_rgba8();
-    Ok(ImageData {
-        width: rgba.width(),
-        height: rgba.height(),
-        format: ImageFormat::Rgba8,
-        alpha_type: ImageAlphaType::Alpha,
-        data: Blob::new(Arc::new(rgba.into_raw())),
-    })
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    decode_raster_image(&bytes)
 }
 
 fn load_svg_image(path: &str) -> Result<ImageData, String> {
     let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    let resources_dir = fs::canonicalize(path)
+        .ok()
+        .and_then(|resolved| resolved.parent().map(Path::to_path_buf));
+    load_svg_data(&bytes, resources_dir)
+}
+
+fn load_svg_data(bytes: &[u8], resources_dir: Option<PathBuf>) -> Result<ImageData, String> {
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_ENCODED_BYTES {
+        return Err(format!(
+            "encoded SVG size must be 1..={MAX_IMAGE_ENCODED_BYTES} bytes"
+        ));
+    }
     let options = resvg::usvg::Options {
-        resources_dir: fs::canonicalize(path)
-            .ok()
-            .and_then(|resolved| resolved.parent().map(Path::to_path_buf)),
+        resources_dir,
         ..resvg::usvg::Options::default()
     };
-    let tree = resvg::usvg::Tree::from_data(&bytes, &options).map_err(|error| error.to_string())?;
+    let tree = resvg::usvg::Tree::from_data(bytes, &options).map_err(|error| error.to_string())?;
     let intrinsic = tree.size().to_int_size();
     let largest = intrinsic.width().max(intrinsic.height()).max(1);
     let scale = if largest > MAX_SVG_RASTER_DIMENSION {
@@ -125,13 +256,7 @@ fn load_svg_image(path: &str) -> Result<ImageData, String> {
         resvg::tiny_skia::Transform::from_scale(scale, scale),
         &mut pixmap.as_mut(),
     );
-    Ok(ImageData {
-        width,
-        height,
-        format: ImageFormat::Rgba8,
-        alpha_type: ImageAlphaType::AlphaPremultiplied,
-        data: Blob::new(Arc::new(pixmap.take())),
-    })
+    rgba_image_data(width, height, pixmap.take(), true)
 }
 
 #[derive(Default, Clone, Copy, Debug)]
@@ -709,6 +834,7 @@ impl Tree {
                 || node.style != prev.node.style
                 || node.value != prev.node.value
                 || node.src != prev.node.src
+                || node.image != prev.node.image
                 || child_ids != prev.children
         }) {
             self.highlight_dirty = true;
@@ -748,6 +874,7 @@ impl Tree {
             measure_dirty = prev.measure_dirty
                 || rich_changed
                 || node.src != prev.node.src
+                || node.image != prev.node.image
                 || node.kind != prev.node.kind
                 || node.display_text() != prev.node.display_text()
                 || syntax_theme_changed
@@ -775,12 +902,39 @@ impl Tree {
         } else {
             self.dirty = Dirty::all();
         }
-        if node.kind == "image" && !self.images.contains_key(&node.src) {
-            match load_image_data(&node.src) {
-                Ok(image) => {
-                    self.images.insert(node.src.clone(), image);
+        if node.kind == "image"
+            && let Some(key) = image_cache_key(&node).map(str::to_string)
+        {
+            let source_changed = previous.as_ref().is_none_or(|entry| {
+                entry.node.kind != "image"
+                    || entry.node.src != node.src
+                    || entry.node.image != node.image
+            });
+            if source_changed || !self.images.contains_key(&key) {
+                match load_image_data(&node) {
+                    Ok(image) => {
+                        let current_bytes: usize = self
+                            .images
+                            .iter()
+                            .filter(|(existing, _)| *existing != &key)
+                            .map(|(_, cached)| cached.data.data().len())
+                            .sum();
+                        let next_bytes = current_bytes.saturating_add(image.data.data().len());
+                        if next_bytes <= MAX_IMAGE_CACHE_BYTES {
+                            self.images.insert(key, image);
+                        } else {
+                            self.images.remove(&key);
+                            self.warnings.push(format!(
+                                "Image '{}': decoded image cache would exceed the {} byte limit",
+                                node.id, MAX_IMAGE_CACHE_BYTES
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        self.images.remove(&key);
+                        self.warnings.push(format!("Image '{}': {e}", node.id));
+                    }
                 }
-                Err(e) => self.warnings.push(format!("Image '{}': {e}", node.src)),
             }
         }
         if node.kind == "svg" {
@@ -1172,10 +1326,10 @@ impl Tree {
         let used: HashSet<String> = self
             .entries
             .values()
-            .filter(|entry| entry.node.kind == "image" && !entry.node.src.is_empty())
-            .map(|entry| entry.node.src.clone())
+            .filter(|entry| entry.node.kind == "image")
+            .filter_map(|entry| image_cache_key(&entry.node).map(str::to_string))
             .collect();
-        self.images.retain(|src, _| used.contains(src));
+        self.images.retain(|key, _| used.contains(key));
     }
     fn prune_svgs(&mut self) {
         self.svgs.retain(|id, _| {
@@ -1545,7 +1699,9 @@ impl Tree {
                                     width: w,
                                     height: h,
                                 };
-                            } else if let Some(image) = images.get(&node.src) {
+                            } else if let Some(image) =
+                                image_cache_key(node).and_then(|key| images.get(key))
+                            {
                                 let ratio = image.width as f32 / image.height as f32;
                                 measured = Size {
                                     width: known
@@ -1708,6 +1864,7 @@ impl Tree {
             let entry = &self.entries[id];
             if entry.rect.width() <= 0.0
                 || entry.rect.height() <= 0.0
+                || self.is_virtual_parked(id)
                 || !matches!(
                     entry.node.kind.as_str(),
                     "text" | "markdown" | "code" | "diff"
@@ -2545,7 +2702,9 @@ impl Tree {
         }
         if node.kind == "image" {
             target.push_clip(Fill::NonZero, transform, &shape);
-            if let Some(image) = self.images.get(&node.src) {
+            if let Some((key, image)) = image_cache_key(&node)
+                .and_then(|key| self.images.get(key).map(|image| (key, image)))
+            {
                 let sx = rect.width() / image.width as f64;
                 let sy = rect.height() / image.height as f64;
                 let factor = if node.fit == "contain" {
@@ -2556,7 +2715,7 @@ impl Tree {
                 let tx = rect.x0 + (rect.width() - image.width as f64 * factor) / 2.0;
                 let ty = rect.y0 + (rect.height() - image.height as f64 * factor) / 2.0;
                 target.draw_image(
-                    &node.src,
+                    key,
                     image,
                     transform * Affine::translate((tx, ty)) * Affine::scale(factor),
                 );
@@ -4974,6 +5133,9 @@ impl Tree {
     }
 
     fn static_selection_range_for(&self, id: &str) -> Option<(usize, usize)> {
+        if self.is_virtual_parked(id) {
+            return None;
+        }
         let selection = self.static_selection.as_ref()?;
         let entry = self.entries.get(id)?;
         if !matches!(
@@ -5227,6 +5389,10 @@ impl Tree {
     #[cfg(test)]
     pub(crate) fn image_cache_len(&self) -> usize {
         self.images.len()
+    }
+    #[cfg(test)]
+    pub(crate) fn image_cache_bytes(&self, key: &str) -> Option<Vec<u8>> {
+        self.images.get(key).map(|image| image.data.data().to_vec())
     }
     #[cfg(test)]
     pub(crate) fn svg_cache_len(&self) -> usize {

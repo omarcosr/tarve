@@ -2,7 +2,7 @@
 
 Tarve currently ships for **Windows x64 and Linux x64**. The release process is intentionally fail-closed: a release tag must match the product version, the complete verification gate must pass, and official Windows binaries must carry a valid timestamped Authenticode signature. The npm package stages both native runtimes so `tarve build --target windows-x64|linux-x64` can cross-compile application executables.
 
-The npm artifact is universal across those two targets: Linux CI builds `libtarve_native.so`, Windows CI builds `tarve_native.dll`, and packaging only proceeds after both are staged. A single-platform Tarve package is rejected instead of being published with a target that would fail later at application build time.
+The npm artifact is universal across those two targets: Linux CI builds `libtarve_native.so`, Windows CI builds `tarve_native.dll`, and packaging only proceeds after both are staged. Each runtime includes compatibility metadata with its target, protocol/ABI versions, source fingerprint, and binary hash. Packaging rejects missing, stale, mismatched, or modified runtimes before publishing.
 
 ## License and distribution
 
@@ -17,8 +17,8 @@ The npm artifact is universal across those two targets: Linux CI builds `libtarv
 There are three independent version domains:
 
 1. **Product SemVer** — one version shared by the root npm package, `@tarve/core`, `@tarve/protocol`, their workspace entries in `bun.lock`, `native/Cargo.toml` and the `tarve_native` entry in `Cargo.lock`.
-2. **JSON protocol version** — a monotonically increasing integer used by serialized TS/Rust messages. It is currently **v29** and is independent from package SemVer.
-3. **Native C ABI version** — a monotonically increasing integer for exported FFI function compatibility. It is currently **v1** and is independent from both product SemVer and the JSON protocol.
+2. **JSON protocol version** — a monotonically increasing integer used by serialized TS/Rust messages. It is currently **v42** and is independent from package SemVer.
+3. **Native C ABI version** — a monotonically increasing integer for exported FFI function compatibility. It is currently **v5** and is independent from both product SemVer and the JSON protocol.
 
 Use the version tool rather than editing manifests independently:
 

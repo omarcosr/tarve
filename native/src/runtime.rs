@@ -1323,6 +1323,7 @@ impl ApplicationHandler<Command> for App {
             return;
         }
         let options = &self.document.window;
+        let visible = options.visible;
         let attributes = Window::default_attributes()
             .with_title(&options.title)
             .with_inner_size(LogicalSize::new(options.width, options.height))
@@ -1347,7 +1348,9 @@ impl ApplicationHandler<Command> for App {
                         // Keep the HWND hidden while WGPU, layout, text and the first scene are
                         // prepared. Making it visible immediately before the synchronous present
                         // prevents Windows from compositing an empty client area on startup.
-                        window.set_visible(true);
+                        if visible {
+                            window.set_visible(true);
+                        }
                         // Once visible, native decorations have their final outer dimensions.
                         // Re-apply the anchor to make native-chrome windows exact as well.
                         self.apply_initial_window_position(event_loop, &window, true);

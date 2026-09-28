@@ -25,6 +25,8 @@ export interface AppErrorEvent {
 
 export interface AppOptions {
   debug?: boolean;
+  /** Keep the native window hidden while still creating a real renderer surface. */
+  headless?: boolean;
   /** Native renderer selected when the app starts. Explicit cpu/gpu wins over TARVE_RENDERER. */
   renderer?: Renderer;
   /** Optional adapters that translate foreign component types into Tarve VNodes. */
@@ -221,7 +223,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       let next: CompiledTree;
       try {
         next = withRenderScope(renderScope, () => compileTree(
-          view(), options.debug, options.renderer ?? "auto", options.componentAdapters, renderScope,
+          view(), options.debug, options.renderer ?? "auto", options.componentAdapters, renderScope, !options.headless,
         ));
         if (committed.document.window.decorations !== next.document.window.decorations) {
           throw new Error("Adding or removing TitleBar after the native window has been created is not supported. Recreate the Window instead.");
@@ -556,7 +558,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
   try {
     committed = withRenderScope(renderScope, () => compileTree(
-      view(), options.debug, options.renderer ?? "auto", options.componentAdapters, renderScope,
+      view(), options.debug, options.renderer ?? "auto", options.componentAdapters, renderScope, !options.headless,
     ));
     observed = nativeShadow(committed);
   } catch (error) {

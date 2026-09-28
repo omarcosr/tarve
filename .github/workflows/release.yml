@@ -47,7 +47,9 @@ jobs:
           name: tarve-linux-x64-native
           if-no-files-found: error
           retention-days: 1
-          path: native/linux-x64/libtarve_native.so
+          path: |
+            native/linux-x64/libtarve_native.so
+            native/linux-x64/runtime.json
 
   windows-x64-release:
     name: Windows x64 signed release
@@ -124,7 +126,9 @@ jobs:
             dist/tarve-*.tgz
             dist/release-manifest.json
             native/win32-x64/tarve_native.dll
+            native/win32-x64/runtime.json
             native/linux-x64/libtarve_native.so
+            native/linux-x64/runtime.json
 
       - name: Publish GitHub release
         shell: pwsh

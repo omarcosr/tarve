@@ -6,7 +6,7 @@ import type { WindowCloseRequestEvent } from "./components";
 import type { ComponentAdapter } from "./component-adapter";
 import { canonicalizeIntrinsicStyle } from "./intrinsic-style";
 import { Text } from "./components/text";
-import { Image } from "./components/image";
+import { Image, serializeImageSource } from "./components/image";
 import { Input, TextArea } from "./components/input";
 import { Button } from "./components/button";
 import { Link } from "./components/link";
@@ -49,6 +49,7 @@ export function compileTree(
   renderer: Renderer = "auto",
   componentAdapters: readonly ComponentAdapter[] = [],
   renderScope?: object,
+  visible = true,
 ): CompiledTree {
   const handlers = new Map<string, Handlers>();
   const ids = new Set<string>();
@@ -192,7 +193,7 @@ export function compileTree(
       windowOptions = { title: p.title ?? "Tarve", width: p.width ?? 1120, height: p.height ?? 820,
         minWidth: p.minWidth ?? 780, minHeight: p.minHeight ?? 580,
         background: resolveThemeColor(p.style?.background ?? theme.colors.background, selectedTheme),
-        decorations: true, resizable: p.resizable ?? true, position: p.position ?? "center", debug };
+        decorations: true, resizable: p.resizable ?? true, position: p.position ?? "center", debug, visible };
     }
     const hoverHandler = isIntrinsicDiv && (p.onMouseEnter || p.onMouseLeave)
       ? (entered: boolean) => {
@@ -234,6 +235,9 @@ export function compileTree(
     for (const key of ["padding", "margin"] as const) {
       if (style[key] && typeof style[key] === "object") style[key] = { ...style[key] };
     }
+    const imageSource = nativeType === "image" && p.src !== undefined
+      ? serializeImageSource(p.src)
+      : undefined;
     const node: NativeNode = { id, kind: nativeType as NativeNode["kind"], style,
       children: isText || isRichLeaf ? [] : visit(p.children, `${path}/children`, childGroup),
       ...(isText ? { text: textContent(p.children) } : {}),
@@ -251,7 +255,9 @@ export function compileTree(
       ...(p.newText !== undefined ? { newText: p.newText } : {}),
       ...(p.svg !== undefined ? { svg: p.svg } : {}),
       ...(control ? { control } : {}),
-      ...(p.src !== undefined ? { src: nativeAssetPath(p.src), fit: p.fit ?? "cover" } : {}),
+      ...(imageSource && "path" in imageSource
+        ? { src: nativeAssetPath(imageSource.path), fit: p.fit ?? "cover" }
+        : imageSource ? { image: imageSource.image, fit: p.fit ?? "cover" } : {}),
       ...(p.value !== undefined ? { value: p.value } : {}),
       ...(p.placeholder !== undefined ? { placeholder: p.placeholder } : {}),
       ...(p.inputType !== undefined ? { inputType: p.inputType } : {}),

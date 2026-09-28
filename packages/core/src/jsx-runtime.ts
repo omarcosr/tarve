@@ -1,4 +1,5 @@
 import type { Control, StateStyle, Style, SvgNode, TextHighlight } from "../../protocol/src/index";
+import type { ImageSource } from "./components/image";
 export type Child = VNode | string | number | boolean | null | undefined | Child[];
 export interface BaseProps { id?: string; key?: string | number; children?: Child; style?: Style; rovingGroup?: boolean; highlight?: TextHighlight; onHighlight?: (event: { matchCount: number }) => void }
 export type IntrinsicStateStyle = StateStyle & {
@@ -58,7 +59,7 @@ export interface IntrinsicLabelProps extends Omit<BaseProps, "style"> {
 }
 export interface ImgProps extends Omit<BaseProps, "style" | "children"> {
   style?: IntrinsicStyle;
-  src: string;
+  src: ImageSource;
   width?: number;
   height?: number;
   fit?: "cover" | "contain";

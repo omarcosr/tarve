@@ -3,6 +3,13 @@ import { copyFile, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { BUILD_TARGETS, hostBuildTarget, targetConfig } from "../packages/core/targets";
+import {
+  NATIVE_COMPATIBILITY_MANIFEST_NAME,
+  assertNativeRuntimeCompatible,
+  createNativeCompatibilityManifest,
+  writeNativeCompatibilityManifest,
+  writeNativeRuntimeManifest,
+} from "../packages/core/native-runtime";
 import { buildNative } from "./native";
 import { cleanPackageOutputs } from "./package-output";
 
@@ -20,6 +27,11 @@ const { values } = parseArgs({
 const platformDirectory = hostConfig.nativeDirectory;
 const nativeName = hostConfig.nativeName;
 const platformOutput = join(root, "native", platformDirectory);
+const packageMetadata = await Bun.file(join(root, "package.json")).json() as { version?: string };
+if (typeof packageMetadata.version !== "string" || packageMetadata.version.length === 0) {
+  throw new Error("Tarve package version is missing.");
+}
+const compatibility = await createNativeCompatibilityManifest(root, packageMetadata.version);
 // Native compilation is intentionally host-native. Release automation builds each
 // runtime on its own OS, then assembles one universal Tarve package containing both.
 const library = await buildNative(true);
@@ -27,6 +39,7 @@ await rm(platformOutput, { recursive: true, force: true });
 await mkdir(platformOutput, { recursive: true });
 const packagedLibrary = join(platformOutput, nativeName);
 await copyFile(library, packagedLibrary);
+await writeNativeRuntimeManifest(packagedLibrary, hostTarget, compatibility);
 
 if (values["native-only"]) {
   console.log(`Tarve native ${platformDirectory} release runtime ready: ${packagedLibrary}`);
@@ -45,6 +58,9 @@ if (!values.local) {
       `Missing: ${missingRuntimes.join(", ")}`,
       "Build the missing runtime on its native OS with `bun run package:native`, then run `bun run package` again.",
     ].join("\n"));
+  }
+  for (let index = 0; index < BUILD_TARGETS.length; index++) {
+    await assertNativeRuntimeCompatible(requiredRuntimes[index]!, BUILD_TARGETS[index]!, compatibility);
   }
 }
 
@@ -68,6 +84,10 @@ const results = await Promise.all(entries.map(([entry, naming]) => Bun.build({
 for (const result of results) {
   if (!result.success) throw new AggregateError(result.logs, "Package bundle failed");
 }
+await writeNativeCompatibilityManifest(
+  join(output, NATIVE_COMPATIBILITY_MANIFEST_NAME),
+  compatibility,
+);
 const types = Bun.spawn([process.execPath, join(root, "node_modules/typescript/bin/tsc"), "-p", "tsconfig.package.json"], { cwd: root, stdout: "inherit", stderr: "inherit" });
 if (await types.exited !== 0) throw new Error("Package declaration generation failed");
 await copyFile(join(root, "packages/core/src/assets.d.ts"), join(root, "dist/types/core/src/assets.d.ts"));
