@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { nativeRelativePath } from "../packages/core/targets";
@@ -13,8 +13,8 @@ const windowsNativeRelative = nativeRelativePath("windows-x64");
 const linuxNativeRelative = nativeRelativePath("linux-x64");
 const fromRoot = (path: string) => join(root, ...path.split("/"));
 
-async function run(args: string[]): Promise<void> {
-  const child = Bun.spawn(args, { cwd: root, stdout: "inherit", stderr: "inherit" });
+async function run(args: string[], cwd = root): Promise<void> {
+  const child = Bun.spawn(args, { cwd, stdout: "inherit", stderr: "inherit" });
   const code = await child.exited;
   if (code !== 0) throw new Error(`Release command failed (${code}): ${args.join(" ")}`);
 }
@@ -32,6 +32,10 @@ const policy = await assertReleasePolicy(root, tag);
 const bun = Bun.which("bun") ?? "bun";
 await run([bun, "run", "package"]);
 await run([bun, "run", "pack"]);
+// @tarve/react-icons ships TypeScript sources as-is (Bun-only, like @tarve/core).
+const iconsName = `tarve-react-icons-${policy.version}.tgz`;
+await run([bun, "pm", "pack", "--ignore-scripts", "--destination", join(root, "dist")], join(root, "packages/react-icons"));
+const icons = join(root, "dist", iconsName);
 
 const library = fromRoot(windowsNativeRelative);
 const linuxLibrary = fromRoot(linuxNativeRelative);
@@ -52,6 +56,13 @@ try {
   if (packedManifest.version !== policy.version) {
     throw new Error(`Packed version ${packedManifest.version} does not match ${policy.version}.`);
   }
+  const iconsExtraction = join(extraction, "icons");
+  await mkdir(iconsExtraction, { recursive: true });
+  await run(["tar", "-xzf", icons, "-C", iconsExtraction]);
+  const iconsManifest = await Bun.file(join(iconsExtraction, "package", "package.json")).json() as { name: string; version: string };
+  if (iconsManifest.name !== "@tarve/react-icons" || iconsManifest.version !== policy.version) {
+    throw new Error(`Packed icons package is ${iconsManifest.name}@${iconsManifest.version}, expected @tarve/react-icons@${policy.version}.`);
+  }
   const manifest = {
     product: "@tarve/core",
     version: policy.version,
@@ -66,6 +77,7 @@ try {
       { file: windowsNativeRelative, sha256: await sha256(library) },
       { file: linuxNativeRelative, sha256: await sha256(linuxLibrary) },
       { file: tarballName, sha256: await sha256(tarball) },
+      { file: iconsName, sha256: await sha256(icons) },
     ],
   };
   await writeFile(join(root, "dist/release-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);

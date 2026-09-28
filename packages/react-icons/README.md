@@ -1,6 +1,10 @@
 # @tarve/react-icons
 
-Optional adapters for using React SVG icon libraries with Tarve while keeping `tarve` core library-agnostic.
+Optional adapters for using React SVG icon libraries with Tarve while keeping `@tarve/core` library-agnostic.
+
+```powershell
+bun add @tarve/core @tarve/react-icons
+```
 
 ```ts
 import { lucideReactAdapter, phosphorReactAdapter, reactSvgAdapter } from "@tarve/react-icons";

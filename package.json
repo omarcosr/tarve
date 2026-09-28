@@ -1,6 +1,6 @@
 {
   "name": "@tarve/core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Native Bun/TSX GUI with Taffy layout, Parley text and Vello rendering",
   "license": "Apache-2.0",
   "keywords": [

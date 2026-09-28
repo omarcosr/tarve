@@ -1,8 +1,29 @@
 {
   "name": "@tarve/react-icons",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "React icon-library adapters for Tarve",
   "license": "Apache-2.0",
+  "keywords": [
+    "tarve",
+    "icons",
+    "lucide",
+    "phosphor",
+    "heroicons",
+    "tabler"
+  ],
+  "homepage": "https://github.com/omarcosr/tarve/tree/main/packages/react-icons#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/omarcosr/tarve.git",
+    "directory": "packages/react-icons"
+  },
+  "bugs": {
+    "url": "https://github.com/omarcosr/tarve/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "type": "module",
   "exports": {
     ".": "./src/index.ts",

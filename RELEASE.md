@@ -42,6 +42,6 @@ Tarve is a framework, not an end-user application, so the Tarve release does **n
    - reruns the full release gate on Windows with the Linux runtime built on Linux;
    - packs the universal tarball, verifies it contains exactly the staged runtimes and the tagged version, and writes SHA-256 hashes to `dist/release-manifest.json`;
    - creates the GitHub release with those artifacts;
-   - publishes `@tarve/core` to npm from that same tarball (never repacked), with provenance: stable versions as `latest`, prereleases (`v0.2.0-beta.1`) as `next` and as GitHub prereleases.
+   - publishes `@tarve/core` and `@tarve/react-icons` to npm from those same tarballs (never repacked), with provenance: stable versions as `latest`, prereleases (`v0.2.0-beta.1`) as `next` and as GitHub prereleases.
 
 A published npm version cannot be reused: if a release fails after publishing, fix forward with a new patch version.

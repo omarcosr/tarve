@@ -125,6 +125,7 @@ jobs:
           retention-days: 30
           path: |
             dist/tarve-core-*.tgz
+            dist/tarve-react-icons-*.tgz
             dist/release-manifest.json
             native/win32-x64/tarve_native.dll
             native/win32-x64/runtime.json
@@ -141,6 +142,7 @@ jobs:
           $arguments = @(
             "release", "create", "$env:GITHUB_REF_NAME",
             $tarball,
+            (Get-ChildItem -LiteralPath dist -Filter "tarve-react-icons-*.tgz" -File | Select-Object -First 1).FullName,
             "dist/release-manifest.json",
             "native/win32-x64/tarve_native.dll",
             "native/linux-x64/libtarve_native.so",
@@ -153,7 +155,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "GitHub release creation failed." }
 
   npm-publish:
-    name: Publish npm package
+    name: Publish npm packages
     needs: windows-x64-release
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -175,7 +177,7 @@ jobs:
           name: tarve-${{ github.ref_name }}-windows-x64
           path: release
 
-      - name: Publish verified tarball
+      - name: Publish verified tarballs
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           TAG: ${{ github.ref_name }}
@@ -186,16 +188,25 @@ jobs:
             exit 1
           fi
           version="${TAG#v}"
-          tarball="release/dist/tarve-core-${version}.tgz"
-          if [ ! -f "${tarball}" ]; then
-            echo "::error::Expected ${tarball}; found: $(find release -name '*.tgz')" >&2
-            exit 1
-          fi
-          packed="$(tar -xOzf "${tarball}" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0)).version')"
-          if [ "${packed}" != "${version}" ]; then
-            echo "::error::Tarball version ${packed} does not match tag ${TAG}." >&2
-            exit 1
-          fi
           dist_tag=latest
           case "${version}" in *-*) dist_tag=next ;; esac
-          npm publish "${tarball}" --access public --provenance --tag "${dist_tag}"
+          # @tarve/core first: @tarve/react-icons declares it as a peer.
+          for pair in "@tarve/core:tarve-core" "@tarve/react-icons:tarve-react-icons"; do
+            name="${pair%%:*}"
+            tarball="release/dist/${pair#*:}-${version}.tgz"
+            if [ ! -f "${tarball}" ]; then
+              echo "::error::Expected ${tarball}; found: $(find release -name '*.tgz')" >&2
+              exit 1
+            fi
+            packed="$(tar -xOzf "${tarball}" package/package.json | node -p 'const p=JSON.parse(require("fs").readFileSync(0)); p.name+"@"+p.version')"
+            if [ "${packed}" != "${name}@${version}" ]; then
+              echo "::error::${tarball} contains ${packed}, expected ${name}@${version}." >&2
+              exit 1
+            fi
+            # Re-runs after a partial publish skip versions that already exist.
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "${name}@${version} is already published; skipping."
+              continue
+            fi
+            npm publish "${tarball}" --access public --provenance --tag "${dist_tag}"
+          done
