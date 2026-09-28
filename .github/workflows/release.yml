@@ -98,7 +98,9 @@ jobs:
             throw "Signed releases must run from a tag."
           }
           bun scripts/release-policy.ts --tag "$env:GITHUB_REF_NAME"
+          if ($LASTEXITCODE -ne 0) { throw "Release policy failed for $env:GITHUB_REF_NAME." }
           git fetch origin "$env:DEFAULT_BRANCH" --no-tags
+          if ($LASTEXITCODE -ne 0) { throw "Could not fetch $env:DEFAULT_BRANCH." }
           git merge-base --is-ancestor "$env:GITHUB_SHA" "origin/$env:DEFAULT_BRANCH"
           if ($LASTEXITCODE -ne 0) {
             throw "Release tag must point to a commit reachable from the default branch."

@@ -51,7 +51,9 @@ jobs:
           name: tarve-ci-linux-x64-native
           if-no-files-found: error
           retention-days: 1
-          path: native/linux-x64/libtarve_native.so
+          path: |
+            native/linux-x64/libtarve_native.so
+            native/linux-x64/runtime.json
 
   linux-x64:
     name: Linux x64 gate
@@ -214,9 +216,16 @@ jobs:
           name: tarve-ci-linux-x64-native
           path: native/linux-x64
 
-      - name: Package, pack and smoke
-        run: |
-          bun run package
-          bun run pack
-          bun run smoke:package
-          bun run smoke:exe
+      # One step per command: a multi-line pwsh script only reports the exit code
+      # of its last command, which let earlier failures pass silently.
+      - name: Package
+        run: bun run package
+
+      - name: Pack
+        run: bun run pack
+
+      - name: Package install smoke
+        run: bun run smoke:package
+
+      - name: Standalone executable smoke
+        run: bun run smoke:exe
