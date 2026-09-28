@@ -210,6 +210,10 @@ jobs:
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
 
+      # smoke:package copies the example app and its installed icon packages.
+      - name: Install example dependencies
+        run: bun run install:examples
+
       - name: Download Linux native runtime
         uses: actions/download-artifact@v4
         with:
