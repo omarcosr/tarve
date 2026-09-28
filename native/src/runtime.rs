@@ -1167,11 +1167,12 @@ impl App {
                 return;
             }
         };
+        // CPU cost only (motion, layout, paint); present can block on vsync.
+        let frame_cpu_ms = frame_started.elapsed().as_secs_f64() * 1000.0;
         match self.present(content_changed) {
             Ok(PresentResult::Presented) => {
                 self.presentation_retry_at = None;
-                self.tree
-                    .record_frame_time(frame_started.elapsed().as_secs_f64() * 1000.0);
+                self.tree.record_frame_time(frame_cpu_ms);
                 if self.graphics_recovery_episodes > 0 {
                     let now = Instant::now();
                     if let Some(stable_since) = self.graphics_stable_since {

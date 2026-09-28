@@ -4499,6 +4499,27 @@ fn native_undo_history_resets_when_controlled_value_returns_to_previous() {
 }
 
 #[test]
+fn rejected_controlled_edit_keeps_earlier_undo_steps() {
+    let mut tree = editor_tree("input", "");
+    tree.type_text("a ");
+    tree.type_text("b");
+    let controlled = |value: &str| {
+        let mut field = node(
+            "field",
+            "input",
+            json!({"width":240,"height":80,"fontSize":14,"userSelect":"text"}),
+            vec![],
+        );
+        field.value = Some(value.into());
+        root(vec![field])
+    };
+    tree.update(controlled("a "));
+    assert_eq!(field_value(&tree), "a ");
+    assert!(!tree.key("Undo").is_empty());
+    assert_eq!(field_value(&tree), "");
+}
+
+#[test]
 fn input_clock_does_not_step_motion_tracks() {
     let mut tree = editor_tree("input", "abc");
     tree.advance_clock(600.0);

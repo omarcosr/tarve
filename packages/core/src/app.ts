@@ -133,16 +133,17 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     const scope = renderScope;
     const renderer = options.renderer ?? "auto";
     const shown = devError;
+    const shownWindow = appWindow;
     overlayCompiled = false;
-    if (shown && appWindow && !devOverlayBroken) {
+    if (shown && shownWindow && !devOverlayBroken) {
       try {
         // Separate scope: rendering the overlay must not advance the app's render
         // epochs, or epoch-swept state (AnimatePresence) is lost on dismiss.
         const overlay = withRenderScope(overlayScope, () => compileTree(
-          DevErrorOverlay({ event: shown, onDismiss: dismissDevError }), options.debug, renderer, undefined, overlayScope, !options.headless,
+          DevErrorOverlay({ event: shown, onDismiss: dismissDevError, decorations: shownWindow.decorations }), options.debug, renderer, undefined, overlayScope, !options.headless,
         ));
         overlayCompiled = true;
-        overlay.document.window = appWindow;
+        overlay.document.window = shownWindow;
         return overlay;
       } catch (overlayError) {
         devOverlayBroken = true;

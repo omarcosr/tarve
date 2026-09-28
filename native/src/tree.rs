@@ -1139,12 +1139,18 @@ impl Tree {
         // controlled value that later returns to an old string (A -> B -> A)
         // cannot resurrect stale steps. User edits already updated the retained
         // value in set_input, so their echo compares equal and keeps history.
-        if previous.as_ref().is_some_and(|entry| {
-            entry.node.kind != node.kind
+        if let Some(entry) = previous.as_ref() {
+            let invalidated = entry.node.kind != node.kind
                 || (matches!(node.kind.as_str(), "input" | "textarea")
-                    && entry.node.value != node.value)
-        }) {
-            self.edit_history.remove(&node.id);
+                    && entry.node.value != node.value
+                    && !self.revert_rejected_edit(
+                        &node.id,
+                        entry.node.value.as_deref(),
+                        node.value.as_deref(),
+                    ));
+            if invalidated {
+                self.edit_history.remove(&node.id);
+            }
         }
         let rich_changed = previous.as_ref().is_none_or(|prev| {
             node.kind != prev.node.kind
@@ -5154,6 +5160,30 @@ impl Tree {
             history.last_ms = now;
         }
         self.set_input(id, value)
+    }
+    /// A controlled field that answers the latest user edit with the value it had
+    /// just before that edit rejected the edit: drop that one step and keep the
+    /// rest of the history. Any other external change is not recognised here.
+    fn revert_rejected_edit(
+        &mut self,
+        id: &str,
+        current: Option<&str>,
+        next: Option<&str>,
+    ) -> bool {
+        let Some(history) = self.edit_history.get_mut(id) else {
+            return false;
+        };
+        let rejected = history.value.as_deref() == current
+            && history.redo.is_empty()
+            && history.undo.last().map(|step| step.value.as_str())
+                == Some(next.unwrap_or_default());
+        if !rejected {
+            return false;
+        }
+        history.undo.pop();
+        history.value = next.map(str::to_string);
+        history.last_kind = None;
+        true
     }
     fn undo_edit(&mut self, id: &str, redo: bool) -> Vec<Value> {
         let current = self.entries[id].node.value.clone().unwrap_or_default();

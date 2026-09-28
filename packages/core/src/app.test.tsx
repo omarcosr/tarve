@@ -5,6 +5,7 @@ import type { NativeBridge } from "./bridge";
 import { Slider } from "./controls";
 import { Button, Column, Diff, Input, ScrollArea, Text, Window, TextArea } from "./components";
 import { InputOTP } from "./form-controls";
+import { TitleBar } from "./components/titlebar";
 import { Svg } from "./components/svg";
 import { VirtualList } from "./virtual-list";
 import type { ComponentAdapter } from "./component-adapter";
@@ -980,6 +981,22 @@ describe("development runtime tooling", () => {
     await Bun.sleep(0);
     expect(texts(bridge)).not.toContain("kaboom");
     expect(texts(bridge)).toContain("fine");
+    app.close();
+  });
+
+  test("dev overlay keeps undecorated windows closable", async () => {
+    const bridge = new FakeBridge();
+    let broken = false;
+    const app = createApp(() => {
+      if (broken) throw new Error("kaboom");
+      return <Window><TitleBar title="Custom" /><Text>fine</Text></Window>;
+    }, { bridge, dev: true, onError: () => {} });
+    await app.ready;
+    broken = true;
+    app.update();
+    await Bun.sleep(0);
+    expect(texts(bridge)).toContain("kaboom");
+    expect(texts(bridge)).toContain("\"windowAction\":\"close\"");
     app.close();
   });
 
