@@ -1,6 +1,6 @@
 # Tarve release policy
 
-Tarve currently ships for **Windows x64 and Linux x64**. The release process is intentionally fail-closed: a release tag must match the product version, the complete verification gate must pass, and official Windows binaries must carry a valid timestamped Authenticode signature. The npm package stages both native runtimes so `tarve build --target windows-x64|linux-x64` can cross-compile application executables.
+Tarve currently ships for **Windows x64 and Linux x64**. The release process is intentionally fail-closed: a release tag must match the product version, and the complete verification gate must pass. The npm package stages both native runtimes so `tarve build --target windows-x64|linux-x64` can cross-compile application executables.
 
 The npm artifact is universal across those two targets: Linux CI builds `libtarve_native.so`, Windows CI builds `tarve_native.dll`, and packaging only proceeds after both are staged. Each runtime includes compatibility metadata with its target, protocol/ABI versions, source fingerprint, and binary hash. Packaging rejects missing, stale, mismatched, or modified runtimes before publishing.
 
@@ -10,7 +10,7 @@ The npm artifact is universal across those two targets: Linux CI builds `libtarv
 - `@tarve/core` and `@tarve/protocol` are private workspace packages for repository organization, but inherit the same Apache-2.0 license.
 - The native Rust crate declares `license = "Apache-2.0"` and remains `publish = false`; it is distributed as part of Tarve rather than as an independent crates.io package.
 - The automated release-policy gate rejects license drift between the root package, workspace packages, native crate, and the canonical `LICENSE` file.
-- The signed release workflow publishes GitHub release artifacts and then publishes the same verified npm tarball to the npm registry (see *npm publishing* below).
+- The release workflow publishes GitHub release artifacts and then publishes the same verified npm tarball to the npm registry (see *npm publishing* below).
 
 ## Version policy
 
@@ -29,29 +29,9 @@ bun run version:set -- 0.2.0
 
 `bun run release:policy` rejects product-version drift, license-policy drift, protocol mismatches and ABI mismatches.
 
-## Authenticode policy
+## Code signing
 
-Official Windows release artifacts require SHA-256 Authenticode signatures with an RFC 3161 timestamp. The signed path covers:
-
-- `dist/Tarve.exe`;
-- `native/win32-x64/tarve_native.dll`;
-- the same native DLL after extraction from the final npm `.tgz`.
-
-For the standalone executable, the release builder signs the release DLL **before** embedding it and signs the final EXE afterward, so the DLL materialized at runtime retains its own Authenticode signature.
-
-The release runner accepts exactly one certificate source:
-
-- `TARVE_AUTHENTICODE_PFX_BASE64` — base64-encoded PFX, intended for CI secrets; or
-- `TARVE_AUTHENTICODE_PFX_PATH` — local PFX path.
-
-`TARVE_AUTHENTICODE_PFX_PASSWORD` is required. `TARVE_AUTHENTICODE_TIMESTAMP_URL` is optional and defaults to `http://timestamp.digicert.com`.
-
-GitHub Actions should store the PFX and password as repository/environment secrets:
-
-- `TARVE_AUTHENTICODE_PFX_BASE64`
-- `TARVE_AUTHENTICODE_PFX_PASSWORD`
-
-The PFX is materialized only into a temporary file during signing and is deleted in a `finally` path. Password/certificate data is never written into release artifacts or the release manifest. Build/package subprocesses run with the Authenticode secret variables removed; only the dedicated signing subprocess receives them.
+Tarve is a framework, not an end-user application, so the Tarve release does **not** Authenticode-sign its native runtimes. Signing is the responsibility of each application author: sign the executable produced by `tarve build` with your own certificate (for example `signtool sign /fd SHA256 /tr <timestamp-url> /td SHA256 dist/App.exe`). The published npm tarball is instead protected by npm provenance and by the SHA-256 hashes in `dist/release-manifest.json`.
 
 ## Release procedure
 
@@ -59,13 +39,13 @@ The PFX is materialized only into a temporary file during signing and is deleted
 2. Commit the version change and run `bun run release:check`.
 3. Create an annotated or lightweight tag exactly matching `v<semver>`, for example `v0.2.0`.
 4. Push the commit and tag.
-5. `.github/workflows/release.yml` verifies that the tag points to a commit reachable from the default branch, reruns the full release gate, builds/signs the Windows artifacts, verifies the signatures/timestamps, emits SHA-256 hashes in `dist/release-manifest.json`, uploads the signed artifacts and creates the GitHub release.
+5. `.github/workflows/release.yml` verifies that the tag points to a commit reachable from the default branch, reruns the full release gate, packs the universal npm tarball, verifies that it contains exactly the staged Windows and Linux runtimes, emits SHA-256 hashes in `dist/release-manifest.json`, uploads the artifacts and creates the GitHub release.
 
 Prerelease SemVer tags such as `v0.2.0-beta.1` are published as GitHub prereleases.
 
 ## npm publishing
 
-The `npm-publish` job in `.github/workflows/release.yml` runs only after the signed Windows release job succeeds. It publishes the exact `dist/tarve-<version>.tgz` produced and verified by `release:build` (it never repacks), with npm provenance attestation:
+The `npm-publish` job in `.github/workflows/release.yml` runs only after the Windows release job succeeds. It publishes the exact `dist/tarve-<version>.tgz` produced and verified by `release:build` (it never repacks), with npm provenance attestation:
 
 - stable versions go to the `latest` dist-tag; prerelease versions (`0.2.0-beta.1`) go to `next`;
 - the job is fail-closed: it refuses to run without the `NPM_TOKEN` secret, verifies the tarball name matches the tag, and skips nothing silently;
@@ -85,14 +65,8 @@ bun run pack
 npm publish --dry-run (Get-ChildItem dist/tarve-*.tgz).FullName
 ```
 
-For a local signing rehearsal with an actual certificate:
+For a local release rehearsal (both runtimes staged):
 
 ```powershell
-$env:TARVE_RELEASE_TAG = "v0.1.0"
-$env:TARVE_AUTHENTICODE_SIGN = "1"
-$env:TARVE_AUTHENTICODE_PFX_PATH = "C:\secure\tarve-signing.pfx"
-$env:TARVE_AUTHENTICODE_PFX_PASSWORD = "<secret>"
-bun run release:build
+bun run release:build -- --tag v0.1.0
 ```
-
-Do not commit a PFX, its password, or its base64 representation.

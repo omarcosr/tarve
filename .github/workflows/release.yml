@@ -52,7 +52,7 @@ jobs:
             native/linux-x64/runtime.json
 
   windows-x64-release:
-    name: Windows x64 signed release
+    name: Windows x64 release
     needs: linux-x64-native
     runs-on: windows-latest
     timeout-minutes: 60
@@ -95,7 +95,7 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           if ("${{ github.ref_type }}" -ne "tag") {
-            throw "Signed releases must run from a tag."
+            throw "Releases must run from a tag."
           }
           bun scripts/release-policy.ts --tag "$env:GITHUB_REF_NAME"
           if ($LASTEXITCODE -ne 0) { throw "Release policy failed for $env:GITHUB_REF_NAME." }
@@ -106,28 +106,24 @@ jobs:
             throw "Release tag must point to a commit reachable from the default branch."
           }
 
-      - name: Full unsigned release gate
+      - name: Full release gate
         env:
           TARVE_SMOKE_FORCED_WGPU: "0"
         run: bun run release:check
 
-      - name: Build and verify signed release artifacts
+      # Tarve is a framework: application authors sign the executables they build.
+      - name: Build and verify release artifacts
         env:
           TARVE_RELEASE_TAG: ${{ github.ref_name }}
-          TARVE_AUTHENTICODE_SIGN: "1"
-          TARVE_AUTHENTICODE_PFX_BASE64: ${{ secrets.TARVE_AUTHENTICODE_PFX_BASE64 }}
-          TARVE_AUTHENTICODE_PFX_PASSWORD: ${{ secrets.TARVE_AUTHENTICODE_PFX_PASSWORD }}
-          TARVE_AUTHENTICODE_TIMESTAMP_URL: ${{ vars.TARVE_AUTHENTICODE_TIMESTAMP_URL }}
         run: bun run release:build
 
-      - name: Upload signed release artifacts
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: tarve-${{ github.ref_name }}-windows-x64
           if-no-files-found: error
           retention-days: 30
           path: |
-            dist/Tarve.exe
             dist/tarve-*.tgz
             dist/release-manifest.json
             native/win32-x64/tarve_native.dll
@@ -144,7 +140,6 @@ jobs:
           if (-not $tarball) { throw "Release tarball is missing." }
           $arguments = @(
             "release", "create", "$env:GITHUB_REF_NAME",
-            "dist/Tarve.exe",
             $tarball,
             "dist/release-manifest.json",
             "native/win32-x64/tarve_native.dll",

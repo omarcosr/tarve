@@ -107,7 +107,7 @@
     "version:set": "bun scripts/version-policy.ts --set",
     "test": "bun test packages/core && cargo test --manifest-path native/Cargo.toml",
     "test:package-clean": "bun test scripts/package-output.test.ts",
-    "test:release-policy": "bun test scripts/version-policy.test.ts scripts/release-policy.test.ts scripts/authenticode.test.ts",
+    "test:release-policy": "bun test scripts/version-policy.test.ts scripts/release-policy.test.ts",
     "test:visual": "bun run setup:examples && bun scripts/visual-regression.tsx",
     "smoke": "bun run build:native && bun run setup:examples && bun scripts/smoke.ts",
     "smoke:controls": "bun run build:native && bun run setup:examples && bun scripts/smoke-controls.ts",

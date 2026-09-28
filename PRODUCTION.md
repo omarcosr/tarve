@@ -13,7 +13,7 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 - External-consumer and standalone-EXE smoke tests are part of `bun run verify`.
 - Real GPU visual regression is a mandatory release gate: `bun run verify` runs `test:visual` after package/EXE smoke validation, and `bun run release:check` is the CI/release entry point for the same gate.
 - Latest full validation on this tree: `bun run verify` **PASS**, including release-policy checks, synchronized product-version policy, independent ABI/protocol tests, the integrated `test:visual` gate against the freshly packed/installed v29 artifact, Windows x64 `smoke:accessibility`, package/standalone-EXE smoke and stale-package-output coverage.
-- Authenticode signing is wired into the tagged Windows release path and fails closed without signing credentials. The local verifier was exercised against a trusted, timestamped Windows binary and returned `Valid`; an actual Tarve release signature is produced only when the configured release workflow runs with the project PFX secrets.
+- Tarve does not Authenticode-sign its runtimes; applications built with `tarve build` are signed by their authors. The npm tarball carries npm provenance and SHA-256 release metadata.
 
 ## Production foundations already implemented
 
@@ -49,7 +49,7 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 - [ ] Bound/coalesce the native event `VecDeque` for high-rate events such as hover/scroll/frame notifications.
 - [ ] Add structured diagnostics: selected GPU/backend/adapter, startup failures, renderer/device failures and optional persistent crash/startup logs.
 - [ ] Test sustained interaction and startup/presentation latency on multiple Windows releases and multiple NVIDIA/AMD/Intel GPUs.
-- [x] Tagged Windows releases use Authenticode SHA-256 + RFC 3161 timestamping for the standalone EXE and native DLL, re-verify the DLL inside the final npm tarball, emit SHA-256 release metadata and publish only after the full release gate passes.
+- [x] Tagged releases verify that the final npm tarball contains exactly the staged Windows and Linux runtimes, emit SHA-256 release metadata and publish (with npm provenance) only after the full release gate passes.
 - [x] License policy is explicit and release-gated: Tarve uses **Apache License 2.0** (`Apache-2.0`) across the root package, private workspace packages and native crate, with the canonical `LICENSE` text included in distribution artifacts; the native crate remains non-publishable independently.
 
 ## Known scope limits / important follow-up components
@@ -64,6 +64,6 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 
 For a Windows x64 beta/internal production release, the shipped npm tarball and standalone EXE must pass `bun run release:check` (the same full gate as `bun run verify`), which includes the mandatory real-GPU `test:visual` regression and release-policy/version checks.
 
-Official third-party release artifacts must be produced by the signed tag workflow in `.github/workflows/release.yml`, with a tag exactly matching `v<product-semver>` and valid Authenticode certificate secrets configured. The detailed license/version/signing/release procedure is documented in `RELEASE.md`.
+Official third-party release artifacts must be produced by the signed tag workflow in `.github/workflows/release.yml`, with a tag exactly matching `v<product-semver>` and the `NPM_TOKEN` secret configured in the `npm` environment. The detailed license/version/release procedure is documented in `RELEASE.md`.
 
 For a broad public **production-ready / 1.0** claim, automate the mandatory Windows x64 release gates, complete the applicable distribution/diagnostics hardening above, and document/test the intentionally supported platform/lifecycle limits.

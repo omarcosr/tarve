@@ -526,7 +526,7 @@ bun run check
 bun run test
 ```
 
-`bun run package:local` stages JS, declarations, and the native runtime for the current host for local development. `bun run package` is the publishable universal package gate and requires both Windows x64 and Linux x64 runtimes. The signed release pipeline documented in `RELEASE.md` assembles both runtimes into the same npm artifact while applying Authenticode only to Windows binaries.
+`bun run package:local` stages JS, declarations, and the native runtime for the current host for local development. `bun run package` is the publishable universal package gate and requires both Windows x64 and Linux x64 runtimes. The release pipeline documented in `RELEASE.md` assembles both runtimes into the same npm artifact. Tarve does not sign binaries; sign the executables you build with `tarve build` using your own certificate.
 
 Run the full package, executable, accessibility, and visual release gate with:
 
