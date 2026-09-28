@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { Button, Column, Text, Window, createApp, readPngRgba, type AppHandle, type RgbaImage } from "@tarve/core";
+import { Button, Column, Text, Window, createApp, readPngRgba, type AppHandle, type RgbaImage } from "@tarve/core-internal";
 
 // Real-window smoke for the development runtime tooling: dev error overlay,
 // native frame-time overlay (and its zero-idle guarantee) and same-window
@@ -76,7 +76,7 @@ const texts = async (app: AppHandle) => (await app.inspect()).nodes.map(node => 
 
 {
   const entry = resolve(work, "devtools-hot-entry.ts");
-  const source = (version: string) => `import { Text, Window, render } from "@tarve/core";
+  const source = (version: string) => `import { Text, Window, render } from "@tarve/core-internal";
 const key = Symbol.for("tarve.devApp");
 const existing = Boolean((globalThis as Record<symbol, unknown>)[key]);
 console.log("MOUNT ${version} existing=" + existing);

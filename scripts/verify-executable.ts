@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { dirname, isAbsolute, join } from "node:path";
-import type { AppHandle } from "@tarve/core";
+import type { AppHandle } from "@tarve/core-internal";
 import type { Snapshot } from "@tarve/protocol";
 
 /** Runs inside the actual compiled executable using its embedded native runtime. */

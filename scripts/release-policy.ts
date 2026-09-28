@@ -61,7 +61,7 @@ export async function assertReleasePolicy(root: string, tag?: string): Promise<R
   if (rootPackage.license !== "Apache-2.0") {
     throw new Error(`Release policy requires package.json license=Apache-2.0; got ${rootPackage.license ?? "<missing>"}`);
   }
-  for (const [name, manifest] of [["@tarve/core", corePackage], ["@tarve/protocol", protocolPackage]] as const) {
+  for (const [name, manifest] of [["@tarve/core-internal", corePackage], ["@tarve/protocol", protocolPackage]] as const) {
     if (manifest.private !== true || manifest.license !== rootPackage.license) {
       throw new Error(`${name} must remain private and inherit the root Apache-2.0 policy`);
     }

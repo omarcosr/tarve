@@ -10,29 +10,29 @@
       },
     },
     "packages/core": {
-      "name": "@tarve/core",
-      "version": "0.1.0",
+      "name": "@tarve/core-internal",
+      "version": "0.1.1",
       "dependencies": {
         "@tarve/protocol": "workspace:*",
       },
     },
     "packages/protocol": {
       "name": "@tarve/protocol",
-      "version": "0.1.0",
+      "version": "0.1.1",
     },
     "packages/react-icons": {
       "name": "@tarve/react-icons",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "peerDependencies": {
-        "tarve": "^0.1.0",
+        "@tarve/core": "^0.1.0",
       },
       "optionalPeers": [
-        "tarve",
+        "@tarve/core",
       ],
     },
   },
   "packages": {
-    "@tarve/core": ["@tarve/core@workspace:packages/core"],
+    "@tarve/core-internal": ["@tarve/core-internal@workspace:packages/core"],
 
     "@tarve/protocol": ["@tarve/protocol@workspace:packages/protocol"],
 

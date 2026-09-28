@@ -2,9 +2,9 @@
   "compilerOptions": {
     "target": "ESNext", "module": "ESNext", "moduleResolution": "Bundler",
     "strict": true, "noEmit": true, "skipLibCheck": true,
-    "jsx": "react-jsx", "jsxImportSource": "tarve",
+    "jsx": "react-jsx", "jsxImportSource": "@tarve/core",
     "types": ["bun"], "allowImportingTsExtensions": true,
-    "paths": { "tarve": ["./packages/core/src/index.ts"], "tarve/*": ["./packages/core/src/*"], "@tarve/core": ["./packages/core/src/index.ts"], "@tarve/core/*": ["./packages/core/src/*"], "@tarve/protocol": ["./packages/protocol/src/index.ts"], "@tarve/react-icons": ["./packages/react-icons/src/index.ts"], "@tarve/react-icons/*": ["./packages/react-icons/src/*"] }
+    "paths": { "@tarve/core": ["./packages/core/src/index.ts"], "@tarve/core/*": ["./packages/core/src/*"], "@tarve/core-internal": ["./packages/core/src/index.ts"], "@tarve/core-internal/*": ["./packages/core/src/*"], "@tarve/protocol": ["./packages/protocol/src/index.ts"], "@tarve/react-icons": ["./packages/react-icons/src/index.ts"], "@tarve/react-icons/*": ["./packages/react-icons/src/*"] }
   },
   "include": ["packages", "scripts"]
 }

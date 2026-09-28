@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { mkdir } from "node:fs/promises";
 import { cpus } from "node:os";
 import { resolve } from "node:path";
-import { Button, Column, Row, Scroll, Text, Window, createApp, BunFfiBridge } from "tarve";
+import { Button, Column, Row, Scroll, Text, Window, createApp, BunFfiBridge } from "@tarve/core";
 import { compileTree, diffTrees } from "../packages/core/src/reconciler";
 import { hostBuildTarget, targetConfig } from "../packages/core/targets";
 

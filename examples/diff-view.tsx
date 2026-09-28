@@ -1,4 +1,4 @@
-import { Button, Column, Diff, Input, Row, Scroll, Text, TitleBar, Window, createTextSearchController, theme } from "tarve";
+import { Button, Column, Diff, Input, Row, Scroll, Text, TitleBar, Window, createTextSearchController, theme } from "@tarve/core";
 
 const colors = theme.colors;
 

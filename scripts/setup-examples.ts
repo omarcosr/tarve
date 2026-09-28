@@ -16,7 +16,8 @@ await run(["run", "package:local"], root);
 const examples = join(root, "examples");
 await run(["install", "--frozen-lockfile"], examples);
 const modules = join(examples, "node_modules");
-const packageLink = join(modules, "tarve");
+// Scoped package: node_modules/@tarve/core.
+const packageLink = join(modules, "@tarve", "core");
 const bin = join(modules, ".bin");
 await mkdir(bin, { recursive: true });
 await rm(packageLink, { recursive: true, force: true });
@@ -37,6 +38,6 @@ for (const name of ["tarve", "tarve.exe", "tarve.bunx", "tarve.cmd"]) {
   await rm(join(bin, name), { force: true });
 }
 const launcher = join(bin, "tarve");
-await writeFile(launcher, '#!/usr/bin/env bun\nimport "../tarve/dist/npm/cli.js";\n');
-await writeFile(join(bin, "tarve.cmd"), '@echo off\r\nbun "%~dp0\\..\\tarve\\dist\\npm\\cli.js" %*\r\n');
+await writeFile(launcher, '#!/usr/bin/env bun\nimport "../@tarve/core/dist/npm/cli.js";\n');
+await writeFile(join(bin, "tarve.cmd"), '@echo off\r\nbun "%~dp0\\..\\@tarve\\core\\dist\\npm\\cli.js" %*\r\n');
 if (process.platform !== "win32") await chmod(launcher, 0o755);

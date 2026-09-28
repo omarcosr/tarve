@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { App } from "../examples/basic-view";
-import { createApp } from "@tarve/core";
+import { createApp } from "@tarve/core-internal";
 import type { Snapshot, NodeSnapshot, NativeEvent } from "@tarve/protocol";
 
 const app = createApp(App, { debug: true });

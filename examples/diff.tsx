@@ -1,4 +1,4 @@
-import { createApp } from "tarve";
+import { createApp } from "@tarve/core";
 import { basename } from "node:path";
 import { readFile, stat } from "node:fs/promises";
 import { App, connectOpenPatch, connectRefresh, setPatchError, setPatchSource } from "./diff-view";

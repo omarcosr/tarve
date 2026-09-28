@@ -1,5 +1,5 @@
 import { App } from "../tests/fixtures/exe-smoke-app";
-import { createApp } from "@tarve/core";
+import { createApp } from "@tarve/core-internal";
 import { verifyExecutable } from "./verify-executable";
 
 const app = createApp(App, { debug: true });

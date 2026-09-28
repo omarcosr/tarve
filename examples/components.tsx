@@ -1,4 +1,4 @@
-import { render } from "tarve";
+import { render } from "@tarve/core";
 import { lucideReactAdapter, phosphorReactAdapter, reactSvgAdapter } from "@tarve/react-icons";
 import { App } from "./components-view";
 

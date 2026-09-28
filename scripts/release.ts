@@ -35,7 +35,9 @@ await run([bun, "run", "pack"]);
 
 const library = fromRoot(windowsNativeRelative);
 const linuxLibrary = fromRoot(linuxNativeRelative);
-const tarball = join(root, "dist", `tarve-${policy.version}.tgz`);
+// bun pm pack names scoped packages <scope>-<name>-<version>.tgz.
+const tarballName = `tarve-core-${policy.version}.tgz`;
+const tarball = join(root, "dist", tarballName);
 
 const extraction = await mkdtemp(join(tmpdir(), "tarve-release-verify-"));
 try {
@@ -51,7 +53,7 @@ try {
     throw new Error(`Packed version ${packedManifest.version} does not match ${policy.version}.`);
   }
   const manifest = {
-    product: "tarve",
+    product: "@tarve/core",
     version: policy.version,
     tag,
     targets: policy.targets,
@@ -63,7 +65,7 @@ try {
     artifacts: [
       { file: windowsNativeRelative, sha256: await sha256(library) },
       { file: linuxNativeRelative, sha256: await sha256(linuxLibrary) },
-      { file: `tarve-${policy.version}.tgz`, sha256: await sha256(tarball) },
+      { file: tarballName, sha256: await sha256(tarball) },
     ],
   };
   await writeFile(join(root, "dist/release-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);

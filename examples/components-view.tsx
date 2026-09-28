@@ -54,7 +54,7 @@ import {
   type QuestionnaireAnswer,
   type Style,
   type SvgNode,
-} from "tarve";
+} from "@tarve/core";
 import vectorScene from "./assets/vector-scene.svg" with { type: "file" };
 const c = theme.colors;
 

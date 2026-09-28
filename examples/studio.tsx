@@ -1,5 +1,5 @@
-import { createApp } from "tarve";
-import { build } from "tarve/build";
+import { createApp } from "@tarve/core";
+import { build } from "@tarve/core/build";
 import { readFile, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { App, connectStudio } from "./studio-view";

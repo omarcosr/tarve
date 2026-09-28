@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createApp } from "@tarve/core";
+import { createApp } from "@tarve/core-internal";
 import { App, connectRefresh, patch, setPatchSource } from "../examples/diff-view";
 import { normalizePatch } from "../examples/patch-file";
 

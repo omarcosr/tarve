@@ -16,7 +16,7 @@ import {
   theme,
   type Child,
   type Style
-} from "tarve";
+} from "@tarve/core";
 import studio from "./assets/studio.png" with { type: "file" };
 
 const c = theme.colors;

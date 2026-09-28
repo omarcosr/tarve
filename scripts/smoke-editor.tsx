@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { Column, Input, Window, createApp, type PastePayload } from "@tarve/core";
+import { Column, Input, Window, createApp, type PastePayload } from "@tarve/core-internal";
 
 // Real-window editor smoke: native undo/redo, submit, file paste and the caret's
 // zero-idle policy. By default the debug input channel drives the tree actions,

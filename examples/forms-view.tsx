@@ -1,7 +1,7 @@
 import {
   Accordion, Badge, Button, Card, Checkbox, Column, Progress, RadioGroup, Row,
   Scroll, Select, Separator, Slider, Switch, Tabs, Text, TextArea, Input, Window, Theme, lightTheme, theme,
-} from "tarve";
+} from "@tarve/core";
 
 const c = theme.colors;
 let name = "";

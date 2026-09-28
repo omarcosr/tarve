@@ -1,4 +1,4 @@
-import { Button, Column, Row, Text, TitleBar, Window, createApp } from "tarve";
+import { Button, Column, Row, Text, TitleBar, Window, createApp } from "@tarve/core";
 
 let count = 0;
 let status = "Ctrl+S is registered as a global app hotkey.";

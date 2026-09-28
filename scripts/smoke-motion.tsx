@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { Column, Window, createTestRenderer, readPngRgba } from "@tarve/core";
+import { Column, Window, createTestRenderer, readPngRgba } from "@tarve/core-internal";
 import { smokeRendererModes } from "./smoke-renderer-modes";
 
 const requestedRenderer = process.env.TARVE_SMOKE_RENDERER;

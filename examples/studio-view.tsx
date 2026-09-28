@@ -28,7 +28,7 @@ import {
   type Child,
   type DataGridKey,
   type DataGridSort,
-} from "tarve";
+} from "@tarve/core";
 
 // "Tarve Studio": the application shown in the launch film, built with real
 // Tarve components. Search filters the DataGrid, "New" opens a DropdownMenu,
@@ -58,7 +58,7 @@ export const componentRows: ComponentRow[] = [
 const FRAME_MS = 1000 / 120;
 const nativeKinds = new Set<ComponentRow["kind"]>(["rich", "data"]);
 
-export const appSource = `import { Window, Row, DataGrid, Markdown } from "tarve";
+export const appSource = `import { Window, Row, DataGrid, Markdown } from "@tarve/core";
 
 export function Studio() {
   return (

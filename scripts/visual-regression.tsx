@@ -7,7 +7,7 @@ import { App as ShowcaseApp } from "../examples/components-view";
 // Runtime must use the freshly packed package installed into examples/node_modules.
 // Resolve through Bun's package resolver from the consumer project instead of knowing
 // Tarve's node_modules or dist layout.
-const installedTarveModule = Bun.resolveSync("tarve", resolve(import.meta.dir, "../examples"));
+const installedTarveModule = Bun.resolveSync("@tarve/core", resolve(import.meta.dir, "../examples"));
 const { createApp, readPngRgba } = await import(installedTarveModule) as typeof import("../packages/core/src/index");
 
 const app = createApp(ShowcaseApp, {

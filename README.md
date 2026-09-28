@@ -52,8 +52,8 @@ Use this TypeScript configuration:
     "strict": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "jsxImportSource": "tarve",
-    "types": ["bun", "tarve/assets"]
+    "jsxImportSource": "@tarve/core",
+    "types": ["bun", "@tarve/core/assets"]
   }
 }
 ```
@@ -61,7 +61,7 @@ Use this TypeScript configuration:
 ## Quick start
 
 ```tsx
-import { Button, Column, Text, Window, createApp } from "tarve";
+import { Button, Column, Text, Window, createApp } from "@tarve/core";
 
 let count = 0;
 
@@ -126,7 +126,7 @@ Rustup installs Cargo per user. If you switch between a normal WSL user and `roo
 The build API is also exported:
 
 ```ts
-import { build } from "tarve/build";
+import { build } from "@tarve/core/build";
 
 await build({
   entrypoint: "app.tsx",
@@ -177,7 +177,7 @@ The public API also includes lower-level composition primitives such as `Pressab
 Tarve uses semantic theme tokens. `lightTheme` is the default; `darkTheme` can be selected per window and themes can be changed at runtime without recreating the native window.
 
 ```tsx
-import { Button, Window, darkTheme, theme } from "tarve";
+import { Button, Window, darkTheme, theme } from "@tarve/core";
 
 function App() {
   return (

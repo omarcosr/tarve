@@ -12,7 +12,7 @@ import {
   type Child,
   type MotionEasing,
   type Style,
-} from "tarve";
+} from "@tarve/core";
 
 const c = theme.colors;
 

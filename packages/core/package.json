@@ -1,6 +1,19 @@
 {
-  "name": "@tarve/core", "version": "0.1.0", "private": true, "license": "Apache-2.0", "type": "module",
-  "exports": { ".": "./src/index.ts", "./jsx-runtime": "./src/jsx-runtime.ts", "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts" },
-  "imports": { "#tarve/runtime": "./src/bridge/runtime.ts", "#tarve/assets": "./src/embedded-assets.ts" },
-  "dependencies": { "@tarve/protocol": "workspace:*" }
+  "name": "@tarve/core-internal",
+  "version": "0.1.1",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./jsx-runtime": "./src/jsx-runtime.ts",
+    "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts"
+  },
+  "imports": {
+    "#tarve/runtime": "./src/bridge/runtime.ts",
+    "#tarve/assets": "./src/embedded-assets.ts"
+  },
+  "dependencies": {
+    "@tarve/protocol": "workspace:*"
+  }
 }

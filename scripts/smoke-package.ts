@@ -10,7 +10,7 @@ if (!hostTarget) throw new Error(`Package smoke is not supported for ${process.p
 const hostConfig = targetConfig(hostTarget);
 const metadata = await Bun.file(join(root, "package.json")).json();
 const directory = await mkdtemp(join(tmpdir(), "tarve-npm-consumer-"));
-await copyFile(join(root, `dist/tarve-${metadata.version}.tgz`), join(directory, "tarve.tgz"));
+await copyFile(join(root, `dist/tarve-core-${metadata.version}.tgz`), join(directory, "tarve.tgz"));
 await copyFile(join(root, "tests/fixtures/consumer.tsx"), join(directory, "app.tsx"));
 await copyFile(join(root, "examples/assets/studio.png"), join(directory, "fixture.png"));
 const examples = join(directory, "examples");
@@ -27,11 +27,11 @@ await cp(sourceExamples, examples, {
 await Bun.write(join(directory, "package.json"), JSON.stringify({ name: "tarve-consumer-test", private: true, type: "module" }));
 await Bun.write(join(directory, "tsconfig.json"), JSON.stringify({ compilerOptions: {
   target: "ESNext", module: "ESNext", moduleResolution: "Bundler", strict: true, noEmit: true,
-  jsx: "react-jsx", jsxImportSource: "tarve", types: ["bun", "tarve/assets"],
+  jsx: "react-jsx", jsxImportSource: "@tarve/core", types: ["bun", "@tarve/core/assets"],
 }, include: ["*.tsx", "*.ts"] }));
 await Bun.write(join(directory, "types.test.ts"), [
-  'import type { AppErrorEvent, AppHandle, AppOptions, ButtonProps, CodeProps, DataGridProps, DiffProps, FileDialogOptions, MarkdownProps, ScrollProps, TreeViewProps } from "tarve";',
-  'import type { NativeNode } from "tarve/protocol";',
+  'import type { AppErrorEvent, AppHandle, AppOptions, ButtonProps, CodeProps, DataGridProps, DiffProps, FileDialogOptions, MarkdownProps, ScrollProps, TreeViewProps } from "@tarve/core";',
+  'import type { NativeNode } from "@tarve/core/protocol";',
   '// @ts-expect-error An invalid variant must be rejected by the installed declarations.',
   'const invalid: ButtonProps = { variant: "not-a-variant" };',
   'const scroll: ScrollProps = { speed: 1.5 };',

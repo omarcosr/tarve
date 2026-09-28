@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { resolve } from "node:path";
-import { Window, Column, Text, Button, Checkbox, Slider, VirtualList, Image, createApp } from "tarve";
+import { Window, Column, Text, Button, Checkbox, Slider, VirtualList, Image, createApp } from "@tarve/core";
 import picture from "./fixture.png" with { type: "file" };
 
 let count = 0;

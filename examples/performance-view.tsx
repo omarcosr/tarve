@@ -13,7 +13,7 @@ import {
   Window,
   darkTheme,
   theme,
-} from "tarve";
+} from "@tarve/core";
 
 // The performance sequence from the launch film: a 100,000-row VirtualList
 // that flies to a row at high speed, plus a card grid that reflows live as the

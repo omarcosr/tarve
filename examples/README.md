@@ -51,5 +51,5 @@ bun run tarve build rich-content.tsx --outfile dist/RichContent.exe
 When consuming a published package instead of the repository tarball:
 
 ```powershell
-bun add tarve@0.1.0
+bun add @tarve/core@0.1.0
 ```

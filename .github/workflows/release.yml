@@ -124,7 +124,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           path: |
-            dist/tarve-*.tgz
+            dist/tarve-core-*.tgz
             dist/release-manifest.json
             native/win32-x64/tarve_native.dll
             native/win32-x64/runtime.json
@@ -136,7 +136,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tarball = (Get-ChildItem -LiteralPath dist -Filter "tarve-*.tgz" -File | Select-Object -First 1).FullName
+          $tarball = (Get-ChildItem -LiteralPath dist -Filter "tarve-core-*.tgz" -File | Select-Object -First 1).FullName
           if (-not $tarball) { throw "Release tarball is missing." }
           $arguments = @(
             "release", "create", "$env:GITHUB_REF_NAME",
@@ -186,9 +186,9 @@ jobs:
             exit 1
           fi
           version="${TAG#v}"
-          tarball="release/dist/tarve-${version}.tgz"
+          tarball="release/dist/tarve-core-${version}.tgz"
           if [ ! -f "${tarball}" ]; then
-            echo "::error::Expected ${tarball}; found: $(find release -name 'tarve-*.tgz')" >&2
+            echo "::error::Expected ${tarball}; found: $(find release -name '*.tgz')" >&2
             exit 1
           fi
           packed="$(tar -xOzf "${tarball}" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0)).version')"

@@ -12,7 +12,7 @@ import {
   lightTheme,
   theme,
   type Child,
-} from "tarve";
+} from "@tarve/core";
 
 const c = theme.colors;
 

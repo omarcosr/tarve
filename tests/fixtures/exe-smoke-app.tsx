@@ -1,4 +1,4 @@
-import { Button, Column, Text, Window } from "@tarve/core";
+import { Button, Column, Text, Window } from "@tarve/core-internal";
 
 let clicks = 0;
 

@@ -1,9 +1,9 @@
 import { strict as assert } from "node:assert";
 import { mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { Code, Column, Diff, Markdown, Scroll, Window, createApp } from "@tarve/core";
-import { darkTheme, lightTheme } from "@tarve/core";
-import { jsx } from "@tarve/core/jsx-runtime";
+import { Code, Column, Diff, Markdown, Scroll, Window, createApp } from "@tarve/core-internal";
+import { darkTheme, lightTheme } from "@tarve/core-internal";
+import { jsx } from "@tarve/core-internal/jsx-runtime";
 import { smokeRendererModes } from "./smoke-renderer-modes";
 
 const updated = `${Array.from({ length: 2000 }, (_, index) => `line ${index}\n`).join("")}answer\n`;

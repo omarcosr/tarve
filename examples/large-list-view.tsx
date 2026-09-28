@@ -1,4 +1,4 @@
-import { Badge, Button, Column, Row, Text, TitleBar, VirtualList, Window, theme } from "tarve";
+import { Badge, Button, Column, Row, Text, TitleBar, VirtualList, Window, theme } from "@tarve/core";
 
 const c = theme.colors;
 export const records = Array.from(

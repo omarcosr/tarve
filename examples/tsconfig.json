@@ -7,8 +7,8 @@
     "noEmit": true,
     "skipLibCheck": true,
     "jsx": "react-jsx",
-    "jsxImportSource": "tarve",
-    "types": ["bun", "tarve/assets"]
+    "jsxImportSource": "@tarve/core",
+    "types": ["bun", "@tarve/core/assets"]
   },
   "include": ["*.ts", "*.tsx"]
 }
