@@ -1,31 +1,81 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tarve Launch Film</title>
-<style>
-  @font-face { font-family: "Geist"; src: url("fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; }
-  @font-face { font-family: "Geist Mono"; src: url("fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; }
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
-  #out {
-    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-    width: min(100vw, 177.78vh); height: min(56.25vw, 100vh); background: #000;
-  }
-  #hud {
-    position: fixed; left: 16px; right: 16px; bottom: 12px; display: flex; gap: 12px; align-items: center;
-    font: 12px/1 "Geist Mono", ui-monospace, monospace; color: rgba(255,255,255,.55);
-    opacity: 0; transition: opacity .2s;
-  }
-  body:hover #hud { opacity: 1; }
-  #track { flex: 1; height: 4px; background: rgba(255,255,255,.12); border-radius: 2px; cursor: pointer; position: relative; }
-  #fill { position: absolute; inset: 0 auto 0 0; background: #3e7bff; border-radius: 2px; }
-  body.render #hud { display: none; }
-</style>
-</head>
-<body>
-<canvas id="out" width="1920" height="1080"></canvas>
-<div id="hud"><span id="play">❚❚</span><div id="track"><div id="fill"></div></div><span id="time">0.00s</span></div>
-<script src="scene.js"></script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tarve Launch Film</title>
+    <style>
+      @font-face {
+        font-family: "Geist";
+        src: url("fonts/Geist-Variable.woff2") format("woff2");
+        font-weight: 100 900;
+      }
+      @font-face {
+        font-family: "Geist Mono";
+        src: url("fonts/GeistMono-Variable.woff2") format("woff2");
+        font-weight: 100 900;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+      #out {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+        width: min(100vw, 177.78vh);
+        height: min(56.25vw, 100vh);
+        background: #000;
+      }
+      #hud {
+        position: fixed;
+        left: 16px;
+        right: 16px;
+        bottom: 12px;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        font:
+          12px/1 "Geist Mono",
+          ui-monospace,
+          monospace;
+        color: rgba(255, 255, 255, 0.55);
+        opacity: 0;
+        transition: opacity 0.2s;
+      }
+      body:hover #hud {
+        opacity: 1;
+      }
+      #track {
+        flex: 1;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.12);
+        border-radius: 2px;
+        cursor: pointer;
+        position: relative;
+      }
+      #fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        background: #3e7bff;
+        border-radius: 2px;
+      }
+      body.render #hud {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="out" width="2560" height="1440"></canvas>
+    <div id="hud">
+      <span id="play">❚❚</span>
+      <div id="track"><div id="fill"></div></div>
+      <span id="time">0.00s</span>
+    </div>
+    <script src="scene.js"></script>
+  </body>
 </html>
