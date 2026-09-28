@@ -4455,6 +4455,29 @@ fn native_undo_history_resets_after_external_value_change() {
 }
 
 #[test]
+fn frame_overlay_records_samples_without_scheduling_frames() {
+    let mut tree = editor_tree("input", "abc");
+    tree.compute(400.0, 300.0).unwrap();
+    let _ = tree.scene(1.0);
+    tree.record_frame_time(4.0);
+    assert!(tree.frame_samples().is_none());
+    assert!(tree.set_frame_overlay(true));
+    assert!(!tree.set_frame_overlay(true));
+    let _ = tree.scene(1.0);
+    for index in 0..(crate::tree::FRAME_OVERLAY_SAMPLES + 5) {
+        tree.record_frame_time(index as f64);
+    }
+    tree.record_frame_time(f64::NAN);
+    assert!(!tree.dirty.paint);
+    let samples = tree.frame_samples().unwrap();
+    assert_eq!(samples.len(), crate::tree::FRAME_OVERLAY_SAMPLES);
+    assert_eq!(samples[0], 5.0);
+    let _ = tree.scene(1.0);
+    assert!(tree.set_frame_overlay(false));
+    assert!(tree.frame_samples().is_none());
+}
+
+#[test]
 fn native_undo_history_resets_when_controlled_value_returns_to_previous() {
     let mut tree = editor_tree("input", "");
     tree.type_text("x");

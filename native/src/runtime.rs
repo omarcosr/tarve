@@ -1158,6 +1158,7 @@ impl App {
         if self.handle_graphics_fault(event_loop) {
             return;
         }
+        let frame_started = Instant::now();
         self.advance_live_motion();
         let content_changed = match self.prepare() {
             Ok(content_changed) => content_changed,
@@ -1169,6 +1170,8 @@ impl App {
         match self.present(content_changed) {
             Ok(PresentResult::Presented) => {
                 self.presentation_retry_at = None;
+                self.tree
+                    .record_frame_time(frame_started.elapsed().as_secs_f64() * 1000.0);
                 if self.graphics_recovery_episodes > 0 {
                     let now = Instant::now();
                     if let Some(stable_since) = self.graphics_stable_since {
@@ -1486,6 +1489,11 @@ impl ApplicationHandler<Command> for App {
             }
             Command::Close => event_loop.exit(),
             Command::CancelCloseRequest => self.close_request_pending = false,
+            Command::FrameOverlay { enabled } => {
+                if self.tree.set_frame_overlay(enabled) {
+                    self.redraw();
+                }
+            }
             Command::Focus { id } => {
                 if let Some(blurred) = self.tree.focus(&id) {
                     self.events.push(json!({"type":"blur", "id":blurred}));

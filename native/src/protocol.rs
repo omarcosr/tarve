@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 44;
+pub const VERSION: u32 = 45;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -375,6 +375,9 @@ pub enum Command {
     },
     Close,
     CancelCloseRequest,
+    FrameOverlay {
+        enabled: bool,
+    },
     Focus {
         id: String,
     },

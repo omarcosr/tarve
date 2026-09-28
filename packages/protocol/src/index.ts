@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 44;
+export const PROTOCOL_VERSION = 45;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 export type MotionProperty = "width" | "height" | "top" | "right" | "bottom" | "left" | "opacity" | "radius";
@@ -165,6 +165,7 @@ export type NativeCommand =
   | { type: "update"; root: NativeNode }
   | { type: "close" }
   | { type: "cancelCloseRequest" }
+  | { type: "frameOverlay"; enabled: boolean }
   | { type: "focus"; id: string }
   | { type: "scrollToItem"; id: string; index: number; offset?: number }
   | { type: "inspect"; requestId: string }

@@ -10,7 +10,7 @@ use crate::{
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use serde_json::{Value, json};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     fs,
     io::Cursor,
     ops::Range,
@@ -24,6 +24,12 @@ use vello::{
     kurbo::{Affine, Cap, Rect as BoxRect, RoundedRect, Stroke, Vec2},
     peniko::{Blob, Color, Fill, ImageAlphaType, ImageData, ImageFormat},
 };
+
+/// Frame-time samples kept by the native debug overlay.
+pub const FRAME_OVERLAY_SAMPLES: usize = 120;
+/// Graph ceiling: two 60 Hz frame budgets.
+const FRAME_OVERLAY_CEILING_MS: f64 = 1000.0 / 30.0;
+const FRAME_OVERLAY_BUDGET_MS: f64 = 1000.0 / 60.0;
 
 const LAYOUT_KEYS: &[&str] = &[
     "width",
@@ -802,6 +808,7 @@ pub struct Tree {
     motion_time_ms: f64,
     caret_activity_ms: f64,
     edit_history: HashMap<String, EditHistory>,
+    frame_overlay: Option<VecDeque<f32>>,
     virtual_focus: Option<(String, String)>,
     stacking: HashMap<String, f32>,
     window_chrome_suppressed: bool,
@@ -928,6 +935,7 @@ impl Tree {
             motion_time_ms: 0.0,
             caret_activity_ms: 0.0,
             edit_history: HashMap::new(),
+            frame_overlay: None,
             virtual_focus: None,
             stacking: HashMap::new(),
             window_chrome_suppressed: false,
@@ -2562,8 +2570,83 @@ impl Tree {
             let offset = self.ancestor_scroll_offset(&portal);
             self.paint_node(&portal, offset, scale, root_rect, target);
         }
+        self.paint_frame_overlay(scale, root_rect, target);
         self.paints += 1;
         self.dirty.paint = false;
+    }
+    /// Toggles the frame-time overlay. Returns true when a repaint is needed.
+    pub fn set_frame_overlay(&mut self, enabled: bool) -> bool {
+        if enabled == self.frame_overlay.is_some() {
+            return false;
+        }
+        self.frame_overlay = enabled.then(VecDeque::new);
+        self.dirty.paint = true;
+        true
+    }
+    /// Records a presented frame's CPU time. Never schedules a frame itself:
+    /// the graph refreshes only when something else repaints, so an idle
+    /// window stays at zero frames.
+    pub fn record_frame_time(&mut self, milliseconds: f64) {
+        let Some(samples) = &mut self.frame_overlay else {
+            return;
+        };
+        if !milliseconds.is_finite() || milliseconds < 0.0 {
+            return;
+        }
+        if samples.len() == FRAME_OVERLAY_SAMPLES {
+            samples.pop_front();
+        }
+        samples.push_back(milliseconds as f32);
+    }
+    pub fn frame_samples(&self) -> Option<Vec<f32>> {
+        self.frame_overlay
+            .as_ref()
+            .map(|samples| samples.iter().copied().collect())
+    }
+    fn paint_frame_overlay<P: PaintTarget>(&self, scale: f64, root: BoxRect, target: &mut P) {
+        let Some(samples) = &self.frame_overlay else {
+            return;
+        };
+        const WIDTH: f64 = 180.0;
+        const HEIGHT: f64 = 48.0;
+        let x0 = (root.x1 - WIDTH - 8.0).max(root.x0);
+        let y1 = root.y1 - 8.0;
+        let y0 = (y1 - HEIGHT).max(root.y0);
+        let transform = Affine::scale(scale);
+        target.fill(
+            Fill::NonZero,
+            transform,
+            Color::from_rgba8(15, 23, 42, 210),
+            &RoundedRect::new(x0, y0, x0 + WIDTH, y1, 4.0),
+        );
+        let height = y1 - y0;
+        let bar = WIDTH / FRAME_OVERLAY_SAMPLES as f64;
+        let start = x0 + WIDTH - bar * samples.len() as f64;
+        for (index, &sample) in samples.iter().enumerate() {
+            let ms = f64::from(sample);
+            let ratio = (ms / FRAME_OVERLAY_CEILING_MS).clamp(0.02, 1.0);
+            let colour = if ms <= FRAME_OVERLAY_BUDGET_MS {
+                Color::from_rgba8(74, 222, 128, 255)
+            } else if ms <= FRAME_OVERLAY_CEILING_MS {
+                Color::from_rgba8(250, 204, 21, 255)
+            } else {
+                Color::from_rgba8(248, 113, 113, 255)
+            };
+            let x = start + bar * index as f64;
+            target.fill(
+                Fill::NonZero,
+                transform,
+                colour,
+                &BoxRect::new(x, y1 - height * ratio, x + bar, y1),
+            );
+        }
+        let budget_y = y1 - height * (FRAME_OVERLAY_BUDGET_MS / FRAME_OVERLAY_CEILING_MS);
+        target.fill(
+            Fill::NonZero,
+            transform,
+            Color::from_rgba8(255, 255, 255, 140),
+            &BoxRect::new(x0, budget_y, x0 + WIDTH, budget_y + 1.0),
+        );
     }
     fn visual_state_for(&self, id: &str, node: &Node) -> VisualState {
         let otp_slot_focused = node.control.as_ref().is_some_and(|control| {

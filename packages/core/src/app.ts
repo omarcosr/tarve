@@ -5,6 +5,7 @@ import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
 import type { VNode, PastePayload } from "./jsx-runtime";
 import { withRenderScope } from "./render-scope";
 import type { ComponentAdapter } from "./component-adapter";
+import { DevErrorOverlay } from "./dev-overlay";
 
 export type AppErrorSource =
   | "render"
@@ -33,6 +34,17 @@ export interface AppOptions {
   componentAdapters?: readonly ComponentAdapter[];
   bridge?: NativeBridge;
   onError?: (event: AppErrorEvent) => void;
+  /** Development mode: runtime errors render an in-window overlay and render() remounts in the same window. Defaults to TARVE_DEV=1. */
+  dev?: boolean;
+  /** Show the native frame-time graph. Defaults to TARVE_FRAME_OVERLAY=1. Never schedules frames on its own. */
+  frameOverlay?: boolean;
+}
+
+const DEV_OVERLAY_SOURCES = new Set<AppErrorSource>(["render", "event-handler", "listener", "hotkey"]);
+const DEV_APP_KEY = Symbol.for("tarve.devApp");
+
+function envFlag(name: string): boolean {
+  return typeof process !== "undefined" && process.env?.[name] === "1";
 }
 
 export type DiagnosticInput = Extract<NativeCommand, { type: "input" | "resize" }>;
@@ -54,6 +66,10 @@ export interface AppHandle {
   /** Advance the native deterministic motion clock. Requires debug mode. */
   advanceMotion(milliseconds: number): Promise<void>;
   debug(command: DiagnosticInput): void;
+  /** Replace the view in the same native window, resetting component state. */
+  remount(view: () => VNode): void;
+  /** Toggle the native frame-time overlay. */
+  setFrameOverlay(enabled: boolean): void;
 }
 
 function asError(value: unknown): Error {
@@ -104,7 +120,46 @@ function reconciliationCommand(previous: CompiledTree, next: CompiledTree): Nati
 
 export function createApp(view: () => VNode, options: AppOptions = {}): AppHandle {
   const bridge = options.bridge ?? new BunFfiBridge();
-  const renderScope = {};
+  let renderScope: object = {};
+  let currentView = view;
+  const devMode = options.dev ?? envFlag("TARVE_DEV");
+  let devError: AppErrorEvent | undefined;
+  let devOverlayBroken = false;
+  let overlayCompiled = false;
+  const overlayScope = {};
+  let appWindow: CompiledTree["document"]["window"] | undefined;
+
+  function compileView(): CompiledTree {
+    const scope = renderScope;
+    const renderer = options.renderer ?? "auto";
+    const shown = devError;
+    overlayCompiled = false;
+    if (shown && appWindow && !devOverlayBroken) {
+      try {
+        // Separate scope: rendering the overlay must not advance the app's render
+        // epochs, or epoch-swept state (AnimatePresence) is lost on dismiss.
+        const overlay = withRenderScope(overlayScope, () => compileTree(
+          DevErrorOverlay({ event: shown, onDismiss: dismissDevError }), options.debug, renderer, undefined, overlayScope, !options.headless,
+        ));
+        overlayCompiled = true;
+        overlay.document.window = appWindow;
+        return overlay;
+      } catch (overlayError) {
+        devOverlayBroken = true;
+        try { console.error("[tarve] dev error overlay failed", asError(overlayError)); } catch {}
+      }
+    }
+    const tree = withRenderScope(scope, () => compileTree(
+      currentView(), options.debug, renderer, options.componentAdapters, scope, !options.headless,
+    ));
+    appWindow = tree.document.window;
+    return tree;
+  }
+
+  function dismissDevError(): void {
+    devError = undefined;
+    update();
+  }
   let committed: CompiledTree | undefined;
   let observed: CompiledTree | undefined;
   let queued = false;
@@ -144,6 +199,13 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     } else {
       try { console.error(`[tarve] ${context.source}${context.event ? `:${context.event}` : ""}`, error); } catch {}
     }
+    if (devMode && context.source === "render" && overlayCompiled) {
+      // The overlay itself failed to diff/commit; re-showing it would loop.
+      devOverlayBroken = true;
+    } else if (devMode && !devOverlayBroken && started && !ended && DEV_OVERLAY_SOURCES.has(context.source)) {
+      devError = event;
+      update();
+    }
     return error;
   }
 
@@ -152,6 +214,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     readySettled = true;
     started = true;
     resolveReady();
+    if (options.frameOverlay ?? envFlag("TARVE_FRAME_OVERLAY")) {
+      sendInternal({ type: "frameOverlay", enabled: true }, { source: "bridge", event: "frameOverlay" });
+    }
   }
 
   function settleReadyFailure(error: Error): void {
@@ -224,9 +289,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
       let next: CompiledTree;
       try {
-        next = withRenderScope(renderScope, () => compileTree(
-          view(), options.debug, options.renderer ?? "auto", options.componentAdapters, renderScope, !options.headless,
-        ));
+        next = compileView();
         if (committed.document.window.decorations !== next.document.window.decorations) {
           throw new Error("Adding or removing TitleBar after the native window has been created is not supported. Recreate the Window instead.");
         }
@@ -603,12 +666,21 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (!options.debug) throw new Error("Enable debug to use diagnostic input/resize");
       sendPublic(command);
     },
+    remount(nextView: () => VNode): void {
+      if (ended || closing) return;
+      currentView = nextView;
+      renderScope = {};
+      devError = undefined;
+      devOverlayBroken = false;
+      update();
+    },
+    setFrameOverlay(enabled: boolean): void {
+      if (!ended) sendPublic({ type: "frameOverlay", enabled });
+    },
   };
 
   try {
-    committed = withRenderScope(renderScope, () => compileTree(
-      view(), options.debug, options.renderer ?? "auto", options.componentAdapters, renderScope, !options.headless,
-    ));
+    committed = compileView();
     observed = nativeShadow(committed);
   } catch (error) {
     const startupError = reportError(error, { source: "render", event: "startup" });
@@ -633,9 +705,32 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   return app;
 }
 
+/**
+ * Renders the app until its window closes. In dev mode a second call in the same
+ * process (e.g. a `bun --hot` reload) remounts into the already open window.
+ */
 export async function render(view: () => VNode, options?: AppOptions): Promise<void> {
+  const dev = options?.dev ?? envFlag("TARVE_DEV");
+  const registry = globalThis as { [DEV_APP_KEY]?: AppHandle };
+  const existing = dev ? registry[DEV_APP_KEY] : undefined;
+  if (existing) {
+    existing.remount(view);
+    await existing.closed;
+    return;
+  }
   const app = createApp(view, options);
-  await app.ready;
+  if (dev) {
+    registry[DEV_APP_KEY] = app;
+    void app.closed.then(() => {
+      if (registry[DEV_APP_KEY] === app) delete registry[DEV_APP_KEY];
+    });
+  }
+  try {
+    await app.ready;
+  } catch (error) {
+    if (registry[DEV_APP_KEY] === app) delete registry[DEV_APP_KEY];
+    throw error;
+  }
   await app.closed;
 }
 function pastePayload(event: Extract<NativeEvent, { type: "paste" }>): PastePayload | undefined {
