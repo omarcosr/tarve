@@ -1,6 +1,10 @@
 import type { Control, MotionProperty, MotionValues, StateStyle, Style, SvgNode, TextHighlight } from "../../protocol/src/index";
 import type { ImageSource } from "./components/image";
 export type Child = VNode | string | number | boolean | null | undefined | Child[];
+/** Clipboard content delivered to the focused element when the clipboard holds no text. */
+export type PastePayload =
+  | { kind: "files"; files: string[] }
+  | { kind: "image"; width: number; height: number; rgba: Uint8Array };
 export interface BaseProps {
   id?: string;
   key?: string | number;
@@ -12,6 +16,8 @@ export interface BaseProps {
   /** Initial numeric values for a native enter transition. */
   motionFrom?: MotionValues;
   onTransitionEnd?: (event: { property: MotionProperty }) => void;
+  /** Receives non-text clipboard content (files or a bitmap) pasted while focused. */
+  onPaste?: (payload: PastePayload) => void;
 }
 export type IntrinsicStateStyle = StateStyle & {
   backgroundColor?: string;
@@ -83,13 +89,16 @@ export interface IntrinsicInputProps extends Omit<BaseProps, "style" | "children
   placeholder?: string;
   disabled?: boolean;
   onChange?: (value: string) => void;
+  onSubmit?: (value: string) => void;
 }
 export interface IntrinsicTextareaProps extends Omit<BaseProps, "style" | "children"> {
   style?: IntrinsicStyle;
   value?: string;
   placeholder?: string;
   disabled?: boolean;
+  submitOnEnter?: boolean;
   onChange?: (value: string) => void;
+  onSubmit?: (value: string) => void;
 }
 export interface IntrinsicButtonProps extends Omit<BaseProps, "style"> {
   style?: IntrinsicStyle;

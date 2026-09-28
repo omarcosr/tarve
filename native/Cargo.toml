@@ -28,7 +28,7 @@ base64 = "0.22"
 resvg = { version = "=0.48.1", default-features = false }
 unicode-segmentation = "1.12"
 unicode-width = "0.2"
-arboard = { version = "3.6", default-features = false }
+arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 bytemuck = "=1.25.0"
 regex = "1"
 

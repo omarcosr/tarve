@@ -2,7 +2,7 @@ import type { FileDialogOptions, NativeEvent, NativeCommand, NativeNode, Rendere
 import { BunFfiBridge, type NativeBridge } from "./bridge";
 import { compileTree, diffTreeMutations, type CompiledTree } from "./reconciler";
 import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
-import type { VNode } from "./jsx-runtime";
+import type { VNode, PastePayload } from "./jsx-runtime";
 import { withRenderScope } from "./render-scope";
 import type { ComponentAdapter } from "./component-adapter";
 
@@ -441,6 +441,11 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (event.type === "highlight" && handlers?.onHighlight) { handled = true; succeeded = invokeHandler("highlight", event.id, handlers.onHighlight as (...args: never[]) => void, { matchCount: event.matchCount, query: event.query, caseSensitive: event.caseSensitive, wholeWord: event.wholeWord } as never); }
       if (event.type === "context" && handlers?.onContextMenu) { handled = true; succeeded = invokeHandler("context", event.id, handlers.onContextMenu as (...args: never[]) => void, { x: event.x, y: event.y } as never); }
       if (event.type === "outside" && handlers?.onOutsideClick) { handled = true; succeeded = invokeHandler("outside", event.id, handlers.onOutsideClick); }
+      if (event.type === "submit" && handlers?.onSubmit) { handled = true; succeeded = invokeHandler("submit", event.id, handlers.onSubmit as (...args: never[]) => void, event.value as never); }
+      if (event.type === "paste" && handlers?.onPaste) {
+        const payload = pastePayload(event);
+        if (payload) { handled = true; succeeded = invokeHandler("paste", event.id, handlers.onPaste as (...args: never[]) => void, payload as never); }
+      }
       if (event.type === "change" && handlers?.onChange) { handled = true; succeeded = invokeHandler("change", event.id, handlers.onChange as (...args: never[]) => void, event.value as never); }
       if (event.type === "valueChange" && handlers?.onValueChange) { handled = true; succeeded = invokeHandler("valueChange", event.id, handlers.onValueChange as (...args: never[]) => void, event.value as never); }
       if (event.type === "scroll" && handlers?.onScroll) { handled = true; succeeded = invokeHandler("scroll", event.id, handlers.onScroll as (...args: never[]) => void, event.offset as never, event.max as never); }
@@ -632,4 +637,12 @@ export async function render(view: () => VNode, options?: AppOptions): Promise<v
   const app = createApp(view, options);
   await app.ready;
   await app.closed;
+}
+function pastePayload(event: Extract<NativeEvent, { type: "paste" }>): PastePayload | undefined {
+  if (event.files?.length) return { kind: "files", files: [...event.files] };
+  if (event.image) {
+    const bytes = Buffer.from(event.image.rgba, "base64");
+    return { kind: "image", width: event.image.width, height: event.image.height, rgba: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) };
+  }
+  return undefined;
 }

@@ -32,7 +32,7 @@ The examples cover:
 - `counter`: a minimal native app plus global hotkeys, file/folder dialogs, save dialogs, and cancellable `Window.onCloseRequest`.
 - `basic`: core layout, text, buttons, images, scrolling, and common controls.
 - `components`: the broader component set, including `TreeView` and `DataGrid`.
-- `forms`: input and form controls.
+- `forms`: input and form controls, including native undo/redo, editor submit handling, and rich file/image clipboard paste payloads.
 - `intrinsics`: Tarve JSX intrinsics such as `div`, `span`, `p`, `img`, `input`, `textarea`, `button`, `label`, `select`, `progress`, headings, and lowercase SVG elements.
 - `large-list`: virtualized list behavior.
 - `motion`: native retained transitions with `motionFrom`, numeric size/opacity/radius animation, easing curves, mid-flight retargeting, `onTransitionEnd`, and `AnimatePresence` enter/exit lifetime handling.

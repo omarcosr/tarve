@@ -454,6 +454,9 @@ const MAX_GRAPHICS_RECOVERY_ATTEMPTS: u8 = 3;
 const MAX_GRAPHICS_RECOVERY_EPISODES: usize = 3;
 const GRAPHICS_RECOVERY_WINDOW: Duration = Duration::from_secs(30);
 const PRESENT_RETRY_DELAY: Duration = Duration::from_millis(16);
+const MAX_PASTE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_PASTE_IMAGE_DIMENSION: usize = 16_384;
+const MAX_PASTE_FILES: usize = 4_096;
 
 #[derive(Clone, Copy, Debug, Default)]
 struct GraphicsCheckpoint {
@@ -817,16 +820,55 @@ impl App {
             return vec![];
         };
         if key == "v" {
-            return clipboard
-                .get_text()
-                .map(|text| self.tree.type_text(&text))
-                .unwrap_or_default();
+            if let Ok(text) = clipboard.get_text()
+                && !text.is_empty()
+            {
+                return self.tree.type_text(&text);
+            }
+            return self.rich_paste(&mut clipboard);
         }
         let Some(text) = self.tree.selected_text() else {
             return vec![];
         };
         if clipboard.set_text(text).is_ok() && key == "x" {
             return self.tree.key("Backspace");
+        }
+        vec![]
+    }
+    /// Clipboard payloads without text (file lists, bitmaps) are forwarded to
+    /// the focused node as a `paste` event instead of being dropped.
+    fn rich_paste(&self, clipboard: &mut arboard::Clipboard) -> Vec<serde_json::Value> {
+        let Some(id) = self.tree.focused.clone() else {
+            return vec![];
+        };
+        if let Ok(files) = clipboard.get().file_list()
+            && !files.is_empty()
+        {
+            let files: Vec<String> = files
+                .iter()
+                .take(MAX_PASTE_FILES)
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect();
+            return vec![json!({"type":"paste", "id":id, "files":files})];
+        }
+        if let Ok(image) = clipboard.get_image()
+            && image.width > 0
+            && image.height > 0
+            && image.width <= MAX_PASTE_IMAGE_DIMENSION
+            && image.height <= MAX_PASTE_IMAGE_DIMENSION
+            && image
+                .width
+                .checked_mul(image.height)
+                .and_then(|pixels| pixels.checked_mul(4))
+                .is_some_and(|bytes| bytes == image.bytes.len() && bytes <= MAX_PASTE_IMAGE_BYTES)
+        {
+            use base64::Engine as _;
+            let rgba = base64::engine::general_purpose::STANDARD.encode(&image.bytes);
+            return vec![json!({
+                "type":"paste",
+                "id":id,
+                "image":{"width":image.width, "height":image.height, "rgba":rgba}
+            })];
         }
         vec![]
     }
@@ -854,11 +896,18 @@ impl App {
         self.tree.advance_motion(now_ms);
         self.emit_motion_events();
     }
+    fn sync_input_clock(&mut self) {
+        if self.motion_test_clock {
+            return;
+        }
+        let now_ms = self.motion_epoch.elapsed().as_secs_f64() * 1000.0;
+        self.tree.advance_clock(now_ms);
+    }
     fn motion_deadline(&self, now: Instant) -> Option<Instant> {
         if self.motion_test_clock {
             return None;
         }
-        let next_ms = self.tree.next_motion_tick_ms()?;
+        let next_ms = self.tree.next_clock_tick_ms()?;
         let delta_ms = (next_ms - self.tree.motion_time_ms()).max(0.0);
         Some(now + Duration::from_secs_f64(delta_ms / 1000.0))
     }
@@ -1642,7 +1691,7 @@ impl ApplicationHandler<Command> for App {
             GraphicsState::Recovering(recovery) if recovery.next_attempt <= now
         );
         let motion_due = !self.motion_test_clock
-            && self.tree.next_motion_tick_ms().is_some_and(|deadline| {
+            && self.tree.next_clock_tick_ms().is_some_and(|deadline| {
                 deadline <= self.motion_epoch.elapsed().as_secs_f64() * 1000.0 + 0.001
             });
         if present_due {
@@ -1662,6 +1711,16 @@ impl ApplicationHandler<Command> for App {
         #[cfg(target_os = "windows")]
         if let (Some(accessibility), Some(window)) = (&mut self.accessibility, &self.window) {
             accessibility.process_event(window.as_ref(), &event);
+        }
+        // Input timestamps drive undo coalescing and caret blink phase. Only the
+        // clock moves here (O(1)); motion tracks keep stepping on their deadlines.
+        if matches!(
+            event,
+            WindowEvent::KeyboardInput { .. }
+                | WindowEvent::MouseInput { .. }
+                | WindowEvent::Ime(_)
+        ) {
+            self.sync_input_clock();
         }
         let mut events = vec![];
         let mut accessibility_changed = false;
@@ -1760,7 +1819,15 @@ impl ApplicationHandler<Command> for App {
                     } else {
                         "Tab"
                     }),
-                    Key::Named(NamedKey::Enter) => Some("Enter"),
+                    Key::Named(NamedKey::Enter) => Some(
+                        if self.modifiers.control_key() || self.modifiers.super_key() {
+                            "ModEnter"
+                        } else if self.modifiers.shift_key() {
+                            "ShiftEnter"
+                        } else {
+                            "Enter"
+                        },
+                    ),
                     Key::Named(NamedKey::Space) => Some("Space"),
                     Key::Named(NamedKey::Backspace) => Some("Backspace"),
                     Key::Named(NamedKey::Delete) => Some("Delete"),
@@ -1807,6 +1874,20 @@ impl ApplicationHandler<Command> for App {
                         if self.modifiers.control_key() && value.eq_ignore_ascii_case("a") =>
                     {
                         Some("SelectAll")
+                    }
+                    Key::Character(value)
+                        if self.modifiers.control_key() && value.eq_ignore_ascii_case("z") =>
+                    {
+                        Some(if self.modifiers.shift_key() {
+                            "Redo"
+                        } else {
+                            "Undo"
+                        })
+                    }
+                    Key::Character(value)
+                        if self.modifiers.control_key() && value.eq_ignore_ascii_case("y") =>
+                    {
+                        Some("Redo")
                     }
                     _ => None,
                 };
@@ -1882,10 +1963,7 @@ mod linux_backend_tests {
             "5.15.167.4-MICROSOFT-standard-WSL2",
             Some(":0")
         ));
-        assert!(!should_force_x11_on_wsl(
-            "6.18.0-generic",
-            Some(":0")
-        ));
+        assert!(!should_force_x11_on_wsl("6.18.0-generic", Some(":0")));
         assert!(!should_force_x11_on_wsl(
             "6.18.33.2-microsoft-standard-WSL2",
             None

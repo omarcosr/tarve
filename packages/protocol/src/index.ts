@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 43;
+export const PROTOCOL_VERSION = 44;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 export type MotionProperty = "width" | "height" | "top" | "right" | "bottom" | "left" | "opacity" | "radius";
@@ -116,6 +116,7 @@ export interface NativeNode {
   svg?: string;
   value?: string; placeholder?: string;
   inputType?: "text" | "password" | "email" | "number" | "search" | "tel" | "url";
+  submitOnEnter?: boolean;
   scrollSpeed?: number;
   scrollOrientation?: ScrollOrientation;
   virtualList?: VirtualListLayout;
@@ -194,6 +195,8 @@ export type NativeEvent =
   | { type: "context"; id: string; x: number; y: number }
   | { type: "outside"; id: string }
   | { type: "change"; id: string; value: string }
+  | { type: "submit"; id: string; value: string }
+  | { type: "paste"; id: string; files?: string[]; image?: { width: number; height: number; rgba: string } }
   | { type: "valueChange"; id: string; value: number }
   | { type: "scroll"; id: string; offset: number; max: number; offsetX?: number; offsetY?: number; maxX?: number; maxY?: number }
   | { type: "virtualListLayout"; id: string; items: VirtualListMeasurement[] }

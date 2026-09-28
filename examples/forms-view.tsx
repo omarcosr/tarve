@@ -14,6 +14,7 @@ let volume = 36;
 let tab = "profile";
 let section: string | undefined = "details";
 let saved = false;
+let pasteStatus = "Paste a file or image into Notes to inspect the native clipboard payload.";
 
 const noOutline = Theme.create(lightTheme, {
   focusOutline: {
@@ -41,7 +42,9 @@ export function App() {
                   <Card title="Profile" description="Set the details visible to your team.">
                     <Column gap={6}>
                       <Text size={13} weight={500}>Display name</Text>
-                      <Input id="display-name" value={name} placeholder="Your name" onChange={value => { name = value; saved = false; }} />
+                      <Input id="display-name" value={name} placeholder="Your name"
+                        onChange={value => { name = value; saved = false; }}
+                        onSubmit={() => { saved = true; }} />
                     </Column>
                     <Column gap={6}>
                       <Text size={13} weight={500}>Role</Text>
@@ -54,7 +57,16 @@ export function App() {
                     <Column gap={6}>
                       <Text size={13} weight={500}>Notes</Text>
                       <TextArea id="profile-notes" value={notes} placeholder="Add notes about this workspace..."
-                        onChange={value => { notes = value; saved = false; }} />
+                        onChange={value => { notes = value; saved = false; }}
+                        onSubmit={() => { saved = true; }}
+                        onPaste={payload => {
+                          pasteStatus = payload.kind === "files"
+                            ? `Received ${payload.files.length} file path${payload.files.length === 1 ? "" : "s"}.`
+                            : `Received a ${payload.width} × ${payload.height} RGBA bitmap.`;
+                        }} />
+                      <Text size={12} color={c.mutedForeground}>
+                        Ctrl+Z / Ctrl+Y undo and redo natively. Ctrl+Enter submits Notes. {pasteStatus}
+                      </Text>
                     </Column>
                     <Checkbox id="updates" label="Send me product updates" checked={updates}
                       onCheckedChange={value => { updates = value; saved = false; }} />

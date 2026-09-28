@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 43;
+pub const VERSION: u32 = 44;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -178,6 +178,8 @@ pub struct Node {
     pub placeholder: String,
     #[serde(default = "default_input_type")]
     pub input_type: String,
+    #[serde(default)]
+    pub submit_on_enter: bool,
     #[serde(default = "default_scroll_speed")]
     pub scroll_speed: f64,
     #[serde(default = "default_scroll_orientation")]
@@ -442,32 +444,56 @@ fn validate_motion(node: &Node) -> Result<(), String> {
         };
         for (property, value) in transitions {
             if property != "all" && !MOTION_PROPERTIES.contains(&property.as_str()) {
-                return Err(format!("Unsupported transition property on {}: {property}", node.id));
+                return Err(format!(
+                    "Unsupported transition property on {}: {property}",
+                    node.id
+                ));
             }
             let Some(config) = value.as_object() else {
-                return Err(format!("transition.{property} must be an object on {}", node.id));
+                return Err(format!(
+                    "transition.{property} must be an object on {}",
+                    node.id
+                ));
             };
             for key in config.keys() {
                 if !matches!(key.as_str(), "duration" | "delay" | "easing") {
-                    return Err(format!("Unsupported transition option on {}: {property}.{key}", node.id));
+                    return Err(format!(
+                        "Unsupported transition option on {}: {property}.{key}",
+                        node.id
+                    ));
                 }
             }
             for key in ["duration", "delay"] {
                 if let Some(value) = config.get(key) {
                     let Some(value) = value.as_f64().filter(|value| value.is_finite()) else {
-                        return Err(format!("transition.{property}.{key} must be a finite number on {}", node.id));
+                        return Err(format!(
+                            "transition.{property}.{key} must be a finite number on {}",
+                            node.id
+                        ));
                     };
                     if !(0.0..=600_000.0).contains(&value) {
-                        return Err(format!("transition.{property}.{key} must be between 0 and 600000 on {}", node.id));
+                        return Err(format!(
+                            "transition.{property}.{key} must be between 0 and 600000 on {}",
+                            node.id
+                        ));
                     }
                 }
             }
             if let Some(easing) = config.get("easing") {
                 let Some(easing) = easing.as_str() else {
-                    return Err(format!("transition.{property}.easing must be a string on {}", node.id));
+                    return Err(format!(
+                        "transition.{property}.easing must be a string on {}",
+                        node.id
+                    ));
                 };
-                if !matches!(easing, "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut") {
-                    return Err(format!("Unsupported transition easing on {}: {easing}", node.id));
+                if !matches!(
+                    easing,
+                    "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut"
+                ) {
+                    return Err(format!(
+                        "Unsupported transition easing on {}: {easing}",
+                        node.id
+                    ));
                 }
             }
         }
@@ -479,10 +505,16 @@ fn validate_motion(node: &Node) -> Result<(), String> {
         };
         for (property, value) in values {
             if !MOTION_PROPERTIES.contains(&property.as_str()) {
-                return Err(format!("Unsupported motionFrom property on {}: {property}", node.id));
+                return Err(format!(
+                    "Unsupported motionFrom property on {}: {property}",
+                    node.id
+                ));
             }
             if value.as_f64().is_none_or(|value| !value.is_finite()) {
-                return Err(format!("motionFrom.{property} must be a finite number on {}", node.id));
+                return Err(format!(
+                    "motionFrom.{property} must be a finite number on {}",
+                    node.id
+                ));
             }
         }
     }

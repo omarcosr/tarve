@@ -157,7 +157,10 @@ mod wake_pipe {
     use std::{
         fs,
         io::{self, Write},
-        os::unix::{fs::PermissionsExt, net::{UnixListener, UnixStream}},
+        os::unix::{
+            fs::PermissionsExt,
+            net::{UnixListener, UnixStream},
+        },
         path::PathBuf,
         sync::atomic::{AtomicU64, Ordering},
     };
@@ -179,7 +182,9 @@ mod wake_pipe {
                 let path = directory.join(format!("tarve-events-{}-{id}.sock", std::process::id()));
                 match UnixListener::bind(&path) {
                     Ok(listener) => {
-                        listener.set_nonblocking(true).map_err(|error| error.to_string())?;
+                        listener
+                            .set_nonblocking(true)
+                            .map_err(|error| error.to_string())?;
                         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
                             .map_err(|error| error.to_string())?;
                         let name = path
@@ -266,7 +271,9 @@ mod wake_pipe {
         pub fn new() -> Result<Self, String> {
             Err("Native event wake transport is not supported on this platform".into())
         }
-        pub fn name(&self) -> &str { "" }
+        pub fn name(&self) -> &str {
+            ""
+        }
         pub fn signal(&mut self) {}
         pub fn close(&mut self) {}
     }
@@ -372,10 +379,7 @@ mod json_input_tests {
     fn read_json_rejects_oversized_input_before_dereferencing_the_buffer() {
         let byte = b'0';
         let result = unsafe {
-            read_json::<serde_json::Value>(
-                std::ptr::from_ref(&byte),
-                MAX_JSON_INPUT_BYTES + 1,
-            )
+            read_json::<serde_json::Value>(std::ptr::from_ref(&byte), MAX_JSON_INPUT_BYTES + 1)
         };
         assert_eq!(result.unwrap_err(), "Invalid input buffer");
     }
@@ -449,7 +453,11 @@ fn open_external(target: &str) -> Result<(), String> {
         match std::process::Command::new("xdg-open").arg(target).spawn() {
             Ok(_) => return Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("Could not open external URI with xdg-open: {error}")),
+            Err(error) => {
+                return Err(format!(
+                    "Could not open external URI with xdg-open: {error}"
+                ));
+            }
         }
         std::process::Command::new("gio")
             .args(["open", target])
@@ -824,7 +832,9 @@ mod unix_tests {
         let events = Events::new().expect("wake socket");
         let name = events.wake_pipe_name();
         let mut client = UnixStream::connect(&name).expect("connect wake socket client");
-        client.set_nonblocking(true).expect("nonblocking wake socket client");
+        client
+            .set_nonblocking(true)
+            .expect("nonblocking wake socket client");
 
         events.push(serde_json::json!({"type":"first"}));
         let mut byte = [0u8; 1];
@@ -832,7 +842,9 @@ mod unix_tests {
         assert_eq!(byte, [1]);
 
         events.push(serde_json::json!({"type":"second"}));
-        let error = client.read(&mut byte).expect_err("queued bursts must coalesce wake signals");
+        let error = client
+            .read(&mut byte)
+            .expect_err("queued bursts must coalesce wake signals");
         assert_eq!(error.kind(), ErrorKind::WouldBlock);
 
         events
@@ -846,6 +858,9 @@ mod unix_tests {
 
         drop(client);
         drop(events);
-        assert!(!Path::new(&name).exists(), "wake socket must be removed on drop");
+        assert!(
+            !Path::new(&name).exists(),
+            "wake socket must be removed on drop"
+        );
     }
 }

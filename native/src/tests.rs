@@ -2294,12 +2294,7 @@ fn virtual_list_search_excludes_the_parked_retained_row() {
         json!({"height":40,"shrink":0}),
         vec![visible_text],
     );
-    let after = node(
-        "after",
-        "row",
-        json!({"height":40,"shrink":0}),
-        vec![],
-    );
+    let after = node("after", "row", json!({"height":40,"shrink":0}), vec![]);
     let mut parked_text = node("parked-text", "text", json!({}), vec![]);
     parked_text.text = "needle parked".into();
     let parked_row = node(
@@ -2327,8 +2322,7 @@ fn virtual_list_search_excludes_the_parked_retained_row() {
         json!({"width":240,"height":80}),
         vec![content],
     );
-    list.control =
-        Some(serde_json::from_value(json!({"role":"virtualList","value":0})).unwrap());
+    list.control = Some(serde_json::from_value(json!({"role":"virtualList","value":0})).unwrap());
     list.virtual_list = Some(
         serde_json::from_value(json!({
             "estimatedItemHeight":40,
@@ -3262,7 +3256,10 @@ fn raw_rgba_updates_replace_pixels_under_a_stable_cache_key() {
         .unwrap(),
     );
     let mut tree = Tree::new(root(vec![dynamic.clone()]));
-    assert_eq!(tree.image_cache_bytes("live-preview"), Some(vec![255, 0, 0, 255]));
+    assert_eq!(
+        tree.image_cache_bytes("live-preview"),
+        Some(vec![255, 0, 0, 255])
+    );
 
     dynamic.image = Some(
         serde_json::from_value(json!({
@@ -3276,7 +3273,10 @@ fn raw_rgba_updates_replace_pixels_under_a_stable_cache_key() {
     );
     tree.update(root(vec![dynamic]));
     assert_eq!(tree.image_cache_len(), 1);
-    assert_eq!(tree.image_cache_bytes("live-preview"), Some(vec![0, 255, 0, 255]));
+    assert_eq!(
+        tree.image_cache_bytes("live-preview"),
+        Some(vec![0, 255, 0, 255])
+    );
     assert!(tree.warnings.is_empty());
 }
 
@@ -3300,7 +3300,10 @@ fn encoded_png_bytes_decode_without_a_filesystem_source() {
     );
 
     let tree = Tree::new(root(vec![inline]));
-    assert_eq!(tree.image_cache_bytes("inline-png"), Some(vec![12, 34, 56, 255]));
+    assert_eq!(
+        tree.image_cache_bytes("inline-png"),
+        Some(vec![12, 34, 56, 255])
+    );
     assert!(tree.warnings.is_empty());
 }
 
@@ -3319,7 +3322,11 @@ fn dynamic_images_reject_oversized_dimensions_before_entering_the_cache() {
     );
     let tree = Tree::new(root(vec![oversized]));
     assert_eq!(tree.image_cache_len(), 0);
-    assert!(tree.warnings.iter().any(|warning| warning.contains("dimensions")));
+    assert!(
+        tree.warnings
+            .iter()
+            .any(|warning| warning.contains("dimensions"))
+    );
 }
 
 #[test]
@@ -4338,12 +4345,7 @@ fn removing_a_node_cancels_its_motion_without_a_stale_completion() {
 
 #[test]
 fn protocol_rejects_invalid_native_motion_values_without_tightening_static_opacity() {
-    let clamped_static_opacity = root(vec![node(
-        "panel",
-        "view",
-        json!({"opacity":1.5}),
-        vec![],
-    )]);
+    let clamped_static_opacity = root(vec![node("panel", "view", json!({"opacity":1.5}), vec![])]);
     protocol::validate(&clamped_static_opacity).unwrap();
 
     let invalid_transition = root(vec![node(
@@ -4352,5 +4354,212 @@ fn protocol_rejects_invalid_native_motion_values_without_tightening_static_opaci
         json!({"transition":{"opacity":{"duration":100,"easing":"spring"}}}),
         vec![],
     )]);
-    assert!(protocol::validate(&invalid_transition).unwrap_err().contains("Unsupported transition easing"));
+    assert!(
+        protocol::validate(&invalid_transition)
+            .unwrap_err()
+            .contains("Unsupported transition easing")
+    );
+}
+
+fn editor_tree(kind: &str, value: &str) -> Tree {
+    let mut field = node(
+        "field",
+        kind,
+        json!({"width":240,"height":80,"fontSize":14,"userSelect":"text"}),
+        vec![],
+    );
+    field.value = Some(value.into());
+    let mut tree = Tree::new(root(vec![field]));
+    tree.compute(300.0, 120.0).unwrap();
+    let _ = tree.focus("field");
+    tree
+}
+
+fn field_value(tree: &Tree) -> &str {
+    tree.entries["field"].node.value.as_deref().unwrap()
+}
+
+#[test]
+fn native_undo_redo_coalesces_typing_and_restores_caret() {
+    let mut tree = editor_tree("input", "");
+    for ch in ["h", "i", " "] {
+        tree.type_text(ch);
+    }
+    tree.advance_motion(10.0);
+    for ch in ["y", "o"] {
+        tree.type_text(ch);
+    }
+    assert_eq!(field_value(&tree), "hi yo");
+
+    let events = tree.key("Undo");
+    assert_eq!(
+        events,
+        vec![json!({"type":"change", "id":"field", "value":"hi "})]
+    );
+    tree.key("Undo");
+    assert_eq!(field_value(&tree), "");
+    assert!(tree.key("Undo").is_empty());
+
+    tree.key("Redo");
+    assert_eq!(field_value(&tree), "hi ");
+    tree.key("Redo");
+    assert_eq!(field_value(&tree), "hi yo");
+    tree.type_text("!");
+    assert_eq!(field_value(&tree), "hi yo!");
+
+    tree.key("Undo");
+    tree.key("Backspace");
+    assert!(
+        tree.key("Redo").is_empty(),
+        "a new edit clears the redo stack"
+    );
+    tree.key("Undo");
+    assert_eq!(field_value(&tree), "hi yo");
+    tree.type_text("Z");
+    assert_eq!(field_value(&tree), "hi yoZ", "caret is restored to the end");
+}
+
+#[test]
+fn native_undo_separates_deletes_pastes_and_pauses() {
+    let mut tree = editor_tree("textarea", "abc");
+    tree.key("End");
+    tree.key("Backspace");
+    tree.key("Backspace");
+    tree.type_text("pasted text");
+    tree.advance_motion(5_000.0);
+    tree.type_text("x");
+    assert_eq!(field_value(&tree), "apasted textx");
+    tree.key("Undo");
+    assert_eq!(field_value(&tree), "apasted text");
+    tree.key("Undo");
+    assert_eq!(field_value(&tree), "a");
+    tree.key("Undo");
+    assert_eq!(field_value(&tree), "abc");
+}
+
+#[test]
+fn native_undo_history_resets_after_external_value_change() {
+    let mut tree = editor_tree("input", "one");
+    tree.key("End");
+    tree.type_text("!");
+    let mut replaced = node(
+        "field",
+        "input",
+        json!({"width":240,"height":80,"fontSize":14}),
+        vec![],
+    );
+    replaced.value = Some("server".into());
+    tree.update(root(vec![replaced]));
+    assert!(tree.key("Undo").is_empty());
+    assert_eq!(field_value(&tree), "server");
+}
+
+#[test]
+fn native_undo_history_resets_when_controlled_value_returns_to_previous() {
+    let mut tree = editor_tree("input", "");
+    tree.type_text("x");
+    let controlled = |value: &str| {
+        let mut field = node(
+            "field",
+            "input",
+            json!({"width":240,"height":80,"fontSize":14,"userSelect":"text"}),
+            vec![],
+        );
+        field.value = Some(value.into());
+        root(vec![field])
+    };
+    tree.update(controlled("x"));
+    tree.update(controlled("server"));
+    tree.update(controlled("x"));
+    assert!(tree.key("Undo").is_empty());
+    assert_eq!(field_value(&tree), "x");
+}
+
+#[test]
+fn input_clock_does_not_step_motion_tracks() {
+    let mut tree = editor_tree("input", "abc");
+    tree.advance_clock(600.0);
+    assert!(!tree.caret_visible());
+    assert_eq!(tree.motion_time_ms(), 600.0);
+    tree.advance_clock(f64::NAN);
+    assert_eq!(tree.motion_time_ms(), 600.0);
+}
+
+#[test]
+fn input_and_textarea_emit_explicit_submit_events() {
+    let mut input = editor_tree("input", "query");
+    let submit = json!({"type":"submit", "id":"field", "value":"query"});
+    assert_eq!(input.key("Enter"), vec![submit.clone()]);
+    assert_eq!(input.key("ShiftEnter"), vec![submit.clone()]);
+    assert_eq!(input.key("ModEnter"), vec![submit]);
+
+    let mut textarea = editor_tree("textarea", "a");
+    textarea.key("End");
+    assert_eq!(textarea.key("Enter")[0]["type"], "change");
+    assert_eq!(textarea.key("ShiftEnter")[0]["type"], "change");
+    assert_eq!(field_value(&textarea), "a\n\n");
+    assert_eq!(textarea.key("ModEnter")[0]["type"], "submit");
+
+    let mut chat = node(
+        "field",
+        "textarea",
+        json!({"width":240,"height":80}),
+        vec![],
+    );
+    chat.value = Some("hi".into());
+    chat.submit_on_enter = true;
+    let mut chat_tree = Tree::new(root(vec![chat]));
+    chat_tree.compute(300.0, 120.0).unwrap();
+    let _ = chat_tree.focus("field");
+    chat_tree.key("End");
+    assert_eq!(chat_tree.key("Enter")[0]["type"], "submit");
+    assert_eq!(chat_tree.key("ShiftEnter")[0]["type"], "change");
+    assert_eq!(field_value(&chat_tree), "hi\n");
+}
+
+#[test]
+fn modified_enter_still_activates_buttons() {
+    let mut tree = Tree::new(root(vec![node(
+        "ok",
+        "button",
+        json!({"width":80,"height":30}),
+        vec![],
+    )]));
+    tree.compute(200.0, 100.0).unwrap();
+    let _ = tree.focus("ok");
+    assert_eq!(
+        tree.key("ShiftEnter"),
+        vec![json!({"type":"click", "id":"ok"})]
+    );
+}
+
+#[test]
+fn caret_blinks_after_activity_and_settles_without_idle_frames() {
+    let mut tree = editor_tree("input", "abc");
+    assert!(tree.caret_visible());
+    assert_eq!(tree.next_caret_blink_ms(), Some(530.0));
+    assert_eq!(tree.next_clock_tick_ms(), Some(530.0));
+    assert_eq!(tree.next_motion_tick_ms(), None, "blink is not a motion");
+
+    tree.dirty.paint = false;
+    tree.advance_motion(530.0);
+    assert!(!tree.caret_visible());
+    assert!(tree.dirty.paint);
+
+    tree.type_text("d");
+    assert!(tree.caret_visible(), "editing resets the blink phase");
+    assert_eq!(tree.next_caret_blink_ms(), Some(1_060.0));
+
+    tree.advance_motion(530.0 + 10_000.0);
+    assert!(tree.caret_visible());
+    assert_eq!(tree.next_caret_blink_ms(), None);
+    assert_eq!(tree.next_clock_tick_ms(), None);
+
+    tree.key("ArrowLeft");
+    assert!(
+        tree.next_caret_blink_ms().is_some(),
+        "navigation wakes the blink"
+    );
+    tree.blur();
+    assert_eq!(tree.next_caret_blink_ms(), None);
 }

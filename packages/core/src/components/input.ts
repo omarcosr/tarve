@@ -9,6 +9,8 @@ export interface InputProps extends BaseProps {
   placeholder?: string;
   disabled?: boolean;
   onChange?: (value: string) => void;
+  /** Enter (with or without modifiers) submits the current value. */
+  onSubmit?: (value: string) => void;
 }
 
 const inputTypes = new Set<InputType>(["text", "password", "email", "number", "search", "tel", "url"]);
@@ -48,7 +50,10 @@ export interface TextAreaProps extends BaseProps {
   value?: string;
   placeholder?: string;
   disabled?: boolean;
+  /** When true, Enter submits and Shift+Enter inserts a newline. Ctrl/Cmd+Enter always submits. */
+  submitOnEnter?: boolean;
   onChange?: (value: string) => void;
+  onSubmit?: (value: string) => void;
 }
 
 export function TextArea({ style, ...props }: TextAreaProps): VNode {

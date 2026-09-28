@@ -109,12 +109,19 @@ fn motion_transition(node: &Node, property: &str) -> Option<(f64, f64, MotionEas
         .get(property)
         .or_else(|| transitions.get("all"))?
         .as_object()?;
-    let duration = config.get("duration").and_then(Value::as_f64).unwrap_or(200.0);
+    let duration = config
+        .get("duration")
+        .and_then(Value::as_f64)
+        .unwrap_or(200.0);
     let delay = config.get("delay").and_then(Value::as_f64).unwrap_or(0.0);
     if !duration.is_finite() || duration <= 0.0 || !delay.is_finite() || delay < 0.0 {
         return None;
     }
-    let easing = match config.get("easing").and_then(Value::as_str).unwrap_or("ease") {
+    let easing = match config
+        .get("easing")
+        .and_then(Value::as_str)
+        .unwrap_or("ease")
+    {
         "linear" => MotionEasing::Linear,
         "easeIn" => MotionEasing::EaseIn,
         "easeOut" => MotionEasing::EaseOut,
@@ -133,7 +140,10 @@ fn motion_target(node: &Node, property: &str) -> Option<f32> {
 }
 
 fn motion_is_layout(property: &str) -> bool {
-    matches!(property, "width" | "height" | "top" | "right" | "bottom" | "left")
+    matches!(
+        property,
+        "width" | "height" | "top" | "right" | "bottom" | "left"
+    )
 }
 const MAX_SVG_RASTER_DIMENSION: u32 = 4096;
 const MAX_VIRTUAL_MEASUREMENTS_PER_LIST: usize = 100_000;
@@ -522,16 +532,36 @@ fn visual_number(node: &Node, key: &str, fallback: f32, state: VisualState) -> f
 fn visual_state_overrides(node: &Node, key: &str, state: VisualState) -> bool {
     (state.hovered
         && !state.disabled
-        && node.style.get("hover").and_then(|style| style.get(key)).is_some_and(|value| !value.is_null()))
+        && node
+            .style
+            .get("hover")
+            .and_then(|style| style.get(key))
+            .is_some_and(|value| !value.is_null()))
         || (state.active
             && !state.disabled
-            && node.style.get("active").and_then(|style| style.get(key)).is_some_and(|value| !value.is_null()))
+            && node
+                .style
+                .get("active")
+                .and_then(|style| style.get(key))
+                .is_some_and(|value| !value.is_null()))
         || (state.focused
-            && node.style.get("focus").and_then(|style| style.get(key)).is_some_and(|value| !value.is_null()))
+            && node
+                .style
+                .get("focus")
+                .and_then(|style| style.get(key))
+                .is_some_and(|value| !value.is_null()))
         || (state.focus_visible
-            && node.style.get("focusVisible").and_then(|style| style.get(key)).is_some_and(|value| !value.is_null()))
+            && node
+                .style
+                .get("focusVisible")
+                .and_then(|style| style.get(key))
+                .is_some_and(|value| !value.is_null()))
         || (state.disabled
-            && node.style.get("disabled").and_then(|style| style.get(key)).is_some_and(|value| !value.is_null()))
+            && node
+                .style
+                .get("disabled")
+                .and_then(|style| style.get(key))
+                .is_some_and(|value| !value.is_null()))
 }
 
 fn visual_motion_number(entry: &Entry, key: &str, fallback: f32, state: VisualState) -> f32 {
@@ -652,8 +682,12 @@ fn motion_tracks_for_node(
                 .map(|track| track.current)
                 .or(previous_target)
                 .or_else(|| match *property {
-                    "width" if previous.rect.width().is_finite() => Some(previous.rect.width() as f32),
-                    "height" if previous.rect.height().is_finite() => Some(previous.rect.height() as f32),
+                    "width" if previous.rect.width().is_finite() => {
+                        Some(previous.rect.width() as f32)
+                    }
+                    "height" if previous.rect.height().is_finite() => {
+                        Some(previous.rect.height() as f32)
+                    }
                     "opacity" => Some(1.0),
                     "radius" => Some(0.0),
                     _ => None,
@@ -717,6 +751,34 @@ struct HighlightMatchCache {
     matches: Vec<Range<usize>>,
 }
 
+const CARET_BLINK_MS: f64 = 530.0;
+const CARET_BLINK_IDLE_MS: f64 = 10_000.0;
+const EDIT_HISTORY_LIMIT: usize = 200;
+const EDIT_COALESCE_MS: f64 = 1_000.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditKind {
+    Insert,
+    Delete,
+    Other,
+}
+
+#[derive(Clone, Debug)]
+struct EditSnapshot {
+    value: String,
+    caret: usize,
+    anchor: Option<usize>,
+}
+
+#[derive(Default)]
+struct EditHistory {
+    undo: Vec<EditSnapshot>,
+    redo: Vec<EditSnapshot>,
+    value: Option<String>,
+    last_kind: Option<EditKind>,
+    last_ms: f64,
+}
+
 pub struct Tree {
     pub root: String,
     pub entries: HashMap<String, Entry>,
@@ -738,6 +800,8 @@ pub struct Tree {
     pending_interaction_events: Vec<Value>,
     pending_motion_events: Vec<Value>,
     motion_time_ms: f64,
+    caret_activity_ms: f64,
+    edit_history: HashMap<String, EditHistory>,
     virtual_focus: Option<(String, String)>,
     stacking: HashMap<String, f32>,
     window_chrome_suppressed: bool,
@@ -862,6 +926,8 @@ impl Tree {
             pending_interaction_events: Vec::new(),
             pending_motion_events: Vec::new(),
             motion_time_ms: 0.0,
+            caret_activity_ms: 0.0,
+            edit_history: HashMap::new(),
             virtual_focus: None,
             stacking: HashMap::new(),
             window_chrome_suppressed: false,
@@ -904,11 +970,23 @@ impl Tree {
         self.dirty.paint = true;
         true
     }
+    /// Moves the native clock without stepping motion tracks. Cheap enough to
+    /// run on every input event; tracks catch up on their next frame deadline.
+    pub fn advance_clock(&mut self, now_ms: f64) {
+        if !now_ms.is_finite() {
+            return;
+        }
+        let caret_was_visible = self.caret_visible();
+        self.motion_time_ms = self.motion_time_ms.max(now_ms);
+        if self.caret_blink_target().is_some() && caret_was_visible != self.caret_visible() {
+            self.dirty.paint = true;
+        }
+    }
     pub fn advance_motion(&mut self, now_ms: f64) {
         if !now_ms.is_finite() {
             return;
         }
-        self.motion_time_ms = self.motion_time_ms.max(now_ms);
+        self.advance_clock(now_ms);
         let mut completed = Vec::new();
         for (id, entry) in &mut self.entries {
             let properties: Vec<String> = entry.motions.keys().cloned().collect();
@@ -961,6 +1039,45 @@ impl Tree {
     pub fn motion_time_ms(&self) -> f64 {
         self.motion_time_ms
     }
+    /// Earliest native clock deadline: motion frames or the next caret blink phase.
+    pub fn next_clock_tick_ms(&self) -> Option<f64> {
+        match (self.next_motion_tick_ms(), self.next_caret_blink_ms()) {
+            (Some(motion), Some(caret)) => Some(motion.min(caret)),
+            (motion, caret) => motion.or(caret),
+        }
+    }
+    fn caret_blink_target(&self) -> Option<&str> {
+        let id = self.focused.as_deref()?;
+        let entry = self.entries.get(id)?;
+        (matches!(entry.node.kind.as_str(), "input" | "textarea")
+            && !entry.node.disabled
+            && self.user_select_mode(id) != UserSelectMode::None)
+            .then_some(id)
+    }
+    /// Caret blinks after activity and settles solid once idle, so an idle
+    /// focused editor schedules no further frames.
+    pub(crate) fn caret_visible(&self) -> bool {
+        let elapsed = self.motion_time_ms - self.caret_activity_ms;
+        if !(0.0..CARET_BLINK_IDLE_MS).contains(&elapsed) {
+            return true;
+        }
+        ((elapsed / CARET_BLINK_MS).floor() as u64).is_multiple_of(2)
+    }
+    pub fn next_caret_blink_ms(&self) -> Option<f64> {
+        self.caret_blink_target()?;
+        let elapsed = (self.motion_time_ms - self.caret_activity_ms).max(0.0);
+        if elapsed >= CARET_BLINK_IDLE_MS {
+            return None;
+        }
+        let next = ((elapsed / CARET_BLINK_MS).floor() + 1.0) * CARET_BLINK_MS;
+        Some(self.caret_activity_ms + next.min(CARET_BLINK_IDLE_MS))
+    }
+    fn touch_caret(&mut self) {
+        if !self.caret_visible() {
+            self.dirty.paint = true;
+        }
+        self.caret_activity_ms = self.motion_time_ms;
+    }
     pub fn update(&mut self, root: Node) {
         let previous_modal = self.active_modal().map(str::to_string);
         let previous_focus = self.focused.clone();
@@ -1010,6 +1127,17 @@ impl Tree {
         }
     }
     fn reconcile_node(&mut self, mut node: Node, child_ids: Vec<String>, previous: Option<Entry>) {
+        // Any external value change invalidates undo history immediately, so a
+        // controlled value that later returns to an old string (A -> B -> A)
+        // cannot resurrect stale steps. User edits already updated the retained
+        // value in set_input, so their echo compares equal and keeps history.
+        if previous.as_ref().is_some_and(|entry| {
+            entry.node.kind != node.kind
+                || (matches!(node.kind.as_str(), "input" | "textarea")
+                    && entry.node.value != node.value)
+        }) {
+            self.edit_history.remove(&node.id);
+        }
         let rich_changed = previous.as_ref().is_none_or(|prev| {
             node.kind != prev.node.kind
                 || node.source != prev.node.source
@@ -2904,6 +3032,7 @@ impl Tree {
             if matches!(node.kind.as_str(), "input" | "textarea")
                 && self.focused.as_deref() == Some(id)
                 && self.user_select_mode(id) != UserSelectMode::None
+                && (ime_display.is_some() || self.caret_visible())
             {
                 let caret = if let Some(display) = &ime_display {
                     display.cursor_range.map(|(_, caret)| caret)
@@ -3353,6 +3482,7 @@ impl Tree {
             self.static_text_dragging = false;
             self.caret = self.entries[id].node.value.as_deref().map_or(0, str::len);
             self.dirty.paint = true;
+            self.touch_caret();
         }
         let mut virtual_scrolls = Vec::new();
         let mut ancestor = self.entries[id].parent.clone();
@@ -3410,6 +3540,11 @@ impl Tree {
         self.focus_with_visibility(id, true)
     }
     fn prune_interaction(&mut self) {
+        self.edit_history.retain(|id, _| {
+            self.entries
+                .get(id)
+                .is_some_and(|entry| matches!(entry.node.kind.as_str(), "input" | "textarea"))
+        });
         let keep_hovered = self
             .hovered
             .as_deref()
@@ -4294,6 +4429,7 @@ impl Tree {
     }
 
     pub(crate) fn ime_preedit(&mut self, target: &str, text: &str, cursor: Option<(usize, usize)>) {
+        self.touch_caret();
         if self.focused.as_deref() != Some(target)
             || !self
                 .entries
@@ -4455,7 +4591,14 @@ impl Tree {
         }
         self.caret = start + committed.len();
         self.selection_anchor = None;
-        self.set_input(target.to_string(), value)
+        self.commit_edit(
+            target.to_string(),
+            ime.base_value,
+            (ime.original_caret, ime.original_anchor),
+            value,
+            EditKind::Other,
+            true,
+        )
     }
 
     fn selected_range(&self) -> Option<(usize, usize)> {
@@ -4490,6 +4633,16 @@ impl Tree {
     }
     pub fn key(&mut self, key: &str) -> Vec<Value> {
         self.set_focus_visible(true);
+        let editable_focus = self
+            .focused
+            .as_deref()
+            .and_then(|id| self.entries.get(id))
+            .is_some_and(|entry| matches!(entry.node.kind.as_str(), "input" | "textarea"));
+        let key = if !editable_focus && matches!(key, "ShiftEnter" | "ModEnter") {
+            "Enter"
+        } else {
+            key
+        };
         if key == "Tab" || key == "ShiftTab" {
             let ids = self.focus_order();
             if !ids.is_empty() {
@@ -4713,10 +4866,25 @@ impl Tree {
         let multiline = self.entries[&id].node.kind == "textarea";
         let value = self.entries[&id].node.value.clone().unwrap_or_default();
         self.caret = floor_boundary(&value, self.caret.min(value.len()));
+        self.touch_caret();
+        let origin = (self.caret, self.selection_anchor);
         if user_select == UserSelectMode::None {
             self.selection_anchor = None;
         }
-        let selecting = key.starts_with("Shift") && user_select != UserSelectMode::None;
+        match key {
+            "Undo" => return self.undo_edit(&id, false),
+            "Redo" => return self.undo_edit(&id, true),
+            _ => {}
+        }
+        let submit_on_enter = !multiline || self.entries[&id].node.submit_on_enter;
+        if key == "ModEnter"
+            || (submit_on_enter && key == "Enter")
+            || (!multiline && key == "ShiftEnter")
+        {
+            return vec![json!({"type":"submit", "id":id, "value":value})];
+        }
+        let selecting =
+            key.starts_with("Shift") && key != "ShiftEnter" && user_select != UserSelectMode::None;
         let key = key.strip_prefix("Shift").unwrap_or(key);
         if user_select == UserSelectMode::All && (selecting || key == "SelectAll") {
             self.selection_anchor = Some(0);
@@ -4794,7 +4962,7 @@ impl Tree {
                 changed.insert(self.caret, '\n');
                 self.caret += 1;
                 self.selection_anchor = None;
-                return self.set_input(id, changed);
+                return self.commit_edit(id, value, origin, changed, EditKind::Other, true);
             }
             "Backspace" | "Delete" => {
                 let mut changed = value.clone();
@@ -4809,7 +4977,12 @@ impl Tree {
                     changed.replace_range(self.caret..next_boundary(&value, self.caret), "");
                 }
                 self.selection_anchor = None;
-                return self.set_input(id, changed);
+                let kind = if origin.1.is_some_and(|anchor| anchor != origin.0) {
+                    EditKind::Other
+                } else {
+                    EditKind::Delete
+                };
+                return self.commit_edit(id, value, origin, changed, kind, false);
             }
             _ => return vec![],
         }
@@ -4829,6 +5002,8 @@ impl Tree {
         }
         let multiline = self.entries[&id].node.kind == "textarea";
         let mut value = self.entries[&id].node.value.clone().unwrap_or_default();
+        let before = value.clone();
+        let origin = (self.caret, self.selection_anchor);
         if let Some((start, end)) = self.selected_range() {
             value.replace_range(start..end, "");
             self.caret = start;
@@ -4847,7 +5022,86 @@ impl Tree {
         }
         self.caret += text.len();
         self.selection_anchor = None;
+        let replaced = origin.1.is_some_and(|anchor| anchor != origin.0);
+        let kind = if replaced || text.chars().count() > 1 {
+            EditKind::Other
+        } else {
+            EditKind::Insert
+        };
+        let boundary = text.ends_with(char::is_whitespace);
+        self.commit_edit(id, before, origin, value, kind, boundary)
+    }
+    /// Records a user edit in the per-field undo history, then applies it.
+    /// Consecutive typing or deletion coalesces into one step; an external
+    /// (controlled) value change invalidates the history for that field.
+    fn commit_edit(
+        &mut self,
+        id: String,
+        before: String,
+        origin: (usize, Option<usize>),
+        value: String,
+        kind: EditKind,
+        boundary: bool,
+    ) -> Vec<Value> {
+        if before != value {
+            let now = self.motion_time_ms;
+            let history = self.edit_history.entry(id.clone()).or_default();
+            if history.value.as_deref() != Some(before.as_str()) {
+                history.undo.clear();
+                history.redo.clear();
+                history.last_kind = None;
+            }
+            let coalesce = kind != EditKind::Other
+                && history.last_kind == Some(kind)
+                && now - history.last_ms <= EDIT_COALESCE_MS
+                && !history.undo.is_empty();
+            if !coalesce {
+                history.undo.push(EditSnapshot {
+                    value: before,
+                    caret: origin.0,
+                    anchor: origin.1,
+                });
+                if history.undo.len() > EDIT_HISTORY_LIMIT {
+                    history.undo.remove(0);
+                }
+            }
+            history.redo.clear();
+            history.value = Some(value.clone());
+            history.last_kind = (!boundary && kind != EditKind::Other).then_some(kind);
+            history.last_ms = now;
+        }
         self.set_input(id, value)
+    }
+    fn undo_edit(&mut self, id: &str, redo: bool) -> Vec<Value> {
+        let current = self.entries[id].node.value.clone().unwrap_or_default();
+        let Some(history) = self.edit_history.get_mut(id) else {
+            return vec![];
+        };
+        if history.value.as_deref() != Some(current.as_str()) {
+            self.edit_history.remove(id);
+            return vec![];
+        }
+        let (from, to) = if redo {
+            (&mut history.redo, &mut history.undo)
+        } else {
+            (&mut history.undo, &mut history.redo)
+        };
+        let Some(snapshot) = from.pop() else {
+            return vec![];
+        };
+        to.push(EditSnapshot {
+            value: current,
+            caret: self.caret,
+            anchor: self.selection_anchor,
+        });
+        history.value = Some(snapshot.value.clone());
+        history.last_kind = None;
+        let len = snapshot.value.len();
+        self.caret = floor_boundary(&snapshot.value, snapshot.caret.min(len));
+        self.selection_anchor = snapshot
+            .anchor
+            .map(|anchor| floor_boundary(&snapshot.value, anchor.min(len)));
+        self.set_input(id.to_string(), snapshot.value)
     }
     fn set_input(&mut self, id: String, value: String) -> Vec<Value> {
         let entry = self.entries.get_mut(&id).unwrap();
@@ -4855,6 +5109,7 @@ impl Tree {
         entry.measure_dirty = true;
         self.text.layouts.remove(&id);
         self.dirty = Dirty::all();
+        self.touch_caret();
         vec![json!({"type":"change", "id": id, "value": value})]
     }
 
@@ -4987,11 +5242,24 @@ impl Tree {
         if self.ime_target() == Some(id) {
             self.ime_cancel();
         }
+        let origin = (self.caret, self.selection_anchor);
         if self.focused.as_deref() == Some(id) {
             self.caret = value.len();
             self.selection_anchor = None;
         }
-        self.set_input(id.to_string(), value.to_string())
+        let before = self
+            .entries
+            .get(id)
+            .and_then(|entry| entry.node.value.clone())
+            .unwrap_or_default();
+        self.commit_edit(
+            id.to_string(),
+            before,
+            origin,
+            value.to_string(),
+            EditKind::Other,
+            true,
+        )
     }
 
     pub(crate) fn accessibility_replace_selected_text(
@@ -5017,9 +5285,11 @@ impl Tree {
             return vec![];
         }
         self.ime_cancel();
+        let origin = (self.caret, self.selection_anchor);
+        let before = self.entries[id].node.value.clone().unwrap_or_default();
         self.caret = start + replacement.len();
         self.selection_anchor = None;
-        self.set_input(id.to_string(), value)
+        self.commit_edit(id.to_string(), before, origin, value, EditKind::Other, true)
     }
 
     pub(crate) fn accessibility_set_text_selection(
@@ -5540,6 +5810,7 @@ impl Tree {
         if let Some(index) = self.text.index_at(id, x, y, multiline.then_some(width)) {
             self.caret = input_actual_index(&entry.node, value, index);
             self.dirty.paint = true;
+            self.touch_caret();
         }
     }
 
@@ -6050,16 +6321,16 @@ fn limit(v: &Value) -> LengthPercentageAuto {
     auto()
 }
 fn motion_dimension(entry: &Entry, key: &str) -> Dimension {
-    entry
-        .motions
-        .get(key)
-        .map_or_else(|| dimension(&entry.node.style[key]), |track| length(track.current))
+    entry.motions.get(key).map_or_else(
+        || dimension(&entry.node.style[key]),
+        |track| length(track.current),
+    )
 }
 fn motion_limit(entry: &Entry, key: &str) -> LengthPercentageAuto {
-    entry
-        .motions
-        .get(key)
-        .map_or_else(|| limit(&entry.node.style[key]), |track| length(track.current))
+    entry.motions.get(key).map_or_else(
+        || limit(&entry.node.style[key]),
+        |track| length(track.current),
+    )
 }
 fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
     let node = &entry.node;

@@ -3,7 +3,7 @@ import type { NativeCommand, NativeEvent, SceneDocument } from "../../protocol/s
 import { createApp, type AppErrorEvent } from "./app";
 import type { NativeBridge } from "./bridge";
 import { Slider } from "./controls";
-import { Button, Column, Diff, Input, ScrollArea, Text, Window } from "./components";
+import { Button, Column, Diff, Input, ScrollArea, Text, Window, TextArea } from "./components";
 import { InputOTP } from "./form-controls";
 import { Svg } from "./components/svg";
 import { VirtualList } from "./virtual-list";
@@ -351,6 +351,37 @@ describe("controlled native reconciliation", () => {
     const patch = bridge.commands.find(command => command.type === "patch");
     expect(patch?.type).toBe("patch");
     if (patch?.type === "patch") expect(patch.nodes.find(node => node.id === "input")?.value).toBe("12");
+  });
+
+  test("dispatches native submit and non-text paste events to editor handlers", async () => {
+    const bridge = new FakeBridge();
+    const submitted: string[] = [];
+    const pasted: unknown[] = [];
+    const app = createApp(() => (
+      <Window>
+        <Input id="input" value="query" onSubmit={value => submitted.push(value)} onPaste={payload => pasted.push(payload)} />
+        <TextArea id="chat" value="" submitOnEnter onSubmit={value => submitted.push(`chat:${value}`)} />
+      </Window>
+    ), { bridge });
+    await app.ready;
+    const find = (node: SceneDocument["root"], id: string): SceneDocument["root"] | undefined =>
+      node.id === id ? node : node.children.map(child => find(child, id)).find(Boolean);
+    expect(find(bridge.document!.root, "chat")?.submitOnEnter).toBe(true);
+    expect(find(bridge.document!.root, "input")?.submitOnEnter).toBeUndefined();
+
+    bridge.emit({ type: "submit", id: "input", value: "query" });
+    bridge.emit({ type: "submit", id: "chat", value: "hello" });
+    bridge.emit({ type: "paste", id: "input", files: ["C:\\tmp\\a.png"] });
+    bridge.emit({ type: "paste", id: "input", image: { width: 1, height: 1, rgba: Buffer.from([1, 2, 3, 4]).toString("base64") } });
+    bridge.emit({ type: "paste", id: "input" });
+    await Bun.sleep(0);
+
+    expect(submitted).toEqual(["query", "chat:hello"]);
+    expect(pasted).toEqual([
+      { kind: "files", files: ["C:\\tmp\\a.png"] },
+      { kind: "image", width: 1, height: 1, rgba: new Uint8Array([1, 2, 3, 4]) },
+    ]);
+    app.close();
   });
 
   test("reverts a native slider edit when controlled state stays unchanged", async () => {
