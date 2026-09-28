@@ -3,6 +3,31 @@
   "version": "0.1.0",
   "description": "Native Bun/TSX GUI with Taffy layout, Parley text and Vello rendering",
   "license": "Apache-2.0",
+  "keywords": [
+    "gui",
+    "desktop",
+    "native",
+    "bun",
+    "tsx",
+    "jsx",
+    "ui",
+    "vello",
+    "taffy",
+    "windows",
+    "linux"
+  ],
+  "homepage": "https://github.com/omarcosr/tarve#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/omarcosr/tarve.git"
+  },
+  "bugs": {
+    "url": "https://github.com/omarcosr/tarve/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "bin": {
     "tarve": "./dist/npm/cli.js"
   },

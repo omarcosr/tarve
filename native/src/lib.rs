@@ -1,3 +1,7 @@
+// The AccessKit bridge is Windows-only; the text/tree accessibility helpers it
+// consumes are shared code that is simply unreferenced on other targets.
+#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
+
 #[cfg(target_os = "windows")]
 mod accessibility;
 mod bridge;

@@ -151,3 +151,51 @@ jobs:
           if ($env:GITHUB_REF_NAME -match "-") { $arguments += "--prerelease" }
           & gh @arguments
           if ($LASTEXITCODE -ne 0) { throw "GitHub release creation failed." }
+
+  npm-publish:
+    name: Publish npm package
+    needs: windows-x64-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Setup Node for npm
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Download verified release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: tarve-${{ github.ref_name }}-windows-x64
+          path: release
+
+      - name: Publish verified tarball
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::error::NPM_TOKEN secret is not configured for the npm environment." >&2
+            exit 1
+          fi
+          version="${TAG#v}"
+          tarball="release/dist/tarve-${version}.tgz"
+          if [ ! -f "${tarball}" ]; then
+            echo "::error::Expected ${tarball}; found: $(find release -name 'tarve-*.tgz')" >&2
+            exit 1
+          fi
+          packed="$(tar -xOzf "${tarball}" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0)).version')"
+          if [ "${packed}" != "${version}" ]; then
+            echo "::error::Tarball version ${packed} does not match tag ${TAG}." >&2
+            exit 1
+          fi
+          dist_tag=latest
+          case "${version}" in *-*) dist_tag=next ;; esac
+          npm publish "${tarball}" --access public --provenance --tag "${dist_tag}"

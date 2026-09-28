@@ -10,14 +10,14 @@ The npm artifact is universal across those two targets: Linux CI builds `libtarv
 - `@tarve/core` and `@tarve/protocol` are private workspace packages for repository organization, but inherit the same Apache-2.0 license.
 - The native Rust crate declares `license = "Apache-2.0"` and remains `publish = false`; it is distributed as part of Tarve rather than as an independent crates.io package.
 - The automated release-policy gate rejects license drift between the root package, workspace packages, native crate, and the canonical `LICENSE` file.
-- The signed release workflow publishes GitHub release artifacts. Publishing the npm package to a registry remains a separate operational step until registry ownership/access is configured.
+- The signed release workflow publishes GitHub release artifacts and then publishes the same verified npm tarball to the npm registry (see *npm publishing* below).
 
 ## Version policy
 
 There are three independent version domains:
 
 1. **Product SemVer** — one version shared by the root npm package, `@tarve/core`, `@tarve/protocol`, their workspace entries in `bun.lock`, `native/Cargo.toml` and the `tarve_native` entry in `Cargo.lock`.
-2. **JSON protocol version** — a monotonically increasing integer used by serialized TS/Rust messages. It is currently **v42** and is independent from package SemVer.
+2. **JSON protocol version** — a monotonically increasing integer used by serialized TS/Rust messages. It is currently **v45** and is independent from package SemVer.
 3. **Native C ABI version** — a monotonically increasing integer for exported FFI function compatibility. It is currently **v5** and is independent from both product SemVer and the JSON protocol.
 
 Use the version tool rather than editing manifests independently:
@@ -62,6 +62,28 @@ The PFX is materialized only into a temporary file during signing and is deleted
 5. `.github/workflows/release.yml` verifies that the tag points to a commit reachable from the default branch, reruns the full release gate, builds/signs the Windows artifacts, verifies the signatures/timestamps, emits SHA-256 hashes in `dist/release-manifest.json`, uploads the signed artifacts and creates the GitHub release.
 
 Prerelease SemVer tags such as `v0.2.0-beta.1` are published as GitHub prereleases.
+
+## npm publishing
+
+The `npm-publish` job in `.github/workflows/release.yml` runs only after the signed Windows release job succeeds. It publishes the exact `dist/tarve-<version>.tgz` produced and verified by `release:build` (it never repacks), with npm provenance attestation:
+
+- stable versions go to the `latest` dist-tag; prerelease versions (`0.2.0-beta.1`) go to `next`;
+- the job is fail-closed: it refuses to run without the `NPM_TOKEN` secret, verifies the tarball name matches the tag, and skips nothing silently;
+- publishing requires the `npm` GitHub environment, so a required reviewer can gate the registry step.
+
+One-time setup:
+
+1. Create the `tarve` package owner account on npmjs.com and enable 2FA.
+2. Create a granular **automation** access token with publish rights for `tarve` and store it as the `NPM_TOKEN` secret of the `npm` GitHub environment.
+3. Optionally add required reviewers to the `npm` environment.
+
+To inspect what would be published locally, stage both native runtimes, then:
+
+```powershell
+bun run package
+bun run pack
+npm publish --dry-run (Get-ChildItem dist/tarve-*.tgz).FullName
+```
 
 For a local signing rehearsal with an actual certificate:
 

@@ -463,7 +463,7 @@ fn open_external(target: &str) -> Result<(), String> {
             .args(["open", target])
             .spawn()
             .map_err(|error| format!("Could not open external URI with gio: {error}"))?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(target_os = "linux"))]
     Err("Opening external URIs is not supported on this platform".into())
