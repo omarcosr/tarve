@@ -1,6 +1,6 @@
 # Tarve examples
 
-This directory is a standalone Bun consumer project for the `tarve` npm package. The examples import only public package APIs and local media assets; their `tsconfig.json` does not inherit repository configuration.
+This directory is a standalone Bun consumer project for the `@tarve/core` npm package. The examples import only public package APIs and local media assets; their `tsconfig.json` does not inherit repository configuration.
 
 From the repository root, build the local package and install its tarball into this consumer project:
 
@@ -48,8 +48,8 @@ bun run tarve build counter.tsx --outfile dist/Counter.exe
 bun run tarve build rich-content.tsx --outfile dist/RichContent.exe
 ```
 
-When consuming a published package instead of the repository tarball:
+To run the examples against the published package instead of the local build, replace the staged copy with:
 
 ```powershell
-bun add @tarve/core@0.1.0
+bun add @tarve/core
 ```

@@ -6,13 +6,13 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 
 - TypeScript package checking: `bun run check` passes.
 - Rust lint gate: `cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings` passes.
-- Core/UI suite: **101 Bun tests / 538 assertions** pass.
-- Native suite: **79 Rust tests** pass, including deterministic AccessKit tree/action/TextPattern/scroll-alignment, horizontal/bidirectional scroll, bounded grid-track coverage and independent ABI/protocol mismatch handling.
-- JSON protocol is currently **v29** on both TypeScript and Rust sides; the native C ABI is independently versioned at **v1** and checked before startup.
-- npm packaging includes JS, JSX runtime, declarations and the Windows x64 native library.
+- Core/UI suite: **192 Bun tests** pass.
+- Native suite: **204 Rust tests** pass on Windows (183 on Linux, where the AccessKit bridge is not built), including deterministic AccessKit tree/action/TextPattern/scroll-alignment, horizontal/bidirectional scroll, bounded grid-track coverage and independent ABI/protocol mismatch handling.
+- JSON protocol is currently **v45** on both TypeScript and Rust sides; the native C ABI is independently versioned at **v5** and checked before startup.
+- The npm package `@tarve/core` includes JS, JSX runtime, declarations, the CLI and both the Windows x64 and Linux x64 native runtimes.
 - External-consumer and standalone-EXE smoke tests are part of `bun run verify`.
 - Real GPU visual regression is a mandatory release gate: `bun run verify` runs `test:visual` after package/EXE smoke validation, and `bun run release:check` is the CI/release entry point for the same gate.
-- Latest full validation on this tree: `bun run verify` **PASS**, including release-policy checks, synchronized product-version policy, independent ABI/protocol tests, the integrated `test:visual` gate against the freshly packed/installed v29 artifact, Windows x64 `smoke:accessibility`, package/standalone-EXE smoke and stale-package-output coverage.
+- Latest full validation on this tree: `bun run verify` **PASS**, including release-policy checks, synchronized product-version policy, independent ABI/protocol tests, the integrated `test:visual` gate against the freshly packed/installed artifact, Windows x64 `smoke:accessibility`, package/standalone-EXE smoke and stale-package-output coverage.
 - Tarve does not Authenticode-sign its runtimes; applications built with `tarve build` are signed by their authors. The npm tarball carries npm provenance and SHA-256 release metadata.
 
 ## Production foundations already implemented
@@ -43,7 +43,7 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 
 - [x] Windows x64 CI in `.github/workflows/ci.yml` installs locked Bun/Rust dependencies and runs the full `release:check` gate, with visual captures uploaded as artifacts. The workflow is configured for pushes, pull requests and manual dispatch; remote execution still occurs when GitHub runs that workflow.
 - [x] `test:visual` is a mandatory release gate inside `bun run verify` / `bun run release:check`, after package and standalone-EXE smoke validation.
-- [x] Packaging removes stale `dist/npm`, `dist/types`, `native/win32-x64` and prior `dist/tarve-*.tgz` outputs before rebuilding; a focused Bun regression test verifies stale generated files cannot survive while unrelated visual artifacts are preserved.
+- [x] Packaging removes stale `dist/npm`, `dist/types`, `native/win32-x64` and prior `dist/*.tgz` outputs before rebuilding; a focused Bun regression test verifies stale generated files cannot survive while unrelated visual artifacts are preserved.
 - [x] Product SemVer is synchronized across root/core/protocol/`bun.lock`/Cargo/Cargo.lock by `version:set`, enforced by `version:check` / `release:policy`, while protocol schema versioning remains independent.
 - [x] The native C ABI is versioned independently from the JSON protocol (ABI v1 vs protocol v29), with TS/Rust agreement checks and independent mismatch regressions.
 - [ ] Bound/coalesce the native event `VecDeque` for high-rate events such as hover/scroll/frame notifications.
@@ -62,8 +62,8 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 
 ## Release completion criteria
 
-For a Windows x64 beta/internal production release, the shipped npm tarball and standalone EXE must pass `bun run release:check` (the same full gate as `bun run verify`), which includes the mandatory real-GPU `test:visual` regression and release-policy/version checks.
+For a release, the shipped npm tarball must pass `bun run release:check` (the same full gate as `bun run verify`), which includes the mandatory real-GPU `test:visual` regression and release-policy/version checks.
 
-Official third-party release artifacts must be produced by the signed tag workflow in `.github/workflows/release.yml`, with a tag exactly matching `v<product-semver>` and the `NPM_TOKEN` secret configured in the `npm` environment. The detailed license/version/release procedure is documented in `RELEASE.md`.
+Official third-party release artifacts must be produced by the tag workflow in `.github/workflows/release.yml`, with a tag exactly matching `v<product-semver>`. The detailed license/version/release procedure is documented in `RELEASE.md`.
 
-For a broad public **production-ready / 1.0** claim, automate the mandatory Windows x64 release gates, complete the applicable distribution/diagnostics hardening above, and document/test the intentionally supported platform/lifecycle limits.
+For a broad public **production-ready / 1.0** claim, complete the applicable distribution/diagnostics hardening above, and document/test the intentionally supported platform/lifecycle limits.

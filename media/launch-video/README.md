@@ -11,13 +11,13 @@ A 15-second, 1920×1080 / 60 fps motion-graphics reveal for Tarve.
 
 | Time | Beat |
 | --- | --- |
-| 0.0–2.0 s | A cursor in the dark. `bun add tarve` is typed, runs, and compresses into a point of light. |
+| 0.0–2.0 s | A cursor in the dark. `bun add @tarve/core` is typed, runs, and compresses into a point of light. |
 | 2.0–6.1 s | The point detonates and a native UI system assembles itself from wireframe primitives: a data grid with search, a dropdown that opens a **Build executable** dialog, a resizable inspector, syntax-highlighted code, Markdown, and a word-level diff. The camera racks focus through depth. |
 | 6.1–7.9 s | A zoom into `"tarve"` match-cuts into kinetic type: **TypeScript · Bun · Rust · Taffy · Vello · Parley**, each over a visual of what it does (flex layout boxes for Taffy, Bézier handles for Vello, glyph metrics and selection for Parley). |
 | 7.9–8.4 s | Architecture stack: TSX → FFI → native core → layout, text and rendering. |
 | 8.3–11.8 s | Performance: a tunnel of about 10,000 UI tiles at speed with a 120 fps profiler HUD. A 100,000-row `VirtualList` scrolls to row 84,216, then the window is resized natively while its card grid reflows live. |
 | 11.8–12.8 s | The interface drops to wireframe and collapses as 2,600 particles into the wordmark. |
-| 12.8–15.0 s | **TARVE** / *Native UI. TypeScript velocity.* / `bun add tarve` |
+| 12.8–15.0 s | **TARVE** / *Native UI. TypeScript velocity.* / `bun add @tarve/core` |
 
 ## Preview live
 

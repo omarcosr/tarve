@@ -6,14 +6,14 @@
  * and in the offline frame-accurate capture (see render.mjs).
  *
  * Timeline
- *   0.00  terminal — cursor in the dark, `bun add tarve`
+ *   0.00  terminal — cursor in the dark, `bun add @tarve/core`
  *   2.00  detonation — native UI system assembles from primitives
  *   6.08  match cut — TypeScript / Bun / Rust / Taffy / Vello / Parley
  *   7.88  architecture stack
  *   8.30  performance — 10k element tunnel, 120 fps profiler
  *   9.45  100k-row VirtualList at speed, native resize + reflow
  *  11.80  collapse into the wordmark
- *  12.80  hero — TARVE / Native UI. TypeScript velocity. / bun add tarve
+ *  12.80  hero — TARVE / Native UI. TypeScript velocity. / bun add @tarve/core
  */
 (() => {
 'use strict';
@@ -246,7 +246,7 @@ function drawWin(ctx, win, P, t, blur = 0, fade = 1) {
 }
 
 // ================================================================ SCENE 1 — terminal
-const CMD = 'bun add tarve';
+const CMD = 'bun add @tarve/core';
 const TYPE_T = (() => { const a = []; let x = 0.42; for (let i = 0; i < CMD.length; i++) { a.push(x); x += 0.05 + hash(i * 3.3) * 0.028 + (CMD[i] === ' ' ? 0.035 : 0); } return a; })();
 const ENTER = TYPE_T[TYPE_T.length - 1] + 0.11;
 const BURST = 2.0;
@@ -308,7 +308,7 @@ function sceneTerminal(ctx, t) {
   // output
   const outs = [
     [ENTER + 0.06, [['bun add ', C.ink4], ['v1.4.0', C.ink4]]],
-    [ENTER + 0.13, [['installed ', C.ink3], ['tarve@0.1.0', C.ink], ['  native · win32-x64', C.ink4]]],
+    [ENTER + 0.13, [['installed ', C.ink3], ['@tarve/core@0.1.1', C.ink], ['  native · win32-x64', C.ink4]]],
     [ENTER + 0.2, [['1 package installed ', C.ink3], ['[38.00ms]', C.accentHi]]],
   ];
   outs.forEach(([t0, segs], k) => {
@@ -544,7 +544,7 @@ function paintMain(g, u, t, win) {
 }
 
 const CODE = [
-  [['import', 'kw'], [' { ', 'punc'], ['Window', 'fn'], [', ', 'punc'], ['Row', 'fn'], [', ', 'punc'], ['DataGrid', 'fn'], [', ', 'punc'], ['Markdown', 'fn'], [' } ', 'punc'], ['from', 'kw'], [' ', 'punc'], ['"tarve"', 'str'], [';', 'punc']],
+  [['import', 'kw'], [' { ', 'punc'], ['Window', 'fn'], [', ', 'punc'], ['Row', 'fn'], [', ', 'punc'], ['DataGrid', 'fn'], [', ', 'punc'], ['Markdown', 'fn'], [' } ', 'punc'], ['from', 'kw'], [' ', 'punc'], ['"@tarve/core"', 'str'], [';', 'punc']],
   [],
   [['export', 'kw'], [' ', 'punc'], ['function', 'kw'], [' ', 'punc'], ['Studio', 'hi'], ['() {', 'punc']],
   [['  return', 'kw'], [' (', 'punc']],

@@ -8,37 +8,31 @@ Tarve turns a TSX tree into a retained native interface. It does not use a brows
 >
 > **Runtime:** Bun 1.4+
 >
-> **Package:** `tarve`
+> **Package:** [`@tarve/core`](https://www.npmjs.com/package/@tarve/core) (CLI: `tarve`)
 >
 > **License:** Apache-2.0
 
 ## Highlights
 
-- Native TSX UI with a dedicated `tarve` JSX runtime.
+- Native TSX UI with a dedicated `@tarve/core` JSX runtime.
 - Retained Taffy Flexbox/Grid layout with incremental property and structural updates.
-- Parley text shaping, selection, clipboard, caret handling, IME composition, and Unicode-aware editing.
+- Parley text shaping, selection, clipboard (text, files, images), IME composition, native undo/redo, and Unicode-aware editing.
 - Native Windows D3D11/DXGI renderer with Vello/WGPU fallback; Linux uses Vello/WGPU. Both platforms provide a `vello_cpu + softbuffer` CPU renderer.
 - shadcn-inspired components and semantic light/dark theme tokens.
 - Native Markdown, syntax-highlighted Code, and Diff leaves designed for large documents.
 - Fixed-height, measured variable-height, and externally windowed `VirtualList` modes.
 - Windows UI Automation accessibility through AccessKit.
 - Global hotkeys, native file dialogs, custom title bars, window positioning, and standalone Windows/Linux builds.
-- Event-driven Bun/native bridge with no continuous idle polling.
+- Event-driven Bun/native bridge with no continuous idle polling: an idle window presents zero frames.
+- Development mode with in-window runtime error overlay, same-window remount under `bun --hot`, and a native frame-time graph.
 
 ## Installation
 
 For a published package:
 
 ```powershell
-bun add tarve
+bun add @tarve/core
 bun add -d typescript @types/bun
-```
-
-To consume the package directly from this repository before registry publication:
-
-```powershell
-bun run pack
-bun add ./dist/tarve-0.1.0.tgz
 ```
 
 Use this TypeScript configuration:
@@ -106,22 +100,7 @@ bun run tarve build app.tsx --target windows-x64 --outfile dist/App.exe
 bun run tarve build app.tsx --target linux-x64 --outfile dist/App
 ```
 
-Tarve's release/package pipeline builds each native runtime on its native OS and assembles both into the same npm package. Repository maintainers can stage one runtime with `bun run package:native`; `bun run package` intentionally refuses to create an incomplete single-platform package.
-
-Each staged native runtime carries compatibility metadata containing its target, native ABI, JSON protocol version, source fingerprint, and binary hash. Cross-compilation validates that metadata before embedding the runtime, so a stale Linux `.so` cannot be combined with newer JavaScript (or vice versa). After native/protocol changes, rebuild the affected runtime on that OS with `bun run package:native` before cross-compiling from the other OS.
-
-To build the Linux runtime on Ubuntu or WSL, install the native toolchain once:
-
-```bash
-apt-get update
-apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev curl ca-certificates
-curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
-source "$HOME/.cargo/env"
-cargo --version
-bun run package:native
-```
-
-Rustup installs Cargo per user. If you switch between a normal WSL user and `root`, install/activate Rust for the user that actually runs `bun run package:native`, or run the build from the same user where Rustup was installed.
+The published package already contains both runtimes, so `tarve build` needs no Rust toolchain.
 
 The build API is also exported:
 
@@ -156,7 +135,7 @@ An explicit renderer in `createApp` takes precedence over `TARVE_RENDERER`. `WGP
 
 ## Components
 
-Tarve exports native primitives and higher-level controls from the main `tarve` entry point.
+Tarve exports native primitives and higher-level controls from the main `@tarve/core` entry point.
 
 | Area | Components |
 | --- | --- |
@@ -481,14 +460,41 @@ const app = createApp(App, {
 
 Recoverable callback, listener, hotkey, bridge, request, dialog, and update failures are reported through `onError`. A failed native update keeps the last confirmed tree.
 
+## Development tools
+
+Run an app in development mode with hot reload:
+
+```powershell
+$env:TARVE_DEV = "1"; bun --hot app.tsx
+```
+
+```bash
+TARVE_DEV=1 bun --hot app.tsx
+```
+
+With `dev: true` (or `TARVE_DEV=1`):
+
+- **Same-window remount:** when `bun --hot` re-evaluates the entry, `render()` remounts the new view into the already open window instead of opening a new one. `app.remount(view)` does the same explicitly and resets component state.
+- **Runtime error overlay:** render, event-handler, listener, and hotkey errors replace the view with an in-window overlay (source, message, scrollable stack). *Dismiss* renders the app again; saving a fix remounts it. Errors during the first render still reject `ready`.
+
+Independently of dev mode, the native frame-time overlay draws the CPU cost of the last 120 presented frames against a 16.7 ms budget line:
+
+```tsx
+const app = createApp(App, { frameOverlay: true }); // or TARVE_FRAME_OVERLAY=1
+app.setFrameOverlay(false);
+```
+
+Neither tool schedules frames on its own, so an idle window still presents zero frames. The graph refreshes on the next repaint.
+
 ## Examples
 
-The `examples/` directory is an independent Bun consumer project using only public Tarve APIs.
+The [`examples/`](https://github.com/omarcosr/tarve/tree/main/examples) directory in the repository is an independent Bun consumer project using only public Tarve APIs. From a clone:
 
 ```powershell
 bun run setup:examples
 cd examples
 bun run check
+bun run basic
 bun run counter
 bun run components
 bun run forms
@@ -496,49 +502,26 @@ bun run intrinsics
 bun run large-list
 bun run rich-content
 bun run diff
+bun run motion
+bun run studio
+bun run performance
 ```
+
+From the repository root, `bun run dev --entry examples/<name>.tsx` runs an example with hot reload and the development tools enabled.
 
 `setup:examples` builds host-local package staging itself; it does not require the universal publishable tarball.
 
 All example UI copy and example documentation is written in English.
 
-## Developing Tarve
-
-Building the native library requires Bun 1.4+ and Rust stable.
-
-On Windows x64, install Visual Studio Build Tools with C++ tooling and the Windows SDK and use the `x86_64-pc-windows-msvc` Rust target.
-
-On Debian/Ubuntu Linux x64, install the native build dependencies first:
-
-```bash
-sudo apt install build-essential pkg-config libx11-dev libxkbcommon-dev \
-  libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev
-```
+## Platform notes
 
 Linux file dialogs use the XDG desktop portal through `rfd`. Opening external links uses `xdg-open` when available and falls back to `gio open`.
 
 On WSLg, Tarve prefers winit's X11 backend when `DISPLAY` is available; native Linux keeps winit's normal Wayland/X11 auto-selection. This avoids WSLg-specific Wayland `Broken pipe` event-loop failures without changing backend selection on ordinary Linux desktops.
 
-```powershell
-bun install
-bun run build:native
-bun run check
-bun run test
-```
+## Contributing
 
-`bun run package:local` stages JS, declarations, and the native runtime for the current host for local development. `bun run package` is the publishable universal package gate and requires both Windows x64 and Linux x64 runtimes. The release pipeline documented in `RELEASE.md` assembles both runtimes into the same npm artifact. Tarve does not sign binaries; sign the executables you build with `tarve build` using your own certificate.
-
-Run the full package, executable, accessibility, and visual release gate with:
-
-```powershell
-bun run verify
-```
-
-Additional project documentation:
-
-- [Production readiness](PRODUCTION.md)
-- [Performance measurements](PERFORMANCE.md)
-- [Release process](RELEASE.md)
+Building Tarve from source, the test and smoke-test gates, and the release process are documented in [CONTRIBUTING.md](https://github.com/omarcosr/tarve/blob/main/CONTRIBUTING.md). Project notes: [production readiness](https://github.com/omarcosr/tarve/blob/main/PRODUCTION.md), [performance measurements](https://github.com/omarcosr/tarve/blob/main/PERFORMANCE.md), [release process](https://github.com/omarcosr/tarve/blob/main/RELEASE.md).
 
 ## Current scope
 
@@ -546,4 +529,4 @@ Tarve is pre-1.0 and currently targets **Windows x64 and Linux x64**. The curren
 
 ## License
 
-Tarve is licensed under the [Apache License 2.0](LICENSE).
+Tarve is licensed under the [Apache License 2.0](https://github.com/omarcosr/tarve/blob/main/LICENSE).

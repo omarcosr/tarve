@@ -40,8 +40,6 @@
     "native/win32-x64",
     "native/linux-x64",
     "README.md",
-    "PERFORMANCE.md",
-    "RELEASE.md",
     "LICENSE"
   ],
   "os": [
@@ -93,7 +91,7 @@
     "package:local": "bun scripts/package.ts --local",
     "package:native": "bun scripts/package.ts --native-only",
     "prepack": "bun scripts/prepack.ts",
-    "pack": "bun pm pack --ignore-scripts --destination dist",
+    "pack": "bun scripts/pack.ts",
     "start:example": "bun run setup:examples && bun examples/basic.tsx",
     "check": "bun node_modules/typescript/bin/tsc --noEmit",
     "lint": "cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings",

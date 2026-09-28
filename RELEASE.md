@@ -35,38 +35,13 @@ Tarve is a framework, not an end-user application, so the Tarve release does **n
 
 ## Release procedure
 
-1. Update the product version with `bun run version:set -- <semver>`.
-2. Commit the version change and run `bun run release:check`.
-3. Create an annotated or lightweight tag exactly matching `v<semver>`, for example `v0.2.0`.
-4. Push the commit and tag.
-5. `.github/workflows/release.yml` verifies that the tag points to a commit reachable from the default branch, reruns the full release gate, packs the universal npm tarball, verifies that it contains exactly the staged Windows and Linux runtimes, emits SHA-256 hashes in `dist/release-manifest.json`, uploads the artifacts and creates the GitHub release.
+1. `bun run version:set -- <semver>`, then commit and push to `main`; wait for CI to pass.
+2. Tag that commit with exactly `v<semver>` and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
+3. `.github/workflows/release.yml` then, without further input:
+   - checks that the tag matches the product version and points to a commit on `main`;
+   - reruns the full release gate on Windows with the Linux runtime built on Linux;
+   - packs the universal tarball, verifies it contains exactly the staged runtimes and the tagged version, and writes SHA-256 hashes to `dist/release-manifest.json`;
+   - creates the GitHub release with those artifacts;
+   - publishes `@tarve/core` to npm from that same tarball (never repacked), with provenance: stable versions as `latest`, prereleases (`v0.2.0-beta.1`) as `next` and as GitHub prereleases.
 
-Prerelease SemVer tags such as `v0.2.0-beta.1` are published as GitHub prereleases.
-
-## npm publishing
-
-The `npm-publish` job in `.github/workflows/release.yml` runs only after the Windows release job succeeds. It publishes `@tarve/core` from the exact `dist/tarve-core-<version>.tgz` produced and verified by `release:build` (it never repacks), with npm provenance attestation:
-
-- stable versions go to the `latest` dist-tag; prerelease versions (`0.2.0-beta.1`) go to `next`;
-- the job is fail-closed: it refuses to run without the `NPM_TOKEN` secret, verifies the tarball name matches the tag, and skips nothing silently;
-- publishing requires the `npm` GitHub environment, so a required reviewer can gate the registry step.
-
-One-time setup:
-
-1. The package is published under the `tarve` npm organization (the unscoped name `tarve` is rejected by npm as too similar to `tar`). Owners need 2FA enabled.
-2. Create a granular **automation** access token with read-and-write access to the `@tarve` scope (organization `tarve`) and store it as the `NPM_TOKEN` secret of the `npm` GitHub environment.
-3. Optionally add required reviewers to the `npm` environment.
-
-To inspect what would be published locally, stage both native runtimes, then:
-
-```powershell
-bun run package
-bun run pack
-npm publish --dry-run (Get-ChildItem dist/tarve-core-*.tgz).FullName
-```
-
-For a local release rehearsal (both runtimes staged):
-
-```powershell
-bun run release:build -- --tag v0.1.0
-```
+A published npm version cannot be reused: if a release fails after publishing, fix forward with a new patch version.
