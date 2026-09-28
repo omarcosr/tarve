@@ -1,58 +1,13 @@
 {
   "name": "@tarve/core",
   "version": "0.1.2",
-  "description": "Native Bun/TSX GUI with Taffy layout, Parley text and Vello rendering",
-  "license": "Apache-2.0",
-  "keywords": [
-    "gui",
-    "desktop",
-    "native",
-    "bun",
-    "tsx",
-    "jsx",
-    "ui",
-    "vello",
-    "taffy",
-    "windows",
-    "linux"
-  ],
-  "homepage": "https://github.com/omarcosr/tarve#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/omarcosr/tarve.git"
   },
-  "bugs": {
-    "url": "https://github.com/omarcosr/tarve/issues"
-  },
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
-  "bin": {
-    "tarve": "./dist/npm/cli.js"
-  },
-  "workspaces": [
-    "packages/*"
-  ],
-  "files": [
-    "dist/npm",
-    "dist/types",
-    "native/win32-x64",
-    "native/linux-x64",
-    "README.md",
-    "LICENSE"
-  ],
-  "os": [
-    "win32",
-    "linux"
-  ],
-  "cpu": [
-    "x64"
-  ],
-  "type": "module",
-  "imports": {
-    "#tarve/runtime": "./dist/npm/runtime.js",
-    "#tarve/assets": "./dist/npm/embedded-assets.js"
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
   },
   "exports": {
     ".": {
@@ -79,6 +34,54 @@
       "types": "./dist/types/core/src/assets.d.ts"
     },
     "./package.json": "./package.json"
+  },
+  "bin": {
+    "tarve": "./dist/npm/cli.js"
+  },
+  "bugs": {
+    "url": "https://github.com/omarcosr/tarve/issues"
+  },
+  "cpu": [
+    "x64"
+  ],
+  "description": "Native Bun/TSX GUI with Taffy layout, Parley text and Vello rendering",
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "files": [
+    "dist/npm",
+    "dist/types",
+    "native/win32-x64",
+    "native/linux-x64",
+    "README.md",
+    "LICENSE"
+  ],
+  "homepage": "https://github.com/omarcosr/tarve#readme",
+  "imports": {
+    "#tarve/runtime": "./dist/npm/runtime.js",
+    "#tarve/assets": "./dist/npm/embedded-assets.js"
+  },
+  "keywords": [
+    "gui",
+    "desktop",
+    "native",
+    "bun",
+    "tsx",
+    "jsx",
+    "ui",
+    "vello",
+    "taffy",
+    "windows",
+    "linux"
+  ],
+  "license": "Apache-2.0",
+  "os": [
+    "win32",
+    "linux"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "scripts": {
     "dev": "bun scripts/dev.ts",
@@ -119,11 +122,8 @@
     "smoke:package": "bun scripts/smoke-package.ts",
     "bench": "bun scripts/benchmark.tsx"
   },
-  "devDependencies": {
-    "@types/bun": "^1.4.2",
-    "typescript": "^7.0.2"
-  },
-  "engines": {
-    "bun": ">=1.4.0"
-  }
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ]
 }

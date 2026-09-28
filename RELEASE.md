@@ -39,7 +39,8 @@ Tarve is a framework, not an end-user application, so the Tarve release does **n
 2. Tag that commit with exactly `v<semver>` and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
 3. `.github/workflows/release.yml` then, without further input:
    - checks that the tag matches the product version and points to a commit on `main`;
-   - reruns the full release gate on Windows with the Linux runtime built on Linux;
+   - requires a successful CI run for the tagged commit (CI runs the full gate on both platforms), waiting for it if it is still running;
+   - builds the Linux runtime on Linux and the Windows runtime on Windows;
    - packs the universal tarball, verifies it contains exactly the staged runtimes and the tagged version, and writes SHA-256 hashes to `dist/release-manifest.json`;
    - creates the GitHub release with those artifacts;
    - publishes `@tarve/core` and `@tarve/react-icons` to npm from those same tarballs (never repacked), with provenance: stable versions as `latest`, prereleases (`v0.2.0-beta.1`) as `next` and as GitHub prereleases.

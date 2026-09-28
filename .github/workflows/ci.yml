@@ -34,6 +34,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
+          shared-key: linux-x64-native
           cache-on-failure: true
 
       - name: Install Linux native dependencies
@@ -182,7 +183,7 @@ jobs:
 
   windows-x64-package:
     name: Universal package and executable
-    needs: [linux-x64-native, windows-x64]
+    needs: linux-x64-native
     runs-on: windows-latest
     timeout-minutes: 30
 

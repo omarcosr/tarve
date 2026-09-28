@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: tarve-release-${{ github.ref }}
@@ -31,6 +32,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+          shared-key: linux-x64-native
+          save-if: false
 
       - name: Install Linux native dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev
@@ -72,13 +80,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
-          components: rustfmt, clippy
 
+      # Reuse the Windows cache that CI builds on main (tag runs can read it).
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
-          cache-on-failure: true
+          shared-key: windows-x64
+          save-if: false
 
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
@@ -106,10 +115,26 @@ jobs:
             throw "Release tag must point to a commit reachable from the default branch."
           }
 
-      - name: Full release gate
+      # The tagged commit already went through the full gate in CI (typecheck,
+      # clippy, tests, real-window smokes, package and executable smokes on both
+      # platforms). Require that green run instead of repeating ~20 minutes of it.
+      - name: Require green CI for the tagged commit
+        shell: pwsh
         env:
-          TARVE_SMOKE_FORCED_WGPU: "0"
-        run: bun run release:check
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $deadline = (Get-Date).AddMinutes(40)
+          while ($true) {
+            $runs = gh run list --workflow ci.yml --commit "$env:GITHUB_SHA" --json status,conclusion | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw "Could not query CI runs." }
+            if ($runs | Where-Object { $_.status -eq "completed" -and $_.conclusion -eq "success" }) { break }
+            if (-not ($runs | Where-Object { $_.status -ne "completed" })) {
+              throw "No successful CI run for $env:GITHUB_SHA. Push the commit to main and let CI pass before tagging."
+            }
+            if ((Get-Date) -gt $deadline) { throw "Timed out waiting for CI on $env:GITHUB_SHA." }
+            Write-Host "Waiting for CI on $env:GITHUB_SHA..."
+            Start-Sleep -Seconds 30
+          }
 
       # Tarve is a framework: application authors sign the executables they build.
       - name: Build and verify release artifacts
