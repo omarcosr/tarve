@@ -1,11 +1,11 @@
 use std::{
-    collections::{HashMap, VecDeque},
     hash::{Hash, Hasher},
     ops::Range,
     path::Path,
     sync::{Arc, Mutex, OnceLock},
 };
 
+use lru::LruCache;
 use syntect::{
     easy::ScopeRangeIterator,
     parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet},
@@ -148,22 +148,27 @@ struct CachedDocument {
     document: Arc<HighlightedDocument>,
 }
 
-#[derive(Default)]
 struct SyntaxCache {
-    documents: HashMap<CacheKey, CachedDocument>,
-    recency: VecDeque<CacheKey>,
+    documents: LruCache<CacheKey, CachedDocument>,
     retained_bytes: usize,
+}
+
+impl Default for SyntaxCache {
+    fn default() -> Self {
+        Self {
+            documents: LruCache::unbounded(),
+            retained_bytes: 0,
+        }
+    }
 }
 
 impl SyntaxCache {
     fn get(&mut self, key: CacheKey) -> Option<Arc<HighlightedDocument>> {
-        let document = self.documents.get(&key)?.document.clone();
-        self.touch(key);
-        Some(document)
+        Some(self.documents.get(&key)?.document.clone())
     }
 
     fn insert(&mut self, key: CacheKey, document: Arc<HighlightedDocument>) {
-        if let Some(previous) = self.documents.remove(&key) {
+        if let Some(previous) = self.documents.pop(&key) {
             self.retained_bytes = self.retained_bytes.saturating_sub(previous.retained_bytes);
         }
         let spans = document.lines.iter().map(Vec::len).sum::<usize>();
@@ -174,27 +179,19 @@ impl SyntaxCache {
             return;
         }
         self.retained_bytes = self.retained_bytes.saturating_add(retained_bytes);
-        self.documents.insert(
+        self.documents.put(
             key,
             CachedDocument {
                 retained_bytes,
                 document,
             },
         );
-        self.touch(key);
         while self.documents.len() > MAX_CACHE_DOCUMENTS || self.retained_bytes > MAX_CACHE_BYTES {
-            let Some(oldest) = self.recency.pop_front() else {
+            let Some((_, removed)) = self.documents.pop_lru() else {
                 break;
             };
-            if let Some(removed) = self.documents.remove(&oldest) {
-                self.retained_bytes = self.retained_bytes.saturating_sub(removed.retained_bytes);
-            }
+            self.retained_bytes = self.retained_bytes.saturating_sub(removed.retained_bytes);
         }
-    }
-
-    fn touch(&mut self, key: CacheKey) {
-        self.recency.retain(|candidate| *candidate != key);
-        self.recency.push_back(key);
     }
 }
 

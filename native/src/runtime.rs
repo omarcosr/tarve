@@ -147,6 +147,15 @@ fn shortcut_key_name(key: &Key) -> Option<String> {
     }
 }
 
+/// Word-wise caret motion: Ctrl on Windows/Linux, Option (Alt) on macOS.
+pub(crate) fn word_modifier(modifiers: ModifiersState) -> bool {
+    if cfg!(target_os = "macos") {
+        modifiers.alt_key()
+    } else {
+        modifiers.control_key()
+    }
+}
+
 pub(crate) fn shortcut_name(key: &Key, modifiers: ModifiersState) -> Option<String> {
     let key = shortcut_key_name(key)?;
     let mut parts = Vec::with_capacity(5);
@@ -1838,18 +1847,32 @@ impl ApplicationHandler<Command> for App {
                         },
                     ),
                     Key::Named(NamedKey::Space) => Some("Space"),
-                    Key::Named(NamedKey::Backspace) => Some("Backspace"),
-                    Key::Named(NamedKey::Delete) => Some("Delete"),
-                    Key::Named(NamedKey::ArrowLeft) => Some(if self.modifiers.shift_key() {
-                        "ShiftArrowLeft"
+                    Key::Named(NamedKey::Backspace) => Some(if word_modifier(self.modifiers) {
+                        "WordBackspace"
                     } else {
-                        "ArrowLeft"
+                        "Backspace"
                     }),
-                    Key::Named(NamedKey::ArrowRight) => Some(if self.modifiers.shift_key() {
-                        "ShiftArrowRight"
+                    Key::Named(NamedKey::Delete) => Some(if word_modifier(self.modifiers) {
+                        "WordDelete"
                     } else {
-                        "ArrowRight"
+                        "Delete"
                     }),
+                    Key::Named(NamedKey::ArrowLeft) => Some(
+                        match (word_modifier(self.modifiers), self.modifiers.shift_key()) {
+                            (true, true) => "ShiftWordLeft",
+                            (true, false) => "WordLeft",
+                            (false, true) => "ShiftArrowLeft",
+                            (false, false) => "ArrowLeft",
+                        },
+                    ),
+                    Key::Named(NamedKey::ArrowRight) => Some(
+                        match (word_modifier(self.modifiers), self.modifiers.shift_key()) {
+                            (true, true) => "ShiftWordRight",
+                            (true, false) => "WordRight",
+                            (false, true) => "ShiftArrowRight",
+                            (false, false) => "ArrowRight",
+                        },
+                    ),
                     Key::Named(NamedKey::ArrowUp) => Some(if self.modifiers.shift_key() {
                         "ShiftArrowUp"
                     } else {

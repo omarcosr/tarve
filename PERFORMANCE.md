@@ -22,6 +22,8 @@ A previous fixed-height `VirtualList` run with 50,000 records kept at most 97 na
 
 ### Native Windows D3D11 GPU renderer
 
+> **Por que o D3D11 continua:** é o caminho padrão de `auto`/`gpu` no Windows e evita o custo-base de `wgpu + D3D12` (~90 MB a mais de working set na medição abaixo). Reavaliar a remoção só se a base de memória do Vello/wgpu cair a um nível comparável ou se a manutenção do D3D11 passar a custar mais que esse ganho.
+
 Windows x64, Bun 1.4.2, Ryzen 7 9800X3D, Counter 620x520, usando o mesmo pacote release local para os três modos. Cada processo estabilizou por 4 s; CPU foi amostrada por mais 3 s. A linha D3D11 é o caminho normal de `renderer: "gpu"`/`"auto"` no Windows sem `WGPU_BACKEND`; a linha DX12 força o renderer legado com `WGPU_BACKEND=dx12`.
 
 | Renderer | Working set | Private bytes | Threads | Handles | CPU idle (um core) |

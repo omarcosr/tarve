@@ -4632,3 +4632,39 @@ fn find_literal_matches_regex_semantics_without_regex() {
         Vec::<std::ops::Range<usize>>::new()
     );
 }
+
+#[test]
+fn word_boundaries_skip_whitespace_and_respect_unicode_words() {
+    use crate::tree::{next_word_boundary, previous_word_boundary};
+    let text = "hello  wörld, foo.bar";
+    assert_eq!(
+        previous_word_boundary(text, text.len()),
+        15,
+        "foo.bar is one UAX #29 word"
+    );
+    assert_eq!(previous_word_boundary(text, 7), 0);
+    assert_eq!(previous_word_boundary(text, 0), 0);
+    assert_eq!(next_word_boundary(text, 0), 5);
+    assert_eq!(next_word_boundary(text, 5), 13);
+    assert_eq!(next_word_boundary(text, text.len()), text.len());
+}
+
+#[test]
+fn word_keys_move_select_and_delete_by_word() {
+    let changed = |events: Vec<serde_json::Value>| events[0]["value"].as_str().unwrap().to_owned();
+    let mut tree = editor_tree("input", "one two three");
+    tree.key("End");
+    tree.key("WordLeft");
+    assert_eq!(changed(tree.key("WordBackspace")), "one three");
+
+    let mut tree = editor_tree("input", "one two three");
+    tree.key("Home");
+    assert_eq!(changed(tree.key("WordDelete")), " two three");
+
+    let mut tree = editor_tree("input", "one two three");
+    tree.key("End");
+    tree.key("ShiftWordLeft");
+    assert_eq!(tree.selected_text().as_deref(), Some("three"));
+    tree.key("ShiftWordLeft");
+    assert_eq!(tree.selected_text().as_deref(), Some("two three"));
+}

@@ -4768,6 +4768,17 @@ impl Tree {
             .is_some_and(|entry| matches!(entry.node.kind.as_str(), "input" | "textarea"));
         let key = if !editable_focus && matches!(key, "ShiftEnter" | "ModEnter") {
             "Enter"
+        } else if !editable_focus {
+            // Word navigation only means something inside a text field.
+            match key {
+                "WordLeft" => "ArrowLeft",
+                "WordRight" => "ArrowRight",
+                "ShiftWordLeft" => "ShiftArrowLeft",
+                "ShiftWordRight" => "ShiftArrowRight",
+                "WordBackspace" => "Backspace",
+                "WordDelete" => "Delete",
+                _ => key,
+            }
         } else {
             key
         };
@@ -5065,6 +5076,18 @@ impl Tree {
                     self.selection_anchor = None;
                 }
             }
+            "WordLeft" => {
+                self.caret = previous_word_boundary(&value, self.caret);
+                if !selecting {
+                    self.selection_anchor = None;
+                }
+            }
+            "WordRight" => {
+                self.caret = next_word_boundary(&value, self.caret);
+                if !selecting {
+                    self.selection_anchor = None;
+                }
+            }
             "ArrowUp" if multiline => {
                 if let Some(next) = self.textarea_vertical_index(&id, -1.0) {
                     self.caret = next;
@@ -5092,17 +5115,26 @@ impl Tree {
                 self.selection_anchor = None;
                 return self.commit_edit(id, value, origin, changed, EditKind::Other, true);
             }
-            "Backspace" | "Delete" => {
+            "Backspace" | "Delete" | "WordBackspace" | "WordDelete" => {
                 let mut changed = value.clone();
                 if let Some((start, end)) = self.selected_range() {
                     changed.replace_range(start..end, "");
                     self.caret = start;
-                } else if key == "Backspace" {
-                    let start = previous_boundary(&value, self.caret);
+                } else if key == "Backspace" || key == "WordBackspace" {
+                    let start = if key == "Backspace" {
+                        previous_boundary(&value, self.caret)
+                    } else {
+                        previous_word_boundary(&value, self.caret)
+                    };
                     changed.replace_range(start..self.caret, "");
                     self.caret = start;
                 } else {
-                    changed.replace_range(self.caret..next_boundary(&value, self.caret), "");
+                    let end = if key == "Delete" {
+                        next_boundary(&value, self.caret)
+                    } else {
+                        next_word_boundary(&value, self.caret)
+                    };
+                    changed.replace_range(self.caret..end, "");
                 }
                 self.selection_anchor = None;
                 let kind = if origin.1.is_some_and(|anchor| anchor != origin.0) {
@@ -6129,6 +6161,25 @@ fn previous_boundary(value: &str, position: usize) -> usize {
         .take_while(|i| *i < position)
         .last()
         .unwrap_or(0)
+}
+/// Start of the word at or before `position`, skipping whitespace first
+/// (Ctrl+Left / Ctrl+Backspace). Uses Unicode word boundaries (UAX #29).
+pub(crate) fn previous_word_boundary(value: &str, position: usize) -> usize {
+    value
+        .split_word_bound_indices()
+        .rev()
+        .find(|(start, word)| *start < position && !word.trim().is_empty())
+        .map(|(start, _)| start)
+        .unwrap_or(0)
+}
+/// End of the word at or after `position`, skipping whitespace first
+/// (Ctrl+Right / Ctrl+Delete).
+pub(crate) fn next_word_boundary(value: &str, position: usize) -> usize {
+    value
+        .split_word_bound_indices()
+        .map(|(start, word)| (start + word.len(), word))
+        .find(|(end, word)| *end > position && !word.trim().is_empty())
+        .map_or(value.len(), |(end, _)| end)
 }
 fn next_boundary(value: &str, position: usize) -> usize {
     value

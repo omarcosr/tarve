@@ -833,17 +833,9 @@ impl Graphics {
         let wgpu_backend_explicit = std::env::var_os("WGPU_BACKEND").is_some();
         let recovered = match previous_backend {
             #[cfg(target_os = "windows")]
-            RendererBackend::D3d11 => D3d11Graphics::new(window.clone())
-                .map(|graphics| GraphicsImpl::D3d11(Box::new(graphics)))
-                .or_else(|d3d11_error| {
-                    GpuGraphics::new_with_backends(window.clone(), Some(wgpu::Backends::DX12))
-                        .map(|graphics| GraphicsImpl::Gpu(Box::new(graphics)))
-                        .map_err(|vello_error| {
-                            format!(
-                                "D3D11 GPU recovery failed: {d3d11_error}; Vello/DX12 fallback failed: {vello_error}"
-                            )
-                        })
-                }),
+            RendererBackend::D3d11 => {
+                Self::new_d3d11_or_vello(window.clone(), "D3D11 GPU recovery failed")
+            }
             RendererBackend::Gpu(previous) => GpuGraphics::recover(window.clone(), previous)
                 .map(|graphics| GraphicsImpl::Gpu(Box::new(graphics))),
             RendererBackend::Cpu => CpuGraphics::new(window.clone())
@@ -987,21 +979,27 @@ impl Graphics {
         {
             // Explicit WGPU_BACKEND remains an escape hatch for debugging the legacy Vello path.
             if std::env::var_os("WGPU_BACKEND").is_none() {
-                match D3d11Graphics::new(window.clone()) {
-                    Ok(graphics) => return Ok(GraphicsImpl::D3d11(Box::new(graphics))),
-                    Err(d3d11_error) => {
-                        return GpuGraphics::new_with_backends(window, Some(wgpu::Backends::DX12))
-                            .map(|graphics| GraphicsImpl::Gpu(Box::new(graphics)))
-                            .map_err(|vello_error| {
-                                format!(
-                                    "Native D3D11 renderer failed: {d3d11_error}; Vello/DX12 fallback failed: {vello_error}"
-                                )
-                            });
-                    }
-                }
+                return Self::new_d3d11_or_vello(window, "Native D3D11 renderer failed");
             }
         }
         GpuGraphics::new(window).map(|graphics| GraphicsImpl::Gpu(Box::new(graphics)))
+    }
+
+    /// D3D11 is the default Windows GPU path (see PERFORMANCE.md); Vello/DX12
+    /// is the fallback when the device cannot be created.
+    #[cfg(target_os = "windows")]
+    fn new_d3d11_or_vello(window: Arc<Window>, context: &str) -> Result<GraphicsImpl, String> {
+        D3d11Graphics::new(window.clone())
+            .map(|graphics| GraphicsImpl::D3d11(Box::new(graphics)))
+            .or_else(|d3d11_error| {
+                GpuGraphics::new_with_backends(window, Some(wgpu::Backends::DX12))
+                    .map(|graphics| GraphicsImpl::Gpu(Box::new(graphics)))
+                    .map_err(|vello_error| {
+                        format!(
+                            "{context}: {d3d11_error}; Vello/DX12 fallback failed: {vello_error}"
+                        )
+                    })
+            })
     }
 }
 
