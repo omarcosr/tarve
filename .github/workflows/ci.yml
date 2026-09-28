@@ -30,6 +30,12 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+          cache-on-failure: true
+
       - name: Install Linux native dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev
 
@@ -71,6 +77,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
+          cache-on-failure: true
 
       - name: Install Linux native and virtual display dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev mesa-vulkan-drivers xvfb
@@ -118,7 +125,6 @@ jobs:
 
   windows-x64:
     name: Windows x64 release gate
-    needs: linux-x64-native
     runs-on: windows-latest
     timeout-minutes: 45
 
@@ -141,15 +147,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
+          shared-key: windows-x64
+          cache-on-failure: true
 
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
-
-      - name: Download Linux native runtime
-        uses: actions/download-artifact@v4
-        with:
-          name: tarve-ci-linux-x64-native
-          path: native/linux-x64
 
       - name: Check locked Rust dependency graph
         run: cargo check --manifest-path native/Cargo.toml --locked
@@ -157,7 +159,12 @@ jobs:
       - name: Rust formatting
         run: cargo fmt --manifest-path native/Cargo.toml -- --check
 
+      # Packaging needs the Linux runtime; it runs in windows-x64-package so this
+      # gate does not wait for the Linux build.
       - name: Full release gate
+        env:
+          TARVE_SMOKE_FORCED_WGPU: "0"
+          TARVE_VERIFY_SKIP: pack,smoke:package,smoke:exe
         run: bun run release:check
 
       - name: Upload visual captures
@@ -170,3 +177,46 @@ jobs:
             dist/*-real.png
             work/*.png
           retention-days: 14
+
+  windows-x64-package:
+    name: Universal package and executable
+    needs: [linux-x64-native, windows-x64]
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+          shared-key: windows-x64
+          save-if: false
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download Linux native runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: tarve-ci-linux-x64-native
+          path: native/linux-x64
+
+      - name: Package, pack and smoke
+        run: |
+          bun run package
+          bun run pack
+          bun run smoke:package
+          bun run smoke:exe

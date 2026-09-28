@@ -78,6 +78,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
+          cache-on-failure: true
 
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
@@ -104,6 +105,8 @@ jobs:
           }
 
       - name: Full unsigned release gate
+        env:
+          TARVE_SMOKE_FORCED_WGPU: "0"
         run: bun run release:check
 
       - name: Build and verify signed release artifacts

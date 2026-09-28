@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { Code, Column, Diff, Markdown, Scroll, Window, createApp } from "@tarve/core";
 import { darkTheme, lightTheme } from "@tarve/core";
 import { jsx } from "@tarve/core/jsx-runtime";
+import { smokeRendererModes } from "./smoke-renderer-modes";
 
 const updated = `${Array.from({ length: 2000 }, (_, index) => `line ${index}\n`).join("")}answer\n`;
 const requestedRenderer = process.env.TARVE_SMOKE_RENDERER;
@@ -102,11 +103,7 @@ if (process.env.TARVE_SMOKE_CODE) {
   }
 } else if (!requestedRenderer) {
   const script = resolve(import.meta.dir, "smoke-rich-content.ts");
-  const modes = [
-    { label: "cpu", renderer: "cpu", wgpuBackend: undefined },
-    { label: "gpu-d3d11", renderer: "gpu", wgpuBackend: undefined },
-    { label: "gpu-vello-dx12", renderer: "gpu", wgpuBackend: "dx12" },
-  ] as const;
+  const modes = smokeRendererModes();
   for (const mode of modes) {
     const env: NodeJS.ProcessEnv = {
       ...process.env,

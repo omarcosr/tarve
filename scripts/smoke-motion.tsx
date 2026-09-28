@@ -2,21 +2,13 @@ import { strict as assert } from "node:assert";
 import { mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Column, Window, createTestRenderer, readPngRgba } from "@tarve/core";
+import { smokeRendererModes } from "./smoke-renderer-modes";
 
 const requestedRenderer = process.env.TARVE_SMOKE_RENDERER;
 
 if (!requestedRenderer) {
   const script = resolve(import.meta.dir, "smoke-motion.tsx");
-  const modes = process.platform === "win32"
-    ? [
-        { label: "cpu", renderer: "cpu", wgpuBackend: undefined },
-        { label: "gpu-d3d11", renderer: "gpu", wgpuBackend: undefined },
-        { label: "gpu-vello-dx12", renderer: "gpu", wgpuBackend: "dx12" },
-      ] as const
-    : [
-        { label: "cpu", renderer: "cpu", wgpuBackend: undefined },
-        { label: "gpu-vello", renderer: "gpu", wgpuBackend: undefined },
-      ] as const;
+  const modes = smokeRendererModes();
 
   for (const mode of modes) {
     const env: NodeJS.ProcessEnv = {
