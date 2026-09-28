@@ -1,4 +1,4 @@
-name: Windows x64 CI
+name: CI
 
 on:
   push:
@@ -46,6 +46,72 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           path: native/linux-x64/libtarve_native.so
+
+  linux-x64:
+    name: Linux x64 gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+
+      - name: Install Linux native and virtual display dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev mesa-vulkan-drivers xvfb
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check locked Rust dependency graph
+        run: cargo check --manifest-path native/Cargo.toml --locked
+
+      - name: Rust formatting
+        run: cargo fmt --manifest-path native/Cargo.toml -- --check
+
+      - name: Typecheck, lint and unit tests
+        run: |
+          bun run check
+          bun run lint
+          bun run test
+          bun run test:package-clean
+          bun run test:release-policy
+
+      # Real-window smokes on a virtual X display. OS keystroke injection is
+      # Windows-only, so the editor smoke uses the debug input channel here.
+      - name: Real-window smoke tests
+        env:
+          TARVE_SMOKE_OS_INPUT: "0"
+        run: |
+          for step in smoke smoke:controls smoke:virtual-list smoke:rich-content smoke:motion smoke:editor smoke:devtools; do
+            echo "::group::$step"
+            xvfb-run -a -s "-screen 0 1920x1080x24" bun run "$step"
+            echo "::endgroup::"
+          done
+
+      - name: Upload smoke captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tarve-linux-captures-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: work/*.png
+          retention-days: 14
 
   windows-x64:
     name: Windows x64 release gate

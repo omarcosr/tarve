@@ -1,0 +1,3 @@
+[test]
+# work/ holds scratch checkouts and smoke artifacts; never collect tests from it.
+pathIgnorePatterns = ["work/**", "dist/**", "native/target/**"]

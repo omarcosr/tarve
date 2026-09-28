@@ -2604,6 +2604,7 @@ impl Tree {
         }
         samples.push_back(milliseconds as f32);
     }
+    #[cfg(test)]
     pub fn frame_samples(&self) -> Option<Vec<f32>> {
         self.frame_overlay
             .as_ref()
