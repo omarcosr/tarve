@@ -4607,3 +4607,28 @@ fn caret_blinks_after_activity_and_settles_without_idle_frames() {
     tree.blur();
     assert_eq!(tree.next_caret_blink_ms(), None);
 }
+
+#[test]
+fn find_literal_matches_regex_semantics_without_regex() {
+    use crate::tree::find_literal;
+    assert_eq!(find_literal("aaaa", "aa", true), vec![0..2, 2..4]);
+    assert_eq!(find_literal("Foo foo FOO", "foo", true), vec![4..7]);
+    assert_eq!(
+        find_literal("Foo foo FOO", "foo", false),
+        vec![0..3, 4..7, 8..11]
+    );
+    assert_eq!(
+        find_literal("ÉCOLE école", "école", false),
+        vec![0..6, 7..13]
+    );
+    assert_eq!(find_literal("ΟΔΟΣ οδος", "οδοσ", false), vec![0..8, 9..17]);
+    assert_eq!(
+        find_literal("KELVIN \u{212A}", "k", false),
+        vec![0..1, 7..10]
+    );
+    assert_eq!(find_literal("İx", "x", false), vec![2..3]);
+    assert_eq!(
+        find_literal("abc", "", false),
+        Vec::<std::ops::Range<usize>>::new()
+    );
+}

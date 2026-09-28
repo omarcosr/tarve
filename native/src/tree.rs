@@ -173,6 +173,52 @@ fn utf16_to_byte(text: &str, offset: usize) -> Option<usize> {
     (units == offset).then_some(text.len())
 }
 
+/// Non-overlapping literal matches as byte ranges of `content`.
+///
+/// Case-insensitive search folds each char to a single lowercase char (the
+/// same simple folding a case-insensitive regex uses), searches the folded
+/// text with `str::match_indices` and maps the hits back to original offsets.
+pub(crate) fn find_literal(content: &str, query: &str, case_sensitive: bool) -> Vec<Range<usize>> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    if case_sensitive {
+        return content
+            .match_indices(query)
+            .map(|(start, found)| start..start + found.len())
+            .collect();
+    }
+    fn fold(ch: char) -> char {
+        let mut lower = ch.to_lowercase();
+        match (lower.next(), lower.next()) {
+            (Some('ς'), None) => 'σ',
+            (Some(single), None) => single,
+            _ => ch,
+        }
+    }
+    let needle: String = query.chars().map(fold).collect();
+    let mut folded = String::with_capacity(content.len());
+    let mut folded_starts = Vec::with_capacity(content.len());
+    let mut original_starts = Vec::with_capacity(content.len());
+    for (offset, ch) in content.char_indices() {
+        folded_starts.push(folded.len());
+        original_starts.push(offset);
+        folded.push(fold(ch));
+    }
+    folded_starts.push(folded.len());
+    original_starts.push(content.len());
+    let original = |folded_offset: usize| {
+        folded_starts
+            .binary_search(&folded_offset)
+            .ok()
+            .map(|index| original_starts[index])
+    };
+    folded
+        .match_indices(needle.as_str())
+        .filter_map(|(start, found)| Some(original(start)?..original(start + found.len())?))
+        .collect()
+}
+
 fn is_search_word_char(ch: char) -> bool {
     ch.is_alphabetic() || ch.is_numeric() || ch == '_'
 }
@@ -2328,43 +2374,35 @@ impl Tree {
                 {
                     self.highlight_searches += 1;
                 }
-                let matches: Vec<Range<usize>> = if !highlight.query.is_empty()
-                    && highlight.query.len() <= 4096
-                {
-                    let Ok(pattern) = regex::RegexBuilder::new(&regex::escape(&highlight.query))
-                        .case_insensitive(!highlight.case_sensitive)
-                        .build()
-                    else {
-                        continue;
-                    };
-                    pattern
-                        .find_iter(&content)
-                        .filter(|found| {
-                            !highlight.whole_word
-                                || (content[..found.start()]
-                                    .chars()
-                                    .next_back()
-                                    .is_none_or(|ch| !is_search_word_char(ch))
-                                    && content[found.end()..]
+                let matches: Vec<Range<usize>> =
+                    if !highlight.query.is_empty() && highlight.query.len() <= 4096 {
+                        find_literal(&content, &highlight.query, highlight.case_sensitive)
+                            .into_iter()
+                            .filter(|found| {
+                                !highlight.whole_word
+                                    || (content[..found.start]
                                         .chars()
-                                        .next()
-                                        .is_none_or(|ch| !is_search_word_char(ch)))
-                        })
-                        .take(50_000)
-                        .map(|found| found.range())
-                        .collect()
-                } else {
-                    highlight
-                        .ranges
-                        .iter()
-                        .filter_map(|range| {
-                            let start = utf16_to_byte(&content, range.start)?;
-                            let end = utf16_to_byte(&content, range.end)?;
-                            (start < end).then_some(start..end)
-                        })
-                        .take(50_000)
-                        .collect()
-                };
+                                        .next_back()
+                                        .is_none_or(|ch| !is_search_word_char(ch))
+                                        && content[found.end..]
+                                            .chars()
+                                            .next()
+                                            .is_none_or(|ch| !is_search_word_char(ch)))
+                            })
+                            .take(50_000)
+                            .collect()
+                    } else {
+                        highlight
+                            .ranges
+                            .iter()
+                            .filter_map(|range| {
+                                let start = utf16_to_byte(&content, range.start)?;
+                                let end = utf16_to_byte(&content, range.end)?;
+                                (start < end).then_some(start..end)
+                            })
+                            .take(50_000)
+                            .collect()
+                    };
                 self.highlight_match_cache.insert(
                     owner_id.clone(),
                     HighlightMatchCache {
