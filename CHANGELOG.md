@@ -13,6 +13,7 @@ All notable changes to `@tarve/core` and `@tarve/react-icons` are documented her
 - JSON protocol version 47.
 
 ### Fixed
+- `bun --hot`: editing a file now reloads into the open window. A second `render()` in the same process remounts instead of failing with "Only one native app can be started per process", and under `--hot` `render()` resolves once the window is ready (Bun defers reloads while a top-level `await` is pending) and the process exits when the window closes.
 - Windows: when the session is out of USER/atom memory (`SetPropW` fails with `0x80070008`), the window starts without UI Automation exposure and logs a warning instead of panicking the window thread in the AccessKit subclassing adapter.
 - `InputOTP` focus: clicking now shows the active slot (slots had only a keyboard focus-visible ring), a click maps to the nearest slot instead of the hidden input's text position, and clicking a filled slot selects its character so typing replaces it instead of inserting before the code.
 - Idle memory: the native runtime returns free `mimalloc` pages to the OS once rendering settles (at most every 500 ms). Since 0.2.0 an idle app stayed at its startup peak; a 2,000-row list now idles at ~225 MB instead of ~255 MB.
