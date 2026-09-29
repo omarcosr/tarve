@@ -230,11 +230,19 @@ function resolveShadowColors(style: StateStyle, selected: ThemeDefinition): void
   }
 }
 
+/** Style keys whose string value is a colour (background, borderColor, diffAddedBackground, …). */
+const COLOR_KEY = /^(background|foreground|color)$|(Color|Background|Foreground|Accent|Rule)$/;
+
+/** Theme token or CSS colour (hex, rgb(), hsl(), names) for colour keys; other strings unchanged. */
+export function resolveStyleString(key: string, value: string, selected: ThemeDefinition): string {
+  return resolveThemeColor(COLOR_KEY.test(key) ? cssColor(value) : value, selected);
+}
+
 export function resolveThemeStyle(style: Style, selected: ThemeDefinition): Style {
   const resolved: Style = { ...style };
   for (const key of Object.keys(resolved) as (keyof Style)[]) {
     const value = resolved[key];
-    if (typeof value === "string") (resolved as Record<string, unknown>)[key] = resolveThemeColor(value, selected);
+    if (typeof value === "string") (resolved as Record<string, unknown>)[key] = resolveStyleString(key, value, selected);
   }
   resolveShadowColors(resolved, selected);
   for (const state of ["hover", "focus", "focusVisible", "active", "disabled"] as const) {
@@ -244,7 +252,7 @@ export function resolveThemeStyle(style: Style, selected: ThemeDefinition): Styl
     for (const key of Object.keys(next) as (keyof typeof next)[]) {
       const stateValue = next[key];
       if (typeof stateValue === "string") {
-        (next as Record<string, unknown>)[key] = resolveThemeColor(stateValue, selected);
+        (next as Record<string, unknown>)[key] = resolveStyleString(key, stateValue, selected);
       }
     }
     resolveShadowColors(next, selected);

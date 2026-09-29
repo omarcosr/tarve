@@ -1,6 +1,6 @@
 import { PROTOCOL_VERSION, type MotionProperty, type NativeNode, type Renderer, type SceneDocument, type ScrollPosition, type TreeMutation, type VirtualListMeasurement, type WindowOptions } from "../../protocol/src/index";
 import { Fragment, _isNativeVNode, type Child, type IntrinsicAnchorProps, type PastePayload, type VNode } from "./jsx-runtime";
-import { lightTheme, resolveThemeColor, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
+import { lightTheme, resolveStyleString, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
 import type { WindowCloseRequestEvent } from "./components";
 import type { ComponentAdapter } from "./component-adapter";
@@ -192,7 +192,7 @@ export function compileTree(
       selectedTheme = p.theme ?? lightTheme;
       windowOptions = { title: p.title ?? "Tarve", width: p.width ?? 1120, height: p.height ?? 820,
         minWidth: p.minWidth ?? 780, minHeight: p.minHeight ?? 580,
-        background: resolveThemeColor(p.style?.background ?? theme.colors.background, selectedTheme),
+        background: resolveStyleString("background", p.style?.background ?? theme.colors.background, selectedTheme),
         decorations: true, resizable: p.resizable ?? true, position: p.position ?? "center", debug, visible };
     }
     const hoverHandler = isIntrinsicDiv && (p.onMouseEnter || p.onMouseLeave)

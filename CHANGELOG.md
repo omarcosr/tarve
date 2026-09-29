@@ -5,6 +5,7 @@ All notable changes to `@tarve/core` and `@tarve/react-icons` are documented her
 ## Unreleased
 
 ### Added
+- CSS colours in every colour property: `rgb()`/`rgba()`, `hsl()`/`hsla()`, short hex and common names. Unsupported colour strings now throw instead of silently rendering black.
 - CSS syntax for shadows: `boxShadow: "0 8px 24px -4px rgba(0,0,0,.2), inset 0 1px 0 #fff"` and `textShadow: "1px 2px #0006"`, including `rgb()`/`hsl()` colours and theme tokens. Shadow objects also accept those colour formats.
 - `hover` styles apply to every node under the pointer and its ancestors (CSS `:hover`), not only interactive nodes.
 - Native transitions for `background`, `foreground`, `borderColor`, `boxShadow` and `textShadow`, and state-driven transitions: hover/active/focus/disabled changes animate `opacity`, `radius`, colours and shadows from the value on screen. No frames are scheduled once a transition ends.
