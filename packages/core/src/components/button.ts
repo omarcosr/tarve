@@ -87,15 +87,6 @@ function composedContent(child: Child, foreground: string): Child {
       },
     };
   }
-  if (child.type === "icon") {
-    return {
-      ...child,
-      props: {
-        ...props,
-        style: { foreground, ...props.style },
-      },
-    };
-  }
   const children = props.children === undefined ? undefined : composedContent(props.children, foreground);
   if (children === undefined) return child;
   return { ...child, props: { ...props, children } };
