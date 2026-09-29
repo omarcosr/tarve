@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Image, Window } from "./components";
-import { clearImageSourceCache, loadImageSource } from "./components/image";
+import { clearImageSourceCache, loadImageSource, serializeImageSource } from "./components/image";
 import { compileTree } from "./reconciler";
 
 afterEach(() => clearImageSourceCache());
@@ -102,5 +102,40 @@ describe("dynamic image sources", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe("image source validation", () => {
+  test("RGBA sources must have valid dimensions and exact byte length", () => {
+    expect(() => serializeImageSource({ width: 0, height: 1, rgba: new Uint8Array(0) })).toThrow("dimensions");
+    expect(() => serializeImageSource({ width: 1.5, height: 1, rgba: new Uint8Array(4) })).toThrow("dimensions");
+    expect(() => serializeImageSource({ width: 2, height: 2, rgba: new Uint8Array(4) })).toThrow("exactly 16 bytes");
+    const ok = serializeImageSource({ width: 1, height: 1, rgba: new Uint8Array([1, 2, 3, 4]), premultiplied: true });
+    expect(ok).toMatchObject({ image: { kind: "rgba", width: 1, height: 1, premultiplied: true } });
+  });
+
+  test("encoded sources reject empty bytes and keep the media type in the key", () => {
+    expect(() => serializeImageSource(new Uint8Array(0))).toThrow("empty");
+    const a = serializeImageSource({ bytes: new Uint8Array([1]), mediaType: "image/png" });
+    const b = serializeImageSource({ bytes: new Uint8Array([1]), mediaType: "image/webp" });
+    expect("image" in a && "image" in b && a.image.key !== b.image.key).toBe(true);
+  });
+
+  test("percent-encoded data URLs decode bytes and UTF-8 text", () => {
+    const source = serializeImageSource("data:image/svg+xml,%3Csvg%3E\u00e9");
+    expect(source).toMatchObject({ image: { kind: "encoded", mediaType: "image/svg+xml" } });
+    const data = "image" in source ? Buffer.from(source.image.data, "base64").toString("utf8") : "";
+    expect(data).toBe("<svg>\u00e9");
+    expect(() => serializeImageSource("data:")).toThrow("Invalid image data URL");
+  });
+
+  test("empty paths are rejected", () => {
+    expect(() => serializeImageSource("")).toThrow("must not be empty");
+  });
+
+  test("loadImageSource validates protocol, cache mode and byte limit", async () => {
+    await expect(loadImageSource("file:///tmp/a.png")).rejects.toThrow("only HTTP(S)");
+    await expect(loadImageSource("https://example.test/a.png", { cache: "bogus" as never })).rejects.toThrow("cache mode");
+    await expect(loadImageSource("https://example.test/a.png", { maxBytes: 0 })).rejects.toThrow("maxBytes");
   });
 });
