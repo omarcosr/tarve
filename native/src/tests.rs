@@ -624,6 +624,107 @@ fn otp_slot_focus_follows_the_native_input_caret() {
     );
 }
 
+/// The shape InputOTP compiles to: one transparent absolute input under a
+/// row of slots whose focus ring follows the caret.
+fn otp_tree(value: &str) -> Tree {
+    let mut input = node(
+        "otp-input",
+        "input",
+        json!({"width":168,"height":42,"position":"absolute","top":0,"left":0,"padding":0,"borderWidth":0}),
+        vec![],
+    );
+    input.value = Some(value.into());
+    let ring =
+        json!({"outlineWidth":2,"outlineOffset":2,"outlineColor":"#a1a1aa","outlineStyle":"solid"});
+    let slots = (0..4)
+        .map(|index| {
+            let mut slot = node(
+                &format!("slot-{index}"),
+                "view",
+                json!({"width":36,"height":42,"focus":ring,"focusVisible":ring}),
+                vec![],
+            );
+            slot.control = Some(
+                serde_json::from_value(
+                    json!({"role":"otpSlot","group":"otp-input","value":index,"max":3}),
+                )
+                .unwrap(),
+            );
+            slot
+        })
+        .collect();
+    let otp = node(
+        "otp",
+        "view",
+        json!({"position":"relative","width":168,"height":42}),
+        vec![
+            input,
+            node(
+                "slots",
+                "row",
+                json!({"gap":8,"width":168,"height":42}),
+                slots,
+            ),
+        ],
+    );
+    let mut tree = Tree::new(root(vec![otp]));
+    tree.compute(320.0, 120.0).unwrap();
+    tree
+}
+
+fn click_otp_slot(tree: &mut Tree, index: usize) {
+    let slot = tree.entries[&format!("slot-{index}")].rect;
+    let center = slot.center();
+    tree.pointer_move(center.x, center.y);
+    tree.pointer_down();
+    tree.pointer_up();
+}
+
+fn focused_otp_slots(tree: &Tree) -> Vec<usize> {
+    (0..4)
+        .filter(|index| {
+            tree.resolved_visual_number(&format!("slot-{index}"), "outlineWidth", 0.0) > 0.0
+        })
+        .collect()
+}
+
+#[test]
+fn otp_slots_show_focus_after_a_mouse_click() {
+    let mut tree = otp_tree("12");
+    click_otp_slot(&mut tree, 3);
+    assert_eq!(tree.focused.as_deref(), Some("otp-input"));
+    // An empty slot past the value puts the caret at the end: slot 2 is next.
+    assert_eq!(focused_otp_slots(&tree), vec![2]);
+}
+
+#[test]
+fn clicking_a_filled_otp_slot_selects_its_character_for_replacement() {
+    let mut tree = otp_tree("123");
+    click_otp_slot(&mut tree, 1);
+    assert_eq!(focused_otp_slots(&tree), vec![1]);
+    let events = tree.type_text("9");
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "change" && event["value"] == "193"),
+        "{events:?}"
+    );
+    // The caret moves on to the next slot, like typing into an empty one.
+    assert_eq!(focused_otp_slots(&tree), vec![2]);
+
+    // A click on the first slot of a partial code does not insert before it.
+    let mut tree = otp_tree("12");
+    click_otp_slot(&mut tree, 0);
+    assert_eq!(focused_otp_slots(&tree), vec![0]);
+    let events = tree.type_text("7");
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "change" && event["value"] == "72"),
+        "{events:?}"
+    );
+}
+
 #[test]
 fn password_input_masks_rendered_text_and_does_not_copy_selection() {
     let mut input = node(

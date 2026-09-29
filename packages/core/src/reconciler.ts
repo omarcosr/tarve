@@ -230,6 +230,10 @@ export function compileTree(
         ...focusOutlineOverrides(p.style?.focus),
         ...p.style?.focusVisible,
       };
+      // OTP slots mirror a hidden input's caret. Pointer focus never sets
+      // focus-visible, so without a plain focus ring a clicked OTP shows no
+      // active slot at all.
+      if (control?.role === "otpSlot") rawStyle.focus = { ...rawStyle.focusVisible, ...p.style?.focus };
     }
     const style = resolveThemeStyle(rawStyle, selectedTheme);
     for (const key of ["padding", "margin"] as const) {

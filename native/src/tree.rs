@@ -3443,7 +3443,12 @@ impl Tree {
                 return false;
             };
             let value = input.node.value.as_deref().unwrap_or("");
-            let caret = floor_boundary(value, self.caret.min(value.len()));
+            // A selected character (a clicked filled slot) marks its own slot.
+            let position = match self.selection_anchor {
+                Some(anchor) if anchor != self.caret => anchor.min(self.caret),
+                _ => self.caret,
+            };
+            let caret = floor_boundary(value, position.min(value.len()));
             let caret_slot = value[..caret].graphemes(true).count();
             let max_slot = control.max.max(0.0) as usize;
             control.value.max(0.0) as usize == caret_slot.min(max_slot)
@@ -5124,20 +5129,25 @@ impl Tree {
                     self.ime_cancel();
                 }
                 self.place_text_caret_from_pointer(&id);
-                match self.user_select_mode(&id) {
-                    UserSelectMode::None => {
-                        self.selection_anchor = None;
-                        self.text_dragging = false;
-                    }
-                    UserSelectMode::Text => {
-                        self.selection_anchor = Some(self.caret);
-                        self.text_dragging = true;
-                    }
-                    UserSelectMode::All => {
-                        let value_len = self.entries[&id].node.value.as_deref().unwrap_or("").len();
-                        self.selection_anchor = Some(0);
-                        self.caret = value_len;
-                        self.text_dragging = false;
+                if self.select_otp_slot_from_pointer(&id) {
+                    self.text_dragging = false;
+                } else {
+                    match self.user_select_mode(&id) {
+                        UserSelectMode::None => {
+                            self.selection_anchor = None;
+                            self.text_dragging = false;
+                        }
+                        UserSelectMode::Text => {
+                            self.selection_anchor = Some(self.caret);
+                            self.text_dragging = true;
+                        }
+                        UserSelectMode::All => {
+                            let value_len =
+                                self.entries[&id].node.value.as_deref().unwrap_or("").len();
+                            self.selection_anchor = Some(0);
+                            self.caret = value_len;
+                            self.text_dragging = false;
+                        }
                     }
                 }
             } else {
@@ -7033,6 +7043,49 @@ impl Tree {
             .filter(|rect| rect.x1 > rect.x0 && rect.y1 > rect.y0)
             .map(|rect| BoxRect::new(rect.x0, rect.y0, rect.x1, rect.y1))
             .collect()
+    }
+
+    /// InputOTP: its transparent input spans every slot, so a text hit test
+    /// would put the caret wherever the (tiny) value text happens to end.
+    /// Map the click to the nearest slot instead: a filled slot selects its
+    /// character so typing replaces it; an empty one puts the caret at the end.
+    fn select_otp_slot_from_pointer(&mut self, id: &str) -> bool {
+        let slot = self
+            .entries
+            .values()
+            .filter_map(|entry| {
+                let control = entry.node.control.as_ref()?;
+                (control.role == "otpSlot" && control.group == id).then(|| {
+                    let rect = self.visible_rect(&entry.node.id).unwrap_or(entry.rect);
+                    let distance = if self.mouse.0 < rect.x0 {
+                        rect.x0 - self.mouse.0
+                    } else if self.mouse.0 > rect.x1 {
+                        self.mouse.0 - rect.x1
+                    } else {
+                        0.0
+                    };
+                    (distance, control.value.max(0.0) as usize)
+                })
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        let Some((_, slot)) = slot else {
+            return false;
+        };
+        let value = self.entries[id].node.value.as_deref().unwrap_or("");
+        let starts: Vec<usize> = value
+            .grapheme_indices(true)
+            .map(|(start, _)| start)
+            .collect();
+        if let Some(start) = starts.get(slot).copied() {
+            self.selection_anchor = Some(start);
+            self.caret = starts.get(slot + 1).copied().unwrap_or(value.len());
+        } else {
+            self.selection_anchor = None;
+            self.caret = value.len();
+        }
+        self.dirty.paint = true;
+        self.touch_caret();
+        true
     }
 
     fn place_text_caret_from_pointer(&mut self, id: &str) {

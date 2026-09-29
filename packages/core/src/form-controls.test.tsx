@@ -65,6 +65,7 @@ describe("form and visual controls", () => {
       outlineStyle: "solid",
       outlineColor: "#a1a1aa",
     });
+    expect(tree.nodes.get("otp-slot-2")?.style.focus).toEqual(tree.nodes.get("otp-slot-2")?.style.focusVisible);
     expect(tree.nodes.get("otp-slot-0")?.children[0]?.style.fontSize).toBe(16);
     expect(tree.nodes.get("otp-slot-0")?.children[0]?.style.fontWeight).toBe(500);
     tree.handlers.get("otp-input")?.onChange?.("12a34");
