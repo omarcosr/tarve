@@ -707,32 +707,35 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 }
 
 /**
- * Renders the app until its window closes. In dev mode a second call in the same
+ * Renders the app until its window closes. A second call in the same
  * process (e.g. a `bun --hot` reload) remounts into the already open window.
  */
 export async function render(view: () => VNode, options?: AppOptions): Promise<void> {
-  const dev = options?.dev ?? envFlag("TARVE_DEV");
-  const registry = globalThis as { [DEV_APP_KEY]?: AppHandle };
-  const existing = dev ? registry[DEV_APP_KEY] : undefined;
-  if (existing) {
-    existing.remount(view);
-    await existing.closed;
-    return;
-  }
-  const app = createApp(view, options);
-  if (dev) {
-    registry[DEV_APP_KEY] = app;
-    void app.closed.then(() => {
-      if (registry[DEV_APP_KEY] === app) delete registry[DEV_APP_KEY];
-    });
-  }
-  try {
-    await app.ready;
-  } catch (error) {
-    if (registry[DEV_APP_KEY] === app) delete registry[DEV_APP_KEY];
-    throw error;
-  }
-  await app.closed;
+    // Only one native app can run per process, so a second render() (e.g. a
+      // `bun --hot` reload re-evaluating the entry) remounts into the open window.
+      // Bun defers hot reloads while a top-level await is pending, so under --hot
+      // render() resolves once the window is ready and the process exits on close.
+      const hot = process.execArgv.includes("--hot");
+      const registry = globalThis as { [DEV_APP_KEY]?: AppHandle };
+      const existing = registry[DEV_APP_KEY];
+      if (existing) {
+        existing.remount(view);
+        if (!hot) await existing.closed;
+        return;
+      }
+      const app = createApp(view, options);
+      registry[DEV_APP_KEY] = app;
+      void app.closed.then(() => {
+        if (registry[DEV_APP_KEY] === app) delete registry[DEV_APP_KEY];
+        if (hot) process.exit(0);
+      });
+      try {
+        await app.ready;
+      } catch (error) {
+        if (registry[DEV_APP_KEY] === app) delete registry[DEV_APP_KEY];
+        throw error;
+      }
+      if (!hot) await app.closed;
 }
 function pastePayload(event: Extract<NativeEvent, { type: "paste" }>): PastePayload | undefined {
   if (event.files?.length) return { kind: "files", files: [...event.files] };
