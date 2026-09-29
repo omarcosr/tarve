@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Column, Text, Window } from "./components";
-import { cssColor, parseBoxShadow, parseTextShadow } from "./css-shadow";
+import { cssColor, parseBoxShadow, parseTextShadow, parseTransform } from "./css-shadow";
 import { compileTree } from "./reconciler";
 import { darkTheme, theme } from "./theme";
 
@@ -56,5 +56,18 @@ describe("CSS shadow syntax", () => {
     expect(card.hover?.boxShadow).toEqual([{ x: 0, y: 0, blur: 0, spread: 2, color: "#2563eb80", inset: true }]);
     expect(card.hover?.textShadow).toEqual({ x: 1, y: 1, color: "#000000" });
     expect(tree.nodes.get("label")!.style.textShadow).toBeUndefined();
+  });
+
+  test("transform syntax composes translate and scale like CSS", () => {
+    expect(parseTransform("translateY(-2px) scale(1.02)")).toEqual({ y: -2, scale: 1.02 });
+    expect(parseTransform("scale(2) translateX(10px)")).toEqual({ x: 20, scale: 2 });
+    expect(parseTransform("translate(4px, 0) scaleX(2) scaleY(0.5)")).toEqual({ x: 4, scaleX: 2, scaleY: 0.5 });
+    expect(parseTransform("none")).toEqual({});
+    expect(() => parseTransform("rotate(10deg)")).toThrow("translate and scale only");
+    expect(() => parseTransform("scale(0)")).toThrow("Invalid scale");
+    expect(() => parseTransform("translateX(1em)")).toThrow("length");
+    expect(() => parseTransform("scale(2) junk")).toThrow("Invalid transform");
+    const tree = compileTree(<Window><Column id="c" style={{ hover: { transform: "translateY(-4px)" } }} /></Window>);
+    expect(tree.nodes.get("c")!.style.hover?.transform).toEqual({ y: -4 });
   });
 });

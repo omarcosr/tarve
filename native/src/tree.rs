@@ -75,10 +75,12 @@ const MOTION_PROPERTIES: &[&str] = &[
     "borderColor",
     "boxShadow",
     "textShadow",
+    "transform",
 ];
 /// Paint-only properties that can also transition when hover/active/focus/
 /// disabled changes. Layout properties only animate on JS updates.
 const STATE_MOTION_PROPERTIES: &[&str] = &[
+    "transform",
     "opacity",
     "radius",
     "background",
@@ -249,6 +251,21 @@ fn motion_value(node: &Node, property: &str, state: VisualState) -> Option<Vec<f
                 })
                 .collect(),
         ),
+        "transform" => {
+            let transform = visual_value(node, "transform", state).as_object();
+            let number = |key: &str| {
+                transform
+                    .and_then(|transform| transform.get(key))
+                    .and_then(Value::as_f64)
+            };
+            let scale = number("scale").unwrap_or(1.0);
+            Some(vec![
+                number("x").unwrap_or(0.0) as f32,
+                number("y").unwrap_or(0.0) as f32,
+                number("scaleX").unwrap_or(scale) as f32,
+                number("scaleY").unwrap_or(scale) as f32,
+            ])
+        }
         "textShadow" => Some(
             text_shadow(node, state)
                 .map(|(x, y, colour)| {
@@ -1308,6 +1325,10 @@ impl Tree {
                 self.dirty.paint = true;
             }
         }
+    }
+    #[cfg(test)]
+    pub(crate) fn motion_values(&self, id: &str, property: &str) -> Option<Vec<f32>> {
+        Some(self.entries.get(id)?.motions.get(property)?.current.clone())
     }
     pub fn active_motion_count(&self) -> usize {
         self.entries.values().map(|entry| entry.motions.len()).sum()
@@ -2853,6 +2874,7 @@ impl Tree {
             self.highlight_dirty = false;
         }
         self.painted_nodes = 0;
+        let target = &mut crate::paint::TransformTarget::new(target);
         let root_rect = self.entries[&self.root].rect;
         self.paint_node(&self.root.clone(), Vec2::ZERO, scale, root_rect, target);
         let mut portals = self.portal_roots();
@@ -3020,7 +3042,68 @@ impl Tree {
         let state = self.visual_state_for(id, &entry.node);
         visual_string(&entry.node, "foreground", fallback, state).to_string()
     }
+    /// Paints one node and its subtree, applying its `transform` (translate /
+    /// scale about the box centre) to everything underneath. Layout, hit
+    /// testing and hover use the untransformed box.
     fn paint_node<P: PaintTarget>(
+        &mut self,
+        id: &str,
+        offset: Vec2,
+        scale: f64,
+        clip: BoxRect,
+        target: &mut P,
+    ) {
+        let Some(local) = self.node_transform(id, offset) else {
+            self.paint_node_content(id, offset, scale, clip, target);
+            return;
+        };
+        // Culling and visible text ranges run in the node's own space.
+        let local_clip = local.inverse().transform_rect_bbox(clip);
+        let device = Affine::scale(scale) * local * Affine::scale(1.0 / scale);
+        target.push_transform(device);
+        self.paint_node_content(id, offset, scale, local_clip, target);
+        target.pop_transform();
+    }
+
+    /// The node's transform in layout space, if it is not the identity.
+    fn node_transform(&self, id: &str, offset: Vec2) -> Option<Affine> {
+        let entry = self.entries.get(id)?;
+        if entry.node.style.get("transform").is_none()
+            && !entry.motions.contains_key("transform")
+            && !["hover", "active", "focus", "focusVisible", "disabled"]
+                .iter()
+                .any(|state| {
+                    entry
+                        .node
+                        .style
+                        .get(*state)
+                        .is_some_and(|style| style.get("transform").is_some())
+                })
+        {
+            return None;
+        }
+        let state = self.visual_state_for(id, &entry.node);
+        let values = entry
+            .motions
+            .get("transform")
+            .filter(|track| {
+                track.state_driven || !visual_state_overrides(&entry.node, "transform", state)
+            })
+            .map(|track| track.current.clone())
+            .or_else(|| motion_value(&entry.node, "transform", state))?;
+        let [x, y, scale_x, scale_y] = [0, 1, 2, 3].map(|index| f64::from(values[index]));
+        if x == 0.0 && y == 0.0 && scale_x == 1.0 && scale_y == 1.0 {
+            return None;
+        }
+        let centre = (entry.rect + Vec2::new(-offset.x, -offset.y)).center();
+        Some(
+            Affine::translate((centre.x + x, centre.y + y))
+                * Affine::scale_non_uniform(scale_x, scale_y)
+                * Affine::translate((-centre.x, -centre.y)),
+        )
+    }
+
+    fn paint_node_content<P: PaintTarget>(
         &mut self,
         id: &str,
         offset: Vec2,
@@ -3711,19 +3794,35 @@ impl Tree {
                 .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
         });
         for portal in portals.iter().rev() {
-            if let Some(path) =
-                self.hover_path_in(portal, self.ancestor_scroll_offset(portal), root_rect)
-            {
+            if let Some(path) = self.hover_path_in(
+                portal,
+                self.ancestor_scroll_offset(portal),
+                root_rect,
+                self.mouse.into(),
+            ) {
                 return path;
             }
         }
-        self.hover_path_in(&self.root, Vec2::ZERO, root_rect)
+        self.hover_path_in(&self.root, Vec2::ZERO, root_rect, self.mouse.into())
             .unwrap_or_default()
     }
 
-    fn hover_path_in(&self, id: &str, offset: Vec2, clip: BoxRect) -> Option<Vec<String>> {
+    fn hover_path_in(
+        &self,
+        id: &str,
+        offset: Vec2,
+        clip: BoxRect,
+        mouse: vello::kurbo::Point,
+    ) -> Option<Vec<String>> {
         let entry = self.entries.get(id)?;
-        if !(entry.bounds + Vec2::new(-offset.x, -offset.y)).contains(self.mouse)
+        let (mouse, clip) = match self.node_transform(id, offset) {
+            Some(transform) => {
+                let inverse = transform.inverse();
+                (inverse * mouse, inverse.transform_rect_bbox(clip))
+            }
+            None => (mouse, clip),
+        };
+        if !(entry.bounds + Vec2::new(-offset.x, -offset.y)).contains(mouse)
             || entry.node.string("display", "flex") == "none"
         {
             return None;
@@ -3734,7 +3833,7 @@ impl Tree {
         } else {
             clip
         };
-        if !clip.contains(self.mouse) {
+        if !clip.contains(mouse) {
             return None;
         }
         let mut children = entry.children.clone();
@@ -3753,12 +3852,13 @@ impl Tree {
                 child,
                 offset + Vec2::new(entry.scroll_x, entry.scroll),
                 clip,
+                mouse,
             ) {
                 path.insert(0, id.to_string());
                 return Some(path);
             }
         }
-        rect.contains(self.mouse).then(|| vec![id.to_string()])
+        rect.contains(mouse).then(|| vec![id.to_string()])
     }
 
     fn hit_root(&self, scroll_only: bool) -> Option<String> {
@@ -3777,11 +3877,18 @@ impl Tree {
                 self.ancestor_scroll_offset(portal),
                 root_rect,
                 scroll_only,
+                self.mouse.into(),
             ) {
                 return Some(id);
             }
         }
-        self.hit(&self.root, Vec2::ZERO, root_rect, scroll_only)
+        self.hit(
+            &self.root,
+            Vec2::ZERO,
+            root_rect,
+            scroll_only,
+            self.mouse.into(),
+        )
     }
 
     fn selectable_text_hit_root(&self) -> Option<String> {
@@ -3868,9 +3975,23 @@ impl Tree {
         self.selectable_text_hit_root()
     }
 
-    fn hit(&self, id: &str, offset: Vec2, clip: BoxRect, scroll_only: bool) -> Option<String> {
+    fn hit(
+        &self,
+        id: &str,
+        offset: Vec2,
+        clip: BoxRect,
+        scroll_only: bool,
+        mouse: vello::kurbo::Point,
+    ) -> Option<String> {
         let entry = &self.entries[id];
-        if !(entry.bounds + Vec2::new(-offset.x, -offset.y)).contains(self.mouse) {
+        let (mouse, clip) = match self.node_transform(id, offset) {
+            Some(transform) => {
+                let inverse = transform.inverse();
+                (inverse * mouse, inverse.transform_rect_bbox(clip))
+            }
+            None => (mouse, clip),
+        };
+        if !(entry.bounds + Vec2::new(-offset.x, -offset.y)).contains(mouse) {
             return None;
         }
         if entry.node.disabled || entry.node.string("display", "flex") == "none" {
@@ -3882,7 +4003,7 @@ impl Tree {
         } else {
             clip
         };
-        if !clip.contains(self.mouse) {
+        if !clip.contains(mouse) {
             return None;
         }
         let mut children = entry.children.clone();
@@ -3902,6 +4023,7 @@ impl Tree {
                 offset + Vec2::new(entry.scroll_x, entry.scroll),
                 clip,
                 scroll_only,
+                mouse,
             ) {
                 return Some(id);
             }
@@ -3916,7 +4038,7 @@ impl Tree {
         } else {
             entry.node.interactive() || entry.node.kind == "markdown" || blocks_pointer
         };
-        (eligible && rect.contains(self.mouse)).then(|| id.to_string())
+        (eligible && rect.contains(mouse)).then(|| id.to_string())
     }
     fn interactive(&self, id: &str) -> bool {
         let Some(target) = self.entries.get(id) else {

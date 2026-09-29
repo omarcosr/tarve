@@ -453,6 +453,7 @@ const MOTION_PROPERTIES: &[&str] = &[
     "borderColor",
     "boxShadow",
     "textShadow",
+    "transform",
 ];
 
 fn validate_motion(node: &Node) -> Result<(), String> {
@@ -874,6 +875,24 @@ fn validate_control(node: &Node) -> Result<(), String> {
         .iter()
         .filter_map(|state| node.style.get(*state));
     let styles: Vec<&Value> = std::iter::once(&node.style).chain(state_styles).collect();
+    for transform in styles.iter().filter_map(|style| style.get("transform")) {
+        let valid = transform.as_object().is_some_and(|transform| {
+            transform.iter().all(|(key, value)| {
+                let number = value.as_f64().filter(|value| value.is_finite());
+                match key.as_str() {
+                    "x" | "y" => number.is_some(),
+                    "scale" | "scaleX" | "scaleY" => number.is_some_and(|value| value != 0.0),
+                    _ => false,
+                }
+            })
+        });
+        if !valid {
+            return Err(format!(
+                "Invalid transform on {}: expected {{ x?, y?, scale?, scaleX?, scaleY? }} with non-zero scales (rotation is not supported)",
+                node.id
+            ));
+        }
+    }
     for shadow in styles.iter().filter_map(|style| style.get("boxShadow")) {
         if !valid_box_shadow(shadow) {
             return Err(format!(

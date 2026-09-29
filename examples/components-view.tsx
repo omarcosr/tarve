@@ -487,7 +487,7 @@ export function App() {
                 <Column style={{ width: 120, height: 72, radius: 12, background: "#ffffff", align: "center", justify: "center",
                   borderWidth: 1, borderColor: "#e2e8f0",
                   boxShadow: { y: 2, blur: 6, color: "#0f172a22" },
-                  hover: { background: "#eff6ff", borderColor: "#93c5fd", boxShadow: { y: 14, blur: 28, spread: -2, color: "#2563eb44" } },
+                  hover: { background: "#eff6ff", borderColor: "#93c5fd", transform: "translateY(-4px) scale(1.03)", boxShadow: { y: 14, blur: 28, spread: -2, color: "#2563eb44" } },
                   transition: { all: { duration: 220, easing: "easeOut" } } }}>
                   <Text size={12}>Hover me</Text>
                 </Column>

@@ -29,6 +29,10 @@ pub(crate) trait PaintTarget {
     fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S);
     fn push_opacity<S: Shape>(&mut self, alpha: f32, transform: Affine, shape: &S);
     fn pop_layer(&mut self);
+    /// Pre-multiplies `transform` onto everything painted until
+    /// `pop_transform`. Only [`TransformTarget`] implements it.
+    fn push_transform(&mut self, _transform: Affine) {}
+    fn pop_transform(&mut self) {}
     /// Gaussian-blurred rounded rectangle limited to `area`. With `invert`,
     /// paints `1 - coverage` over `area` (inset shadows); callers clip it.
     #[allow(clippy::too_many_arguments)]
@@ -52,6 +56,104 @@ pub(crate) trait PaintTarget {
         color: Color,
         glyphs: &[PaintGlyph],
     );
+}
+
+/// Wraps any target with a stack of node transforms (CSS `transform`), so
+/// text, SVG, images and shadows in a transformed subtree follow it without
+/// every paint helper threading an extra matrix.
+pub(crate) struct TransformTarget<'a, P: PaintTarget> {
+    inner: &'a mut P,
+    stack: Vec<Affine>,
+}
+
+impl<'a, P: PaintTarget> TransformTarget<'a, P> {
+    pub(crate) fn new(inner: &'a mut P) -> Self {
+        Self {
+            inner,
+            stack: Vec::new(),
+        }
+    }
+
+    fn map(&self, transform: Affine) -> Affine {
+        self.stack
+            .last()
+            .map_or(transform, |outer| *outer * transform)
+    }
+}
+
+impl<P: PaintTarget> PaintTarget for TransformTarget<'_, P> {
+    fn fill<S: Shape>(&mut self, fill: Fill, transform: Affine, color: Color, shape: &S) {
+        self.inner.fill(fill, self.map(transform), color, shape);
+    }
+
+    fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S) {
+        self.inner.stroke(stroke, self.map(transform), color, shape);
+    }
+
+    fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S) {
+        self.inner.push_clip(fill, self.map(transform), shape);
+    }
+
+    fn push_opacity<S: Shape>(&mut self, alpha: f32, transform: Affine, shape: &S) {
+        self.inner.push_opacity(alpha, self.map(transform), shape);
+    }
+
+    fn pop_layer(&mut self) {
+        self.inner.pop_layer();
+    }
+
+    fn push_transform(&mut self, transform: Affine) {
+        let next = self.map(transform);
+        self.stack.push(next);
+    }
+
+    fn pop_transform(&mut self) {
+        self.stack.pop();
+    }
+
+    fn box_shadow(
+        &mut self,
+        transform: Affine,
+        area: Rect,
+        rect: Rect,
+        color: Color,
+        radius: f64,
+        std_dev: f64,
+        invert: bool,
+    ) {
+        self.inner.box_shadow(
+            self.map(transform),
+            area,
+            rect,
+            color,
+            radius,
+            std_dev,
+            invert,
+        );
+    }
+
+    fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine) {
+        self.inner.draw_image(key, image, self.map(transform));
+    }
+
+    fn draw_glyphs(
+        &mut self,
+        font: &FontData,
+        font_size: f32,
+        normalized_coords: &[i16],
+        transform: Affine,
+        color: Color,
+        glyphs: &[PaintGlyph],
+    ) {
+        self.inner.draw_glyphs(
+            font,
+            font_size,
+            normalized_coords,
+            self.map(transform),
+            color,
+            glyphs,
+        );
+    }
 }
 
 impl PaintTarget for Scene {

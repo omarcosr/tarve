@@ -1,4 +1,4 @@
-import type { BoxShadow, TextShadow } from "../../protocol/src/index";
+import type { BoxShadow, TextShadow, Transform } from "../../protocol/src/index";
 
 const NAMED: Record<string, string> = {
   transparent: "#00000000", black: "#000000", white: "#ffffff", red: "#ff0000", green: "#008000",
@@ -114,4 +114,45 @@ export function parseTextShadow(value: string): TextShadow | undefined {
   if (lengths.length > 3) throw new TypeError(`Too many lengths in text-shadow: ${value}`);
   if ((lengths[2] ?? 0) !== 0) throw new TypeError("textShadow blur is not supported");
   return { x: lengths[0], y: lengths[1], color };
+}
+
+/**
+ * CSS `transform` syntax limited to translate/scale: "translateY(-2px) scale(1.02)".
+ * Functions compose left to right as in CSS; "none" is the identity.
+ */
+export function parseTransform(value: string): Transform {
+  let [x, y, scaleX, scaleY] = [0, 0, 1, 1];
+  const input = value.trim();
+  if (input.toLowerCase() === "none") return {};
+  const pattern = /([a-zA-Z]+)\(([^)]*)\)/g;
+  let consumed = "";
+  for (const match of input.matchAll(pattern)) {
+    consumed += match[0];
+    const name = match[1]!;
+    const args = match[2]!.split(/[\s,]+/).filter(Boolean);
+    const px = (token: string | undefined) => {
+      const number = token === undefined ? 0 : length(token);
+      if (number === undefined) throw new TypeError(`Unsupported transform length: ${token}`);
+      return number;
+    };
+    const factor = (token: string | undefined) => {
+      const number = Number(token);
+      if (token === undefined || !Number.isFinite(number) || number === 0) throw new TypeError(`Invalid scale: ${token}`);
+      return number;
+    };
+    switch (name) {
+      case "translate": x += scaleX * px(args[0]); y += scaleY * px(args[1]); break;
+      case "translateX": x += scaleX * px(args[0]); break;
+      case "translateY": y += scaleY * px(args[0]); break;
+      case "scale": { const sx = factor(args[0]); scaleX *= sx; scaleY *= args[1] === undefined ? sx : factor(args[1]); break; }
+      case "scaleX": scaleX *= factor(args[0]); break;
+      case "scaleY": scaleY *= factor(args[0]); break;
+      default: throw new TypeError(`Unsupported transform function: ${name}() (translate and scale only)`);
+    }
+  }
+  if (consumed.replace(/\s/g, "") !== input.replace(/\s/g, "")) throw new TypeError(`Invalid transform: ${value}`);
+  return {
+    ...(x !== 0 ? { x } : {}), ...(y !== 0 ? { y } : {}),
+    ...(scaleX === scaleY ? (scaleX !== 1 ? { scale: scaleX } : {}) : { scaleX, scaleY }),
+  };
 }

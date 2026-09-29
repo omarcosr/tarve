@@ -5246,3 +5246,162 @@ fn hover_transitions_text_shadow_foreground_and_border_colour() {
     let delta = shadow_at.translation() - text_at.translation();
     assert!((delta.x - 2.0).abs() < 0.01 && (delta.y - 2.0).abs() < 0.01);
 }
+
+#[test]
+fn transform_moves_and_scales_the_subtree_about_its_centre_and_hit_testing_follows() {
+    let label = text_node("label", json!({"fontSize": 14}));
+    let card: Node = serde_json::from_value(json!({
+        "id": "card", "kind": "pressable", "children": [],
+        "style": {"width": 100, "height": 40, "background": "#ff0000",
+            "transform": {"x": 10, "y": -5, "scale": 2}}
+    }))
+    .unwrap();
+    let mut tree = Tree::new(root(vec![node(
+        "wrap",
+        "view",
+        json!({}),
+        vec![card, label],
+    )]));
+    tree.compute(400.0, 300.0).unwrap();
+    let recorder = fills_of(&mut tree);
+    let red = crate::tree::color("#ff0000");
+    let (_, local) = recorder
+        .fills
+        .iter()
+        .find(|(color, _)| *color == red)
+        .copied()
+        .expect("card fill");
+    assert_eq!(local.width(), 100.0, "shapes stay in layout space");
+    let card = tree.entries["card"].rect;
+    // Box centre (50, 20) plus (10, -5): scaled x 2 the box spans -40..160 by -25..55.
+    tree.pointer_move(card.x0 + 150.0, card.y0 + 50.0);
+    assert_eq!(
+        tree.hovered.as_deref(),
+        Some("card"),
+        "hit testing uses the transformed box"
+    );
+    tree.pointer_move(card.x0 + 1.0, card.y0 + 1.0);
+    assert_eq!(tree.hovered.as_deref(), Some("card"));
+    tree.pointer_move(card.x0 + 170.0, card.y0 + 20.0);
+    assert_eq!(tree.hovered, None);
+}
+
+#[test]
+fn transform_is_applied_to_every_paint_call_in_the_subtree() {
+    #[derive(Default)]
+    struct Transforms(Vec<vello::kurbo::Affine>);
+    impl crate::paint::PaintTarget for Transforms {
+        fn fill<S: vello::kurbo::Shape>(
+            &mut self,
+            _: vello::peniko::Fill,
+            transform: vello::kurbo::Affine,
+            _: vello::peniko::Color,
+            _: &S,
+        ) {
+            self.0.push(transform);
+        }
+        fn stroke<S: vello::kurbo::Shape>(
+            &mut self,
+            _: &vello::kurbo::Stroke,
+            _: vello::kurbo::Affine,
+            _: vello::peniko::Color,
+            _: &S,
+        ) {
+        }
+        fn push_clip<S: vello::kurbo::Shape>(
+            &mut self,
+            _: vello::peniko::Fill,
+            _: vello::kurbo::Affine,
+            _: &S,
+        ) {
+        }
+        fn push_opacity<S: vello::kurbo::Shape>(&mut self, _: f32, _: vello::kurbo::Affine, _: &S) {
+        }
+        fn pop_layer(&mut self) {}
+        fn box_shadow(
+            &mut self,
+            _: vello::kurbo::Affine,
+            _: vello::kurbo::Rect,
+            _: vello::kurbo::Rect,
+            _: vello::peniko::Color,
+            _: f64,
+            _: f64,
+            _: bool,
+        ) {
+        }
+        fn draw_image(&mut self, _: &str, _: &vello::peniko::ImageData, _: vello::kurbo::Affine) {}
+        fn draw_glyphs(
+            &mut self,
+            _: &vello::peniko::FontData,
+            _: f32,
+            _: &[i16],
+            transform: vello::kurbo::Affine,
+            _: vello::peniko::Color,
+            _: &[crate::paint::PaintGlyph],
+        ) {
+            self.0.push(transform);
+        }
+    }
+    let child = node(
+        "child",
+        "view",
+        json!({"width": 20, "height": 20, "background": "#00ff00"}),
+        vec![],
+    );
+    let parent = node(
+        "parent",
+        "view",
+        json!({"width": 60, "height": 60, "background": "#0000ff", "transform": {"x": 7, "y": 3}}),
+        vec![child],
+    );
+    let mut tree = Tree::new(root(vec![parent]));
+    tree.compute(400.0, 300.0).unwrap();
+    let mut transforms = Transforms::default();
+    tree.paint(2.0, &mut transforms);
+    let moved: Vec<_> = transforms
+        .0
+        .iter()
+        .filter(|transform| transform.translation().x != 0.0)
+        .collect();
+    assert_eq!(moved.len(), 2, "parent and child fills are both moved");
+    for transform in moved {
+        assert_eq!(
+            transform.translation(),
+            vello::kurbo::Vec2::new(14.0, 6.0),
+            "device pixels"
+        );
+    }
+}
+
+#[test]
+fn hover_transform_transitions_and_invalid_transforms_are_rejected() {
+    let card = node(
+        "card",
+        "view",
+        json!({"width": 80, "height": 40, "background": "#ff0000",
+            "hover": {"transform": {"y": -4, "scale": 1.5}},
+            "transition": {"transform": {"duration": 100, "easing": "linear"}}}),
+        vec![],
+    );
+    let mut tree = Tree::new(root(vec![card]));
+    tree.compute(400.0, 300.0).unwrap();
+    tree.advance_motion(0.0);
+    tree.pointer_move(20.0, 20.0);
+    tree.advance_motion(0.0);
+    tree.advance_motion(50.0);
+    assert_eq!(
+        tree.motion_values("card", "transform"),
+        Some(vec![0.0, -2.0, 1.25, 1.25])
+    );
+
+    for transform in [
+        json!({"rotate": 45}),
+        json!({"scale": 0}),
+        json!({"x": "2px"}),
+        json!(3),
+    ] {
+        let bad = node("bad", "view", json!({"transform": transform}), vec![]);
+        let error = protocol::validate(&root(vec![bad])).unwrap_err();
+        assert!(error.contains("transform"), "{error}");
+    }
+}

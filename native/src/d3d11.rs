@@ -1031,15 +1031,17 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         if self.suppressed_clips > 0 {
             return;
         }
-        // Tarve paints with scale-only transforms, so one factor maps to pixels.
-        let scale = transform.as_coeffs()[0].abs();
+        // Node transforms are translate/scale only, so the axes stay aligned.
+        let coeffs = transform.as_coeffs();
+        let (scale_x, scale_y) = (coeffs[0].abs(), coeffs[3].abs());
+        let scale = (scale_x * scale_y).sqrt();
         let corner = |point: Point| {
             let point = transform * point;
             [point.x as f32, point.y as f32]
         };
         let half = [
-            (rect.width() * scale / 2.0) as f32,
-            (rect.height() * scale / 2.0) as f32,
+            (rect.width() * scale_x / 2.0) as f32,
+            (rect.height() * scale_y / 2.0) as f32,
         ];
         self.graphics.append_shadow_quad(
             [

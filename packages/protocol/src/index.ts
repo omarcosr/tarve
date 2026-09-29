@@ -6,7 +6,7 @@ export type Length = number | `${number}%` | "auto";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
 export type NumericMotionProperty = "width" | "height" | "top" | "right" | "bottom" | "left" | "opacity" | "radius";
 /** Colour and shadow properties also transition on hover/active/focus/disabled changes. */
-export type MotionProperty = NumericMotionProperty | "background" | "foreground" | "borderColor" | "boxShadow" | "textShadow";
+export type MotionProperty = NumericMotionProperty | "background" | "foreground" | "borderColor" | "boxShadow" | "textShadow" | "transform";
 export type MotionEasing = "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut";
 export interface MotionTransition {
   /** Duration in milliseconds. Defaults to 200 when omitted. */
@@ -31,6 +31,8 @@ export type BorderStyle = OutlineStyle;
 /** Solid offset copy of the text. Blur is not supported. */
 export interface TextShadow { x?: number; y?: number; color: string }
 /** CSS-like box shadow. `blur` is the CSS blur radius (sigma = blur / 2); `inset` paints inside the padding box. */
+/** Paint-time translate/scale about the box centre. Hit testing follows it; layout does not. */
+export interface Transform { x?: number; y?: number; scale?: number; scaleX?: number; scaleY?: number }
 export interface BoxShadow { x?: number; y?: number; blur?: number; spread?: number; color: string; inset?: boolean }
 export type UserSelect = "auto" | "text" | "none" | "all";
 export type TextDecoration = "none" | "underline" | "overline" | "line-through";
@@ -63,6 +65,8 @@ export interface StateStyle {
   textShadow?: TextShadow | string;
   /** One shadow or up to 8; the first paints on top. Does not affect layout. */
   boxShadow?: BoxShadow | readonly BoxShadow[] | string;
+  /** Object form, or CSS syntax such as "translateY(-2px) scale(1.02)" (translate/scale only). */
+  transform?: Transform | string;
 }
 export interface Style extends StateStyle {
   width?: Length; height?: Length; minWidth?: Length; minHeight?: Length;

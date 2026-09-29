@@ -178,6 +178,8 @@ function App() {
 
 Every colour property (`background`, `foreground`, `borderColor`, `outlineColor`, rich-content and diff colours, state styles and the window background) accepts hex (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`), `rgb()`/`rgba()`, `hsl()`/`hsla()`, common names such as `transparent` or `white`, and theme tokens. Unsupported colour strings throw when the view is compiled instead of rendering black.
 
+`transform` translates and scales a node and its subtree about the box centre: `{ x, y, scale, scaleX, scaleY }` or CSS syntax such as `"translateY(-2px) scale(1.02)"`. It is paint-only (layout does not move) but hit testing and hover follow the transformed box, and it transitions like other paint properties. Rotation is not supported yet.
+
 Borders accept `borderStyle` with the same values as `outlineStyle` (`dashed`, `dotted`, `double`, `groove`, `ridge`, `inset`, `outset`, `none`); non-solid styles apply when all four border widths are equal. Text, button labels, `Input` and `TextArea` accept `textShadow: { x, y, color }`, a solid offset copy of the glyphs; it also works inside state styles such as `hover`. Blurred text shadows are not supported yet.
 
 `boxShadow` takes `{ x, y, blur, spread, color, inset }` or a list of up to 8 (the first paints on top). `blur` is the CSS blur radius; `spread` grows or shrinks the shadow and its corner radius; `inset` paints inside the padding box. Outer shadows are never drawn under their own box, so translucent backgrounds stay clean. Shadows do not affect layout, work in state styles such as `hover`, and render the same on D3D11, Vello GPU and the CPU renderer.

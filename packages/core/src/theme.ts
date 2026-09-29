@@ -1,5 +1,5 @@
 import type { BoxShadow, StateStyle, Style, SyntaxTheme } from "../../protocol/src/index";
-import { cssColor, parseBoxShadow, parseTextShadow } from "./css-shadow";
+import { cssColor, parseBoxShadow, parseTextShadow, parseTransform } from "./css-shadow";
 
 export interface ThemeColors {
   background: string;
@@ -213,6 +213,7 @@ export function resolveThemeColor(value: string, selected: ThemeDefinition): str
 
 /** Normalizes CSS shadow strings and CSS colours (rgba(), hsl(), names) and resolves theme tokens. */
 function resolveShadowColors(style: StateStyle, selected: ThemeDefinition): void {
+  if (typeof style.transform === "string") style.transform = parseTransform(style.transform);
   const colour = (value: string) => resolveThemeColor(cssColor(value), selected);
   if (typeof style.textShadow === "string") {
     const parsed = parseTextShadow(style.textShadow);

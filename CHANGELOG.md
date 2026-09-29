@@ -5,6 +5,7 @@ All notable changes to `@tarve/core` and `@tarve/react-icons` are documented her
 ## Unreleased
 
 ### Added
+- `transform`: translate/scale about the box centre (object or CSS `translate*()`/`scale*()` syntax), applied to the whole subtree on every renderer, followed by hit testing and hover, and animatable with `transition` (e.g. a hover lift).
 - CSS colours in every colour property: `rgb()`/`rgba()`, `hsl()`/`hsla()`, short hex and common names. Unsupported colour strings now throw instead of silently rendering black.
 - CSS syntax for shadows: `boxShadow: "0 8px 24px -4px rgba(0,0,0,.2), inset 0 1px 0 #fff"` and `textShadow: "1px 2px #0006"`, including `rgb()`/`hsl()` colours and theme tokens. Shadow objects also accept those colour formats.
 - `hover` styles apply to every node under the pointer and its ancestors (CSS `:hover`), not only interactive nodes.
