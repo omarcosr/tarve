@@ -176,6 +176,8 @@ function App() {
 }
 ```
 
+Borders accept `borderStyle` with the same values as `outlineStyle` (`dashed`, `dotted`, `double`, `groove`, `ridge`, `inset`, `outset`, `none`); non-solid styles apply when all four border widths are equal. Text and button labels accept `textShadow: { x, y, color }`, a solid offset copy of the glyphs. Blurred text shadows are not supported yet.
+
 Create derived themes with `createTheme` or `Theme.create`. Theme tokens cover surfaces, foregrounds, borders, focus outlines, selection, caret, scrollbars, modal overlays, rich-content colors, and control states.
 
 ## Native motion

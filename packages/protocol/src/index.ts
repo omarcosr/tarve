@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 45;
+export const PROTOCOL_VERSION = 46;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 export type MotionProperty = "width" | "height" | "top" | "right" | "bottom" | "left" | "opacity" | "radius";
@@ -23,6 +23,10 @@ export type SvgNode =
   | readonly [SvgElementName, SvgAttributes, readonly SvgNode[]];
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
 export type OutlineStyle = "dotted" | "dashed" | "solid" | "double" | "groove" | "ridge" | "inset" | "outset" | "none" | "hidden";
+/** Same values as OutlineStyle. Non-solid styles apply when all four border widths are equal. */
+export type BorderStyle = OutlineStyle;
+/** Solid offset copy of the text. Blur is not supported. */
+export interface TextShadow { x?: number; y?: number; color: string }
 export type UserSelect = "auto" | "text" | "none" | "all";
 export type TextDecoration = "none" | "underline" | "overline" | "line-through";
 export interface SyntaxTheme {
@@ -43,7 +47,7 @@ export interface TextHighlight {
   activeColor?: string;
 }
 export interface StateStyle {
-  background?: string; foreground?: string; borderColor?: string; radius?: number;
+  background?: string; foreground?: string; borderColor?: string; borderStyle?: BorderStyle; radius?: number;
   opacity?: number;
   outlineWidth?: number; outlineColor?: string; outlineOffset?: number; outlineRadius?: number; outlineStyle?: OutlineStyle;
   placeholderColor?: string; selectionColor?: string; caretColor?: string;
@@ -60,6 +64,8 @@ export interface Style extends StateStyle {
   display?: "flex" | "grid" | "none"; columns?: number;
   zIndex?: number;
   borderWidth?: Insets;
+  /** Applies to text and button labels. */
+  textShadow?: TextShadow;
   radius?: number; fontSize?: number; fontWeight?: number; fontFamily?: string;
   /** Native retained transitions. Bun sends the target once; Rust owns interpolation. */
   transition?: MotionTransitions;

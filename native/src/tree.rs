@@ -2836,10 +2836,28 @@ impl Tree {
         };
         if border.iter().any(|width| *width > 0.0) {
             let border_color = color(visual_string(&node, "borderColor", "#e4e4e7", state));
+            let border_style = visual_string(&node, "borderStyle", "solid", state);
             let uniform = border
                 .iter()
                 .all(|width| (*width - border[0]).abs() < f64::EPSILON);
-            if uniform {
+            if matches!(border_style, "none" | "hidden") {
+                // Layout still reserves borderWidth; only the paint is suppressed.
+            } else if uniform && border_style != "solid" {
+                // A border is an outline drawn inside the border box.
+                paint_outline(
+                    target,
+                    transform,
+                    rect,
+                    radius,
+                    Outline {
+                        width: border[0],
+                        offset: -border[0],
+                        radius_override: None,
+                        color: visual_string(&node, "borderColor", "#e4e4e7", state),
+                        style: border_style,
+                    },
+                );
+            } else if uniform {
                 let width = border[0];
                 target.stroke(
                     &Stroke::new(width),
@@ -2967,6 +2985,25 @@ impl Tree {
             } else {
                 visual_string(&node, "foreground", "#18181b", state).to_string()
             };
+            // The shadow is ink overflow: it may extend past the text box by its
+            // own offset, so it gets a clip grown by that offset instead of the
+            // node clip used for the glyphs themselves.
+            if matches!(node.kind.as_str(), "text" | "button")
+                && ime_display.is_none()
+                && let Some(shadow) = text_shadow(&node)
+            {
+                let (dx, dy) = (shadow.0, shadow.1);
+                let shadow_clip = BoxRect::new(
+                    rect.x0 + dx.min(0.0),
+                    rect.y0 + dy.min(0.0),
+                    rect.x1 + dx.max(0.0),
+                    rect.y1 + dy.max(0.0),
+                );
+                target.push_clip(Fill::NonZero, transform, &shadow_clip);
+                self.text
+                    .draw_shadow(target, &render_node.id, (x + dx, y + dy), shadow.2, scale);
+                target.pop_layer();
+            }
             target.push_clip(Fill::NonZero, transform, &shape);
             let code_source_clip = (node.kind == "code").then(|| {
                 let left = rect.x0 + pad[3] as f64 + border[3] + gutter;
@@ -6208,6 +6245,15 @@ pub fn color(hex: &str) -> Color {
     } else {
         Color::from_rgb8((number >> 16) as u8, (number >> 8) as u8, number as u8)
     }
+}
+
+/// `textShadow: { x, y, color }` as (dx, dy, colour). Blur is rejected by
+/// protocol validation, so the shadow is a solid offset copy of the glyphs.
+fn text_shadow(node: &Node) -> Option<(f64, f64, Color)> {
+    let shadow = node.style.get("textShadow")?.as_object()?;
+    let offset = |key: &str| shadow.get(key).and_then(Value::as_f64).unwrap_or(0.0);
+    let colour = shadow.get("color")?.as_str()?;
+    Some((offset("x"), offset("y"), color(colour)))
 }
 
 struct Outline<'a> {

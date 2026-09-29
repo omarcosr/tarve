@@ -30,7 +30,7 @@ export type { ComponentAdapter, ComponentAdapterInput } from "./component-adapte
 export { theme, Theme, lightTheme, darkTheme, createTheme, buttonVariants } from "./theme";
 export type { ThemeColors, ThemeFocusOutline, ThemeDefinition, ThemeOverrides, ButtonVariant } from "./theme";
 export { Style } from "./style";
-export type { StateStyle, OutlineStyle, UserSelect, TextDecoration, Renderer, WindowPosition, WindowPositionPreset, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition, MotionProperty, MotionEasing, MotionTransition, MotionTransitions, MotionValues } from "../../protocol/src/index";
+export type { StateStyle, OutlineStyle, BorderStyle, TextShadow, UserSelect, TextDecoration, Renderer, WindowPosition, WindowPositionPreset, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition, MotionProperty, MotionEasing, MotionTransition, MotionTransitions, MotionValues } from "../../protocol/src/index";
 export type { VNode, Child, PastePayload } from "./jsx-runtime";
 export { BunFfiBridge, openExternal } from "./bridge";
 export type { NativeBridge, BunFfiBridgeOptions } from "./bridge";

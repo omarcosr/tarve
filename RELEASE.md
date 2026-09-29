@@ -17,7 +17,7 @@ The npm artifact is universal across those two targets: Linux CI builds `libtarv
 There are three independent version domains:
 
 1. **Product SemVer** — one version shared by the root npm package, `@tarve/core-internal`, `@tarve/protocol`, their workspace entries in `bun.lock`, `native/Cargo.toml` and the `tarve_native` entry in `Cargo.lock`.
-2. **JSON protocol version** — a monotonically increasing integer used by serialized TS/Rust messages. It is currently **v45** and is independent from package SemVer.
+2. **JSON protocol version** — a monotonically increasing integer used by serialized TS/Rust messages. It is currently **v46** and is independent from package SemVer.
 3. **Native C ABI version** — a monotonically increasing integer for exported FFI function compatibility. It is currently **v5** and is independent from both product SemVer and the JSON protocol.
 
 Use the version tool rather than editing manifests independently:

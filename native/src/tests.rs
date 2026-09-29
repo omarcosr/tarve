@@ -4742,3 +4742,140 @@ fn perf_probe() {
         median(paint)
     );
 }
+
+#[derive(Default)]
+struct PaintRecorder {
+    strokes: Vec<(f64, bool, vello::peniko::Color)>,
+    glyphs: Vec<(vello::peniko::Color, vello::kurbo::Affine)>,
+    clips: Vec<Option<vello::kurbo::Rect>>,
+    glyph_clips: Vec<Option<vello::kurbo::Rect>>,
+}
+
+impl crate::paint::PaintTarget for PaintRecorder {
+    fn fill<S: vello::kurbo::Shape>(
+        &mut self,
+        _: vello::peniko::Fill,
+        _: vello::kurbo::Affine,
+        _: vello::peniko::Color,
+        _: &S,
+    ) {
+    }
+    fn stroke<S: vello::kurbo::Shape>(
+        &mut self,
+        stroke: &vello::kurbo::Stroke,
+        _: vello::kurbo::Affine,
+        color: vello::peniko::Color,
+        _: &S,
+    ) {
+        self.strokes
+            .push((stroke.width, !stroke.dash_pattern.is_empty(), color));
+    }
+    fn push_clip<S: vello::kurbo::Shape>(
+        &mut self,
+        _: vello::peniko::Fill,
+        _: vello::kurbo::Affine,
+        shape: &S,
+    ) {
+        self.clips.push(Some(shape.bounding_box()));
+    }
+    fn push_opacity<S: vello::kurbo::Shape>(&mut self, _: f32, _: vello::kurbo::Affine, _: &S) {
+        self.clips.push(None);
+    }
+    fn pop_layer(&mut self) {
+        self.clips.pop();
+    }
+    fn draw_image(&mut self, _: &str, _: &vello::peniko::ImageData, _: vello::kurbo::Affine) {}
+    fn draw_glyphs(
+        &mut self,
+        _: &vello::peniko::FontData,
+        _: f32,
+        _: &[i16],
+        transform: vello::kurbo::Affine,
+        color: vello::peniko::Color,
+        _: &[crate::paint::PaintGlyph],
+    ) {
+        self.glyphs.push((color, transform));
+        self.glyph_clips
+            .push(self.clips.iter().rev().find_map(|clip| *clip));
+    }
+}
+
+fn painted(children: Vec<Node>) -> PaintRecorder {
+    let mut tree = Tree::new(root(children));
+    tree.compute(400.0, 200.0).unwrap();
+    let mut recorder = PaintRecorder::default();
+    tree.paint(1.0, &mut recorder);
+    recorder
+}
+
+fn text_node(id: &str, style: serde_json::Value) -> Node {
+    serde_json::from_value(
+        json!({"id": id, "kind": "text", "style": style, "text": "Shadow", "children": []}),
+    )
+    .unwrap()
+}
+
+#[test]
+fn border_style_paints_dashed_borders_and_can_be_hidden() {
+    let border = crate::tree::color("#ff0000");
+    let style = |border_style: &str| json!({"width": 80, "height": 40, "borderWidth": 3, "borderColor": "#ff0000", "borderStyle": border_style});
+    let dashed = painted(vec![node("box", "view", style("dashed"), vec![])]);
+    assert!(
+        dashed
+            .strokes
+            .iter()
+            .any(|(width, dashed, color)| *width == 3.0 && *dashed && *color == border)
+    );
+    let solid = painted(vec![node("box", "view", style("solid"), vec![])]);
+    assert!(
+        solid
+            .strokes
+            .iter()
+            .any(|(width, dashed, color)| *width == 3.0 && !*dashed && *color == border)
+    );
+    let hidden = painted(vec![node("box", "view", style("none"), vec![])]);
+    assert!(hidden.strokes.iter().all(|(_, _, color)| *color != border));
+}
+
+#[test]
+fn text_shadow_paints_an_offset_copy_under_the_text() {
+    let shadow = crate::tree::color("#ff0000");
+    let recorder = painted(vec![text_node(
+        "label",
+        json!({"fontSize": 16, "foreground": "#000000", "textShadow": {"x": 2, "y": 3, "color": "#ff0000"}}),
+    )]);
+    assert_eq!(recorder.glyphs.len(), 2, "shadow pass plus the real text");
+    let (shadow_color, shadow_at) = recorder.glyphs[0];
+    let (text_color, text_at) = recorder.glyphs[1];
+    assert_eq!(shadow_color, shadow);
+    assert_ne!(text_color, shadow);
+    let delta = shadow_at.translation() - text_at.translation();
+    assert_eq!((delta.x, delta.y), (2.0, 3.0));
+
+    let shadow_clip = recorder.glyph_clips[0].expect("shadow is clipped");
+    let text_clip = recorder.glyph_clips[1].expect("text is clipped");
+    assert_eq!(
+        (shadow_clip.x1 - text_clip.x1, shadow_clip.y1 - text_clip.y1),
+        (2.0, 3.0),
+        "the shadow clip grows by its offset so the last glyph is not cut"
+    );
+
+    let plain = painted(vec![text_node("label", json!({"fontSize": 16}))]);
+    assert_eq!(plain.glyphs.len(), 1);
+}
+
+#[test]
+fn text_shadow_rejects_blur_and_malformed_values() {
+    for shadow in [
+        json!({"x": 1, "y": 1, "blur": 4, "color": "#000000"}),
+        json!({"x": 1}),
+        json!("2px 2px red"),
+    ] {
+        let error = protocol::validate(&root(vec![text_node(
+            "label",
+            json!({"textShadow": shadow}),
+        )]))
+        .unwrap_err();
+        assert!(error.contains("textShadow"), "{error}");
+    }
+}

@@ -544,6 +544,19 @@ fn draw_layout<P: PaintTarget>(
     fallback: Color,
     scale: f64,
 ) {
+    draw_layout_with(target, layout, origin, fallback, scale, false);
+}
+
+/// `solid` paints every run in `fallback`, ignoring per-span brushes; used
+/// for text shadows so rich spans keep one shadow colour.
+fn draw_layout_with<P: PaintTarget>(
+    target: &mut P,
+    layout: &Layout<TextBrush>,
+    origin: (f64, f64),
+    fallback: Color,
+    scale: f64,
+    solid: bool,
+) {
     for line in layout.lines() {
         for item in line.items() {
             if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
@@ -556,13 +569,17 @@ fn draw_layout<P: PaintTarget>(
                         y: glyph.y,
                     })
                     .collect();
-                let color = glyph_run
-                    .style()
-                    .brush
-                    .0
-                    .as_deref()
-                    .map(crate::tree::color)
-                    .unwrap_or(fallback);
+                let color = if solid {
+                    fallback
+                } else {
+                    glyph_run
+                        .style()
+                        .brush
+                        .0
+                        .as_deref()
+                        .map(crate::tree::color)
+                        .unwrap_or(fallback)
+                };
                 target.draw_glyphs(
                     run.font(),
                     run.font_size(),
@@ -1026,6 +1043,21 @@ impl TextEngine {
         layout.break_all_lines(width.map(|w| w.max(0.0)));
         (layout.width().ceil(), layout.height().ceil())
     }
+    /// Paints a plain text layout once more in a single colour, offset by the
+    /// caller, before the real text is drawn on top.
+    pub fn draw_shadow<P: PaintTarget>(
+        &self,
+        target: &mut P,
+        id: &str,
+        origin: (f64, f64),
+        color: Color,
+        scale: f64,
+    ) {
+        if let Some(layout) = self.layouts.get(id) {
+            draw_layout_with(target, layout, origin, color, scale, true);
+        }
+    }
+
     pub fn draw<P: PaintTarget>(
         &mut self,
         target: &mut P,

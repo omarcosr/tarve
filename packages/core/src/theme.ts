@@ -216,6 +216,7 @@ export function resolveThemeStyle(style: Style, selected: ThemeDefinition): Styl
     const value = resolved[key];
     if (typeof value === "string") (resolved as Record<string, unknown>)[key] = resolveThemeColor(value, selected);
   }
+  if (style.textShadow) resolved.textShadow = { ...style.textShadow, color: resolveThemeColor(style.textShadow.color, selected) };
   for (const state of ["hover", "focus", "focusVisible", "active", "disabled"] as const) {
     const value = style[state];
     if (!value) continue;

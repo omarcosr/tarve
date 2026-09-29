@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 45;
+pub const VERSION: u32 = 46;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -823,6 +823,25 @@ fn validate_control(node: &Node) -> Result<(), String> {
         .contains(&node.input_type.as_str())
     {
         return Err(format!("Unsupported input type: {}", node.input_type));
+    }
+    if let Some(shadow) = node.style.get("textShadow") {
+        let valid = shadow.as_object().is_some_and(|shadow| {
+            shadow.get("color").is_some_and(Value::is_string)
+                && ["x", "y"].iter().all(|key| {
+                    shadow
+                        .get(*key)
+                        .is_none_or(|value| value.as_f64().is_some_and(f64::is_finite))
+                })
+                && shadow
+                    .keys()
+                    .all(|key| matches!(key.as_str(), "x" | "y" | "color"))
+        });
+        if !valid {
+            return Err(format!(
+                "Invalid textShadow on {}: expected {{ x?, y?, color }} (blur is not supported)",
+                node.id
+            ));
+        }
     }
     if matches!(node.kind.as_str(), "slider" | "splitter") {
         let control = node
