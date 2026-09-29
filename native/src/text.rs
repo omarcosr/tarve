@@ -277,6 +277,10 @@ pub struct TextEngine {
     pub markdown_painted_lines: usize,
     signatures: HashMap<String, (String, Vec<serde_json::Value>)>,
     alignments: HashMap<String, parley::Alignment>,
+    /// Blurred text-shadow images by node id, with their signature and
+    /// device-pixel offset from the recorder base.
+    shadow_images: HashMap<String, (u64, vello::peniko::ImageData, (f64, f64))>,
+    scale_context: swash::scale::ScaleContext,
 }
 
 struct MarkdownLine {
@@ -659,6 +663,8 @@ impl TextEngine {
             markdown_painted_lines: 0,
             signatures: HashMap::default(),
             alignments: HashMap::default(),
+            shadow_images: HashMap::default(),
+            scale_context: swash::scale::ScaleContext::new(),
         }
     }
     pub fn prepare(&mut self, node: &Node) {
@@ -1044,17 +1050,57 @@ impl TextEngine {
         (layout.width().ceil(), layout.height().ceil())
     }
     /// Paints a plain text layout once more in a single colour, offset by the
-    /// caller, before the real text is drawn on top.
+    /// caller, before the real text is drawn on top. With `blur` (the CSS
+    /// blur radius) the glyphs are rasterized to a coverage mask, blurred on
+    /// the CPU and drawn as one cached image, so every renderer shows the same
+    /// gaussian.
     pub fn draw_shadow<P: PaintTarget>(
-        &self,
+        &mut self,
         target: &mut P,
         id: &str,
         origin: (f64, f64),
         color: Color,
+        blur: f64,
         scale: f64,
     ) {
-        if let Some(layout) = self.layouts.get(id) {
+        let Some(layout) = self.layouts.get(id) else {
+            self.shadow_images.remove(id);
+            return;
+        };
+        if blur <= 0.0 {
+            self.shadow_images.remove(id);
             draw_layout_with(target, layout, origin, color, scale, true);
+            return;
+        }
+        let mut recorder = crate::shadow::ShadowRecorder::default();
+        draw_layout_with(&mut recorder, layout, origin, color, scale, true);
+        let sigma = blur / 2.0 * scale;
+        let Some(base) = recorder.base() else {
+            return;
+        };
+        let signature = recorder.signature(base, sigma, color);
+        let stale = self
+            .shadow_images
+            .get(id)
+            .is_none_or(|cached| cached.0 != signature);
+        if stale {
+            match crate::shadow::rasterize(&mut self.scale_context, &recorder, base, sigma, color) {
+                Some((image, offset)) => {
+                    self.shadow_images
+                        .insert(id.to_string(), (signature, image, offset));
+                }
+                None => {
+                    self.shadow_images.remove(id);
+                    return;
+                }
+            }
+        }
+        if let Some((_, image, offset)) = self.shadow_images.get(id) {
+            target.draw_image(
+                &format!("text-shadow:{id}"),
+                image,
+                Affine::translate((base.0 + offset.0, base.1 + offset.1)),
+            );
         }
     }
 

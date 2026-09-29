@@ -909,13 +909,18 @@ fn validate_control(node: &Node) -> Result<(), String> {
                         .get(*key)
                         .is_none_or(|value| value.as_f64().is_some_and(f64::is_finite))
                 })
+                && shadow.get("blur").is_none_or(|value| {
+                    value
+                        .as_f64()
+                        .is_some_and(|blur| blur.is_finite() && (0.0..=200.0).contains(&blur))
+                })
                 && shadow
                     .keys()
-                    .all(|key| matches!(key.as_str(), "x" | "y" | "color"))
+                    .all(|key| matches!(key.as_str(), "x" | "y" | "blur" | "color"))
         });
         if !valid {
             return Err(format!(
-                "Invalid textShadow on {}: expected {{ x?, y?, color }} (blur is not supported)",
+                "Invalid textShadow on {}: expected {{ x?, y?, blur?, color }} (blur 0..=200)",
                 node.id
             ));
         }

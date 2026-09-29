@@ -13,6 +13,7 @@ mod protocol;
 mod renderer;
 mod rich;
 mod runtime;
+mod shadow;
 mod svg;
 mod syntax;
 #[cfg(test)]

@@ -91,7 +91,7 @@ const STATE_MOTION_PROPERTIES: &[&str] = &[
 ];
 /// Numbers per shadow layer in a motion vector.
 const BOX_SHADOW_STRIDE: usize = 9;
-const TEXT_SHADOW_STRIDE: usize = 6;
+const TEXT_SHADOW_STRIDE: usize = 7;
 const MOTION_FRAME_MS: f64 = 1000.0 / 60.0;
 
 #[derive(Clone, Copy, Debug)]
@@ -705,9 +705,9 @@ fn motion_value(node: &Node, property: &str, state: VisualState) -> Option<Vec<f
         }
         "textShadow" => Some(
             text_shadow(node, state)
-                .map(|(x, y, colour)| {
+                .map(|(x, y, blur, colour)| {
                     let [r, g, b, a] = rgba_of(colour);
-                    vec![x as f32, y as f32, r, g, b, a]
+                    vec![x as f32, y as f32, blur as f32, r, g, b, a]
                 })
                 .unwrap_or_default(),
         ),
@@ -725,7 +725,7 @@ fn motion_value(node: &Node, property: &str, state: VisualState) -> Option<Vec<f
 fn pad_motion_layers(property: &str, mut from: Vec<f32>, mut to: Vec<f32>) -> (Vec<f32>, Vec<f32>) {
     let (stride, geometry, alpha) = match property {
         "boxShadow" => (BOX_SHADOW_STRIDE, 4, 7),
-        "textShadow" => (TEXT_SHADOW_STRIDE, 2, 5),
+        "textShadow" => (TEXT_SHADOW_STRIDE, 3, 6),
         _ => return (from, to),
     };
     let pad = |short: &mut Vec<f32>, long: &[f32]| {
@@ -763,12 +763,13 @@ fn box_shadows_from(values: &[f32]) -> Vec<BoxShadow> {
         .collect()
 }
 
-fn text_shadow_from(values: &[f32]) -> Option<(f64, f64, Color)> {
+fn text_shadow_from(values: &[f32]) -> Option<(f64, f64, f64, Color)> {
     (values.len() >= TEXT_SHADOW_STRIDE).then(|| {
         (
             f64::from(values[0]),
             f64::from(values[1]),
-            colour_from(&values[2..6]),
+            f64::from(values[2]).max(0.0),
+            colour_from(&values[3..7]),
         )
     })
 }
@@ -3814,16 +3815,24 @@ impl Tree {
                     |values| text_shadow_from(values),
                 )
             {
-                let (dx, dy) = (shadow.0, shadow.1);
+                let (dx, dy, blur) = (shadow.0, shadow.1, shadow.2);
+                // A gaussian of sigma = blur / 2 is invisible past 3 sigma.
+                let reach = (blur * 1.5).ceil();
                 let shadow_clip = BoxRect::new(
-                    rect.x0 + dx.min(0.0),
-                    rect.y0 + dy.min(0.0),
-                    rect.x1 + dx.max(0.0),
-                    rect.y1 + dy.max(0.0),
+                    rect.x0 + dx.min(0.0) - reach,
+                    rect.y0 + dy.min(0.0) - reach,
+                    rect.x1 + dx.max(0.0) + reach,
+                    rect.y1 + dy.max(0.0) + reach,
                 );
                 target.push_clip(Fill::NonZero, transform, &shadow_clip);
-                self.text
-                    .draw_shadow(target, &render_node.id, (x + dx, y + dy), shadow.2, scale);
+                self.text.draw_shadow(
+                    target,
+                    &render_node.id,
+                    (x + dx, y + dy),
+                    shadow.3,
+                    blur,
+                    scale,
+                );
                 target.pop_layer();
             }
             target.push_clip(Fill::NonZero, transform, &shape);
@@ -7196,13 +7205,18 @@ pub fn color(hex: &str) -> Color {
     }
 }
 
-/// `textShadow: { x, y, color }` as (dx, dy, colour). Blur is rejected by
-/// protocol validation, so the shadow is a solid offset copy of the glyphs.
-fn text_shadow(node: &Node, state: VisualState) -> Option<(f64, f64, Color)> {
+/// `textShadow: { x, y, blur, color }` as (dx, dy, blur, colour). `blur` is
+/// the CSS blur radius (sigma = blur / 2); 0 paints a solid offset copy.
+fn text_shadow(node: &Node, state: VisualState) -> Option<(f64, f64, f64, Color)> {
     let shadow = visual_value(node, "textShadow", state).as_object()?;
-    let offset = |key: &str| shadow.get(key).and_then(Value::as_f64).unwrap_or(0.0);
+    let number = |key: &str| shadow.get(key).and_then(Value::as_f64).unwrap_or(0.0);
     let colour = shadow.get("color")?.as_str()?;
-    Some((offset("x"), offset("y"), color(colour)))
+    Some((
+        number("x"),
+        number("y"),
+        number("blur").max(0.0),
+        color(colour),
+    ))
 }
 
 struct BoxShadow {

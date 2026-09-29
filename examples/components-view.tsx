@@ -462,7 +462,7 @@ export function App() {
                   ))}
                 </Row>
                 <Row gap={24} align="center">
-                  <Text size={28} weight={700} style={{ textShadow: { x: 2, y: 2, color: c.border } }}>Soft shadow</Text>
+                  <Text size={28} weight={700} style={{ textShadow: { x: 0, y: 2, blur: 6, color: "#0f172a55" } }}>Soft shadow</Text>
                   <Text size={28} weight={700} color="#ffffff" style={{ background: "#2563eb", padding: 8, radius: 8,
                     textShadow: { x: 0, y: 2, color: "#1e3a8a" } }}>Lifted</Text>
                   <Text size={28} weight={800} color="#fde047" style={{ textShadow: { x: 3, y: 3, color: "#dc2626" } }}>Retro</Text>

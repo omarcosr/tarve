@@ -4752,6 +4752,7 @@ struct PaintRecorder {
     fills: Vec<(vello::peniko::Color, vello::kurbo::Rect)>,
     shadows: Vec<RecordedShadow>,
     gradients: Vec<(crate::paint::PaintGradient, vello::kurbo::Rect)>,
+    images: Vec<(String, u64, u32, u32, vello::kurbo::Affine)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -4827,7 +4828,20 @@ impl crate::paint::PaintTarget for PaintRecorder {
     fn pop_layer(&mut self) {
         self.clips.pop();
     }
-    fn draw_image(&mut self, _: &str, _: &vello::peniko::ImageData, _: vello::kurbo::Affine) {}
+    fn draw_image(
+        &mut self,
+        key: &str,
+        image: &vello::peniko::ImageData,
+        transform: vello::kurbo::Affine,
+    ) {
+        self.images.push((
+            key.to_string(),
+            image.data.id(),
+            image.width,
+            image.height,
+            transform,
+        ));
+    }
     fn draw_glyphs(
         &mut self,
         _: &vello::peniko::FontData,
@@ -4908,9 +4922,10 @@ fn text_shadow_paints_an_offset_copy_under_the_text() {
 }
 
 #[test]
-fn text_shadow_rejects_blur_and_malformed_values() {
+fn text_shadow_rejects_invalid_blur_and_malformed_values() {
     for shadow in [
-        json!({"x": 1, "y": 1, "blur": 4, "color": "#000000"}),
+        json!({"x": 1, "y": 1, "blur": -4, "color": "#000000"}),
+        json!({"blur": 500, "color": "#000000"}),
         json!({"x": 1}),
         json!("2px 2px red"),
     ] {
@@ -4963,7 +4978,7 @@ fn text_shadow_follows_hover_state_and_applies_to_inputs() {
 fn text_shadow_in_state_styles_is_validated() {
     let bad = text_node(
         "label",
-        json!({"hover": {"textShadow": {"blur": 2, "color": "#000000"}}}),
+        json!({"hover": {"textShadow": {"blur": -2, "color": "#000000"}}}),
     );
     assert!(
         protocol::validate(&root(vec![bad]))
@@ -5217,6 +5232,60 @@ fn js_updates_transition_colours_and_motion_from_stays_numeric() {
     entering.motion_from = json!({"background": 1});
     let error = protocol::validate(&root(vec![entering])).unwrap_err();
     assert!(error.contains("motionFrom"), "{error}");
+}
+
+#[test]
+fn blurred_text_shadows_paint_one_cached_gaussian_image() {
+    let text = |blur: f64| {
+        let mut text = node(
+            "label",
+            "text",
+            json!({"fontSize": 20, "textShadow": {"x": 2, "y": 3, "blur": blur, "color": "#ff000080"}}),
+            vec![],
+        );
+        text.text = "Shadow".into();
+        text
+    };
+    let mut tree = Tree::new(root(vec![text(8.0)]));
+    tree.compute(400.0, 200.0).unwrap();
+    let first = fills_of(&mut tree);
+    assert_eq!(first.images.len(), 1, "blurred shadows are one image");
+    let (key, blob, width, height, transform) = first.images[0].clone();
+    assert_eq!(key, "text-shadow:label");
+    let label = tree.entries["label"].rect;
+    // Glyph ink plus 3 sigma (sigma = 4 → 13 px) of padding on each side.
+    assert!(
+        width > 60 + 26 && height > 10 + 26,
+        "{width}x{height} for {label:?}"
+    );
+    let origin = transform.translation();
+    assert!(
+        origin.x < label.x0 + 2.0 - 10.0 && origin.y < label.y0 + 3.0,
+        "{origin:?}"
+    );
+    let second = fills_of(&mut tree);
+    assert_eq!(
+        second.images[0].1, blob,
+        "an unchanged shadow reuses its image"
+    );
+
+    tree.update(root(vec![text(0.0)]));
+    tree.compute(400.0, 200.0).unwrap();
+    let solid = fills_of(&mut tree);
+    assert!(solid.images.is_empty());
+    assert_eq!(solid.glyphs.len(), 2, "blur 0 keeps the solid offset copy");
+
+    let invalid = node(
+        "bad",
+        "text",
+        json!({"textShadow": {"blur": -1, "color": "#000"}}),
+        vec![],
+    );
+    assert!(
+        protocol::validate(&root(vec![invalid]))
+            .unwrap_err()
+            .contains("textShadow")
+    );
 }
 
 #[test]

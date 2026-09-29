@@ -28,8 +28,8 @@ export type Insets = number | { top?: number; right?: number; bottom?: number; l
 export type OutlineStyle = "dotted" | "dashed" | "solid" | "double" | "groove" | "ridge" | "inset" | "outset" | "none" | "hidden";
 /** Same values as OutlineStyle. Non-solid styles apply when all four border widths are equal. */
 export type BorderStyle = OutlineStyle;
-/** Solid offset copy of the text. Blur is not supported. */
-export interface TextShadow { x?: number; y?: number; color: string }
+/** Offset copy of the text; `blur` is the CSS blur radius (sigma = blur / 2, max 200), 0 for a solid copy. */
+export interface TextShadow { x?: number; y?: number; blur?: number; color: string }
 /** CSS-like box shadow. `blur` is the CSS blur radius (sigma = blur / 2); `inset` paints inside the padding box. */
 /** Paint-time translate/scale about the box centre. Hit testing follows it; layout does not. */
 export interface Transform { x?: number; y?: number; scale?: number; scaleX?: number; scaleY?: number }
@@ -90,8 +90,8 @@ export interface StateStyle {
   placeholderColor?: string; selectionColor?: string; caretColor?: string;
   scrollbarColor?: string; placeholderBackground?: string; thumbColor?: string;
   textDecoration?: TextDecoration;
-  /** Text, button, Input and TextArea text. Solid offset copy; blur is not supported. */
-  /** Object form, or CSS text-shadow syntax such as "1px 2px #0006" (no blur). */
+  /** Text, button, Input and TextArea text. Offset copy, optionally blurred. */
+  /** Object form, or CSS text-shadow syntax such as "1px 2px 4px #0006". */
   textShadow?: TextShadow | string;
   /** One shadow or up to 8; the first paints on top. Does not affect layout. */
   boxShadow?: BoxShadow | readonly BoxShadow[] | string;

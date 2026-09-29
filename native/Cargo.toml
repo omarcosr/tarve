@@ -26,6 +26,8 @@ taffy = { version = "=0.14.0", default-features = false, features = ["std", "taf
 winit = "0.30.12"
 pollster = "0.4"
 serde = { version = "1", features = ["derive"] }
+# Glyph rasterization: D3D11 atlas and blurred text shadows on every platform.
+swash = { version = "=0.2.10", default-features = false, features = ["std", "render"] }
 serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 base64 = "0.22"
@@ -43,7 +45,6 @@ accesskit = "=0.25.0"
 accesskit_winit = { version = "=0.34.0", default-features = false, features = ["rwh_06"] }
 lyon_tessellation = "=1.0.22"
 rfd = { version = "=0.17.2", default-features = false, features = ["common-controls-v6"] }
-swash = { version = "=0.2.10", default-features = false, features = ["std", "render"] }
 windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 

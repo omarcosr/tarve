@@ -112,8 +112,8 @@ export function parseTextShadow(value: string): TextShadow | undefined {
   if (layers.length !== 1) throw new TypeError("textShadow supports a single shadow");
   const { lengths, color } = parseLayer(layers[0]!, false);
   if (lengths.length > 3) throw new TypeError(`Too many lengths in text-shadow: ${value}`);
-  if ((lengths[2] ?? 0) !== 0) throw new TypeError("textShadow blur is not supported");
-  return { x: lengths[0], y: lengths[1], color };
+  if ((lengths[2] ?? 0) < 0) throw new TypeError("textShadow blur must be >= 0");
+  return { x: lengths[0], y: lengths[1], ...(lengths[2] ? { blur: lengths[2] } : {}), color };
 }
 
 /**

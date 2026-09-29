@@ -35,11 +35,12 @@ describe("CSS shadow syntax", () => {
     expect(() => parseBoxShadow("1px 1px #000 #fff")).toThrow("Unexpected");
   });
 
-  test("text-shadow takes one solid shadow", () => {
+  test("text-shadow takes one shadow with optional blur", () => {
     expect(parseTextShadow("1px 2px #0006")).toEqual({ x: 1, y: 2, color: "#00000066" });
     expect(parseTextShadow("1px 2px 0 red")).toEqual({ x: 1, y: 2, color: "#ff0000" });
     expect(parseTextShadow("none")).toBeUndefined();
-    expect(() => parseTextShadow("1px 1px 3px #000")).toThrow("blur");
+    expect(parseTextShadow("1px 1px 3px #000")).toEqual({ x: 1, y: 1, blur: 3, color: "#000000" });
+    expect(() => parseTextShadow("1px 1px -3px #000")).toThrow("blur");
     expect(() => parseTextShadow("1px 1px #000, 2px 2px #fff")).toThrow("single");
   });
 
