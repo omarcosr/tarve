@@ -2,7 +2,13 @@
 
 All notable changes to `@tarve/core` and `@tarve/react-icons` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
-## Unreleased
+## 0.2.0 — 2026-09-29
+
+### Breaking
+- `hover` styles now also apply to ancestors of the hovered node and to non-interactive nodes, like CSS `:hover`. Containers with a `hover` style that never activated before will now react.
+- Unsupported colour strings in colour properties throw when the view is compiled instead of painting black.
+- State styles with a matching `transition` now animate instead of switching instantly, and emit `motionComplete`.
+- JSON protocol version 46: `@tarve/core` 0.2.0 requires its bundled native runtime (as always, runtimes are not mixed across versions).
 
 ### Added
 - `transform`: translate/scale about the box centre (object or CSS `translate*()`/`scale*()` syntax), applied to the whole subtree on every renderer, followed by hit testing and hover, and animatable with `transition` (e.g. a hover lift).
