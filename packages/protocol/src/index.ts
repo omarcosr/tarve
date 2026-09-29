@@ -3,7 +3,10 @@ export const NATIVE_ABI_VERSION = 5;
 export const PROTOCOL_VERSION = 46;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
-export type MotionProperty = "width" | "height" | "top" | "right" | "bottom" | "left" | "opacity" | "radius";
+/** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
+export type NumericMotionProperty = "width" | "height" | "top" | "right" | "bottom" | "left" | "opacity" | "radius";
+/** Colour and shadow properties also transition on hover/active/focus/disabled changes. */
+export type MotionProperty = NumericMotionProperty | "background" | "foreground" | "borderColor" | "boxShadow" | "textShadow";
 export type MotionEasing = "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut";
 export interface MotionTransition {
   /** Duration in milliseconds. Defaults to 200 when omitted. */
@@ -13,7 +16,7 @@ export interface MotionTransition {
   easing?: MotionEasing;
 }
 export type MotionTransitions = Partial<Record<MotionProperty | "all", MotionTransition>>;
-export type MotionValues = Partial<Record<MotionProperty, number>>;
+export type MotionValues = Partial<Record<NumericMotionProperty, number>>;
 export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "markdown" | "code" | "diff" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter";
 export type SvgElementName = "path" | "circle" | "ellipse" | "g" | "line" | "polygon" | "polyline" | "rect";
 export type SvgAttributeValue = string | number;
@@ -27,6 +30,8 @@ export type OutlineStyle = "dotted" | "dashed" | "solid" | "double" | "groove" |
 export type BorderStyle = OutlineStyle;
 /** Solid offset copy of the text. Blur is not supported. */
 export interface TextShadow { x?: number; y?: number; color: string }
+/** CSS-like box shadow. `blur` is the CSS blur radius (sigma = blur / 2); `inset` paints inside the padding box. */
+export interface BoxShadow { x?: number; y?: number; blur?: number; spread?: number; color: string; inset?: boolean }
 export type UserSelect = "auto" | "text" | "none" | "all";
 export type TextDecoration = "none" | "underline" | "overline" | "line-through";
 export interface SyntaxTheme {
@@ -54,7 +59,10 @@ export interface StateStyle {
   scrollbarColor?: string; placeholderBackground?: string; thumbColor?: string;
   textDecoration?: TextDecoration;
   /** Text, button, Input and TextArea text. Solid offset copy; blur is not supported. */
-  textShadow?: TextShadow;
+  /** Object form, or CSS text-shadow syntax such as "1px 2px #0006" (no blur). */
+  textShadow?: TextShadow | string;
+  /** One shadow or up to 8; the first paints on top. Does not affect layout. */
+  boxShadow?: BoxShadow | readonly BoxShadow[] | string;
 }
 export interface Style extends StateStyle {
   width?: Length; height?: Length; minWidth?: Length; minHeight?: Length;

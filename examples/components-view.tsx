@@ -471,6 +471,29 @@ export function App() {
               </Column>
             </Section>
 
+            <Section title="Box shadow" description="Blurred, spread, hard, layered and inset shadows on every renderer.">
+              <Row gap={28} style={{ wrap: true, padding: 12 }}>
+                {([
+                  ["Soft", { boxShadow: { y: 8, blur: 24, color: "#0f172a33" } }],
+                  ["Spread", { boxShadow: { spread: 3, color: "#2563eb" } }],
+                  ["Hard", { boxShadow: { x: 6, y: 6, color: "#0f172a" } }],
+                  ["Layered", { boxShadow: "0 1px 2px rgba(0, 0, 0, 0.12), 0 12px 28px -4px rgba(37, 99, 235, 0.33)" }],
+                  ["Inset", { boxShadow: { inset: true, y: 4, blur: 12, color: "#0f172a55" } }],
+                ] as const).map(([label, style]) => (
+                  <Column key={label} style={{ width: 120, height: 72, radius: 12, background: "#ffffff", align: "center", justify: "center", ...style }}>
+                    <Text size={12}>{label}</Text>
+                  </Column>
+                ))}
+                <Column style={{ width: 120, height: 72, radius: 12, background: "#ffffff", align: "center", justify: "center",
+                  borderWidth: 1, borderColor: "#e2e8f0",
+                  boxShadow: { y: 2, blur: 6, color: "#0f172a22" },
+                  hover: { background: "#eff6ff", borderColor: "#93c5fd", boxShadow: { y: 14, blur: 28, spread: -2, color: "#2563eb44" } },
+                  transition: { all: { duration: 220, easing: "easeOut" } } }}>
+                  <Text size={12}>Hover me</Text>
+                </Column>
+              </Row>
+            </Section>
+
             <Section title="Typography" description="Preset text hierarchy and supporting styles.">
               <Column gap={8}>
                 <Typography variant="h2">Build native interfaces</Typography>

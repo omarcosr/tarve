@@ -178,6 +178,21 @@ function App() {
 
 Borders accept `borderStyle` with the same values as `outlineStyle` (`dashed`, `dotted`, `double`, `groove`, `ridge`, `inset`, `outset`, `none`); non-solid styles apply when all four border widths are equal. Text, button labels, `Input` and `TextArea` accept `textShadow: { x, y, color }`, a solid offset copy of the glyphs; it also works inside state styles such as `hover`. Blurred text shadows are not supported yet.
 
+`boxShadow` takes `{ x, y, blur, spread, color, inset }` or a list of up to 8 (the first paints on top). `blur` is the CSS blur radius; `spread` grows or shrinks the shadow and its corner radius; `inset` paints inside the padding box. Outer shadows are never drawn under their own box, so translucent backgrounds stay clean. Shadows do not affect layout, work in state styles such as `hover`, and render the same on D3D11, Vello GPU and the CPU renderer.
+
+`hover` styles apply to any node under the pointer and to its ancestors, as CSS `:hover` does; the innermost interactive node still receives events. With `transition`, `opacity`, `radius`, `background`, `foreground`, `borderColor`, `boxShadow` and `textShadow` animate natively both on JS updates and on hover/active/focus/disabled changes, starting from the value on screen:
+
+```tsx
+<Column style={{
+  background: "#ffffff",
+  boxShadow: { y: 2, blur: 6, color: "#0f172a22" },
+  hover: { background: "#eff6ff", boxShadow: { y: 14, blur: 28, color: "#2563eb44" } },
+  transition: { all: { duration: 220, easing: "easeOut" } },
+}} />
+```
+
+Both shadows also accept CSS syntax: `boxShadow: "inset 0 1px 2px rgba(0,0,0,.2), 0 8px 24px -4px #0003"` and `textShadow: "1px 2px #0006"` (or `"none"`). Lengths are `px` or unitless `0`; colours may be hex, `rgb()`/`rgba()`, `hsl()`/`hsla()`, a few names or theme tokens. Invalid strings throw when the view is compiled. Shadow lists of different lengths interpolate against transparent layers. `motionFrom` and AnimatePresence `enter`/`exit` accept numeric properties only.
+
 Create derived themes with `createTheme` or `Theme.create`. Theme tokens cover surfaces, foregrounds, borders, focus outlines, selection, caret, scrollbars, modal overlays, rich-content colors, and control states.
 
 ## Native motion

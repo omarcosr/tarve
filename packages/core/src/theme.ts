@@ -1,4 +1,5 @@
-import type { StateStyle, Style, SyntaxTheme } from "../../protocol/src/index";
+import type { BoxShadow, StateStyle, Style, SyntaxTheme } from "../../protocol/src/index";
+import { cssColor, parseBoxShadow, parseTextShadow } from "./css-shadow";
 
 export interface ThemeColors {
   background: string;
@@ -210,13 +211,32 @@ export function resolveThemeColor(value: string, selected: ThemeDefinition): str
   return key ? selected.colors[key] : value;
 }
 
+/** Normalizes CSS shadow strings and CSS colours (rgba(), hsl(), names) and resolves theme tokens. */
+function resolveShadowColors(style: StateStyle, selected: ThemeDefinition): void {
+  const colour = (value: string) => resolveThemeColor(cssColor(value), selected);
+  if (typeof style.textShadow === "string") {
+    const parsed = parseTextShadow(style.textShadow);
+    if (parsed) style.textShadow = parsed;
+    else delete style.textShadow;
+  }
+  if (style.textShadow && typeof style.textShadow === "object") {
+    style.textShadow = { ...style.textShadow, color: colour(style.textShadow.color) };
+  }
+  const box = typeof style.boxShadow === "string" ? parseBoxShadow(style.boxShadow) : style.boxShadow;
+  if (box !== undefined) {
+    style.boxShadow = Array.isArray(box)
+      ? box.map(shadow => ({ ...shadow, color: colour(shadow.color) }))
+      : { ...(box as BoxShadow), color: colour((box as BoxShadow).color) };
+  }
+}
+
 export function resolveThemeStyle(style: Style, selected: ThemeDefinition): Style {
   const resolved: Style = { ...style };
   for (const key of Object.keys(resolved) as (keyof Style)[]) {
     const value = resolved[key];
     if (typeof value === "string") (resolved as Record<string, unknown>)[key] = resolveThemeColor(value, selected);
   }
-  if (style.textShadow) resolved.textShadow = { ...style.textShadow, color: resolveThemeColor(style.textShadow.color, selected) };
+  resolveShadowColors(resolved, selected);
   for (const state of ["hover", "focus", "focusVisible", "active", "disabled"] as const) {
     const value = style[state];
     if (!value) continue;
@@ -227,7 +247,7 @@ export function resolveThemeStyle(style: Style, selected: ThemeDefinition): Styl
         (next as Record<string, unknown>)[key] = resolveThemeColor(stateValue, selected);
       }
     }
-    if (next.textShadow) next.textShadow = { ...next.textShadow, color: resolveThemeColor(next.textShadow.color, selected) };
+    resolveShadowColors(next, selected);
     resolved[state] = next;
   }
   return resolved;

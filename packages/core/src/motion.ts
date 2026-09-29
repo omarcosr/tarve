@@ -1,4 +1,4 @@
-import type { MotionProperty, MotionTransitions, MotionValues, Style } from "../../protocol/src/index";
+import type { NumericMotionProperty as MotionProperty, MotionTransitions, MotionValues, Style } from "../../protocol/src/index";
 import { currentRenderEpoch, currentRenderScope } from "./render-scope";
 import { Fragment, jsx, type VNode } from "./jsx-runtime";
 

@@ -5,6 +5,10 @@ All notable changes to `@tarve/core` and `@tarve/react-icons` are documented her
 ## Unreleased
 
 ### Added
+- CSS syntax for shadows: `boxShadow: "0 8px 24px -4px rgba(0,0,0,.2), inset 0 1px 0 #fff"` and `textShadow: "1px 2px #0006"`, including `rgb()`/`hsl()` colours and theme tokens. Shadow objects also accept those colour formats.
+- `hover` styles apply to every node under the pointer and its ancestors (CSS `:hover`), not only interactive nodes.
+- Native transitions for `background`, `foreground`, `borderColor`, `boxShadow` and `textShadow`, and state-driven transitions: hover/active/focus/disabled changes animate `opacity`, `radius`, colours and shadows from the value on screen. No frames are scheduled once a transition ends.
+- `boxShadow`: `{ x, y, blur, spread, color, inset }` or a list of up to 8, in base and state styles. Analytic gaussian blur on D3D11, Vello GPU and the CPU renderer; outer shadows are clipped out of their own box; `inset` paints inside the padding box.
 - `borderStyle` (`dashed`, `dotted`, `double`, `groove`, `ridge`, `inset`, `outset`, `none`) on any node with a uniform border width.
 - `textShadow: { x, y, color }` on text, button labels, `Input` and `TextArea`, including state styles such as `hover` (solid offset; no blur). Protocol version is now 46.
 - Linux accessibility: the AccessKit bridge now runs on Linux through AT-SPI, so screen readers such as Orca can read and drive Tarve apps.
