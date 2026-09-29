@@ -24,3 +24,19 @@ mod tree;
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+#[cfg(feature = "mimalloc")]
+unsafe extern "C" {
+    fn mi_collect(force: bool);
+}
+
+/// Returns the calling thread's free allocator pages to the OS. mimalloc
+/// keeps freed pages for reuse, so without this a burst of work (startup, a
+/// large update) leaves an idle app at its peak working set.
+pub(crate) fn release_free_memory() {
+    #[cfg(feature = "mimalloc")]
+    // SAFETY: mi_collect only walks and trims mimalloc's own heap state.
+    unsafe {
+        mi_collect(true);
+    }
+}

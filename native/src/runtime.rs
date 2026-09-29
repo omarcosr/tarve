@@ -414,6 +414,8 @@ pub fn run(
         fatal: None,
         ready_emitted: false,
         presentation_retry_at: None,
+        memory_dirty: std::cell::Cell::new(false),
+        last_memory_release: std::cell::Cell::new(Instant::now()),
         motion_epoch: Instant::now(),
         motion_test_clock: false,
         graphics_recovery_episodes: 0,
@@ -435,6 +437,9 @@ pub fn run(
 }
 
 struct App {
+    /// Frames were painted since free memory was last released.
+    memory_dirty: std::cell::Cell<bool>,
+    last_memory_release: std::cell::Cell<Instant>,
     document: Document,
     events: Arc<Events>,
     tree: Tree,
@@ -463,6 +468,7 @@ const MAX_GRAPHICS_RECOVERY_ATTEMPTS: u8 = 3;
 const MAX_GRAPHICS_RECOVERY_EPISODES: usize = 3;
 const GRAPHICS_RECOVERY_WINDOW: Duration = Duration::from_secs(30);
 const PRESENT_RETRY_DELAY: Duration = Duration::from_millis(16);
+const MEMORY_RELEASE_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_PASTE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PASTE_IMAGE_DIMENSION: usize = 16_384;
 const MAX_PASTE_FILES: usize = 4_096;
@@ -948,9 +954,21 @@ impl App {
             .min();
         if let Some(deadline) = deadline {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
-        } else {
-            event_loop.set_control_flow(ControlFlow::Wait);
+            return;
         }
+        // Idle: hand free allocator pages back once activity settles, at most
+        // every MEMORY_RELEASE_INTERVAL, so hover bursts don't trim per frame.
+        if self.memory_dirty.get() {
+            let release_at = self.last_memory_release.get() + MEMORY_RELEASE_INTERVAL;
+            if release_at > now {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(release_at));
+                return;
+            }
+            crate::release_free_memory();
+            self.memory_dirty.set(false);
+            self.last_memory_release.set(now);
+        }
+        event_loop.set_control_flow(ControlFlow::Wait);
     }
     fn start_graphics_recovery(&mut self, event_loop: &ActiveEventLoop, cause: String) -> bool {
         if matches!(self.graphics, GraphicsState::Recovering(_)) {
@@ -1773,6 +1791,7 @@ impl ApplicationHandler<Command> for App {
                 self.sync_control_flow(event_loop);
             }
             WindowEvent::RedrawRequested => {
+                self.memory_dirty.set(true);
                 self.redraw_frame(event_loop);
                 return;
             }

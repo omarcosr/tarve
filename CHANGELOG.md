@@ -12,6 +12,9 @@ All notable changes to `@tarve/core` and `@tarve/react-icons` are documented her
 ### Changed
 - JSON protocol version 47.
 
+### Fixed
+- Idle memory: the native runtime returns free `mimalloc` pages to the OS once rendering settles (at most every 500 ms). Since 0.2.0 an idle app stayed at its startup peak; a 2,000-row list now idles at ~225 MB instead of ~255 MB.
+
 ## 0.2.0 — 2026-09-29
 
 ### Breaking
