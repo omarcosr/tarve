@@ -422,14 +422,14 @@ pub enum Command {
         delta_y: Option<f64>,
         text: Option<String>,
     },
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     #[serde(skip)]
     Accessibility {
         event: accesskit_winit::Event,
     },
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 impl From<accesskit_winit::Event> for Command {
     fn from(event: accesskit_winit::Event) -> Self {
         Self::Accessibility { event }

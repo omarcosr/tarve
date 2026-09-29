@@ -7,7 +7,7 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 - TypeScript package checking: `bun run check` passes.
 - Rust lint gate: `cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings` passes.
 - Core/UI suite: **192 Bun tests** pass.
-- Native suite: **204 Rust tests** pass on Windows (183 on Linux, where the AccessKit bridge is not built), including deterministic AccessKit tree/action/TextPattern/scroll-alignment, horizontal/bidirectional scroll, bounded grid-track coverage and independent ABI/protocol mismatch handling.
+- Native suite: **207 Rust tests** pass on Windows (203 on Linux), including deterministic AccessKit tree/action/TextPattern/scroll-alignment, horizontal/bidirectional scroll, bounded grid-track coverage and independent ABI/protocol mismatch handling.
 - JSON protocol is currently **v45** on both TypeScript and Rust sides; the native C ABI is independently versioned at **v5** and checked before startup.
 - The npm package `@tarve/core` includes JS, JSX runtime, declarations, the CLI and both the Windows x64 and Linux x64 native runtimes.
 - External-consumer and standalone-EXE smoke tests are part of `bun run verify`.

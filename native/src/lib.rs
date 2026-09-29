@@ -1,8 +1,8 @@
-// The AccessKit bridge is Windows-only; the text/tree accessibility helpers it
+// The AccessKit bridge runs on Windows (UIA) and Linux (AT-SPI); the text/tree accessibility helpers it
 // consumes are shared code that is simply unreferenced on other targets.
-#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#![cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 mod accessibility;
 mod bridge;
 mod controls;

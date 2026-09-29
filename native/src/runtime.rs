@@ -9,16 +9,16 @@ use crate::{
     tree::{Tree, color},
 };
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use crate::accessibility::AccessibilityBridge;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use crate::tree::AccessibilityScrollAlignment;
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use accesskit::{Action, ActionData, ActionRequest, ScrollHint, ScrollUnit};
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 use accesskit_winit::WindowEvent as AccessKitWindowEvent;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 fn accessibility_scroll_alignment(
     data: Option<&ActionData>,
 ) -> Option<AccessibilityScrollAlignment> {
@@ -422,9 +422,9 @@ pub fn run(
         ime_enabled: false,
         last_titlebar_click: None,
         close_request_pending: false,
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
         event_proxy,
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
         accessibility: None,
     };
     event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
@@ -453,9 +453,9 @@ struct App {
     ime_enabled: bool,
     last_titlebar_click: Option<(Instant, (f64, f64))>,
     close_request_pending: bool,
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     event_proxy: EventLoopProxy<Command>,
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     accessibility: Option<AccessibilityBridge>,
 }
 
@@ -582,7 +582,7 @@ pub(crate) fn close_request_action(intercept: bool, pending: &mut bool) -> Close
     CloseRequestAction::Emit
 }
 impl App {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     fn initialize_accessibility(&mut self, event_loop: &ActiveEventLoop, window: &Window) {
         self.accessibility = Some(AccessibilityBridge::new(
             event_loop,
@@ -591,10 +591,10 @@ impl App {
         ));
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     fn initialize_accessibility(&mut self, _: &ActiveEventLoop, _: &Window) {}
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     fn sync_accessibility(&mut self) {
         if !self
             .accessibility
@@ -624,10 +624,10 @@ impl App {
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     fn sync_accessibility(&mut self) {}
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     fn handle_accessibility_action(&mut self, request: ActionRequest) -> Vec<serde_json::Value> {
         let text_run_start = self
             .accessibility
@@ -1650,7 +1650,7 @@ impl ApplicationHandler<Command> for App {
                 self.emit(events);
                 accessibility_changed = true;
             }
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
             Command::Accessibility { event } => match event.window_event {
                 AccessKitWindowEvent::InitialTreeRequested => {
                     if let Some(accessibility) = self.accessibility.as_mut() {
@@ -1726,7 +1726,7 @@ impl ApplicationHandler<Command> for App {
         self.sync_control_flow(event_loop);
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
         if let (Some(accessibility), Some(window)) = (&mut self.accessibility, &self.window) {
             accessibility.process_event(window.as_ref(), &event);
         }

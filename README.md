@@ -21,7 +21,7 @@ Tarve turns a TSX tree into a retained native interface. It does not use a brows
 - shadcn-inspired components and semantic light/dark theme tokens.
 - Native Markdown, syntax-highlighted Code, and Diff leaves designed for large documents.
 - Fixed-height, measured variable-height, and externally windowed `VirtualList` modes.
-- Windows UI Automation accessibility through AccessKit.
+- Accessibility through AccessKit: UI Automation on Windows and AT-SPI on Linux.
 - Global hotkeys, native file dialogs, custom title bars, window positioning, and standalone Windows/Linux builds.
 - Event-driven Bun/native bridge with no continuous idle polling: an idle window presents zero frames.
 - Development mode with in-window runtime error overlay, same-window remount under `bun --hot`, and a native frame-time graph.
@@ -347,7 +347,7 @@ Native text search and copy operate on the mounted logical window. A retained ed
 
 Editors keep a native per-field undo/redo history (`Ctrl+Z`, `Ctrl+Y` / `Ctrl+Shift+Z`) that coalesces continuous typing or deletion into word-sized steps and resets when a controlled value changes externally. `onSubmit(value)` fires on Enter for `Input`; `TextArea` submits on `Ctrl/Cmd+Enter`, or on Enter with `submitOnEnter` (Shift+Enter then inserts a newline). The caret blinks after activity and settles solid after 10 s idle, so a focused editor schedules no idle frames. When the clipboard holds no text, `Ctrl+V` delivers files or a bitmap to the focused element's `onPaste` as `{ kind: "files", files }` or `{ kind: "image", width, height, rgba }`.
 
-On Windows, Tarve projects the native tree through AccessKit/UI Automation with roles, names, values, states, actions, focus, text ranges, selection, scroll ranges, live regions, and field relationships. Linux input and rendering are supported, but the AccessKit accessibility bridge is currently Windows-only.
+On Windows, Tarve projects the native tree through AccessKit/UI Automation with roles, names, values, states, actions, focus, text ranges, selection, scroll ranges, live regions, and field relationships. On Linux, the same AccessKit tree is exposed over AT-SPI (D-Bus) for screen readers such as Orca; it activates only when an assistive technology connects.
 
 ## Desktop APIs
 
@@ -525,7 +525,7 @@ Building Tarve from source, the test and smoke-test gates, and the release proce
 
 ## Current scope
 
-Tarve is pre-1.0 and currently targets **Windows x64 and Linux x64**. The current application bootstrap model uses one native app/window lifetime per process; multi-window support is not yet part of the public runtime model. Accessibility integration remains Windows-only for now.
+Tarve is pre-1.0 and currently targets **Windows x64 and Linux x64**. The current application bootstrap model uses one native app/window lifetime per process; multi-window support is not yet part of the public runtime model.
 
 ## License
 
