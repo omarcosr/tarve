@@ -466,6 +466,7 @@ export function App() {
                   <Text size={28} weight={700} color="#ffffff" style={{ background: "#2563eb", padding: 8, radius: 8,
                     textShadow: { x: 0, y: 2, color: "#1e3a8a" } }}>Lifted</Text>
                   <Text size={28} weight={800} color="#fde047" style={{ textShadow: { x: 3, y: 3, color: "#dc2626" } }}>Retro</Text>
+                  <Button variant="outline" style={{ hover: { textShadow: { x: 1, y: 1, color: "#93c5fd" } } }}>Hover me</Button>
                 </Row>
               </Column>
             </Section>
