@@ -39,6 +39,10 @@ struct SubclassImpl {
     state: RefCell<SubclassState>,
     prev_wnd_proc: WNDPROC,
     window_destroyed: Cell<bool>,
+    /// Tarve patch: false when subclassing failed (e.g. the session is out
+    /// of USER/atom memory). The adapter then stays inert instead of
+    /// panicking the window thread; the app runs without UIA exposure.
+    installed: bool,
 }
 
 extern "system" fn wnd_proc(window: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -89,6 +93,7 @@ impl SubclassImpl {
             state,
             prev_wnd_proc: None,
             window_destroyed: Cell::new(false),
+            installed: false,
         })
     }
 
@@ -99,20 +104,28 @@ impl SubclassImpl {
                 self.hwnd.0
             );
         }
-        unsafe {
+        if let Err(error) = unsafe {
             SetPropW(
                 self.hwnd,
                 PROP_NAME,
                 Some(HANDLE(self as *const SubclassImpl as _)),
             )
+        } {
+            eprintln!("[tarve] accessibility disabled: SetPropW failed: {error}");
+            return;
         }
-        .unwrap();
         let result =
             unsafe { SetWindowLongPtrW(self.hwnd, GWLP_WNDPROC, wnd_proc as *const c_void as _) };
         if result == 0 {
-            win32_error();
+            eprintln!(
+                "[tarve] accessibility disabled: subclassing failed: {}",
+                Error::from_thread()
+            );
+            let _ = unsafe { RemovePropW(self.hwnd, PROP_NAME) };
+            return;
         }
         self.prev_wnd_proc = unsafe { transmute::<LongPtr, WNDPROC>(result) };
+        self.installed = true;
     }
 
     fn update_window_focus_state(&self, is_focused: bool) {
@@ -124,7 +137,7 @@ impl SubclassImpl {
     }
 
     fn uninstall(&self) {
-        if self.window_destroyed.get() {
+        if !self.installed || self.window_destroyed.get() {
             return;
         }
         let result = unsafe {
