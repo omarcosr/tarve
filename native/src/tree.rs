@@ -2988,9 +2988,9 @@ impl Tree {
             // The shadow is ink overflow: it may extend past the text box by its
             // own offset, so it gets a clip grown by that offset instead of the
             // node clip used for the glyphs themselves.
-            if matches!(node.kind.as_str(), "text" | "button")
+            if matches!(node.kind.as_str(), "text" | "button" | "input" | "textarea")
                 && ime_display.is_none()
-                && let Some(shadow) = text_shadow(&node)
+                && let Some(shadow) = text_shadow(&node, state)
             {
                 let (dx, dy) = (shadow.0, shadow.1);
                 let shadow_clip = BoxRect::new(
@@ -6249,8 +6249,8 @@ pub fn color(hex: &str) -> Color {
 
 /// `textShadow: { x, y, color }` as (dx, dy, colour). Blur is rejected by
 /// protocol validation, so the shadow is a solid offset copy of the glyphs.
-fn text_shadow(node: &Node) -> Option<(f64, f64, Color)> {
-    let shadow = node.style.get("textShadow")?.as_object()?;
+fn text_shadow(node: &Node, state: VisualState) -> Option<(f64, f64, Color)> {
+    let shadow = visual_value(node, "textShadow", state).as_object()?;
     let offset = |key: &str| shadow.get(key).and_then(Value::as_f64).unwrap_or(0.0);
     let colour = shadow.get("color")?.as_str()?;
     Some((offset("x"), offset("y"), color(colour)))

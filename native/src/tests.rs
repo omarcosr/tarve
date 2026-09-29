@@ -4879,3 +4879,52 @@ fn text_shadow_rejects_blur_and_malformed_values() {
         assert!(error.contains("textShadow"), "{error}");
     }
 }
+
+#[test]
+fn text_shadow_follows_hover_state_and_applies_to_inputs() {
+    let shadow = crate::tree::color("#ff0000");
+    let button: Node = serde_json::from_value(json!({
+        "id": "b", "kind": "button", "text": "Go", "children": [],
+        "style": {"width": 80, "height": 30, "fontSize": 14, "hover": {"textShadow": {"x": 1, "y": 1, "color": "#ff0000"}}}
+    }))
+    .unwrap();
+    let mut tree = Tree::new(root(vec![button]));
+    tree.compute(400.0, 200.0).unwrap();
+    let mut idle = PaintRecorder::default();
+    tree.paint(1.0, &mut idle);
+    assert!(idle.glyphs.iter().all(|(color, _)| *color != shadow));
+    tree.pointer_move(20.0, 15.0);
+    let mut hovered = PaintRecorder::default();
+    tree.paint(1.0, &mut hovered);
+    assert_eq!(
+        hovered.glyphs.first().map(|(color, _)| *color),
+        Some(shadow)
+    );
+
+    let mut field = node(
+        "field",
+        "input",
+        json!({"width": 200, "height": 32, "fontSize": 14, "textShadow": {"x": 1, "y": 2, "color": "#ff0000"}}),
+        vec![],
+    );
+    field.value = Some("abc".into());
+    let recorder = painted(vec![field]);
+    assert_eq!(
+        recorder.glyphs.first().map(|(color, _)| *color),
+        Some(shadow)
+    );
+    assert_eq!(recorder.glyphs.len(), 2);
+}
+
+#[test]
+fn text_shadow_in_state_styles_is_validated() {
+    let bad = text_node(
+        "label",
+        json!({"hover": {"textShadow": {"blur": 2, "color": "#000000"}}}),
+    );
+    assert!(
+        protocol::validate(&root(vec![bad]))
+            .unwrap_err()
+            .contains("textShadow")
+    );
+}

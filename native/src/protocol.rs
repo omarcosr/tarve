@@ -824,7 +824,13 @@ fn validate_control(node: &Node) -> Result<(), String> {
     {
         return Err(format!("Unsupported input type: {}", node.input_type));
     }
-    if let Some(shadow) = node.style.get("textShadow") {
+    let state_styles = ["hover", "active", "focus", "focusVisible", "disabled"]
+        .iter()
+        .filter_map(|state| node.style.get(*state));
+    for shadow in std::iter::once(&node.style)
+        .chain(state_styles)
+        .filter_map(|style| style.get("textShadow"))
+    {
         let valid = shadow.as_object().is_some_and(|shadow| {
             shadow.get("color").is_some_and(Value::is_string)
                 && ["x", "y"].iter().all(|key| {

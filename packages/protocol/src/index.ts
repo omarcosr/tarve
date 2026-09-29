@@ -53,6 +53,8 @@ export interface StateStyle {
   placeholderColor?: string; selectionColor?: string; caretColor?: string;
   scrollbarColor?: string; placeholderBackground?: string; thumbColor?: string;
   textDecoration?: TextDecoration;
+  /** Text, button, Input and TextArea text. Solid offset copy; blur is not supported. */
+  textShadow?: TextShadow;
 }
 export interface Style extends StateStyle {
   width?: Length; height?: Length; minWidth?: Length; minHeight?: Length;
@@ -64,8 +66,6 @@ export interface Style extends StateStyle {
   display?: "flex" | "grid" | "none"; columns?: number;
   zIndex?: number;
   borderWidth?: Insets;
-  /** Applies to text and button labels. */
-  textShadow?: TextShadow;
   radius?: number; fontSize?: number; fontWeight?: number; fontFamily?: string;
   /** Native retained transitions. Bun sends the target once; Rust owns interpolation. */
   transition?: MotionTransitions;

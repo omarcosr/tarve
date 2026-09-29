@@ -227,6 +227,7 @@ export function resolveThemeStyle(style: Style, selected: ThemeDefinition): Styl
         (next as Record<string, unknown>)[key] = resolveThemeColor(stateValue, selected);
       }
     }
+    if (next.textShadow) next.textShadow = { ...next.textShadow, color: resolveThemeColor(next.textShadow.color, selected) };
     resolved[state] = next;
   }
   return resolved;
