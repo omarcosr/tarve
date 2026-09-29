@@ -84,7 +84,7 @@ export interface TextHighlight {
 }
 export interface StateStyle {
   /** Colour, gradient object, or CSS `linear-gradient(…)` / `radial-gradient(…)` string. */
-  background?: string | Gradient; foreground?: string; borderColor?: string; borderStyle?: BorderStyle; radius?: number;
+  background?: string | Gradient; foreground?: string | Gradient; borderColor?: string | Gradient; borderStyle?: BorderStyle; radius?: number;
   opacity?: number;
   outlineWidth?: number; outlineColor?: string; outlineOffset?: number; outlineRadius?: number; outlineStyle?: OutlineStyle;
   placeholderColor?: string; selectionColor?: string; caretColor?: string;

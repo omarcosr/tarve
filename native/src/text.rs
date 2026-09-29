@@ -280,6 +280,8 @@ pub struct TextEngine {
     /// Blurred text-shadow images by node id, with their signature and
     /// device-pixel offset from the recorder base.
     shadow_images: HashMap<String, (u64, vello::peniko::ImageData, (f64, f64))>,
+    /// Gradient-filled text images by node id, cached like `shadow_images`.
+    ink_images: HashMap<String, (u64, vello::peniko::ImageData, (f64, f64))>,
     scale_context: swash::scale::ScaleContext,
 }
 
@@ -664,6 +666,7 @@ impl TextEngine {
             signatures: HashMap::default(),
             alignments: HashMap::default(),
             shadow_images: HashMap::default(),
+            ink_images: HashMap::default(),
             scale_context: swash::scale::ScaleContext::new(),
         }
     }
@@ -1084,7 +1087,13 @@ impl TextEngine {
             .get(id)
             .is_none_or(|cached| cached.0 != signature);
         if stale {
-            match crate::shadow::rasterize(&mut self.scale_context, &recorder, base, sigma, color) {
+            match crate::shadow::rasterize(
+                &mut self.scale_context,
+                &recorder,
+                base,
+                sigma,
+                crate::shadow::Ink::Solid(color),
+            ) {
                 Some((image, offset)) => {
                     self.shadow_images
                         .insert(id.to_string(), (signature, image, offset));
@@ -1098,6 +1107,59 @@ impl TextEngine {
         if let Some((_, image, offset)) = self.shadow_images.get(id) {
             target.draw_image(
                 &format!("text-shadow:{id}"),
+                image,
+                Affine::translate((base.0 + offset.0, base.1 + offset.1)),
+            );
+        }
+    }
+
+    /// Paints text filled with a gradient (CSS `background-clip: text`):
+    /// the glyph coverage is rasterized once, each pixel takes the gradient
+    /// colour, and the cached image is drawn, identically on every renderer.
+    pub fn draw_gradient<P: PaintTarget>(
+        &mut self,
+        target: &mut P,
+        node: &Node,
+        area: TextDrawArea,
+        gradient: &crate::paint::PaintGradient,
+        local_to_device: Affine,
+        scale: f64,
+    ) {
+        use std::hash::{Hash, Hasher};
+        let mut recorder = crate::shadow::ShadowRecorder::default();
+        self.draw(&mut recorder, node, area, Color::BLACK, scale);
+        let Some(base) = recorder.base() else {
+            self.ink_images.remove(&node.id);
+            return;
+        };
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        format!("{gradient:?}{:?}", local_to_device.as_coeffs()).hash(&mut hasher);
+        base.0.to_bits().hash(&mut hasher);
+        base.1.to_bits().hash(&mut hasher);
+        let signature = recorder.signature(base, 0.0, Color::BLACK) ^ hasher.finish();
+        let stale = self
+            .ink_images
+            .get(&node.id)
+            .is_none_or(|cached| cached.0 != signature);
+        if stale {
+            let ink = crate::shadow::Ink::Gradient {
+                gradient,
+                device_to_local: local_to_device.inverse(),
+            };
+            match crate::shadow::rasterize(&mut self.scale_context, &recorder, base, 0.0, ink) {
+                Some((image, offset)) => {
+                    self.ink_images
+                        .insert(node.id.clone(), (signature, image, offset));
+                }
+                None => {
+                    self.ink_images.remove(&node.id);
+                    return;
+                }
+            }
+        }
+        if let Some((_, image, offset)) = self.ink_images.get(&node.id) {
+            target.draw_image(
+                &format!("text-ink:{}", node.id),
                 image,
                 Affine::translate((base.0 + offset.0, base.1 + offset.1)),
             );

@@ -134,5 +134,8 @@ describe("CSS gradients", () => {
     });
     expect(resolved.hover?.background).toEqual({ type: "radial", stops: [{ color: "#ffffff" }, { color: "#000000" }] });
     expect(resolveThemeStyle({ background: "repeating-linear-gradient(red 0 4px, blue 4px 8px)" }, lightTheme).background).toMatchObject({ repeating: true });
+    const painted = resolveThemeStyle({ foreground: "linear-gradient(red, blue)", hover: { borderColor: "radial-gradient(#fff, #000)" } }, lightTheme);
+    expect(painted.foreground).toEqual({ type: "linear", stops: [{ color: "#ff0000" }, { color: "#0000ff" }] });
+    expect(painted.hover?.borderColor).toMatchObject({ type: "radial" });
   });
 });

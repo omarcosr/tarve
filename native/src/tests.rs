@@ -5289,6 +5289,62 @@ fn blurred_text_shadows_paint_one_cached_gaussian_image() {
 }
 
 #[test]
+fn gradient_borders_and_text_fill_with_the_gradient() {
+    let gradient = json!({"type": "linear", "to": "right", "stops": [
+        {"offset": 0, "color": "#ff0000"}, {"offset": 1, "color": "#0000ff"}
+    ]});
+    let card = node(
+        "card",
+        "view",
+        json!({"width": 100, "height": 40, "borderWidth": 3, "radius": 6, "borderColor": gradient}),
+        vec![],
+    );
+    let mut title = node(
+        "title",
+        "text",
+        json!({"fontSize": 24, "foreground": gradient}),
+        vec![],
+    );
+    title.text = "Gradient".into();
+    let mut tree = Tree::new(root(vec![card, title]));
+    tree.compute(400.0, 200.0).unwrap();
+    let recorded = fills_of(&mut tree);
+    // The border ring is one gradient fill over the border box.
+    let card_rect = tree.entries["card"].rect;
+    assert_eq!(recorded.gradients.len(), 1);
+    assert_eq!(recorded.gradients[0].1, card_rect);
+    assert!(recorded.strokes.is_empty(), "no solid border stroke");
+    // Gradient text is one cached image instead of glyph runs.
+    assert!(recorded.glyphs.is_empty());
+    assert_eq!(recorded.images.len(), 1);
+    assert_eq!(recorded.images[0].0, "text-ink:title");
+    let blob = recorded.images[0].1;
+    assert_eq!(fills_of(&mut tree).images[0].1, blob, "cached");
+
+    let sample = crate::paint::PaintGradient {
+        geometry: crate::paint::GradientGeometry::Linear {
+            start: vello::kurbo::Point::new(0.0, 0.0),
+            end: vello::kurbo::Point::new(100.0, 0.0),
+        },
+        stops: vec![
+            (0.0, crate::tree::color("#ff0000")),
+            (1.0, crate::tree::color("#0000ff")),
+        ],
+        repeat: false,
+    };
+    let middle = sample
+        .sample(vello::kurbo::Point::new(50.0, 7.0))
+        .components;
+    assert!((middle[0] - 0.5).abs() < 1e-3 && (middle[2] - 0.5).abs() < 1e-3);
+    assert_eq!(
+        sample
+            .sample(vello::kurbo::Point::new(-20.0, 0.0))
+            .components[0],
+        1.0
+    );
+}
+
+#[test]
 fn gradient_backgrounds_resolve_css_geometry() {
     use crate::paint::GradientGeometry;
     let stops = json!([{"offset": 0, "color": "#ff0000"}, {"offset": 1, "color": "#0000ff"}]);

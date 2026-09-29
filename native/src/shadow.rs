@@ -14,7 +14,17 @@ use vello::{
     peniko::{Blob, Color, Fill, FontData, ImageAlphaType, ImageData, ImageFormat},
 };
 
-use crate::paint::{PaintGlyph, PaintTarget};
+use crate::paint::{PaintGlyph, PaintGradient, PaintTarget};
+
+/// What fills the rasterized glyph coverage.
+pub(crate) enum Ink<'a> {
+    Solid(Color),
+    /// `device_to_local` maps device pixels back to the gradient's space.
+    Gradient {
+        gradient: &'a PaintGradient,
+        device_to_local: Affine,
+    },
+}
 
 /// Largest mask the blur will allocate (pixels); bigger shadows are skipped.
 const MAX_PIXELS: usize = 16 * 1024 * 1024;
@@ -137,7 +147,7 @@ pub(crate) fn rasterize(
     recorder: &ShadowRecorder,
     base: (f64, f64),
     sigma: f64,
-    color: Color,
+    ink: Ink<'_>,
 ) -> Option<(ImageData, (f64, f64))> {
     let mut pieces = Vec::new();
     for run in &recorder.runs {
@@ -222,9 +232,21 @@ pub(crate) fn rasterize(
         }
     }
     gaussian_blur(&mut mask, width, height, sigma);
-    let rgba = color.to_rgba8();
     let mut pixels = Vec::with_capacity(width * height * 4);
-    for coverage in mask {
+    for (index, coverage) in mask.into_iter().enumerate() {
+        let rgba = match &ink {
+            Ink::Solid(color) => color.to_rgba8(),
+            Ink::Gradient {
+                gradient,
+                device_to_local,
+            } => {
+                let device = Point::new(
+                    base.0 + f64::from(origin_x) + (index % width) as f64 + 0.5,
+                    base.1 + f64::from(origin_y) + (index / width) as f64 + 0.5,
+                );
+                gradient.sample(*device_to_local * device).to_rgba8()
+            }
+        };
         pixels.extend_from_slice(&[
             rgba.r,
             rgba.g,

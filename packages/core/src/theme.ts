@@ -212,6 +212,9 @@ export function resolveThemeColor(value: string, selected: ThemeDefinition): str
 }
 
 /** Normalizes CSS shadow strings and CSS colours (rgba(), hsl(), names) and resolves theme tokens. */
+/** Style keys that take a colour or a gradient. */
+const PAINT_KEYS = ["background", "foreground", "borderColor"] as const;
+
 function resolveShadowColors(style: StateStyle, selected: ThemeDefinition): void {
   if (typeof style.transform === "string") style.transform = parseTransform(style.transform);
   const colour = (value: string) => resolveThemeColor(cssColor(value), selected);
@@ -223,10 +226,11 @@ function resolveShadowColors(style: StateStyle, selected: ThemeDefinition): void
   if (style.textShadow && typeof style.textShadow === "object") {
     style.textShadow = { ...style.textShadow, color: colour(style.textShadow.color) };
   }
-  const background = typeof style.background === "string" && GRADIENT.test(style.background)
-    ? parseGradient(style.background)
-    : style.background;
-  if (background && typeof background === "object") style.background = normalizeGradient(background, colour);
+  for (const key of PAINT_KEYS) {
+    const value = style[key];
+    const gradient = typeof value === "string" && GRADIENT.test(value) ? parseGradient(value) : value;
+    if (gradient && typeof gradient === "object") style[key] = normalizeGradient(gradient, colour);
+  }
   const box = typeof style.boxShadow === "string" ? parseBoxShadow(style.boxShadow) : style.boxShadow;
   if (box !== undefined) {
     style.boxShadow = Array.isArray(box)
@@ -240,7 +244,7 @@ const COLOR_KEY = /^(background|foreground|color)$|(Color|Background|Foreground|
 
 /** Theme token or CSS colour (hex, rgb(), hsl(), names) for colour keys; other strings unchanged. */
 export function resolveStyleString(key: string, value: string, selected: ThemeDefinition): string {
-  if (key === "background" && GRADIENT.test(value)) return value;
+  if ((PAINT_KEYS as readonly string[]).includes(key) && GRADIENT.test(value)) return value;
   return resolveThemeColor(COLOR_KEY.test(key) ? cssColor(value) : value, selected);
 }
 

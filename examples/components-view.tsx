@@ -516,6 +516,11 @@ export function App() {
                   transition: { background: { duration: 300, easing: "easeOut" } } }}>
                   <Text size={12} weight={600} color="#ffffff">Hover me</Text>
                 </Column>
+                <Column style={{ width: 120, height: 72, radius: 12, align: "center", justify: "center", background: "#ffffff",
+                  borderWidth: 3, borderColor: "linear-gradient(135deg, #f97316, #db2777, #7c3aed)" }}>
+                  <Text size={12} weight={600}>Gradient border</Text>
+                </Column>
+                <Text size={32} weight={800} style={{ foreground: "linear-gradient(90deg, #2563eb, #db2777 60%, #f97316)" }}>Gradient text</Text>
               </Row>
             </Section>
 

@@ -7,6 +7,7 @@ All notable changes to `@tarve/core` and `@tarve/react-icons` are documented her
 ### Added
 - Gradient backgrounds: `linear-gradient(…)`, `radial-gradient(…)` and their `repeating-` forms as CSS strings or `{ type, angle | to, shape, size, at, repeating, stops }` objects, in state styles too, on D3D11, Vello GPU and the CPU renderer. Stops take `%` or `px` with CSS fix-up of omitted positions; radial gradients take every size keyword, explicit radii and `at` centres in keywords, `%` or `px` (with edge offsets like `right 10px bottom 20%`). Gradients with matching shape and stop count transition stop by stop.
 - `textShadow` blur (`{ blur }` or CSS `"1px 2px 4px #0006"`): glyphs are rasterized, blurred on the CPU and cached as one image per node, so the gaussian matches on every renderer. Blur transitions with the rest of the shadow.
+- Gradient `borderColor` (fills the border ring; solid borders) and gradient `foreground` on `Text` (glyph coverage filled with the gradient, cached per node). Both transition like background gradients.
 
 ### Changed
 - JSON protocol version 47.

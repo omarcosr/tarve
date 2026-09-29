@@ -1,4 +1,5 @@
-import type { Control, Style } from "../../../protocol/src/index";
+import type { Control, Gradient, Style } from "../../../protocol/src/index";
+import { GRADIENT, parseGradient } from "../css-shadow";
 import { _nativeJsx, jsx, type BaseProps, type Child, type VNode } from "../jsx-runtime";
 import { buttonVariants, theme, type ButtonVariant } from "../theme";
 import { Icon } from "./icon";
@@ -27,6 +28,11 @@ function accessibleText(child: Child, parts: string[] = []): string {
     accessibleText(child.props.children, parts);
   }
   return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function firstStopColor(gradient: Gradient): string {
+  const stop = gradient.stops[0];
+  return typeof stop === "string" ? stop : stop?.color ?? theme.colors.foreground;
 }
 
 function composedContent(child: Child, foreground: string): Child {
@@ -128,9 +134,13 @@ export function Button({ variant = "default", size = "default", style, disabled,
   const semanticControl: Control = control
     ? { ...control, ...(control.label || !label ? {} : { label }) }
     : { role: "button", ...(label ? { label } : {}) };
-  const foreground = disabled
+  const paint = disabled
     ? buttonStyle.disabled?.foreground ?? buttonStyle.foreground ?? theme.colors.foreground
     : buttonStyle.foreground ?? theme.colors.foreground;
+  // Composed labels and icons take a colour; a gradient foreground passes its
+  // first stop (wrap the label in <Text style={{ foreground: gradient }}> for gradient text).
+  const foreground = typeof paint !== "string" ? firstStopColor(paint)
+    : GRADIENT.test(paint) ? firstStopColor(parseGradient(paint)) : paint;
 
   return _nativeJsx("pressable", {
     ...props,

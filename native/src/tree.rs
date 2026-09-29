@@ -127,7 +127,8 @@ impl MotionTrack {
         state_driven: bool,
     ) -> Option<Self> {
         let (from, to) = pad_motion_layers(property, from, to);
-        if (property == "background" && !gradient_shapes_match(&from, &to))
+        if (matches!(property, "background" | "foreground" | "borderColor")
+            && !gradient_shapes_match(&from, &to))
             || from.len() != to.len()
             || from
                 .iter()
@@ -380,6 +381,25 @@ fn background_vector(value: &Value) -> Vec<f32> {
             ]
         };
     header.into_iter().chain(stops).collect()
+}
+
+/// A colour-or-gradient style value as a motion vector (see
+/// `background_vector`); missing values use `fallback`.
+fn paint_vector(value: &Value, fallback: &str) -> Vec<f32> {
+    if value.is_null() {
+        rgba_of(color(fallback)).to_vec()
+    } else {
+        background_vector(value)
+    }
+}
+
+/// The solid colour of a paint vector: itself, or a gradient's first stop.
+fn vector_colour(values: &[f32]) -> Color {
+    if values.len() >= GRADIENT_HEADER + GRADIENT_STOP {
+        colour_from(&values[GRADIENT_HEADER + 2..GRADIENT_HEADER + 6])
+    } else {
+        colour_from(values)
+    }
 }
 
 /// Gradients interpolate only when every discrete field matches (kind,
@@ -663,12 +683,14 @@ fn hex_of(colour: Color) -> String {
 fn motion_value(node: &Node, property: &str, state: VisualState) -> Option<Vec<f32>> {
     match property {
         "background" => Some(background_vector(visual_value(node, "background", state))),
-        "borderColor" => {
-            Some(rgba_of(color(visual_string(node, "borderColor", "#e4e4e7", state))).to_vec())
+        "borderColor" => Some(paint_vector(
+            visual_value(node, "borderColor", state),
+            "#e4e4e7",
+        )),
+        "foreground" => {
+            let value = visual_value(node, "foreground", state);
+            (value.is_string() || value.is_object()).then(|| paint_vector(value, "#18181b"))
         }
-        "foreground" => visual_value(node, "foreground", state)
-            .as_str()
-            .map(|value| rgba_of(color(value)).to_vec()),
         "boxShadow" => Some(
             box_shadows(node, state)
                 .iter()
@@ -3649,10 +3671,12 @@ impl Tree {
             target.pop_layer();
         }
         if border.iter().any(|width| *width > 0.0) {
-            let border_color = animated.get("borderColor").map_or_else(
-                || color(visual_string(&node, "borderColor", "#e4e4e7", state)),
-                |values| colour_from(values),
+            let border_vector = animated.get("borderColor").map_or_else(
+                || paint_vector(visual_value(&node, "borderColor", state), "#e4e4e7"),
+                |values| values.to_vec(),
             );
+            let border_gradient = paint_gradient(&border_vector, rect);
+            let border_color = vector_colour(&border_vector);
             let border_hex = hex_of(border_color);
             let border_style = visual_string(&node, "borderStyle", "solid", state);
             let uniform = border
@@ -3660,6 +3684,24 @@ impl Tree {
                 .all(|width| (*width - border[0]).abs() < f64::EPSILON);
             if matches!(border_style, "none" | "hidden") {
                 // Layout still reserves borderWidth; only the paint is suppressed.
+            } else if let (Some(gradient), "solid") = (&border_gradient, border_style) {
+                // Gradient borders fill the ring between the border and padding
+                // boxes (CSS border-image with a gradient source).
+                let inner = BoxRect::new(
+                    rect.x0 + border[3],
+                    rect.y0 + border[0],
+                    (rect.x1 - border[1]).max(rect.x0 + border[3]),
+                    (rect.y1 - border[2]).max(rect.y0 + border[0]),
+                );
+                let inner_radius = (radius - border.iter().copied().fold(0.0, f64::max)).max(0.0);
+                let mut ring = vello::kurbo::Shape::to_path(&shape, 0.1);
+                ring.extend(vello::kurbo::Shape::path_elements(
+                    &RoundedRect::from_rect(inner, inner_radius),
+                    0.1,
+                ));
+                target.push_clip(Fill::EvenOdd, transform, &ring);
+                target.fill_gradient(transform, gradient, &shape);
+                target.pop_layer();
             } else if uniform && border_style != "solid" {
                 // A border is an outline drawn inside the border box.
                 paint_outline(
@@ -3794,8 +3836,18 @@ impl Tree {
             if node.kind == "button" {
                 x = rect.x0 + (rect.width() - tw as f64) / 2.0;
             }
-            let foreground = if let Some(values) = animated.get("foreground") {
-                hex_of(colour_from(values))
+            let foreground_vector = animated.get("foreground").cloned().or_else(|| {
+                let value = visual_value(&node, "foreground", state);
+                value.is_object().then(|| background_vector(value))
+            });
+            let foreground_gradient = foreground_vector
+                .as_deref()
+                .filter(|_| {
+                    matches!(node.kind.as_str(), "text" | "button") && ime_display.is_none()
+                })
+                .and_then(|values| paint_gradient(values, rect));
+            let foreground = if let Some(values) = &foreground_vector {
+                hex_of(vector_colour(values))
             } else if matches!(node.kind.as_str(), "input" | "textarea")
                 && render_node.value.as_deref().unwrap_or("").is_empty()
             {
@@ -3979,25 +4031,32 @@ impl Tree {
                     );
                 }
             }
-            self.text.draw(
-                target,
-                &render_node,
-                crate::text::TextDrawArea {
-                    // Code paint owns the gutter and horizontal scroll offset.
-                    // Keep its paint origin fixed at the content box so line
-                    // numbers do not slide away when the code scrolls.
-                    origin: if node.kind == "code" {
-                        (x - gutter + scroll_x, y)
-                    } else {
-                        (x, y)
-                    },
-                    width: available_width,
-                    visible_y: visible_text_y,
-                    scroll_x: if node.kind == "code" { scroll_x } else { 0.0 },
+            let text_area = crate::text::TextDrawArea {
+                // Code paint owns the gutter and horizontal scroll offset.
+                // Keep its paint origin fixed at the content box so line
+                // numbers do not slide away when the code scrolls.
+                origin: if node.kind == "code" {
+                    (x - gutter + scroll_x, y)
+                } else {
+                    (x, y)
                 },
-                color(&foreground),
-                scale,
-            );
+                width: available_width,
+                visible_y: visible_text_y,
+                scroll_x: if node.kind == "code" { scroll_x } else { 0.0 },
+            };
+            if let Some(gradient) = &foreground_gradient {
+                self.text.draw_gradient(
+                    target,
+                    &render_node,
+                    text_area,
+                    gradient,
+                    transform,
+                    scale,
+                );
+            } else {
+                self.text
+                    .draw(target, &render_node, text_area, color(&foreground), scale);
+            }
             let decoration = self.text_decoration_for(id);
             if decoration != "none" {
                 if let Some(source_clip) = code_source_clip {

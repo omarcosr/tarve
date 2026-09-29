@@ -38,6 +38,55 @@ pub(crate) struct PaintGradient {
 }
 
 impl PaintGradient {
+    /// Colour at `point` (same coordinates as the geometry), interpolated
+    /// in straight alpha like the D3D11 bands.
+    pub(crate) fn sample(&self, point: Point) -> Color {
+        let Some(first) = self.stops.first() else {
+            return Color::TRANSPARENT;
+        };
+        let t = match self.geometry {
+            GradientGeometry::Linear { start, end } => {
+                let axis = end - start;
+                (point - start).dot(axis) / axis.hypot2().max(1e-12)
+            }
+            GradientGeometry::Radial {
+                center,
+                radius_x,
+                radius_y,
+                start,
+                end,
+            } => {
+                let distance = ((point.x - center.x) / radius_x.max(1e-6))
+                    .hypot((point.y - center.y) / radius_y.max(1e-6));
+                (distance - start) / (end - start).max(1e-9)
+            }
+        };
+        let t = if self.repeat {
+            t - t.floor()
+        } else {
+            t.clamp(0.0, 1.0)
+        } as f32;
+        let index = self.stops.partition_point(|stop| stop.0 <= t);
+        if index == 0 {
+            return first.1;
+        }
+        let Some(&(end_offset, end_color)) = self.stops.get(index) else {
+            return self.stops[self.stops.len() - 1].1;
+        };
+        let (start_offset, start_color) = self.stops[index - 1];
+        let amount = if end_offset > start_offset {
+            (t - start_offset) / (end_offset - start_offset)
+        } else {
+            1.0
+        };
+        let mut out = [0.0_f32; 4];
+        for (channel, value) in out.iter_mut().enumerate() {
+            *value = start_color.components[channel]
+                + (end_color.components[channel] - start_color.components[channel]) * amount;
+        }
+        Color::new(out)
+    }
+
     /// Peniko brush plus its brush transform: radial ellipses scale circles.
     pub(crate) fn brush(&self) -> (Gradient, Affine) {
         let stops: Vec<ColorStop> = self
