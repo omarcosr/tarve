@@ -19,3 +19,7 @@ mod syntax;
 mod tests;
 mod text;
 mod tree;
+
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;

@@ -4668,3 +4668,77 @@ fn word_keys_move_select_and_delete_by_word() {
     tree.key("ShiftWordLeft");
     assert_eq!(tree.selected_text().as_deref(), Some("two three"));
 }
+
+#[test]
+#[ignore = "manual performance probe: cargo test --release --lib perf_probe -- --ignored --nocapture"]
+fn perf_probe() {
+    use std::time::Instant;
+    let rows = 2000;
+    let build = |revision: usize| {
+        let children = (0..rows)
+            .map(|index| {
+                let label: Node = serde_json::from_value(json!({
+                    "id": format!("label-{index}"), "kind": "text",
+                    "style": {"flex": 1, "fontSize": 14},
+                    "text": if index == 0 { format!("Record {index} rev {revision}") } else { format!("Record {index}: native layout and text") },
+                    "children": []
+                }))
+                .unwrap();
+                let button: Node = serde_json::from_value(json!({
+                    "id": format!("open-{index}"), "kind": "button",
+                    "style": {"height": 28, "paddingLeft": 10, "paddingRight": 10, "backgroundColor": "#18181b", "color": "#fafafa", "radius": 6},
+                    "text": "Open", "children": []
+                }))
+                .unwrap();
+                node(&format!("row-{index}"), "row", json!({"height": 36, "shrink": 0, "gap": 12}), vec![label, button])
+            })
+            .collect();
+        let list = node("list", "column", json!({}), children);
+        let scroll = node("scroll", "scroll", json!({"flex": 1}), vec![list]);
+        root(vec![node(
+            "main",
+            "column",
+            json!({"padding": 16, "gap": 12, "flex": 1}),
+            vec![scroll],
+        )])
+    };
+    let median = |mut v: Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        v[v.len() / 2]
+    };
+    let (mut cold, mut update, mut paint) = (vec![], vec![], vec![]);
+    for iteration in 0..25 {
+        let document = build(0);
+        let start = Instant::now();
+        let mut tree = Tree::new(document);
+        tree.compute(1024.0, 760.0).unwrap();
+        let elapsed = start.elapsed().as_secs_f64() * 1e3;
+        let mut scene = vello::Scene::new();
+        let mut update_times = vec![];
+        let mut paint_times = vec![];
+        for revision in 1..=12 {
+            let next = build(revision);
+            let start = Instant::now();
+            tree.update(next);
+            tree.compute(1024.0, 760.0).unwrap();
+            update_times.push(start.elapsed().as_secs_f64() * 1e3);
+            scene.reset();
+            let start = Instant::now();
+            tree.paint(1.0, &mut scene);
+            paint_times.push(start.elapsed().as_secs_f64() * 1e3);
+        }
+        if iteration >= 5 {
+            cold.push(elapsed);
+            update.push(median(update_times));
+            paint.push(median(paint_times));
+        }
+    }
+    println!(
+        "PERF mimalloc={} fxhash={} cold_ms={:.2} update_ms={:.2} paint_ms={:.3}",
+        cfg!(feature = "mimalloc"),
+        cfg!(feature = "fxhash"),
+        median(cold),
+        median(update),
+        median(paint)
+    );
+}

@@ -8,6 +8,11 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+default = ["mimalloc", "fxhash"]
+mimalloc = ["dep:mimalloc"]
+fxhash = ["dep:rustc-hash"]
+
 [dependencies]
 vello = "=0.10.0"
 vello_cpu = { version = "=0.2.0", default-features = false, features = ["std", "text", "u8_pipeline"] }
@@ -30,6 +35,8 @@ unicode-width = "0.2"
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 bytemuck = "=1.25.0"
 lru = { version = "0.18.5", default-features = false }
+mimalloc = { version = "0.1", default-features = false, optional = true }
+rustc-hash = { version = "2", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 accesskit = "=0.25.0"

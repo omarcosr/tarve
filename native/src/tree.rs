@@ -8,9 +8,13 @@ use crate::{
     },
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
+#[cfg(feature = "fxhash")]
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde_json::{Value, json};
+#[cfg(not(feature = "fxhash"))]
+use std::collections::{HashMap, HashSet};
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::VecDeque,
     fs,
     io::Cursor,
     ops::Range,
@@ -900,7 +904,8 @@ impl Tree {
             out.insert(id.to_string(), highest);
             highest
         }
-        let mut stacking = HashMap::with_capacity(self.entries.len());
+        let mut stacking =
+            HashMap::with_capacity_and_hasher(self.entries.len(), Default::default());
         if self.entries.contains_key(&self.root) {
             visit(&self.entries, &self.root, &mut stacking);
         }
@@ -960,30 +965,30 @@ impl Tree {
     pub fn new(root: Node) -> Self {
         let mut tree = Self {
             root: root.id.clone(),
-            entries: HashMap::new(),
+            entries: HashMap::default(),
             order: Vec::new(),
             layout: TaffyTree::new(),
             text: TextEngine::new(),
-            highlight_ranges: HashMap::new(),
-            highlight_counts: HashMap::new(),
-            highlight_count_queries: HashMap::new(),
-            highlight_focus: HashMap::new(),
-            highlight_match_cache: HashMap::new(),
+            highlight_ranges: HashMap::default(),
+            highlight_counts: HashMap::default(),
+            highlight_count_queries: HashMap::default(),
+            highlight_focus: HashMap::default(),
+            highlight_match_cache: HashMap::default(),
             #[cfg(test)]
             highlight_searches: 0,
             highlight_dirty: true,
-            images: HashMap::new(),
-            svgs: HashMap::new(),
-            virtual_measurements: HashMap::new(),
+            images: HashMap::default(),
+            svgs: HashMap::default(),
+            virtual_measurements: HashMap::default(),
             pending_layout_events: Vec::new(),
             pending_interaction_events: Vec::new(),
             pending_motion_events: Vec::new(),
             motion_time_ms: 0.0,
             caret_activity_ms: 0.0,
-            edit_history: HashMap::new(),
+            edit_history: HashMap::default(),
             frame_overlay: None,
             virtual_focus: None,
-            stacking: HashMap::new(),
+            stacking: HashMap::default(),
             window_chrome_suppressed: false,
             dirty: Dirty::all(),
             hovered: None,
@@ -1515,10 +1520,10 @@ impl Tree {
             .collect();
         let mut creates = Vec::new();
         let mut patches = Vec::new();
-        let mut child_updates = HashMap::<String, Vec<String>>::new();
-        let mut removes = HashSet::<String>::new();
-        let mut created = HashSet::<String>::new();
-        let mut patched = HashSet::<String>::new();
+        let mut child_updates = HashMap::<String, Vec<String>>::default();
+        let mut removes = HashSet::<String>::default();
+        let mut created = HashSet::<String>::default();
+        let mut patched = HashSet::<String>::default();
 
         for mutation in mutations {
             match mutation {
@@ -1598,9 +1603,10 @@ impl Tree {
             return Err("Structural mutation batch must preserve the root Window".into());
         }
 
-        let mut parents = HashMap::<String, String>::new();
+        let mut parents = HashMap::<String, String>::default();
         for (parent, children) in &structure {
-            let mut siblings = HashSet::with_capacity(children.len());
+            let mut siblings: HashSet<_> =
+                HashSet::with_capacity_and_hasher(children.len(), Default::default());
             for child in children {
                 if !siblings.insert(child) {
                     return Err(format!("Duplicate child {child} under {parent}"));
@@ -1645,7 +1651,7 @@ impl Tree {
         }
 
         let mut final_order = Vec::with_capacity(structure.len());
-        let mut visited = HashSet::with_capacity(structure.len());
+        let mut visited = HashSet::with_capacity_and_hasher(structure.len(), Default::default());
         visit_order(&self.root, &structure, &mut visited, &mut final_order, 0)?;
         if visited.len() != structure.len() {
             return Err("Structural mutation creates a disconnected cycle".into());
@@ -2299,11 +2305,11 @@ impl Tree {
     }
     fn resolve_highlights(&mut self) {
         self.highlight_ranges.clear();
-        let mut counts = HashMap::new();
-        let mut queries = HashMap::new();
-        let mut focus = HashMap::new();
+        let mut counts = HashMap::default();
+        let mut queries = HashMap::default();
+        let mut focus = HashMap::default();
         let mut focus_requests = Vec::new();
-        let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+        let mut groups: HashMap<String, Vec<String>> = HashMap::default();
         for id in &self.order {
             let entry = &self.entries[id];
             if entry.rect.width() <= 0.0
@@ -3537,7 +3543,7 @@ impl Tree {
     }
     fn focus_order(&self) -> Vec<String> {
         let modal = self.active_modal();
-        let mut group_choice = HashMap::<String, String>::new();
+        let mut group_choice = HashMap::<String, String>::default();
         for id in &self.order {
             if !self.interactive(id)
                 || self.is_virtual_parked(id)

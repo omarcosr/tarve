@@ -12,11 +12,12 @@ use parley::{
     LineHeight, PositionedLayoutItem, StyleProperty,
     layout::{Affinity, Cursor, Selection},
 };
+#[cfg(feature = "fxhash")]
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde_json::Value;
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Range,
-};
+#[cfg(not(feature = "fxhash"))]
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 use vello::{
     kurbo::{Affine, BezPath, Rect, RoundedRect, Stroke},
@@ -626,21 +627,21 @@ impl TextEngine {
         Self {
             fonts: FontContext::new(),
             context: LayoutContext::new(),
-            layouts: HashMap::new(),
-            markdown_lines: HashMap::new(),
-            markdown_scroll: HashMap::new(),
-            markdown_metrics: HashMap::new(),
-            markdown_block_widths: HashMap::new(),
-            diff_layouts: HashMap::new(),
-            code_gutter_layouts: HashMap::new(),
-            code_gutter_widths: HashMap::new(),
-            unwrapped_code: HashSet::new(),
-            diff_column_widths: HashMap::new(),
+            layouts: HashMap::default(),
+            markdown_lines: HashMap::default(),
+            markdown_scroll: HashMap::default(),
+            markdown_metrics: HashMap::default(),
+            markdown_block_widths: HashMap::default(),
+            diff_layouts: HashMap::default(),
+            code_gutter_layouts: HashMap::default(),
+            code_gutter_widths: HashMap::default(),
+            unwrapped_code: HashSet::default(),
+            diff_column_widths: HashMap::default(),
             shapes: 0,
             #[cfg(test)]
             markdown_painted_lines: 0,
-            signatures: HashMap::new(),
-            alignments: HashMap::new(),
+            signatures: HashMap::default(),
+            alignments: HashMap::default(),
         }
     }
     pub fn prepare(&mut self, node: &Node) {
@@ -852,7 +853,7 @@ impl TextEngine {
         let lines = self.markdown_lines.get_mut(id)?;
         let mut y: f32 = 0.0;
         let mut max_width: f32 = 0.0;
-        let mut block_widths = HashMap::<usize, f32>::new();
+        let mut block_widths = HashMap::<usize, f32>::default();
         for line in lines {
             line.layout
                 .break_all_lines(if line.nowrap { None } else { width });
