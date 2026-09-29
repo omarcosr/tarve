@@ -450,6 +450,26 @@ export function App() {
               </Column>
             </Section>
 
+            <Section title="Border styles + text shadow" description="borderStyle reuses the outline styles; textShadow paints a solid offset copy.">
+              <Column gap={14}>
+                <Row gap={10} style={{ wrap: true }}>
+                  {(["solid", "dashed", "dotted", "double", "groove", "ridge", "inset", "outset"] as const).map(borderStyle => (
+                    <Column key={borderStyle} style={{ width: 96, height: 56, align: "center", justify: "center",
+                      borderWidth: borderStyle === "double" || borderStyle === "groove" || borderStyle === "ridge" ? 6 : 3,
+                      borderStyle, borderColor: c.primary, radius: 8 }}>
+                      <Text size={12}>{borderStyle}</Text>
+                    </Column>
+                  ))}
+                </Row>
+                <Row gap={24} align="center">
+                  <Text size={28} weight={700} style={{ textShadow: { x: 2, y: 2, color: c.border } }}>Soft shadow</Text>
+                  <Text size={28} weight={700} color="#ffffff" style={{ background: "#2563eb", padding: 8, radius: 8,
+                    textShadow: { x: 0, y: 2, color: "#1e3a8a" } }}>Lifted</Text>
+                  <Text size={28} weight={800} color="#fde047" style={{ textShadow: { x: 3, y: 3, color: "#dc2626" } }}>Retro</Text>
+                </Row>
+              </Column>
+            </Section>
+
             <Section title="Typography" description="Preset text hierarchy and supporting styles.">
               <Column gap={8}>
                 <Typography variant="h2">Build native interfaces</Typography>
