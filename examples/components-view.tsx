@@ -1,7 +1,6 @@
 import { CameraIcon as HeroCamera } from "@heroicons/react/24/outline";
 import { Camera as PhosphorCamera } from "@phosphor-icons/react";
 import { IconCamera as TablerCamera } from "@tabler/icons-react";
-import { Camera } from 'lucide-react';
 import {
   Alert,
   AspectRatio,
@@ -55,6 +54,7 @@ import {
   type Style,
   type SvgNode,
 } from "@tarve/core";
+import { Camera } from 'lucide-react';
 import vectorScene from "./assets/vector-scene.svg" with { type: "file" };
 const c = theme.colors;
 
@@ -454,17 +454,21 @@ export function App() {
               <Column gap={14}>
                 <Row gap={10} style={{ wrap: true }}>
                   {(["solid", "dashed", "dotted", "double", "groove", "ridge", "inset", "outset"] as const).map(borderStyle => (
-                    <Column key={borderStyle} style={{ width: 96, height: 56, align: "center", justify: "center",
+                    <Column key={borderStyle} style={{
+                      width: 96, height: 56, align: "center", justify: "center",
                       borderWidth: borderStyle === "double" || borderStyle === "groove" || borderStyle === "ridge" ? 6 : 3,
-                      borderStyle, borderColor: c.primary, radius: 8 }}>
+                      borderStyle, borderColor: c.primary, radius: 8
+                    }}>
                       <Text size={12}>{borderStyle}</Text>
                     </Column>
                   ))}
                 </Row>
                 <Row gap={24} align="center">
                   <Text size={28} weight={700} style={{ textShadow: { x: 0, y: 2, blur: 6, color: "#0f172a55" } }}>Soft shadow</Text>
-                  <Text size={28} weight={700} color="#ffffff" style={{ background: "#2563eb", padding: 8, radius: 8,
-                    textShadow: { x: 0, y: 2, color: "#1e3a8a" } }}>Lifted</Text>
+                  <Text size={28} weight={700} color="#ffffff" style={{
+                    background: "#2563eb", padding: 8, radius: 8,
+                    textShadow: { x: 0, y: 2, color: "#1e3a8a" }
+                  }}>Lifted</Text>
                   <Text size={28} weight={800} color="#fde047" style={{ textShadow: { x: 3, y: 3, color: "#dc2626" } }}>Retro</Text>
                   <Button variant="outline" style={{ hover: { textShadow: { x: 1, y: 1, color: "#93c5fd" } } }}>Hover me</Button>
                 </Row>
@@ -484,11 +488,13 @@ export function App() {
                     <Text size={12}>{label}</Text>
                   </Column>
                 ))}
-                <Column style={{ width: 120, height: 72, radius: 12, background: "#ffffff", align: "center", justify: "center",
+                <Column style={{
+                  width: 120, height: 72, radius: 12, background: "#ffffff", align: "center", justify: "center",
                   borderWidth: 1, borderColor: "#e2e8f0",
                   boxShadow: { y: 2, blur: 6, color: "#0f172a22" },
                   hover: { background: "#eff6ff", borderColor: "#93c5fd", transform: "translateY(-4px) scale(1.03)", boxShadow: { y: 14, blur: 28, spread: -2, color: "#2563eb44" } },
-                  transition: { all: { duration: 220, easing: "easeOut" } } }}>
+                  transition: { all: { duration: 220, easing: "easeOut" } }
+                }}>
                   <Text size={12}>Hover me</Text>
                 </Column>
               </Row>
@@ -510,14 +516,18 @@ export function App() {
                     <Text size={12} weight={600} color="#ffffff" style={{ textShadow: "0 1px #0006" }}>{label}</Text>
                   </Column>
                 ))}
-                <Column style={{ width: 120, height: 72, radius: 12, align: "center", justify: "center",
+                <Column style={{
+                  width: 120, height: 72, radius: 12, align: "center", justify: "center",
                   background: "linear-gradient(135deg, #1e293b, #334155)",
                   hover: { background: "linear-gradient(135deg, #4f46e5, #db2777)" },
-                  transition: { background: { duration: 300, easing: "easeOut" } } }}>
+                  transition: { background: { duration: 300, easing: "easeOut" } }
+                }}>
                   <Text size={12} weight={600} color="#ffffff">Hover me</Text>
                 </Column>
-                <Column style={{ width: 120, height: 72, radius: 12, align: "center", justify: "center", background: "#ffffff",
-                  borderWidth: 3, borderColor: "linear-gradient(135deg, #f97316, #db2777, #7c3aed)" }}>
+                <Column style={{
+                  width: 120, height: 72, radius: 12, align: "center", justify: "center", background: "#ffffff",
+                  borderWidth: 3, borderColor: "linear-gradient(135deg, #f97316, #db2777, #7c3aed)"
+                }}>
                   <Text size={12} weight={600}>Gradient border</Text>
                 </Column>
                 <Text size={32} weight={800} style={{ foreground: "linear-gradient(90deg, #2563eb, #db2777 60%, #f97316)" }}>Gradient text</Text>
