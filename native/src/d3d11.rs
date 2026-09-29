@@ -69,7 +69,7 @@ use winit::{
     window::Window,
 };
 
-use crate::paint::{PaintGlyph, PaintTarget};
+use crate::paint::{GradientGeometry, PaintGlyph, PaintGradient, PaintTarget};
 
 const GLYPH_ATLAS_SIZE: u32 = 1024;
 const MAX_GLYPH_ATLASES: usize = 4;
@@ -742,6 +742,36 @@ impl D3d11Graphics {
         });
     }
 
+    /// Plain triangles with per-vertex colours (three entries per triangle).
+    fn append_colored_triangles(
+        &mut self,
+        points: &[(Point, Color)],
+        transform: Affine,
+        opacity: f32,
+    ) {
+        if points.is_empty() {
+            return;
+        }
+        let first = self.indices.len() as u32;
+        let base = self.vertices.len() as u32;
+        for (index, (point, color)) in points.iter().enumerate() {
+            let p = transform * *point;
+            self.vertices.push(Vertex {
+                pos: self.ndc(p.x as f32, p.y as f32),
+                uv: [0.0, 0.0],
+                color: rgba(color.multiply_alpha(opacity)),
+                mode: 0.0,
+                params: [0.0; 4],
+            });
+            self.indices.push(base + index as u32);
+        }
+        self.commands.push(DrawCommand::Draw {
+            first,
+            count: points.len() as u32,
+            texture: TextureRef::Solid,
+        });
+    }
+
     fn ndc(&self, x: f32, y: f32) -> [f32; 2] {
         [
             x * 2.0 / self.width.max(1) as f32 - 1.0,
@@ -967,6 +997,154 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                 texture: TextureRef::Solid,
             });
         }
+    }
+
+    /// Clips to `shape` and paints vertex-coloured bands between stops: the
+    /// colour is linear between two stops, so the bands are exact for linear
+    /// gradients and exact along each of 96 slices for radial ones.
+    fn fill_gradient<S: Shape>(&mut self, transform: Affine, gradient: &PaintGradient, shape: &S) {
+        if self.suppressed_clips > 0 || gradient.stops.is_empty() {
+            return;
+        }
+        let bounds = shape.bounding_box();
+        let corners = [
+            Point::new(bounds.x0, bounds.y0),
+            Point::new(bounds.x1, bounds.y0),
+            Point::new(bounds.x1, bounds.y1),
+            Point::new(bounds.x0, bounds.y1),
+        ];
+        let stops: Vec<(f64, Color)> = gradient
+            .stops
+            .iter()
+            .map(|(offset, color)| (f64::from(*offset), *color))
+            .collect();
+        let first = stops[0].1;
+        let last = stops[stops.len() - 1].1;
+        // Range of the gradient parameter t the shape covers.
+        let (low, high) = match gradient.geometry {
+            GradientGeometry::Linear { start, end } => {
+                let axis = end - start;
+                let length2 = axis.hypot2().max(1e-12);
+                let project = |point: &Point| (*point - start).dot(axis) / length2;
+                (
+                    corners.iter().map(project).fold(f64::INFINITY, f64::min),
+                    corners
+                        .iter()
+                        .map(project)
+                        .fold(f64::NEG_INFINITY, f64::max),
+                )
+            }
+            GradientGeometry::Radial {
+                center,
+                radius_x,
+                radius_y,
+                start,
+                end,
+            } => {
+                let (rx, ry) = (radius_x.max(1e-6), radius_y.max(1e-6));
+                let span = (end - start).max(1e-9);
+                let reach = corners
+                    .iter()
+                    .map(|p| ((p.x - center.x) / rx).hypot((p.y - center.y) / ry))
+                    .fold(0.0, f64::max)
+                    + 0.01;
+                (-start / span, (reach - start) / span)
+            }
+        };
+        let mut bands: Vec<(f64, Color, f64, Color)> = Vec::new();
+        if gradient.repeat {
+            let (from, to) = (low.floor() as i64, high.ceil() as i64);
+            if (to - from).unsigned_abs() as usize * stops.len() > 20_000 {
+                // Finer than a pixel: CSS paints the average colour.
+                let mut sum = [0.0_f32; 4];
+                for pair in stops.windows(2) {
+                    let weight = (pair[1].0 - pair[0].0) as f32;
+                    for (channel, total) in sum.iter_mut().enumerate() {
+                        *total += weight
+                            * (pair[0].1.components[channel] + pair[1].1.components[channel])
+                            / 2.0;
+                    }
+                }
+                self.fill(Fill::NonZero, transform, Color::new(sum), shape);
+                return;
+            }
+            for period in from..to {
+                let base = period as f64;
+                for pair in stops.windows(2) {
+                    bands.push((base + pair[0].0, pair[0].1, base + pair[1].0, pair[1].1));
+                }
+            }
+        } else {
+            let mut list = vec![(low.min(0.0), first)];
+            list.extend(stops.iter().copied());
+            list.push((high.max(1.0), last));
+            for pair in list.windows(2) {
+                bands.push((pair[0].0, pair[0].1, pair[1].0, pair[1].1));
+            }
+        }
+        let mix = |a: Color, b: Color, amount: f64| {
+            let amount = amount.clamp(0.0, 1.0) as f32;
+            let mut out = [0.0_f32; 4];
+            for (channel, value) in out.iter_mut().enumerate() {
+                *value = a.components[channel]
+                    + (b.components[channel] - a.components[channel]) * amount;
+            }
+            Color::new(out)
+        };
+        let mut triangles: Vec<(Point, Color)> = Vec::new();
+        let mut quad = |a: Point, b: Point, c: Point, d: Point, from: Color, to: Color| {
+            triangles.extend([(a, from), (b, from), (c, to), (a, from), (c, to), (d, to)]);
+        };
+        for (t0, c0, t1, c1) in bands {
+            if t1 <= t0 || t1 < low || t0 > high {
+                continue;
+            }
+            match gradient.geometry {
+                GradientGeometry::Linear { start, end } => {
+                    let axis = end - start;
+                    let along = axis / axis.hypot().max(1e-12);
+                    let across = vello::kurbo::Vec2::new(-along.y, along.x)
+                        * (bounds.width().hypot(bounds.height()) + axis.hypot());
+                    let p0 = start + axis * t0;
+                    let p1 = start + axis * t1;
+                    quad(p0 - across, p0 + across, p1 + across, p1 - across, c0, c1);
+                }
+                GradientGeometry::Radial {
+                    center,
+                    radius_x,
+                    radius_y,
+                    start,
+                    end,
+                } => {
+                    let radius = |t: f64| start + (end - start) * t;
+                    let (mut r0, r1) = (radius(t0), radius(t1));
+                    if r1 <= 0.0 {
+                        continue;
+                    }
+                    let mut c0 = c0;
+                    if r0 < 0.0 {
+                        c0 = mix(c0, c1, -r0 / (r1 - r0));
+                        r0 = 0.0;
+                    }
+                    const SLICES: usize = 96;
+                    let at = |r: f64, k: usize| {
+                        let angle = std::f64::consts::TAU * k as f64 / SLICES as f64;
+                        Point::new(
+                            center.x + radius_x * r * angle.cos(),
+                            center.y + radius_y * r * angle.sin(),
+                        )
+                    };
+                    for k in 0..SLICES {
+                        quad(at(r0, k), at(r0, k + 1), at(r1, k + 1), at(r1, k), c0, c1);
+                    }
+                }
+            }
+        }
+        self.push_clip(Fill::NonZero, transform, shape);
+        let opacity = self.opacity;
+        self.graphics
+            .append_colored_triangles(&triangles, transform, opacity);
+        self.pop_layer();
     }
 
     fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S) {

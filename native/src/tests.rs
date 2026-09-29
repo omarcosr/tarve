@@ -4751,6 +4751,7 @@ struct PaintRecorder {
     glyph_clips: Vec<Option<vello::kurbo::Rect>>,
     fills: Vec<(vello::peniko::Color, vello::kurbo::Rect)>,
     shadows: Vec<RecordedShadow>,
+    gradients: Vec<(crate::paint::PaintGradient, vello::kurbo::Rect)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -4772,6 +4773,15 @@ impl crate::paint::PaintTarget for PaintRecorder {
         shape: &S,
     ) {
         self.fills.push((color, shape.bounding_box()));
+    }
+    fn fill_gradient<S: vello::kurbo::Shape>(
+        &mut self,
+        _: vello::kurbo::Affine,
+        gradient: &crate::paint::PaintGradient,
+        shape: &S,
+    ) {
+        self.gradients
+            .push((gradient.clone(), shape.bounding_box()));
     }
     fn box_shadow(
         &mut self,
@@ -5207,6 +5217,322 @@ fn js_updates_transition_colours_and_motion_from_stays_numeric() {
     entering.motion_from = json!({"background": 1});
     let error = protocol::validate(&root(vec![entering])).unwrap_err();
     assert!(error.contains("motionFrom"), "{error}");
+}
+
+#[test]
+fn gradient_backgrounds_resolve_css_geometry() {
+    use crate::paint::GradientGeometry;
+    let stops = json!([{"offset": 0, "color": "#ff0000"}, {"offset": 1, "color": "#0000ff"}]);
+    let card = |id: &str, background: serde_json::Value| {
+        node(
+            id,
+            "view",
+            json!({"width": 100, "height": 40, "background": background}),
+            vec![],
+        )
+    };
+    let radial = |extra: serde_json::Value| {
+        let mut gradient = json!({"type": "radial", "stops": stops});
+        gradient
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        gradient
+    };
+    let mut tree = Tree::new(root(vec![
+        card(
+            "right",
+            json!({"type": "linear", "to": "right", "stops": stops}),
+        ),
+        card("down", json!({"type": "linear", "stops": stops})),
+        card(
+            "corner",
+            json!({"type": "linear", "to": "top right", "stops": stops}),
+        ),
+        card("ellipse", radial(json!({}))),
+        card(
+            "circle",
+            radial(json!({"shape": "circle", "at": {"x": 0, "y": 0}})),
+        ),
+        card("closest-side", radial(json!({"size": "closest-side"}))),
+        card(
+            "farthest-side",
+            radial(
+                json!({"shape": "circle", "size": "farthest-side", "at": {"x": 0.25, "y": 0.5}}),
+            ),
+        ),
+        card(
+            "closest-corner",
+            radial(
+                json!({"shape": "circle", "size": "closest-corner", "at": {"x": 0.25, "y": 0.25}}),
+            ),
+        ),
+        card("px-circle", radial(json!({"shape": "circle", "size": 30}))),
+        card("percent-ellipse", radial(json!({"size": ["50%", "10px"]}))),
+        card(
+            "px-centre",
+            radial(
+                json!({"shape": "circle", "size": "closest-side", "at": {"x": "10px", "y": "15px"}}),
+            ),
+        ),
+        card(
+            "edge-centre",
+            radial(json!({"at": {"x": "20px", "xEdge": "right", "y": "5px", "yEdge": "bottom"}})),
+        ),
+    ]));
+    tree.compute(400.0, 600.0).unwrap();
+    let gradients = fills_of(&mut tree).gradients;
+    assert_eq!(gradients.len(), 12);
+    let near =
+        |a: vello::kurbo::Point, x: f64, y: f64| (a.x - x).abs() < 0.01 && (a.y - y).abs() < 0.01;
+    let close = |a: f64, b: f64| (a - b).abs() < 0.01;
+    let radii = |index: usize| match gradients[index].0.geometry {
+        GradientGeometry::Radial {
+            radius_x,
+            radius_y,
+            start,
+            end,
+            ..
+        } => {
+            assert!(close(start, 0.0) && close(end, 1.0));
+            (radius_x, radius_y)
+        }
+        other => panic!("{other:?}"),
+    };
+    for (index, (gradient, rect)) in gradients.iter().enumerate().take(5) {
+        let (x0, y0) = (rect.x0, rect.y0);
+        assert_eq!(gradient.stops.len(), 2);
+        match (index, gradient.geometry) {
+            (0, GradientGeometry::Linear { start, end }) => {
+                assert!(near(start, x0, y0 + 20.0) && near(end, x0 + 100.0, y0 + 20.0));
+            }
+            (1, GradientGeometry::Linear { start, end }) => {
+                assert!(near(start, x0 + 50.0, y0) && near(end, x0 + 50.0, y0 + 40.0));
+            }
+            (2, GradientGeometry::Linear { start, end }) => {
+                // Perpendicular to the top-left/bottom-right diagonal, so the
+                // top-left and bottom-right corners share the 50% colour.
+                let axis = end - start;
+                let tl = vello::kurbo::Point::new(x0, y0) - rect.center();
+                assert!(axis.x > 0.0 && axis.y < 0.0 && tl.dot(axis).abs() < 1e-6);
+                let far = vello::kurbo::Point::new(x0 + 100.0, y0) - start;
+                assert!((far.dot(axis) / axis.hypot2() - 1.0).abs() < 1e-6);
+            }
+            (3, GradientGeometry::Radial { center, .. }) => {
+                assert!(near(center, x0 + 50.0, y0 + 20.0))
+            }
+            (4, GradientGeometry::Radial { center, .. }) => assert!(near(center, x0, y0)),
+            other => panic!("unexpected gradient {other:?}"),
+        }
+    }
+    let sqrt2 = std::f64::consts::SQRT_2;
+    let (rx, ry) = radii(3);
+    assert!(close(rx, 50.0 * sqrt2) && close(ry, 20.0 * sqrt2));
+    let (rx, ry) = radii(4);
+    assert!(close(rx, 100.0f64.hypot(40.0)) && rx == ry);
+    assert_eq!(radii(5), (50.0, 20.0));
+    let (rx, ry) = radii(6);
+    assert!(close(rx, 75.0) && close(ry, 75.0));
+    let (rx, ry) = radii(7);
+    assert!(close(rx, 25.0f64.hypot(10.0)) && close(ry, rx));
+    assert_eq!(radii(8), (30.0, 30.0));
+    assert_eq!(radii(9), (50.0, 10.0));
+    let centre = |index: usize| match gradients[index] {
+        (
+            crate::paint::PaintGradient {
+                geometry: GradientGeometry::Radial { center, .. },
+                ..
+            },
+            rect,
+        ) => (center.x - rect.x0, center.y - rect.y0),
+        _ => panic!(),
+    };
+    assert_eq!(centre(10), (10.0, 15.0));
+    assert_eq!(radii(10), (10.0, 10.0));
+    assert_eq!(centre(11), (80.0, 35.0));
+}
+
+#[test]
+fn gradient_stops_support_px_css_fixup_and_repeating() {
+    use crate::paint::GradientGeometry;
+    let card = |id: &str, background: serde_json::Value| {
+        node(
+            id,
+            "view",
+            json!({"width": 100, "height": 40, "background": background}),
+            vec![],
+        )
+    };
+    let mut tree = Tree::new(root(vec![
+        card(
+            "fixup",
+            json!({"type": "linear", "to": "right", "stops": [
+                {"color": "#ff0000"}, {"color": "#00ff00"}, {"color": "#0000ff", "offset": 0.2},
+                {"color": "#ffffff"}, {"color": "#000000"}
+            ]}),
+        ),
+        card(
+            "px",
+            json!({"type": "linear", "to": "right", "stops": [
+                {"color": "#ff0000", "offset": "20px"}, {"color": "#0000ff", "offset": "60%"},
+                {"color": "#00ff00", "offset": "10px"}
+            ]}),
+        ),
+        card(
+            "overflow",
+            json!({"type": "linear", "to": "right", "stops": [
+                {"color": "#ff0000", "offset": -0.5}, {"color": "#0000ff", "offset": 1.5}
+            ]}),
+        ),
+        card(
+            "repeat",
+            json!({"type": "linear", "to": "right", "repeating": true, "stops": [
+                {"color": "#000000", "offset": "10px"}, {"color": "#ffffff", "offset": "30px"}
+            ]}),
+        ),
+        card(
+            "repeat-radial",
+            json!({"type": "radial", "shape": "circle", "size": "40px", "repeating": true, "stops": [
+                {"color": "#000000", "offset": "-10px"}, {"color": "#ffffff", "offset": "10px"}
+            ]}),
+        ),
+    ]));
+    tree.compute(400.0, 400.0).unwrap();
+    let gradients = fills_of(&mut tree).gradients;
+    let offsets = |index: usize| -> Vec<f64> {
+        gradients[index]
+            .0
+            .stops
+            .iter()
+            .map(|(offset, _)| (f64::from(*offset) * 1e4).round() / 1e4)
+            .collect()
+    };
+    assert_eq!(offsets(0), vec![0.0, 0.1, 0.2, 0.6, 1.0]);
+    // 20px on a 100px line, then 60%, then 10px clamped to the previous 60%.
+    assert_eq!(offsets(1), vec![0.0, 0.2, 0.6, 0.6, 1.0]);
+    // Stops beyond the line stretch it: -0.5..1.5 maps to 0..1.
+    assert_eq!(offsets(2), vec![0.0, 1.0]);
+    assert_eq!(offsets(3), vec![0.0, 1.0]);
+    match (gradients[2].0.geometry, gradients[2].1) {
+        (GradientGeometry::Linear { start, end }, rect) => {
+            assert!(
+                (start.x - (rect.x0 - 50.0)).abs() < 0.01
+                    && (end.x - (rect.x1 + 50.0)).abs() < 0.01
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    // Repeating: the pattern spans 10px..30px and tiles.
+    assert!(gradients[3].0.repeat);
+    assert_eq!(offsets(3), vec![0.0, 1.0]);
+    match (gradients[3].0.geometry, gradients[3].1) {
+        (GradientGeometry::Linear { start, end }, rect) => {
+            assert!(
+                (start.x - (rect.x0 + 10.0)).abs() < 0.01
+                    && (end.x - (rect.x0 + 30.0)).abs() < 0.01
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    // Repeating radials unroll from the centre to the farthest corner.
+    match gradients[4].0.geometry {
+        GradientGeometry::Radial {
+            start,
+            end,
+            radius_x,
+            ..
+        } => {
+            assert!(!gradients[4].0.repeat && radius_x == 40.0 && start == 0.0);
+            assert!((end - 50.0f64.hypot(20.0) / 40.0).abs() < 1e-6, "{end}");
+            let stops = &gradients[4].0.stops;
+            assert!(stops.len() > 4 && stops[0].0 == 0.0 && stops[stops.len() - 1].0 == 1.0);
+            // -10px..10px black→white: the centre is mid-grey.
+            assert!((stops[0].1.components[0] - 0.5).abs() < 0.01);
+        }
+        other => panic!("{other:?}"),
+    }
+    // Different units or repeat flags switch instead of interpolating.
+    let transition = |from: serde_json::Value, to: serde_json::Value| {
+        let card = |background: serde_json::Value| {
+            node(
+                "t",
+                "view",
+                json!({"width": 80, "height": 40, "background": background,
+                "transition": {"background": {"duration": 100, "easing": "linear"}}}),
+                vec![],
+            )
+        };
+        let mut tree = Tree::new(root(vec![card(from)]));
+        tree.compute(400.0, 200.0).unwrap();
+        tree.advance_motion(0.0);
+        tree.update(root(vec![card(to)]));
+        tree.compute(400.0, 200.0).unwrap();
+        tree.advance_motion(50.0);
+        fills_of(&mut tree).gradients[0].0.stops[0].1.components[0]
+    };
+    let linear = |offset: serde_json::Value, repeating: bool, color: &str| json!({"type": "linear", "repeating": repeating, "stops": [{"color": color, "offset": offset}, {"color": "#000000", "offset": "80px"}]});
+    assert!(
+        (transition(
+            linear(json!("0px"), false, "#000000"),
+            linear(json!("0px"), false, "#ffffff")
+        ) - 0.5)
+            .abs()
+            < 0.02
+    );
+    assert_eq!(
+        transition(
+            linear(json!("0px"), false, "#000000"),
+            linear(json!(0), false, "#ffffff")
+        ),
+        1.0
+    );
+    assert_eq!(
+        transition(
+            linear(json!("0px"), false, "#000000"),
+            linear(json!("0px"), true, "#ffffff")
+        ),
+        1.0
+    );
+}
+
+#[test]
+fn gradients_transition_stop_by_stop_and_switch_from_colours() {
+    let gradient = |from: &str, to: &str| json!({"type": "linear", "angle": 90, "stops": [{"offset": 0, "color": from}, {"offset": 1, "color": to}]});
+    let card = |background: serde_json::Value| {
+        node(
+            "card",
+            "view",
+            json!({"width": 80, "height": 40, "background": background,
+                "transition": {"background": {"duration": 100, "easing": "linear"}}}),
+            vec![],
+        )
+    };
+    let mut tree = Tree::new(root(vec![card(gradient("#000000", "#ffffff"))]));
+    tree.compute(400.0, 200.0).unwrap();
+    tree.advance_motion(0.0);
+    tree.update(root(vec![card(gradient("#ffffff", "#000000"))]));
+    tree.compute(400.0, 200.0).unwrap();
+    tree.advance_motion(50.0);
+    let middle = fills_of(&mut tree).gradients;
+    assert_eq!(middle.len(), 1);
+    for (_, color) in &middle[0].0.stops {
+        assert!((color.components[0] - 0.5).abs() < 0.02, "{color:?}");
+    }
+
+    tree.update(root(vec![card(json!("#ff0000"))]));
+    tree.compute(400.0, 200.0).unwrap();
+    tree.advance_motion(60.0);
+    let recorded = fills_of(&mut tree);
+    assert!(recorded.gradients.is_empty());
+    assert!(fill_near(&recorded, [1.0, 0.0, 0.0]));
+
+    let radial = json!({"type": "radial", "stops": [{"offset": 0, "color": "#ffffff"}, {"offset": 1, "color": "#000000"}]});
+    tree.update(root(vec![card(radial)]));
+    tree.compute(400.0, 200.0).unwrap();
+    tree.advance_motion(70.0);
+    let recorded = fills_of(&mut tree);
+    assert_eq!(recorded.gradients.len(), 1);
+    assert_eq!(recorded.gradients[0].0.stops[0].1.components[0], 1.0);
 }
 
 #[test]

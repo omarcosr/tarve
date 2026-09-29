@@ -494,6 +494,31 @@ export function App() {
               </Row>
             </Section>
 
+            <Section title="Gradients" description="linear-gradient and radial-gradient backgrounds, also in hover with transitions.">
+              <Row gap={20} style={{ wrap: true, padding: 12 }}>
+                {([
+                  ["135deg", "linear-gradient(135deg, #2563eb, #9333ea)"],
+                  ["to right", "linear-gradient(to right, #f97316, #facc15 50%, #22c55e)"],
+                  ["Hard stops", "linear-gradient(90deg, #0ea5e9 0 33%, #f43f5e 33% 66%, #a3e635 66%)"],
+                  ["Radial", "radial-gradient(#fef3c7, #f59e0b 60%, #b45309)"],
+                  ["Circle at corner", "radial-gradient(circle at top left, #e0f2fe, #0369a1)"],
+                  ["Closest side", "radial-gradient(closest-side, #fde68a, #7c3aed)"],
+                  ["Stripes", "repeating-linear-gradient(45deg, #0f172a 0 8px, #334155 8px 16px)"],
+                  ["Rings", "repeating-radial-gradient(circle at 30% 40%, #0ea5e9 0 6px, #0369a1 6px 12px)"],
+                ] as const).map(([label, background]) => (
+                  <Column key={label} style={{ width: 120, height: 72, radius: 12, background, align: "center", justify: "center" }}>
+                    <Text size={12} weight={600} color="#ffffff" style={{ textShadow: "0 1px #0006" }}>{label}</Text>
+                  </Column>
+                ))}
+                <Column style={{ width: 120, height: 72, radius: 12, align: "center", justify: "center",
+                  background: "linear-gradient(135deg, #1e293b, #334155)",
+                  hover: { background: "linear-gradient(135deg, #4f46e5, #db2777)" },
+                  transition: { background: { duration: 300, easing: "easeOut" } } }}>
+                  <Text size={12} weight={600} color="#ffffff">Hover me</Text>
+                </Column>
+              </Row>
+            </Section>
+
             <Section title="Typography" description="Preset text hierarchy and supporting styles.">
               <Column gap={8}>
                 <Typography variant="h2">Build native interfaces</Typography>

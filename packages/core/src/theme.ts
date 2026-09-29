@@ -1,5 +1,5 @@
 import type { BoxShadow, StateStyle, Style, SyntaxTheme } from "../../protocol/src/index";
-import { cssColor, parseBoxShadow, parseTextShadow, parseTransform } from "./css-shadow";
+import { cssColor, GRADIENT, normalizeGradient, parseBoxShadow, parseGradient, parseTextShadow, parseTransform } from "./css-shadow";
 
 export interface ThemeColors {
   background: string;
@@ -223,6 +223,10 @@ function resolveShadowColors(style: StateStyle, selected: ThemeDefinition): void
   if (style.textShadow && typeof style.textShadow === "object") {
     style.textShadow = { ...style.textShadow, color: colour(style.textShadow.color) };
   }
+  const background = typeof style.background === "string" && GRADIENT.test(style.background)
+    ? parseGradient(style.background)
+    : style.background;
+  if (background && typeof background === "object") style.background = normalizeGradient(background, colour);
   const box = typeof style.boxShadow === "string" ? parseBoxShadow(style.boxShadow) : style.boxShadow;
   if (box !== undefined) {
     style.boxShadow = Array.isArray(box)
@@ -236,6 +240,7 @@ const COLOR_KEY = /^(background|foreground|color)$|(Color|Background|Foreground|
 
 /** Theme token or CSS colour (hex, rgb(), hsl(), names) for colour keys; other strings unchanged. */
 export function resolveStyleString(key: string, value: string, selected: ThemeDefinition): string {
+  if (key === "background" && GRADIENT.test(value)) return value;
   return resolveThemeColor(COLOR_KEY.test(key) ? cssColor(value) : value, selected);
 }
 

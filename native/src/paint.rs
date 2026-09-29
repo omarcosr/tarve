@@ -3,14 +3,87 @@ use std::{
     sync::Arc,
 };
 
+use vello::kurbo::Point;
 use vello::{
     Glyph, Scene,
     kurbo::{Affine, Rect, Shape, Stroke},
     peniko::{
-        BlendMode, Blob, Color, Compose, Fill, FontData, ImageAlphaType, ImageBrush, ImageData,
-        ImageFormat, Mix,
+        BlendMode, Blob, Color, ColorStop, Compose, Extend, Fill, FontData, Gradient,
+        ImageAlphaType, ImageBrush, ImageData, ImageFormat, Mix, color::DynamicColor,
     },
 };
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum GradientGeometry {
+    /// Offsets 0 and 1 sit at `start` and `end`.
+    Linear { start: Point, end: Point },
+    /// Ellipse radii for a ray of 1; offsets 0 and 1 sit at the `start` and
+    /// `end` multiples of those radii.
+    Radial {
+        center: Point,
+        radius_x: f64,
+        radius_y: f64,
+        start: f64,
+        end: f64,
+    },
+}
+
+/// A CSS gradient resolved to local coordinates; stop offsets are sorted and
+/// within 0..=1. `repeat` tiles the 0..1 pattern (repeating-*-gradient).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PaintGradient {
+    pub geometry: GradientGeometry,
+    pub stops: Vec<(f32, Color)>,
+    pub repeat: bool,
+}
+
+impl PaintGradient {
+    /// Peniko brush plus its brush transform: radial ellipses scale circles.
+    pub(crate) fn brush(&self) -> (Gradient, Affine) {
+        let stops: Vec<ColorStop> = self
+            .stops
+            .iter()
+            .map(|(offset, color)| ColorStop {
+                offset: *offset,
+                color: DynamicColor::from_alpha_color(*color),
+            })
+            .collect();
+        let (mut gradient, transform) = match self.geometry {
+            GradientGeometry::Linear { start, end } => (
+                Gradient::new_linear(start, end).with_stops(stops.as_slice()),
+                Affine::IDENTITY,
+            ),
+            GradientGeometry::Radial {
+                center,
+                radius_x,
+                radius_y,
+                start,
+                end,
+            } => (
+                if start <= 0.0 {
+                    Gradient::new_radial(Point::ZERO, end as f32)
+                } else {
+                    Gradient::new_two_point_radial(
+                        Point::ZERO,
+                        start as f32,
+                        Point::ZERO,
+                        end as f32,
+                    )
+                }
+                .with_stops(stops.as_slice()),
+                Affine::translate(center.to_vec2())
+                    * Affine::scale_non_uniform(radius_x.max(1e-6), radius_y.max(1e-6)),
+            ),
+        };
+        gradient.extend = if self.repeat {
+            Extend::Repeat
+        } else {
+            Extend::Pad
+        };
+        (gradient, transform)
+    }
+}
+
 use vello_cpu::{
     Image as CpuImage, ImageSource as CpuImageSource, Pixmap, RenderContext, Resources,
     color::PremulRgba8,
@@ -25,6 +98,13 @@ pub(crate) struct PaintGlyph {
 
 pub(crate) trait PaintTarget {
     fn fill<S: Shape>(&mut self, fill: Fill, transform: Affine, color: Color, shape: &S);
+    /// Fills `shape` with a gradient. Targets without gradient support paint
+    /// the first stop.
+    fn fill_gradient<S: Shape>(&mut self, transform: Affine, gradient: &PaintGradient, shape: &S) {
+        if let Some((_, color)) = gradient.stops.first() {
+            self.fill(Fill::NonZero, transform, *color, shape);
+        }
+    }
     fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S);
     fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S);
     fn push_opacity<S: Shape>(&mut self, alpha: f32, transform: Affine, shape: &S);
@@ -84,6 +164,11 @@ impl<'a, P: PaintTarget> TransformTarget<'a, P> {
 impl<P: PaintTarget> PaintTarget for TransformTarget<'_, P> {
     fn fill<S: Shape>(&mut self, fill: Fill, transform: Affine, color: Color, shape: &S) {
         self.inner.fill(fill, self.map(transform), color, shape);
+    }
+
+    fn fill_gradient<S: Shape>(&mut self, transform: Affine, gradient: &PaintGradient, shape: &S) {
+        self.inner
+            .fill_gradient(self.map(transform), gradient, shape);
     }
 
     fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S) {
@@ -159,6 +244,17 @@ impl<P: PaintTarget> PaintTarget for TransformTarget<'_, P> {
 impl PaintTarget for Scene {
     fn fill<S: Shape>(&mut self, fill: Fill, transform: Affine, color: Color, shape: &S) {
         self.fill(fill, transform, color, None, shape);
+    }
+
+    fn fill_gradient<S: Shape>(&mut self, transform: Affine, gradient: &PaintGradient, shape: &S) {
+        let (brush, brush_transform) = gradient.brush();
+        self.fill(
+            Fill::NonZero,
+            transform,
+            &brush,
+            Some(brush_transform),
+            shape,
+        );
     }
 
     fn box_shadow(
@@ -319,6 +415,16 @@ impl PaintTarget for CpuPaintTarget<'_> {
         self.context.set_transform(transform);
         self.context.set_paint(color);
         self.context.fill_path(&shape.to_path(0.1));
+    }
+
+    fn fill_gradient<S: Shape>(&mut self, transform: Affine, gradient: &PaintGradient, shape: &S) {
+        let (brush, brush_transform) = gradient.brush();
+        self.context.set_fill_rule(Fill::NonZero);
+        self.context.set_transform(transform);
+        self.context.set_paint(brush);
+        self.context.set_paint_transform(brush_transform);
+        self.context.fill_path(&shape.to_path(0.1));
+        self.context.set_paint_transform(Affine::IDENTITY);
     }
 
     fn box_shadow(

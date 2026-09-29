@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 46;
+export const PROTOCOL_VERSION = 47;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
@@ -34,6 +34,35 @@ export interface TextShadow { x?: number; y?: number; color: string }
 /** Paint-time translate/scale about the box centre. Hit testing follows it; layout does not. */
 export interface Transform { x?: number; y?: number; scale?: number; scaleX?: number; scaleY?: number }
 export interface BoxShadow { x?: number; y?: number; blur?: number; spread?: number; color: string; inset?: boolean }
+/** Gradient length: a number is px; strings take `px` or `%`. */
+export type GradientLength = number | `${number}px` | `${number}%`;
+/**
+ * A colour stop. A number `offset` is a fraction 0..1 of the gradient line (or radial ray);
+ * strings take `px` or `%`. Omitted offsets are spread evenly and positions never go back, as in CSS.
+ */
+export interface GradientStop { color: string; offset?: number | `${number}px` | `${number}%` }
+export type GradientSide = "top" | "bottom" | "left" | "right" | "top left" | "top right" | "bottom left" | "bottom right";
+/** CSS `linear-gradient`: `angle` in CSS degrees (0 = to top, 90 = to right, default 180), or `to` a side/corner. */
+export interface LinearGradient { type: "linear"; angle?: number; to?: GradientSide; repeating?: boolean; stops: readonly (GradientStop | string)[] }
+/**
+ * Radial centre. A number is a fraction of the box; strings take `px` or `%`.
+ * `xEdge: "right"` / `yEdge: "bottom"` measure from the far edge (CSS `right 10px bottom 20%`).
+ */
+export interface GradientCentre {
+  x?: number | `${number}px` | `${number}%`; y?: number | `${number}px` | `${number}%`;
+  xEdge?: "left" | "right"; yEdge?: "top" | "bottom";
+}
+export type RadialExtent = "closest-side" | "closest-corner" | "farthest-side" | "farthest-corner";
+/**
+ * CSS `radial-gradient`. `at` is the centre as fractions of the box (default 0.5, 0.5).
+ * `size` is an extent keyword (default `farthest-corner`), one length (circle radius) or two (ellipse radii).
+ */
+export interface RadialGradient {
+  type: "radial"; shape?: "ellipse" | "circle"; at?: GradientCentre;
+  size?: RadialExtent | GradientLength | readonly [GradientLength, GradientLength];
+  repeating?: boolean; stops: readonly (GradientStop | string)[];
+}
+export type Gradient = LinearGradient | RadialGradient;
 export type UserSelect = "auto" | "text" | "none" | "all";
 export type TextDecoration = "none" | "underline" | "overline" | "line-through";
 export interface SyntaxTheme {
@@ -54,7 +83,8 @@ export interface TextHighlight {
   activeColor?: string;
 }
 export interface StateStyle {
-  background?: string; foreground?: string; borderColor?: string; borderStyle?: BorderStyle; radius?: number;
+  /** Colour, gradient object, or CSS `linear-gradient(…)` / `radial-gradient(…)` string. */
+  background?: string | Gradient; foreground?: string; borderColor?: string; borderStyle?: BorderStyle; radius?: number;
   opacity?: number;
   outlineWidth?: number; outlineColor?: string; outlineOffset?: number; outlineRadius?: number; outlineStyle?: OutlineStyle;
   placeholderColor?: string; selectionColor?: string; caretColor?: string;
