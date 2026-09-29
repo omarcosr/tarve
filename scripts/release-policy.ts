@@ -47,7 +47,7 @@ function cargoPackageLicense(source: string): string | undefined {
 
 export async function assertReleasePolicy(root: string, tag?: string): Promise<ReleasePolicyState> {
   const version = assertVersionsSynchronized(await readProductVersions(root));
-  const [rootPackage, corePackage, protocolPackage, reactIconsPackage, cargoToml, licenseText, tsProtocol, rustProtocol, rustBridge] = await Promise.all([
+  const [rootPackage, corePackage, protocolPackage, reactIconsPackage, cargoToml, licenseText, tsProtocol, rustProtocol, rustBridge, changelog] = await Promise.all([
     Bun.file(join(root, "package.json")).json() as Promise<{ license?: string }>,
     Bun.file(join(root, "packages/core/package.json")).json() as Promise<{ license?: string; private?: boolean }>,
     Bun.file(join(root, "packages/protocol/package.json")).json() as Promise<{ license?: string; private?: boolean }>,
@@ -57,6 +57,7 @@ export async function assertReleasePolicy(root: string, tag?: string): Promise<R
     readFile(join(root, "packages/protocol/src/index.ts"), "utf8"),
     readFile(join(root, "native/src/protocol.rs"), "utf8"),
     readFile(join(root, "native/src/bridge.rs"), "utf8"),
+    readFile(join(root, "CHANGELOG.md"), "utf8"),
   ]);
   if (rootPackage.license !== "Apache-2.0") {
     throw new Error(`Release policy requires package.json license=Apache-2.0; got ${rootPackage.license ?? "<missing>"}`);
@@ -71,6 +72,9 @@ export async function assertReleasePolicy(root: string, tag?: string): Promise<R
   }
   if (cargoPackageLicense(cargoToml) !== rootPackage.license) {
     throw new Error("native/Cargo.toml must use license = \"Apache-2.0\"");
+  }
+  if (!new RegExp(`^## ${version.replaceAll(".", "\\.")}(\\s|$)`, "m").test(changelog)) {
+    throw new Error(`CHANGELOG.md must have a "## ${version}" section before releasing ${version}`);
   }
   if (!cargoPublishDisabled(cargoToml)) throw new Error("native/Cargo.toml must set publish = false");
   if (!/Apache License\s+Version 2\.0, January 2004/.test(licenseText)) {

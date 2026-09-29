@@ -35,7 +35,7 @@ Tarve is a framework, not an end-user application, so the Tarve release does **n
 
 ## Release procedure
 
-1. `bun run version:set -- <semver>`, then commit and push to `main`; wait for CI to pass.
+1. `bun run version:set -- <semver>` and rename the `## Unreleased` section of `CHANGELOG.md` to `## <semver> — <date>` (`release:policy` rejects a version without its own section). Commit and push to `main`; wait for CI to pass.
 2. Tag that commit with exactly `v<semver>` and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
 3. `.github/workflows/release.yml` then, without further input:
    - checks that the tag matches the product version and points to a commit on `main`;
