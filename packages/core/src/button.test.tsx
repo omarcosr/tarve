@@ -18,4 +18,12 @@ describe("Button composed content", () => {
     const tree = compileTree(<Window><Button id="b"><span id="s" style={{ color: "#ff0000" }}>Hi</span></Button></Window>);
     expect(tree.nodes.get("s")?.style.foreground).toBe("#ff0000");
   });
+
+  test("bare strings nested in layout children become themed Text", () => {
+    const tree = compileTree(<Window><Button id="b"><div id="row">Hi{3}</div></Button></Window>);
+    const texts = tree.nodes.get("row")?.children ?? [];
+    expect(texts.map(node => [node.kind, node.text])).toEqual([["text", "Hi"], ["text", "3"]]);
+    expect(texts[0]?.style).toMatchObject({ fontSize: 14, fontWeight: 500 });
+    expect(texts[0]?.style.foreground).toBeString();
+  });
 });
