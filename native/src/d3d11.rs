@@ -88,6 +88,9 @@ struct Vertex {
     uv: [f32; 2],
     color: [f32; 4],
     mode: f32,
+    /// Blurred rounded-rect shadow: half width, half height, corner radius,
+    /// gaussian sigma, all in device pixels. Zero for every other mode.
+    params: [f32; 4],
 }
 
 unsafe impl bytemuck::Zeroable for Vertex {}
@@ -698,11 +701,45 @@ impl D3d11Graphics {
                 uv: texcoord,
                 color: rgba,
                 mode,
+                params: [0.0; 4],
             });
         }
         self.indices
             .extend(indices.iter().map(|index| vertex_base + *index));
         (first, indices.len() as u32)
+    }
+
+    /// One quad over `area` whose pixels evaluate an analytic gaussian-blurred
+    /// rounded rectangle (mode 3), or its inverse for inset shadows (mode 4).
+    /// `uv` carries each corner's offset from the shadow centre in pixels.
+    fn append_shadow_quad(
+        &mut self,
+        area: [[f32; 2]; 2],
+        center: [f32; 2],
+        color: Color,
+        invert: bool,
+        params: [f32; 4],
+    ) {
+        let first = self.indices.len() as u32;
+        let base = self.vertices.len() as u32;
+        let rgba = rgba(color);
+        let [[x0, y0], [x1, y1]] = area;
+        for [x, y] in [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] {
+            self.vertices.push(Vertex {
+                pos: self.ndc(x, y),
+                uv: [x - center[0], y - center[1]],
+                color: rgba,
+                mode: if invert { 4.0 } else { 3.0 },
+                params,
+            });
+        }
+        self.indices
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        self.commands.push(DrawCommand::Draw {
+            first,
+            count: 6,
+            texture: TextureRef::Solid,
+        });
     }
 
     fn ndc(&self, x: f32, y: f32) -> [f32; 2] {
@@ -733,6 +770,7 @@ impl D3d11Graphics {
                 uv: [u, v],
                 color: rgba,
                 mode,
+                params: [0.0; 4],
             });
         }
         self.indices
@@ -978,6 +1016,46 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                 texture: TextureRef::Solid,
             });
         }
+    }
+
+    fn box_shadow(
+        &mut self,
+        transform: Affine,
+        area: vello::kurbo::Rect,
+        rect: vello::kurbo::Rect,
+        color: Color,
+        radius: f64,
+        std_dev: f64,
+        invert: bool,
+    ) {
+        if self.suppressed_clips > 0 {
+            return;
+        }
+        // Tarve paints with scale-only transforms, so one factor maps to pixels.
+        let scale = transform.as_coeffs()[0].abs();
+        let corner = |point: Point| {
+            let point = transform * point;
+            [point.x as f32, point.y as f32]
+        };
+        let half = [
+            (rect.width() * scale / 2.0) as f32,
+            (rect.height() * scale / 2.0) as f32,
+        ];
+        self.graphics.append_shadow_quad(
+            [
+                corner(Point::new(area.x0, area.y0)),
+                corner(Point::new(area.x1, area.y1)),
+            ],
+            corner(rect.center()),
+            color.multiply_alpha(self.opacity),
+            invert,
+            [
+                half[0],
+                half[1],
+                ((radius * scale) as f32).min(half[0].min(half[1])).max(0.0),
+                ((std_dev * scale) as f32).max(0.01),
+            ],
+        );
     }
 
     fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S) {
@@ -1285,12 +1363,35 @@ fn create_shaders(
     device: &ID3D11Device,
 ) -> Result<(ID3D11VertexShader, ID3D11PixelShader, ID3D11InputLayout), String> {
     const SOURCE: &str = r#"
-struct VSIn { float2 pos : POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; };
-struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; };
-PSIn vs_main(VSIn i) { PSIn o; o.pos=float4(i.pos,0,1); o.uv=i.uv; o.color=i.color; o.mode=i.mode; return o; }
+struct VSIn { float2 pos : POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; float4 params : TEXCOORD2; };
+struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; float4 params : TEXCOORD2; };
+PSIn vs_main(VSIn i) { PSIn o; o.pos=float4(i.pos,0,1); o.uv=i.uv; o.color=i.color; o.mode=i.mode; o.params=i.params; return o; }
 Texture2D tex0 : register(t0); SamplerState samp0 : register(s0);
+// Analytic gaussian-blurred rounded rectangle (Evan Wallace): exact along x
+// via erf, integrated along y with four gaussian-weighted samples.
+float2 erf2(float2 x) { float2 s=sign(x); float2 a=abs(x); x=1.0+(0.278393+(0.230389+0.078108*(a*a))*a)*a; x*=x; return s-s/(x*x); }
+float gauss(float x, float sigma) { return exp(-(x*x)/(2.0*sigma*sigma))/(2.5066282746*sigma); }
+float shadow_x(float x, float y, float sigma, float corner, float2 half_size) {
+    float delta=min(half_size.y-corner-abs(y),0.0);
+    float curved=half_size.x-corner+sqrt(max(0.0,corner*corner-delta*delta));
+    float2 integral=0.5+0.5*erf2((x+float2(-curved,curved))*(0.7071067812/sigma));
+    return integral.y-integral.x;
+}
+float rounded_box_shadow(float2 p, float4 params) {
+    float2 half_size=params.xy; float corner=params.z; float sigma=params.w;
+    float low=p.y-half_size.y; float high=p.y+half_size.y;
+    float start=clamp(-3.0*sigma,low,high); float end=clamp(3.0*sigma,low,high);
+    float step=(end-start)/4.0; float y=start+step*0.5; float value=0.0;
+    [unroll] for (int k=0;k<4;k++) { value+=shadow_x(p.x,p.y-y,sigma,corner,half_size)*gauss(y,sigma)*step; y+=step; }
+    return value;
+}
 float4 ps_main(PSIn i) : SV_TARGET {
     if (i.mode < 0.5) return i.color;
+    if (i.mode > 2.5) {
+        float coverage=saturate(rounded_box_shadow(i.uv,i.params));
+        if (i.mode > 3.5) coverage=1.0-coverage;
+        return float4(i.color.rgb, i.color.a*coverage);
+    }
     float4 sample = tex0.Sample(samp0, i.uv);
     if (i.mode < 1.5) return sample * i.color;
     return float4(i.color.rgb, i.color.a * sample.r);
@@ -1340,6 +1441,15 @@ float4 ps_main(PSIn i) : SV_TARGET {
             Format: DXGI_FORMAT_R32_FLOAT,
             InputSlot: 0,
             AlignedByteOffset: 32,
+            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+            InstanceDataStepRate: 0,
+        },
+        D3D11_INPUT_ELEMENT_DESC {
+            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
+            SemanticIndex: 2,
+            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+            InputSlot: 0,
+            AlignedByteOffset: 36,
             InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
             InstanceDataStepRate: 0,
         },

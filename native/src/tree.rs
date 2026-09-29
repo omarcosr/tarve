@@ -62,8 +62,34 @@ const LAYOUT_KEYS: &[&str] = &[
     "left",
 ];
 const MOTION_PROPERTIES: &[&str] = &[
-    "width", "height", "top", "right", "bottom", "left", "opacity", "radius",
+    "width",
+    "height",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "opacity",
+    "radius",
+    "background",
+    "foreground",
+    "borderColor",
+    "boxShadow",
+    "textShadow",
 ];
+/// Paint-only properties that can also transition when hover/active/focus/
+/// disabled changes. Layout properties only animate on JS updates.
+const STATE_MOTION_PROPERTIES: &[&str] = &[
+    "opacity",
+    "radius",
+    "background",
+    "foreground",
+    "borderColor",
+    "boxShadow",
+    "textShadow",
+];
+/// Numbers per shadow layer in a motion vector.
+const BOX_SHADOW_STRIDE: usize = 9;
+const TEXT_SHADOW_STRIDE: usize = 6;
 const MOTION_FRAME_MS: f64 = 1000.0 / 60.0;
 
 #[derive(Clone, Copy, Debug)]
@@ -77,18 +103,50 @@ enum MotionEasing {
 
 #[derive(Clone, Debug)]
 struct MotionTrack {
-    from: f32,
-    to: f32,
-    current: f32,
+    /// Scalars hold one value; colours hold rgba; shadows hold one fixed-size
+    /// chunk per layer (see the *_STRIDE constants).
+    from: Vec<f32>,
+    to: Vec<f32>,
+    current: Vec<f32>,
     start_ms: f64,
     duration_ms: f64,
     easing: MotionEasing,
+    /// Started by a hover/active/focus/disabled change rather than a JS update.
+    state_driven: bool,
 }
 
 impl MotionTrack {
-    fn value_at(&self, now_ms: f64) -> (f32, bool) {
+    fn new(
+        property: &str,
+        from: Vec<f32>,
+        to: Vec<f32>,
+        now_ms: f64,
+        (duration_ms, delay_ms, easing): (f64, f64, MotionEasing),
+        state_driven: bool,
+    ) -> Option<Self> {
+        let (from, to) = pad_motion_layers(property, from, to);
+        if from.len() != to.len()
+            || from
+                .iter()
+                .zip(&to)
+                .all(|(a, b)| (a - b).abs() <= f32::EPSILON)
+        {
+            return None;
+        }
+        Some(Self {
+            current: from.clone(),
+            from,
+            to,
+            start_ms: now_ms + delay_ms,
+            duration_ms,
+            easing,
+            state_driven,
+        })
+    }
+
+    fn value_at(&self, now_ms: f64) -> (Vec<f32>, bool) {
         if now_ms <= self.start_ms {
-            return (self.from, false);
+            return (self.from.clone(), false);
         }
         let progress = ((now_ms - self.start_ms) / self.duration_ms).clamp(0.0, 1.0);
         let eased = match self.easing {
@@ -104,8 +162,13 @@ impl MotionTrack {
                 }
             }
         };
-        let value = self.from as f64 + (self.to - self.from) as f64 * eased;
-        (value as f32, progress >= 1.0)
+        let value = self
+            .from
+            .iter()
+            .zip(&self.to)
+            .map(|(from, to)| (*from as f64 + (*to - *from) as f64 * eased) as f32)
+            .collect();
+        (value, progress >= 1.0)
     }
 
     fn end_ms(&self) -> f64 {
@@ -141,12 +204,119 @@ fn motion_transition(node: &Node, property: &str) -> Option<(f64, f64, MotionEas
     Some((duration, delay, easing))
 }
 
-fn motion_target(node: &Node, property: &str) -> Option<f32> {
-    node.style
-        .get(property)
-        .and_then(Value::as_f64)
-        .map(|value| value as f32)
-        .filter(|value| value.is_finite())
+fn rgba_of(colour: Color) -> [f32; 4] {
+    colour.components
+}
+
+fn colour_from(values: &[f32]) -> Color {
+    let channel = |index: usize| values.get(index).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+    Color::new([channel(0), channel(1), channel(2), channel(3)])
+}
+
+fn hex_of(colour: Color) -> String {
+    let rgba = colour.to_rgba8();
+    format!("#{:02x}{:02x}{:02x}{:02x}", rgba.r, rgba.g, rgba.b, rgba.a)
+}
+
+/// The value a property resolves to for `state`, as a motion vector.
+fn motion_value(node: &Node, property: &str, state: VisualState) -> Option<Vec<f32>> {
+    match property {
+        "background" => {
+            Some(rgba_of(color(visual_string(node, "background", "#00000000", state))).to_vec())
+        }
+        "borderColor" => {
+            Some(rgba_of(color(visual_string(node, "borderColor", "#e4e4e7", state))).to_vec())
+        }
+        "foreground" => visual_value(node, "foreground", state)
+            .as_str()
+            .map(|value| rgba_of(color(value)).to_vec()),
+        "boxShadow" => Some(
+            box_shadows(node, state)
+                .iter()
+                .flat_map(|shadow| {
+                    let [r, g, b, a] = rgba_of(shadow.color);
+                    [
+                        shadow.x as f32,
+                        shadow.y as f32,
+                        shadow.blur as f32,
+                        shadow.spread as f32,
+                        r,
+                        g,
+                        b,
+                        a,
+                        if shadow.inset { 1.0 } else { 0.0 },
+                    ]
+                })
+                .collect(),
+        ),
+        "textShadow" => Some(
+            text_shadow(node, state)
+                .map(|(x, y, colour)| {
+                    let [r, g, b, a] = rgba_of(colour);
+                    vec![x as f32, y as f32, r, g, b, a]
+                })
+                .unwrap_or_default(),
+        ),
+        _ => visual_value(node, property, state)
+            .as_f64()
+            .map(|value| value as f32)
+            .filter(|value| value.is_finite())
+            .map(|value| vec![value]),
+    }
+}
+
+/// Shadow lists of different lengths interpolate against transparent layers
+/// with no offset, blur or spread, as CSS does; the missing side copies the
+/// other side's colour (at zero alpha) and inset flag so nothing darkens.
+fn pad_motion_layers(property: &str, mut from: Vec<f32>, mut to: Vec<f32>) -> (Vec<f32>, Vec<f32>) {
+    let (stride, geometry, alpha) = match property {
+        "boxShadow" => (BOX_SHADOW_STRIDE, 4, 7),
+        "textShadow" => (TEXT_SHADOW_STRIDE, 2, 5),
+        _ => return (from, to),
+    };
+    let pad = |short: &mut Vec<f32>, long: &[f32]| {
+        while short.len() < long.len() {
+            let start = short.len();
+            let mut layer = long[start..start + stride].to_vec();
+            layer[..geometry].fill(0.0);
+            layer[alpha] = 0.0;
+            short.extend(layer);
+        }
+    };
+    let longer = if from.len() < to.len() {
+        to.clone()
+    } else {
+        from.clone()
+    };
+    pad(&mut from, &longer);
+    pad(&mut to, &longer);
+    (from, to)
+}
+
+fn box_shadows_from(values: &[f32]) -> Vec<BoxShadow> {
+    values
+        .as_chunks::<BOX_SHADOW_STRIDE>()
+        .0
+        .iter()
+        .map(|layer| BoxShadow {
+            x: f64::from(layer[0]),
+            y: f64::from(layer[1]),
+            blur: f64::from(layer[2]).max(0.0),
+            spread: f64::from(layer[3]),
+            color: colour_from(&layer[4..8]),
+            inset: layer[8] > 0.5,
+        })
+        .collect()
+}
+
+fn text_shadow_from(values: &[f32]) -> Option<(f64, f64, Color)> {
+    (values.len() >= TEXT_SHADOW_STRIDE).then(|| {
+        (
+            f64::from(values[0]),
+            f64::from(values[1]),
+            colour_from(&values[2..6]),
+        )
+    })
 }
 
 fn motion_is_layout(property: &str) -> bool {
@@ -425,7 +595,7 @@ impl Dirty {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 struct VisualState {
     hovered: bool,
     active: bool,
@@ -621,13 +791,11 @@ fn visual_state_overrides(node: &Node, key: &str, state: VisualState) -> bool {
 }
 
 fn visual_motion_number(entry: &Entry, key: &str, fallback: f32, state: VisualState) -> f32 {
-    if visual_state_overrides(&entry.node, key, state) {
-        return visual_number(&entry.node, key, fallback, state);
-    }
     entry
         .motions
         .get(key)
-        .map(|track| track.current)
+        .filter(|track| track.state_driven || !visual_state_overrides(&entry.node, key, state))
+        .and_then(|track| track.current.first().copied())
         .unwrap_or_else(|| visual_number(&entry.node, key, fallback, state))
 }
 
@@ -711,6 +879,8 @@ pub struct Entry {
     virtual_initial_layout: bool,
     virtual_scroll_generation: u64,
     motions: HashMap<String, MotionTrack>,
+    /// Visual state at the last state-transition sync.
+    last_state: VisualState,
 }
 
 fn motion_tracks_for_node(
@@ -721,79 +891,58 @@ fn motion_tracks_for_node(
     let mut motions = previous
         .map(|entry| entry.motions.clone())
         .unwrap_or_default();
-
+    // JS updates animate the base style; state styles transition separately.
+    let base = VisualState::default();
     for property in MOTION_PROPERTIES {
-        let target = motion_target(node, property);
+        let target = motion_value(node, property, base);
         if let Some(previous) = previous {
-            let previous_target = motion_target(&previous.node, property);
+            let previous_target = motion_value(&previous.node, property, base);
             if target == previous_target {
                 if motion_transition(node, property).is_none() {
                     motions.remove(*property);
                 }
                 continue;
             }
-
             let current = motions
                 .get(*property)
-                .map(|track| track.current)
+                .map(|track| track.current.clone())
                 .or(previous_target)
                 .or_else(|| match *property {
                     "width" if previous.rect.width().is_finite() => {
-                        Some(previous.rect.width() as f32)
+                        Some(vec![previous.rect.width() as f32])
                     }
                     "height" if previous.rect.height().is_finite() => {
-                        Some(previous.rect.height() as f32)
+                        Some(vec![previous.rect.height() as f32])
                     }
-                    "opacity" => Some(1.0),
-                    "radius" => Some(0.0),
+                    "opacity" => Some(vec![1.0]),
+                    "radius" => Some(vec![0.0]),
                     _ => None,
                 });
             motions.remove(*property);
-            let (Some(from), Some(to), Some((duration_ms, delay_ms, easing))) =
+            let (Some(from), Some(to), Some(config)) =
                 (current, target, motion_transition(node, property))
             else {
                 continue;
             };
-            if (from - to).abs() <= f32::EPSILON {
-                continue;
+            if let Some(track) = MotionTrack::new(property, from, to, now_ms, config, false) {
+                motions.insert((*property).to_string(), track);
             }
-            motions.insert(
-                (*property).to_string(),
-                MotionTrack {
-                    from,
-                    to,
-                    current: from,
-                    start_ms: now_ms + delay_ms,
-                    duration_ms,
-                    easing,
-                },
-            );
         } else {
             let from = node
                 .motion_from
                 .get(*property)
                 .and_then(Value::as_f64)
                 .map(|value| value as f32)
-                .filter(|value| value.is_finite());
-            let (Some(from), Some(to), Some((duration_ms, delay_ms, easing))) =
+                .filter(|value| value.is_finite())
+                .map(|value| vec![value]);
+            let (Some(from), Some(to), Some(config)) =
                 (from, target, motion_transition(node, property))
             else {
                 continue;
             };
-            if (from - to).abs() <= f32::EPSILON {
-                continue;
+            if let Some(track) = MotionTrack::new(property, from, to, now_ms, config, false) {
+                motions.insert((*property).to_string(), track);
             }
-            motions.insert(
-                (*property).to_string(),
-                MotionTrack {
-                    from,
-                    to,
-                    current: from,
-                    start_ms: now_ms + delay_ms,
-                    duration_ms,
-                    easing,
-                },
-            );
         }
     }
     motions
@@ -864,6 +1013,13 @@ pub struct Tree {
     window_chrome_suppressed: bool,
     pub dirty: Dirty,
     pub hovered: Option<String>,
+    /// Every node under the pointer that has a `hover` style, ancestors
+    /// included, as CSS `:hover` does. `hovered` stays the interactive target.
+    hover_styled: Vec<String>,
+    /// Ids holding hover/active/focus at the last state-transition sync.
+    visual_snapshot_ids: Vec<String>,
+    /// Extra ids to re-check at the next sync (e.g. `disabled` changed).
+    state_candidates: Vec<String>,
     pub focused: Option<String>,
     pub(crate) focus_visible: bool,
     pressed: Option<String>,
@@ -992,6 +1148,9 @@ impl Tree {
             window_chrome_suppressed: false,
             dirty: Dirty::all(),
             hovered: None,
+            hover_styled: Vec::new(),
+            visual_snapshot_ids: Vec::new(),
+            state_candidates: Vec::new(),
             focused: None,
             focus_visible: false,
             pressed: None,
@@ -1046,6 +1205,7 @@ impl Tree {
             return;
         }
         self.advance_clock(now_ms);
+        self.sync_state_transitions();
         let mut completed = Vec::new();
         for (id, entry) in &mut self.entries {
             let properties: Vec<String> = entry.motions.keys().cloned().collect();
@@ -1054,7 +1214,11 @@ impl Tree {
                     continue;
                 };
                 let (value, done) = track.value_at(self.motion_time_ms);
-                let changed = (track.current - value).abs() > 0.0001;
+                let changed = track
+                    .current
+                    .iter()
+                    .zip(&value)
+                    .any(|(current, next)| (current - next).abs() > 0.0001);
                 track.current = value;
                 if changed || done {
                     if motion_is_layout(&property) {
@@ -1074,6 +1238,75 @@ impl Tree {
             }
             self.pending_motion_events
                 .push(json!({"type":"motionComplete", "id":id, "property":property}));
+        }
+    }
+    /// Starts transitions for nodes whose hover/active/focus/disabled state
+    /// changed since the last sync. Only nodes that held or now hold a state
+    /// are visited, so a pointer move never walks the whole tree.
+    fn sync_state_transitions(&mut self) {
+        let current: Vec<String> = self
+            .hovered
+            .iter()
+            .chain(self.hover_styled.iter())
+            .chain(self.pressed.iter())
+            .chain(self.focused.iter())
+            .cloned()
+            .collect();
+        let mut ids = std::mem::take(&mut self.state_candidates);
+        ids.append(&mut self.visual_snapshot_ids);
+        ids.extend(current.iter().cloned());
+        ids.sort();
+        ids.dedup();
+        self.visual_snapshot_ids = current;
+        let now_ms = self.motion_time_ms;
+        for id in ids {
+            let Some(entry) = self.entries.get(&id) else {
+                continue;
+            };
+            let new_state = self.visual_state_for(&id, &entry.node);
+            let old_state = entry.last_state;
+            if old_state == new_state {
+                continue;
+            }
+            let mut started = Vec::new();
+            let mut stopped = Vec::new();
+            if entry.node.style.get("transition").is_some() {
+                for property in STATE_MOTION_PROPERTIES {
+                    let Some(config) = motion_transition(&entry.node, property) else {
+                        continue;
+                    };
+                    let Some(to) = motion_value(&entry.node, property, new_state) else {
+                        continue;
+                    };
+                    let from = entry
+                        .motions
+                        .get(*property)
+                        .map(|track| track.current.clone())
+                        .or_else(|| motion_value(&entry.node, property, old_state));
+                    let Some(from) = from else {
+                        continue;
+                    };
+                    match MotionTrack::new(property, from, to, now_ms, config, true) {
+                        Some(track) => started.push(((*property).to_string(), track)),
+                        None => stopped.push(*property),
+                    }
+                }
+            }
+            let entry = self.entries.get_mut(&id).expect("entry checked above");
+            entry.last_state = new_state;
+            for property in stopped {
+                if entry
+                    .motions
+                    .get(property)
+                    .is_some_and(|track| track.state_driven)
+                {
+                    entry.motions.remove(property);
+                }
+            }
+            if !started.is_empty() {
+                entry.motions.extend(started);
+                self.dirty.paint = true;
+            }
         }
     }
     pub fn active_motion_count(&self) -> usize {
@@ -1443,6 +1676,19 @@ impl Tree {
                 .map_or(0.0, |control| control.value.max(0.0))
         });
         let motions = motion_tracks_for_node(&node, previous.as_ref(), self.motion_time_ms);
+        let last_state = previous.as_ref().map_or(
+            VisualState {
+                disabled: node.disabled,
+                ..VisualState::default()
+            },
+            |entry| entry.last_state,
+        );
+        if previous
+            .as_ref()
+            .is_some_and(|entry| entry.node.disabled != node.disabled)
+        {
+            self.state_candidates.push(node.id.clone());
+        }
         self.entries.insert(
             id,
             Entry {
@@ -1464,6 +1710,7 @@ impl Tree {
                 virtual_initial_layout,
                 virtual_scroll_generation,
                 motions,
+                last_state,
             },
         );
     }
@@ -2720,7 +2967,8 @@ impl Tree {
             control.value.max(0.0) as usize == caret_slot.min(max_slot)
         });
         VisualState {
-            hovered: self.hovered.as_deref() == Some(id),
+            hovered: self.hovered.as_deref() == Some(id)
+                || self.hover_styled.iter().any(|hovered| hovered == id),
             active: self.pressed.as_deref() == Some(id) && self.hovered.as_deref() == Some(id),
             focused: self.focused.as_deref() == Some(id) || otp_slot_focused,
             focus_visible: (self.focused.as_deref() == Some(id) || otp_slot_focused)
@@ -2809,6 +3057,14 @@ impl Tree {
         self.painted_nodes += 1;
         let transform = Affine::scale(scale);
         let state = self.visual_state_for(id, &node);
+        // Paint-time values of running colour/shadow transitions. A state style
+        // with no transition of its own still wins over a JS-driven track.
+        let animated: HashMap<String, Vec<f32>> = entry
+            .motions
+            .iter()
+            .filter(|(key, track)| track.state_driven || !visual_state_overrides(&node, key, state))
+            .map(|(key, track)| (key.clone(), track.current.clone()))
+            .collect();
         let suppress_root_chrome = self.window_chrome_suppressed && id == self.root;
         let radius = if suppress_root_chrome {
             0.0
@@ -2824,9 +3080,27 @@ impl Tree {
         if opacity_layer {
             target.push_opacity(opacity, transform, &clip);
         }
-        let bg = visual_string(&node, "background", "#00000000", state);
-        if bg != "#00000000" {
-            target.fill(Fill::NonZero, transform, color(bg), &shape);
+        let shadows = if suppress_root_chrome {
+            Vec::new()
+        } else {
+            animated.get("boxShadow").map_or_else(
+                || box_shadows(&node, state),
+                |values| box_shadows_from(values),
+            )
+        };
+        for shadow in shadows.iter().rev().filter(|shadow| !shadow.inset) {
+            paint_outer_shadow(target, transform, rect, radius, shape, shadow);
+        }
+        if let Some(values) = animated.get("background") {
+            let bg = colour_from(values);
+            if bg.components[3] > 0.0 {
+                target.fill(Fill::NonZero, transform, bg, &shape);
+            }
+        } else {
+            let bg = visual_string(&node, "background", "#00000000", state);
+            if bg != "#00000000" {
+                target.fill(Fill::NonZero, transform, color(bg), &shape);
+            }
         }
         let border = if suppress_root_chrome {
             [0.0; 4]
@@ -2834,8 +3108,30 @@ impl Tree {
             node.insets("borderWidth")
                 .map(|value| value.max(0.0) as f64)
         };
+        if shadows.iter().any(|shadow| shadow.inset) {
+            let padding_box = BoxRect::new(
+                rect.x0 + border[3],
+                rect.y0 + border[0],
+                (rect.x1 - border[1]).max(rect.x0 + border[3]),
+                (rect.y1 - border[2]).max(rect.y0 + border[0]),
+            );
+            let inner_radius = (radius - border.iter().copied().fold(0.0, f64::max)).max(0.0);
+            target.push_clip(
+                Fill::NonZero,
+                transform,
+                &RoundedRect::from_rect(padding_box, inner_radius),
+            );
+            for shadow in shadows.iter().rev().filter(|shadow| shadow.inset) {
+                paint_inset_shadow(target, transform, padding_box, inner_radius, shadow);
+            }
+            target.pop_layer();
+        }
         if border.iter().any(|width| *width > 0.0) {
-            let border_color = color(visual_string(&node, "borderColor", "#e4e4e7", state));
+            let border_color = animated.get("borderColor").map_or_else(
+                || color(visual_string(&node, "borderColor", "#e4e4e7", state)),
+                |values| colour_from(values),
+            );
+            let border_hex = hex_of(border_color);
             let border_style = visual_string(&node, "borderStyle", "solid", state);
             let uniform = border
                 .iter()
@@ -2853,7 +3149,7 @@ impl Tree {
                         width: border[0],
                         offset: -border[0],
                         radius_override: None,
-                        color: visual_string(&node, "borderColor", "#e4e4e7", state),
+                        color: &border_hex,
                         style: border_style,
                     },
                 );
@@ -2976,7 +3272,9 @@ impl Tree {
             if node.kind == "button" {
                 x = rect.x0 + (rect.width() - tw as f64) / 2.0;
             }
-            let foreground = if matches!(node.kind.as_str(), "input" | "textarea")
+            let foreground = if let Some(values) = animated.get("foreground") {
+                hex_of(colour_from(values))
+            } else if matches!(node.kind.as_str(), "input" | "textarea")
                 && render_node.value.as_deref().unwrap_or("").is_empty()
             {
                 visual_string(&node, "placeholderColor", "#a1a1aa", state).to_string()
@@ -2990,7 +3288,10 @@ impl Tree {
             // node clip used for the glyphs themselves.
             if matches!(node.kind.as_str(), "text" | "button" | "input" | "textarea")
                 && ime_display.is_none()
-                && let Some(shadow) = text_shadow(&node, state)
+                && let Some(shadow) = animated.get("textShadow").map_or_else(
+                    || text_shadow(&node, state),
+                    |values| text_shadow_from(values),
+                )
             {
                 let (dx, dy) = (shadow.0, shadow.1);
                 let shadow_clip = BoxRect::new(
@@ -3377,6 +3678,89 @@ impl Tree {
             target.pop_layer();
         }
     }
+    /// Recomputes `hover_styled`; repaints only when that set changes.
+    fn refresh_hover_chain(&mut self) {
+        let next: Vec<String> = self
+            .hover_path()
+            .into_iter()
+            .filter(|id| {
+                self.entries.get(id).is_some_and(|entry| {
+                    !entry.node.disabled
+                        && entry.node.style.get("hover").is_some_and(Value::is_object)
+                })
+            })
+            .collect();
+        if next != self.hover_styled {
+            self.hover_styled = next;
+            self.dirty.paint = true;
+        }
+    }
+
+    /// Root-to-leaf ids of the deepest node under the pointer, whatever its kind.
+    fn hover_path(&self) -> Vec<String> {
+        if !self.entries.contains_key(&self.root) {
+            return Vec::new();
+        }
+        let root_rect = self.entries[&self.root].rect;
+        let mut portals = self.portal_roots();
+        portals.sort_by(|a, b| {
+            self.stacking
+                .get(a)
+                .copied()
+                .unwrap_or(0.0)
+                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
+        });
+        for portal in portals.iter().rev() {
+            if let Some(path) =
+                self.hover_path_in(portal, self.ancestor_scroll_offset(portal), root_rect)
+            {
+                return path;
+            }
+        }
+        self.hover_path_in(&self.root, Vec2::ZERO, root_rect)
+            .unwrap_or_default()
+    }
+
+    fn hover_path_in(&self, id: &str, offset: Vec2, clip: BoxRect) -> Option<Vec<String>> {
+        let entry = self.entries.get(id)?;
+        if !(entry.bounds + Vec2::new(-offset.x, -offset.y)).contains(self.mouse)
+            || entry.node.string("display", "flex") == "none"
+        {
+            return None;
+        }
+        let rect = entry.rect + Vec2::new(-offset.x, -offset.y);
+        let clip = if entry.node.kind == "scroll" {
+            clip.intersect(rect)
+        } else {
+            clip
+        };
+        if !clip.contains(self.mouse) {
+            return None;
+        }
+        let mut children = entry.children.clone();
+        children.sort_by(|a, b| {
+            self.stacking
+                .get(a)
+                .copied()
+                .unwrap_or(0.0)
+                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
+        });
+        for child in children.iter().rev() {
+            if self.entries[child].node.portal && !entry.node.portal {
+                continue;
+            }
+            if let Some(mut path) = self.hover_path_in(
+                child,
+                offset + Vec2::new(entry.scroll_x, entry.scroll),
+                clip,
+            ) {
+                path.insert(0, id.to_string());
+                return Some(path);
+            }
+        }
+        rect.contains(self.mouse).then(|| vec![id.to_string()])
+    }
+
     fn hit_root(&self, scroll_only: bool) -> Option<String> {
         let root_rect = self.entries[&self.root].rect;
         let mut portals = self.portal_roots();
@@ -4026,6 +4410,7 @@ impl Tree {
             self.hovered = next;
             self.dirty.paint = true;
         }
+        self.refresh_hover_chain();
         if let Some(id) = self
             .pressed
             .clone()
@@ -4041,6 +4426,7 @@ impl Tree {
     }
     pub fn pointer_leave(&mut self) -> Vec<Value> {
         self.mouse = (-1.0, -1.0);
+        self.refresh_hover_chain();
         if let Some(id) = self.hovered.take() {
             self.dirty.paint = true;
             vec![json!({"type":"hover", "id":id, "entered":false})]
@@ -4098,6 +4484,7 @@ impl Tree {
             self.pressed_diff_row = Some((id.to_string(), index));
         }
         self.hovered = self.hit_root(false);
+        self.refresh_hover_chain();
         self.pressed = self.hovered.clone();
         let mut events = vec![];
         if let Some(id) = self.hovered.clone() {
@@ -4175,6 +4562,7 @@ impl Tree {
             return vec![];
         }
         self.hovered = self.hit_root(false);
+        self.refresh_hover_chain();
         let mut out = vec![];
         if let Some(id) = self.pressed.take() {
             if self.hovered.as_ref() == Some(&id)
@@ -4225,6 +4613,7 @@ impl Tree {
             return vec![json!({"type":"outside", "id":id})];
         }
         self.hovered = self.hit_root(false);
+        self.refresh_hover_chain();
         let Some(id) = self.hovered.clone() else {
             return vec![];
         };
@@ -6256,6 +6645,139 @@ fn text_shadow(node: &Node, state: VisualState) -> Option<(f64, f64, Color)> {
     Some((offset("x"), offset("y"), color(colour)))
 }
 
+struct BoxShadow {
+    x: f64,
+    y: f64,
+    blur: f64,
+    spread: f64,
+    color: Color,
+    inset: bool,
+}
+
+/// `boxShadow` as one object or a list; the first entry paints on top, as in CSS.
+fn box_shadows(node: &Node, state: VisualState) -> Vec<BoxShadow> {
+    let value = visual_value(node, "boxShadow", state);
+    let entries: Vec<&Value> = match value {
+        Value::Array(items) => items.iter().collect(),
+        Value::Object(_) => vec![value],
+        _ => Vec::new(),
+    };
+    entries
+        .into_iter()
+        .filter_map(|entry| {
+            let entry = entry.as_object()?;
+            let number = |key: &str| entry.get(key).and_then(Value::as_f64).unwrap_or(0.0);
+            Some(BoxShadow {
+                x: number("x"),
+                y: number("y"),
+                blur: number("blur").max(0.0),
+                spread: number("spread"),
+                color: color(entry.get("color")?.as_str()?),
+                inset: entry.get("inset").and_then(Value::as_bool).unwrap_or(false),
+            })
+        })
+        .collect()
+}
+
+/// CSS blur radius is twice the gaussian standard deviation.
+fn shadow_sigma(blur: f64) -> f64 {
+    blur / 2.0
+}
+
+fn paint_outer_shadow<P: PaintTarget>(
+    target: &mut P,
+    transform: Affine,
+    rect: BoxRect,
+    radius: f64,
+    shape: RoundedRect,
+    shadow: &BoxShadow,
+) {
+    let spread = shadow.spread;
+    let casting = BoxRect::new(
+        rect.x0 + shadow.x - spread,
+        rect.y0 + shadow.y - spread,
+        rect.x1 + shadow.x + spread,
+        rect.y1 + shadow.y + spread,
+    );
+    if casting.width() <= 0.0 || casting.height() <= 0.0 {
+        return;
+    }
+    let casting_radius = if radius > 0.0 {
+        (radius + spread).max(0.0)
+    } else {
+        0.0
+    };
+    let sigma = shadow_sigma(shadow.blur);
+    let area = casting
+        .inflate(sigma * 3.0 + 1.0, sigma * 3.0 + 1.0)
+        .union(rect);
+    // An outer shadow is never visible through its own box, even when the
+    // background is translucent: clip to the area minus the border box.
+    let mut outside = vello::kurbo::Shape::to_path(&area, 0.1);
+    outside.extend(vello::kurbo::Shape::to_path(&shape, 0.1));
+    target.push_clip(Fill::EvenOdd, transform, &outside);
+    if sigma < 0.01 {
+        target.fill(
+            Fill::NonZero,
+            transform,
+            shadow.color,
+            &RoundedRect::from_rect(casting, casting_radius),
+        );
+    } else {
+        target.box_shadow(
+            transform,
+            area,
+            casting,
+            shadow.color,
+            casting_radius,
+            sigma,
+            false,
+        );
+    }
+    target.pop_layer();
+}
+
+/// Paints inside the padding box; the caller has already clipped to it.
+fn paint_inset_shadow<P: PaintTarget>(
+    target: &mut P,
+    transform: Affine,
+    padding_box: BoxRect,
+    radius: f64,
+    shadow: &BoxShadow,
+) {
+    let spread = shadow.spread;
+    let hole = BoxRect::new(
+        padding_box.x0 + shadow.x + spread,
+        padding_box.y0 + shadow.y + spread,
+        padding_box.x1 + shadow.x - spread,
+        padding_box.y1 + shadow.y - spread,
+    );
+    if hole.width() <= 0.0 || hole.height() <= 0.0 {
+        target.fill(Fill::NonZero, transform, shadow.color, &padding_box);
+        return;
+    }
+    let hole_radius = (radius - spread).max(0.0);
+    let sigma = shadow_sigma(shadow.blur);
+    if sigma < 0.01 {
+        let mut ring = vello::kurbo::Shape::to_path(&padding_box, 0.1);
+        ring.extend(vello::kurbo::Shape::to_path(
+            &RoundedRect::from_rect(hole, hole_radius),
+            0.1,
+        ));
+        target.fill(Fill::EvenOdd, transform, shadow.color, &ring);
+    } else {
+        target.box_shadow(
+            transform,
+            padding_box,
+            hole,
+            shadow.color,
+            hole_radius,
+            sigma,
+            true,
+        );
+    }
+}
+
 struct Outline<'a> {
     width: f64,
     offset: f64,
@@ -6578,13 +7100,13 @@ fn limit(v: &Value) -> LengthPercentageAuto {
 fn motion_dimension(entry: &Entry, key: &str) -> Dimension {
     entry.motions.get(key).map_or_else(
         || dimension(&entry.node.style[key]),
-        |track| length(track.current),
+        |track| length(track.current.first().copied().unwrap_or(0.0)),
     )
 }
 fn motion_limit(entry: &Entry, key: &str) -> LengthPercentageAuto {
     entry.motions.get(key).map_or_else(
         || limit(&entry.node.style[key]),
-        |track| length(track.current),
+        |track| length(track.current.first().copied().unwrap_or(0.0)),
     )
 }
 fn layout_style(entry: &Entry, suppress_border: bool) -> Style {

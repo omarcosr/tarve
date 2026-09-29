@@ -2113,6 +2113,8 @@ mod rich_measure_tests {
     }
 
     impl PaintTarget for ProbeTarget {
+        fn box_shadow(&mut self, _: Affine, _: Rect, _: Rect, _: Color, _: f64, _: f64, _: bool) {}
+
         fn fill<S: vello::kurbo::Shape>(
             &mut self,
             _fill: Fill,

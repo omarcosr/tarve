@@ -4749,6 +4749,18 @@ struct PaintRecorder {
     glyphs: Vec<(vello::peniko::Color, vello::kurbo::Affine)>,
     clips: Vec<Option<vello::kurbo::Rect>>,
     glyph_clips: Vec<Option<vello::kurbo::Rect>>,
+    fills: Vec<(vello::peniko::Color, vello::kurbo::Rect)>,
+    shadows: Vec<RecordedShadow>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RecordedShadow {
+    rect: vello::kurbo::Rect,
+    color: vello::peniko::Color,
+    radius: f64,
+    std_dev: f64,
+    invert: bool,
+    clip: Option<vello::kurbo::Rect>,
 }
 
 impl crate::paint::PaintTarget for PaintRecorder {
@@ -4756,9 +4768,30 @@ impl crate::paint::PaintTarget for PaintRecorder {
         &mut self,
         _: vello::peniko::Fill,
         _: vello::kurbo::Affine,
-        _: vello::peniko::Color,
-        _: &S,
+        color: vello::peniko::Color,
+        shape: &S,
     ) {
+        self.fills.push((color, shape.bounding_box()));
+    }
+    fn box_shadow(
+        &mut self,
+        _: vello::kurbo::Affine,
+        _: vello::kurbo::Rect,
+        rect: vello::kurbo::Rect,
+        color: vello::peniko::Color,
+        radius: f64,
+        std_dev: f64,
+        invert: bool,
+    ) {
+        let clip = self.clips.iter().rev().find_map(|clip| *clip);
+        self.shadows.push(RecordedShadow {
+            rect,
+            color,
+            radius,
+            std_dev,
+            invert,
+            clip,
+        });
     }
     fn stroke<S: vello::kurbo::Shape>(
         &mut self,
@@ -4927,4 +4960,289 @@ fn text_shadow_in_state_styles_is_validated() {
             .unwrap_err()
             .contains("textShadow")
     );
+}
+
+fn shadow_box(style: serde_json::Value) -> PaintRecorder {
+    let mut style = style;
+    style["width"] = json!(80);
+    style["height"] = json!(40);
+    style["background"] = json!("#ffffff");
+    painted(vec![node("card", "view", style, vec![])])
+}
+
+fn box_rect(recorder: &PaintRecorder) -> vello::kurbo::Rect {
+    let white = crate::tree::color("#ffffff");
+    recorder
+        .fills
+        .iter()
+        .find(|(color, _)| *color == white)
+        .map(|(_, rect)| *rect)
+        .expect("background fill")
+}
+
+#[test]
+fn box_shadow_offsets_spreads_and_blurs_outside_the_box() {
+    let recorder = shadow_box(json!({"radius": 8,
+        "boxShadow": {"x": 4, "y": 6, "blur": 10, "spread": 2, "color": "#ff0000"}}));
+    let card = box_rect(&recorder);
+    assert_eq!(recorder.shadows.len(), 1);
+    let shadow = recorder.shadows[0];
+    assert_eq!(shadow.color, crate::tree::color("#ff0000"));
+    assert!(!shadow.invert);
+    assert_eq!(shadow.std_dev, 5.0, "CSS blur radius is two sigma");
+    assert_eq!(shadow.radius, 10.0, "spread grows the corner radius");
+    assert_eq!(
+        (shadow.rect.x0 - card.x0, shadow.rect.y0 - card.y0),
+        (2.0, 4.0)
+    );
+    assert_eq!(shadow.rect.width(), card.width() + 4.0);
+    let clip = shadow.clip.expect("outer shadow is clipped");
+    assert!(
+        clip.contains_rect(card),
+        "clip area covers the box so the hole can be cut out"
+    );
+}
+
+#[test]
+fn box_shadow_lists_paint_first_on_top_and_blur_zero_is_a_hard_fill() {
+    let recorder = shadow_box(json!({"boxShadow": [
+        {"x": 1, "y": 1, "blur": 4, "color": "#ff0000"},
+        {"x": 2, "y": 2, "blur": 4, "color": "#0000ff"}
+    ]}));
+    let colors: Vec<_> = recorder.shadows.iter().map(|shadow| shadow.color).collect();
+    assert_eq!(
+        colors,
+        vec![crate::tree::color("#0000ff"), crate::tree::color("#ff0000")]
+    );
+
+    let hard = shadow_box(json!({"boxShadow": {"x": 3, "y": 3, "color": "#00ff00"}}));
+    assert!(hard.shadows.is_empty());
+    let card = box_rect(&hard);
+    let green = crate::tree::color("#00ff00");
+    let (_, fill) = hard
+        .fills
+        .iter()
+        .find(|(color, _)| *color == green)
+        .expect("hard shadow fill");
+    assert_eq!((fill.x0 - card.x0, fill.y0 - card.y0), (3.0, 3.0));
+}
+
+#[test]
+fn inset_box_shadow_inverts_inside_the_padding_box() {
+    let recorder = shadow_box(json!({"borderWidth": 2, "radius": 6,
+        "boxShadow": {"inset": true, "x": 1, "y": 0, "blur": 6, "spread": 3, "color": "#000000"}}));
+    let card = box_rect(&recorder);
+    assert_eq!(recorder.shadows.len(), 1);
+    let shadow = recorder.shadows[0];
+    assert!(shadow.invert);
+    let clip = shadow
+        .clip
+        .expect("inset shadow is clipped to the padding box");
+    assert_eq!((clip.x0 - card.x0, clip.x1 - card.x1), (2.0, -2.0));
+    assert_eq!(
+        (shadow.rect.x0 - clip.x0, shadow.rect.x1 - clip.x1),
+        (4.0, -2.0)
+    );
+    assert_eq!(shadow.radius, 1.0, "inner radius 4 minus spread 3");
+}
+
+#[test]
+fn box_shadow_follows_hover_and_rejects_invalid_values() {
+    let button: Node = serde_json::from_value(json!({
+        "id": "b", "kind": "button", "text": "Go", "children": [],
+        "style": {"width": 80, "height": 30, "hover": {"boxShadow": {"y": 2, "blur": 8, "color": "#000000"}}}
+    }))
+    .unwrap();
+    let mut tree = Tree::new(root(vec![button]));
+    tree.compute(400.0, 200.0).unwrap();
+    let mut idle = PaintRecorder::default();
+    tree.paint(1.0, &mut idle);
+    assert!(idle.shadows.is_empty());
+    tree.pointer_move(20.0, 15.0);
+    let mut hovered = PaintRecorder::default();
+    tree.paint(1.0, &mut hovered);
+    assert_eq!(hovered.shadows.len(), 1);
+
+    let too_many: Vec<_> = (0..9).map(|_| json!({"color": "#000000"})).collect();
+    for shadow in [
+        json!({"blur": -1, "color": "#000000"}),
+        json!({"color": "#000000", "offset": 2}),
+        json!({"x": 1}),
+        json!({"color": "#000000", "inset": "yes"}),
+        json!(too_many),
+    ] {
+        let card = node("card", "view", json!({"boxShadow": shadow}), vec![]);
+        let error = protocol::validate(&root(vec![card])).unwrap_err();
+        assert!(error.contains("boxShadow"), "{error}");
+    }
+}
+
+fn fills_of(tree: &mut Tree) -> PaintRecorder {
+    let mut recorder = PaintRecorder::default();
+    tree.paint(1.0, &mut recorder);
+    recorder
+}
+
+fn fill_near(recorder: &PaintRecorder, rgb: [f32; 3]) -> bool {
+    recorder.fills.iter().any(|(color, _)| {
+        let [r, g, b, _] = color.components;
+        (r - rgb[0]).abs() < 0.02 && (g - rgb[1]).abs() < 0.02 && (b - rgb[2]).abs() < 0.02
+    })
+}
+
+#[test]
+fn hover_styles_apply_to_plain_views_and_their_ancestors() {
+    let button: Node = serde_json::from_value(json!({
+        "id": "go", "kind": "button", "text": "Go", "children": [],
+        "style": {"width": 40, "height": 20}
+    }))
+    .unwrap();
+    let card = node(
+        "card",
+        "view",
+        json!({"width": 120, "height": 60, "background": "#ffffff", "hover": {"background": "#ff0000"}}),
+        vec![button],
+    );
+    let mut tree = Tree::new(root(vec![card]));
+    tree.compute(400.0, 200.0).unwrap();
+    assert!(!fill_near(&fills_of(&mut tree), [1.0, 0.0, 0.0]));
+
+    tree.pointer_move(100.0, 50.0);
+    assert!(
+        fill_near(&fills_of(&mut tree), [1.0, 0.0, 0.0]),
+        "plain view is hoverable"
+    );
+
+    tree.pointer_move(10.0, 10.0);
+    assert_eq!(
+        tree.hovered.as_deref(),
+        Some("go"),
+        "the button stays the interactive target"
+    );
+    assert!(
+        fill_near(&fills_of(&mut tree), [1.0, 0.0, 0.0]),
+        "ancestor keeps :hover"
+    );
+
+    tree.pointer_leave();
+    assert!(!fill_near(&fills_of(&mut tree), [1.0, 0.0, 0.0]));
+}
+
+#[test]
+fn hover_transitions_interpolate_colour_and_box_shadow_then_go_idle() {
+    let card = node(
+        "card",
+        "view",
+        json!({
+            "width": 120, "height": 60, "background": "#000000",
+            "hover": {"background": "#ffffff", "boxShadow": {"y": 10, "blur": 20, "color": "#000000"}},
+            "transition": {"all": {"duration": 100, "easing": "linear"}}
+        }),
+        vec![],
+    );
+    let mut tree = Tree::new(root(vec![card]));
+    tree.compute(400.0, 200.0).unwrap();
+    tree.advance_motion(0.0);
+    tree.pointer_move(20.0, 15.0);
+    tree.advance_motion(0.0);
+    assert!(
+        fill_near(&fills_of(&mut tree), [0.0, 0.0, 0.0]),
+        "starts from the resting value"
+    );
+
+    tree.advance_motion(50.0);
+    let middle = fills_of(&mut tree);
+    assert!(fill_near(&middle, [0.5, 0.5, 0.5]));
+    let shadow = middle.shadows[0];
+    assert_eq!(shadow.std_dev, 5.0, "blur 20 halfway is 10, sigma 5");
+    assert!(
+        (shadow.color.components[3] - 0.5).abs() < 0.02,
+        "fades in from transparent"
+    );
+
+    tree.advance_motion(100.0);
+    let end = fills_of(&mut tree);
+    assert!(fill_near(&end, [1.0, 1.0, 1.0]));
+    assert_eq!(end.shadows[0].std_dev, 10.0);
+    assert_eq!(tree.active_motion_count(), 0);
+    assert_eq!(
+        tree.next_motion_tick_ms(),
+        None,
+        "no frames once the transition ends"
+    );
+
+    tree.pointer_leave();
+    tree.advance_motion(150.0);
+    assert!(tree.active_motion_count() > 0, "leaving animates back");
+    tree.advance_motion(200.0);
+    tree.pointer_move(20.0, 15.0);
+    tree.advance_motion(200.0);
+    let reversed = fills_of(&mut tree);
+    assert!(
+        fill_near(&reversed, [0.5, 0.5, 0.5]),
+        "re-entering mid-way starts from the displayed value"
+    );
+}
+
+#[test]
+fn js_updates_transition_colours_and_motion_from_stays_numeric() {
+    let card = |background: &str| {
+        node(
+            "card",
+            "view",
+            json!({"width": 80, "height": 40, "background": background,
+                "transition": {"background": {"duration": 100, "easing": "linear"}}}),
+            vec![],
+        )
+    };
+    let mut tree = Tree::new(root(vec![card("#000000")]));
+    tree.compute(400.0, 200.0).unwrap();
+    tree.advance_motion(0.0);
+    tree.update(root(vec![card("#ffffff")]));
+    tree.compute(400.0, 200.0).unwrap();
+    tree.advance_motion(50.0);
+    assert!(fill_near(&fills_of(&mut tree), [0.5, 0.5, 0.5]));
+
+    let mut entering = node("card", "view", json!({}), vec![]);
+    entering.motion_from = json!({"background": 1});
+    let error = protocol::validate(&root(vec![entering])).unwrap_err();
+    assert!(error.contains("motionFrom"), "{error}");
+}
+
+#[test]
+fn hover_transitions_text_shadow_foreground_and_border_colour() {
+    let button: Node = serde_json::from_value(json!({
+        "id": "b", "kind": "button", "text": "Go", "children": [],
+        "style": {
+            "width": 80, "height": 30, "fontSize": 14, "foreground": "#000000",
+            "borderWidth": 2, "borderColor": "#000000", "borderStyle": "dashed",
+            "hover": {"foreground": "#ffffff", "borderColor": "#ffffff",
+                "textShadow": {"x": 4, "y": 4, "color": "#ff0000"}},
+            "transition": {"all": {"duration": 100, "easing": "linear"}}
+        }
+    }))
+    .unwrap();
+    let mut tree = Tree::new(root(vec![button]));
+    tree.compute(400.0, 200.0).unwrap();
+    tree.advance_motion(0.0);
+    tree.pointer_move(20.0, 15.0);
+    tree.advance_motion(0.0);
+    tree.advance_motion(50.0);
+    let middle = fills_of(&mut tree);
+    let grey = |color: vello::peniko::Color| {
+        let [r, g, b, _] = color.components;
+        [r, g, b].iter().all(|channel| (channel - 0.5).abs() < 0.02)
+    };
+    assert!(
+        middle
+            .strokes
+            .iter()
+            .any(|(_, dashed, color)| *dashed && grey(*color))
+    );
+    let (shadow_color, shadow_at) = middle.glyphs[0];
+    let (text_color, text_at) = middle.glyphs[1];
+    assert!((shadow_color.components[3] - 0.5).abs() < 0.02);
+    assert!(grey(text_color));
+    let delta = shadow_at.translation() - text_at.translation();
+    assert!((delta.x - 2.0).abs() < 0.01 && (delta.y - 2.0).abs() < 0.01);
 }

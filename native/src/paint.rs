@@ -5,8 +5,11 @@ use std::{
 
 use vello::{
     Glyph, Scene,
-    kurbo::{Affine, Shape, Stroke},
-    peniko::{Blob, Color, Fill, FontData, ImageAlphaType, ImageBrush, ImageData, ImageFormat},
+    kurbo::{Affine, Rect, Shape, Stroke},
+    peniko::{
+        BlendMode, Blob, Color, Compose, Fill, FontData, ImageAlphaType, ImageBrush, ImageData,
+        ImageFormat, Mix,
+    },
 };
 use vello_cpu::{
     Image as CpuImage, ImageSource as CpuImageSource, Pixmap, RenderContext, Resources,
@@ -26,6 +29,19 @@ pub(crate) trait PaintTarget {
     fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S);
     fn push_opacity<S: Shape>(&mut self, alpha: f32, transform: Affine, shape: &S);
     fn pop_layer(&mut self);
+    /// Gaussian-blurred rounded rectangle limited to `area`. With `invert`,
+    /// paints `1 - coverage` over `area` (inset shadows); callers clip it.
+    #[allow(clippy::too_many_arguments)]
+    fn box_shadow(
+        &mut self,
+        transform: Affine,
+        area: Rect,
+        rect: Rect,
+        color: Color,
+        radius: f64,
+        std_dev: f64,
+        invert: bool,
+    );
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine);
     fn draw_glyphs(
         &mut self,
@@ -41,6 +57,35 @@ pub(crate) trait PaintTarget {
 impl PaintTarget for Scene {
     fn fill<S: Shape>(&mut self, fill: Fill, transform: Affine, color: Color, shape: &S) {
         self.fill(fill, transform, color, None, shape);
+    }
+
+    fn box_shadow(
+        &mut self,
+        transform: Affine,
+        area: Rect,
+        rect: Rect,
+        color: Color,
+        radius: f64,
+        std_dev: f64,
+        invert: bool,
+    ) {
+        if !invert {
+            self.draw_blurred_rounded_rect_in(&area, transform, rect, color, radius, std_dev);
+            return;
+        }
+        // Inset: flood the area, then erase the blurred rectangle out of it.
+        self.push_layer(Fill::NonZero, BlendMode::default(), 1.0, transform, &area);
+        self.fill(Fill::NonZero, transform, color, None, &area);
+        self.push_layer(
+            Fill::NonZero,
+            BlendMode::new(Mix::Normal, Compose::DestOut),
+            1.0,
+            transform,
+            &area,
+        );
+        self.draw_blurred_rounded_rect_in(&area, transform, rect, Color::BLACK, radius, std_dev);
+        self.pop_layer();
+        self.pop_layer();
     }
 
     fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S) {
@@ -172,6 +217,25 @@ impl PaintTarget for CpuPaintTarget<'_> {
         self.context.set_transform(transform);
         self.context.set_paint(color);
         self.context.fill_path(&shape.to_path(0.1));
+    }
+
+    fn box_shadow(
+        &mut self,
+        transform: Affine,
+        area: Rect,
+        rect: Rect,
+        color: Color,
+        radius: f64,
+        std_dev: f64,
+        invert: bool,
+    ) {
+        self.context.set_fill_rule(Fill::NonZero);
+        self.context.set_transform(transform);
+        self.context.push_clip_layer(&area.to_path(0.1));
+        self.context.set_paint(color);
+        self.context
+            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, invert);
+        self.context.pop_layer();
     }
 
     fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S) {

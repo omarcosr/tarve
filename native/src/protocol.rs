@@ -436,8 +436,23 @@ impl From<accesskit_winit::Event> for Command {
     }
 }
 
-const MOTION_PROPERTIES: &[&str] = &[
+const NUMERIC_MOTION_PROPERTIES: &[&str] = &[
     "width", "height", "top", "right", "bottom", "left", "opacity", "radius",
+];
+const MOTION_PROPERTIES: &[&str] = &[
+    "width",
+    "height",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "opacity",
+    "radius",
+    "background",
+    "foreground",
+    "borderColor",
+    "boxShadow",
+    "textShadow",
 ];
 
 fn validate_motion(node: &Node) -> Result<(), String> {
@@ -507,7 +522,7 @@ fn validate_motion(node: &Node) -> Result<(), String> {
             return Err(format!("motionFrom must be an object on {}", node.id));
         };
         for (property, value) in values {
-            if !MOTION_PROPERTIES.contains(&property.as_str()) {
+            if !NUMERIC_MOTION_PROPERTIES.contains(&property.as_str()) {
                 return Err(format!(
                     "Unsupported motionFrom property on {}: {property}",
                     node.id
@@ -522,6 +537,37 @@ fn validate_motion(node: &Node) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+const MAX_BOX_SHADOWS: usize = 8;
+
+fn valid_box_shadow(value: &Value) -> bool {
+    let one = |value: &Value| {
+        value.as_object().is_some_and(|shadow| {
+            shadow.get("color").is_some_and(Value::is_string)
+                && ["x", "y", "spread"].iter().all(|key| {
+                    shadow
+                        .get(*key)
+                        .is_none_or(|value| value.as_f64().is_some_and(f64::is_finite))
+                })
+                && shadow.get("blur").is_none_or(|value| {
+                    value
+                        .as_f64()
+                        .is_some_and(|blur| blur.is_finite() && blur >= 0.0)
+                })
+                && shadow.get("inset").is_none_or(Value::is_boolean)
+                && shadow.keys().all(|key| {
+                    matches!(
+                        key.as_str(),
+                        "x" | "y" | "blur" | "spread" | "color" | "inset"
+                    )
+                })
+        })
+    };
+    match value {
+        Value::Array(items) => items.len() <= MAX_BOX_SHADOWS && items.iter().all(one),
+        _ => one(value),
+    }
 }
 
 pub fn validate(root: &Node) -> Result<(), String> {
@@ -827,10 +873,16 @@ fn validate_control(node: &Node) -> Result<(), String> {
     let state_styles = ["hover", "active", "focus", "focusVisible", "disabled"]
         .iter()
         .filter_map(|state| node.style.get(*state));
-    for shadow in std::iter::once(&node.style)
-        .chain(state_styles)
-        .filter_map(|style| style.get("textShadow"))
-    {
+    let styles: Vec<&Value> = std::iter::once(&node.style).chain(state_styles).collect();
+    for shadow in styles.iter().filter_map(|style| style.get("boxShadow")) {
+        if !valid_box_shadow(shadow) {
+            return Err(format!(
+                "Invalid boxShadow on {}: expected {{ x?, y?, blur?, spread?, color, inset? }} or a list of up to {MAX_BOX_SHADOWS} (blur must be >= 0)",
+                node.id
+            ));
+        }
+    }
+    for shadow in styles.iter().filter_map(|style| style.get("textShadow")) {
         let valid = shadow.as_object().is_some_and(|shadow| {
             shadow.get("color").is_some_and(Value::is_string)
                 && ["x", "y"].iter().all(|key| {
