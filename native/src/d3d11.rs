@@ -1056,6 +1056,11 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                     + 0.01;
                 (-start / span, (reach - start) / span)
             }
+            // The shape covers every angle: t spans one full turn.
+            GradientGeometry::Conic { start, end, .. } => {
+                let span = (end - start).max(1e-9);
+                (-start / span, (1.0 - start) / span)
+            }
         };
         let mut bands: Vec<(f64, Color, f64, Color)> = Vec::new();
         if gradient.repeat {
@@ -1097,6 +1102,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             }
             Color::new(out)
         };
+        let mut wedges: Vec<(Point, Color)> = Vec::new();
         let mut triangles: Vec<(Point, Color)> = Vec::new();
         let mut quad = |a: Point, b: Point, c: Point, d: Point, from: Color, to: Color| {
             triangles.extend([(a, from), (b, from), (c, to), (a, from), (c, to), (d, to)]);
@@ -1144,8 +1150,47 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                         quad(at(r0, k), at(r0, k + 1), at(r1, k + 1), at(r1, k), c0, c1);
                     }
                 }
+                // Colour varies with the angle only: wedges of at most 1° from
+                // the centre, split at every stop so hard stops stay exact.
+                GradientGeometry::Conic {
+                    center,
+                    from,
+                    start,
+                    end,
+                } => {
+                    let (a, b) = (t0.max(low), t1.min(high));
+                    if b <= a {
+                        continue;
+                    }
+                    let ca = mix(c0, c1, (a - t0) / (t1 - t0));
+                    let cb = mix(c0, c1, (b - t0) / (t1 - t0));
+                    let turn = |t: f64| from + (start + (end - start) * t) * std::f64::consts::TAU;
+                    let (angle0, angle1) = (turn(a), turn(b));
+                    let reach = corners
+                        .iter()
+                        .map(|p| (p.x - center.x).hypot(p.y - center.y))
+                        .fold(0.0, f64::max)
+                        + 1.0;
+                    let point = |angle: f64| {
+                        Point::new(
+                            center.x + reach * angle.sin(),
+                            center.y - reach * angle.cos(),
+                        )
+                    };
+                    let count = ((angle1 - angle0) / 1f64.to_radians()).ceil().max(1.0) as usize;
+                    for k in 0..count {
+                        let (f0, f1) = (k as f64 / count as f64, (k + 1) as f64 / count as f64);
+                        let (w0, w1) = (mix(ca, cb, f0), mix(ca, cb, f1));
+                        wedges.extend([
+                            (center, mix(w0, w1, 0.5)),
+                            (point(angle0 + (angle1 - angle0) * f0), w0),
+                            (point(angle0 + (angle1 - angle0) * f1), w1),
+                        ]);
+                    }
+                }
             }
         }
+        triangles.append(&mut wedges);
         self.push_clip(Fill::NonZero, transform, shape);
         let opacity = self.opacity;
         self.graphics

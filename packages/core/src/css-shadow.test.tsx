@@ -138,4 +138,29 @@ describe("CSS gradients", () => {
     expect(painted.foreground).toEqual({ type: "linear", stops: [{ color: "#ff0000" }, { color: "#0000ff" }] });
     expect(painted.hover?.borderColor).toMatchObject({ type: "radial" });
   });
+
+  test("conic-gradient syntax", () => {
+    expect(parseGradient("conic-gradient(red, blue)")).toEqual({ type: "conic", stops: [{ color: "red" }, { color: "blue" }] });
+    expect(parseGradient("conic-gradient(from 0.25turn at 25% 10px, red 0deg, blue 90deg 180deg, rgb(0 0 0 / 50%) 75%)")).toEqual({
+      type: "conic", from: 90, at: { x: 0.25, y: "10px" },
+      stops: [
+        { color: "red", offset: 0 }, { color: "blue", offset: 0.25 }, { color: "blue", offset: 0.5 },
+        { color: "rgb(0 0 0 / 50%)", offset: 0.75 },
+      ],
+    });
+    expect(parseGradient("conic-gradient(at right 10px top, red, blue)")).toEqual({
+      type: "conic", at: { x: "10px", xEdge: "right", y: 0 }, stops: [{ color: "red" }, { color: "blue" }],
+    });
+    expect(parseGradient("conic-gradient(from 0, red, blue)")).toEqual({ type: "conic", stops: [{ color: "red" }, { color: "blue" }] });
+    expect(parseGradient("repeating-conic-gradient(#000 0 25%, #fff 0 50%)")).toMatchObject({ type: "conic", repeating: true });
+    expect(() => parseGradient("conic-gradient(from 10px, red, blue)")).toThrow("conic-gradient angle");
+    expect(() => parseGradient("conic-gradient(red 10px, blue)")).toThrow("angles or %");
+  });
+
+  test("conic normalization turns angle and percent offsets into fractions of a turn", () => {
+    const stops = normalizeGradient({ type: "conic", stops: ["red", { color: "blue", offset: "90deg" }, { color: "white", offset: "75%" }, { color: "black", offset: 1 }] }, cssColor).stops;
+    expect(stops).toEqual([{ color: "#ff0000" }, { color: "#0000ff", offset: 0.25 }, { color: "#ffffff", offset: 0.75 }, { color: "#000000", offset: 1 }]);
+    expect(() => normalizeGradient({ type: "conic", stops: [{ color: "red", offset: "4px" as "4deg" }, "blue"] }, cssColor)).toThrow("angles or %");
+    expect(resolveThemeStyle({ background: "conic-gradient(from 45deg, var(--primary), transparent)" }, lightTheme).background).toMatchObject({ type: "conic", from: 45 });
+  });
 });

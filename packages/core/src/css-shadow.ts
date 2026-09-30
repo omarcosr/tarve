@@ -1,4 +1,4 @@
-import type { BoxShadow, Gradient, GradientCentre, GradientLength, GradientSide, GradientStop, RadialExtent, TextShadow, Transform } from "../../protocol/src/index";
+import type { BoxShadow, ConicGradient, ConicGradientStop, Gradient, GradientCentre, GradientLength, GradientSide, GradientStop, RadialExtent, TextShadow, Transform } from "../../protocol/src/index";
 
 const NAMED: Record<string, string> = {
   transparent: "#00000000", black: "#000000", white: "#ffffff", red: "#ff0000", green: "#008000",
@@ -157,7 +157,7 @@ export function parseTransform(value: string): Transform {
   };
 }
 
-export const GRADIENT = /^\s*(repeating-)?(linear|radial)-gradient\(/i;
+export const GRADIENT = /^\s*(repeating-)?(linear|radial|conic)-gradient\(/i;
 
 function angle(token: string): number | undefined {
   const match = token.match(/^(-?(?:\d+\.?\d*|\.\d+))(deg|rad|turn|grad)$/);
@@ -241,13 +241,47 @@ function centre(tokens: string[]): GradientCentre {
 
 const EXTENT = /^(closest|farthest)-(side|corner)$/;
 
+/** A conic stop position: an angle or `N%` → fraction of a turn; unitless 0 → 0. */
+function turn(token: string): number {
+  if (token === "0") return 0;
+  if (/^-?(?:\d+\.?\d*|\.\d+)%$/.test(token)) return Number(token.slice(0, -1)) / 100;
+  const degrees = angle(token);
+  if (degrees === undefined) throw new TypeError(`Conic gradient positions must be angles or %: ${token}`);
+  return degrees / 360;
+}
+
+function parseConicStop(token: string): ConicGradientStop[] {
+  const [color, ...positions] = splitTopLevel(token, /\s/);
+  if (!color || positions.length > 2) throw new TypeError(`Invalid colour stop: ${token}`);
+  return positions.length === 0 ? [{ color }] : positions.map(value => ({ color, offset: turn(value) }));
+}
+
+/** `[from <angle>] [at <position>]`, the optional first argument of `conic-gradient()`. */
+function conicHeader(words: string[]): Pick<ConicGradient, "from" | "at"> | undefined {
+  if (words[0] !== "from" && words[0] !== "at") return undefined;
+  const at = words.indexOf("at");
+  const before = at < 0 ? words : words.slice(0, at);
+  const header: Pick<ConicGradient, "from" | "at"> = {};
+  if (before.length > 0) {
+    const degrees = before.length === 2 && before[0] === "from" ? (before[1] === "0" ? 0 : angle(before[1]!)) : undefined;
+    if (degrees === undefined) throw new TypeError(`Invalid conic-gradient angle: ${words.join(" ")}`);
+    if (degrees !== 0) header.from = degrees;
+  }
+  if (at >= 0) header.at = centre(words.slice(at + 1));
+  return header;
+}
+
 /** CSS `linear-gradient(…)` / `radial-gradient(…)` and their `repeating-` forms → gradient object. */
 export function parseGradient(value: string): Gradient {
-  const match = value.trim().match(/^(repeating-)?(linear|radial)-gradient\(([\s\S]*)\)$/i);
+  const match = value.trim().match(/^(repeating-)?(linear|radial|conic)-gradient\(([\s\S]*)\)$/i);
   if (!match) throw new TypeError(`Unsupported gradient: ${value}`);
   const repeating = match[1] ? { repeating: true } : {};
   const args = splitTopLevel(match[3]!, /,/);
-  const first = (args[0] ?? "").toLowerCase().split(/\s+/);
+  const first = (args[0] ?? "").toLowerCase().trim().split(/\s+/);
+  if (match[2]!.toLowerCase() === "conic") {
+    const header = conicHeader(first);
+    return { type: "conic", ...header, ...repeating, stops: (header ? args.slice(1) : args).flatMap(parseConicStop) };
+  }
   if (match[2]!.toLowerCase() === "linear") {
     const degrees = first.length === 1 ? angle(first[0]!) : undefined;
     if (degrees !== undefined) return { type: "linear", angle: degrees, ...repeating, stops: args.slice(1).flatMap(parseStop) };
@@ -293,16 +327,16 @@ export function parseGradient(value: string): Gradient {
 /** Resolves stop colours and converts `N%` offsets to fractions; px and omitted offsets resolve natively. */
 export function normalizeGradient(gradient: Gradient, colour: (value: string) => string): Gradient {
   if (gradient.stops.length === 0) throw new TypeError("A gradient needs at least one colour stop");
+  const conic = gradient.type === "conic";
   const stops = gradient.stops.map(stop => {
     const { color, offset } = typeof stop === "string" ? { color: stop, offset: undefined } : stop;
-    let resolved: GradientStop["offset"] = offset;
+    let resolved: GradientStop["offset"] = offset as GradientStop["offset"];
     if (typeof offset === "string") {
-      const parsed = position(offset.trim());
-      resolved = parsed;
+      resolved = conic ? turn(offset.trim()) : position(offset.trim());
     } else if (offset !== undefined && !Number.isFinite(offset)) {
       throw new TypeError(`Invalid gradient offset: ${offset}`);
     }
     return resolved === undefined ? { color: colour(color) } : { color: colour(color), offset: resolved };
   });
-  return { ...gradient, stops: stops.length === 1 ? [stops[0]!, { color: stops[0]!.color }] : stops };
+  return { ...gradient, stops: stops.length === 1 ? [stops[0]!, { color: stops[0]!.color }] : stops } as Gradient;
 }

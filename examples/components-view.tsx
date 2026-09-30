@@ -500,7 +500,7 @@ export function App() {
               </Row>
             </Section>
 
-            <Section title="Gradients" description="linear-gradient and radial-gradient backgrounds, also in hover with transitions.">
+            <Section title="Gradients" description="linear-gradient, radial-gradient and conic-gradient backgrounds, also in hover with transitions.">
               <Row gap={20} style={{ wrap: true, padding: 12 }}>
                 {([
                   ["135deg", "linear-gradient(135deg, #2563eb, #9333ea)"],
@@ -511,6 +511,9 @@ export function App() {
                   ["Closest side", "radial-gradient(closest-side, #fde68a, #7c3aed)"],
                   ["Stripes", "repeating-linear-gradient(45deg, #0f172a 0 8px, #334155 8px 16px)"],
                   ["Rings", "repeating-radial-gradient(circle at 30% 40%, #0ea5e9 0 6px, #0369a1 6px 12px)"],
+                  ["Conic", "conic-gradient(from 90deg, #f43f5e, #f59e0b, #22c55e, #0ea5e9, #8b5cf6, #f43f5e)"],
+                  ["Pie", "conic-gradient(at 35% 60%, #2563eb 0 40%, #f59e0b 0 70%, #e2e8f0 0)"],
+                  ["Checkerboard", "repeating-conic-gradient(#0f172a 0 25%, #f8fafc 0 50%)"],
                 ] as const).map(([label, background]) => (
                   <Column key={label} style={{ width: 120, height: 72, radius: 12, background, align: "center", justify: "center" }}>
                     <Text size={12} weight={600} color="#ffffff" style={{ textShadow: "0 1px #0006" }}>{label}</Text>

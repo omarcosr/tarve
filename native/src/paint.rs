@@ -26,6 +26,22 @@ pub(crate) enum GradientGeometry {
         start: f64,
         end: f64,
     },
+    /// CSS conic: `from` in radians (0 points up, clockwise). The angle's
+    /// fraction of a turn past `from` maps offsets 0 and 1 to `start` and
+    /// `end`.
+    Conic {
+        center: Point,
+        from: f64,
+        start: f64,
+        end: f64,
+    },
+}
+
+/// Fraction of a turn (0..1) of `point` around `center`, clockwise from
+/// `from` (radians, 0 pointing up) in y-down coordinates, as CSS conics.
+pub(crate) fn conic_turn(center: Point, from: f64, point: Point) -> f64 {
+    let angle = (point.x - center.x).atan2(center.y - point.y);
+    ((angle - from) / std::f64::consts::TAU).rem_euclid(1.0)
 }
 
 /// A CSS gradient resolved to local coordinates; stop offsets are sorted and
@@ -60,6 +76,12 @@ impl PaintGradient {
                     .hypot((point.y - center.y) / radius_y.max(1e-6));
                 (distance - start) / (end - start).max(1e-9)
             }
+            GradientGeometry::Conic {
+                center,
+                from,
+                start,
+                end,
+            } => (conic_turn(center, from, point) - start) / (end - start).max(1e-9),
         };
         let t = if self.repeat {
             t - t.floor()
@@ -122,6 +144,23 @@ impl PaintGradient {
                 .with_stops(stops.as_slice()),
                 Affine::translate(center.to_vec2())
                     * Affine::scale_non_uniform(radius_x.max(1e-6), radius_y.max(1e-6)),
+            ),
+            // Peniko sweeps measure from +x; rotating the brush puts angle 0
+            // at `from`, so its 0..2π sweep is the CSS turn.
+            GradientGeometry::Conic {
+                center,
+                from,
+                start,
+                end,
+            } => (
+                Gradient::new_sweep(
+                    Point::ZERO,
+                    (start * std::f64::consts::TAU) as f32,
+                    (end * std::f64::consts::TAU).max(start * std::f64::consts::TAU + 1e-6) as f32,
+                )
+                .with_stops(stops.as_slice()),
+                Affine::translate(center.to_vec2())
+                    * Affine::rotate(from - std::f64::consts::FRAC_PI_2),
             ),
         };
         gradient.extend = if self.repeat {
@@ -616,6 +655,101 @@ mod tests {
         let center = pixmap.data()[8 * 16 + 8];
         assert_eq!(center.to_u8_array(), [255, 0, 0, 255]);
         assert_eq!(pixmap.data()[0].to_u8_array(), [0, 0, 0, 0]);
+    }
+
+    /// Renders `gradient` over a 64×64 box on the CPU and returns the worst
+    /// channel difference from `PaintGradient::sample`, skipping pixels next
+    /// to hard stops and the centre (where the colour is undefined).
+    fn conic_cpu_error(gradient: &PaintGradient) -> u8 {
+        let mut context = RenderContext::new(64, 64);
+        let mut resources = Resources::new();
+        let mut images = HashMap::new();
+        {
+            let mut target = CpuPaintTarget::new(&mut context, &mut resources, &mut images);
+            target.fill_gradient(Affine::IDENTITY, gradient, &Rect::new(0.0, 0.0, 64.0, 64.0));
+            target.finish();
+        }
+        context.flush();
+        let mut pixmap = Pixmap::new(64, 64);
+        context.render(&mut pixmap, &mut resources);
+        let GradientGeometry::Conic { center, .. } = gradient.geometry else {
+            unreachable!()
+        };
+        let mut worst = 0;
+        for y in 0..64 {
+            for x in 0..64 {
+                let point = Point::new(x as f64 + 0.5, y as f64 + 0.5);
+                if (point - center).hypot() < 6.0 {
+                    continue;
+                }
+                let around = [(-1.5, 0.0), (1.5, 0.0), (0.0, -1.5), (0.0, 1.5)].map(|(dx, dy)| {
+                    gradient
+                        .sample(Point::new(point.x + dx, point.y + dy))
+                        .to_rgba8()
+                });
+                let expected = gradient.sample(point).to_rgba8();
+                let steep = around.iter().any(|near| {
+                    [
+                        near.r.abs_diff(expected.r),
+                        near.g.abs_diff(expected.g),
+                        near.b.abs_diff(expected.b),
+                    ]
+                    .into_iter()
+                    .max()
+                    .unwrap()
+                        > 24
+                });
+                if steep {
+                    continue;
+                }
+                let actual = pixmap.data()[y * 64 + x].to_u8_array();
+                let error = [expected.r, expected.g, expected.b]
+                    .iter()
+                    .zip(actual)
+                    .map(|(e, a)| e.abs_diff(a))
+                    .max()
+                    .unwrap();
+                worst = worst.max(error);
+            }
+        }
+        worst
+    }
+
+    #[test]
+    fn conic_gradients_rasterize_like_their_css_sample() {
+        let red = Color::from_rgb8(255, 0, 0);
+        let blue = Color::from_rgb8(0, 0, 255);
+        let green = Color::from_rgb8(0, 160, 0);
+        let plain = PaintGradient {
+            geometry: GradientGeometry::Conic {
+                center: Point::new(20.0, 36.0),
+                from: 30f64.to_radians(),
+                start: 0.0,
+                end: 1.0,
+            },
+            stops: vec![(0.0, red), (0.5, blue), (0.5, green), (1.0, red)],
+            repeat: false,
+        };
+        // CSS: 0 points up and turns clockwise, so straight right of the
+        // centre is 90° - 30° = a sixth of a turn into the red→blue ramp.
+        let right = plain.sample(Point::new(60.0, 36.0)).to_rgba8();
+        assert!(right.r > right.b && right.b > 60, "{right:?}");
+        assert!(conic_cpu_error(&plain) <= 6, "{}", conic_cpu_error(&plain));
+        let repeating = PaintGradient {
+            geometry: GradientGeometry::Conic {
+                center: Point::new(32.0, 32.0),
+                from: 0.0,
+                start: 0.0,
+                end: 0.25,
+            },
+            stops: vec![(0.0, red), (1.0, blue)],
+            repeat: true,
+        };
+        assert!(
+            conic_cpu_error(&repeating) <= 6,
+            "{}",
+            conic_cpu_error(&repeating)
+        );
     }
 
     #[test]

@@ -5579,6 +5579,72 @@ fn gradient_backgrounds_resolve_css_geometry() {
 }
 
 #[test]
+fn conic_gradients_resolve_centre_from_and_stop_fixup() {
+    let card = |id: &str, background: serde_json::Value| {
+        node(
+            id,
+            "view",
+            json!({"width": 100, "height": 50, "background": background}),
+            vec![],
+        )
+    };
+    let mut tree = Tree::new(root(vec![
+        card(
+            "plain",
+            json!({"type": "conic", "stops": [{"color": "#ff0000"}, {"color": "#0000ff"}]}),
+        ),
+        card(
+            "placed",
+            json!({"type": "conic", "from": 90, "at": {"x": "10px", "y": 0.25},
+                "stops": [{"color": "#ff0000", "offset": 0.25}, {"color": "#00ff00"}, {"color": "#0000ff", "offset": 0.75}]}),
+        ),
+        card(
+            "repeating",
+            json!({"type": "conic", "repeating": true, "at": {"x": "10px", "xEdge": "right"},
+                "stops": [{"color": "#ff0000", "offset": 0}, {"color": "#0000ff", "offset": 0.125}]}),
+        ),
+    ]));
+    tree.compute(300.0, 200.0).unwrap();
+    let gradients = fills_of(&mut tree).gradients;
+    assert_eq!(gradients.len(), 3);
+    let conic = |index: usize| match gradients[index].0.geometry {
+        crate::paint::GradientGeometry::Conic {
+            center,
+            from,
+            start,
+            end,
+        } => (center, from, start, end),
+        other => panic!("expected a conic gradient, got {other:?}"),
+    };
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-4;
+
+    let (center, from, start, end) = conic(0);
+    let rect = gradients[0].1;
+    assert!(near(center.x, rect.center().x) && near(center.y, rect.center().y));
+    assert!(near(from, 0.0) && near(start, 0.0) && near(end, 1.0));
+
+    let (center, from, start, end) = conic(1);
+    let rect = gradients[1].1;
+    assert!(near(center.x, rect.x0 + 10.0) && near(center.y, rect.y0 + 12.5));
+    assert!(near(from, std::f64::consts::FRAC_PI_2));
+    assert!(
+        near(start, 0.0) && near(end, 1.0),
+        "stops within 0..1 pad to a full turn"
+    );
+    let offsets: Vec<f32> = gradients[1].0.stops.iter().map(|stop| stop.0).collect();
+    assert!(offsets.windows(2).all(|pair| pair[0] <= pair[1]));
+    assert!(
+        offsets.contains(&0.5),
+        "the auto stop sits halfway: {offsets:?}"
+    );
+
+    let (center, _, start, end) = conic(2);
+    let rect = gradients[2].1;
+    assert!(near(center.x, rect.x1 - 10.0));
+    assert!(gradients[2].0.repeat && near(start, 0.0) && near(end, 0.125));
+}
+
+#[test]
 fn gradient_stops_support_px_css_fixup_and_repeating() {
     use crate::paint::GradientGeometry;
     let card = |id: &str, background: serde_json::Value| {

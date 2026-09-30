@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 47;
+export const PROTOCOL_VERSION = 48;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
@@ -62,7 +62,17 @@ export interface RadialGradient {
   size?: RadialExtent | GradientLength | readonly [GradientLength, GradientLength];
   repeating?: boolean; stops: readonly (GradientStop | string)[];
 }
-export type Gradient = LinearGradient | RadialGradient;
+/** A conic colour stop: a number is a fraction of a turn; strings take `%`, `deg`, `turn`, `rad` or `grad`. */
+export interface ConicGradientStop { color: string; offset?: number | `${number}%` | `${number}deg` | `${number}turn` | `${number}rad` | `${number}grad` }
+/**
+ * CSS `conic-gradient`: `from` in CSS degrees (0 points up, clockwise; default 0) and `at` the centre
+ * (default the box centre). Stops sweep one turn clockwise from `from`.
+ */
+export interface ConicGradient {
+  type: "conic"; from?: number; at?: GradientCentre;
+  repeating?: boolean; stops: readonly (ConicGradientStop | string)[];
+}
+export type Gradient = LinearGradient | RadialGradient | ConicGradient;
 export type UserSelect = "auto" | "text" | "none" | "all";
 export type TextDecoration = "none" | "underline" | "overline" | "line-through";
 export interface SyntaxTheme {

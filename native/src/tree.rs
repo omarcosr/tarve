@@ -263,7 +263,8 @@ fn gradient_centre(at: Option<&Value>, key: &str, end_edge: &str) -> (f32, f32) 
 /// `(offset, unit, r, g, b, a)` per stop. Kind 1 is linear (a = angle in
 /// degrees, b/c = corner); kind 2 is radial (a = circle flag, b/c = centre
 /// as fractions; size 0 farthest-corner, 1 closest-side, 2 farthest-side,
-/// 3 closest-corner, 4 explicit sx/sy). Stop units: 0 fraction, 1 px, 2 auto.
+/// 3 closest-corner, 4 explicit sx/sy); kind 3 is conic (a = `from` in
+/// degrees, b/c = centre). Stop units: 0 fraction, 1 px, 2 auto.
 fn background_vector(value: &Value) -> Vec<f32> {
     if let Some(text) = value.as_str() {
         return rgba_of(color(text)).to_vec();
@@ -302,84 +303,95 @@ fn background_vector(value: &Value) -> Vec<f32> {
     } else {
         0.0
     };
-    let header: [f32; GRADIENT_HEADER] =
-        if object.get("type").and_then(Value::as_str) == Some("radial") {
-            let at = object.get("at");
-            let (centre_x, centre_y) = (
-                gradient_centre(at, "x", "right"),
-                gradient_centre(at, "y", "bottom"),
-            );
-            let circle = object.get("shape").and_then(Value::as_str) == Some("circle");
-            let size = object.get("size").unwrap_or(&Value::Null);
-            let (code, x, y) = match size {
-                Value::String(keyword) if !keyword.ends_with("px") && !keyword.ends_with('%') => (
-                    match keyword.as_str() {
-                        "closest-side" => 1.0,
-                        "farthest-side" => 2.0,
-                        "closest-corner" => 3.0,
-                        _ => 0.0,
-                    },
-                    (0.0, 0.0),
-                    (0.0, 0.0),
-                ),
-                Value::Array(pair) => match (
-                    pair.first().and_then(gradient_length),
-                    pair.get(1).and_then(gradient_length),
-                ) {
-                    (Some(x), Some(y)) => (4.0, x, y),
-                    _ => (0.0, (0.0, 0.0), (0.0, 0.0)),
+    let kind = object.get("type").and_then(Value::as_str);
+    let header: [f32; GRADIENT_HEADER] = if kind == Some("conic") {
+        let at = object.get("at");
+        let (centre_x, centre_y) = (
+            gradient_centre(at, "x", "right"),
+            gradient_centre(at, "y", "bottom"),
+        );
+        let from = object.get("from").and_then(Value::as_f64).unwrap_or(0.0) as f32;
+        [
+            3.0, from, centre_x.0, centre_y.0, repeat, 0.0, 0.0, 0.0, 0.0, 0.0, centre_x.1,
+            centre_y.1,
+        ]
+    } else if kind == Some("radial") {
+        let at = object.get("at");
+        let (centre_x, centre_y) = (
+            gradient_centre(at, "x", "right"),
+            gradient_centre(at, "y", "bottom"),
+        );
+        let circle = object.get("shape").and_then(Value::as_str) == Some("circle");
+        let size = object.get("size").unwrap_or(&Value::Null);
+        let (code, x, y) = match size {
+            Value::String(keyword) if !keyword.ends_with("px") && !keyword.ends_with('%') => (
+                match keyword.as_str() {
+                    "closest-side" => 1.0,
+                    "farthest-side" => 2.0,
+                    "closest-corner" => 3.0,
+                    _ => 0.0,
                 },
-                other => match gradient_length(other) {
-                    Some(length) => (4.0, length, length),
-                    None => (0.0, (0.0, 0.0), (0.0, 0.0)),
-                },
-            };
-            [
-                2.0,
-                if circle { 1.0 } else { 0.0 },
-                centre_x.0,
-                centre_y.0,
-                repeat,
-                code,
-                x.0,
-                x.1,
-                y.0,
-                y.1,
-                centre_x.1,
-                centre_y.1,
-            ]
-        } else {
-            let to = object.get("to").and_then(Value::as_str).unwrap_or("");
-            let has = |word: &str| to.split_whitespace().any(|part| part == word);
-            let x: f32 = if has("right") {
-                1.0
-            } else if has("left") {
-                -1.0
-            } else {
-                0.0
-            };
-            let y: f32 = if has("bottom") {
-                1.0
-            } else if has("top") {
-                -1.0
-            } else {
-                0.0
-            };
-            let (angle, corner_x, corner_y) = if x != 0.0 && y != 0.0 {
-                (0.0, x, y)
-            } else if to.is_empty() {
-                (
-                    object.get("angle").and_then(Value::as_f64).unwrap_or(180.0) as f32,
-                    0.0,
-                    0.0,
-                )
-            } else {
-                (x.atan2(-y).to_degrees(), 0.0, 0.0)
-            };
-            [
-                1.0, angle, corner_x, corner_y, repeat, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-            ]
+                (0.0, 0.0),
+                (0.0, 0.0),
+            ),
+            Value::Array(pair) => match (
+                pair.first().and_then(gradient_length),
+                pair.get(1).and_then(gradient_length),
+            ) {
+                (Some(x), Some(y)) => (4.0, x, y),
+                _ => (0.0, (0.0, 0.0), (0.0, 0.0)),
+            },
+            other => match gradient_length(other) {
+                Some(length) => (4.0, length, length),
+                None => (0.0, (0.0, 0.0), (0.0, 0.0)),
+            },
         };
+        [
+            2.0,
+            if circle { 1.0 } else { 0.0 },
+            centre_x.0,
+            centre_y.0,
+            repeat,
+            code,
+            x.0,
+            x.1,
+            y.0,
+            y.1,
+            centre_x.1,
+            centre_y.1,
+        ]
+    } else {
+        let to = object.get("to").and_then(Value::as_str).unwrap_or("");
+        let has = |word: &str| to.split_whitespace().any(|part| part == word);
+        let x: f32 = if has("right") {
+            1.0
+        } else if has("left") {
+            -1.0
+        } else {
+            0.0
+        };
+        let y: f32 = if has("bottom") {
+            1.0
+        } else if has("top") {
+            -1.0
+        } else {
+            0.0
+        };
+        let (angle, corner_x, corner_y) = if x != 0.0 && y != 0.0 {
+            (0.0, x, y)
+        } else if to.is_empty() {
+            (
+                object.get("angle").and_then(Value::as_f64).unwrap_or(180.0) as f32,
+                0.0,
+                0.0,
+            )
+        } else {
+            (x.atan2(-y).to_degrees(), 0.0, 0.0)
+        };
+        [
+            1.0, angle, corner_x, corner_y, repeat, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ]
+    };
     header.into_iter().chain(stops).collect()
 }
 
@@ -410,10 +422,10 @@ fn gradient_shapes_match(from: &[f32], to: &[f32]) -> bool {
         return true;
     }
     let mut discrete = vec![0, 4, 5, 7, 9, 10, 11];
-    if from[0] > 1.5 {
-        discrete.push(1);
-    } else {
-        discrete.extend([2, 3]);
+    match from[0] as u8 {
+        2 => discrete.push(1),
+        1 => discrete.extend([2, 3]),
+        _ => {}
     }
     discrete.extend((GRADIENT_HEADER + 1..from.len()).step_by(GRADIENT_STOP));
     discrete.iter().all(|index| from[*index] == to[*index])
@@ -461,14 +473,23 @@ fn paint_gradient(values: &[f32], rect: BoxRect) -> Option<PaintGradient> {
         return None;
     }
     let (width, height) = (rect.width(), rect.height());
-    let radial = values[0] > 1.5;
+    let conic = values[0] > 2.5;
+    let radial = values[0] > 1.5 && !conic;
     let value = |index: usize| f64::from(values[index]);
-    let (line, radii, ray) = if radial {
-        let coordinate = |index: usize, unit: usize, low: f64, high: f64| match values[unit] as u8 {
-            1 => low + value(index),
-            2 => high - value(index),
-            _ => low + value(index) * (high - low),
-        };
+    let coordinate = |index: usize, unit: usize, low: f64, high: f64| match values[unit] as u8 {
+        1 => low + value(index),
+        2 => high - value(index),
+        _ => low + value(index) * (high - low),
+    };
+    let conic_center = conic.then(|| {
+        vello::kurbo::Point::new(
+            coordinate(2, 10, rect.x0, rect.x1),
+            coordinate(3, 11, rect.y0, rect.y1),
+        )
+    });
+    let (line, radii, ray) = if conic {
+        (None, None, 1.0)
+    } else if radial {
         let center = vello::kurbo::Point::new(
             coordinate(2, 10, rect.x0, rect.x1),
             coordinate(3, 11, rect.y0, rect.y1),
@@ -665,7 +686,12 @@ fn paint_gradient(values: &[f32], rect: BoxRect) -> Option<PaintGradient> {
             start: low,
             end: high,
         },
-        _ => return None,
+        _ => GradientGeometry::Conic {
+            center: conic_center?,
+            from: value(1).to_radians(),
+            start: low,
+            end: high,
+        },
     };
     Some(PaintGradient {
         geometry,

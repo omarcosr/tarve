@@ -4,11 +4,15 @@ All notable changes to `@tarve/core` and `@tarve/react-icons` are documented her
 
 ## Unreleased
 
+### Added
+- `conic-gradient(…)` and `repeating-conic-gradient(…)` (or `{ type: "conic", from, at, stops }`) for `background`, `borderColor` and `foreground`, in state styles too, on D3D11, Vello GPU and the CPU renderer. `from` and stop positions take `deg`, `turn`, `rad`, `grad` or `%`; `at` takes every position form radial gradients accept. Conic gradients with the same stop count transition stop by stop.
+
 ### Fixed
 - `TextArea` Up/Down keep the column they started from when they pass a shorter line.
 - `Backspace` at the start and `Delete` at the end of an `Input`/`TextArea` no longer emit a `change` event with the unchanged value.
 
 ### Changed
+- JSON protocol version 48.
 - The JS-side native shadow tree copies nodes shallowly and shares their styles instead of deep-cloning the whole document on every render. On a 6,000-node tree the copy drops from ~25 ms to ~3.5 ms (first frame and every update), and the second copy of every style object is gone.
 - Renderer fallback (D3D11 → Vello/DX12 → CPU on Windows, Vello → CPU on Linux) is one ordered list shared by startup and device-loss recovery, documented in `PERFORMANCE.md`. Startup errors now name every failed attempt. Removes an unreachable Vulkan-first Vello path on Windows.
 - Compiled executables reuse the extracted native runtime without reading or hashing it on every launch: `tarve build` embeds its SHA-256 and size, and a launch that finds the cached copy at that size uses it directly (the hash is checked when the copy is written). An empty window reaches its first frame in ~52 ms instead of ~80 ms.
