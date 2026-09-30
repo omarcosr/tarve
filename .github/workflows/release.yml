@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -50,7 +50,7 @@ jobs:
         run: bun run package:native
 
       - name: Upload Linux runtime
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tarve-linux-x64-native
           if-no-files-found: error
@@ -67,7 +67,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -93,7 +93,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Download Linux runtime
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: tarve-linux-x64-native
           path: native/linux-x64
@@ -143,7 +143,7 @@ jobs:
         run: bun run release:build
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tarve-${{ github.ref_name }}-windows-x64
           if-no-files-found: error
@@ -191,13 +191,13 @@ jobs:
 
     steps:
       - name: Setup Node for npm
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
       - name: Download verified release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: tarve-${{ github.ref_name }}-windows-x64
           path: release
