@@ -5957,3 +5957,104 @@ fn hover_transform_transitions_and_invalid_transforms_are_rejected() {
         assert!(error.contains("transform"), "{error}");
     }
 }
+
+#[test]
+fn hit_testing_caches_follow_updates_patches_and_mutations() {
+    let layer = |id: &str, extra: serde_json::Value| {
+        let mut style = json!({"position":"absolute","left":0,"top":0,"width":100,"height":40});
+        style
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        node(id, "button", style, vec![])
+    };
+    let mut tree = Tree::new(root(vec![layer("a", json!({})), layer("b", json!({}))]));
+    tree.compute(300.0, 200.0).unwrap();
+    assert!(tree.hit_caches_are_fresh());
+    tree.pointer_move(20.0, 20.0);
+    assert_eq!(
+        tree.hovered.as_deref(),
+        Some("b"),
+        "later sibling is on top"
+    );
+
+    tree.patch(vec![layer("a", json!({"zIndex":5}))]).unwrap();
+    tree.compute(300.0, 200.0).unwrap();
+    assert!(tree.hit_caches_are_fresh());
+    tree.pointer_move(21.0, 20.0);
+    assert_eq!(
+        tree.hovered.as_deref(),
+        Some("a"),
+        "patched zIndex reorders hits"
+    );
+
+    tree.patch(vec![layer("a", json!({"zIndex":5,"transform":{"x":150}}))])
+        .unwrap();
+    tree.compute(300.0, 200.0).unwrap();
+    assert!(tree.hit_caches_are_fresh());
+    tree.pointer_move(20.0, 20.0);
+    assert_eq!(tree.hovered.as_deref(), Some("b"));
+    tree.pointer_move(170.0, 20.0);
+    assert_eq!(
+        tree.hovered.as_deref(),
+        Some("a"),
+        "patched transform moves the hit area"
+    );
+
+    tree.mutate(vec![
+        TreeMutation::Children {
+            id: "root".into(),
+            children: vec!["b".into()],
+        },
+        TreeMutation::Remove { id: "a".into() },
+    ])
+    .unwrap();
+    tree.compute(300.0, 200.0).unwrap();
+    assert!(tree.hit_caches_are_fresh());
+    tree.pointer_move(171.0, 20.0);
+    assert_eq!(tree.hovered, None, "removed nodes leave the caches");
+
+    let mut popup = layer("popup", json!({}));
+    popup.portal = true;
+    let host = node("host", "view", json!({}), vec![popup]);
+    tree.update(root(vec![layer("b", json!({})), host]));
+    tree.compute(300.0, 200.0).unwrap();
+    assert!(tree.hit_caches_are_fresh());
+    tree.pointer_move(20.0, 20.0);
+    assert_eq!(
+        tree.hovered.as_deref(),
+        Some("popup"),
+        "portals hit above the root"
+    );
+}
+
+#[test]
+#[ignore]
+fn bench_pointer_motion_tick() {
+    let mut rows = Vec::new();
+    for i in 0..10_000 {
+        rows.push(
+            serde_json::from_value::<Node>(
+                json!({"id":format!("r{i}"),"kind":"view","style":{"height":4},"children":[]}),
+            )
+            .unwrap(),
+        );
+    }
+    let mut tree = Tree::new(root(rows));
+    tree.compute(800.0, 600.0).unwrap();
+    let mut moving = std::time::Duration::ZERO;
+    let mut ticking = std::time::Duration::ZERO;
+    for i in 0..2_000 {
+        let start = std::time::Instant::now();
+        tree.pointer_move((i % 700) as f64, (i % 500) as f64);
+        moving += start.elapsed();
+        let start = std::time::Instant::now();
+        tree.advance_motion(i as f64);
+        ticking += start.elapsed();
+    }
+    println!(
+        "BENCH pointer_move_ns={} advance_motion_ns={}",
+        moving.as_nanos() / 2_000,
+        ticking.as_nanos() / 2_000
+    );
+}

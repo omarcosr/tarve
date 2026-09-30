@@ -1487,6 +1487,13 @@ pub struct Tree {
     frame_overlay: Option<VecDeque<f32>>,
     virtual_focus: Option<(String, String)>,
     stacking: HashMap<String, f32>,
+    /// Parents whose children differ in stacking order; hit testing sorts
+    /// only these, so wide flat containers are walked without a sort.
+    stacked_parents: HashSet<String>,
+    /// Top-level portal roots in ascending stacking order.
+    portal_order: Vec<String>,
+    /// Nodes with a `transform` in their base or state styles.
+    transformed: HashSet<String>,
     window_chrome_suppressed: bool,
     pub dirty: Dirty,
     pub hovered: Option<String>,
@@ -1497,6 +1504,9 @@ pub struct Tree {
     visual_snapshot_ids: Vec<String>,
     /// Extra ids to re-check at the next sync (e.g. `disabled` changed).
     state_candidates: Vec<String>,
+    /// Ids whose entry holds at least one motion track, so frame and
+    /// pointer ticks visit only animating nodes instead of the whole tree.
+    animating: HashSet<String>,
     pub focused: Option<String>,
     pub(crate) focus_visible: bool,
     pressed: Option<String>,
@@ -1542,7 +1552,86 @@ impl Tree {
         if self.entries.contains_key(&self.root) {
             visit(&self.entries, &self.root, &mut stacking);
         }
+        self.stacked_parents = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| {
+                let mut levels = entry
+                    .children
+                    .iter()
+                    .map(|child| stacking.get(child).copied().unwrap_or(0.0));
+                levels
+                    .next()
+                    .is_some_and(|first| levels.any(|level| level != first))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
         self.stacking = stacking;
+        self.transformed = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| {
+                entry.node.style.get("transform").is_some()
+                    || ["hover", "active", "focus", "focusVisible", "disabled"]
+                        .iter()
+                        .any(|state| {
+                            entry
+                                .node
+                                .style
+                                .get(*state)
+                                .is_some_and(|style| style.get("transform").is_some())
+                        })
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        let mut portals = self.portal_roots();
+        portals.sort_by(|a, b| {
+            self.stacking
+                .get(a)
+                .copied()
+                .unwrap_or(0.0)
+                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
+        });
+        self.portal_order = portals;
+    }
+    /// Whether the hit-testing caches match a fresh rebuild and every node
+    /// with a motion is tracked as animating.
+    #[cfg(test)]
+    pub(crate) fn hit_caches_are_fresh(&mut self) -> bool {
+        let animating_ok = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| !entry.motions.is_empty())
+            .all(|(id, _)| self.animating.contains(id));
+        let cached = (
+            self.stacked_parents.clone(),
+            self.portal_order.clone(),
+            self.transformed.clone(),
+        );
+        self.refresh_stacking();
+        animating_ok
+            && cached
+                == (
+                    self.stacked_parents.clone(),
+                    self.portal_order.clone(),
+                    self.transformed.clone(),
+                )
+    }
+    /// Children of `id` in ascending stacking order (stable), borrowed when
+    /// no reordering is needed.
+    fn hit_order<'a>(&self, id: &str, children: &'a [String]) -> std::borrow::Cow<'a, [String]> {
+        if !self.stacked_parents.contains(id) {
+            return std::borrow::Cow::Borrowed(children);
+        }
+        let mut sorted = children.to_vec();
+        sorted.sort_by(|a, b| {
+            self.stacking
+                .get(a)
+                .copied()
+                .unwrap_or(0.0)
+                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
+        });
+        std::borrow::Cow::Owned(sorted)
     }
 
     fn portal_roots(&self) -> Vec<String> {
@@ -1622,12 +1711,16 @@ impl Tree {
             frame_overlay: None,
             virtual_focus: None,
             stacking: HashMap::default(),
+            stacked_parents: HashSet::default(),
+            portal_order: Vec::new(),
+            transformed: HashSet::default(),
             window_chrome_suppressed: false,
             dirty: Dirty::all(),
             hovered: None,
             hover_styled: Vec::new(),
             visual_snapshot_ids: Vec::new(),
             state_candidates: Vec::new(),
+            animating: HashSet::default(),
             focused: None,
             focus_visible: false,
             pressed: None,
@@ -1684,7 +1777,12 @@ impl Tree {
         self.advance_clock(now_ms);
         self.sync_state_transitions();
         let mut completed = Vec::new();
-        for (id, entry) in &mut self.entries {
+        let ids: Vec<String> = self.animating.iter().cloned().collect();
+        for id in ids {
+            let Some(entry) = self.entries.get_mut(&id) else {
+                self.animating.remove(&id);
+                continue;
+            };
             let properties: Vec<String> = entry.motions.keys().cloned().collect();
             for property in properties {
                 let Some(track) = entry.motions.get_mut(&property) else {
@@ -1712,6 +1810,9 @@ impl Tree {
         for (id, property) in completed {
             if let Some(entry) = self.entries.get_mut(&id) {
                 entry.motions.remove(&property);
+                if entry.motions.is_empty() {
+                    self.animating.remove(&id);
+                }
             }
             self.pending_motion_events
                 .push(json!({"type":"motionComplete", "id":id, "property":property}));
@@ -1782,6 +1883,7 @@ impl Tree {
             }
             if !started.is_empty() {
                 entry.motions.extend(started);
+                self.animating.insert(id.clone());
                 self.dirty.paint = true;
             }
         }
@@ -1791,11 +1893,16 @@ impl Tree {
         Some(self.entries.get(id)?.motions.get(property)?.current.clone())
     }
     pub fn active_motion_count(&self) -> usize {
-        self.entries.values().map(|entry| entry.motions.len()).sum()
+        self.animating
+            .iter()
+            .filter_map(|id| self.entries.get(id))
+            .map(|entry| entry.motions.len())
+            .sum()
     }
     pub fn next_motion_tick_ms(&self) -> Option<f64> {
-        self.entries
-            .values()
+        self.animating
+            .iter()
+            .filter_map(|id| self.entries.get(id))
             .flat_map(|entry| entry.motions.values())
             .map(|track| {
                 if self.motion_time_ms < track.start_ms {
@@ -2169,6 +2276,11 @@ impl Tree {
             .is_some_and(|entry| entry.node.disabled != node.disabled)
         {
             self.state_candidates.push(node.id.clone());
+        }
+        if motions.is_empty() {
+            self.animating.remove(&id);
+        } else {
+            self.animating.insert(id.clone());
         }
         self.entries.insert(
             id,
@@ -3532,19 +3644,11 @@ impl Tree {
 
     /// The node's transform in layout space, if it is not the identity.
     fn node_transform(&self, id: &str, offset: Vec2) -> Option<Affine> {
+        if self.animating.is_empty() && !self.transformed.contains(id) {
+            return None;
+        }
         let entry = self.entries.get(id)?;
-        if entry.node.style.get("transform").is_none()
-            && !entry.motions.contains_key("transform")
-            && !["hover", "active", "focus", "focusVisible", "disabled"]
-                .iter()
-                .any(|state| {
-                    entry
-                        .node
-                        .style
-                        .get(*state)
-                        .is_some_and(|style| style.get("transform").is_some())
-                })
-        {
+        if !self.transformed.contains(id) && !entry.motions.contains_key("transform") {
             return None;
         }
         let state = self.visual_state_for(id, &entry.node);
@@ -4296,14 +4400,7 @@ impl Tree {
             return Vec::new();
         }
         let root_rect = self.entries[&self.root].rect;
-        let mut portals = self.portal_roots();
-        portals.sort_by(|a, b| {
-            self.stacking
-                .get(a)
-                .copied()
-                .unwrap_or(0.0)
-                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
-        });
+        let portals = &self.portal_order;
         for portal in portals.iter().rev() {
             if let Some(path) = self.hover_path_in(
                 portal,
@@ -4347,14 +4444,7 @@ impl Tree {
         if !clip.contains(mouse) {
             return None;
         }
-        let mut children = entry.children.clone();
-        children.sort_by(|a, b| {
-            self.stacking
-                .get(a)
-                .copied()
-                .unwrap_or(0.0)
-                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
-        });
+        let children = self.hit_order(id, &entry.children);
         for child in children.iter().rev() {
             if self.entries[child].node.portal && !entry.node.portal {
                 continue;
@@ -4374,14 +4464,7 @@ impl Tree {
 
     fn hit_root(&self, scroll_only: bool) -> Option<String> {
         let root_rect = self.entries[&self.root].rect;
-        let mut portals = self.portal_roots();
-        portals.sort_by(|a, b| {
-            self.stacking
-                .get(a)
-                .copied()
-                .unwrap_or(0.0)
-                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
-        });
+        let portals = &self.portal_order;
         for portal in portals.iter().rev() {
             if let Some(id) = self.hit(
                 portal,
@@ -4404,14 +4487,7 @@ impl Tree {
 
     fn selectable_text_hit_root(&self) -> Option<String> {
         let root_rect = self.entries[&self.root].rect;
-        let mut portals = self.portal_roots();
-        portals.sort_by(|a, b| {
-            self.stacking
-                .get(a)
-                .copied()
-                .unwrap_or(0.0)
-                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
-        });
+        let portals = &self.portal_order;
         for portal in portals.iter().rev() {
             match self.selectable_text_hit(portal, self.ancestor_scroll_offset(portal), root_rect) {
                 SelectableTextHit::Text(id) => return Some(id),
@@ -4442,14 +4518,7 @@ impl Tree {
         if !clip.contains(self.mouse) {
             return SelectableTextHit::Miss;
         }
-        let mut children = entry.children.clone();
-        children.sort_by(|a, b| {
-            self.stacking
-                .get(a)
-                .copied()
-                .unwrap_or(0.0)
-                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
-        });
+        let children = self.hit_order(id, &entry.children);
         for child in children.iter().rev() {
             if self.entries[child].node.portal && !entry.node.portal {
                 continue;
@@ -4517,14 +4586,7 @@ impl Tree {
         if !clip.contains(mouse) {
             return None;
         }
-        let mut children = entry.children.clone();
-        children.sort_by(|a, b| {
-            self.stacking
-                .get(a)
-                .copied()
-                .unwrap_or(0.0)
-                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
-        });
+        let children = self.hit_order(id, &entry.children);
         for child in children.iter().rev() {
             if self.entries[child].node.portal && !entry.node.portal {
                 continue;
