@@ -52,3 +52,13 @@ Writing them found two behaviour gaps, fixed with them:
 
 - `Backspace` at the start and `Delete` at the end emitted a `change` event with the unchanged value; they are now no-ops.
 - Textarea Up/Down had no goal column: passing a shorter line pulled the caret left for the rest of the run. The column from where the run started is now kept (`Tree::vertical_goal`).
+
+## Decision (2026-09-30): keep the native editor
+
+The `PlainEditor` spike was not started. Tarve keeps its own editing code because:
+
+- `PlainEditor` would replace only the cursor model (~700–900 lines); undo/redo, controlled values, masking, number validation, `userSelect`, submit, OTP, caret blink and textarea scrolling (~1,100 lines) stay either way.
+- `PlainEditor` owns its text and `Layout`. Every focused field would carry a second layout kept in sync with the node's value, styles and width, painted instead of `TextEngine`'s — new sync code in exchange for the removed lines.
+- The existing editor is now covered by the parity tests above, which also fixed its two known gaps.
+
+Revisit when Parley's editor gains undo and can render from an external layout, or when bidirectional/vertical text requires visual cursor movement that `TextEngine` does not model.
