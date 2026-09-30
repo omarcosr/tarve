@@ -5,6 +5,7 @@ All notable changes to `@tarve/core` and `@tarve/react-icons` are documented her
 ## Unreleased
 
 ### Changed
+- Renderer fallback (D3D11 → Vello/DX12 → CPU on Windows, Vello → CPU on Linux) is one ordered list shared by startup and device-loss recovery, documented in `PERFORMANCE.md`. Startup errors now name every failed attempt. Removes an unreachable Vulkan-first Vello path on Windows.
 - Compiled executables reuse the extracted native runtime without reading or hashing it on every launch: `tarve build` embeds its SHA-256 and size, and a launch that finds the cached copy at that size uses it directly (the hash is checked when the copy is written). An empty window reaches its first frame in ~52 ms instead of ~80 ms.
 
 ## 0.3.0 — 2026-09-30

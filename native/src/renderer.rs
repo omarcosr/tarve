@@ -189,48 +189,6 @@ fn supports_vello_float16_packing(
 }
 
 impl GpuGraphics {
-    pub fn new(window: Arc<Window>) -> Result<Self, String> {
-        if std::env::var_os("WGPU_BACKEND").is_some() {
-            return Self::new_with_backends(window, None);
-        }
-        #[cfg(target_os = "windows")]
-        {
-            Self::new_with_backends(window.clone(), Some(wgpu::Backends::VULKAN))
-                .or_else(|vulkan_error| {
-                    Self::new_with_backends(window, Some(wgpu::Backends::DX12))
-                        .map_err(|dx12_error| format!("Vulkan renderer failed: {vulkan_error}; DX12 renderer failed: {dx12_error}"))
-                })
-        }
-        #[cfg(not(target_os = "windows"))]
-        Self::new_with_backends(window, None)
-    }
-
-    pub fn recover(window: Arc<Window>, previous_backend: wgpu::Backend) -> Result<Self, String> {
-        if std::env::var_os("WGPU_BACKEND").is_some() {
-            return Self::new_with_backends(window, None);
-        }
-        #[cfg(target_os = "windows")]
-        {
-            let (first, second) = if previous_backend == wgpu::Backend::Vulkan {
-                (wgpu::Backends::VULKAN, wgpu::Backends::DX12)
-            } else {
-                (wgpu::Backends::DX12, wgpu::Backends::VULKAN)
-            };
-            Self::new_with_backends(window.clone(), Some(first)).or_else(|first_error| {
-                Self::new_with_backends(window, Some(second)).map_err(|second_error| {
-                    format!(
-                        "GPU recovery primary backend failed: {first_error}; fallback backend failed: {second_error}"
-                    )
-                })
-            })
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = previous_backend;
-            Self::new_with_backends(window, None)
-        }
-    }
-
     fn new_with_backends(
         window: Arc<Window>,
         backends: Option<wgpu::Backends>,
@@ -811,27 +769,21 @@ impl Graphics {
     pub fn new(window: Arc<Window>, preference: RendererPreference) -> Result<Self, String> {
         let renderer_env = std::env::var_os("TARVE_RENDERER");
         let wgpu_backend_explicit = std::env::var_os("WGPU_BACKEND").is_some();
-        let backend = match resolve_renderer(preference, renderer_env.as_deref())? {
-            ResolvedRenderer::Gpu => match Self::new_gpu_backend(window.clone()) {
-                Ok(graphics) => graphics,
-                Err(gpu_error)
-                    if should_fallback_to_cpu(
-                        preference,
-                        renderer_env.as_deref(),
-                        wgpu_backend_explicit,
-                        &gpu_error,
-                    ) =>
-                {
-                    GraphicsImpl::Cpu(Box::new(CpuGraphics::new(window).map_err(|cpu_error| {
-                        format!(
-                            "GPU renderer unavailable: {gpu_error}; CPU fallback failed: {cpu_error}"
-                        )
-                    })?))
-                }
-                Err(error) => return Err(error),
-            },
-            ResolvedRenderer::Cpu => GraphicsImpl::Cpu(Box::new(CpuGraphics::new(window)?)),
-        };
+        let resolved = resolve_renderer(preference, renderer_env.as_deref())?;
+        let backend = open_first(&window, &startup_attempts(resolved, wgpu_backend_explicit))
+            .or_else(|error| {
+                cpu_fallback(
+                    &window,
+                    resolved == ResolvedRenderer::Gpu
+                        && should_fallback_to_cpu(
+                            preference,
+                            renderer_env.as_deref(),
+                            wgpu_backend_explicit,
+                            &error,
+                        ),
+                    error,
+                )
+            })?;
         Ok(Self {
             backend,
             frames: 0,
@@ -846,34 +798,23 @@ impl Graphics {
     ) -> Result<Self, String> {
         let renderer_env = std::env::var_os("TARVE_RENDERER");
         let wgpu_backend_explicit = std::env::var_os("WGPU_BACKEND").is_some();
-        let recovered = match previous_backend {
-            #[cfg(target_os = "windows")]
-            RendererBackend::D3d11 => {
-                Self::new_d3d11_or_vello(window.clone(), "D3D11 GPU recovery failed")
-            }
-            RendererBackend::Gpu(previous) => GpuGraphics::recover(window.clone(), previous)
-                .map(|graphics| GraphicsImpl::Gpu(Box::new(graphics))),
-            RendererBackend::Cpu => CpuGraphics::new(window.clone())
-                .map(|graphics| GraphicsImpl::Cpu(Box::new(graphics))),
-        };
-        let backend = match recovered {
-            Ok(graphics) => graphics,
-            Err(gpu_error)
-                if should_fallback_to_cpu(
-                    preference,
-                    renderer_env.as_deref(),
-                    wgpu_backend_explicit,
-                    &gpu_error,
-                ) =>
-            {
-                GraphicsImpl::Cpu(Box::new(CpuGraphics::new(window).map_err(|cpu_error| {
-                    format!(
-                        "GPU renderer recovery failed: {gpu_error}; CPU fallback failed: {cpu_error}"
-                    )
-                })?))
-            }
-            Err(error) => return Err(error),
-        };
+        let backend = open_first(
+            &window,
+            &recovery_attempts(previous_backend, wgpu_backend_explicit),
+        )
+        .or_else(|error| {
+            cpu_fallback(
+                &window,
+                previous_backend != RendererBackend::Cpu
+                    && should_fallback_to_cpu(
+                        preference,
+                        renderer_env.as_deref(),
+                        wgpu_backend_explicit,
+                        &error,
+                    ),
+                error,
+            )
+        })?;
         Ok(Self {
             backend,
             frames: 0,
@@ -988,34 +929,119 @@ impl Graphics {
             GraphicsImpl::Cpu(graphics) => graphics.capture(background, path),
         }
     }
+}
 
-    fn new_gpu_backend(window: Arc<Window>) -> Result<GraphicsImpl, String> {
-        #[cfg(target_os = "windows")]
-        {
-            // Explicit WGPU_BACKEND remains an escape hatch for debugging the legacy Vello path.
-            if std::env::var_os("WGPU_BACKEND").is_none() {
-                return Self::new_d3d11_or_vello(window, "Native D3D11 renderer failed");
-            }
-        }
-        GpuGraphics::new(window).map(|graphics| GraphicsImpl::Gpu(Box::new(graphics)))
-    }
-
-    /// D3D11 is the default Windows GPU path (see PERFORMANCE.md); Vello/DX12
-    /// is the fallback when the device cannot be created.
+/// One way to open the window's graphics. Startup and device-loss recovery
+/// both walk an ordered list of these (see `startup_attempts` and
+/// `recovery_attempts`), so the fallback order lives in one place:
+///
+/// - Windows, `auto`/`gpu`: D3D11 → Vello/DX12 → CPU (CPU only for `auto`
+///   without `TARVE_RENDERER`, or `gpu` on an adapter Vello cannot run).
+/// - Windows with `WGPU_BACKEND`: that Vello backend only (diagnostics).
+/// - Linux: Vello over wgpu's default backends → CPU (same CPU rule).
+/// - `cpu`: CPU only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BackendAttempt {
     #[cfg(target_os = "windows")]
-    fn new_d3d11_or_vello(window: Arc<Window>, context: &str) -> Result<GraphicsImpl, String> {
-        D3d11Graphics::new(window.clone())
-            .map(|graphics| GraphicsImpl::D3d11(Box::new(graphics)))
-            .or_else(|d3d11_error| {
-                GpuGraphics::new_with_backends(window, Some(wgpu::Backends::DX12))
-                    .map(|graphics| GraphicsImpl::Gpu(Box::new(graphics)))
-                    .map_err(|vello_error| {
-                        format!(
-                            "{context}: {d3d11_error}; Vello/DX12 fallback failed: {vello_error}"
-                        )
-                    })
-            })
+    D3d11,
+    /// Vello over the given wgpu backends; `None` defers to `WGPU_BACKEND`
+    /// or wgpu's defaults.
+    Vello(Option<wgpu::Backends>),
+    Cpu,
+}
+
+impl BackendAttempt {
+    fn name(self) -> &'static str {
+        match self {
+            #[cfg(target_os = "windows")]
+            Self::D3d11 => "D3D11",
+            Self::Vello(Some(backends)) if backends == wgpu::Backends::DX12 => "Vello/DX12",
+            Self::Vello(Some(backends)) if backends == wgpu::Backends::VULKAN => "Vello/Vulkan",
+            Self::Vello(_) => "Vello/WGPU",
+            Self::Cpu => "CPU",
+        }
     }
+
+    fn open(self, window: &Arc<Window>) -> Result<GraphicsImpl, String> {
+        match self {
+            #[cfg(target_os = "windows")]
+            Self::D3d11 => D3d11Graphics::new(window.clone())
+                .map(|graphics| GraphicsImpl::D3d11(Box::new(graphics))),
+            Self::Vello(backends) => GpuGraphics::new_with_backends(window.clone(), backends)
+                .map(|graphics| GraphicsImpl::Gpu(Box::new(graphics))),
+            Self::Cpu => CpuGraphics::new(window.clone())
+                .map(|graphics| GraphicsImpl::Cpu(Box::new(graphics))),
+        }
+    }
+}
+
+fn startup_attempts(
+    resolved: ResolvedRenderer,
+    wgpu_backend_explicit: bool,
+) -> Vec<BackendAttempt> {
+    match resolved {
+        ResolvedRenderer::Cpu => vec![BackendAttempt::Cpu],
+        ResolvedRenderer::Gpu if wgpu_backend_explicit => vec![BackendAttempt::Vello(None)],
+        #[cfg(target_os = "windows")]
+        ResolvedRenderer::Gpu => vec![
+            BackendAttempt::D3d11,
+            BackendAttempt::Vello(Some(wgpu::Backends::DX12)),
+        ],
+        #[cfg(not(target_os = "windows"))]
+        ResolvedRenderer::Gpu => vec![BackendAttempt::Vello(None)],
+    }
+}
+
+/// Recovery retries the backend that was lost first, then its alternatives.
+fn recovery_attempts(
+    previous: RendererBackend,
+    wgpu_backend_explicit: bool,
+) -> Vec<BackendAttempt> {
+    match previous {
+        RendererBackend::Cpu => vec![BackendAttempt::Cpu],
+        #[cfg(target_os = "windows")]
+        RendererBackend::D3d11 => startup_attempts(ResolvedRenderer::Gpu, false),
+        RendererBackend::Gpu(_) if wgpu_backend_explicit => vec![BackendAttempt::Vello(None)],
+        #[cfg(target_os = "windows")]
+        RendererBackend::Gpu(lost) => {
+            let (first, second) = if lost == wgpu::Backend::Vulkan {
+                (wgpu::Backends::VULKAN, wgpu::Backends::DX12)
+            } else {
+                (wgpu::Backends::DX12, wgpu::Backends::VULKAN)
+            };
+            vec![
+                BackendAttempt::Vello(Some(first)),
+                BackendAttempt::Vello(Some(second)),
+            ]
+        }
+        #[cfg(not(target_os = "windows"))]
+        RendererBackend::Gpu(_) => vec![BackendAttempt::Vello(None)],
+    }
+}
+
+/// Opens the first attempt that succeeds; the error names every failure in order.
+fn open_first(window: &Arc<Window>, attempts: &[BackendAttempt]) -> Result<GraphicsImpl, String> {
+    let mut failures = Vec::new();
+    for attempt in attempts {
+        match attempt.open(window) {
+            Ok(graphics) => return Ok(graphics),
+            Err(error) => failures.push(format!("{} renderer failed: {error}", attempt.name())),
+        }
+    }
+    Err(failures.join("; "))
+}
+
+fn cpu_fallback(
+    window: &Arc<Window>,
+    allowed: bool,
+    gpu_error: String,
+) -> Result<GraphicsImpl, String> {
+    if !allowed {
+        return Err(gpu_error);
+    }
+    BackendAttempt::Cpu
+        .open(window)
+        .map_err(|cpu_error| format!("{gpu_error}; CPU fallback failed: {cpu_error}"))
 }
 
 fn create_targets(
@@ -1067,6 +1093,56 @@ mod tests {
             vello::wgpu::Features::empty(),
             vello::wgpu::DownlevelFlags::empty()
         ));
+    }
+
+    #[test]
+    fn fallback_order_is_one_list_for_startup_and_recovery() {
+        use super::{
+            BackendAttempt::*, RendererBackend, ResolvedRenderer, recovery_attempts,
+            startup_attempts, wgpu,
+        };
+        assert_eq!(startup_attempts(ResolvedRenderer::Cpu, false), [Cpu]);
+        assert_eq!(startup_attempts(ResolvedRenderer::Cpu, true), [Cpu]);
+        assert_eq!(startup_attempts(ResolvedRenderer::Gpu, true), [Vello(None)]);
+        assert_eq!(recovery_attempts(RendererBackend::Cpu, false), [Cpu]);
+        assert_eq!(
+            recovery_attempts(RendererBackend::Gpu(wgpu::Backend::Dx12), true),
+            [Vello(None)]
+        );
+        #[cfg(target_os = "windows")]
+        {
+            let default_gpu = [D3d11, Vello(Some(wgpu::Backends::DX12))];
+            assert_eq!(startup_attempts(ResolvedRenderer::Gpu, false), default_gpu);
+            assert_eq!(
+                recovery_attempts(RendererBackend::D3d11, false),
+                default_gpu
+            );
+            assert_eq!(
+                recovery_attempts(RendererBackend::Gpu(wgpu::Backend::Vulkan), false),
+                [
+                    Vello(Some(wgpu::Backends::VULKAN)),
+                    Vello(Some(wgpu::Backends::DX12))
+                ]
+            );
+            assert_eq!(
+                recovery_attempts(RendererBackend::Gpu(wgpu::Backend::Dx12), false),
+                [
+                    Vello(Some(wgpu::Backends::DX12)),
+                    Vello(Some(wgpu::Backends::VULKAN))
+                ]
+            );
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            assert_eq!(
+                startup_attempts(ResolvedRenderer::Gpu, false),
+                [Vello(None)]
+            );
+            assert_eq!(
+                recovery_attempts(RendererBackend::Gpu(wgpu::Backend::Vulkan), false),
+                [Vello(None)]
+            );
+        }
     }
 
     #[test]
