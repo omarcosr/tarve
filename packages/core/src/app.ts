@@ -93,18 +93,24 @@ function validateFileDialogOptions(options: FileDialogOptions): void {
   }
 }
 
+/**
+ * The tree native is known to hold. Nodes are copied shallowly: the shadow only
+ * ever replaces a node's own `value`/`control` fields (optimistic edits), so
+ * styles and other nested values are shared with the compiled tree instead of
+ * deep-cloned, which kept a second copy of every style object alive.
+ */
 function nativeShadow(tree: CompiledTree, previous?: CompiledTree): CompiledTree {
-  const document = structuredClone(tree.document);
   const nodes = new Map<string, NativeNode>();
-  const index = (node: NativeNode): void => {
+  const copy = (source: NativeNode): NativeNode => {
+    const node: NativeNode = { ...source, children: source.children.map(copy) };
     const old = previous?.nodes.get(node.id);
     if ((node.kind === "input" || node.kind === "textarea") && node.value === undefined && old?.kind === node.kind) {
       node.value = old.value;
     }
     nodes.set(node.id, node);
-    for (const child of node.children) index(child);
+    return node;
   };
-  index(document.root);
+  const document = { ...tree.document, root: copy(tree.document.root) };
   return { document, handlers: tree.handlers, nodes };
 }
 
