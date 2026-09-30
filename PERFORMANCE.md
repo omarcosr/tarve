@@ -64,6 +64,29 @@ Windows x64 measurements after 1.8 s idle, using the standalone release executab
 
 Before requesting wgpu's memory-oriented allocation strategy and limiting Vello shader initialization to one thread, the Counter executable measured about 266 MB working set / 842 MB private bytes. In an isolated Bun process, the old dedicated event Worker added roughly 15–16 MB working set and about 40 MB private bytes. It has since been removed: native events remain in a FIFO queue, a Windows named pipe wakes the Bun event loop only when work arrives, and the main runtime then drains the queue with non-blocking FFI calls.
 
+## Startup and memory floor (0.3.x, Windows x64)
+
+Measured on 2026-09-30 (Ryzen 7 9800X3D, RTX 5070 Laptop, Bun 1.4.2) with `tarve build` executables; medians of 3 runs. "First frame" is process start to the first presented frame.
+
+| Scene | `cpu` | `auto` (D3D11) |
+| --- | ---: | ---: |
+| Empty window | ~52 ms | ~193 ms |
+| 2,000-row list (6,000 nodes) | ~212 ms | ~332 ms |
+| Components example | ~94 ms | ~287 ms |
+
+- ~140 ms of the GPU path is `D3D11CreateDevice` (driver load). It now runs on a background thread from `tarve_start`, and the shaders ship precompiled.
+- For the 2,000-row list the JS side spends ~48 ms building the tree and the native side ~10 ms parsing 1.96 MB of JSON (64% of it repeated styles), ~18 ms shaping text for every row and ~25 ms in taffy. Large lists should use `VirtualList`, which keeps only the visible rows as nodes.
+
+Memory of an idle empty window, 4 s after start:
+
+| Process | Private | Working set |
+| --- | ---: | ---: |
+| Bare compiled Bun (no Tarve) | ~72 MB | ~18 MB |
+| Tarve, `cpu` | ~114 MB | ~43–64 MB |
+| Tarve, `auto` (D3D11, NVIDIA) | ~338 MB | ~75–80 MB |
+
+Of the ~42 MB private that Tarve adds on `cpu`, ~19 MB is Bun's FFI itself (any `bun:ffi` `dlopen` costs it), ~3.5 MB is loading `tarve_native.dll` and ~1.5 MB is the tree, text and layout; the rest is winit, UI Automation and DirectWrite. On `auto` the NVIDIA user-mode driver maps ~190 MB of images. Delay-loading the D3D/OpenGL/UIA DLLs for `cpu` apps was measured and dropped (~1 MB working set).
+
 ## Implemented
 
 - Stable IDs retain Taffy nodes and layout caches across updates and resizes.
