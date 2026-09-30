@@ -75,6 +75,11 @@ export async function build(options: BuildOptions): Promise<string> {
   if (requireRuntimeManifest) {
     await assertNativeRuntimeCompatible(library, target, expectedCompatibility);
   }
+  const libraryBytes = await Bun.file(library).bytes();
+  const libraryDigest = {
+    sha256: new Bun.CryptoHasher("sha256").update(libraryBytes).digest("hex"),
+    size: libraryBytes.byteLength,
+  };
   const runtime: BunPlugin = {
     name: "tarve-native-runtime",
     setup(builder) {
@@ -89,7 +94,8 @@ export async function build(options: BuildOptions): Promise<string> {
         contents: [
           `import library from ${JSON.stringify(library)} with { type: "file" };`,
           `import { materializeAsset } from ${JSON.stringify(assetsModule)};`,
-          `export function nativePath() { return materializeAsset(library, ${JSON.stringify(config.nativeName)}); }`,
+          `const digest = ${JSON.stringify(libraryDigest)};`,
+          `export function nativePath() { return materializeAsset(library, ${JSON.stringify(config.nativeName)}, digest); }`,
         ].join("\n"),
       }));
     },
