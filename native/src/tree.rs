@@ -1504,6 +1504,8 @@ pub struct Tree {
     visual_snapshot_ids: Vec<String>,
     /// Extra ids to re-check at the next sync (e.g. `disabled` changed).
     state_candidates: Vec<String>,
+    /// Caret and x of the last textarea Up/Down move (the goal column).
+    vertical_goal: Option<(usize, f32)>,
     /// Ids whose entry holds at least one motion track, so frame and
     /// pointer ticks visit only animating nodes instead of the whole tree.
     animating: HashSet<String>,
@@ -1720,6 +1722,7 @@ impl Tree {
             hover_styled: Vec::new(),
             visual_snapshot_ids: Vec::new(),
             state_candidates: Vec::new(),
+            vertical_goal: None,
             animating: HashSet::default(),
             focused: None,
             focus_visible: false,
@@ -6269,6 +6272,10 @@ impl Tree {
                     changed.replace_range(self.caret..end, "");
                 }
                 self.selection_anchor = None;
+                if changed == value {
+                    // Backspace at the start or Delete at the end: nothing to edit.
+                    return vec![];
+                }
                 let kind = if origin.1.is_some_and(|anchor| anchor != origin.0) {
                     EditKind::Other
                 } else {
@@ -7191,14 +7198,21 @@ impl Tree {
         let (width, _, value) = self.textarea_metrics(id)?;
         let caret = floor_boundary(&value, self.caret.min(value.len()));
         let cursor = self.text.caret_rect(id, caret, Some(width))?;
-        let x = cursor.x0 as f32;
+        // Keep the column from where a run of Up/Down started, so passing a
+        // shorter line does not pull the caret left for the rest of the run.
+        let x = self
+            .vertical_goal
+            .filter(|(goal_caret, _)| *goal_caret == caret)
+            .map_or(cursor.x0 as f32, |(_, x)| x);
         let y = if direction < 0.0 {
             (cursor.y0 as f32 - 1.0).max(0.0)
         } else {
             cursor.y1 as f32 + 1.0
         };
         let next = self.text.index_at(id, x, y, Some(width))?;
-        Some(floor_boundary(&value, next.min(value.len())))
+        let next = floor_boundary(&value, next.min(value.len()));
+        self.vertical_goal = Some((next, x));
+        Some(next)
     }
 
     fn textarea_visual_edge(&mut self, id: &str, end: bool) -> Option<usize> {

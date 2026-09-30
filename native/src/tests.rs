@@ -6058,3 +6058,132 @@ fn bench_pointer_motion_tick() {
         ticking.as_nanos() / 2_000
     );
 }
+
+#[test]
+fn delete_removes_the_grapheme_after_the_caret_or_the_selection() {
+    let value = |events: Vec<serde_json::Value>| events[0]["value"].as_str().unwrap().to_owned();
+    let mut tree = editor_tree("input", "ae\u{301}z");
+    tree.key("Home");
+    tree.key("ArrowRight");
+    assert_eq!(
+        value(tree.key("Delete")),
+        "az",
+        "Delete removes a whole grapheme"
+    );
+
+    let mut tree = editor_tree("input", "hello world");
+    tree.key("Home");
+    tree.key("ShiftWordRight");
+    assert_eq!(value(tree.key("Delete")), " world");
+
+    let mut tree = editor_tree("input", "end");
+    tree.key("Home");
+    assert!(
+        tree.key("Backspace").is_empty(),
+        "Backspace at the start is a no-op"
+    );
+    tree.key("End");
+    let events = tree.key("Delete");
+    assert!(
+        events.is_empty(),
+        "Delete at the end is a no-op: {events:?}"
+    );
+}
+
+#[test]
+fn shift_home_and_end_select_to_the_edges() {
+    let mut tree = editor_tree("input", "one two");
+    tree.key("End");
+    tree.key("WordLeft");
+    tree.key("ShiftHome");
+    assert_eq!(tree.selected_text().as_deref(), Some("one "));
+    tree.key("ShiftEnd");
+    assert_eq!(
+        tree.selected_text().as_deref(),
+        Some("two"),
+        "the anchor stays put"
+    );
+
+    let mut tree = editor_tree("textarea", "first\nsecond line");
+    tree.key("End");
+    tree.key("ShiftHome");
+    assert_eq!(
+        tree.selected_text().as_deref(),
+        Some("second line"),
+        "textarea Home stops at the start of the visual line"
+    );
+}
+
+#[test]
+fn textarea_up_and_down_keep_the_column_and_stop_at_the_edges() {
+    let caret_after = |keys: &[&str]| {
+        let mut tree = editor_tree("textarea", "ghij\nef\nghij");
+        tree.scene(1.0);
+        for key in keys {
+            tree.key(key);
+        }
+        tree.type_text("|")[0]["value"].as_str().unwrap().to_owned()
+    };
+    assert_eq!(
+        caret_after(&["End", "ArrowUp"]),
+        "ghij\nef|\nghij",
+        "column clamps to a shorter line"
+    );
+    assert_eq!(
+        caret_after(&["End", "ArrowUp", "ArrowUp"]),
+        "ghij|\nef\nghij",
+        "the goal column survives the shorter line"
+    );
+    assert_eq!(
+        caret_after(&["End", "ArrowUp", "ArrowUp", "ArrowUp"]),
+        "ghij|\nef\nghij",
+        "ArrowUp on the first line stays on it"
+    );
+    assert_eq!(
+        caret_after(&["End", "ArrowDown"]),
+        "ghij\nef\nghij|",
+        "ArrowDown on the last line stays on it"
+    );
+    let mut tree = editor_tree("textarea", "abcd\nef\nghij");
+    tree.key("End");
+    tree.key("ShiftArrowUp");
+    let selected = tree.selected_text().unwrap();
+    assert!(
+        selected.contains('\n'),
+        "ShiftArrowUp selects across the line break: {selected:?}"
+    );
+}
+
+#[test]
+fn typing_and_pasting_replace_the_selection() {
+    let mut tree = editor_tree("input", "hello world");
+    tree.key("End");
+    tree.key("ShiftWordLeft");
+    let typed = tree.type_text("there");
+    assert_eq!(typed[0]["value"], "hello there");
+    assert_eq!(tree.selected_text(), None);
+
+    let mut tree = editor_tree("input", "abc");
+    tree.key("SelectAll");
+    let pasted = tree.type_text("x\ny");
+    assert_eq!(
+        pasted[0]["value"]
+            .as_str()
+            .map(|v| v.contains('x') && v.contains('y')),
+        Some(true)
+    );
+    assert!(!pasted[0]["value"].as_str().unwrap().contains("abc"));
+}
+
+#[test]
+fn caret_is_clamped_when_the_value_shrinks_under_it() {
+    let mut tree = editor_tree("input", "a long value");
+    tree.key("End");
+    let mut shorter = tree.entries["field"].node.clone();
+    shorter.value = Some("ab".into());
+    tree.patch(vec![shorter]).unwrap();
+    tree.key("ShiftArrowLeft");
+    assert_eq!(tree.selected_text().as_deref(), Some("b"));
+    let typed = tree.type_text("!");
+    assert_eq!(typed[0]["value"], "a!");
+}

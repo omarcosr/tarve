@@ -4,6 +4,10 @@ All notable changes to `@tarve/core` and `@tarve/react-icons` are documented her
 
 ## Unreleased
 
+### Fixed
+- `TextArea` Up/Down keep the column they started from when they pass a shorter line.
+- `Backspace` at the start and `Delete` at the end of an `Input`/`TextArea` no longer emit a `change` event with the unchanged value.
+
 ### Changed
 - The JS-side native shadow tree copies nodes shallowly and shares their styles instead of deep-cloning the whole document on every render. On a 6,000-node tree the copy drops from ~25 ms to ~3.5 ms (first frame and every update), and the second copy of every style object is gone.
 - Renderer fallback (D3D11 → Vello/DX12 → CPU on Windows, Vello → CPU on Linux) is one ordered list shared by startup and device-loss recovery, documented in `PERFORMANCE.md`. Startup errors now name every failed attempt. Removes an unreachable Vulkan-first Vello path on Windows.
