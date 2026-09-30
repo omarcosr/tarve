@@ -12,6 +12,7 @@ All notable changes to `@tarve/core` and `@tarve/react-icons` are documented her
 ### Changed
 - JSON protocol version 47.
 - Pointer moves no longer walk the whole tree: transitions advance only on animating nodes, hit testing skips the stacking sort for containers whose children share a z-index, and portal and `transform` lookups are cached per tree update. On a 10,000-node tree a pointer move drops from ~2.6 ms to ~0.5 ms.
+- Windows GPU startup: the D3D11 device (driver load, ~140 ms) is created on a background thread as soon as the app starts, overlapping window creation and the first layout. Apps on the CPU renderer skip it.
 
 ### Fixed
 - `bun --hot`: editing a file now reloads into the open window. A second `render()` in the same process remounts instead of failing with "Only one native app can be started per process", and under `--hot` `render()` resolves once the window is ready (Bun defers reloads while a top-level `await` is pending) and the process exits when the window closes.

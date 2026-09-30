@@ -579,6 +579,21 @@ fn renderer_from_env(value: Option<&std::ffi::OsStr>) -> Result<ResolvedRenderer
     }
 }
 
+/// Starts GPU device creation early when the app will use the default
+/// Windows GPU path.
+pub(crate) fn prewarm(preference: RendererPreference) {
+    #[cfg(target_os = "windows")]
+    if std::env::var_os("WGPU_BACKEND").is_none()
+        && matches!(
+            resolve_renderer(preference, std::env::var_os("TARVE_RENDERER").as_deref()),
+            Ok(ResolvedRenderer::Gpu)
+        )
+    {
+        crate::d3d11::prewarm_device();
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = preference;
+}
 fn resolve_renderer(
     preference: RendererPreference,
     env: Option<&std::ffi::OsStr>,

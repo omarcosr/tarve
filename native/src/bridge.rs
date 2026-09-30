@@ -509,6 +509,7 @@ pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
         if state.is_some() {
             return Err("Only one native app can be started per process".into());
         }
+        crate::renderer::prewarm(document.renderer);
         let events = Arc::new(Events::new()?);
         let out = events.clone();
         let (tx, rx) = mpsc::sync_channel(1);

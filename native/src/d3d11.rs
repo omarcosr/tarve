@@ -232,8 +232,11 @@ impl D3d11Graphics {
         let size = window.inner_size();
         let width = size.width.max(1);
         let height = size.height.max(1);
-        let hwnd = hwnd(&window)?;
+
+        // Claim the prewarmed device first so an early error cannot strand it.
         let (device, context) = create_device()?;
+        let hwnd = hwnd(&window)?;
+
         let factory: IDXGIFactory2 = unsafe { CreateDXGIFactory1() }.map_err(win_error)?;
         let desc = DXGI_SWAP_CHAIN_DESC1 {
             Width: width,
@@ -254,11 +257,14 @@ impl D3d11Graphics {
         let swap_chain =
             unsafe { factory.CreateSwapChainForHwnd(&device, hwnd, &desc, None, None) }
                 .map_err(win_error)?;
+
         let sample_desc = choose_sample_desc(&device);
         let (multisample_texture, render_target) =
             create_color_target(&device, &swap_chain, width, height, sample_desc)?;
         let (depth_texture, depth_view) = create_depth_target(&device, width, height, sample_desc)?;
+
         let (vertex_shader, pixel_shader, input_layout) = create_shaders(&device)?;
+
         let image_sampler = create_sampler(&device, D3D11_FILTER_MIN_MAG_MIP_LINEAR)?;
         let glyph_sampler = create_sampler(&device, D3D11_FILTER_MIN_MAG_MIP_POINT)?;
         let rasterizer = create_rasterizer(&device, sample_desc.Count > 1)?;
@@ -280,6 +286,7 @@ impl D3d11Graphics {
             D3D11_BIND_INDEX_BUFFER,
         )?;
         let first_atlas = create_glyph_atlas(&device)?;
+
         Ok(Self {
             _window: window,
             device,
@@ -1394,7 +1401,34 @@ fn hwnd(window: &Window) -> Result<HWND, String> {
     }
 }
 
+struct PrewarmedDevice(Result<(ID3D11Device, ID3D11DeviceContext), String>);
+// SAFETY: the device is created on the prewarm thread and handed over once;
+// D3D11 devices are free-threaded and the immediate context is only used by
+// the window thread after the handoff.
+unsafe impl Send for PrewarmedDevice {}
+static PREWARM: std::sync::Mutex<Option<std::thread::JoinHandle<PrewarmedDevice>>> =
+    std::sync::Mutex::new(None);
+/// Starts `D3D11CreateDevice` on a background thread. Loading the driver takes
+/// most of the GPU startup (~140 ms), and it does not need the window, so it
+/// overlaps window creation and the first layout.
+pub(crate) fn prewarm_device() {
+    let Ok(mut slot) = PREWARM.lock() else { return };
+    if slot.is_some() {
+        return;
+    }
+    *slot = std::thread::Builder::new()
+        .name("tarve-d3d11-prewarm".into())
+        .spawn(|| PrewarmedDevice(create_device_now()))
+        .ok();
+}
 fn create_device() -> Result<(ID3D11Device, ID3D11DeviceContext), String> {
+    let prewarmed = PREWARM.lock().ok().and_then(|mut slot| slot.take());
+    match prewarmed.and_then(|handle| handle.join().ok()) {
+        Some(PrewarmedDevice(result)) => result,
+        None => create_device_now(),
+    }
+}
+fn create_device_now() -> Result<(ID3D11Device, ID3D11DeviceContext), String> {
     let mut device = None;
     let mut context = None;
     unsafe {
