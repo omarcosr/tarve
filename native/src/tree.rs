@@ -3840,6 +3840,19 @@ impl Tree {
                 target.push_clip(Fill::EvenOdd, transform, &ring);
                 target.fill_gradient(transform, gradient, &shape);
                 target.pop_layer();
+            } else if uniform
+                && border_gradient.as_ref().is_some_and(|gradient| {
+                    paint_gradient_styled_border(
+                        target,
+                        transform,
+                        rect,
+                        radius,
+                        border[0],
+                        border_style,
+                        gradient,
+                    )
+                })
+            {
             } else if uniform && border_style != "solid" {
                 // A border is an outline drawn inside the border box.
                 paint_outline(
@@ -7748,8 +7761,31 @@ fn paint_outline_stroke<P: PaintTarget>(
     total_width: f64,
     total_offset: f64,
 ) {
+    if let Some(ring) = outline_ring(
+        rect,
+        base_radius,
+        band_width,
+        band_offset,
+        radius_override,
+        total_width,
+        total_offset,
+    ) {
+        target.stroke(&stroke, transform, outline_color, &ring);
+    }
+}
+
+/// The rounded rect whose stroke paints one outline band.
+fn outline_ring(
+    rect: BoxRect,
+    base_radius: f64,
+    band_width: f64,
+    band_offset: f64,
+    radius_override: Option<f64>,
+    total_width: f64,
+    total_offset: f64,
+) -> Option<RoundedRect> {
     if band_width <= 0.0 {
-        return;
+        return None;
     }
     let max_inset = (rect.width().min(rect.height()) / 2.0 - 0.01).max(0.0);
     let expansion = (band_offset + band_width / 2.0).max(-max_inset);
@@ -7764,12 +7800,59 @@ fn paint_outline_stroke<P: PaintTarget>(
         .map(|radius| radius + expansion - base_expansion)
         .unwrap_or(base_radius + expansion)
         .max(0.0);
-    target.stroke(
-        &stroke,
-        transform,
-        outline_color,
-        &RoundedRect::from_rect(outline_rect, outline_radius),
-    );
+    Some(RoundedRect::from_rect(outline_rect, outline_radius))
+}
+
+/// Dashed, dotted and double borders painted with a gradient: the style's
+/// strokes become one clip path (expanded once on the CPU) over a single
+/// gradient fill, so dashes sample the gradient where they sit.
+fn paint_gradient_styled_border<P: PaintTarget>(
+    target: &mut P,
+    transform: Affine,
+    rect: BoxRect,
+    radius: f64,
+    width: f64,
+    style: &str,
+    gradient: &PaintGradient,
+) -> bool {
+    let bands: Vec<(f64, f64, Stroke)> = match style {
+        "dashed" => vec![(
+            width,
+            -width,
+            Stroke::new(width).with_dashes(0.0, [width * 3.0, width * 2.0]),
+        )],
+        "dotted" => vec![(
+            width,
+            -width,
+            Stroke::new(width)
+                .with_caps(Cap::Round)
+                .with_dashes(0.0, [0.01, width * 2.0]),
+        )],
+        "double" => {
+            let band = width / 3.0;
+            vec![
+                (band, -width, Stroke::new(band)),
+                (band, -width + band * 2.0, Stroke::new(band)),
+            ]
+        }
+        _ => return false,
+    };
+    let mut clip = vello::kurbo::BezPath::new();
+    for (band, offset, stroke) in bands {
+        if let Some(ring) = outline_ring(rect, radius, band, offset, None, width, -width) {
+            let outline = vello::kurbo::stroke(
+                vello::kurbo::Shape::path_elements(&ring, 0.1),
+                &stroke,
+                &vello::kurbo::StrokeOpts::default(),
+                0.1,
+            );
+            clip.extend(outline);
+        }
+    }
+    target.push_clip(Fill::NonZero, transform, &clip);
+    target.fill_gradient(transform, gradient, &rect);
+    target.pop_layer();
+    true
 }
 
 #[allow(clippy::too_many_arguments)]

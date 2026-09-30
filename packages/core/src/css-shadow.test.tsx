@@ -139,6 +139,13 @@ describe("CSS gradients", () => {
     expect(painted.hover?.borderColor).toMatchObject({ type: "radial" });
   });
 
+  test("every CSS named colour resolves", () => {
+    expect(cssColor("lime")).toBe("#00ff00");
+    expect(cssColor("RebeccaPurple")).toBe("#663399");
+    expect(cssColor("lightgoldenrodyellow")).toBe("#fafad2");
+    expect(cssColor("transparent")).toBe("#00000000");
+  });
+
   test("conic-gradient syntax", () => {
     expect(parseGradient("conic-gradient(red, blue)")).toEqual({ type: "conic", stops: [{ color: "red" }, { color: "blue" }] });
     expect(parseGradient("conic-gradient(from 0.25turn at 25% 10px, red 0deg, blue 90deg 180deg, rgb(0 0 0 / 50%) 75%)")).toEqual({

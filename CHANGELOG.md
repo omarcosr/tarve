@@ -5,9 +5,12 @@ All notable changes to `@tarve/core` and `@tarve/react-icons` are documented her
 ## Unreleased
 
 ### Added
+- `examples/gradients.tsx`: linear, radial and conic gradients, repeating patterns, gradient text and gradient borders in every style.
 - `conic-gradient(…)` and `repeating-conic-gradient(…)` (or `{ type: "conic", from, at, stops }`) for `background`, `borderColor` and `foreground`, in state styles too, on D3D11, Vello GPU and the CPU renderer. `from` and stop positions take `deg`, `turn`, `rad`, `grad` or `%`; `at` takes every position form radial gradients accept. Conic gradients with the same stop count transition stop by stop.
 
 ### Fixed
+- Gradient `borderColor` now paints `dashed`, `dotted` and `double` borders with the gradient instead of its first colour: the style's strokes become one clip over a single gradient fill, on every renderer.
+- CSS colour strings accept all 148 CSS named colours (`lime`, `rebeccapurple`, …), not only the 14 most common.
 - `TextArea` Up/Down keep the column they started from when they pass a shorter line.
 - `Backspace` at the start and `Delete` at the end of an `Input`/`TextArea` no longer emit a `change` event with the unchanged value.
 
