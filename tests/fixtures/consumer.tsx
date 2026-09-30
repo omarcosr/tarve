@@ -51,8 +51,16 @@ try {
   assert(list.scrollMax > 20_000);
   app.debug({ type: "input", action: "move", x: list.x + 20, y: list.y + 20 });
   app.debug({ type: "input", action: "wheel", delta: 240 });
-  await Bun.sleep(100);
-  const virtual = await app.inspect();
+  // The wheel event reaches JS, which re-renders the virtual rows and patches
+  // native; wait for that round trip to settle so the idle check below only
+  // sees frames nothing asked for.
+  let virtual = await app.inspect();
+  for (let settled = 0, start = Date.now(); settled < 3 && Date.now() - start < 3_000;) {
+    await Bun.sleep(50);
+    const next = await app.inspect();
+    settled = next.frames === virtual.frames ? settled + 1 : 0;
+    virtual = next;
+  }
   assert.equal(virtual.nodes.find(node => node.id === "list")?.scroll, 240);
   assert(virtual.nodes.some(node => node.id === "row-10"));
   assert(virtual.nodes.length < 50);
