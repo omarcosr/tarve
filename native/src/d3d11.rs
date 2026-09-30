@@ -25,10 +25,9 @@ use windows::{
     Win32::{
         Foundation::{HMODULE, HWND},
         Graphics::{
-            Direct3D::Fxc::D3DCompile,
             Direct3D::{
                 D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0,
-                D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST, ID3DBlob,
+                D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
             },
             Direct3D11::{
                 D3D11_BIND_DEPTH_STENCIL, D3D11_BIND_INDEX_BUFFER, D3D11_BIND_SHADER_RESOURCE,
@@ -1572,49 +1571,19 @@ fn upload_dynamic(
     Ok(())
 }
 
+/// DXBC compiled from `shaders/ui.hlsl` by the ignored test
+/// `regenerate_d3d11_shaders`. DXBC is hardware-independent (the driver
+/// translates it when the shader is created), so shipping it skips loading
+/// `d3dcompiler_47.dll` and ~20 ms of compilation on every start.
+const VERTEX_SHADER: &[u8] = include_bytes!("shaders/ui.vs.dxbc");
+const PIXEL_SHADER: &[u8] = include_bytes!("shaders/ui.ps.dxbc");
+
 #[allow(clippy::manual_c_str_literals)]
 fn create_shaders(
     device: &ID3D11Device,
 ) -> Result<(ID3D11VertexShader, ID3D11PixelShader, ID3D11InputLayout), String> {
-    const SOURCE: &str = r#"
-struct VSIn { float2 pos : POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; float4 params : TEXCOORD2; };
-struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; float4 params : TEXCOORD2; };
-PSIn vs_main(VSIn i) { PSIn o; o.pos=float4(i.pos,0,1); o.uv=i.uv; o.color=i.color; o.mode=i.mode; o.params=i.params; return o; }
-Texture2D tex0 : register(t0); SamplerState samp0 : register(s0);
-// Analytic gaussian-blurred rounded rectangle (Evan Wallace): exact along x
-// via erf, integrated along y with four gaussian-weighted samples.
-float2 erf2(float2 x) { float2 s=sign(x); float2 a=abs(x); x=1.0+(0.278393+(0.230389+0.078108*(a*a))*a)*a; x*=x; return s-s/(x*x); }
-float gauss(float x, float sigma) { return exp(-(x*x)/(2.0*sigma*sigma))/(2.5066282746*sigma); }
-float shadow_x(float x, float y, float sigma, float corner, float2 half_size) {
-    float delta=min(half_size.y-corner-abs(y),0.0);
-    float curved=half_size.x-corner+sqrt(max(0.0,corner*corner-delta*delta));
-    float2 integral=0.5+0.5*erf2((x+float2(-curved,curved))*(0.7071067812/sigma));
-    return integral.y-integral.x;
-}
-float rounded_box_shadow(float2 p, float4 params) {
-    float2 half_size=params.xy; float corner=params.z; float sigma=params.w;
-    float low=p.y-half_size.y; float high=p.y+half_size.y;
-    float start=clamp(-3.0*sigma,low,high); float end=clamp(3.0*sigma,low,high);
-    float step=(end-start)/4.0; float y=start+step*0.5; float value=0.0;
-    [unroll] for (int k=0;k<4;k++) { value+=shadow_x(p.x,p.y-y,sigma,corner,half_size)*gauss(y,sigma)*step; y+=step; }
-    return value;
-}
-float4 ps_main(PSIn i) : SV_TARGET {
-    if (i.mode < 0.5) return i.color;
-    if (i.mode > 2.5) {
-        float coverage=saturate(rounded_box_shadow(i.uv,i.params));
-        if (i.mode > 3.5) coverage=1.0-coverage;
-        return float4(i.color.rgb, i.color.a*coverage);
-    }
-    float4 sample = tex0.Sample(samp0, i.uv);
-    if (i.mode < 1.5) return sample * i.color;
-    return float4(i.color.rgb, i.color.a * sample.r);
-}
-"#;
-    let vs_blob = compile_shader(SOURCE, b"vs_main\0", b"vs_5_0\0")?;
-    let ps_blob = compile_shader(SOURCE, b"ps_main\0", b"ps_5_0\0")?;
-    let vs_bytes = blob_bytes(&vs_blob);
-    let ps_bytes = blob_bytes(&ps_blob);
+    let vs_bytes = VERTEX_SHADER;
+    let ps_bytes = PIXEL_SHADER;
     let mut vertex_shader = None;
     unsafe { device.CreateVertexShader(vs_bytes, None, Some(&mut vertex_shader)) }
         .map_err(win_error)?;
@@ -1678,11 +1647,16 @@ float4 ps_main(PSIn i) : SV_TARGET {
     ))
 }
 
-fn compile_shader(source: &str, entry: &[u8], target: &[u8]) -> Result<ID3DBlob, String> {
+#[cfg(test)]
+fn compile_shader(
+    source: &str,
+    entry: &[u8],
+    target: &[u8],
+) -> Result<windows::Win32::Graphics::Direct3D::ID3DBlob, String> {
     let mut code = None;
     let mut errors = None;
     let result = unsafe {
-        D3DCompile(
+        windows::Win32::Graphics::Direct3D::Fxc::D3DCompile(
             source.as_ptr().cast(),
             source.len(),
             PCSTR::null(),
@@ -1705,7 +1679,8 @@ fn compile_shader(source: &str, entry: &[u8], target: &[u8]) -> Result<ID3DBlob,
     code.ok_or_else(|| "D3D shader compiler returned no bytecode".into())
 }
 
-fn blob_bytes(blob: &ID3DBlob) -> &[u8] {
+#[cfg(test)]
+fn blob_bytes(blob: &windows::Win32::Graphics::Direct3D::ID3DBlob) -> &[u8] {
     unsafe {
         std::slice::from_raw_parts(blob.GetBufferPointer() as *const u8, blob.GetBufferSize())
     }
@@ -2055,5 +2030,55 @@ mod tests {
         assert_eq!(quantize_glyph_position(-0.24), (-1.0, 3));
         assert_eq!(quantize_glyph_position(-0.51), (-1.0, 2));
         assert_eq!(quantize_glyph_position(-0.90), (-1.0, 0));
+    }
+}
+
+#[cfg(test)]
+mod shader_tests {
+    use super::*;
+
+    const SOURCE: &str = include_str!("shaders/ui.hlsl");
+    const SOURCE_HASH: &str = include_str!("shaders/ui.hlsl.fnv");
+
+    /// FNV-1a over the HLSL with line endings normalized, so a CRLF checkout
+    /// hashes the same as an LF one.
+    fn source_hash() -> String {
+        let hash = SOURCE
+            .replace("\r\n", "\n")
+            .bytes()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+            });
+        format!("{hash:016x}")
+    }
+
+    #[test]
+    fn d3d11_shader_bytecode_matches_hlsl_source() {
+        assert_eq!(
+            SOURCE_HASH.trim(),
+            source_hash(),
+            "shaders/ui.hlsl changed without regenerating its bytecode; run \
+             `cargo test --lib regenerate_d3d11_shaders -- --ignored`"
+        );
+        for (name, bytes) in [("vertex", VERTEX_SHADER), ("pixel", PIXEL_SHADER)] {
+            assert!(
+                bytes.starts_with(b"DXBC"),
+                "{name} shader is not DXBC bytecode"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "writes shaders/*.dxbc; run after editing shaders/ui.hlsl"]
+    fn regenerate_d3d11_shaders() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/shaders");
+        for (entry, target, file) in [
+            (&b"vs_main\0"[..], &b"vs_5_0\0"[..], "ui.vs.dxbc"),
+            (&b"ps_main\0"[..], &b"ps_5_0\0"[..], "ui.ps.dxbc"),
+        ] {
+            let blob = compile_shader(SOURCE, entry, target).unwrap();
+            std::fs::write(dir.join(file), blob_bytes(&blob)).unwrap();
+        }
+        std::fs::write(dir.join("ui.hlsl.fnv"), format!("{}\n", source_hash())).unwrap();
     }
 }
