@@ -1,5 +1,5 @@
-import { CameraIcon as HeroCamera } from "@heroicons/react/24/outline";
-import { Camera as PhosphorCamera } from "@phosphor-icons/react";
+import { default as HeroCamera } from "@heroicons/react/24/outline/CameraIcon";
+import { CameraIcon as PhosphorCamera } from "@phosphor-icons/react/dist/csr/camera";
 import { IconCamera as TablerCamera } from "@tabler/icons-react";
 import {
   Alert,
