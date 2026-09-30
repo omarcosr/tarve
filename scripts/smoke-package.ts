@@ -57,12 +57,19 @@ delete env.TARVE_NATIVE;
 delete env.TARVE_DEBUG;
 delete env.BUN_BE_BUN;
 
-async function run(command: string[], cwd = directory, runtimeEnv = env): Promise<void> {
+// Registry installs depend on the network, so they get a longer budget than
+// the app runs, and a timeout says so instead of surfacing as exit 143.
+async function run(command: string[], cwd = directory, runtimeEnv = env, timeoutMs = 60_000): Promise<void> {
   const child = Bun.spawn(command, { cwd, env: runtimeEnv, stdout: "inherit", stderr: "inherit" });
-  const timer = setTimeout(() => child.kill(), 60_000);
-  try { assert.equal(await child.exited, 0, `Failed: ${command.join(" ")}`); }
-  finally { clearTimeout(timer); }
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; child.kill(); }, timeoutMs);
+  try {
+    const code = await child.exited;
+    assert(!timedOut, `Timed out after ${timeoutMs / 1000} s: ${command.join(" ")}`);
+    assert.equal(code, 0, `Failed: ${command.join(" ")}`);
+  } finally { clearTimeout(timer); }
 }
+const INSTALL_TIMEOUT_MS = 240_000;
 await run([process.execPath, "add", "./tarve.tgz"]);
 const reactIconsPackage = await Bun.file(join(root, "packages/react-icons/package.json")).json() as { version: string };
 await run([process.execPath, "pm", "pack", "--ignore-scripts", "--destination", directory], join(root, "packages/react-icons"));
@@ -84,8 +91,8 @@ for (const name of Object.keys(examplePackage.dependencies ?? {})) {
   const installed = await Bun.file(join(root, "examples/node_modules", ...name.split("/"), "package.json")).json() as { version: string };
   externalPackages.push(`${name}@${installed.version}`);
 }
-if (externalPackages.length) await run([process.execPath, "add", ...externalPackages]);
-await run([process.execPath, "add", "--dev", `@types/bun@${bunTypes.version}`, `typescript@${typescript.version}`]);
+if (externalPackages.length) await run([process.execPath, "add", ...externalPackages], directory, env, INSTALL_TIMEOUT_MS);
+await run([process.execPath, "add", "--dev", `@types/bun@${bunTypes.version}`, `typescript@${typescript.version}`], directory, env, INSTALL_TIMEOUT_MS);
 await run([process.execPath, join(directory, "node_modules/typescript/bin/tsc"), "--noEmit"]);
 await run([process.execPath, join(directory, "node_modules/typescript/bin/tsc"), "-p", join(examples, "tsconfig.json"), "--noEmit"]);
 const isolatedEnv = process.platform === "win32"
