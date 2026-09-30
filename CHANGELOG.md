@@ -2,7 +2,7 @@
 
 All notable changes to `@tarve/core` and `@tarve/react-icons` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
-## Unreleased
+## 0.3.0 — 2026-09-30
 
 ### Added
 - Gradient backgrounds: `linear-gradient(…)`, `radial-gradient(…)` and their `repeating-` forms as CSS strings or `{ type, angle | to, shape, size, at, repeating, stops }` objects, in state styles too, on D3D11, Vello GPU and the CPU renderer. Stops take `%` or `px` with CSS fix-up of omitted positions; radial gradients take every size keyword, explicit radii and `at` centres in keywords, `%` or `px` (with edge offsets like `right 10px bottom 20%`). Gradients with matching shape and stop count transition stop by stop.
