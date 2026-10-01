@@ -43,6 +43,14 @@ function textContent(value: Child): string {
   if (typeof value === "object") throw new Error("Text/Button children must be strings or numbers.");
   return String(value);
 }
+const DIV_SHORTHANDS = ["gap", "padding", "flex", "align", "justify"] as const;
+
+/** Props copied to the native node unchanged when they are set. */
+const COPIED_PROPS = [
+  "value", "placeholder", "inputType", "scrollSpeed", "scrollOrientation", "virtualList", "disabled", "modal",
+  "portal", "dismissOnOutside", "focusable", "dragRegion", "windowAction",
+] as const;
+
 export function compileTree(
   element: VNode,
   debug = false,
@@ -213,12 +221,10 @@ export function compileTree(
     const isText = nativeType === "text" || nativeType === "button";
     const isRichLeaf = nativeType === "markdown" || nativeType === "code" || nativeType === "diff";
     if (isRichLeaf && p.children != null) throw new Error(`${nativeType} is a native leaf and cannot have children.`);
-    const divShorthands = isIntrinsicDiv
-      ? Object.fromEntries(
-          Object.entries({ gap: p.gap, padding: p.padding, flex: p.flex, align: p.align, justify: p.justify })
-            .filter(([, value]) => value !== undefined),
-        )
-      : {};
+    const divShorthands: Record<string, unknown> = {};
+    if (isIntrinsicDiv) {
+      for (const key of DIV_SHORTHANDS) if (p[key] !== undefined) divShorthands[key] = p[key];
+    }
     const rawStyle = isIntrinsicDiv
       ? { ...divShorthands, ...canonicalizeIntrinsicStyle(p.style) }
       : { ...p.style };
@@ -242,44 +248,38 @@ export function compileTree(
     const imageSource = nativeType === "image" && p.src !== undefined
       ? serializeImageSource(p.src)
       : undefined;
+    // Plain assignments instead of ~30 conditional object spreads per node:
+    // on a 6,000-node first render the spreads alone cost ~10 ms.
     const node: NativeNode = { id, kind: nativeType as NativeNode["kind"], style,
-      children: isText || isRichLeaf ? [] : visit(p.children, `${path}/children`, childGroup),
-      ...(isText ? { text: textContent(p.children) } : {}),
-      ...(nativeType === "code" ? { text: p.code } : {}),
-      ...(nativeType === "markdown" || nativeType === "diff" ? { source: p.source } : {}),
-      ...(p.language !== undefined ? { language: p.language } : {}),
-      ...(p.path !== undefined ? { path: p.path } : {}),
-      ...(p.showLineNumbers !== undefined ? { showLineNumbers: p.showLineNumbers } : {}),
-      ...(p.wordDiff !== undefined ? { wordDiff: p.wordDiff } : {}),
-      ...(p.collapsedPaths !== undefined ? { collapsedPaths: [...p.collapsedPaths] } : {}),
-      ...(p.maxLines !== undefined ? { maxLines: p.maxLines } : {}),
-      ...(p.highlight !== undefined ? { highlight: p.highlight } : {}),
-      ...(isRichLeaf ? { syntaxTheme: { ...selectedTheme.syntax, ...p.syntaxTheme } } : {}),
-      ...(p.oldText !== undefined ? { oldText: p.oldText } : {}),
-      ...(p.newText !== undefined ? { newText: p.newText } : {}),
-      ...(p.svg !== undefined ? { svg: p.svg } : {}),
-      ...(control ? { control } : {}),
-      ...(imageSource && "path" in imageSource
-        ? { src: nativeAssetPath(imageSource.path), fit: p.fit ?? "cover" }
-        : imageSource ? { image: imageSource.image, fit: p.fit ?? "cover" } : {}),
-      ...(p.value !== undefined ? { value: p.value } : {}),
-      ...(p.placeholder !== undefined ? { placeholder: p.placeholder } : {}),
-      ...(p.inputType !== undefined ? { inputType: p.inputType } : {}),
-      ...(p.submitOnEnter !== undefined ? { submitOnEnter: p.submitOnEnter === true } : {}),
-      ...(p.scrollSpeed !== undefined ? { scrollSpeed: p.scrollSpeed } : {}),
-      ...(p.scrollOrientation !== undefined ? { scrollOrientation: p.scrollOrientation } : {}),
-      ...(p.virtualList !== undefined ? { virtualList: p.virtualList } : {}),
-      ...(p.disabled !== undefined ? { disabled: p.disabled } : {}),
-      ...(p.modal !== undefined ? { modal: p.modal } : {}),
-      ...(rovingGroup ? { rovingGroup } : {}),
-      ...(p.portal !== undefined ? { portal: p.portal } : {}),
-      ...(p.dismissOnOutside !== undefined ? { dismissOnOutside: p.dismissOnOutside } : {}),
-      ...(nativeType === "window" && p.onCloseRequest !== undefined ? { closeIntercept: true } : {}),
-      ...(p.focusable !== undefined ? { focusable: p.focusable } : {}),
-      ...(p.dragRegion !== undefined ? { dragRegion: p.dragRegion } : {}),
-      ...(p.windowAction !== undefined ? { windowAction: p.windowAction } : {}),
-      ...(p.motionFrom !== undefined ? { motionFrom: { ...p.motionFrom } } : {}),
-    };
+      children: isText || isRichLeaf ? [] : visit(p.children, `${path}/children`, childGroup) };
+    const optional = node as unknown as Record<string, unknown>;
+    if (isText) node.text = textContent(p.children);
+    if (nativeType === "code") node.text = p.code;
+    if (nativeType === "markdown" || nativeType === "diff") node.source = p.source;
+    if (p.language !== undefined) node.language = p.language;
+    if (p.path !== undefined) node.path = p.path;
+    if (p.showLineNumbers !== undefined) node.showLineNumbers = p.showLineNumbers;
+    if (p.wordDiff !== undefined) node.wordDiff = p.wordDiff;
+    if (p.collapsedPaths !== undefined) node.collapsedPaths = [...p.collapsedPaths];
+    if (p.maxLines !== undefined) node.maxLines = p.maxLines;
+    if (p.highlight !== undefined) node.highlight = p.highlight;
+    if (isRichLeaf) node.syntaxTheme = { ...selectedTheme.syntax, ...p.syntaxTheme };
+    if (p.oldText !== undefined) node.oldText = p.oldText;
+    if (p.newText !== undefined) node.newText = p.newText;
+    if (p.svg !== undefined) node.svg = p.svg;
+    if (control) node.control = control;
+    if (imageSource && "path" in imageSource) {
+      node.src = nativeAssetPath(imageSource.path);
+      node.fit = p.fit ?? "cover";
+    } else if (imageSource) {
+      node.image = imageSource.image;
+      node.fit = p.fit ?? "cover";
+    }
+    for (const key of COPIED_PROPS) if (p[key] !== undefined) optional[key] = p[key];
+    if (p.submitOnEnter !== undefined) node.submitOnEnter = p.submitOnEnter === true;
+    if (rovingGroup) node.rovingGroup = rovingGroup;
+    if (nativeType === "window" && p.onCloseRequest !== undefined) node.closeIntercept = true;
+    if (p.motionFrom !== undefined) node.motionFrom = { ...p.motionFrom };
     if (nativeType === "input" || nativeType === "textarea") labelableTargets.set(id, id);
     nodes.set(id, node);
     return [node];
