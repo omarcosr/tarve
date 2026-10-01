@@ -107,6 +107,14 @@ Measured on 2026-10-01 on the same machine with `bun run bench:compare` (`exampl
 - The `cpu` renderer's remaining scroll cost is `vello_cpu` re-rasterizing the whole window (~10.7 ms per frame on the list); damage-region redraws would be the next step there.
 - Runs on a loaded desktop vary by 20–40% in first frame; compare versions in the same session.
 
+## Startup of a 2,000-row list (2026-10-01)
+
+Native breakdown after `072f0d5` (Windows x64, `cpu` and D3D11): JSON parse ~10 ms + validation ~3 ms, tree construction ~22 ms, first layout + text shaping ~50 ms (now overlapped with D3D11 device creation), first paint ~6 ms. The JS side spends ~65 ms building the tree; `JSON.stringify` of the 1.96 MB document is only ~1.4 ms of that.
+
+Measured and dropped:
+- **Parallel text shaping** (one font context per worker): shaping fell from ~24 to ~12 ms, but on D3D11 it is already hidden behind device creation, and each worker's font context loads its own copy of the font data, so glyph caches keyed by font identity filled again while scrolling (`smoke:steady-frames` caught 52 extra rasterizations). Revisit only with a shared font source cache.
+- **A style table in the protocol** (the list has 7 distinct styles across 6,000 nodes; the document shrinks from 1.96 MB to 0.70 MB): parsing the smaller document and expanding the styles measured ~12.8 ms against ~10.1 ms for the plain document, and even a direct implementation would save ~3 ms. Not worth a protocol version.
+
 ## Implemented
 
 - Stable IDs retain Taffy nodes and layout caches across updates and resizes.

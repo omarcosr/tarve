@@ -2,6 +2,11 @@
 
 All notable changes to `@tarve/core` and `@tarve/react-icons` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
+## Unreleased
+
+### Changed
+- Startup: the native tree takes the startup document's nodes instead of deep-cloning them (~11 ms and ~23 MB less for a 2,000-row list), and the first layout and text shaping run while the prewarmed D3D11 device finishes. First paint of a 2,000-row list on D3D11 drops from ~384 ms to ~349 ms.
+
 ## 0.4.0 — 2026-10-01
 
 ### Added
