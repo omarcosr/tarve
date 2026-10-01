@@ -883,14 +883,18 @@ impl D3d11Graphics {
             ))
             .render(&mut scaler, glyph_id as GlyphId)?;
         if image.placement.width == 0 || image.placement.height == 0 {
-            return Some(GlyphEntry {
+            // Blank glyphs (spaces) are cached too; otherwise every frame
+            // rebuilds a scaler and rasterizes them again.
+            let entry = GlyphEntry {
                 view: None,
                 uv: [0.0; 4],
                 left: image.placement.left,
                 top: image.placement.top,
                 width: 0,
                 height: 0,
-            });
+            };
+            self.glyphs.insert(key, entry.clone());
+            return Some(entry);
         }
         let entry = if let Some((page, ax, ay)) =
             self.allocate_glyph(image.placement.width, image.placement.height)
