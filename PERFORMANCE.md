@@ -87,6 +87,26 @@ Memory of an idle empty window, 4 s after start:
 
 Of the ~42 MB private that Tarve adds on `cpu`, ~19 MB is Bun's FFI itself (any `bun:ffi` `dlopen` costs it), ~3.5 MB is loading `tarve_native.dll` and ~1.5 MB is the tree, text and layout; the rest is winit, UI Automation and DirectWrite. On `auto` the NVIDIA user-mode driver maps ~190 MB of images. Delay-loading the D3D/OpenGL/UIA DLLs for `cpu` apps was measured and dropped (~1 MB working set).
 
+## 0.3.0 → main (Windows x64, compiled)
+
+Measured on 2026-10-01 on the same machine with `bun run bench:compare` (`examples/bench.tsx` compiled per version, median of 3 runs). "Busy" is 4 s of simulated wheel scrolling and pointer movement; CPU is a percentage of one core.
+
+| Scene | Renderer | First frame | Working set | Private | Busy CPU |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Empty window | `cpu` | 84 → 59 ms | 64 → 45 MB | 114 → 114 MB | 2.7 → 1.6% |
+| Empty window | `auto` (D3D11) | 224 → 201 ms | 96 → 78 MB | 338 → 338 MB | 3.5 → 1.9% |
+| 2,000-row list | `cpu` | 255 → 217 ms | 185 → 163 MB | 256 → 252 MB | 28.6 → 22.3% |
+| 2,000-row list | `auto` (D3D11) | 400 → 332 ms | 213 → 193 MB | 492 → 486 MB | 69.6 → 17.7% |
+| Components example | `cpu` | 124 → 94 ms | 96 → 76 MB | 170 → 178 MB | 26.6 → 18.8% |
+| Components example | `auto` (D3D11) | 310 → 271 ms | 125 → 105 MB | 476 → 485 MB | 39.4 → 9.3% |
+
+- Idle stays at 0 frames and ~0% CPU in every scene.
+- The D3D11 busy-CPU drop is the blank-glyph cache fix: every visible space used to rebuild a font scaler each frame (~12.5 of 13.7 ms of frame CPU on the list). `bun run smoke:steady-frames` now fails if redrawing already-seen text rasterizes glyphs again (`glyphRasterizations` in the debug snapshot).
+- The components example grew between the two versions (gradient section), so its private-memory row is not a like-for-like comparison.
+- D3D11 dedicated GPU memory on main: ~51 MB empty, ~72 MB list, ~100 MB components.
+- The `cpu` renderer's remaining scroll cost is `vello_cpu` re-rasterizing the whole window (~10.7 ms per frame on the list); damage-region redraws would be the next step there.
+- Runs on a loaded desktop vary by 20–40% in first frame; compare versions in the same session.
+
 ## Implemented
 
 - Stable IDs retain Taffy nodes and layout caches across updates and resizes.

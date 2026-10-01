@@ -5,6 +5,8 @@ All notable changes to `@tarve/core` and `@tarve/react-icons` are documented her
 ## Unreleased
 
 ### Added
+- `bun run smoke:steady-frames`: scrolls a list on every renderer and fails if redrawing already-seen text rasterizes glyphs again. The debug snapshot reports `glyphRasterizations` on D3D11.
+- `bun run bench:compare <exe…>` with `examples/bench.tsx`: compares compiled builds scene by scene (first frame, memory, idle/busy CPU, GPU memory).
 - `examples/gradients.tsx`: linear, radial and conic gradients, repeating patterns, gradient text and gradient borders in every style.
 - `conic-gradient(…)` and `repeating-conic-gradient(…)` (or `{ type: "conic", from, at, stops }`) for `background`, `borderColor` and `foreground`, in state styles too, on D3D11, Vello GPU and the CPU renderer. `from` and stop positions take `deg`, `turn`, `rad`, `grad` or `%`; `at` takes every position form radial gradients accept. Conic gradients with the same stop count transition stop by stop.
 
