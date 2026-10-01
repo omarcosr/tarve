@@ -1550,11 +1550,15 @@ impl ApplicationHandler<Command> for App {
                         GraphicsState::Suspended(checkpoint) => checkpoint.frames,
                         GraphicsState::Fatal => 0,
                     };
+                    let glyph_rasterizations = match &self.graphics {
+                        GraphicsState::Ready(graphics) => graphics.glyph_rasterizations(),
+                        _ => None,
+                    };
                     self.events.push(json!({"type":"inspect", "requestId":request_id, "snapshot": {
                         "frames": frames, "layouts":self.tree.layouts, "shapes":self.tree.text.shapes, "paints":self.tree.paints,
                         "hovered":self.tree.hovered, "focused":self.tree.focused, "nodes":self.tree.snapshots(), "width":size.width, "height":size.height, "scale":window.scale_factor(),
                         "layoutNodes":self.tree.layout_node_count(), "layoutNodesCreated":self.tree.layout_nodes_created, "measureCalls":self.tree.measure_calls, "paintedNodes":self.tree.painted_nodes,
-                        "activeMotions":self.tree.active_motion_count()
+                        "activeMotions":self.tree.active_motion_count(), "glyphRasterizations": glyph_rasterizations
                     }}));
                 }
             }

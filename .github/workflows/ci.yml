@@ -111,7 +111,7 @@ jobs:
         env:
           TARVE_SMOKE_OS_INPUT: "0"
         run: |
-          for step in smoke smoke:controls smoke:virtual-list smoke:rich-content smoke:motion smoke:editor smoke:devtools; do
+          for step in smoke smoke:controls smoke:virtual-list smoke:rich-content smoke:motion smoke:editor smoke:steady-frames smoke:devtools; do
             echo "::group::$step"
             xvfb-run -a -s "-screen 0 1920x1080x24" bun run "$step"
             echo "::endgroup::"

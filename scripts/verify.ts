@@ -18,6 +18,7 @@ const allSteps = [
   "smoke:rich-content",
   "smoke:motion",
   "smoke:editor",
+  "smoke:steady-frames",
   "smoke:devtools",
   ...(process.platform === "win32" && process.arch === "x64" ? ["smoke:accessibility"] : []),
   "pack",

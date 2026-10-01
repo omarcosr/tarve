@@ -243,6 +243,8 @@ export interface Snapshot {
   layoutNodes: number; layoutNodesCreated: number; measureCalls: number; paintedNodes: number;
   frames: number; layouts: number; shapes: number; paints: number;
   activeMotions: number;
+  /** Glyphs rasterized so far on renderers with their own glyph atlas (D3D11); null elsewhere. */
+  glyphRasterizations?: number | null;
   hovered: string | null; focused: string | null; nodes: NodeSnapshot[];
   width: number; height: number; scale: number;
 }

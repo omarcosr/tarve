@@ -210,6 +210,9 @@ pub(crate) struct D3d11Graphics {
     glyphs: HashMap<GlyphKey, GlyphEntry>,
     glyph_atlases: Vec<GlyphAtlas>,
     glyph_atlas_exhausted: bool,
+    /// Glyphs rasterized since the device was created; steady redraws of
+    /// already-seen text must not move it.
+    glyph_rasterizations: u64,
     scale_context: ScaleContext,
     prepared: bool,
 }
@@ -321,6 +324,7 @@ impl D3d11Graphics {
             glyphs: HashMap::new(),
             glyph_atlases: vec![first_atlas],
             glyph_atlas_exhausted: false,
+            glyph_rasterizations: 0,
             scale_context: ScaleContext::new(),
             prepared: false,
         })
@@ -370,6 +374,10 @@ impl D3d11Graphics {
         self.images.retain(|key, _| self.used_images.contains(key));
         self.prepared = true;
         Ok(())
+    }
+
+    pub(crate) fn glyph_rasterizations(&self) -> u64 {
+        self.glyph_rasterizations
     }
 
     pub(crate) fn resize(&mut self, width: u32, height: u32) -> Result<bool, D3d11Error> {
@@ -867,6 +875,7 @@ impl D3d11Graphics {
         if let Some(entry) = self.glyphs.get(&key) {
             return Some(entry.clone());
         }
+        self.glyph_rasterizations += 1;
         let font_ref = FontRef::from_index(font.data.data(), font.index as usize)?;
         let mut scaler = self
             .scale_context

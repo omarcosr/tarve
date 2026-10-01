@@ -835,6 +835,16 @@ impl Graphics {
         self.generation
     }
 
+    /// Glyph rasterizations on renderers that keep their own glyph atlas
+    /// (D3D11); `None` where the backend caches glyphs internally.
+    pub(crate) fn glyph_rasterizations(&self) -> Option<u64> {
+        match &self.backend {
+            #[cfg(target_os = "windows")]
+            GraphicsImpl::D3d11(graphics) => Some(graphics.glyph_rasterizations()),
+            _ => None,
+        }
+    }
+
     pub(crate) fn backend(&self) -> RendererBackend {
         match &self.backend {
             #[cfg(target_os = "windows")]
