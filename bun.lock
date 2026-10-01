@@ -11,18 +11,18 @@
     },
     "packages/core": {
       "name": "@tarve/core-internal",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@tarve/protocol": "workspace:*",
       },
     },
     "packages/protocol": {
       "name": "@tarve/protocol",
-      "version": "0.3.0",
+      "version": "0.4.0",
     },
     "packages/react-icons": {
       "name": "@tarve/react-icons",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "peerDependencies": {
         "@tarve/core": "^0.1.0",
       },

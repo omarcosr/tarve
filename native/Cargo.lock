@@ -3179,7 +3179,7 @@ dependencies = [
 
 [[package]]
 name = "tarve_native"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "accesskit",
  "accesskit_winit",

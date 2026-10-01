@@ -2,7 +2,7 @@
 
 All notable changes to `@tarve/core` and `@tarve/react-icons` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
-## Unreleased
+## 0.4.0 — 2026-10-01
 
 ### Added
 - `bun run smoke:steady-frames`: scrolls a list on every renderer and fails if redrawing already-seen text rasterizes glyphs again. The debug snapshot reports `glyphRasterizations` on D3D11.
