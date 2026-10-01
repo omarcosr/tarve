@@ -1558,6 +1558,23 @@ pub struct Tree {
     pub warnings: Vec<String>,
 }
 
+/// The node fields `Tree::refresh_stacking` reads, besides children.
+fn stacking_inputs(node: &Node) -> (u32, bool, bool) {
+    let transformed = node.style.get("transform").is_some()
+        || ["hover", "active", "focus", "focusVisible", "disabled"]
+            .iter()
+            .any(|state| {
+                node.style
+                    .get(*state)
+                    .is_some_and(|style| style.get("transform").is_some())
+            });
+    (
+        node.number("zIndex", 0.0).to_bits(),
+        node.portal,
+        transformed,
+    )
+}
+
 impl Tree {
     fn refresh_stacking(&mut self) {
         fn visit(
@@ -2340,6 +2357,13 @@ impl Tree {
         let previous_modal = self.active_modal().map(str::to_string);
         let previous_focus = self.focused.clone();
         crate::protocol::validate_patch(&nodes)?;
+        // Stacking is a whole-tree pass; a patch keeps children, so it only
+        // changes when a patched node changes its own z-index, portal or transform.
+        let stacking_changed = nodes.iter().any(|node| {
+            self.entries
+                .get(&node.id)
+                .is_none_or(|entry| stacking_inputs(&entry.node) != stacking_inputs(node))
+        });
         // Validate the whole patch before applying any part of it.
         for node in &nodes {
             if !self
@@ -2365,7 +2389,9 @@ impl Tree {
         if let Some(id) = restore_focus {
             self.focus(&id);
         }
-        self.refresh_stacking();
+        if stacking_changed {
+            self.refresh_stacking();
+        }
         Ok(())
     }
 

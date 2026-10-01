@@ -4204,6 +4204,45 @@ fn z_index_controls_overlapping_hit_order_without_affecting_layout() {
 }
 
 #[test]
+fn patching_z_index_restacks_and_unrelated_patches_keep_the_order() {
+    let pressable = |id: &str, z: f32| {
+        node(
+            id,
+            "pressable",
+            json!({"position":"absolute","left":0,"top":0,"width":80,"height":40,"zIndex":z}),
+            vec![],
+        )
+    };
+    let mut tree = Tree::new(root(vec![node(
+        "stack",
+        "view",
+        json!({"position":"relative","width":100,"height":60}),
+        vec![pressable("high", 10.0), pressable("low", 0.0)],
+    )]));
+    tree.compute(120.0, 80.0).unwrap();
+    tree.pointer_move(20.0, 20.0);
+    assert_eq!(tree.hovered.as_deref(), Some("high"));
+    tree.patch(vec![pressable("low", 20.0)]).unwrap();
+    tree.compute(120.0, 80.0).unwrap();
+    tree.pointer_move(21.0, 20.0);
+    assert_eq!(
+        tree.hovered.as_deref(),
+        Some("low"),
+        "a z-index patch restacks"
+    );
+    let mut labelled = pressable("high", 10.0);
+    labelled.text = "unrelated".into();
+    tree.patch(vec![labelled]).unwrap();
+    tree.compute(120.0, 80.0).unwrap();
+    tree.pointer_move(22.0, 20.0);
+    assert_eq!(
+        tree.hovered.as_deref(),
+        Some("low"),
+        "other patches keep the order"
+    );
+}
+
+#[test]
 fn portal_escapes_scroll_clip_for_paint_and_hit_testing() {
     let button = node(
         "portal-button",
