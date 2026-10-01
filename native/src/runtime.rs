@@ -367,7 +367,7 @@ fn prefer_x11_on_wsl() -> bool {
 }
 
 pub fn run(
-    document: Document,
+    mut document: Document,
     events: Arc<Events>,
     ready: SyncSender<Result<EventLoopProxy<Command>, String>>,
 ) -> Result<(), String> {
@@ -402,7 +402,12 @@ pub fn run(
     ready
         .send(Ok(event_proxy.clone()))
         .map_err(|e| e.to_string())?;
-    let tree = Tree::new(document.root.clone());
+    // The tree owns the nodes from here on; move the children instead of
+    // deep-cloning the whole document (~11 ms for 6,000 nodes).
+    let tree = Tree::new(Node {
+        children: std::mem::take(&mut document.root.children),
+        ..document.root.clone()
+    });
     let mut app = App {
         document,
         events,
@@ -1442,6 +1447,11 @@ impl ApplicationHandler<Command> for App {
         match event_loop.create_window(attributes) {
             Ok(window) => {
                 let window = Arc::new(window);
+                // Lay out and shape text while the GPU device (prewarmed on
+                // another thread since tarve_start) finishes; prepare() then
+                // finds a clean layout. Errors surface again from prepare().
+                let size = window.inner_size().to_logical::<f32>(window.scale_factor());
+                let _ = self.tree.compute(size.width, size.height);
                 match Graphics::new(window.clone(), self.document.renderer) {
                     Ok(graphics) => {
                         self.graphics = GraphicsState::Ready(Box::new(graphics));
