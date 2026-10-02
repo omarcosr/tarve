@@ -6,17 +6,20 @@
   const repo = "https://github.com/omarcosr/tarve";
 </script>
 
-<div class="aurora" class:aurora-dim={section === "docs"} aria-hidden="true"><span></span><span></span><span></span></div>
-<div class="grid-bg" aria-hidden="true"></div>
-
 <SiteNav {section} />
 
 {@render children()}
 
 <footer class="footer">
-  <span>Tarve · Apache-2.0</span>
-  <span>
-    <a href="/docs">Docs</a> · <a href={repo}>GitHub</a> · <a href="https://www.npmjs.com/package/@tarve/core">npm</a> ·
+  <p class="colophon">
+    Set in Archivo and IBM Plex. Every component figure in the documentation was drawn by Tarve itself, either as a PNG
+    from the runtime or live in WebAssembly.
+  </p>
+  <nav aria-label="Footer">
+    <a href="/docs">Docs</a>
+    <a href={repo}>GitHub</a>
+    <a href="https://www.npmjs.com/package/@tarve/core">npm</a>
     <a href="{repo}/blob/main/CHANGELOG.md">Changelog</a>
-  </span>
+  </nav>
+  <span>Tarve · Apache-2.0</span>
 </footer>

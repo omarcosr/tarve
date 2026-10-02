@@ -59,3 +59,7 @@ cargo install wasm-bindgen-cli --version 0.2.129
 
 Fonts in `public/fonts` (Inter, JetBrains Mono; SIL OFL, licences alongside) replace the system fonts the desktop
 runtime uses. Clipboard copy/paste, IME composition, file dialogs, accessibility and window chrome stay desktop-only.
+
+The site itself is set in Archivo and IBM Plex (SIL OFL, also in `public/fonts`), self-hosted so no request leaves for a
+font CDN. The home page's Fig. 1 runs `src/lib/playground/hero/Counter.tsx` live; the code shown next to it is the same
+file imported with `?raw`.

@@ -2,3 +2,9 @@
 // `src/hono-svelte-entries.d.ts` (see vite.config.ts). `c.render()` only
 // accepts those names — a typo fails the typecheck.
  /// <reference path="./hono-svelte-entries.d.ts" />
+
+/** A documentation example turned into a mountable view by the playground Vite plugin. */
+declare module "*.tsx?playground" {
+  export const preview: () => import("@tarve/core").VNode;
+  export const fullWindow: boolean;
+}

@@ -19,7 +19,7 @@
 
 <figure class="code" class:code-bare={!file}>
   {#if file}
-    <figcaption><span class="code-dots" aria-hidden="true"><i></i><i></i><i></i></span>{file}</figcaption>
+    <figcaption>{file}</figcaption>
   {/if}
   <button class="code-copy" class:copied type="button" onclick={copy} aria-label={copied ? "Copied" : "Copy code"}>
     {#if copied}

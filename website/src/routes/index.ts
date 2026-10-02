@@ -2,15 +2,17 @@ import { Hono } from "hono";
 import { notFoundHandler, shell } from "hono-svelte";
 import tarve from "../../../package.json";
 import { buildComponentDoc, commonProps, docsCatalog } from "../lib/docs/build";
+import { themeBootScript } from "../lib/theme";
 
 const SITE = "https://tarve.dev";
 
 const head = [
-  '<meta name="theme-color" content="#07070b">',
+  `<script>${themeBootScript}</script>`,
+  '<meta name="theme-color" content="#f2efe6" media="(prefers-color-scheme: light)">',
+  '<meta name="theme-color" content="#12110e" media="(prefers-color-scheme: dark)">',
   '<link rel="icon" type="image/svg+xml" href="/favicon.svg">',
-  '<link rel="preconnect" href="https://fonts.googleapis.com">',
-  '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
-  '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap">',
+  '<link rel="preload" href="/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>',
+  '<link rel="preload" href="/fonts/IBMPlexSans.woff2" as="font" type="font/woff2" crossorigin>',
 ].join("");
 
 const version = tarve.version;

@@ -1,4 +1,4 @@
-import { Column, Window, createApp, darkTheme, type VNode } from "@tarve/core";
+import { Column, Window, createApp, darkTheme, lightTheme, type VNode } from "@tarve/core";
 import { CanvasBridge } from "./bridge";
 import init, { WebTree, registerFont } from "./wasm/tarve_web.js";
 import wasmUrl from "./wasm/tarve_web_bg.wasm?url";
@@ -26,13 +26,25 @@ export function loadRuntime(): Promise<WebAssembly.Memory> {
   return runtime;
 }
 
-/** Runs a documentation example in `canvas` with the real Tarve reconciler and native tree. */
-export async function mountExample(canvas: HTMLCanvasElement, preview: () => VNode, fullWindow: boolean): Promise<() => void> {
+/**
+ * Runs a documentation example in `canvas` with the real Tarve reconciler and native tree, in the
+ * page's light or dark theme. Full-window examples keep their own markup; only their theme is swapped.
+ */
+export async function mountExample(
+  canvas: HTMLCanvasElement,
+  preview: () => VNode,
+  fullWindow: boolean,
+  mode: "light" | "dark" = "dark",
+): Promise<() => void> {
   const memory = await loadRuntime();
+  const theme = mode === "dark" ? darkTheme : lightTheme;
   const view = fullWindow
-    ? preview
+    ? () => {
+        const root = preview();
+        return root.type === Window ? { ...root, props: { ...root.props, theme } } : root;
+      }
     : () => (
-        <Window title="Example" theme={darkTheme}>
+        <Window title="Example" theme={theme}>
           <Column flex={1} align="center" justify="center" padding={40}>
             {preview()}
           </Column>
