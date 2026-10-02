@@ -1883,7 +1883,7 @@
       "name": "Direction",
       "summary": "Layout direction helper. RTL reverses visual horizontal flow while preserving logical/focus order. Text bidi is not changed.",
       "source": "packages/core/src/form-controls.ts",
-      "line": 397,
+      "line": 401,
       "generic": false,
       "propsType": "DirectionProps",
       "props": [
@@ -2440,7 +2440,7 @@
     {
       "name": "InputOTP",
       "source": "packages/core/src/form-controls.ts",
-      "line": 190,
+      "line": 194,
       "generic": false,
       "propsType": "InputOTPProps",
       "props": [
@@ -2501,7 +2501,7 @@
     {
       "name": "Item",
       "source": "packages/core/src/form-controls.ts",
-      "line": 245,
+      "line": 249,
       "generic": false,
       "propsType": "ItemProps",
       "props": [
@@ -2558,7 +2558,7 @@
     {
       "name": "Kbd",
       "source": "packages/core/src/form-controls.ts",
-      "line": 267,
+      "line": 271,
       "generic": false,
       "propsType": "KbdProps",
       "props": [],
@@ -3227,7 +3227,7 @@
     {
       "name": "NativeSelect",
       "source": "packages/core/src/form-controls.ts",
-      "line": 283,
+      "line": 287,
       "generic": false,
       "propsType": "NativeSelectProps",
       "props": [
@@ -5254,7 +5254,7 @@
     {
       "name": "Toggle",
       "source": "packages/core/src/form-controls.ts",
-      "line": 295,
+      "line": 299,
       "generic": false,
       "propsType": "ToggleProps",
       "props": [
@@ -5310,7 +5310,7 @@
     {
       "name": "ToggleGroup",
       "source": "packages/core/src/form-controls.ts",
-      "line": 325,
+      "line": 329,
       "generic": false,
       "propsType": "ToggleGroupProps",
       "props": [
@@ -5492,7 +5492,7 @@
     {
       "name": "Typography",
       "source": "packages/core/src/form-controls.ts",
-      "line": 368,
+      "line": 372,
       "generic": false,
       "propsType": "TypographyProps",
       "props": [
