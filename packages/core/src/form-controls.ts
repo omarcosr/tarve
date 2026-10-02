@@ -167,7 +167,11 @@ export function InputGroup({ prefix, suffix, disabled, children, style, ...props
     control: { role: "group" },
     gap: 8,
     style: { width: "100%", minHeight: 38, padding: { left: 10, right: 10 }, borderWidth: 1, borderColor: c.border,
-      radius: theme.radius.sm, background: disabled ? c.disabled : c.input, ...style },
+      radius: theme.radius.sm, background: disabled ? c.disabled : c.input,
+      // Presses on the prefix, suffix or padding reach the field, and the group shows its focus.
+      pointerEvents: "delegate", focus: { borderColor: c.ring },
+      focusVisible: { borderColor: c.ring, outlineColor: c.ring, outlineWidth: 2, outlineOffset: 2, outlineStyle: "solid" },
+      ...style },
     children: [prefix, jsx(View, { flex: 1, children: disableFormChild(groupedInput(children), disabled) }), suffix],
   });
 }

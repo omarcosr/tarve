@@ -15,6 +15,7 @@ All notable changes to `@tarve/core`, `@tarve/react-icons` and `@tarve/headless`
 - `Tooltip` text no longer wraps to the width of its trigger; `Command` lists no longer clip with group headings; the search field of `Command` and `Combobox` no longer draws a ring across its icon.
 - `Alert`, `Field` errors and failed `Attachment`s use readable destructive text; `Alert` tints an uncoloured icon; `Field` shows the description with the error; `InputGroup` strips its `Input`'s border; `NavigationMenu` triggers show open and current state.
 - `getByRole("button", { name })` finds plain `Button`s.
+- `InputGroup` is clickable across its whole box: presses on the prefix, suffix or padding focus the field (text cursor included), and the group shows a focus border. New style value `pointerEvents: "delegate"` sends presses on a node's own area to its first enabled input or textarea and gives the node that field's focus state.
 
 ### Changed
 - Startup: the native tree takes the startup document's nodes instead of deep-cloning them (~11 ms and ~23 MB less for a 2,000-row list), and the first layout and text shaping run while the prewarmed D3D11 device finishes. First paint of a 2,000-row list on D3D11 drops from ~384 ms to ~349 ms.

@@ -1910,6 +1910,20 @@ impl Tree {
             .chain(self.focused.iter())
             .cloned()
             .collect();
+        let mut current = current;
+        if let Some(focused) = self.focused.clone() {
+            // Delegating ancestors of the focused field change state with it.
+            let mut parent = self
+                .entries
+                .get(&focused)
+                .and_then(|entry| entry.parent.clone());
+            while let Some(id) = parent {
+                if self.delegate_focused(&id) {
+                    current.push(id.clone());
+                }
+                parent = self.entries.get(&id).and_then(|entry| entry.parent.clone());
+            }
+        }
         let mut ids = std::mem::take(&mut self.state_candidates);
         ids.append(&mut self.visual_snapshot_ids);
         ids.extend(current.iter().cloned());
@@ -3658,12 +3672,15 @@ impl Tree {
             let max_slot = control.max.max(0.0) as usize;
             control.value.max(0.0) as usize == caret_slot.min(max_slot)
         });
+        let delegate_focused = self.delegate_focused(id);
         VisualState {
             hovered: self.hovered.as_deref() == Some(id)
                 || self.hover_styled.iter().any(|hovered| hovered == id),
             active: self.pressed.as_deref() == Some(id) && self.hovered.as_deref() == Some(id),
-            focused: self.focused.as_deref() == Some(id) || otp_slot_focused,
-            focus_visible: (self.focused.as_deref() == Some(id) || otp_slot_focused)
+            focused: self.focused.as_deref() == Some(id) || otp_slot_focused || delegate_focused,
+            focus_visible: (self.focused.as_deref() == Some(id)
+                || otp_slot_focused
+                || delegate_focused)
                 && self.focus_visible,
             disabled: node.disabled,
         }
@@ -4713,6 +4730,12 @@ impl Tree {
             }
         }
         let blocks_pointer = entry.node.string("pointerEvents", "auto") == "block";
+        if !scroll_only
+            && rect.contains(mouse)
+            && let Some(target) = self.pointer_delegate(id)
+        {
+            return Some(target);
+        }
         let eligible = if scroll_only {
             (matches!(entry.node.kind.as_str(), "scroll" | "textarea")
                 && (entry.scroll_max > 0.0 || entry.scroll_max_x > 0.0))
@@ -4724,6 +4747,36 @@ impl Tree {
         };
         (eligible && rect.contains(mouse)).then(|| id.to_string())
     }
+    /// With `pointerEvents: "delegate"`, presses on a node's own area go to its first
+    /// enabled input or textarea, as a click on an HTML label reaches its field.
+    fn pointer_delegate(&self, id: &str) -> Option<String> {
+        let entry = self.entries.get(id)?;
+        if entry.node.string("pointerEvents", "auto") != "delegate" {
+            return None;
+        }
+        let mut stack: Vec<&String> = entry.children.iter().rev().collect();
+        while let Some(child) = stack.pop() {
+            let Some(node) = self.entries.get(child.as_str()) else {
+                continue;
+            };
+            if node.node.disabled || node.node.string("display", "flex") == "none" {
+                continue;
+            }
+            if matches!(node.node.kind.as_str(), "input" | "textarea") {
+                return Some(child.clone());
+            }
+            stack.extend(node.children.iter().rev());
+        }
+        None
+    }
+
+    /// A delegating node shows its focus state while the field it delegates to has focus.
+    pub(crate) fn delegate_focused(&self, id: &str) -> bool {
+        self.focused.as_deref().is_some_and(|focused| {
+            focused != id && self.pointer_delegate(id).as_deref() == Some(focused)
+        })
+    }
+
     fn interactive(&self, id: &str) -> bool {
         let Some(target) = self.entries.get(id) else {
             return false;
@@ -5189,7 +5242,11 @@ impl Tree {
         }
     }
     fn drop_target_enabled(&self, id: &str, source: &str) -> bool {
-        if !self.entries.get(id).is_some_and(|entry| entry.node.drop_target) {
+        if !self
+            .entries
+            .get(id)
+            .is_some_and(|entry| entry.node.drop_target)
+        {
             return false;
         }
         let mut current = Some(id);
@@ -5243,7 +5300,9 @@ impl Tree {
                 };
                 if current_id != id
                     && ancestor.node.kind == "scroll"
-                    && !self.visible_rect(current_id).is_some_and(|clip| inside(&clip))
+                    && !self
+                        .visible_rect(current_id)
+                        .is_some_and(|clip| inside(&clip))
                 {
                     visible = false;
                     break;

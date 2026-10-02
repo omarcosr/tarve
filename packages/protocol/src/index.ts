@@ -139,7 +139,7 @@ export interface Style extends StateStyle {
   /** Line-number gutter colour, for `diff` and for `code`. */
   diffGutterColor?: string; gutterColor?: string;
   hover?: StateStyle; focus?: StateStyle; focusVisible?: StateStyle; active?: StateStyle; disabled?: StateStyle;
-  strokeWidth?: number; pointerEvents?: "auto" | "block"; userSelect?: UserSelect;
+  strokeWidth?: number; pointerEvents?: "auto" | "block" | "delegate"; userSelect?: UserSelect;
 }
 export interface Control {
   role: "button" | "link" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "navigation" | "menuitem" | "tree" | "treeitem" | "grid" | "row" | "toggle" | "togglegroup" | "slider" | "progress" | "virtualList" | "select" | "group" | "field" | "alert" | "status" | "label" | "option" | "otpSlot";

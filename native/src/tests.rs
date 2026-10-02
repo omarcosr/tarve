@@ -6352,8 +6352,15 @@ fn pointer_drag_waits_for_the_threshold_and_a_short_press_still_clicks() {
     let mut tree = drag_fixture(false);
     tree.pointer_move(10.0, 10.0);
     tree.pointer_down();
-    assert!(tree.pointer_move(12.0, 11.0).iter().all(|event| event["type"] != "dragStart"));
-    assert_eq!(tree.pointer_up(), vec![json!({"type":"click", "id":"card"})]);
+    assert!(
+        tree.pointer_move(12.0, 11.0)
+            .iter()
+            .all(|event| event["type"] != "dragStart")
+    );
+    assert_eq!(
+        tree.pointer_up(),
+        vec![json!({"type":"click", "id":"card"})]
+    );
 }
 
 #[test]
@@ -6362,19 +6369,37 @@ fn pointer_drag_reports_the_innermost_target_and_drops_without_clicking() {
     tree.pointer_move(10.0, 10.0);
     tree.pointer_down();
     let events = tree.pointer_move(30.0, 10.0);
-    assert_eq!(events[events.len() - 2], json!({"type":"dragStart", "id":"card", "x":10.0, "y":10.0}));
-    assert_eq!(events.last().unwrap()["over"], serde_json::Value::Null, "the source is not its own target");
+    assert_eq!(
+        events[events.len() - 2],
+        json!({"type":"dragStart", "id":"card", "x":10.0, "y":10.0})
+    );
+    assert_eq!(
+        events.last().unwrap()["over"],
+        serde_json::Value::Null,
+        "the source is not its own target"
+    );
     let over = |events: Vec<serde_json::Value>| events.last().unwrap()["over"].clone();
-    assert_eq!(over(tree.pointer_move(80.0, 20.0)), json!("a-slot"), "nested targets resolve inward");
+    assert_eq!(
+        over(tree.pointer_move(80.0, 20.0)),
+        json!("a-slot"),
+        "nested targets resolve inward"
+    );
     assert_eq!(over(tree.pointer_move(80.0, 80.0)), json!("a"));
     assert_eq!(over(tree.pointer_move(200.0, 50.0)), json!("b"));
-    assert_eq!(over(tree.pointer_move(300.0, 50.0)), serde_json::Value::Null);
+    assert_eq!(
+        over(tree.pointer_move(300.0, 50.0)),
+        serde_json::Value::Null
+    );
     tree.pointer_move(200.0, 50.0);
     assert_eq!(
         tree.pointer_up(),
         vec![json!({"type":"drop", "id":"card", "target":"b", "x":200.0, "y":50.0})]
     );
-    assert!(tree.pointer_move(220.0, 50.0).iter().all(|event| event["type"] != "dragMove"));
+    assert!(
+        tree.pointer_move(220.0, 50.0)
+            .iter()
+            .all(|event| event["type"] != "dragMove")
+    );
 }
 
 #[test]
@@ -6384,7 +6409,78 @@ fn pointer_drag_cancels_on_escape_and_skips_disabled_targets() {
     tree.pointer_down();
     let events = tree.pointer_move(200.0, 50.0);
     assert_eq!(events.last().unwrap()["over"], serde_json::Value::Null);
-    assert_eq!(tree.key("Escape"), vec![json!({"type":"dragCancel", "id":"card"})]);
-    assert!(tree.pointer_up().is_empty(), "a cancelled drag neither drops nor clicks");
+    assert_eq!(
+        tree.key("Escape"),
+        vec![json!({"type":"dragCancel", "id":"card"})]
+    );
+    assert!(
+        tree.pointer_up().is_empty(),
+        "a cancelled drag neither drops nor clicks"
+    );
     assert!(tree.cancel_pointer_drag().is_empty());
+}
+
+#[test]
+fn pointer_delegate_sends_presses_on_a_group_to_its_field_and_shares_its_focus() {
+    let icon = node("icon", "view", json!({"width":16,"height":16}), vec![]);
+    let mut field = node("field", "input", json!({"flex":1,"height":30}), vec![]);
+    field.value = Some("abc".into());
+    let kbd = node("kbd", "view", json!({"width":20,"height":20}), vec![]);
+    let group = node(
+        "group",
+        "row",
+        json!({"width":300,"height":40,"padding":{"left":10,"right":10},"gap":8,"align":"center","pointerEvents":"delegate","focus":{"borderColor":"#ff0000"}}),
+        vec![icon, field, kbd],
+    );
+    let plain = node(
+        "plain",
+        "row",
+        json!({"width":300,"height":40}),
+        vec![node(
+            "other",
+            "view",
+            json!({"width":16,"height":16}),
+            vec![],
+        )],
+    );
+    let mut tree = Tree::new(root(vec![group, plain]));
+    tree.compute(400.0, 200.0).unwrap();
+    let group_rect = tree.entries["group"].rect;
+    let press = |tree: &mut Tree, x: f64, y: f64| {
+        tree.compute(400.0, 200.0).unwrap();
+        tree.pointer_move(x, y);
+        tree.pointer_down();
+        tree.pointer_up();
+    };
+    press(&mut tree, group_rect.x0 + 4.0, group_rect.y0 + 20.0);
+    assert_eq!(
+        tree.focused.as_deref(),
+        Some("field"),
+        "the prefix side reaches the field"
+    );
+    assert_eq!(
+        tree.type_text("X")[0]["value"],
+        "Xabc",
+        "the caret starts at the beginning"
+    );
+    assert!(tree.delegate_focused("group"));
+    press(&mut tree, group_rect.x1 - 4.0, group_rect.y0 + 20.0);
+    assert_eq!(
+        tree.focused.as_deref(),
+        Some("field"),
+        "the suffix side reaches the field"
+    );
+    assert_eq!(
+        tree.type_text("Y")[0]["value"],
+        "XabcY",
+        "pressing past the text puts the caret at the end"
+    );
+    let plain_rect = tree.entries["plain"].rect;
+    press(&mut tree, plain_rect.x0 + 4.0, plain_rect.y0 + 20.0);
+    assert_ne!(
+        tree.focused.as_deref(),
+        Some("field"),
+        "other rows do not delegate"
+    );
+    assert!(!tree.delegate_focused("group"));
 }
