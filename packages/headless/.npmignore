@@ -1,3 +1,5 @@
 __snapshots__
 scripts
+.pack-check
 src/**/*.test.tsx
+*.actual.png

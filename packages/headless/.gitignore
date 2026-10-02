@@ -1,2 +1,3 @@
 wasm
+.pack-check
 __snapshots__/*.actual.png

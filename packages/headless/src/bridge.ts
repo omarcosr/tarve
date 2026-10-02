@@ -20,7 +20,7 @@ export interface HeadlessBridgeOptions {
    * `realtime`: the clock follows `performance.now()`, as in a window.
    */
   clock?: "manual" | "realtime";
-  /** Directory relative `Image` paths are read from. Default `process.cwd()`. */
+  /** Directory relative `Image` paths (and web-style `/…` paths) are read from. Default `process.cwd()`. */
   assetRoot?: string;
 }
 
@@ -203,10 +203,13 @@ export class HeadlessBridge implements NativeBridge {
     const node = value as Record<string, unknown> & { src?: unknown; image?: unknown };
     if (typeof node.kind === "string" && typeof node.id === "string" && typeof node.src === "string" && !node.image) {
       const src = node.src;
-      if (!/^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith("file:")) {
+      // A single letter before ":" is a Windows drive, not a URL scheme.
+      if (!/^[a-z][a-z0-9+.-]+:/i.test(src) || src.startsWith("file:")) {
         const path = src.startsWith("file:") ? new URL(src).pathname : src;
-        const file = isAbsolute(path) ? path : resolve(this.options.assetRoot ?? process.cwd(), path);
-        if (existsSync(file)) {
+        const root = this.options.assetRoot ?? process.cwd();
+        // "/assets/a.png" is a real absolute path, or, as on the web, rooted at assetRoot.
+        const file = [isAbsolute(path) ? path : resolve(root, path), resolve(root, path.replace(/^[\\/]+/, ""))].find((candidate) => existsSync(candidate));
+        if (file) {
           node.image = { kind: "encoded", key: src, data: readFileSync(file).toString("base64"), mediaType: MEDIA[extname(file).toLowerCase()] };
           delete node.src;
         }

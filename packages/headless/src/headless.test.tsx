@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Button, Card, Column, Input, Row, Spinner, Text, View, Window, darkTheme, readPngRgba, type RgbaImage } from "@tarve/core";
+import { Button, Card, Column, Image, Input, Row, Spinner, Text, View, Window, darkTheme, readPngRgba, type RgbaImage } from "@tarve/core";
 import { createHeadlessApp, createHeadlessTestRenderer, matchImageSnapshot, renderToPng, renderToRgba } from "./index";
 
 const snapshots = resolve(import.meta.dir, "../__snapshots__");
@@ -127,6 +127,24 @@ describe("@tarve/headless", () => {
       expect(Buffer.from(app.png()).equals(Buffer.from(before))).toBe(true);
       await app.advanceMotion(200);
       expect(Buffer.from(app.png()).equals(Buffer.from(before))).toBe(false);
+    } finally {
+      app.close();
+    }
+  });
+
+  test("Image files are read from disk and inlined into the tree", async () => {
+    const errors: string[] = [];
+    const app = await createHeadlessApp(
+      () => (
+        <Window width={200} height={120}>
+          <Image src={join(snapshots, "settings-card.png")} width={200} height={120} fit="cover" />
+        </Window>
+      ),
+      { onError: (event) => errors.push(event.error.message) },
+    );
+    try {
+      expect(errors).toEqual([]);
+      expect(inkWithin(app.pixels(), 0, 0, 200, 120)).toBeGreaterThan(1000);
     } finally {
       app.close();
     }

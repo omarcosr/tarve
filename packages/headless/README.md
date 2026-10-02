@@ -76,7 +76,8 @@ follows `performance.now()` like a window.
 ## Limits
 
 - No window: title bar buttons, file dialogs, the clipboard and accessibility are desktop-only.
-- Images load from files and `data:` URIs; remote URLs are not fetched.
+- Images load from files and `data:` URIs; remote URLs are not fetched. Relative paths resolve from
+  the main script, as in a window; web-style `/assets/a.png` paths resolve from `assetRoot`.
 - Only the bundled fonts exist unless you register more: Arabic, CJK and emoji text needs a font.
 
 ## Building from the repository

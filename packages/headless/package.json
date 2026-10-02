@@ -29,7 +29,8 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun scripts/build-wasm.ts"
+    "build": "bun scripts/build-wasm.ts",
+    "verify:pack": "bun scripts/verify-pack.ts"
   },
   "peerDependencies": {
     "@tarve/core": ">=0.4.0"
