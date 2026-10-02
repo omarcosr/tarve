@@ -1,0 +1,83 @@
+diff --git a/dist/index.js b/dist/index.js
+index fc667d812e8ea2e6eb070974ebc38c9daafe54c3..dc7efa01143ed8e24843037004406bd6723bc836 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -277,7 +277,9 @@ export function shell(options = {}) {
+             if (!isValidEntryName(entryName)) {
+                 throw new Error(`hono-svelte: invalid entryName: ${JSON.stringify(entryName)}`);
+             }
+-            const loader = ssrPages[entryName];
++            // [patch] client entries are SSR'd as well and hydrated by their entry script.
++            const clientEntry = hasClientEntry(entryName);
++            const loader = ssrPages[entryName] ?? ssrPages.__clientLoaders?.[entryName] ?? autoSsrPages.__clientLoaders?.[entryName];
+             // A page is SSR when it is static (no <script>) — LAYOUTS DON'T MATTER
+             // here. A static page wrapped in layouts SSRs the page and wraps it in
+             // the layout chain (same rule as pages().staticEntries/clientEntries).
+@@ -285,7 +287,7 @@ export function shell(options = {}) {
+             const chain = layoutChainFor(entryName)
+                 .map((l) => ssrLayouts[l])
+                 .filter((l) => l !== undefined);
+-            let isSsr = loader !== undefined && !hasClientEntry(entryName);
++            let isSsr = loader !== undefined;
+             if (strict && !isSsr) {
+                 const known = availableEntries();
+                 if (known && !known.includes(entryName)) {
+@@ -321,7 +323,7 @@ export function shell(options = {}) {
+             let scriptHtml = "";
+             let preloadHtml = "";
+             let prefetchHtml = "";
+-            if (!isSsr) {
++            if (!isSsr || clientEntry) {
+                 const src = resolveUrl(entryName);
+                 scriptHtml =
+                     lt + `script type="module" src="${escapeAttr(src)}"${nAttr}>` + lt + "/script>";
+diff --git a/dist/vite.js b/dist/vite.js
+index da45d301bf610c15337bf974dae845734889bc52..bf2c532c5900eaec8de72e5f7c76735fb0dedd63 100644
+--- a/dist/vite.js
++++ b/dist/vite.js
+@@ -264,6 +264,8 @@ export function pages(options = {}) {
+         const client = all.filter((p) => !p.isStatic).map((p) => p.entryName);
+         const staticPages = all.filter((p) => p.isStatic);
+         const loaders = staticPages.map((p) => "  " + JSON.stringify(p.entryName) + ": () => import(" + JSON.stringify(pageImportPath(p)) + "),");
++        // [patch] client entries are SSR'd too and hydrated by their entry script.
++        const clientLoaders = all.filter((p) => !p.isStatic).map((p) => "  " + JSON.stringify(p.entryName) + ": () => import(" + JSON.stringify(pageImportPath(p)) + "),");
+         const layoutLoaders = cachedLayouts.map((l) => "  " + JSON.stringify(l.entryName) + ": () => import(" + JSON.stringify(layoutImportPath(l)) + "),");
+         return [
+             header + " gerado em memoria pelo plugin - nao editar.",
+@@ -280,6 +282,10 @@ export function pages(options = {}) {
+             ...(loaders.length > 0 ? loaders : ["  // nenhuma pagina estatica detectada"]),
+             "};",
+             "",
++            "export const ssrClientPages = {",
++            ...clientLoaders,
++            "};",
++            "",
+             "export const ssrLayouts = {",
+             ...(layoutLoaders.length > 0 ? layoutLoaders : ["  // nenhum layout detectado"]),
+             "};",
+@@ -287,6 +293,7 @@ export function pages(options = {}) {
+             "ssrPages.__allEntries = allEntries;",
+             "ssrPages.__layouts = ssrLayouts;",
+             "ssrPages.__clientEntries = clientEntries;",
++            "ssrPages.__clientLoaders = ssrClientPages;",
+             "",
+         ].join("\n");
+     }
+@@ -302,7 +309,7 @@ export function pages(options = {}) {
+         return (header + " Source: " + page.file + "\n" +
+             (page.layouts.length > 0
+                 ? 'import { createRawSnippet, hydrate, mount } from "svelte";\n'
+-                : 'import { mount } from "svelte";\n') +
++                : 'import { hydrate } from "svelte";\n') +
+             "import Page from " + JSON.stringify(pageImportPath(page)) + ";\n" +
+             (page.layouts.length > 0 ? layoutImports + "\n" : "") +
+             "const target = document.getElementById(" + JSON.stringify(ids.rootId) + ");\n" +
+@@ -313,7 +320,7 @@ export function pages(options = {}) {
+     }
+     function entryMountSource(page) {
+         if (page.layouts.length === 0)
+-            return "if (target) mount(Page, { target, props });";
++            return "if (target) hydrate(Page, { target, props });";
+         // NOTE: createRawSnippet's snippet MUST render one wrapper element
+         // (client impl takes get_first_child(fragment) and calls setup(element)).
+         // An empty render ("") yields a null element -> "Cannot set properties

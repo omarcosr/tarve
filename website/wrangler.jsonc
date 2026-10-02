@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tarve",
+  "main": "dist-cf/worker.js",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    { "pattern": "tarve.dev", "custom_domain": true },
+    { "pattern": "www.tarve.dev", "custom_domain": true }
+  ],
+  "assets": {
+    "directory": "dist-cf/public"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

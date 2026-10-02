@@ -1,0 +1,5912 @@
+{
+  "components": [
+    {
+      "name": "Accordion",
+      "source": "packages/core/src/controls.ts",
+      "line": 177,
+      "generic": false,
+      "propsType": "AccordionProps",
+      "props": [
+        {
+          "name": "items",
+          "type": "AccordionItem[]",
+          "optional": false
+        },
+        {
+          "name": "onValueChange",
+          "type": "(value: string | undefined) => void",
+          "optional": true
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "AccordionItem"
+      ]
+    },
+    {
+      "name": "Alert",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 18,
+      "generic": false,
+      "propsType": "AlertProps",
+      "props": [
+        {
+          "name": "description",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "icon",
+          "type": "Child",
+          "optional": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "variant",
+          "type": "AlertVariant",
+          "optional": true,
+          "default": "\"default\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "AlertVariant"
+      ]
+    },
+    {
+      "name": "AlertDialog",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 720,
+      "generic": false,
+      "propsType": "AlertDialogProps",
+      "props": [
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "actionDisabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "actionLabel",
+          "type": "string",
+          "optional": true,
+          "default": "\"Continue\""
+        },
+        {
+          "name": "actionVariant",
+          "type": "ButtonProps[\"variant\"]",
+          "optional": true,
+          "default": "\"default\""
+        },
+        {
+          "name": "cancelLabel",
+          "type": "string",
+          "optional": true,
+          "default": "\"Cancel\""
+        },
+        {
+          "name": "closeOnEscape",
+          "type": "boolean",
+          "optional": true,
+          "default": "false"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "onAction",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "onCancel",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "ButtonProps"
+      ]
+    },
+    {
+      "name": "AnimatePresence",
+      "summary": "Keeps one native child alive while its exit targets are animated by the Rust renderer.\nKeep the boundary itself mounted and toggle `present` so Tarve can retain native identity.",
+      "source": "packages/core/src/motion.ts",
+      "line": 120,
+      "generic": false,
+      "propsType": "AnimatePresenceProps",
+      "props": [
+        {
+          "name": "children",
+          "type": "VNode",
+          "optional": false
+        },
+        {
+          "name": "exit",
+          "type": "MotionValues",
+          "optional": false,
+          "doc": "Numeric targets held until their native transitions finish."
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false,
+          "doc": "Stable identity for this presence boundary."
+        },
+        {
+          "name": "present",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "enter",
+          "type": "MotionValues",
+          "optional": true,
+          "doc": "Initial numeric values applied when the native node is first mounted."
+        },
+        {
+          "name": "transition",
+          "type": "MotionTransitions",
+          "optional": true,
+          "doc": "Overrides the child's style.transition for enter/exit motion."
+        }
+      ],
+      "common": [],
+      "types": [
+        "MotionTransitions",
+        "MotionValues"
+      ]
+    },
+    {
+      "name": "AspectRatio",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 47,
+      "generic": false,
+      "propsType": "AspectRatioProps",
+      "props": [
+        {
+          "name": "ratio",
+          "type": "number",
+          "optional": false
+        },
+        {
+          "name": "width",
+          "type": "Style[\"width\"]",
+          "optional": true,
+          "default": "320"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Attachment",
+      "source": "packages/core/src/chat-controls.ts",
+      "line": 19,
+      "generic": false,
+      "propsType": "AttachmentProps",
+      "props": [
+        {
+          "name": "name",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "leading",
+          "type": "Child",
+          "optional": true
+        },
+        {
+          "name": "onRemove",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "progress",
+          "type": "number",
+          "optional": true,
+          "default": "0"
+        },
+        {
+          "name": "removeLabel",
+          "type": "string",
+          "optional": true,
+          "default": "\"Remove\""
+        },
+        {
+          "name": "size",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "status",
+          "type": "AttachmentStatus",
+          "optional": true,
+          "default": "\"ready\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "AttachmentStatus"
+      ]
+    },
+    {
+      "name": "Avatar",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 75,
+      "generic": false,
+      "propsType": "AvatarProps",
+      "props": [
+        {
+          "name": "fallback",
+          "type": "string",
+          "optional": true,
+          "default": "\"?\""
+        },
+        {
+          "name": "fit",
+          "type": "\"cover\" | \"contain\"",
+          "optional": true,
+          "default": "\"cover\""
+        },
+        {
+          "name": "size",
+          "type": "number",
+          "optional": true,
+          "default": "40"
+        },
+        {
+          "name": "src",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Badge",
+      "source": "packages/core/src/controls.ts",
+      "line": 119,
+      "generic": false,
+      "propsType": "BadgeProps",
+      "props": [
+        {
+          "name": "variant",
+          "type": "\"default\" | \"secondary\" | \"outline\" | \"destructive\"",
+          "optional": true,
+          "default": "\"default\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Breadcrumb",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 119,
+      "generic": false,
+      "propsType": "BreadcrumbProps",
+      "props": [
+        {
+          "name": "items",
+          "type": "BreadcrumbItem[]",
+          "optional": false
+        },
+        {
+          "name": "separator",
+          "type": "Child",
+          "optional": true,
+          "default": "\"/\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "BreadcrumbItem"
+      ]
+    },
+    {
+      "name": "Bubble",
+      "source": "packages/core/src/chat-controls.ts",
+      "line": 66,
+      "generic": false,
+      "propsType": "BubbleProps",
+      "props": [
+        {
+          "name": "maxWidth",
+          "type": "number | `${number}%`",
+          "optional": true,
+          "default": "\"80%\""
+        },
+        {
+          "name": "side",
+          "type": "BubbleSide",
+          "optional": true,
+          "default": "\"incoming\""
+        },
+        {
+          "name": "variant",
+          "type": "BubbleVariant",
+          "optional": true,
+          "default": "\"default\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "BubbleSide",
+        "BubbleVariant"
+      ]
+    },
+    {
+      "name": "Button",
+      "source": "packages/core/src/components/button.ts",
+      "line": 101,
+      "generic": false,
+      "propsType": "ButtonProps",
+      "props": [
+        {
+          "name": "control",
+          "type": "Control",
+          "optional": true
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "onClick",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "onHover",
+          "type": "(hovered: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "size",
+          "type": "\"sm\" | \"default\" | \"lg\"",
+          "optional": true,
+          "default": "\"default\""
+        },
+        {
+          "name": "variant",
+          "type": "ButtonVariant",
+          "optional": true,
+          "default": "\"default\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "ButtonVariant"
+      ]
+    },
+    {
+      "name": "ButtonGroup",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 57,
+      "generic": false,
+      "propsType": "ButtonGroupProps",
+      "props": [
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true,
+          "default": "0"
+        },
+        {
+          "name": "orientation",
+          "type": "\"horizontal\" | \"vertical\"",
+          "optional": true,
+          "default": "\"horizontal\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Calendar",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 352,
+      "generic": false,
+      "propsType": "CalendarProps",
+      "props": [
+        {
+          "name": "month",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "isDateDisabled",
+          "type": "(date: string) => boolean",
+          "optional": true
+        },
+        {
+          "name": "max",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "min",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "onMonthChange",
+          "type": "(month: string) => void",
+          "optional": true
+        },
+        {
+          "name": "onValueChange",
+          "type": "(date: string) => void",
+          "optional": true
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "weekStartsOn",
+          "type": "CalendarWeekStartsOn",
+          "optional": true,
+          "default": "0"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "CalendarWeekStartsOn"
+      ]
+    },
+    {
+      "name": "Card",
+      "source": "packages/core/src/controls.ts",
+      "line": 107,
+      "generic": false,
+      "propsType": "CardProps",
+      "props": [
+        {
+          "name": "align",
+          "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "dismissOnOutside",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dragRegion",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "flex",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "focusable",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "footer",
+          "type": "Child",
+          "optional": true
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "justify",
+          "type": "Style[\"justify\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "onOutsideClick",
+          "type": "() => void",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "padding",
+          "type": "Style[\"padding\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "portal",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "windowAction",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "optional": true,
+          "from": "ViewProps"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Carousel",
+      "source": "packages/core/src/advanced-controls.ts",
+      "line": 26,
+      "generic": false,
+      "propsType": "CarouselProps",
+      "props": [
+        {
+          "name": "index",
+          "type": "number",
+          "optional": false
+        },
+        {
+          "name": "items",
+          "type": "readonly CarouselItem[]",
+          "optional": false
+        },
+        {
+          "name": "loop",
+          "type": "boolean",
+          "optional": true,
+          "default": "false"
+        },
+        {
+          "name": "nextLabel",
+          "type": "string",
+          "optional": true,
+          "default": "\"Next slide\""
+        },
+        {
+          "name": "onIndexChange",
+          "type": "(index: number) => void",
+          "optional": true
+        },
+        {
+          "name": "previousLabel",
+          "type": "string",
+          "optional": true,
+          "default": "\"Previous slide\""
+        },
+        {
+          "name": "showIndicators",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "CarouselItem"
+      ]
+    },
+    {
+      "name": "Chart",
+      "source": "packages/core/src/advanced-controls.ts",
+      "line": 74,
+      "generic": false,
+      "propsType": "ChartProps",
+      "props": [
+        {
+          "name": "data",
+          "type": "readonly ChartDatum[]",
+          "optional": false
+        },
+        {
+          "name": "barWidth",
+          "type": "number",
+          "optional": true,
+          "default": "36"
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "optional": true,
+          "default": "180"
+        },
+        {
+          "name": "max",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "showLabels",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        },
+        {
+          "name": "showValues",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "ChartDatum"
+      ]
+    },
+    {
+      "name": "Checkbox",
+      "source": "packages/core/src/controls.ts",
+      "line": 14,
+      "generic": false,
+      "propsType": "CheckboxProps",
+      "props": [
+        {
+          "name": "checked",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "onCheckedChange",
+          "type": "(checked: boolean) => void",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Circle",
+      "source": "packages/core/src/components/svg.ts",
+      "line": 46,
+      "generic": false,
+      "props": [
+        {
+          "name": "cx",
+          "type": "number | string",
+          "optional": false,
+          "from": "CircleProps"
+        },
+        {
+          "name": "cy",
+          "type": "number | string",
+          "optional": false,
+          "from": "CircleProps"
+        },
+        {
+          "name": "r",
+          "type": "number | string",
+          "optional": false,
+          "from": "CircleProps"
+        }
+      ],
+      "common": [],
+      "types": []
+    },
+    {
+      "name": "Code",
+      "source": "packages/core/src/components/rich-content.ts",
+      "line": 74,
+      "generic": false,
+      "propsType": "CodeProps",
+      "props": [
+        {
+          "name": "code",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "language",
+          "type": "string",
+          "optional": true,
+          "doc": "Syntect syntax name, token, or file extension."
+        },
+        {
+          "name": "path",
+          "type": "string",
+          "optional": true,
+          "doc": "Optional path used for extension-based language detection."
+        },
+        {
+          "name": "showLineNumbers",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Paint line numbers as non-selectable chrome."
+        },
+        {
+          "name": "syntaxTheme",
+          "type": "Partial<SyntaxTheme>",
+          "optional": true,
+          "doc": "Overrides syntax colours without changing parsing or layout.",
+          "from": "RichProps"
+        }
+      ],
+      "common": [
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Collapsible",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 566,
+      "generic": false,
+      "propsType": "CollapsibleProps",
+      "props": [
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "trigger",
+          "type": "Child",
+          "optional": false
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true,
+          "default": "\"Toggle section\""
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Column",
+      "source": "packages/core/src/components/layout.ts",
+      "line": 35,
+      "generic": false,
+      "propsType": "ViewProps",
+      "props": [
+        {
+          "name": "align",
+          "type": "Style[\"align\"]",
+          "optional": true
+        },
+        {
+          "name": "dismissOnOutside",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "dragRegion",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "flex",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "focusable",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "justify",
+          "type": "Style[\"justify\"]",
+          "optional": true
+        },
+        {
+          "name": "onOutsideClick",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "padding",
+          "type": "Style[\"padding\"]",
+          "optional": true
+        },
+        {
+          "name": "portal",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "windowAction",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Combobox",
+      "source": "packages/core/src/popups.ts",
+      "line": 455,
+      "generic": false,
+      "propsType": "ComboboxProps",
+      "props": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "options",
+          "type": "readonly ComboboxOption[]",
+          "optional": false
+        },
+        {
+          "name": "query",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "contentStyle",
+          "type": "Style",
+          "optional": true
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true,
+          "default": "false"
+        },
+        {
+          "name": "emptyText",
+          "type": "string",
+          "optional": true,
+          "default": "\"No results found.\""
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "onQueryChange",
+          "type": "(query: string) => void",
+          "optional": true
+        },
+        {
+          "name": "onValueChange",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "placeholder",
+          "type": "string",
+          "optional": true,
+          "default": "\"Select an option\""
+        },
+        {
+          "name": "searchPlaceholder",
+          "type": "string",
+          "optional": true,
+          "default": "\"Search...\""
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "ComboboxOption"
+      ]
+    },
+    {
+      "name": "Command",
+      "source": "packages/core/src/popups.ts",
+      "line": 601,
+      "generic": false,
+      "propsType": "CommandProps",
+      "props": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "items",
+          "type": "readonly CommandItem[]",
+          "optional": false
+        },
+        {
+          "name": "query",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "emptyText",
+          "type": "string",
+          "optional": true,
+          "default": "\"No results found.\""
+        },
+        {
+          "name": "onEscape",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "onQueryChange",
+          "type": "(query: string) => void",
+          "optional": true
+        },
+        {
+          "name": "onSelect",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "onValueChange",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "placeholder",
+          "type": "string",
+          "optional": true,
+          "default": "\"Type a command or search...\""
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "CommandItem"
+      ]
+    },
+    {
+      "name": "CommandPalette",
+      "source": "packages/core/src/popups.ts",
+      "line": 722,
+      "generic": false,
+      "propsType": "CommandPaletteProps",
+      "props": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false,
+          "from": "CommandProps"
+        },
+        {
+          "name": "items",
+          "type": "readonly CommandItem[]",
+          "optional": false,
+          "from": "CommandProps"
+        },
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "query",
+          "type": "string",
+          "optional": false,
+          "from": "CommandProps"
+        },
+        {
+          "name": "closeOnOverlay",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        },
+        {
+          "name": "closeOnSelect",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        },
+        {
+          "name": "emptyText",
+          "type": "string",
+          "optional": true,
+          "from": "CommandProps"
+        },
+        {
+          "name": "onEscape",
+          "type": "() => void",
+          "optional": true,
+          "from": "CommandProps"
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "onQueryChange",
+          "type": "(query: string) => void",
+          "optional": true,
+          "from": "CommandProps"
+        },
+        {
+          "name": "onSelect",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "onValueChange",
+          "type": "(value: string) => void",
+          "optional": true,
+          "from": "CommandProps"
+        },
+        {
+          "name": "placeholder",
+          "type": "string",
+          "optional": true,
+          "from": "CommandProps"
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true,
+          "from": "CommandProps"
+        },
+        {
+          "name": "width",
+          "type": "number",
+          "optional": true,
+          "default": "520"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup"
+      ],
+      "types": [
+        "CommandItem"
+      ]
+    },
+    {
+      "name": "ContextMenu",
+      "source": "packages/core/src/popups.ts",
+      "line": 375,
+      "generic": false,
+      "propsType": "ContextMenuProps",
+      "props": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "items",
+          "type": "readonly DropdownMenuItem[]",
+          "optional": false
+        },
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "trigger",
+          "type": "Child",
+          "optional": false
+        },
+        {
+          "name": "contentStyle",
+          "type": "Style",
+          "optional": true
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true,
+          "default": "false"
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "onSelect",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "side",
+          "type": "PopupSide",
+          "optional": true,
+          "default": "\"bottom\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "DropdownMenuItem",
+        "PopupSide"
+      ]
+    },
+    {
+      "name": "DataGrid",
+      "summary": "Virtualized controlled data grid with local/manual sort, filtering and row selection.",
+      "source": "packages/core/src/desktop-controls.ts",
+      "line": 213,
+      "generic": true,
+      "propsType": "DataGridProps<T>",
+      "props": [
+        {
+          "name": "columns",
+          "type": "readonly DataGridColumn<T>[]",
+          "optional": false
+        },
+        {
+          "name": "rowKey",
+          "type": "(row: T, index: number) => DataGridKey",
+          "optional": false
+        },
+        {
+          "name": "rows",
+          "type": "readonly T[]",
+          "optional": false
+        },
+        {
+          "name": "empty",
+          "type": "Child",
+          "optional": true,
+          "default": "\"No results.\""
+        },
+        {
+          "name": "filter",
+          "type": "string",
+          "optional": true,
+          "default": "\"\""
+        },
+        {
+          "name": "filterMode",
+          "type": "\"local\" | \"manual\"",
+          "optional": true,
+          "default": "\"local\""
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "optional": true,
+          "default": "360"
+        },
+        {
+          "name": "offset",
+          "type": "number",
+          "optional": true,
+          "default": "0"
+        },
+        {
+          "name": "onRowActivate",
+          "type": "(row: T, index: number) => void",
+          "optional": true
+        },
+        {
+          "name": "onScroll",
+          "type": "(offset: number, max: number) => void",
+          "optional": true,
+          "default": "() => {}"
+        },
+        {
+          "name": "onSelectionChange",
+          "type": "(keys: DataGridKey[]) => void",
+          "optional": true
+        },
+        {
+          "name": "onSortChange",
+          "type": "(sort: DataGridSort | undefined) => void",
+          "optional": true
+        },
+        {
+          "name": "overscan",
+          "type": "number",
+          "optional": true,
+          "default": "3"
+        },
+        {
+          "name": "rowHeight",
+          "type": "number",
+          "optional": true,
+          "default": "40"
+        },
+        {
+          "name": "selectedKeys",
+          "type": "readonly DataGridKey[]",
+          "optional": true,
+          "default": "[]"
+        },
+        {
+          "name": "selectionMode",
+          "type": "\"none\" | \"single\" | \"multiple\"",
+          "optional": true,
+          "default": "\"none\""
+        },
+        {
+          "name": "sort",
+          "type": "DataGridSort",
+          "optional": true
+        },
+        {
+          "name": "sortMode",
+          "type": "\"local\" | \"manual\"",
+          "optional": true,
+          "default": "\"local\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "DataGridColumn",
+        "DataGridKey",
+        "DataGridSort"
+      ]
+    },
+    {
+      "name": "DataTable",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 702,
+      "generic": true,
+      "propsType": "DataTableProps<T>",
+      "props": [
+        {
+          "name": "columns",
+          "type": "TableColumn<T>[]",
+          "optional": false,
+          "from": "TableProps"
+        },
+        {
+          "name": "data",
+          "type": "T[]",
+          "optional": false,
+          "from": "TableProps"
+        },
+        {
+          "name": "empty",
+          "type": "Child",
+          "optional": true,
+          "from": "TableProps"
+        },
+        {
+          "name": "onRowClick",
+          "type": "(row: T, index: number) => void",
+          "optional": true,
+          "from": "TableProps"
+        },
+        {
+          "name": "rowKey",
+          "type": "(row: T, index: number) => string | number",
+          "optional": true,
+          "from": "TableProps"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "TableColumn"
+      ]
+    },
+    {
+      "name": "DatePicker",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 501,
+      "generic": false,
+      "propsType": "DatePickerProps",
+      "props": [
+        {
+          "name": "month",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "formatValue",
+          "type": "(date: string) => string",
+          "optional": true,
+          "default": "defaultDatePickerLabel"
+        },
+        {
+          "name": "isDateDisabled",
+          "type": "(date: string) => boolean",
+          "optional": true
+        },
+        {
+          "name": "max",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "min",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "onMonthChange",
+          "type": "(month: string) => void",
+          "optional": true
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "onValueChange",
+          "type": "(date: string) => void",
+          "optional": true
+        },
+        {
+          "name": "placeholder",
+          "type": "string",
+          "optional": true,
+          "default": "\"Pick a date\""
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "weekStartsOn",
+          "type": "CalendarWeekStartsOn",
+          "optional": true,
+          "default": "0"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "CalendarWeekStartsOn"
+      ]
+    },
+    {
+      "name": "Dialog",
+      "source": "packages/core/src/components/modal.ts",
+      "line": 112,
+      "generic": false,
+      "props": [
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false,
+          "from": "ModalProps"
+        },
+        {
+          "name": "closeOnEscape",
+          "type": "boolean",
+          "optional": true,
+          "from": "ModalProps"
+        },
+        {
+          "name": "closeOnOverlay",
+          "type": "boolean",
+          "optional": true,
+          "from": "ModalProps"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "optional": true,
+          "from": "ModalProps"
+        },
+        {
+          "name": "footer",
+          "type": "Child",
+          "optional": true,
+          "from": "ModalProps"
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true,
+          "from": "ModalProps"
+        },
+        {
+          "name": "showClose",
+          "type": "boolean",
+          "optional": true,
+          "from": "ModalProps"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "optional": true,
+          "from": "ModalProps"
+        },
+        {
+          "name": "width",
+          "type": "number",
+          "optional": true,
+          "from": "ModalProps"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Diff",
+      "source": "packages/core/src/components/rich-content.ts",
+      "line": 92,
+      "generic": false,
+      "propsType": "DiffProps",
+      "props": [
+        {
+          "name": "collapsedPaths",
+          "type": "string[]",
+          "optional": true,
+          "doc": "File paths rendered as headers only."
+        },
+        {
+          "name": "maxLines",
+          "type": "number",
+          "optional": true,
+          "doc": "Maximum changed/context lines to render per file before a Show more row."
+        },
+        {
+          "name": "newText",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "oldText",
+          "type": "string",
+          "optional": true,
+          "doc": "Supply both oldText and newText to calculate a diff natively."
+        },
+        {
+          "name": "onLineClick",
+          "type": "(event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void",
+          "optional": true
+        },
+        {
+          "name": "onShowMore",
+          "type": "(hidden: number, path?: string) => void",
+          "optional": true
+        },
+        {
+          "name": "onToggleFile",
+          "type": "(path: string) => void",
+          "optional": true
+        },
+        {
+          "name": "source",
+          "type": "string",
+          "optional": true,
+          "doc": "A unified or git diff."
+        },
+        {
+          "name": "syntaxTheme",
+          "type": "Partial<SyntaxTheme>",
+          "optional": true,
+          "doc": "Overrides syntax colours without changing parsing or layout.",
+          "from": "RichProps"
+        },
+        {
+          "name": "wordDiff",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Enables/disables word-level emphasis inside paired changed lines. Default: true."
+        }
+      ],
+      "common": [
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Direction",
+      "summary": "Layout direction helper. RTL reverses visual horizontal flow while preserving logical/focus order. Text bidi is not changed.",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 382,
+      "generic": false,
+      "propsType": "DirectionProps",
+      "props": [
+        {
+          "name": "dir",
+          "type": "\"ltr\" | \"rtl\"",
+          "optional": true,
+          "default": "\"ltr\""
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true,
+          "default": "0"
+        },
+        {
+          "name": "orientation",
+          "type": "\"horizontal\" | \"vertical\"",
+          "optional": true,
+          "default": "\"horizontal\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Drawer",
+      "source": "packages/core/src/advanced-controls.ts",
+      "line": 120,
+      "generic": false,
+      "propsType": "DrawerProps",
+      "props": [
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "closeOnEscape",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "closeOnOverlay",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "showClose",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "side",
+          "type": "SheetSide",
+          "optional": true,
+          "default": "\"bottom\""
+        },
+        {
+          "name": "size",
+          "type": "Style[\"width\"]",
+          "optional": true,
+          "default": "320"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "SheetSide"
+      ]
+    },
+    {
+      "name": "DropdownMenu",
+      "source": "packages/core/src/popups.ts",
+      "line": 305,
+      "generic": false,
+      "propsType": "DropdownMenuProps",
+      "props": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "items",
+          "type": "readonly DropdownMenuItem[]",
+          "optional": false
+        },
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "trigger",
+          "type": "Child",
+          "optional": false
+        },
+        {
+          "name": "contentStyle",
+          "type": "Style",
+          "optional": true
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true,
+          "default": "false"
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "onSelect",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "side",
+          "type": "PopupSide",
+          "optional": true,
+          "default": "\"bottom\""
+        },
+        {
+          "name": "triggerStyle",
+          "type": "Style",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "DropdownMenuItem",
+        "PopupSide"
+      ]
+    },
+    {
+      "name": "Ellipse",
+      "source": "packages/core/src/components/svg.ts",
+      "line": 47,
+      "generic": false,
+      "props": [
+        {
+          "name": "cx",
+          "type": "number | string",
+          "optional": false,
+          "from": "EllipseProps"
+        },
+        {
+          "name": "cy",
+          "type": "number | string",
+          "optional": false,
+          "from": "EllipseProps"
+        },
+        {
+          "name": "rx",
+          "type": "number | string",
+          "optional": false,
+          "from": "EllipseProps"
+        },
+        {
+          "name": "ry",
+          "type": "number | string",
+          "optional": false,
+          "from": "EllipseProps"
+        }
+      ],
+      "common": [],
+      "types": []
+    },
+    {
+      "name": "Empty",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 68,
+      "generic": false,
+      "propsType": "EmptyProps",
+      "props": [
+        {
+          "name": "title",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "action",
+          "type": "Child",
+          "optional": true
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "icon",
+          "type": "Child",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Field",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 117,
+      "generic": false,
+      "propsType": "FieldProps",
+      "props": [
+        {
+          "name": "description",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "error",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "required",
+          "type": "boolean",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "HoverCard",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 1134,
+      "generic": false,
+      "propsType": "HoverCardProps",
+      "props": [
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "trigger",
+          "type": "Child",
+          "optional": false
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "side",
+          "type": "HoverCardSide",
+          "optional": true,
+          "default": "\"bottom\""
+        },
+        {
+          "name": "width",
+          "type": "Style[\"width\"]",
+          "optional": true,
+          "default": "280"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "HoverCardSide"
+      ]
+    },
+    {
+      "name": "Icon",
+      "source": "packages/core/src/components/icon.ts",
+      "line": 46,
+      "generic": false,
+      "propsType": "IconProps",
+      "props": [
+        {
+          "name": "color",
+          "type": "string",
+          "optional": true,
+          "default": "theme.colors.foreground"
+        },
+        {
+          "name": "iconNode",
+          "type": "readonly SvgNode[]",
+          "optional": true
+        },
+        {
+          "name": "name",
+          "type": "IconName",
+          "optional": true
+        },
+        {
+          "name": "size",
+          "type": "number",
+          "optional": true,
+          "default": "16"
+        },
+        {
+          "name": "strokeWidth",
+          "type": "number",
+          "optional": true,
+          "default": "1.75"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "IconName",
+        "SvgNode"
+      ]
+    },
+    {
+      "name": "Image",
+      "source": "packages/core/src/components/image.ts",
+      "line": 263,
+      "generic": false,
+      "propsType": "ImageProps",
+      "props": [
+        {
+          "name": "src",
+          "type": "ImageSource",
+          "optional": false,
+          "doc": "Local path, data URL, encoded bytes, or raw RGBA8 pixels."
+        },
+        {
+          "name": "fit",
+          "type": "\"cover\" | \"contain\"",
+          "optional": true
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "width",
+          "type": "number",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "ImageSource"
+      ]
+    },
+    {
+      "name": "Input",
+      "source": "packages/core/src/components/input.ts",
+      "line": 19,
+      "generic": false,
+      "propsType": "InputProps",
+      "props": [
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "onChange",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "onSubmit",
+          "type": "(value: string) => void",
+          "optional": true,
+          "doc": "Enter (with or without modifiers) submits the current value."
+        },
+        {
+          "name": "placeholder",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "type",
+          "type": "InputType",
+          "optional": true,
+          "default": "\"text\""
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "InputType"
+      ]
+    },
+    {
+      "name": "InputGroup",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 148,
+      "generic": false,
+      "propsType": "InputGroupProps",
+      "props": [
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "prefix",
+          "type": "Child",
+          "optional": true
+        },
+        {
+          "name": "suffix",
+          "type": "Child",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "InputOTP",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 175,
+      "generic": false,
+      "propsType": "InputOTPProps",
+      "props": [
+        {
+          "name": "value",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "length",
+          "type": "number",
+          "optional": true,
+          "default": "6"
+        },
+        {
+          "name": "mask",
+          "type": "boolean",
+          "optional": true,
+          "default": "false"
+        },
+        {
+          "name": "onValueChange",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "pattern",
+          "type": "RegExp",
+          "optional": true,
+          "default": "/^[0-9]$/"
+        },
+        {
+          "name": "slotWidth",
+          "type": "number",
+          "optional": true,
+          "default": "36"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Item",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 230,
+      "generic": false,
+      "propsType": "ItemProps",
+      "props": [
+        {
+          "name": "title",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "leading",
+          "type": "Child",
+          "optional": true
+        },
+        {
+          "name": "onClick",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "selected",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "trailing",
+          "type": "Child",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Kbd",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 252,
+      "generic": false,
+      "propsType": "KbdProps",
+      "props": [],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Label",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 90,
+      "generic": false,
+      "propsType": "LabelProps",
+      "props": [
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "onClick",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "required",
+          "type": "boolean",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Line",
+      "source": "packages/core/src/components/svg.ts",
+      "line": 48,
+      "generic": false,
+      "props": [
+        {
+          "name": "x1",
+          "type": "number | string",
+          "optional": false,
+          "from": "LineProps"
+        },
+        {
+          "name": "x2",
+          "type": "number | string",
+          "optional": false,
+          "from": "LineProps"
+        },
+        {
+          "name": "y1",
+          "type": "number | string",
+          "optional": false,
+          "from": "LineProps"
+        },
+        {
+          "name": "y2",
+          "type": "number | string",
+          "optional": false,
+          "from": "LineProps"
+        }
+      ],
+      "common": [],
+      "types": []
+    },
+    {
+      "name": "Link",
+      "summary": "Native hyperlink primitive. Opens `href` through the platform's registered URI handler.",
+      "source": "packages/core/src/components/link.ts",
+      "line": 29,
+      "generic": false,
+      "propsType": "LinkProps",
+      "props": [
+        {
+          "name": "href",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "align",
+          "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true,
+          "from": "PressableProps"
+        },
+        {
+          "name": "dismissOnOutside",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dragRegion",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "flex",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "focusable",
+          "type": "boolean",
+          "optional": true,
+          "from": "PressableProps"
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "justify",
+          "type": "Style[\"justify\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true,
+          "doc": "Accessible label override for icon-only or otherwise non-textual links."
+        },
+        {
+          "name": "modal",
+          "type": "boolean",
+          "optional": true,
+          "from": "PressableProps"
+        },
+        {
+          "name": "onBlur",
+          "type": "() => void",
+          "optional": true,
+          "from": "PressableProps"
+        },
+        {
+          "name": "onClick",
+          "type": "() => void",
+          "optional": true,
+          "from": "PressableProps"
+        },
+        {
+          "name": "onContextMenu",
+          "type": "(position: { x: number; y: number }) => void",
+          "optional": true,
+          "from": "PressableProps"
+        },
+        {
+          "name": "onEscape",
+          "type": "() => void",
+          "optional": true,
+          "from": "PressableProps"
+        },
+        {
+          "name": "onHover",
+          "type": "(hovered: boolean) => void",
+          "optional": true,
+          "from": "PressableProps"
+        },
+        {
+          "name": "onKeyDown",
+          "type": "(key: string) => void",
+          "optional": true,
+          "from": "PressableProps"
+        },
+        {
+          "name": "onOutsideClick",
+          "type": "() => void",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "padding",
+          "type": "Style[\"padding\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "portal",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "style",
+          "type": "IntrinsicStyle",
+          "optional": true
+        },
+        {
+          "name": "windowAction",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "optional": true,
+          "from": "ViewProps"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup"
+      ],
+      "types": []
+    },
+    {
+      "name": "List",
+      "summary": "A regular, non-virtual list. Every item stays mounted and can have any height.",
+      "source": "packages/core/src/list.ts",
+      "line": 12,
+      "generic": true,
+      "propsType": "ListProps<T>",
+      "props": [
+        {
+          "name": "align",
+          "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dismissOnOutside",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dragRegion",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "flex",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "focusable",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true,
+          "default": "0"
+        },
+        {
+          "name": "items",
+          "type": "readonly T[]",
+          "optional": true
+        },
+        {
+          "name": "justify",
+          "type": "Style[\"justify\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "keyForItem",
+          "type": "(item: T, index: number) => string | number",
+          "optional": true
+        },
+        {
+          "name": "onOutsideClick",
+          "type": "() => void",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "onScroll",
+          "type": "(offset: number, max: number) => void",
+          "optional": true,
+          "from": "ScrollProps"
+        },
+        {
+          "name": "onScrollPosition",
+          "type": "(position: ScrollPosition) => void",
+          "optional": true,
+          "from": "ScrollProps"
+        },
+        {
+          "name": "orientation",
+          "type": "ScrollOrientation",
+          "optional": true,
+          "from": "ScrollProps"
+        },
+        {
+          "name": "padding",
+          "type": "Style[\"padding\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "portal",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "renderItem",
+          "type": "(item: T, index: number) => Child",
+          "optional": true
+        },
+        {
+          "name": "speed",
+          "type": "number",
+          "optional": true,
+          "from": "ScrollProps"
+        },
+        {
+          "name": "windowAction",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "optional": true,
+          "from": "ViewProps"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "ScrollOrientation",
+        "ScrollPosition"
+      ]
+    },
+    {
+      "name": "Markdown",
+      "source": "packages/core/src/components/rich-content.ts",
+      "line": 44,
+      "generic": false,
+      "propsType": "MarkdownProps",
+      "props": [
+        {
+          "name": "source",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "onLinkClick",
+          "type": "(href: string) => void",
+          "optional": true,
+          "doc": "Overrides the default platform URI action for a clicked Markdown link."
+        },
+        {
+          "name": "syntaxTheme",
+          "type": "Partial<SyntaxTheme>",
+          "optional": true,
+          "doc": "Overrides syntax colours without changing parsing or layout.",
+          "from": "RichProps"
+        }
+      ],
+      "common": [
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Marker",
+      "source": "packages/core/src/chat-controls.ts",
+      "line": 86,
+      "generic": false,
+      "propsType": "MarkerProps",
+      "props": [
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Menubar",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 1005,
+      "generic": false,
+      "propsType": "MenubarProps",
+      "props": [
+        {
+          "name": "menus",
+          "type": "MenubarMenu[]",
+          "optional": false
+        },
+        {
+          "name": "onOpenMenuChange",
+          "type": "(value: string | undefined) => void",
+          "optional": true
+        },
+        {
+          "name": "onSelect",
+          "type": "(menuValue: string, itemValue: string) => void",
+          "optional": true
+        },
+        {
+          "name": "openMenu",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "MenubarMenu"
+      ]
+    },
+    {
+      "name": "Message",
+      "source": "packages/core/src/chat-controls.ts",
+      "line": 107,
+      "generic": false,
+      "propsType": "MessageProps",
+      "props": [
+        {
+          "name": "actions",
+          "type": "Child",
+          "optional": true
+        },
+        {
+          "name": "author",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "avatarFallback",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "avatarSrc",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "bubbleVariant",
+          "type": "BubbleVariant",
+          "optional": true,
+          "default": "\"default\""
+        },
+        {
+          "name": "side",
+          "type": "BubbleSide",
+          "optional": true,
+          "default": "\"incoming\""
+        },
+        {
+          "name": "timestamp",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "BubbleSide",
+        "BubbleVariant"
+      ]
+    },
+    {
+      "name": "MessageScroller",
+      "source": "packages/core/src/chat-controls.ts",
+      "line": 135,
+      "generic": false,
+      "propsType": "MessageScrollerProps",
+      "props": [
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true,
+          "default": "12"
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "optional": true,
+          "default": "360"
+        },
+        {
+          "name": "onScroll",
+          "type": "(offset: number, max: number) => void",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Modal",
+      "source": "packages/core/src/components/modal.ts",
+      "line": 20,
+      "generic": false,
+      "propsType": "ModalProps",
+      "props": [
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "closeOnEscape",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        },
+        {
+          "name": "closeOnOverlay",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "footer",
+          "type": "Child",
+          "optional": true
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "showClose",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "width",
+          "type": "number",
+          "optional": true,
+          "default": "480"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "NativeSelect",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 268,
+      "generic": false,
+      "propsType": "NativeSelectProps",
+      "props": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "options",
+          "type": "readonly SelectOption[]",
+          "optional": false
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "onValueChange",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "placeholder",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "highlight",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "SelectOption"
+      ]
+    },
+    {
+      "name": "NavigationMenu",
+      "source": "packages/core/src/advanced-controls.ts",
+      "line": 144,
+      "generic": false,
+      "propsType": "NavigationMenuProps",
+      "props": [
+        {
+          "name": "items",
+          "type": "readonly NavigationMenuItem[]",
+          "optional": false
+        },
+        {
+          "name": "onOpenValueChange",
+          "type": "(value: string | undefined) => void",
+          "optional": true
+        },
+        {
+          "name": "onValueChange",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "openValue",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "NavigationMenuItem"
+      ]
+    },
+    {
+      "name": "Pagination",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 190,
+      "generic": false,
+      "propsType": "PaginationProps",
+      "props": [
+        {
+          "name": "page",
+          "type": "number",
+          "optional": false
+        },
+        {
+          "name": "pageCount",
+          "type": "number",
+          "optional": false
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "onPageChange",
+          "type": "(page: number) => void",
+          "optional": true
+        },
+        {
+          "name": "siblingCount",
+          "type": "number",
+          "optional": true,
+          "default": "1"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Path",
+      "source": "packages/core/src/components/svg.ts",
+      "line": 45,
+      "generic": false,
+      "props": [
+        {
+          "name": "d",
+          "type": "string",
+          "optional": false,
+          "from": "PathProps"
+        }
+      ],
+      "common": [],
+      "types": []
+    },
+    {
+      "name": "Polygon",
+      "source": "packages/core/src/components/svg.ts",
+      "line": 50,
+      "generic": false,
+      "props": [
+        {
+          "name": "points",
+          "type": "string",
+          "optional": false,
+          "from": "PolygonProps"
+        }
+      ],
+      "common": [],
+      "types": []
+    },
+    {
+      "name": "Polyline",
+      "source": "packages/core/src/components/svg.ts",
+      "line": 49,
+      "generic": false,
+      "props": [
+        {
+          "name": "points",
+          "type": "string",
+          "optional": false,
+          "from": "PolylineProps"
+        }
+      ],
+      "common": [],
+      "types": []
+    },
+    {
+      "name": "Popover",
+      "source": "packages/core/src/popups.ts",
+      "line": 197,
+      "generic": false,
+      "propsType": "PopoverProps",
+      "props": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "trigger",
+          "type": "Child",
+          "optional": false
+        },
+        {
+          "name": "contentStyle",
+          "type": "Style",
+          "optional": true
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true,
+          "default": "false"
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "side",
+          "type": "PopupSide",
+          "optional": true,
+          "default": "\"bottom\""
+        },
+        {
+          "name": "triggerStyle",
+          "type": "Style",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "PopupSide"
+      ]
+    },
+    {
+      "name": "Portal",
+      "source": "packages/core/src/components/layout.ts",
+      "line": 41,
+      "generic": false,
+      "propsType": "PortalProps",
+      "props": [
+        {
+          "name": "align",
+          "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dismissOnOutside",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dragRegion",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "flex",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "focusable",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "justify",
+          "type": "Style[\"justify\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "onOutsideClick",
+          "type": "() => void",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "padding",
+          "type": "Style[\"padding\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "portal",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "windowAction",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "optional": true,
+          "from": "ViewProps"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Pressable",
+      "source": "packages/core/src/components/pressable.ts",
+      "line": 19,
+      "generic": false,
+      "propsType": "PressableProps",
+      "props": [
+        {
+          "name": "align",
+          "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "control",
+          "type": "Control",
+          "optional": true
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "dismissOnOutside",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dragRegion",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "flex",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "focusable",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "justify",
+          "type": "Style[\"justify\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "modal",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "onBlur",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "onClick",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "onContextMenu",
+          "type": "(position: { x: number; y: number }) => void",
+          "optional": true
+        },
+        {
+          "name": "onEscape",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "onHover",
+          "type": "(hovered: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "onKeyDown",
+          "type": "(key: string) => void",
+          "optional": true
+        },
+        {
+          "name": "onOutsideClick",
+          "type": "() => void",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "padding",
+          "type": "Style[\"padding\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "portal",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "windowAction",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "optional": true,
+          "from": "ViewProps"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Progress",
+      "source": "packages/core/src/controls.ts",
+      "line": 140,
+      "generic": false,
+      "propsType": "ProgressProps",
+      "props": [
+        {
+          "name": "value",
+          "type": "number",
+          "optional": false
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "max",
+          "type": "number",
+          "optional": true,
+          "default": "100"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Questionnaire",
+      "source": "packages/core/src/advanced-controls.ts",
+      "line": 323,
+      "generic": false,
+      "propsType": "QuestionnaireProps",
+      "props": [
+        {
+          "name": "current",
+          "type": "number",
+          "optional": false
+        },
+        {
+          "name": "questions",
+          "type": "readonly QuestionnaireQuestion[]",
+          "optional": false
+        },
+        {
+          "name": "values",
+          "type": "Readonly<Record<string, QuestionnaireAnswer | undefined>>",
+          "optional": false
+        },
+        {
+          "name": "nextLabel",
+          "type": "string",
+          "optional": true,
+          "default": "\"Next\""
+        },
+        {
+          "name": "onCurrentChange",
+          "type": "(index: number) => void",
+          "optional": true
+        },
+        {
+          "name": "onSubmit",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "onValueChange",
+          "type": "(questionId: string, value: QuestionnaireAnswer) => void",
+          "optional": true
+        },
+        {
+          "name": "previousLabel",
+          "type": "string",
+          "optional": true,
+          "default": "\"Previous\""
+        },
+        {
+          "name": "submitLabel",
+          "type": "string",
+          "optional": true,
+          "default": "\"Submit\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "QuestionnaireAnswer",
+        "QuestionnaireQuestion"
+      ]
+    },
+    {
+      "name": "RadioGroup",
+      "source": "packages/core/src/controls.ts",
+      "line": 58,
+      "generic": false,
+      "propsType": "RadioGroupProps",
+      "props": [
+        {
+          "name": "options",
+          "type": "RadioOption[]",
+          "optional": false
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "onValueChange",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "orientation",
+          "type": "\"horizontal\" | \"vertical\"",
+          "optional": true,
+          "default": "\"vertical\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "RadioOption"
+      ]
+    },
+    {
+      "name": "Resizable",
+      "source": "packages/core/src/advanced-controls.ts",
+      "line": 215,
+      "generic": false,
+      "propsType": "ResizableProps",
+      "props": [
+        {
+          "name": "first",
+          "type": "Child",
+          "optional": false
+        },
+        {
+          "name": "second",
+          "type": "Child",
+          "optional": false
+        },
+        {
+          "name": "size",
+          "type": "number",
+          "optional": false
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true,
+          "default": "\"Resize panels\""
+        },
+        {
+          "name": "max",
+          "type": "number",
+          "optional": true,
+          "default": "90"
+        },
+        {
+          "name": "min",
+          "type": "number",
+          "optional": true,
+          "default": "10"
+        },
+        {
+          "name": "onSizeChange",
+          "type": "(size: number) => void",
+          "optional": true
+        },
+        {
+          "name": "orientation",
+          "type": "\"horizontal\" | \"vertical\"",
+          "optional": true,
+          "default": "\"horizontal\""
+        },
+        {
+          "name": "step",
+          "type": "number",
+          "optional": true,
+          "default": "1"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Row",
+      "source": "packages/core/src/components/layout.ts",
+      "line": 31,
+      "generic": false,
+      "propsType": "ViewProps",
+      "props": [
+        {
+          "name": "align",
+          "type": "Style[\"align\"]",
+          "optional": true
+        },
+        {
+          "name": "dismissOnOutside",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "dragRegion",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "flex",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "focusable",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "justify",
+          "type": "Style[\"justify\"]",
+          "optional": true
+        },
+        {
+          "name": "onOutsideClick",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "padding",
+          "type": "Style[\"padding\"]",
+          "optional": true
+        },
+        {
+          "name": "portal",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "windowAction",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Scroll",
+      "source": "packages/core/src/components/scroll.ts",
+      "line": 13,
+      "generic": false,
+      "propsType": "ScrollProps",
+      "props": [
+        {
+          "name": "align",
+          "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dismissOnOutside",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dragRegion",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "flex",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "focusable",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "justify",
+          "type": "Style[\"justify\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "onOutsideClick",
+          "type": "() => void",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "onScroll",
+          "type": "(offset: number, max: number) => void",
+          "optional": true
+        },
+        {
+          "name": "onScrollPosition",
+          "type": "(position: ScrollPosition) => void",
+          "optional": true
+        },
+        {
+          "name": "orientation",
+          "type": "ScrollOrientation",
+          "optional": true,
+          "default": "\"vertical\""
+        },
+        {
+          "name": "padding",
+          "type": "Style[\"padding\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "portal",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "speed",
+          "type": "number",
+          "optional": true,
+          "default": "1"
+        },
+        {
+          "name": "windowAction",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "optional": true,
+          "from": "ViewProps"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "ScrollOrientation",
+        "ScrollPosition"
+      ]
+    },
+    {
+      "name": "ScrollArea",
+      "source": "packages/core/src/components/scroll.ts",
+      "line": 24,
+      "generic": false,
+      "props": [
+        {
+          "name": "align",
+          "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dismissOnOutside",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dragRegion",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "flex",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "focusable",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "justify",
+          "type": "Style[\"justify\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "onOutsideClick",
+          "type": "() => void",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "onScroll",
+          "type": "(offset: number, max: number) => void",
+          "optional": true,
+          "from": "ScrollProps"
+        },
+        {
+          "name": "onScrollPosition",
+          "type": "(position: ScrollPosition) => void",
+          "optional": true,
+          "from": "ScrollProps"
+        },
+        {
+          "name": "orientation",
+          "type": "ScrollOrientation",
+          "optional": true,
+          "from": "ScrollProps"
+        },
+        {
+          "name": "padding",
+          "type": "Style[\"padding\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "portal",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "speed",
+          "type": "number",
+          "optional": true,
+          "from": "ScrollProps"
+        },
+        {
+          "name": "windowAction",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "optional": true,
+          "from": "ViewProps"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "ScrollOrientation",
+        "ScrollPosition"
+      ]
+    },
+    {
+      "name": "Select",
+      "source": "packages/core/src/select.ts",
+      "line": 19,
+      "generic": false,
+      "propsType": "SelectProps",
+      "props": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "options",
+          "type": "readonly SelectOption[]",
+          "optional": false
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true,
+          "default": "false"
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "onValueChange",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "placeholder",
+          "type": "string",
+          "optional": true,
+          "default": "\"Select an option\""
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "SelectOption"
+      ]
+    },
+    {
+      "name": "Separator",
+      "source": "packages/core/src/controls.ts",
+      "line": 134,
+      "generic": false,
+      "propsType": "SeparatorProps",
+      "props": [
+        {
+          "name": "orientation",
+          "type": "\"horizontal\" | \"vertical\"",
+          "optional": true,
+          "default": "\"horizontal\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Sheet",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 796,
+      "generic": false,
+      "propsType": "SheetProps",
+      "props": [
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "closeOnEscape",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        },
+        {
+          "name": "closeOnOverlay",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "footer",
+          "type": "Child",
+          "optional": true
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "showClose",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        },
+        {
+          "name": "side",
+          "type": "SheetSide",
+          "optional": true,
+          "default": "\"right\""
+        },
+        {
+          "name": "size",
+          "type": "Style[\"width\"]",
+          "optional": true,
+          "default": "400"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "SheetSide"
+      ]
+    },
+    {
+      "name": "Sidebar",
+      "source": "packages/core/src/advanced-controls.ts",
+      "line": 263,
+      "generic": false,
+      "propsType": "SidebarProps",
+      "props": [
+        {
+          "name": "items",
+          "type": "readonly SidebarItem[]",
+          "optional": false
+        },
+        {
+          "name": "collapsed",
+          "type": "boolean",
+          "optional": true,
+          "default": "false"
+        },
+        {
+          "name": "collapsedWidth",
+          "type": "number",
+          "optional": true,
+          "default": "64"
+        },
+        {
+          "name": "footer",
+          "type": "Child",
+          "optional": true
+        },
+        {
+          "name": "header",
+          "type": "Child",
+          "optional": true
+        },
+        {
+          "name": "onCollapsedChange",
+          "type": "(collapsed: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "onValueChange",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "width",
+          "type": "number",
+          "optional": true,
+          "default": "248"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "SidebarItem"
+      ]
+    },
+    {
+      "name": "Skeleton",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 26,
+      "generic": false,
+      "propsType": "SkeletonProps",
+      "props": [
+        {
+          "name": "height",
+          "type": "Style[\"height\"]",
+          "optional": true,
+          "default": "16"
+        },
+        {
+          "name": "radius",
+          "type": "number",
+          "optional": true,
+          "default": "theme.radius.sm"
+        },
+        {
+          "name": "width",
+          "type": "Style[\"width\"]",
+          "optional": true,
+          "default": "\"100%\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Slider",
+      "source": "packages/core/src/controls.ts",
+      "line": 89,
+      "generic": false,
+      "propsType": "SliderProps",
+      "props": [
+        {
+          "name": "value",
+          "type": "number",
+          "optional": false
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "max",
+          "type": "number",
+          "optional": true,
+          "default": "100"
+        },
+        {
+          "name": "min",
+          "type": "number",
+          "optional": true,
+          "default": "0"
+        },
+        {
+          "name": "onValueChange",
+          "type": "(value: number) => void",
+          "optional": true
+        },
+        {
+          "name": "orientation",
+          "type": "\"horizontal\" | \"vertical\"",
+          "optional": true,
+          "default": "\"horizontal\""
+        },
+        {
+          "name": "step",
+          "type": "number",
+          "optional": true,
+          "default": "1"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Spinner",
+      "summary": "A renderer-only loading indicator. Animation can be added once transforms/animation exist natively.",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 39,
+      "generic": false,
+      "propsType": "SpinnerProps",
+      "props": [
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true,
+          "default": "\"Loading\""
+        },
+        {
+          "name": "size",
+          "type": "number",
+          "optional": true,
+          "default": "18"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Svg",
+      "source": "packages/core/src/components/svg.ts",
+      "line": 151,
+      "generic": false,
+      "propsType": "SvgProps",
+      "props": [
+        {
+          "name": "color",
+          "type": "string",
+          "optional": true,
+          "default": "theme.colors.foreground"
+        },
+        {
+          "name": "fill",
+          "type": "string",
+          "optional": true,
+          "default": "\"none\""
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "nodes",
+          "type": "readonly SvgNode[]",
+          "optional": true,
+          "default": "[]"
+        },
+        {
+          "name": "size",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "stroke",
+          "type": "string",
+          "optional": true,
+          "default": "\"currentColor\""
+        },
+        {
+          "name": "strokeLinecap",
+          "type": "\"butt\" | \"round\" | \"square\"",
+          "optional": true,
+          "default": "\"round\""
+        },
+        {
+          "name": "strokeLinejoin",
+          "type": "\"miter\" | \"round\" | \"bevel\"",
+          "optional": true,
+          "default": "\"round\""
+        },
+        {
+          "name": "strokeWidth",
+          "type": "number",
+          "optional": true,
+          "default": "2"
+        },
+        {
+          "name": "viewBox",
+          "type": "string | readonly [number, number, number, number]",
+          "optional": true
+        },
+        {
+          "name": "width",
+          "type": "number",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "SvgNode"
+      ]
+    },
+    {
+      "name": "SvgRect",
+      "source": "packages/core/src/components/svg.ts",
+      "line": 51,
+      "generic": false,
+      "props": [
+        {
+          "name": "height",
+          "type": "number | string",
+          "optional": false,
+          "from": "RectProps"
+        },
+        {
+          "name": "width",
+          "type": "number | string",
+          "optional": false,
+          "from": "RectProps"
+        },
+        {
+          "name": "rx",
+          "type": "number | string",
+          "optional": true,
+          "from": "RectProps"
+        },
+        {
+          "name": "ry",
+          "type": "number | string",
+          "optional": true,
+          "from": "RectProps"
+        },
+        {
+          "name": "x",
+          "type": "number | string",
+          "optional": true,
+          "from": "RectProps"
+        },
+        {
+          "name": "y",
+          "type": "number | string",
+          "optional": true,
+          "from": "RectProps"
+        }
+      ],
+      "common": [],
+      "types": []
+    },
+    {
+      "name": "Switch",
+      "source": "packages/core/src/controls.ts",
+      "line": 35,
+      "generic": false,
+      "propsType": "SwitchProps",
+      "props": [
+        {
+          "name": "checked",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "onCheckedChange",
+          "type": "(checked: boolean) => void",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Table",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 625,
+      "generic": true,
+      "propsType": "TableProps<T>",
+      "props": [
+        {
+          "name": "columns",
+          "type": "TableColumn<T>[]",
+          "optional": false
+        },
+        {
+          "name": "data",
+          "type": "T[]",
+          "optional": false
+        },
+        {
+          "name": "empty",
+          "type": "Child",
+          "optional": true,
+          "default": "\"No results.\""
+        },
+        {
+          "name": "onRowClick",
+          "type": "(row: T, index: number) => void",
+          "optional": true
+        },
+        {
+          "name": "rowKey",
+          "type": "(row: T, index: number) => string | number",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "TableColumn"
+      ]
+    },
+    {
+      "name": "Tabs",
+      "source": "packages/core/src/controls.ts",
+      "line": 154,
+      "generic": false,
+      "propsType": "TabsProps",
+      "props": [
+        {
+          "name": "items",
+          "type": "TabItem[]",
+          "optional": false
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "onValueChange",
+          "type": "(value: string) => void",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "TabItem"
+      ]
+    },
+    {
+      "name": "Text",
+      "source": "packages/core/src/components/text.ts",
+      "line": 13,
+      "generic": false,
+      "propsType": "TextProps",
+      "props": [
+        {
+          "name": "children",
+          "type": "Child",
+          "optional": true
+        },
+        {
+          "name": "color",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "size",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "style",
+          "type": "IntrinsicStyle",
+          "optional": true
+        },
+        {
+          "name": "weight",
+          "type": "number",
+          "optional": true
+        }
+      ],
+      "common": [
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup"
+      ],
+      "types": []
+    },
+    {
+      "name": "TextArea",
+      "source": "packages/core/src/components/input.ts",
+      "line": 59,
+      "generic": false,
+      "propsType": "TextAreaProps",
+      "props": [
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "onChange",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "onSubmit",
+          "type": "(value: string) => void",
+          "optional": true
+        },
+        {
+          "name": "placeholder",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "submitOnEnter",
+          "type": "boolean",
+          "optional": true,
+          "doc": "When true, Enter submits and Shift+Enter inserts a newline. Ctrl/Cmd+Enter always submits."
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "TitleBar",
+      "source": "packages/core/src/components/titlebar.ts",
+      "line": 37,
+      "generic": false,
+      "propsType": "TitleBarProps",
+      "props": [
+        {
+          "name": "align",
+          "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dismissOnOutside",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dragRegion",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "flex",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "focusable",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "optional": true,
+          "default": "40"
+        },
+        {
+          "name": "justify",
+          "type": "Style[\"justify\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "onOutsideClick",
+          "type": "() => void",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "padding",
+          "type": "Style[\"padding\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "portal",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "showClose",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        },
+        {
+          "name": "showMaximize",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        },
+        {
+          "name": "showMinimize",
+          "type": "boolean",
+          "optional": true,
+          "default": "true"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "windowAction",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "optional": true,
+          "from": "ViewProps"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Toast",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 904,
+      "generic": false,
+      "propsType": "ToastProps",
+      "props": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "action",
+          "type": "ToastAction",
+          "optional": true
+        },
+        {
+          "name": "description",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "onDismiss",
+          "type": "(id: string) => void",
+          "optional": true
+        },
+        {
+          "name": "variant",
+          "type": "ToastVariant",
+          "optional": true,
+          "default": "\"default\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "ToastAction",
+        "ToastVariant"
+      ]
+    },
+    {
+      "name": "Toaster",
+      "summary": "Render-driven toaster: callers own the toast array and remove items in onDismiss.",
+      "source": "packages/core/src/extra-controls.ts",
+      "line": 973,
+      "generic": false,
+      "propsType": "ToasterProps",
+      "props": [
+        {
+          "name": "toasts",
+          "type": "ToastItem[]",
+          "optional": false
+        },
+        {
+          "name": "onDismiss",
+          "type": "(id: string) => void",
+          "optional": true
+        },
+        {
+          "name": "position",
+          "type": "ToasterPosition",
+          "optional": true,
+          "default": "\"bottom-right\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "ToastItem",
+        "ToasterPosition"
+      ]
+    },
+    {
+      "name": "Toggle",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 280,
+      "generic": false,
+      "propsType": "ToggleProps",
+      "props": [
+        {
+          "name": "pressed",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "onPressedChange",
+          "type": "(pressed: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "size",
+          "type": "ButtonProps[\"size\"]",
+          "optional": true,
+          "default": "\"default\""
+        },
+        {
+          "name": "variant",
+          "type": "\"default\" | \"outline\"",
+          "optional": true,
+          "default": "\"default\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "ButtonProps"
+      ]
+    },
+    {
+      "name": "ToggleGroup",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 310,
+      "generic": false,
+      "propsType": "ToggleGroupProps",
+      "props": [
+        {
+          "name": "items",
+          "type": "readonly ToggleGroupItem[]",
+          "optional": false
+        },
+        {
+          "name": "value",
+          "type": "string | string[]",
+          "optional": false
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "onValueChange",
+          "type": "(value: string | string[]) => void",
+          "optional": true
+        },
+        {
+          "name": "type",
+          "type": "\"single\" | \"multiple\"",
+          "optional": true,
+          "default": "\"single\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "ToggleGroupItem"
+      ]
+    },
+    {
+      "name": "Tooltip",
+      "source": "packages/core/src/popups.ts",
+      "line": 143,
+      "generic": false,
+      "propsType": "TooltipProps",
+      "props": [
+        {
+          "name": "content",
+          "type": "Child",
+          "optional": false
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "trigger",
+          "type": "Child",
+          "optional": false
+        },
+        {
+          "name": "contentStyle",
+          "type": "Style",
+          "optional": true
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "side",
+          "type": "PopupSide",
+          "optional": true,
+          "default": "\"top\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "PopupSide"
+      ]
+    },
+    {
+      "name": "TreeView",
+      "summary": "Controlled desktop tree with roving keyboard focus and explicit expansion/selection state.",
+      "source": "packages/core/src/desktop-controls.ts",
+      "line": 60,
+      "generic": true,
+      "propsType": "TreeViewProps<T>",
+      "props": [
+        {
+          "name": "nodes",
+          "type": "readonly TreeNode<T>[]",
+          "optional": false
+        },
+        {
+          "name": "expandedIds",
+          "type": "readonly string[]",
+          "optional": true,
+          "default": "[]"
+        },
+        {
+          "name": "indent",
+          "type": "number",
+          "optional": true,
+          "default": "18"
+        },
+        {
+          "name": "onActivate",
+          "type": "(id: string, node: TreeNode<T>) => void",
+          "optional": true
+        },
+        {
+          "name": "onExpandedChange",
+          "type": "(ids: string[]) => void",
+          "optional": true
+        },
+        {
+          "name": "onSelectedChange",
+          "type": "(id: string, node: TreeNode<T>) => void",
+          "optional": true
+        },
+        {
+          "name": "rowHeight",
+          "type": "number",
+          "optional": true,
+          "default": "32"
+        },
+        {
+          "name": "selectedId",
+          "type": "string",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "TreeNode"
+      ]
+    },
+    {
+      "name": "Typography",
+      "source": "packages/core/src/form-controls.ts",
+      "line": 353,
+      "generic": false,
+      "propsType": "TypographyProps",
+      "props": [
+        {
+          "name": "variant",
+          "type": "TypographyVariant",
+          "optional": true,
+          "default": "\"p\""
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "TypographyVariant"
+      ]
+    },
+    {
+      "name": "View",
+      "source": "packages/core/src/components/layout.ts",
+      "line": 27,
+      "generic": false,
+      "propsType": "ViewProps",
+      "props": [
+        {
+          "name": "align",
+          "type": "Style[\"align\"]",
+          "optional": true
+        },
+        {
+          "name": "dismissOnOutside",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "dragRegion",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "flex",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "focusable",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "justify",
+          "type": "Style[\"justify\"]",
+          "optional": true
+        },
+        {
+          "name": "onOutsideClick",
+          "type": "() => void",
+          "optional": true
+        },
+        {
+          "name": "padding",
+          "type": "Style[\"padding\"]",
+          "optional": true
+        },
+        {
+          "name": "portal",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "windowAction",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "VirtualList",
+      "summary": "Fixed-height rows; the caller keeps `offset` and updates it from `onScroll`.",
+      "source": "packages/core/src/virtual-list.ts",
+      "line": 584,
+      "generic": true,
+      "propsType": "VirtualListProps<T> | VariableVirtualListProps<T> | WindowedVirtualListProps<T>",
+      "props": [
+        {
+          "name": "height",
+          "type": "number",
+          "optional": false
+        },
+        {
+          "name": "items",
+          "type": "readonly T[]",
+          "optional": false
+        },
+        {
+          "name": "offset",
+          "type": "number",
+          "optional": false
+        },
+        {
+          "name": "onScroll",
+          "type": "(offset: number, max: number) => void",
+          "optional": false
+        },
+        {
+          "name": "renderItem",
+          "type": "(item: T, index: number) => Child",
+          "optional": false
+        },
+        {
+          "name": "alignment",
+          "type": "\"top\" | \"bottom\"",
+          "optional": true,
+          "from": "VariableVirtualListProps"
+        },
+        {
+          "name": "estimatedItemHeight",
+          "type": "number",
+          "optional": true,
+          "from": "VariableVirtualListProps"
+        },
+        {
+          "name": "followTail",
+          "type": "boolean",
+          "optional": true,
+          "from": "VariableVirtualListProps"
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "optional": true,
+          "doc": "Stable list id is required so measured heights survive rerenders.",
+          "from": "VariableVirtualListProps"
+        },
+        {
+          "name": "itemCount",
+          "type": "number",
+          "optional": true,
+          "doc": "Total logical row count; `items` contains only the mounted window.",
+          "from": "WindowedVirtualListProps"
+        },
+        {
+          "name": "itemHeight",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "keyForItem",
+          "type": "(item: T, index: number) => string | number",
+          "optional": true
+        },
+        {
+          "name": "overscan",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "windowStart",
+          "type": "number",
+          "optional": true,
+          "doc": "Logical index represented by `items[0]`.",
+          "from": "WindowedVirtualListProps"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": []
+    },
+    {
+      "name": "Window",
+      "source": "packages/core/src/components/window.ts",
+      "line": 23,
+      "generic": false,
+      "propsType": "WindowProps",
+      "props": [
+        {
+          "name": "align",
+          "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dismissOnOutside",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dragRegion",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "flex",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "focusable",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "justify",
+          "type": "Style[\"justify\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "minHeight",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "minWidth",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "onCloseRequest",
+          "type": "(event: WindowCloseRequestEvent) => void",
+          "optional": true
+        },
+        {
+          "name": "onOutsideClick",
+          "type": "() => void",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "padding",
+          "type": "Style[\"padding\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "portal",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "position",
+          "type": "WindowPosition",
+          "optional": true
+        },
+        {
+          "name": "resizable",
+          "type": "boolean",
+          "optional": true
+        },
+        {
+          "name": "theme",
+          "type": "ThemeDefinition",
+          "optional": true
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "width",
+          "type": "number",
+          "optional": true
+        },
+        {
+          "name": "windowAction",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "optional": true,
+          "from": "ViewProps"
+        }
+      ],
+      "common": [
+        "children",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "WindowCloseRequestEvent",
+        "WindowPosition"
+      ]
+    }
+  ],
+  "commonProps": [
+    {
+      "name": "children",
+      "type": "Child",
+      "optional": true,
+      "from": "BaseProps"
+    },
+    {
+      "name": "highlight",
+      "type": "TextHighlight",
+      "optional": true,
+      "from": "BaseProps"
+    },
+    {
+      "name": "id",
+      "type": "string",
+      "optional": true,
+      "from": "BaseProps"
+    },
+    {
+      "name": "key",
+      "type": "string | number",
+      "optional": true,
+      "from": "BaseProps"
+    },
+    {
+      "name": "motionFrom",
+      "type": "MotionValues",
+      "optional": true,
+      "doc": "Initial numeric values for a native enter transition.",
+      "from": "BaseProps"
+    },
+    {
+      "name": "onHighlight",
+      "type": "(event: { matchCount: number }) => void",
+      "optional": true,
+      "from": "BaseProps"
+    },
+    {
+      "name": "onPaste",
+      "type": "(payload: PastePayload) => void",
+      "optional": true,
+      "doc": "Receives non-text clipboard content (files or a bitmap) pasted while focused.",
+      "from": "BaseProps"
+    },
+    {
+      "name": "onTransitionEnd",
+      "type": "(event: { property: MotionProperty }) => void",
+      "optional": true,
+      "from": "BaseProps"
+    },
+    {
+      "name": "rovingGroup",
+      "type": "boolean",
+      "optional": true,
+      "from": "BaseProps"
+    },
+    {
+      "name": "style",
+      "type": "Style",
+      "optional": true,
+      "from": "BaseProps"
+    }
+  ],
+  "types": {
+    "AccordionItem": "interface AccordionItem { value: string; title: string; content: Child; disabled?: boolean }",
+    "AlertVariant": "type AlertVariant = \"default\" | \"destructive\" | \"success\";",
+    "AttachmentStatus": "type AttachmentStatus = \"ready\" | \"uploading\" | \"error\";",
+    "BreadcrumbItem": "interface BreadcrumbItem {\n  label: string;\n  disabled?: boolean;\n  onClick?: () => void;\n}",
+    "BubbleSide": "type BubbleSide = \"incoming\" | \"outgoing\";",
+    "BubbleVariant": "type BubbleVariant = \"default\" | \"secondary\" | \"destructive\";",
+    "ButtonProps": "interface ButtonProps extends BaseProps {\n  variant?: ButtonVariant;\n  size?: \"sm\" | \"default\" | \"lg\";\n  disabled?: boolean;\n  control?: Control;\n  onClick?: () => void;\n  onHover?: (hovered: boolean) => void;\n}",
+    "ButtonVariant": "type ButtonVariant = \"default\" | \"secondary\" | \"outline\" | \"ghost\" | \"destructive\";",
+    "CalendarWeekStartsOn": "type CalendarWeekStartsOn = 0 | 1 | 2 | 3 | 4 | 5 | 6;",
+    "CarouselItem": "interface CarouselItem {\n  value: string;\n  content: Child;\n  label?: string;\n}",
+    "ChartDatum": "interface ChartDatum {\n  label: string;\n  value: number;\n  color?: string;\n}",
+    "ComboboxOption": "interface ComboboxOption {\n  value: string;\n  label: string;\n  keywords?: readonly string[];\n  disabled?: boolean;\n}",
+    "CommandItem": "interface CommandItem {\n  value: string;\n  label: string;\n  keywords?: readonly string[];\n  icon?: IconName;\n  group?: string;\n  shortcut?: string;\n  disabled?: boolean;\n}",
+    "DataGridColumn": "interface DataGridColumn<T> {\n  key: string;\n  header: Child;\n  value?: (row: T, index: number) => unknown;\n  render?: (row: T, index: number) => Child;\n  width?: Style[\"width\"];\n  align?: Style[\"align\"];\n  sortable?: boolean;\n  searchable?: boolean;\n  compare?: (a: T, b: T) => number;\n}",
+    "DataGridKey": "type DataGridKey = string | number;",
+    "DataGridSort": "interface DataGridSort {\n  column: string;\n  direction: DataGridSortDirection;\n}",
+    "DataGridSortDirection": "type DataGridSortDirection = \"asc\" | \"desc\";",
+    "DropdownMenuItem": "interface DropdownMenuItem {\n  value: string;\n  label: string;\n  icon?: IconName;\n  shortcut?: string;\n  disabled?: boolean;\n  checked?: boolean;\n}",
+    "HoverCardSide": "type HoverCardSide = \"top\" | \"right\" | \"bottom\" | \"left\";",
+    "IconName": "type IconName =\n  | \"check\" | \"x\" | \"plus\" | \"minus\"\n  | \"chevron-down\" | \"chevron-up\" | \"chevron-right\" | \"chevron-left\"\n  | \"search\" | \"info\"\n  | \"house\" | \"settings\" | \"user\" | \"bell\" | \"heart\" | \"star\"\n  | \"download\" | \"trash-2\" | \"folder\" | \"mail\";",
+    "ImageBytesSource": "interface ImageBytesSource {\n  /** Encoded PNG, JPEG, WebP or SVG bytes. */\n  bytes: Uint8Array;\n  mediaType?: string;\n  /** Stable key can reduce GPU cache churn when pixels are updated in place. */\n  cacheKey?: string;\n}",
+    "ImageRgbaSource": "interface ImageRgbaSource {\n  /** Raw RGBA8 pixels in row-major order. */\n  rgba: Uint8Array;\n  width: number;\n  height: number;\n  premultiplied?: boolean;\n  cacheKey?: string;\n}",
+    "ImageSource": "type ImageSource = string | Uint8Array | ImageBytesSource | ImageRgbaSource;",
+    "InputType": "type InputType = \"text\" | \"password\" | \"email\" | \"number\" | \"search\" | \"tel\" | \"url\";",
+    "MenubarItem": "interface MenubarItem {\n  value: string;\n  label: string;\n  disabled?: boolean;\n  checked?: boolean;\n  shortcut?: string;\n  onSelect?: () => void;\n}",
+    "MenubarMenu": "interface MenubarMenu {\n  value: string;\n  label: string;\n  disabled?: boolean;\n  items: MenubarItem[];\n}",
+    "MotionProperty": "type MotionProperty = NumericMotionProperty | \"background\" | \"foreground\" | \"borderColor\" | \"boxShadow\" | \"textShadow\" | \"transform\";",
+    "MotionTransition": "interface MotionTransition {\n  /** Duration in milliseconds. Defaults to 200 when omitted. */\n  duration?: number;\n  /** Delay in milliseconds. Defaults to 0. */\n  delay?: number;\n  easing?: MotionEasing;\n}",
+    "MotionTransitions": "type MotionTransitions = Partial<Record<MotionProperty | \"all\", MotionTransition>>;",
+    "MotionValues": "type MotionValues = Partial<Record<NumericMotionProperty, number>>;",
+    "NavigationMenuItem": "interface NavigationMenuItem {\n  value: string;\n  label: string;\n  disabled?: boolean;\n  links?: readonly NavigationMenuLink[];\n}",
+    "NavigationMenuLink": "interface NavigationMenuLink {\n  value: string;\n  label: string;\n  description?: string;\n  disabled?: boolean;\n}",
+    "NumericMotionProperty": "type NumericMotionProperty = \"width\" | \"height\" | \"top\" | \"right\" | \"bottom\" | \"left\" | \"opacity\" | \"radius\";",
+    "PopupSide": "type PopupSide = \"top\" | \"right\" | \"bottom\" | \"left\";",
+    "QuestionnaireAnswer": "type QuestionnaireAnswer = string | string[];",
+    "QuestionnaireQuestion": "interface QuestionnaireQuestion {\n  id: string;\n  title: string;\n  description?: string;\n  type: \"text\" | \"single\" | \"multiple\";\n  options?: readonly RadioOption[];\n  required?: boolean;\n  placeholder?: string;\n}",
+    "RadioOption": "interface RadioOption { value: string; label: string; disabled?: boolean }",
+    "ScrollOrientation": "type ScrollOrientation = \"vertical\" | \"horizontal\" | \"both\";",
+    "ScrollPosition": "interface ScrollPosition { x: number; y: number; maxX: number; maxY: number }",
+    "SelectOption": "interface SelectOption { value: string; label: string; disabled?: boolean }",
+    "SheetSide": "type SheetSide = \"left\" | \"right\" | \"top\" | \"bottom\";",
+    "SidebarItem": "interface SidebarItem {\n  value: string;\n  label: string;\n  icon?: IconName;\n  disabled?: boolean;\n  badge?: Child;\n}",
+    "SvgAttributes": "type SvgAttributes = Record<string, SvgAttributeValue>;",
+    "SvgNode": "type SvgNode =\n  | readonly [SvgElementName, SvgAttributes]\n  | readonly [SvgElementName, SvgAttributes, readonly SvgNode[]];",
+    "TabItem": "interface TabItem { value: string; label: string; content: Child; disabled?: boolean }",
+    "TableColumn": "interface TableColumn<T> {\n  key: string;\n  header: Child;\n  accessor?: keyof T | ((row: T, index: number) => Child);\n  render?: (row: T, index: number) => Child;\n  width?: Style[\"width\"];\n  align?: Style[\"align\"];\n}",
+    "ToastAction": "interface ToastAction {\n  label: string;\n  onClick: () => void;\n}",
+    "ToastItem": "interface ToastItem {\n  id: string;\n  title: string;\n  description?: string;\n  variant?: ToastVariant;\n  action?: ToastAction;\n}",
+    "ToastVariant": "type ToastVariant = \"default\" | \"success\" | \"destructive\";",
+    "ToasterPosition": "type ToasterPosition = \"top-left\" | \"top-right\" | \"bottom-left\" | \"bottom-right\";",
+    "ToggleGroupItem": "interface ToggleGroupItem {\n  value: string;\n  label: string;\n  content?: Child;\n  disabled?: boolean;\n}",
+    "TreeNode": "interface TreeNode<T = unknown> {\n  id: string;\n  label: string;\n  children?: readonly TreeNode<T>[];\n  disabled?: boolean;\n  icon?: IconName;\n  data?: T;\n}",
+    "TypographyVariant": "type TypographyVariant = \"h1\" | \"h2\" | \"h3\" | \"h4\" | \"p\" | \"lead\" | \"large\" | \"small\" | \"muted\" | \"code\" | \"blockquote\";",
+    "WindowCloseRequestEvent": "interface WindowCloseRequestEvent {\n  readonly defaultPrevented: boolean;\n  preventDefault(): void;\n}",
+    "WindowPosition": "type WindowPosition = WindowPositionPreset | { x: number; y: number };",
+    "WindowPositionPreset": "type WindowPositionPreset =\n  | \"top-left\" | \"top\" | \"top-right\"\n  | \"left\" | \"center\" | \"right\"\n  | \"bottom-left\" | \"bottom\" | \"bottom-right\";"
+  }
+}
