@@ -1520,6 +1520,8 @@ pub struct Tree {
     portal_order: Vec<String>,
     /// Nodes with a `transform` in their base or state styles.
     transformed: HashSet<String>,
+    /// Ids with a `spin` style: rotated by the clock, so they need a frame every tick.
+    spinning: HashSet<String>,
     window_chrome_suppressed: bool,
     pub dirty: Dirty,
     pub hovered: Option<String>,
@@ -1558,9 +1560,18 @@ pub struct Tree {
     pub warnings: Vec<String>,
 }
 
+/// Period in milliseconds of a node's continuous `spin` rotation, if it has one.
+fn spin_period(node: &Node) -> Option<f64> {
+    node.style
+        .get("spin")
+        .and_then(Value::as_f64)
+        .filter(|period| period.is_finite() && *period > 0.0)
+}
+
 /// The node fields `Tree::refresh_stacking` reads, besides children.
 fn stacking_inputs(node: &Node) -> (u32, bool, bool) {
     let transformed = node.style.get("transform").is_some()
+        || spin_period(node).is_some()
         || ["hover", "active", "focus", "focusVisible", "disabled"]
             .iter()
             .any(|state| {
@@ -1612,11 +1623,18 @@ impl Tree {
             .map(|(id, _)| id.clone())
             .collect();
         self.stacking = stacking;
+        self.spinning = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| spin_period(&entry.node).is_some())
+            .map(|(id, _)| id.clone())
+            .collect();
         self.transformed = self
             .entries
             .iter()
             .filter(|(_, entry)| {
                 entry.node.style.get("transform").is_some()
+                    || spin_period(&entry.node).is_some()
                     || ["hover", "active", "focus", "focusVisible", "disabled"]
                         .iter()
                         .any(|state| {
@@ -1759,6 +1777,7 @@ impl Tree {
             stacked_parents: HashSet::default(),
             portal_order: Vec::new(),
             transformed: HashSet::default(),
+            spinning: HashSet::default(),
             window_chrome_suppressed: false,
             dirty: Dirty::all(),
             hovered: None,
@@ -1811,6 +1830,9 @@ impl Tree {
             return;
         }
         let caret_was_visible = self.caret_visible();
+        if !self.spinning.is_empty() && now_ms > self.motion_time_ms {
+            self.dirty.paint = true;
+        }
         self.motion_time_ms = self.motion_time_ms.max(now_ms);
         if self.caret_blink_target().is_some() && caret_was_visible != self.caret_visible() {
             self.dirty.paint = true;
@@ -1967,10 +1989,11 @@ impl Tree {
     }
     /// Earliest native clock deadline: motion frames or the next caret blink phase.
     pub fn next_clock_tick_ms(&self) -> Option<f64> {
-        match (self.next_motion_tick_ms(), self.next_caret_blink_ms()) {
-            (Some(motion), Some(caret)) => Some(motion.min(caret)),
-            (motion, caret) => motion.or(caret),
-        }
+        let spin = (!self.spinning.is_empty()).then_some(self.motion_time_ms + MOTION_FRAME_MS);
+        [self.next_motion_tick_ms(), self.next_caret_blink_ms(), spin]
+            .into_iter()
+            .flatten()
+            .min_by(f64::total_cmp)
     }
     fn caret_blink_target(&self) -> Option<&str> {
         let id = self.focused.as_deref()?;
@@ -3717,14 +3740,19 @@ impl Tree {
                 track.state_driven || !visual_state_overrides(&entry.node, "transform", state)
             })
             .map(|track| track.current.clone())
-            .or_else(|| motion_value(&entry.node, "transform", state))?;
+            .or_else(|| motion_value(&entry.node, "transform", state))
+            .unwrap_or_else(|| vec![0.0, 0.0, 1.0, 1.0]);
         let [x, y, scale_x, scale_y] = [0, 1, 2, 3].map(|index| f64::from(values[index]));
-        if x == 0.0 && y == 0.0 && scale_x == 1.0 && scale_y == 1.0 {
+        let angle = spin_period(&entry.node).map_or(0.0, |period| {
+            std::f64::consts::TAU * (self.motion_time_ms.rem_euclid(period) / period)
+        });
+        if x == 0.0 && y == 0.0 && scale_x == 1.0 && scale_y == 1.0 && angle == 0.0 {
             return None;
         }
         let centre = (entry.rect + Vec2::new(-offset.x, -offset.y)).center();
         Some(
             Affine::translate((centre.x + x, centre.y + y))
+                * Affine::rotate(angle)
                 * Affine::scale_non_uniform(scale_x, scale_y)
                 * Affine::translate((-centre.x, -centre.y)),
         )

@@ -121,6 +121,8 @@ export interface Style extends StateStyle {
   radius?: number; fontSize?: number; fontWeight?: number; fontFamily?: string;
   /** Native retained transitions. Bun sends the target once; Rust owns interpolation. */
   transition?: MotionTransitions;
+  /** Continuous rotation about the centre, one turn per `spin` milliseconds. Rust drives the frames. */
+  spin?: number;
   lineHeight?: number; textAlign?: "start" | "center" | "end";
   taskMarkerColor?: string; taskMarkerCheckColor?: string;
   markdownCodeBackground?: string; markdownQuoteBackground?: string; markdownQuoteAccent?: string;

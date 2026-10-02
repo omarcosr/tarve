@@ -2,12 +2,15 @@ import type { Style } from "../../protocol/src/index";
 import { Fragment, jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
 import {
   Button,
+  Circle,
   Column,
   Icon,
   Image,
   Modal,
+  Path,
   Pressable,
   Row,
+  Svg,
   Text,
   View,
   type ButtonProps,
@@ -35,33 +38,20 @@ export interface SpinnerProps extends BaseProps {
   label?: string;
 }
 
-/** A renderer-only loading indicator. Animation can be added once transforms/animation exist natively. */
+/** A loading indicator: an arc that turns once every 800 ms, rotated natively by `style.spin`. */
 export function Spinner({ size = 18, label = "Loading", style, ...props }: SpinnerProps): VNode {
-  const dot = Math.max(3, Math.round(size * 0.22));
-  return jsx(View, {
+  return jsx(Svg, {
     ...props,
     control: { role: "progress", label },
-    style: {
-      position: "relative",
-      width: size,
-      height: size,
-      radius: size / 2,
-      borderWidth: 2,
-      borderColor: c.border,
-      shrink: 0,
-      ...style,
-    },
-    children: jsx(View, {
-      style: {
-        position: "absolute",
-        top: -1,
-        left: (size - dot) / 2,
-        width: dot,
-        height: dot,
-        radius: dot / 2,
-        background: c.foreground,
-      },
-    }),
+    size,
+    viewBox: "0 0 24 24",
+    strokeWidth: 2.5,
+    color: c.foreground,
+    style: { spin: 800, ...style },
+    children: [
+      jsx(Circle, { cx: 12, cy: 12, r: 9, opacity: 0.2 }),
+      jsx(Path, { d: "M12 3a9 9 0 0 1 9 9" }),
+    ],
   });
 }
 

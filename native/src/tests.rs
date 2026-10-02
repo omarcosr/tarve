@@ -6297,3 +6297,32 @@ fn caret_is_clamped_when_the_value_shrinks_under_it() {
     let typed = tree.type_text("!");
     assert_eq!(typed[0]["value"], "a!");
 }
+
+#[test]
+fn spin_rotates_on_the_native_clock_and_schedules_frames_only_while_present() {
+    let spinner = node(
+        "spinner",
+        "view",
+        json!({"width":20,"height":20,"spin":1000}),
+        vec![],
+    );
+    let mut tree = Tree::new(root(vec![spinner]));
+    tree.compute(100.0, 100.0).unwrap();
+    tree.advance_motion(0.0);
+    assert_eq!(tree.next_clock_tick_ms(), Some(1000.0 / 60.0));
+    tree.dirty.paint = false;
+    tree.advance_motion(250.0);
+    assert!(tree.dirty.paint, "every clock step repaints a spinner");
+
+    tree.update(root(vec![node(
+        "still",
+        "view",
+        json!({"width":20,"height":20}),
+        vec![],
+    )]));
+    assert_eq!(
+        tree.next_clock_tick_ms(),
+        None,
+        "no frames once the spinner is gone"
+    );
+}
