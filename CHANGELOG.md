@@ -8,6 +8,7 @@ All notable changes to `@tarve/core`, `@tarve/react-icons` and `@tarve/headless`
 - `@tarve/headless`: renders and tests Tarve apps with the WebAssembly build of the native tree, with no window, GPU or native library. `renderToPng`/`renderToRgba`, `createHeadlessApp`, `createHeadlessTestRenderer` (the `TestRenderer` API) and `matchImageSnapshot`. Text uses bundled Inter and JetBrains Mono and time only moves with `advanceMotion`, so a view renders to the same bytes on every machine. CI runs its image snapshots on Linux, Windows and macOS; releases publish it next to `@tarve/core`.
 - `style.spin`: continuous rotation about the centre, one turn per `spin` milliseconds, driven by the native clock. `Spinner` uses it.
 - `destructiveText` theme colour for error text and icons.
+- Pointer drag and drop. `draggable` on `Pressable` turns a press that travels past 4px into a drag (a short press still clicks); `onDragStart`, `onDragMove` and `onDragEnd` report position, the target under the pointer and whether the drag was cancelled (Escape or window blur). Any view with `onDrop`, `onDragEnter` or `onDragLeave` becomes a drop target; the innermost visible target wins, targets inside the dragged node, clipped by a scroll area, disabled or behind a modal are skipped. Example: `examples/drag-and-drop.tsx`. Native protocol v49.
 
 ### Fixed
 - A modal opened with the mouse no longer paints the keyboard focus ring on its first control, and closing it no longer rings the trigger.
