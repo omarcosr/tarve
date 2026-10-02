@@ -218,9 +218,11 @@ export class TestRenderer {
     return new Locator(
       this,
       snapshot => snapshot.nodes.filter(node => {
-        if (node.control?.role !== role) return false;
+        // A plain Button is a native "button" node without a control: its role is implicit.
+        const nodeRole = node.control?.role ?? (node.kind === "button" ? "button" : undefined);
+        if (nodeRole !== role) return false;
         if (options.name === undefined) return true;
-        return textMatches(node.control.label ?? node.text, options.name, exact);
+        return textMatches(node.control?.label ?? node.text, options.name, exact);
       }),
       options.name === undefined ? `role ${JSON.stringify(role)}` : `role ${JSON.stringify(role)} named ${String(options.name)}`,
     );
