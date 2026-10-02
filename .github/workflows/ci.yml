@@ -234,3 +234,63 @@ jobs:
 
       - name: Standalone executable smoke
         run: bun run smoke:exe
+
+  # @tarve/headless renders with the WebAssembly build: no window, GPU or native library. Running
+  # it on every OS (macOS on ARM included) checks that the stored image snapshots are byte-identical
+  # everywhere, which is the package's promise.
+  headless:
+    name: Headless (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+          shared-key: wasm-${{ matrix.os }}
+          cache-on-failure: true
+
+      # Must match the wasm-bindgen crate version in native/Cargo.lock.
+      - name: Install wasm-bindgen
+        run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build the WebAssembly runtime
+        run: bun run build:wasm
+
+      - name: Headless tests and image snapshots
+        run: bun run test:headless
+
+      - name: Verify the packed package
+        if: matrix.os == 'ubuntu-latest'
+        run: bun packages/headless/scripts/verify-pack.ts
+
+      - name: Upload snapshot differences
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tarve-headless-snapshots-${{ matrix.os }}-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: packages/headless/__snapshots__/*.actual.png
+          retention-days: 14
