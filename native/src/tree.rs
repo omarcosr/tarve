@@ -2033,9 +2033,10 @@ impl Tree {
         self.prune_images();
         self.prune_svgs();
         let restore_focus = self.modal_focus_transition(previous_modal, previous_focus);
+        let keyboard = self.focus_visible;
         self.prune_interaction();
         if let Some(id) = restore_focus {
-            self.focus(&id);
+            self.focus_with_visibility(&id, keyboard);
         }
         self.refresh_stacking();
     }
@@ -2385,9 +2386,10 @@ impl Tree {
         self.prune_images();
         self.prune_svgs();
         let restore_focus = self.modal_focus_transition(previous_modal, previous_focus);
+        let keyboard = self.focus_visible;
         self.prune_interaction();
         if let Some(id) = restore_focus {
-            self.focus(&id);
+            self.focus_with_visibility(&id, keyboard);
         }
         if stacking_changed {
             self.refresh_stacking();
@@ -2607,9 +2609,10 @@ impl Tree {
         self.prune_images();
         self.prune_svgs();
         let restore_focus = self.modal_focus_transition(previous_modal, previous_focus);
+        let keyboard = self.focus_visible;
         self.prune_interaction();
         if let Some(id) = restore_focus {
-            self.focus(&id);
+            self.focus_with_visibility(&id, keyboard);
         }
         self.refresh_stacking();
         Ok(())
@@ -4896,6 +4899,9 @@ impl Tree {
             self.hovered = None;
         }
         if !keep_focused {
+            // Moving focus into a modal keeps the input modality: a mouse-opened
+            // dialog must not paint a keyboard ring on its first control.
+            let keyboard = self.focus_visible;
             self.ime_cancel();
             self.focused = None;
             self.focus_visible = false;
@@ -4905,7 +4911,7 @@ impl Tree {
             if modal.is_some()
                 && let Some(id) = self.focus_order().into_iter().next()
             {
-                let _ = self.focus(&id);
+                let _ = self.focus_with_visibility(&id, keyboard);
             }
         }
         if !keep_pressed {

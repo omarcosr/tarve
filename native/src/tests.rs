@@ -3600,7 +3600,12 @@ fn modal_overlay_is_absolute_blocks_background_and_traps_focus() {
         Some("close"),
         "modal should focus its first control"
     );
+    assert!(
+        !tree.focus_visible,
+        "a modal opened without the keyboard must not ring its first control"
+    );
     tree.key("Tab");
+    assert!(tree.focus_visible, "keyboard navigation shows the ring");
     assert_eq!(
         tree.focused.as_deref(),
         Some("close"),
