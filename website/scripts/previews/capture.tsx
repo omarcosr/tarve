@@ -94,7 +94,8 @@ class HeadlessBridge implements NativeBridge {
   join(): void {}
 
   frame(): void {
-    this.tree?.frame(performance.now());
+    // Time stands still: transitions and spinners are captured at their first frame, every run.
+    this.tree?.frame(0);
     this.flush();
   }
 

@@ -1,37 +1,14 @@
-// Compiles Tarve's native crate to WebAssembly for the documentation playground.
+// Builds Tarve's WebAssembly runtime (packages/headless) and copies it next to the playground.
 // Needs: rustup target add wasm32-unknown-unknown && cargo install wasm-bindgen-cli --version 0.2.129
+import { cpSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 const website = resolve(import.meta.dir, "..");
-const native = resolve(website, "../native");
+const headless = resolve(website, "../packages/headless");
+const out = resolve(website, "src/lib/playground/wasm");
 
-// SIMD lets vello_cpu rasterize with wasm simd128 (every current browser supports it).
-const env = { ...process.env, RUSTFLAGS: [process.env.RUSTFLAGS, "-C target-feature=+simd128"].filter(Boolean).join(" ") };
-
-function run(command: string[]): void {
-  const result = Bun.spawnSync(command, { cwd: native, env, stdout: "inherit", stderr: "inherit" });
-  if (result.exitCode !== 0) process.exit(result.exitCode ?? 1);
-}
-
-run([
-  "cargo",
-  "build",
-  "--release",
-  "--target",
-  "wasm32-unknown-unknown",
-  "--no-default-features",
-  "--features",
-  "fxhash",
-  "--lib",
-]);
-run([
-  "wasm-bindgen",
-  resolve(native, "target/wasm32-unknown-unknown/release/tarve_native.wasm"),
-  "--target",
-  "web",
-  "--out-dir",
-  resolve(website, "src/lib/playground/wasm"),
-  "--out-name",
-  "tarve_web",
-]);
+const build = Bun.spawnSync(["bun", resolve(headless, "scripts/build-wasm.ts")], { stdout: "inherit", stderr: "inherit" });
+if (build.exitCode !== 0) process.exit(build.exitCode ?? 1);
+mkdirSync(out, { recursive: true });
+cpSync(resolve(headless, "wasm"), out, { recursive: true });
 console.log("[build-wasm] src/lib/playground/wasm/tarve_web_bg.wasm");
