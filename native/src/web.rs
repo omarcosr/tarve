@@ -175,10 +175,11 @@ impl WebTree {
 
     /// Sets the logical size and device pixel ratio of the canvas.
     pub fn resize(&mut self, width: f32, height: f32, scale: f64) {
-        if (width - self.width).abs() > f32::EPSILON
-            || (height - self.height).abs() > f32::EPSILON
-            || (scale - self.scale).abs() > f64::EPSILON
-        {
+        let resized = (width - self.width).abs() > f32::EPSILON
+            || (height - self.height).abs() > f32::EPSILON;
+        if resized || (scale - self.scale).abs() > f64::EPSILON {
+            // A new size needs a new layout; `compute` skips layout unless it is marked dirty.
+            self.tree.dirty.layout |= resized;
             self.width = width.max(1.0);
             self.height = height.max(1.0);
             self.scale = scale.max(0.5);
