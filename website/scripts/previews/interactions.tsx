@@ -1,14 +1,15 @@
 // Clicks every interactive control of every documentation example with the real Tarve runtime
-// and reports controls whose click changes nothing (layout, text, state or scroll), plus errors.
+// (the WebAssembly build, through @tarve/headless: no window needed) and reports controls whose
+// click changes nothing (layout, text, state or scroll), plus errors.
 //   bun run docs:interactions            all components
 //   bun run docs:interactions DataGrid   only the named components
 import { readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
-import { availableParallelism } from "node:os";
 import { basename, resolve } from "node:path";
-import { Column, Window, createApp, darkTheme, type VNode } from "@tarve/core";
+import { Column, Window, darkTheme, type VNode } from "@tarve/core";
+import { createHeadlessApp } from "@tarve/headless";
 import { toPreviewModule } from "../../src/lib/playground/example-transform";
 
-type Snapshot = Awaited<ReturnType<ReturnType<typeof createApp>["inspect"]>>;
+type Snapshot = Awaited<ReturnType<Awaited<ReturnType<typeof createHeadlessApp>>["inspect"]>>;
 type Report = { name: string; controls: number; dead: string[]; errors: string[] };
 
 const here = import.meta.dir;
@@ -54,17 +55,12 @@ async function checkOne(name: string): Promise<Report> {
   mkdirSync(generatedDir, { recursive: true });
   const { code, fullWindow } = toPreviewModule(name, readFileSync(resolve(examplesDir, name + ".tsx"), "utf8"));
   const errors: string[] = [];
-  process.chdir(resolve(website, "public"));
-  const app = createApp(await freshView(name, code, fullWindow), {
-    headless: true,
-    debug: true,
-    renderer: "cpu",
+  const app = await createHeadlessApp(await freshView(name, code, fullWindow), {
+    assetRoot: resolve(website, "public"),
     onError: (event) => errors.push(event.error.message),
   });
-  const settle = () => Bun.sleep(150);
+  const settle = () => app.settle();
   try {
-    await app.ready;
-    await settle();
     const first = await app.inspect();
     const controls = first.nodes
       .filter((node) => (node.control || INTERACTIVE.has(node.kind)) && node.width > 4 && node.height > 4)
@@ -120,18 +116,14 @@ async function checkAll(selected: string[]): Promise<void> {
     .map((file) => basename(file, ".tsx"))
     .filter((name) => selected.length === 0 || selected.includes(name))
     .sort();
-  const queue = [...names];
   const reports: Report[] = [];
-  const workers = Array.from({ length: Math.min(4, availableParallelism()) }, async () => {
-    for (let name = queue.shift(); name; name = queue.shift()) {
-      const child = Bun.spawn(["bun", import.meta.path, "--one", name], { stdout: "pipe", stderr: "pipe" });
-      const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-      const line = stdout.split("\n").find((entry) => entry.startsWith("REPORT "));
-      reports.push(line ? JSON.parse(line.slice(7)) : { name, controls: 0, dead: [], errors: [stderr.trim().split("\n").slice(-2).join(" | ")] });
+  for (const name of names) {
+    try {
+      reports.push(await checkOne(name));
+    } catch (error) {
+      reports.push({ name, controls: 0, dead: [], errors: [error instanceof Error ? error.message : String(error)] });
     }
-  });
-  await Promise.all(workers);
-  reports.sort((a, b) => a.name.localeCompare(b.name));
+  }
   let problems = 0;
   for (const report of reports) {
     if (report.errors.length || report.dead.length) problems++;
@@ -144,10 +136,4 @@ async function checkAll(selected: string[]): Promise<void> {
   if (reports.some((report) => report.errors.length)) process.exit(1);
 }
 
-const args = process.argv.slice(2);
-if (args[0] === "--one") {
-  console.log("REPORT " + JSON.stringify(await checkOne(args[1]!)));
-  process.exit(0);
-} else {
-  await checkAll(args);
-}
+await checkAll(process.argv.slice(2));
