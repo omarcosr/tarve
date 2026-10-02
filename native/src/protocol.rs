@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 48;
+pub const VERSION: u32 = 49;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -202,6 +202,10 @@ pub struct Node {
     pub roving_group: String,
     #[serde(default)]
     pub drag_region: bool,
+    #[serde(default)]
+    pub draggable: bool,
+    #[serde(default)]
+    pub drop_target: bool,
     #[serde(default)]
     pub window_action: String,
     #[serde(default)]

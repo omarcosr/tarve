@@ -1107,6 +1107,16 @@ struct VisualState {
     disabled: bool,
 }
 
+/// A press on a `draggable` node. It stays pending until the pointer travels
+/// past `DRAG_THRESHOLD`, so an ordinary click on a draggable still clicks.
+struct PointerDrag {
+    id: String,
+    origin: (f64, f64),
+    active: bool,
+}
+
+const DRAG_THRESHOLD: f64 = 4.0;
+
 struct ScrollDrag {
     id: String,
     axis: ScrollbarAxis,
@@ -1543,6 +1553,7 @@ pub struct Tree {
     pressed_link: Option<(String, String)>,
     pressed_diff_row: Option<(String, usize)>,
     scroll_drag: Option<ScrollDrag>,
+    pointer_drag: Option<PointerDrag>,
     pub mouse: (f64, f64),
     caret: usize,
     selection_anchor: Option<usize>,
@@ -1792,6 +1803,7 @@ impl Tree {
             pressed_link: None,
             pressed_diff_row: None,
             scroll_drag: None,
+            pointer_drag: None,
             mouse: (-1.0, -1.0),
             caret: 0,
             selection_anchor: None,
@@ -5176,6 +5188,117 @@ impl Tree {
             }
         }
     }
+    fn drop_target_enabled(&self, id: &str, source: &str) -> bool {
+        if !self.entries.get(id).is_some_and(|entry| entry.node.drop_target) {
+            return false;
+        }
+        let mut current = Some(id);
+        while let Some(current_id) = current {
+            if current_id == source {
+                return false;
+            }
+            let Some(entry) = self.entries.get(current_id) else {
+                return false;
+            };
+            if entry.node.disabled || entry.node.string("display", "flex") == "none" {
+                return false;
+            }
+            current = entry.parent.as_deref();
+        }
+        true
+    }
+    /// The innermost visible drop target under the pointer. Targets inside the
+    /// dragged node, clipped by a scroll ancestor, or hidden behind an open modal
+    /// layer are skipped; nested targets resolve to the smallest one.
+    fn drop_target_at_pointer(&self, source: &str) -> Option<String> {
+        let (x, y) = self.mouse;
+        let inside = |rect: &BoxRect| x >= rect.x0 && x < rect.x1 && y >= rect.y0 && y < rect.y1;
+        let modal = self
+            .portal_order
+            .iter()
+            .rev()
+            .find(|id| self.entries.get(*id).is_some_and(|entry| entry.node.modal))
+            .cloned();
+        let mut best: Option<(f64, &String)> = None;
+        for (id, entry) in &self.entries {
+            if !entry.node.drop_target || !self.drop_target_enabled(id, source) {
+                continue;
+            }
+            let Some(rect) = self.visible_rect(id) else {
+                continue;
+            };
+            if !inside(&rect) {
+                continue;
+            }
+            let mut visible = true;
+            let mut within_modal = modal.is_none();
+            let mut current = Some(id.as_str());
+            while let Some(current_id) = current {
+                if modal.as_deref() == Some(current_id) {
+                    within_modal = true;
+                }
+                let Some(ancestor) = self.entries.get(current_id) else {
+                    visible = false;
+                    break;
+                };
+                if current_id != id
+                    && ancestor.node.kind == "scroll"
+                    && !self.visible_rect(current_id).is_some_and(|clip| inside(&clip))
+                {
+                    visible = false;
+                    break;
+                }
+                current = ancestor.parent.as_deref();
+            }
+            if !visible || !within_modal {
+                continue;
+            }
+            let area = rect.width() * rect.height();
+            if best.is_none_or(|(smallest, _)| area < smallest) {
+                best = Some((area, id));
+            }
+        }
+        best.map(|(_, id)| id.clone())
+    }
+    fn pointer_drag_move(&mut self) -> Option<Vec<Value>> {
+        let drag = self.pointer_drag.as_ref()?;
+        if !self.entries.contains_key(&drag.id) {
+            return Some(self.cancel_pointer_drag());
+        }
+        let (x, y) = self.mouse;
+        let mut events = vec![];
+        if !drag.active {
+            let (origin_x, origin_y) = drag.origin;
+            if (x - origin_x).hypot(y - origin_y) < DRAG_THRESHOLD {
+                return None;
+            }
+            let id = drag.id.clone();
+            if let Some(drag) = self.pointer_drag.as_mut() {
+                drag.active = true;
+            }
+            self.text_dragging = false;
+            self.static_text_dragging = false;
+            self.static_selection = None;
+            self.dirty.paint = true;
+            events.push(json!({"type":"dragStart", "id":id, "x":origin_x, "y":origin_y}));
+        }
+        let id = self.pointer_drag.as_ref()?.id.clone();
+        let over = self.drop_target_at_pointer(&id);
+        events.push(json!({"type":"dragMove", "id":id, "x":x, "y":y, "over":over}));
+        Some(events)
+    }
+    /// Abandons an in-flight pointer drag (Escape, focus loss, source removed).
+    /// A drag that never crossed the threshold ends silently.
+    pub fn cancel_pointer_drag(&mut self) -> Vec<Value> {
+        match self.pointer_drag.take() {
+            Some(drag) if drag.active => {
+                self.pressed = None;
+                self.dirty.paint = true;
+                vec![json!({"type":"dragCancel", "id":drag.id})]
+            }
+            _ => vec![],
+        }
+    }
     pub fn pointer_move(&mut self, x: f64, y: f64) -> Vec<Value> {
         self.mouse = (x, y);
         if self.text_dragging
@@ -5208,6 +5331,10 @@ impl Tree {
             self.dirty.paint = true;
         }
         self.refresh_hover_chain();
+        if let Some(drag_events) = self.pointer_drag_move() {
+            events.extend(drag_events);
+            return events;
+        }
         if let Some(id) = self
             .pressed
             .clone()
@@ -5247,6 +5374,7 @@ impl Tree {
         blurred
     }
     pub fn pointer_down(&mut self) -> Vec<Value> {
+        self.pointer_drag = None;
         self.pressed_link = None;
         self.pressed_diff_row = None;
         self.set_focus_visible(false);
@@ -5283,6 +5411,15 @@ impl Tree {
         self.hovered = self.hit_root(false);
         self.refresh_hover_chain();
         self.pressed = self.hovered.clone();
+        self.pointer_drag = self
+            .pressed
+            .as_deref()
+            .filter(|id| self.entries[*id].node.draggable && self.interactive(id))
+            .map(|id| PointerDrag {
+                id: id.to_string(),
+                origin: self.mouse,
+                active: false,
+            });
         let mut events = vec![];
         if let Some(id) = self.hovered.clone() {
             if let Some(blurred) = self.focus_with_visibility(&id, false) {
@@ -5350,6 +5487,22 @@ impl Tree {
         events
     }
     pub fn pointer_up(&mut self) -> Vec<Value> {
+        if let Some(drag) = self.pointer_drag.take()
+            && drag.active
+        {
+            self.text_dragging = false;
+            self.static_text_dragging = false;
+            self.pressed = None;
+            self.pressed_link = None;
+            self.pressed_diff_row = None;
+            self.hovered = self.hit_root(false);
+            self.refresh_hover_chain();
+            self.dirty.paint = true;
+            let target = self.drop_target_at_pointer(&drag.id);
+            return vec![json!({
+                "type":"drop", "id":drag.id, "target":target, "x":self.mouse.0, "y":self.mouse.1
+            })];
+        }
         self.text_dragging = false;
         self.static_text_dragging = false;
         if self.selection_anchor == Some(self.caret) {
@@ -5994,6 +6147,9 @@ impl Tree {
         self.static_selected_text()
     }
     pub fn key(&mut self, key: &str) -> Vec<Value> {
+        if key == "Escape" && self.pointer_drag.as_ref().is_some_and(|drag| drag.active) {
+            return self.cancel_pointer_drag();
+        }
         self.set_focus_visible(true);
         let editable_focus = self
             .focused

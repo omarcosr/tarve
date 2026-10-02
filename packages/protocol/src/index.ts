@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 48;
+export const PROTOCOL_VERSION = 49;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
@@ -188,6 +188,9 @@ export interface NativeNode {
   labelledBy?: string[];
   closeIntercept?: boolean;
   dragRegion?: boolean;
+  /** Interactive nodes only: a press past 4px becomes a pointer drag. */
+  draggable?: boolean;
+  dropTarget?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "close";
   /** Optional initial numeric values used only when the native node is first mounted. */
   motionFrom?: MotionValues;
@@ -271,6 +274,10 @@ export type NativeEvent =
   | { type: "diffLineClick"; id: string; text: string; path?: string | null; oldLine?: number | null; newLine?: number | null }
   | { type: "highlight"; id: string; matchCount: number; query?: string; caseSensitive?: boolean; wholeWord?: boolean }
   | { type: "hover"; id: string; entered: boolean }
+  | { type: "dragStart"; id: string; x: number; y: number }
+  | { type: "dragMove"; id: string; x: number; y: number; over: string | null }
+  | { type: "drop"; id: string; target: string | null; x: number; y: number }
+  | { type: "dragCancel"; id: string }
   | { type: "key"; id: string; key: string }
   | { type: "blur"; id: string }
   | { type: "shortcut"; shortcut: string }

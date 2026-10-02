@@ -6326,3 +6326,65 @@ fn spin_rotates_on_the_native_clock_and_schedules_frames_only_while_present() {
         "no frames once the spinner is gone"
     );
 }
+
+fn drag_fixture(disabled_b: bool) -> Tree {
+    let card: Node = serde_json::from_value(json!({
+        "id": "card", "kind": "pressable", "draggable": true, "children": [],
+        "style": {"width": 60, "height": 40}
+    }))
+    .unwrap();
+    let target = |id: &str, size: f32, children: Vec<Node>| -> Node {
+        let mut lane = node(id, "view", json!({"width": size, "height": size}), children);
+        lane.drop_target = true;
+        lane
+    };
+    let slot = target("a-slot", 50.0, vec![]);
+    let mut b = target("b", 100.0, vec![]);
+    b.disabled = disabled_b;
+    let lanes = vec![card, target("a", 100.0, vec![slot]), b];
+    let mut tree = Tree::new(node("root", "window", json!({"direction": "row"}), lanes));
+    tree.compute(400.0, 200.0).unwrap();
+    tree
+}
+
+#[test]
+fn pointer_drag_waits_for_the_threshold_and_a_short_press_still_clicks() {
+    let mut tree = drag_fixture(false);
+    tree.pointer_move(10.0, 10.0);
+    tree.pointer_down();
+    assert!(tree.pointer_move(12.0, 11.0).iter().all(|event| event["type"] != "dragStart"));
+    assert_eq!(tree.pointer_up(), vec![json!({"type":"click", "id":"card"})]);
+}
+
+#[test]
+fn pointer_drag_reports_the_innermost_target_and_drops_without_clicking() {
+    let mut tree = drag_fixture(false);
+    tree.pointer_move(10.0, 10.0);
+    tree.pointer_down();
+    let events = tree.pointer_move(30.0, 10.0);
+    assert_eq!(events[events.len() - 2], json!({"type":"dragStart", "id":"card", "x":10.0, "y":10.0}));
+    assert_eq!(events.last().unwrap()["over"], serde_json::Value::Null, "the source is not its own target");
+    let over = |events: Vec<serde_json::Value>| events.last().unwrap()["over"].clone();
+    assert_eq!(over(tree.pointer_move(80.0, 20.0)), json!("a-slot"), "nested targets resolve inward");
+    assert_eq!(over(tree.pointer_move(80.0, 80.0)), json!("a"));
+    assert_eq!(over(tree.pointer_move(200.0, 50.0)), json!("b"));
+    assert_eq!(over(tree.pointer_move(300.0, 50.0)), serde_json::Value::Null);
+    tree.pointer_move(200.0, 50.0);
+    assert_eq!(
+        tree.pointer_up(),
+        vec![json!({"type":"drop", "id":"card", "target":"b", "x":200.0, "y":50.0})]
+    );
+    assert!(tree.pointer_move(220.0, 50.0).iter().all(|event| event["type"] != "dragMove"));
+}
+
+#[test]
+fn pointer_drag_cancels_on_escape_and_skips_disabled_targets() {
+    let mut tree = drag_fixture(true);
+    tree.pointer_move(10.0, 10.0);
+    tree.pointer_down();
+    let events = tree.pointer_move(200.0, 50.0);
+    assert_eq!(events.last().unwrap()["over"], serde_json::Value::Null);
+    assert_eq!(tree.key("Escape"), vec![json!({"type":"dragCancel", "id":"card"})]);
+    assert!(tree.pointer_up().is_empty(), "a cancelled drag neither drops nor clicks");
+    assert!(tree.cancel_pointer_drag().is_empty());
+}

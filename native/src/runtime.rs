@@ -1997,6 +1997,7 @@ impl ApplicationHandler<Command> for App {
             WindowEvent::Focused(false) => {
                 self.ime_enabled = false;
                 self.ime_target = None;
+                events.extend(self.tree.cancel_pointer_drag());
                 if let Some(blurred) = self.tree.blur() {
                     events.push(json!({"type":"blur", "id":blurred}));
                 }
