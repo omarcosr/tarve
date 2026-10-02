@@ -283,7 +283,10 @@ export function DataGrid<T>({
           : column.header,
         active ? jsx(Text, { size: 11, color: c.mutedForeground, children: sort!.direction === "asc" ? "↑" : "↓" }) : null,
       ];
-      const common = { style: { width: column.width, flex: column.width === undefined ? 1 : undefined, minWidth: 0, height: "100%", padding: { left: 10, right: 10 }, direction: "row" as const, align: column.align ?? "start" as const, gap: 5 } };
+      // The header cell lays its label out in a row, so the column's horizontal alignment is `justify` here
+      // (body cells are columns, where it is `align`).
+      const justify = column.align === "center" || column.align === "end" ? column.align : "start" as const;
+      const common = { style: { width: column.width, flex: column.width === undefined ? 1 : undefined, minWidth: 0, height: "100%", padding: { left: 10, right: 10 }, direction: "row" as const, align: "center" as const, justify, gap: 5 } };
       if (!column.sortable) return jsx(Row, { ...common, children: content }, column.key);
       return jsx(Pressable, {
         ...(id ? { id: `${id}-sort-${column.key}` } : {}),
