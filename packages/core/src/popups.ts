@@ -140,6 +140,30 @@ export interface TooltipProps extends BaseProps {
   contentStyle?: Style;
 }
 
+const TOOLTIP_MAX_WIDTH = 320;
+
+/**
+ * An absolute box takes its wrapping width from its containing block, which for a tooltip is the
+ * trigger: "Save (Ctrl+S)" over a small button would wrap word by word. The lane reaches
+ * TOOLTIP_MAX_WIDTH past the trigger and lets pointer events through; the surface inside it sizes
+ * to its text.
+ */
+function tooltipLane(side: PopupSide): Style {
+  const gap = 6;
+  const base: Style = { position: "absolute", zIndex: POPUP_Z_INDEX + 1, pointerEvents: "auto" };
+  switch (side) {
+    case "top":
+      return { ...base, bottom: "100%", left: 0, right: -TOOLTIP_MAX_WIDTH, align: "start", margin: { bottom: gap } };
+    case "right":
+      return { ...base, top: 0, left: "100%", right: -TOOLTIP_MAX_WIDTH - gap, align: "start", margin: { left: gap } };
+    case "left":
+      return { ...base, top: 0, right: "100%", left: -TOOLTIP_MAX_WIDTH - gap, align: "end", margin: { right: gap } };
+    case "bottom":
+    default:
+      return { ...base, top: "100%", left: 0, right: -TOOLTIP_MAX_WIDTH, align: "start", margin: { top: gap } };
+  }
+}
+
 export function Tooltip({
   id,
   open,
@@ -166,16 +190,29 @@ export function Tooltip({
       }),
       open
         ? jsx(View, {
-            id: `${id}-content`,
+            id: `${id}-lane`,
             portal: true,
-            style: popupSurface(side, {
-              minWidth: 0,
-              padding: { left: 8, right: 8, top: 5, bottom: 5 },
-              background: c.foreground,
-              foreground: c.background,
-              ...contentStyle,
+            style: tooltipLane(side),
+            children: jsx(View, {
+              id: `${id}-content`,
+              style: {
+                ...popupSurface(side, {
+                  minWidth: 0,
+                  maxWidth: TOOLTIP_MAX_WIDTH,
+                  padding: { left: 8, right: 8, top: 5, bottom: 5 },
+                  background: c.foreground,
+                  foreground: c.background,
+                  ...contentStyle,
+                }),
+                position: "relative",
+                top: undefined,
+                right: undefined,
+                bottom: undefined,
+                left: undefined,
+                margin: undefined,
+              },
+              children: tooltipContent,
             }),
-            children: tooltipContent,
           })
         : null,
     ],
@@ -532,7 +569,9 @@ export function Combobox({
                         placeholder: searchPlaceholder,
                         onChange: onQueryChange,
                         rovingGroup: true,
-                        style: { flex: 1, minWidth: 0, borderWidth: 0, background: "#00000000" },
+                        style: { flex: 1, minWidth: 0, borderWidth: 0, background: "#00000000",
+              // The search row is the field; a ring around the bare input would cut through its icon.
+              focus: { outlineWidth: 0 }, focusVisible: { outlineWidth: 0 } },
                       }),
                     ],
                   }),
@@ -689,7 +728,9 @@ export function Command({
             placeholder,
             onChange: onQueryChange,
             rovingGroup: true,
-            style: { flex: 1, minWidth: 0, borderWidth: 0, background: "#00000000" },
+            style: { flex: 1, minWidth: 0, borderWidth: 0, background: "#00000000",
+              // The search row is the field; a ring around the bare input would cut through its icon.
+              focus: { outlineWidth: 0 }, focusVisible: { outlineWidth: 0 } },
           }),
         ],
       }),
@@ -699,7 +740,7 @@ export function Command({
         style: {
           height: visible.length === 0
             ? 46
-            : boundedHeight(visible.length, 36, COMMAND_MAX_HEIGHT, groups.size * 28 + 8),
+            : boundedHeight(visible.length, 36, COMMAND_MAX_HEIGHT, groups.size * 32 + 8),
           padding: 4,
         },
         children: visible.length === 0

@@ -13,7 +13,9 @@ describe("popup and selection components", () => {
       </Window>,
     );
     expect(tree.nodes.get("tip")?.style.zIndex).toBe(1000);
-    expect(tree.nodes.get("tip-content")?.style.bottom).toBe("100%");
+    expect(tree.nodes.get("tip-lane")?.style.bottom).toBe("100%");
+    expect(tree.nodes.get("tip-lane")?.style.pointerEvents).toBe("auto");
+    expect(tree.nodes.get("tip-content")?.style.position).toBe("relative");
     tree.handlers.get("tip-trigger")?.onHover?.(false);
     expect(changes).toEqual([false]);
   });
