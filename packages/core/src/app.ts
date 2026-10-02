@@ -1,6 +1,6 @@
 import type { FileDialogOptions, NativeEvent, NativeCommand, NativeNode, Renderer, Snapshot } from "../../protocol/src/index";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
-import { compileTree, diffTreeMutations, type CompiledTree } from "./reconciler";
+import { compileTree, diffTreeMutations, type CompiledTree, type Handlers } from "./reconciler";
 import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
 import type { VNode, PastePayload } from "./jsx-runtime";
 import { withRenderScope } from "./render-scope";
@@ -416,6 +416,47 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     });
   }
 
+  /** Last known pointer position and drop target per in-flight drag source. */
+  const drags = new Map<string, { x: number; y: number; over: string | null }>();
+
+  function dispatchDrag(
+    event: Extract<NativeEvent, { type: "dragStart" | "dragMove" | "drop" | "dragCancel" }>,
+    handlers: Handlers | undefined,
+  ): { handled: boolean; succeeded: boolean } {
+    let handled = false;
+    let succeeded = true;
+    const call = (name: string, id: string, handler: ((...args: never[]) => void) | undefined, arg?: unknown) => {
+      if (!handler) return;
+      handled = true;
+      succeeded = invokeHandler(name, id, handler, arg as never) && succeeded;
+    };
+    const target = (id: string) => committed?.handlers.get(id);
+    const source = event.id;
+    if (event.type === "dragStart") {
+      drags.set(source, { x: event.x, y: event.y, over: null });
+      call("dragStart", source, handlers?.onDragStart as never, { x: event.x, y: event.y });
+      return { handled, succeeded };
+    }
+    const state = drags.get(source) ?? { x: 0, y: 0, over: null };
+    if (event.type === "dragMove") {
+      drags.set(source, { x: event.x, y: event.y, over: event.over });
+      if (state.over !== event.over) {
+        if (state.over) call("dragLeave", state.over, target(state.over)?.onDragLeave as never, source);
+        if (event.over) call("dragEnter", event.over, target(event.over)?.onDragEnter as never, source);
+      }
+      call("dragMove", source, handlers?.onDragMove as never, { x: event.x, y: event.y, over: event.over });
+      return { handled, succeeded };
+    }
+    drags.delete(source);
+    const dropped = event.type === "drop" ? event.target : null;
+    const x = event.type === "drop" ? event.x : state.x;
+    const y = event.type === "drop" ? event.y : state.y;
+    if (state.over && state.over !== dropped) call("dragLeave", state.over, target(state.over)?.onDragLeave as never, source);
+    if (dropped) call("drop", dropped, target(dropped)?.onDrop as never, { source, x, y });
+    call("dragEnd", source, handlers?.onDragEnd as never, { target: dropped, x, y, cancelled: event.type === "dragCancel" });
+    return { handled, succeeded };
+  }
+
   function dispatchNativeEvent(event: NativeEvent): void {
     if (event.type === "ready") settleReadySuccess();
 
@@ -546,6 +587,11 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (event.type === "virtualListFocus" && handlers?.onVirtualListFocus) {
         handled = true;
         succeeded = invokeHandler("virtualListFocus", event.id, handlers.onVirtualListFocus as (...args: never[]) => void, event.key as never) && succeeded;
+      }
+      if (event.type === "dragStart" || event.type === "dragMove" || event.type === "drop" || event.type === "dragCancel") {
+        const result = dispatchDrag(event, handlers);
+        handled = result.handled;
+        succeeded = result.succeeded && succeeded;
       }
       if (event.type === "hover" && handlers?.onHover) { handled = true; succeeded = invokeHandler("hover", event.id, handlers.onHover as (...args: never[]) => void, event.entered as never); }
       if (event.type === "key" && handlers?.onKeyDown) { handled = true; succeeded = invokeHandler("key", event.id, handlers.onKeyDown as (...args: never[]) => void, event.key as never); }

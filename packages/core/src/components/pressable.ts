@@ -1,9 +1,9 @@
 import type { Control } from "../../../protocol/src/index";
-import type { VNode } from "../jsx-runtime";
+import type { DraggableProps, VNode } from "../jsx-runtime";
 import { theme } from "../theme";
 import { container, type ViewProps } from "./layout";
 
-export interface PressableProps extends ViewProps {
+export interface PressableProps extends ViewProps, DraggableProps {
   disabled?: boolean;
   onClick?: () => void;
   onContextMenu?: (position: { x: number; y: number }) => void;

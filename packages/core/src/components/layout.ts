@@ -1,7 +1,7 @@
 import type { Style } from "../../../protocol/src/index";
-import { jsx, type BaseProps, type VNode } from "../jsx-runtime";
+import { jsx, type BaseProps, type DropTargetProps, type VNode } from "../jsx-runtime";
 
-export interface ViewProps extends BaseProps {
+export interface ViewProps extends BaseProps, DropTargetProps {
   gap?: number;
   padding?: Style["padding"];
   flex?: number;

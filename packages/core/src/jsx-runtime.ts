@@ -5,6 +5,28 @@ export type Child = VNode | string | number | boolean | null | undefined | Child
 export type PastePayload =
   | { kind: "files"; files: string[] }
   | { kind: "image"; width: number; height: number; rgba: Uint8Array };
+export interface DragPosition { x: number; y: number }
+/** Pointer position while dragging and the drop target currently under it. */
+export interface DragMoveEvent extends DragPosition { over: string | null }
+/** Fired once per drag: `target` is the accepting drop target, or null. */
+export interface DragEndEvent extends DragPosition { target: string | null; cancelled: boolean }
+/** Delivered to the drop target; `source` is the dragged node id. */
+export interface DropEvent extends DragPosition { source: string }
+/** Makes a node a drop target. Any of the drop handlers implies `dropTarget`. */
+export interface DropTargetProps {
+  dropTarget?: boolean;
+  onDragEnter?: (source: string) => void;
+  onDragLeave?: (source: string) => void;
+  onDrop?: (event: DropEvent) => void;
+}
+/** Pointer drag on an interactive node. A press only becomes a drag after the
+ * pointer travels 4px, so the node keeps its click; Escape or window blur cancels. */
+export interface DraggableProps {
+  draggable?: boolean;
+  onDragStart?: (position: DragPosition) => void;
+  onDragMove?: (event: DragMoveEvent) => void;
+  onDragEnd?: (event: DragEndEvent) => void;
+}
 export interface BaseProps {
   id?: string;
   key?: string | number;
@@ -37,7 +59,7 @@ export type IntrinsicStyle = Omit<Style, "hover" | "focus" | "focusVisible" | "a
   disabled?: IntrinsicStateStyle;
 };
 export type DivStyle = IntrinsicStyle;
-export interface DivProps extends Omit<BaseProps, "style"> {
+export interface DivProps extends Omit<BaseProps, "style">, DropTargetProps {
   style?: IntrinsicStyle;
   gap?: number;
   padding?: Style["padding"];
