@@ -158,6 +158,7 @@ export function NavigationMenu({ items, value, openValue, onValueChange, onOpenV
     children: items.map(item => {
       const open = openValue === item.value;
       const direct = !item.links || item.links.length === 0;
+      const current = direct ? value === item.value : item.links!.some(link => link.value === value);
       return jsx(Column, {
         style: { position: "relative" },
         children: [
@@ -169,9 +170,13 @@ export function NavigationMenu({ items, value, openValue, onValueChange, onOpenV
               : { role: "menuitem", label: item.label, expanded: open },
             onClick: direct ? () => { onValueChange?.(item.value); onOpenValueChange?.(undefined); }
               : () => onOpenValueChange?.(open ? undefined : item.value),
-            style: { minHeight: 36, padding: { left: 12, right: 12 }, align: "center", justify: "center",
-              background: direct && value === item.value ? c.muted : transparent, hover: { background: c.muted } },
-            children: jsx(Text, { weight: 500, color: item.disabled ? c.disabledForeground : c.foreground, children: item.label }),
+            style: { minHeight: 36, padding: { left: 12, right: direct ? 12 : 8 }, direction: "row", gap: 4, align: "center",
+              justify: "center", radius: theme.radius.sm, background: open || current ? c.muted : transparent,
+              hover: { background: c.muted } },
+            children: [
+              jsx(Text, { weight: 500, color: item.disabled ? c.disabledForeground : c.foreground, children: item.label }),
+              direct ? null : jsx(Icon, { name: open ? "chevron-up" : "chevron-down", size: 14, color: c.mutedForeground }),
+            ],
           }),
           open && !direct ? jsx(Column, {
             ...(id ? { id: `${id}-content-${item.value}` } : {}),
@@ -180,14 +185,15 @@ export function NavigationMenu({ items, value, openValue, onValueChange, onOpenV
             onOutsideClick: () => onOpenValueChange?.(undefined),
             onEscape: () => onOpenValueChange?.(undefined),
             gap: 2,
-            style: { position: "absolute", top: "100%", left: 0, minWidth: 240, padding: 6, background: c.card,
+            style: { position: "absolute", top: "100%", left: 0, margin: { top: 6 }, minWidth: 240, padding: 6, background: c.card,
               borderWidth: 1, borderColor: c.border, radius: theme.radius.md, zIndex: 1000, pointerEvents: "block" },
             children: item.links!.map(link => jsx(Pressable, {
               ...(id ? { id: `${id}-link-${link.value}` } : {}),
               disabled: link.disabled,
               control: { role: "menuitem", label: link.label, checked: value === link.value },
               onClick: () => { onValueChange?.(link.value); onOpenValueChange?.(undefined); },
-              style: { minHeight: 40, padding: 8, hover: { background: c.muted }, background: value === link.value ? c.muted : transparent },
+              style: { minHeight: 40, padding: 8, radius: theme.radius.sm, hover: { background: c.muted },
+                background: value === link.value ? c.muted : transparent },
               children: jsx(Column, { gap: 2, children: [
                 jsx(Text, { weight: 500, children: link.label }),
                 link.description ? jsx(Text, { size: 12, color: c.mutedForeground, children: link.description }) : null,
