@@ -76,8 +76,15 @@
             <a class="doc-card" href="/docs/components/{item.name}">
               {#if item.preview}
                 <span class="doc-card-thumb">
-                  <img class="only-dark" src={item.preview.src} width={item.preview.width} height={item.preview.height} alt="" loading="lazy" decoding="async" />
-                  <img class="only-light" src={item.preview.srcLight} width={item.preview.width} height={item.preview.height} alt="" loading="lazy" decoding="async" />
+                  <span
+                    class="doc-card-crop"
+                    style:--ratio={item.preview.contentWidth / item.preview.height}
+                    style:--x="{(item.preview.contentLeft / item.preview.contentWidth) * 100}%"
+                    style:--w="{(item.preview.width / item.preview.contentWidth) * 100}%"
+                  >
+                    <img class="only-dark" src={item.preview.src} width={item.preview.width} height={item.preview.height} alt="" loading="lazy" decoding="async" />
+                    <img class="only-light" src={item.preview.srcLight} width={item.preview.width} height={item.preview.height} alt="" loading="lazy" decoding="async" />
+                  </span>
                 </span>
               {/if}
               <strong>{item.name}</strong>

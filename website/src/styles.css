@@ -1593,10 +1593,22 @@ h3 {
   border-bottom: 1px solid var(--rule);
 }
 
-.doc-card-thumb img {
-  width: 100%;
+/* Posters span the docs column; the thumbnail shows only the painted part, scaled to fit. */
+.doc-card-crop {
+  position: relative;
+  display: block;
+  width: min(100%, calc(116px * var(--ratio)));
+  aspect-ratio: var(--ratio);
+  overflow: hidden;
+}
+
+.doc-card-crop img {
+  position: absolute;
+  top: 0;
+  left: calc(-1 * var(--x));
+  width: var(--w);
+  max-width: none;
   height: 100%;
-  object-fit: contain;
 }
 
 .doc-preview {

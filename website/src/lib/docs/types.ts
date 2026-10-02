@@ -24,6 +24,9 @@ export interface PreviewImage {
   top: number;
   frameWidth: number;
   frameHeight: number;
+  /** Horizontal span of the painted content (plus padding) inside the poster; thumbnails crop to it. */
+  contentLeft: number;
+  contentWidth: number;
 }
 
 export interface ComponentDoc {

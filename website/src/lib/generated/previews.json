@@ -1,19 +1,23 @@
 {
   "Accordion": {
-    "width": 481,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 259,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "Alert": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "AlertDialog": {
     "width": 858,
@@ -21,167 +25,209 @@
     "left": 0,
     "top": 0,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 0,
+    "contentWidth": 858
   },
   "AnimatePresence": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 200,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "AspectRatio": {
-    "width": 560,
+    "width": 858,
     "height": 350,
-    "left": 149,
+    "left": 0,
     "top": 185,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 149,
+    "contentWidth": 560
   },
   "Attachment": {
-    "width": 481,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "Avatar": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Badge": {
-    "width": 481,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "Breadcrumb": {
-    "width": 481,
+    "width": 858,
     "height": 221,
-    "left": 191,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 191,
+    "contentWidth": 481
   },
   "Bubble": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Button": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "ButtonGroup": {
-    "width": 481,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "Calendar": {
-    "width": 480,
+    "width": 858,
     "height": 361,
-    "left": 189,
+    "left": 0,
     "top": 180,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Card": {
-    "width": 481,
+    "width": 858,
     "height": 286,
-    "left": 189,
+    "left": 0,
     "top": 217,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "Carousel": {
-    "width": 480,
+    "width": 858,
     "height": 282,
-    "left": 189,
+    "left": 0,
     "top": 219,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Chart": {
-    "width": 480,
+    "width": 858,
     "height": 276,
-    "left": 189,
+    "left": 0,
     "top": 224,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Checkbox": {
-    "width": 481,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "Circle": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Code": {
-    "width": 481,
+    "width": 858,
     "height": 221,
-    "left": 193,
+    "left": 0,
     "top": 249,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 193,
+    "contentWidth": 481
   },
   "Collapsible": {
-    "width": 481,
+    "width": 858,
     "height": 221,
-    "left": 187,
+    "left": 0,
     "top": 251,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 187,
+    "contentWidth": 481
   },
   "Column": {
-    "width": 481,
+    "width": 858,
     "height": 205,
-    "left": 189,
+    "left": 0,
     "top": 0,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "Combobox": {
-    "width": 480,
+    "width": 858,
     "height": 276,
-    "left": 189,
+    "left": 0,
     "top": 301,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Command": {
-    "width": 480,
+    "width": 858,
     "height": 265,
-    "left": 189,
+    "left": 0,
     "top": 228,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "CommandPalette": {
     "width": 858,
@@ -189,15 +235,19 @@
     "left": 0,
     "top": 0,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 0,
+    "contentWidth": 858
   },
   "ContextMenu": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 187,
+    "left": 0,
     "top": 315,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 187,
+    "contentWidth": 480
   },
   "DataGrid": {
     "width": 858,
@@ -205,23 +255,29 @@
     "left": 0,
     "top": 120,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 0,
+    "contentWidth": 858
   },
   "DataTable": {
-    "width": 480,
+    "width": 858,
     "height": 221,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "DatePicker": {
-    "width": 480,
+    "width": 858,
     "height": 403,
-    "left": 189,
+    "left": 0,
     "top": 302,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Dialog": {
     "width": 858,
@@ -229,23 +285,29 @@
     "left": 0,
     "top": 0,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 0,
+    "contentWidth": 858
   },
   "Diff": {
-    "width": 481,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 249,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "Direction": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Drawer": {
     "width": 858,
@@ -253,175 +315,219 @@
     "left": 0,
     "top": 0,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 0,
+    "contentWidth": 858
   },
   "DropdownMenu": {
-    "width": 480,
+    "width": 858,
     "height": 234,
-    "left": 239,
+    "left": 0,
     "top": 302,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 239,
+    "contentWidth": 480
   },
   "Ellipse": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Empty": {
-    "width": 500,
+    "width": 858,
     "height": 268,
-    "left": 179,
+    "left": 0,
     "top": 226,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 179,
+    "contentWidth": 500
   },
   "Field": {
-    "width": 481,
+    "width": 858,
     "height": 221,
-    "left": 189,
+    "left": 0,
     "top": 249,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "HoverCard": {
-    "width": 480,
+    "width": 858,
     "height": 221,
-    "left": 291,
+    "left": 0,
     "top": 290,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 291,
+    "contentWidth": 480
   },
   "Icon": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 188,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 188,
+    "contentWidth": 480
   },
   "Image": {
-    "width": 480,
+    "width": 858,
     "height": 280,
-    "left": 189,
+    "left": 0,
     "top": 220,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Input": {
-    "width": 481,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "InputGroup": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "InputOTP": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Item": {
-    "width": 480,
+    "width": 858,
     "height": 221,
-    "left": 189,
+    "left": 0,
     "top": 251,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Kbd": {
-    "width": 481,
+    "width": 858,
     "height": 221,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "Label": {
-    "width": 481,
+    "width": 858,
     "height": 221,
-    "left": 189,
+    "left": 0,
     "top": 251,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "Line": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Link": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 253,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "List": {
-    "width": 481,
+    "width": 858,
     "height": 221,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "Markdown": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 254,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Marker": {
-    "width": 480,
+    "width": 858,
     "height": 221,
-    "left": 189,
+    "left": 0,
     "top": 252,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Menubar": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 233,
+    "left": 0,
     "top": 285,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 233,
+    "contentWidth": 480
   },
   "Message": {
-    "width": 400,
+    "width": 858,
     "height": 221,
     "left": 0,
     "top": 246,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 0,
+    "contentWidth": 400
   },
   "MessageScroller": {
-    "width": 485,
+    "width": 858,
     "height": 434,
-    "left": 191,
+    "left": 0,
     "top": 146,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 191,
+    "contentWidth": 485
   },
   "Modal": {
     "width": 858,
@@ -429,151 +535,189 @@
     "left": 0,
     "top": 0,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 0,
+    "contentWidth": 858
   },
   "NativeSelect": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "NavigationMenu": {
-    "width": 480,
+    "width": 858,
     "height": 252,
-    "left": 244,
+    "left": 0,
     "top": 302,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 244,
+    "contentWidth": 480
   },
   "Pagination": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Path": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Polygon": {
-    "width": 480,
+    "width": 858,
     "height": 221,
-    "left": 189,
+    "left": 0,
     "top": 248,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Polyline": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Popover": {
-    "width": 480,
+    "width": 858,
     "height": 221,
-    "left": 243,
+    "left": 0,
     "top": 268,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 243,
+    "contentWidth": 480
   },
   "Portal": {
-    "width": 480,
+    "width": 858,
     "height": 221,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Pressable": {
-    "width": 604,
+    "width": 858,
     "height": 280,
-    "left": 127,
+    "left": 0,
     "top": 220,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 127,
+    "contentWidth": 604
   },
   "Progress": {
-    "width": 480,
+    "width": 858,
     "height": 221,
-    "left": 189,
+    "left": 0,
     "top": 251,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Questionnaire": {
-    "width": 520,
+    "width": 858,
     "height": 226,
-    "left": 169,
+    "left": 0,
     "top": 249,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 169,
+    "contentWidth": 520
   },
   "RadioGroup": {
-    "width": 481,
+    "width": 858,
     "height": 220,
-    "left": 188,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 188,
+    "contentWidth": 481
   },
   "Resizable": {
-    "width": 420,
+    "width": 858,
     "height": 400,
     "left": 0,
     "top": 160,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 0,
+    "contentWidth": 420
   },
   "Row": {
-    "width": 481,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "Scroll": {
-    "width": 481,
+    "width": 858,
     "height": 305,
-    "left": 194,
+    "left": 0,
     "top": 206,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 194,
+    "contentWidth": 481
   },
   "ScrollArea": {
-    "width": 480,
+    "width": 858,
     "height": 291,
-    "left": 192,
+    "left": 0,
     "top": 216,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 192,
+    "contentWidth": 480
   },
   "Select": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Separator": {
-    "width": 480,
+    "width": 858,
     "height": 221,
-    "left": 189,
+    "left": 0,
     "top": 252,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Sheet": {
     "width": 858,
@@ -581,182 +725,228 @@
     "left": 0,
     "top": 0,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 0,
+    "contentWidth": 858
   },
   "Sidebar": {
-    "width": 480,
+    "width": 858,
     "height": 720,
-    "left": 193,
+    "left": 0,
     "top": 0,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 193,
+    "contentWidth": 480
   },
   "Skeleton": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Slider": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Spinner": {
-    "width": 481,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 251,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 481
   },
   "Svg": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "SvgRect": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Switch": {
-    "width": 481,
+    "width": 858,
     "height": 220,
-    "left": 188,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 188,
+    "contentWidth": 481
   },
   "Table": {
-    "width": 520,
+    "width": 858,
     "height": 220,
-    "left": 169,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 169,
+    "contentWidth": 520
   },
   "Tabs": {
-    "width": 480,
+    "width": 858,
     "height": 221,
-    "left": 189,
+    "left": 0,
     "top": 249,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Text": {
-    "width": 480,
+    "width": 858,
     "height": 221,
-    "left": 187,
+    "left": 0,
     "top": 255,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 187,
+    "contentWidth": 480
   },
   "TextArea": {
-    "width": 480,
+    "width": 858,
     "height": 240,
-    "left": 189,
+    "left": 0,
     "top": 240,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "TitleBar": {
-    "width": 720,
+    "width": 858,
     "height": 280,
     "left": 0,
     "top": 0,
-    "frameWidth": 720,
-    "frameHeight": 280
+    "frameWidth": 858,
+    "frameHeight": 280,
+    "contentLeft": 0,
+    "contentWidth": 858
   },
   "Toast": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Toaster": {
-    "width": 520,
+    "width": 858,
     "height": 320,
-    "left": 169,
+    "left": 0,
     "top": 200,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 169,
+    "contentWidth": 520
   },
   "Toggle": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "ToggleGroup": {
-    "width": 481,
+    "width": 858,
     "height": 220,
-    "left": 184,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 184,
+    "contentWidth": 481
   },
   "Tooltip": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 206,
+    "left": 0,
     "top": 232,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 206,
+    "contentWidth": 480
   },
   "TreeView": {
-    "width": 480,
+    "width": 858,
     "height": 221,
-    "left": 189,
+    "left": 0,
     "top": 250,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "Typography": {
-    "width": 480,
+    "width": 858,
     "height": 221,
-    "left": 189,
+    "left": 0,
     "top": 253,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "View": {
-    "width": 480,
+    "width": 858,
     "height": 220,
-    "left": 189,
+    "left": 0,
     "top": 257,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 189,
+    "contentWidth": 480
   },
   "VirtualList": {
-    "width": 480,
+    "width": 858,
     "height": 530,
-    "left": 192,
+    "left": 0,
     "top": 86,
     "frameWidth": 858,
-    "frameHeight": 720
+    "frameHeight": 720,
+    "contentLeft": 192,
+    "contentWidth": 480
   },
   "Window": {
-    "width": 640,
+    "width": 858,
     "height": 320,
     "left": 0,
     "top": 0,
-    "frameWidth": 640,
-    "frameHeight": 320
+    "frameWidth": 858,
+    "frameHeight": 320,
+    "contentLeft": 0,
+    "contentWidth": 858
   }
 }

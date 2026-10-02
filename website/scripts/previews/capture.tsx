@@ -31,7 +31,7 @@ const MIN: [number, number] = [480, 220];
 const SCALE = 2;
 
 /** CSS pixels. The poster is the `left/top/width/height` crop of a `frameWidth × frameHeight` frame. */
-type Preview = { width: number; height: number; left: number; top: number; frameWidth: number; frameHeight: number };
+type Preview = { width: number; height: number; left: number; top: number; frameWidth: number; frameHeight: number; contentLeft: number; contentWidth: number };
 
 if (!existsSync(wasmPath)) {
   console.error("Missing src/lib/playground/wasm — run bun run build:wasm first.");
@@ -71,7 +71,8 @@ class HeadlessBridge implements NativeBridge {
     this.onEvent = onEvent;
     inlineImages(document);
     this.tree = new WebTree(JSON.stringify(document));
-    const [width, height] = this.size ?? [document.window.width, document.window.height];
+    // Full-window examples keep their height but span the docs column, like every other example.
+    const [width, height] = this.size ?? [WINDOW[0], document.window.height];
     this.tree.resize(width, height, SCALE);
     queueMicrotask(() => {
       this.frame();
@@ -213,6 +214,8 @@ async function captureOne(name: string): Promise<Preview> {
   let y0 = 0;
   let x1 = dark.width;
   let y1 = dark.height;
+  let contentLeft = 0;
+  let contentRight = dark.width / SCALE;
   if (!fullWindow) {
     // One crop for both themes (the union of what each painted), so either poster lines up with the live canvas.
     const boxes = [paintedBox(dark), paintedBox(light)].filter((box) => box !== undefined);
@@ -223,17 +226,16 @@ async function captureOne(name: string): Promise<Preview> {
     const maxY = Math.max(...boxes.map((box) => box[3]));
     // Work in CSS pixels so the crop is a whole number of them at either scale.
     const css = (value: number) => value / SCALE;
-    const width = css(maxX - minX + 1) + PAD * 2;
     const height = css(maxY - minY + 1) + PAD * 2;
-    const growX = Math.max(0, MIN[0] - width) / 2;
+    // The painted content plus padding, at least MIN wide: thumbnails show only this part of the full-width poster.
+    const growX = Math.max(0, MIN[0] - (css(maxX - minX + 1) + PAD * 2)) / 2;
+    contentLeft = Math.max(0, Math.floor(css(minX) - PAD - growX));
+    contentRight = Math.min(css(dark.width), Math.ceil(css(maxX + 1) + PAD + growX));
     const growY = Math.max(0, MIN[1] - height) / 2;
-    const left = Math.max(0, Math.floor(css(minX) - PAD - growX));
     const top = Math.max(0, Math.floor(css(minY) - PAD - growY));
-    const right = Math.min(css(dark.width), Math.ceil(css(maxX + 1) + PAD + growX));
     const bottom = Math.min(css(dark.height), Math.ceil(css(maxY + 1) + PAD + growY));
-    x0 = left * SCALE;
+    // Full width: the stage spans the docs column, so the poster does too; only the height is cropped.
     y0 = top * SCALE;
-    x1 = right * SCALE;
     y1 = bottom * SCALE;
   }
   const width = x1 - x0;
@@ -249,6 +251,8 @@ async function captureOne(name: string): Promise<Preview> {
     top: y0 / SCALE,
     frameWidth: dark.width / SCALE,
     frameHeight: dark.height / SCALE,
+    contentLeft,
+    contentWidth: contentRight - contentLeft,
   };
 }
 
