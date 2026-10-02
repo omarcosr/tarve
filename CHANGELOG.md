@@ -1,8 +1,19 @@
 # Changelog
 
-All notable changes to `@tarve/core` and `@tarve/react-icons` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
+All notable changes to `@tarve/core`, `@tarve/react-icons` and `@tarve/headless` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
 ## Unreleased
+
+### Added
+- `@tarve/headless`: renders and tests Tarve apps with the WebAssembly build of the native tree, with no window, GPU or native library. `renderToPng`/`renderToRgba`, `createHeadlessApp`, `createHeadlessTestRenderer` (the `TestRenderer` API) and `matchImageSnapshot`. Text uses bundled Inter and JetBrains Mono and time only moves with `advanceMotion`, so a view renders to the same bytes on every machine. CI runs its image snapshots on Linux, Windows and macOS; releases publish it next to `@tarve/core`.
+- `style.spin`: continuous rotation about the centre, one turn per `spin` milliseconds, driven by the native clock. `Spinner` uses it.
+- `destructiveText` theme colour for error text and icons.
+
+### Fixed
+- A modal opened with the mouse no longer paints the keyboard focus ring on its first control, and closing it no longer rings the trigger.
+- `Tooltip` text no longer wraps to the width of its trigger; `Command` lists no longer clip with group headings; the search field of `Command` and `Combobox` no longer draws a ring across its icon.
+- `Alert`, `Field` errors and failed `Attachment`s use readable destructive text; `Alert` tints an uncoloured icon; `Field` shows the description with the error; `InputGroup` strips its `Input`'s border; `NavigationMenu` triggers show open and current state.
+- `getByRole("button", { name })` finds plain `Button`s.
 
 ### Changed
 - Startup: the native tree takes the startup document's nodes instead of deep-cloning them (~11 ms and ~23 MB less for a 2,000-row list), and the first layout and text shaping run while the prewarmed D3D11 device finishes. First paint of a 2,000-row list on D3D11 drops from ~384 ms to ~349 ms.
