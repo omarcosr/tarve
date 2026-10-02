@@ -15,10 +15,16 @@ export interface AlertProps extends BaseProps {
   variant?: AlertVariant;
   icon?: Child;
 }
+/** Gives an icon without an explicit colour the colour of the text beside it. */
+function tintIcon(icon: Child, color: string): Child {
+  if (!icon || typeof icon !== "object" || Array.isArray(icon) || icon.props.color !== undefined) return icon;
+  return { ...icon, props: { ...icon.props, color } };
+}
+
 export function Alert({ title, description, variant = "default", icon, children, style, ...props }: AlertProps): VNode {
   const palette: Record<AlertVariant, { border: string; background: string; foreground: string }> = {
     default: { border: c.border, background: c.card, foreground: c.foreground },
-    destructive: { border: c.destructive, background: c.card, foreground: c.destructive },
+    destructive: { border: c.destructive, background: c.card, foreground: c.destructiveText },
     success: { border: c.success, background: c.successMuted, foreground: c.success },
   };
   const selected = palette[variant];
@@ -30,7 +36,7 @@ export function Alert({ title, description, variant = "default", icon, children,
     style: { width: "100%", padding: 14, radius: theme.radius.md, borderWidth: 1, borderColor: selected.border,
       background: selected.background, ...style },
     children: [
-      icon,
+      tintIcon(icon, selected.foreground),
       jsx(Column, { gap: 3, flex: 1, children: [
         title ? jsx(Text, { weight: 600, color: selected.foreground, children: title }) : null,
         description ? jsx(Text, { size: 13, color: variant === "default" ? c.mutedForeground : selected.foreground, children: description }) : null,
@@ -131,11 +137,12 @@ export function Field({ label, description, error, required, disabled, children,
     children: [
       label ? jsx(Label, { ...(id ? { id: `${id}-label` } : {}), required, disabled, children: label }) : null,
       disableFormChild(children, disabled),
+      description
+        ? jsx(Text, { ...(id ? { id: `${id}-description` } : {}), size: 12, color: c.mutedForeground, children: description })
+        : null,
       error
-        ? jsx(Text, { ...(id ? { id: `${id}-error` } : {}), control: { role: "alert", label: error }, size: 12, color: c.destructive, children: error })
-        : description
-          ? jsx(Text, { ...(id ? { id: `${id}-description` } : {}), size: 12, color: c.mutedForeground, children: description })
-          : null,
+        ? jsx(Text, { ...(id ? { id: `${id}-error` } : {}), control: { role: "alert", label: error }, size: 12, color: c.destructiveText, children: error })
+        : null,
     ],
   });
 }
@@ -145,6 +152,14 @@ export interface InputGroupProps extends BaseProps {
   suffix?: Child;
   disabled?: boolean;
 }
+/** The group draws the field's border and background; an Input inside it drops its own. */
+function groupedInput(child: Child): Child {
+  if (Array.isArray(child)) return child.map(groupedInput);
+  if (!child || typeof child !== "object" || child.type !== Input) return child;
+  return { ...child, props: { ...child.props, style: { borderWidth: 0, background: transparent, padding: { left: 0, right: 0 },
+    minWidth: 0, focus: { outlineWidth: 0 }, focusVisible: { outlineWidth: 0 }, ...child.props.style } } };
+}
+
 export function InputGroup({ prefix, suffix, disabled, children, style, ...props }: InputGroupProps): VNode {
   return jsx(Row, {
     ...props,
@@ -153,7 +168,7 @@ export function InputGroup({ prefix, suffix, disabled, children, style, ...props
     gap: 8,
     style: { width: "100%", minHeight: 38, padding: { left: 10, right: 10 }, borderWidth: 1, borderColor: c.border,
       radius: theme.radius.sm, background: disabled ? c.disabled : c.input, ...style },
-    children: [prefix, jsx(View, { flex: 1, children: disableFormChild(children, disabled) }), suffix],
+    children: [prefix, jsx(View, { flex: 1, children: disableFormChild(groupedInput(children), disabled) }), suffix],
   });
 }
 

@@ -21,6 +21,8 @@ export interface ThemeColors {
   destructiveForeground: string;
   destructiveHover: string;
   destructiveActive: string;
+  /** Destructive colour for text and icons on the background: errors, alerts. */
+  destructiveText: string;
   ring: string;
   ringSoft: string;
   success: string;
@@ -99,6 +101,7 @@ export const lightTheme: ThemeDefinition = {
     destructiveForeground: "#ffffff",
     destructiveHover: "#b91c1c",
     destructiveActive: "#991b1b",
+    destructiveText: "#dc2626",
     ring: "#a1a1aa",
     ringSoft: "#aeaeb6",
     success: "#15803d",
@@ -153,6 +156,7 @@ export const darkTheme: ThemeDefinition = {
     destructiveForeground: "#fafafa",
     destructiveHover: "#991b1b",
     destructiveActive: "#b91c1c",
+    destructiveText: "#f87171",
     ring: "#d4d4d8",
     ringSoft: "#b1b1b5",
     success: "#4ade80",

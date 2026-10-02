@@ -27,16 +27,16 @@ export function Attachment({ name, size, status = "ready", progress = 0, leading
     style: { minWidth: 180, padding: 10, background: c.card, borderWidth: 1, borderColor: status === "error" ? c.destructive : c.border,
       radius: theme.radius.md, ...style },
     children: [
-      jsx(Row, { gap: 8, children: [
+      jsx(Row, { gap: 8, justify: "between", children: [
         leading,
-        jsx(Column, { gap: 2, flex: 1, children: [
+        jsx(Column, { gap: 2, style: { shrink: 1, minWidth: 0 }, children: [
           jsx(Text, { weight: 500, color: statusColor, children: name }),
           size ? jsx(Text, { size: 11, color: c.mutedForeground, children: size }) : null,
         ] }),
         onRemove ? jsx(Button, { ...(id ? { id: `${id}-remove` } : {}), variant: "ghost", size: "sm", onClick: onRemove, children: removeLabel }) : null,
       ] }),
       status === "uploading" ? jsx(Progress, { ...(id ? { id: `${id}-progress` } : {}), value: progress, max: 100, label: `${name} upload progress` }) : null,
-      status === "error" ? jsx(Text, { ...(id ? { id: `${id}-error` } : {}), size: 11, color: c.destructive, children: "Upload failed" }) : null,
+      status === "error" ? jsx(Text, { ...(id ? { id: `${id}-error` } : {}), size: 11, color: c.destructiveText, children: "Upload failed" }) : null,
     ],
   });
 }
@@ -120,7 +120,7 @@ export function Message({ side = "incoming", author, avatarSrc, avatarFallback, 
     ...props,
     ...(id ? { id } : {}),
     gap: 8,
-    align: "end",
+    align: "start",
     justify: side === "outgoing" ? "end" : "start",
     style: { width: "100%", ...style },
     children: side === "outgoing" ? [body, avatar] : [avatar, body],
