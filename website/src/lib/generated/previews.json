@@ -16,10 +16,10 @@
     "frameHeight": 720
   },
   "AlertDialog": {
-    "width": 560,
-    "height": 240,
-    "left": 149,
-    "top": 240,
+    "width": 858,
+    "height": 720,
+    "left": 0,
+    "top": 0,
     "frameWidth": 858,
     "frameHeight": 720
   },
@@ -184,10 +184,10 @@
     "frameHeight": 720
   },
   "CommandPalette": {
-    "width": 600,
-    "height": 377,
-    "left": 129,
-    "top": 32,
+    "width": 858,
+    "height": 720,
+    "left": 0,
+    "top": 0,
     "frameWidth": 858,
     "frameHeight": 720
   },
@@ -224,10 +224,10 @@
     "frameHeight": 720
   },
   "Dialog": {
-    "width": 500,
-    "height": 220,
-    "left": 179,
-    "top": 250,
+    "width": 858,
+    "height": 720,
+    "left": 0,
+    "top": 0,
     "frameWidth": 858,
     "frameHeight": 720
   },
@@ -249,9 +249,9 @@
   },
   "Drawer": {
     "width": 858,
-    "height": 406,
+    "height": 720,
     "left": 0,
-    "top": 314,
+    "top": 0,
     "frameWidth": 858,
     "frameHeight": 720
   },
@@ -305,7 +305,7 @@
   },
   "Image": {
     "width": 480,
-    "height": 265,
+    "height": 280,
     "left": 189,
     "top": 220,
     "frameWidth": 858,
@@ -424,10 +424,10 @@
     "frameHeight": 720
   },
   "Modal": {
-    "width": 560,
-    "height": 298,
-    "left": 149,
-    "top": 211,
+    "width": 858,
+    "height": 720,
+    "left": 0,
+    "top": 0,
     "frameWidth": 858,
     "frameHeight": 720
   },
@@ -576,9 +576,9 @@
     "frameHeight": 720
   },
   "Sheet": {
-    "width": 509,
+    "width": 858,
     "height": 720,
-    "left": 349,
+    "left": 0,
     "top": 0,
     "frameWidth": 858,
     "frameHeight": 720
@@ -737,9 +737,9 @@
   },
   "View": {
     "width": 480,
-    "height": 221,
+    "height": 220,
     "left": 189,
-    "top": 250,
+    "top": 257,
     "frameWidth": 858,
     "frameHeight": 720
   },

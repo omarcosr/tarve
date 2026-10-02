@@ -14,7 +14,10 @@ export interface DocLink {
 
 /** A native render of the example: the `left/top/width/height` crop of a `frameWidth × frameHeight` window. */
 export interface PreviewImage {
+  /** Dark-theme render. */
   src: string;
+  /** Light-theme render, same crop. */
+  srcLight: string;
   width: number;
   height: number;
   left: number;

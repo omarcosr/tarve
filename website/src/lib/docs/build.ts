@@ -31,8 +31,8 @@ export function commonProps(): PropDoc[] {
 }
 
 export function previewFor(name: string): ComponentDoc["preview"] {
-  const size = (previews as Record<string, Omit<PreviewImage, "src">>)[name];
-  return size ? { src: `/previews/${name}.png`, ...size } : undefined;
+  const size = (previews as Record<string, Omit<PreviewImage, "src" | "srcLight">>)[name];
+  return size ? { src: `/previews/${name}.png`, srcLight: `/previews/${name}.light.png`, ...size } : undefined;
 }
 
 export function docsCatalog() {

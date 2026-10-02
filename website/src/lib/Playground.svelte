@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import type { VNode } from "@tarve/core";
   import type { PreviewImage } from "./docs/types";
+  import { currentTheme, onThemeChange } from "./theme";
 
   let { name, poster }: { name: string; poster?: PreviewImage } = $props();
 
@@ -43,7 +44,7 @@
       const [{ mountExample }, example] = await Promise.all([import("./playground/mount"), load()]);
       if (run !== generation) return;
       dispose?.();
-      dispose = await mountExample(canvas, example.preview, example.fullWindow);
+      dispose = await mountExample(canvas, example.preview, example.fullWindow, currentTheme());
       if (run === generation) phase = "live";
     } catch (error) {
       console.error(error);
@@ -81,7 +82,12 @@
     );
     if (canvas) observer.observe(canvas);
     canvas?.addEventListener("tarve:windowaction", onWindowAction);
+    // A theme switch restarts a running example in the new theme; one not started yet will pick it up.
+    const stopTheme = onThemeChange(() => {
+      if (phase !== "idle" && windowState !== "closed") void start();
+    });
     return () => {
+      stopTheme();
       canvas?.removeEventListener("tarve:windowaction", onWindowAction);
       observer.disconnect();
       generation++;
@@ -96,8 +102,17 @@
   <div class="playground-stage" style:max-width={poster ? `${poster.width + 2}px` : undefined} style:height={poster ? `${poster.height + 2}px` : "320px"}>
     {#if poster}
       <img
-        class="playground-poster"
+        class="playground-poster only-dark"
         src={poster.src}
+        width={poster.width}
+        height={poster.height}
+        style:width="{poster.width}px"
+        style:height="{poster.height}px"
+        alt="{name} rendered by Tarve"
+      />
+      <img
+        class="playground-poster only-light"
+        src={poster.srcLight}
         width={poster.width}
         height={poster.height}
         style:width="{poster.width}px"

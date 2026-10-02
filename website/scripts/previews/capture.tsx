@@ -1,12 +1,13 @@
 // Renders every documentation example with the same WebAssembly build of Tarve the live
 // playground runs (same fonts, same layout, same paint), and saves a 2x PNG per component to
-// public/previews. The poster and the first live frame are therefore the same picture.
+// public/previews, in the dark (<Name>.png) and light (<Name>.light.png) theme, cropped alike.
+// The poster and the first live frame are therefore the same picture in either theme.
 //   bun run docs:previews            all components
 //   bun run docs:previews Button     only the named components
 // Needs the wasm build: bun run build:wasm
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
-import { Column, Window, createApp, darkTheme, type NativeBridge, type VNode } from "@tarve/core";
+import { Column, Window, createApp, darkTheme, lightTheme, type NativeBridge, type ThemeDefinition, type VNode } from "@tarve/core";
 import type { NativeCommand, NativeEvent, NativeImageSource, SceneDocument } from "../../../packages/protocol/src/index";
 import { toPreviewModule } from "../../src/lib/playground/example-transform";
 import { WebTree, initSync, registerFont } from "../../src/lib/playground/wasm/tarve_web.js";
@@ -148,25 +149,25 @@ function writeAssets(): void {
 }
 
 
-async function captureOne(name: string): Promise<Preview> {
-  const { code, fullWindow } = toPreviewModule(name, readFileSync(resolve(examplesDir, name + ".tsx"), "utf8"));
-  const file = resolve(generatedDir, name + ".tsx");
-  writeFileSync(file, code);
-  const mod = (await import(file)) as { preview: () => VNode };
+type Frame = { rgba: Uint8Array; width: number; height: number };
+
+/** Renders one example in `theme`, exactly as mount.tsx does in the browser. */
+async function render(preview: () => VNode, fullWindow: boolean, theme: ThemeDefinition, title: string): Promise<Frame> {
   const bridge = new HeadlessBridge(fullWindow ? undefined : WINDOW);
   const errors: string[] = [];
-  const app = createApp(
-    fullWindow
-      ? mod.preview
-      : () => (
-          <Window title={name} theme={darkTheme}>
-            <Column flex={1} align="center" justify="center" padding={PAD}>
-              {mod.preview()}
-            </Column>
-          </Window>
-        ),
-    { bridge, renderer: "cpu", onError: (event) => errors.push(event.error.message) },
-  );
+  const view = fullWindow
+    ? () => {
+        const root = preview();
+        return root.type === Window ? { ...root, props: { ...root.props, theme } } : root;
+      }
+    : () => (
+        <Window title={title} theme={theme}>
+          <Column flex={1} align="center" justify="center" padding={PAD}>
+            {preview()}
+          </Column>
+        </Window>
+      );
+  const app = createApp(view, { bridge, renderer: "cpu", onError: (event) => errors.push(event.error.message) });
   try {
     await app.ready;
     for (let pass = 0; pass < 6; pass++) {
@@ -174,60 +175,81 @@ async function captureOne(name: string): Promise<Preview> {
       bridge.frame();
     }
     if (errors.length) throw new Error(errors.join("; "));
-    const png = bridge.pixels();
-    let x0 = 0;
-    let y0 = 0;
-    let x1 = png.width;
-    let y1 = png.height;
-    if (!fullWindow) {
-      // Crop to the painted pixels (anything that differs from the window/overlay background), plus padding.
-      const { rgba, width: w, height: h } = png;
-      const bg = [rgba[0]!, rgba[1]!, rgba[2]!];
-      let minX = w;
-      let minY = h;
-      let maxX = -1;
-      let maxY = -1;
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          const i = (y * w + x) * 4;
-          if (Math.abs(rgba[i]! - bg[0]!) + Math.abs(rgba[i + 1]! - bg[1]!) + Math.abs(rgba[i + 2]! - bg[2]!) > 24) {
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-          }
-        }
-      }
-      if (maxX < 0) throw new Error("rendered nothing");
-      // Work in CSS pixels so the crop is a whole number of them at either scale.
-      const css = (value: number) => value / SCALE;
-      const width = css(maxX - minX + 1) + PAD * 2;
-      const height = css(maxY - minY + 1) + PAD * 2;
-      const growX = Math.max(0, MIN[0] - width) / 2;
-      const growY = Math.max(0, MIN[1] - height) / 2;
-      const left = Math.max(0, Math.floor(css(minX) - PAD - growX));
-      const top = Math.max(0, Math.floor(css(minY) - PAD - growY));
-      const right = Math.min(css(w), Math.ceil(css(maxX + 1) + PAD + growX));
-      const bottom = Math.min(css(h), Math.ceil(css(maxY + 1) + PAD + growY));
-      x0 = left * SCALE;
-      y0 = top * SCALE;
-      x1 = right * SCALE;
-      y1 = bottom * SCALE;
-    }
-    const width = x1 - x0;
-    const height = y1 - y0;
-    writeFileSync(resolve(outDir, name + ".png"), encodePng(cropRgba(png.rgba, png.width, x0, y0, width, height), width, height));
-    return {
-      width: width / SCALE,
-      height: height / SCALE,
-      left: x0 / SCALE,
-      top: y0 / SCALE,
-      frameWidth: png.width / SCALE,
-      frameHeight: png.height / SCALE,
-    };
+    return bridge.pixels();
   } finally {
     app.close();
   }
+}
+
+/** Device-pixel box of everything that differs from the window background, or undefined if nothing does. */
+function paintedBox({ rgba, width: w, height: h }: Frame): [number, number, number, number] | undefined {
+  const bg = [rgba[0]!, rgba[1]!, rgba[2]!];
+  let minX = w;
+  let minY = h;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      if (Math.abs(rgba[i]! - bg[0]!) + Math.abs(rgba[i + 1]! - bg[1]!) + Math.abs(rgba[i + 2]! - bg[2]!) > 24) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  return maxX < 0 ? undefined : [minX, minY, maxX, maxY];
+}
+
+async function captureOne(name: string): Promise<Preview> {
+  const { code, fullWindow } = toPreviewModule(name, readFileSync(resolve(examplesDir, name + ".tsx"), "utf8"));
+  const file = resolve(generatedDir, name + ".tsx");
+  writeFileSync(file, code);
+  const mod = (await import(file)) as { preview: () => VNode };
+  const dark = await render(mod.preview, fullWindow, darkTheme, name);
+  const light = await render(mod.preview, fullWindow, lightTheme, name);
+  let x0 = 0;
+  let y0 = 0;
+  let x1 = dark.width;
+  let y1 = dark.height;
+  if (!fullWindow) {
+    // One crop for both themes (the union of what each painted), so either poster lines up with the live canvas.
+    const boxes = [paintedBox(dark), paintedBox(light)].filter((box) => box !== undefined);
+    if (!boxes.length) throw new Error("rendered nothing");
+    const minX = Math.min(...boxes.map((box) => box[0]));
+    const minY = Math.min(...boxes.map((box) => box[1]));
+    const maxX = Math.max(...boxes.map((box) => box[2]));
+    const maxY = Math.max(...boxes.map((box) => box[3]));
+    // Work in CSS pixels so the crop is a whole number of them at either scale.
+    const css = (value: number) => value / SCALE;
+    const width = css(maxX - minX + 1) + PAD * 2;
+    const height = css(maxY - minY + 1) + PAD * 2;
+    const growX = Math.max(0, MIN[0] - width) / 2;
+    const growY = Math.max(0, MIN[1] - height) / 2;
+    const left = Math.max(0, Math.floor(css(minX) - PAD - growX));
+    const top = Math.max(0, Math.floor(css(minY) - PAD - growY));
+    const right = Math.min(css(dark.width), Math.ceil(css(maxX + 1) + PAD + growX));
+    const bottom = Math.min(css(dark.height), Math.ceil(css(maxY + 1) + PAD + growY));
+    x0 = left * SCALE;
+    y0 = top * SCALE;
+    x1 = right * SCALE;
+    y1 = bottom * SCALE;
+  }
+  const width = x1 - x0;
+  const height = y1 - y0;
+  for (const [frame, suffix] of [[dark, ""], [light, ".light"]] as const) {
+    if (frame.width !== dark.width || frame.height !== dark.height) throw new Error("light and dark frames differ in size");
+    writeFileSync(resolve(outDir, name + suffix + ".png"), encodePng(cropRgba(frame.rgba, frame.width, x0, y0, width, height), width, height));
+  }
+  return {
+    width: width / SCALE,
+    height: height / SCALE,
+    left: x0 / SCALE,
+    top: y0 / SCALE,
+    frameWidth: dark.width / SCALE,
+    frameHeight: dark.height / SCALE,
+  };
 }
 
 async function captureAll(selected: string[]): Promise<void> {

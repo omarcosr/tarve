@@ -14,7 +14,7 @@
 <article class="doc">
   <header class="doc-head">
     <span class="eyebrow">Documentation · v{version}</span>
-    <h1>Build native apps with <span class="grad">Tarve</span></h1>
+    <h1>Tarve documentation</h1>
     <p class="doc-lead">
       Everything you need to ship a native Windows and Linux interface from Bun and TSX: setup, the rendering model and a
       reference page for each of the {total} built-in components.
@@ -76,7 +76,8 @@
             <a class="doc-card" href="/docs/components/{item.name}">
               {#if item.preview}
                 <span class="doc-card-thumb">
-                  <img src={item.preview.src} width={item.preview.width} height={item.preview.height} alt="" loading="lazy" decoding="async" />
+                  <img class="only-dark" src={item.preview.src} width={item.preview.width} height={item.preview.height} alt="" loading="lazy" decoding="async" />
+                  <img class="only-light" src={item.preview.srcLight} width={item.preview.width} height={item.preview.height} alt="" loading="lazy" decoding="async" />
                 </span>
               {/if}
               <strong>{item.name}</strong>
