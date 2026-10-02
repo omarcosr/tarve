@@ -6,6 +6,7 @@ const invoices = [
 ];
 
 <Table
+  style={{ width: 440 }}
   data={invoices}
   rowKey={(row) => row.id}
   columns={[

@@ -1,6 +1,6 @@
 import { Combobox } from "@tarve/core";
 
-let open = false;
+let open = true;
 let query = "";
 let framework = "tarve";
 

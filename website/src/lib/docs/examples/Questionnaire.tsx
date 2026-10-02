@@ -1,9 +1,10 @@
 import { Questionnaire, type QuestionnaireAnswer } from "@tarve/core";
 
 let current = 0;
-let values: Record<string, QuestionnaireAnswer | undefined> = {};
+let values: Record<string, QuestionnaireAnswer | undefined> = { name: "Ada" };
 
 <Questionnaire
+  style={{ width: 440 }}
   current={current}
   values={values}
   questions={[

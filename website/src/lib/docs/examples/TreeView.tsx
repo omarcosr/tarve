@@ -4,6 +4,7 @@ let expanded = ["src"];
 let selected = "app";
 
 <TreeView
+  style={{ width: 280 }}
   expandedIds={expanded}
   selectedId={selected}
   nodes={[

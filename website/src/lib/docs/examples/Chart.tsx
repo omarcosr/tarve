@@ -2,6 +2,8 @@ import { Chart } from "@tarve/core";
 
 <Chart
   height={200}
+  barWidth={48}
+  style={{ width: 300 }}
   data={[
     { label: "Jan", value: 186 },
     { label: "Feb", value: 305 },

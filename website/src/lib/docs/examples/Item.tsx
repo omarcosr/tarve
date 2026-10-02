@@ -1,6 +1,7 @@
 import { Avatar, Badge, Item } from "@tarve/core";
 
 <Item
+  style={{ width: 360 }}
   title="Ada Lovelace"
   description="ada@example.com"
   leading={<Avatar fallback="AL" size={32} />}

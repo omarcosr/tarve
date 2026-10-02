@@ -1,6 +1,6 @@
 import { Menubar } from "@tarve/core";
 
-let openMenu: string | undefined;
+let openMenu: string | undefined = "file";
 
 <Menubar
   openMenu={openMenu}

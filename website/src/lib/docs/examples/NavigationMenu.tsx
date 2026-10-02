@@ -1,7 +1,7 @@
 import { NavigationMenu } from "@tarve/core";
 
-let value = "docs";
-let openValue: string | undefined;
+let value = "start";
+let openValue: string | undefined = "docs";
 
 <NavigationMenu
   value={value}

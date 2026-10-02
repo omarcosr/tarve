@@ -9,5 +9,5 @@ let notes = "";
   onChange={(value) => {
     notes = value;
   }}
-  style={{ height: 160 }}
+  style={{ width: 380, height: 160 }}
 />;

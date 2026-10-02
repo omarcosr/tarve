@@ -1,6 +1,6 @@
 import { ContextMenu, Text, View } from "@tarve/core";
 
-let open = false;
+let open = true;
 
 <ContextMenu
   id="canvas-menu"

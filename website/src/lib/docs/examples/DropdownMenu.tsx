@@ -1,6 +1,6 @@
 import { Button, DropdownMenu } from "@tarve/core";
 
-let open = false;
+let open = true;
 
 <DropdownMenu
   id="file-actions"

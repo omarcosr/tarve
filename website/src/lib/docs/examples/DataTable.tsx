@@ -6,6 +6,7 @@ const users = [
 ];
 
 <DataTable
+  style={{ width: 400 }}
   data={users}
   rowKey={(row) => row.id}
   empty="No users."

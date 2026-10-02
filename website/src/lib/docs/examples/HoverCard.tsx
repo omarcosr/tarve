@@ -1,6 +1,6 @@
 import { Avatar, HoverCard, Row, Text } from "@tarve/core";
 
-let open = false;
+let open = true;
 
 <HoverCard
   open={open}

@@ -1,6 +1,6 @@
 import { DatePicker } from "@tarve/core";
 
-let open = false;
+let open = true;
 let month = "2026-09";
 let date: string | undefined;
 

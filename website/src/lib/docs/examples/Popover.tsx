@@ -1,6 +1,6 @@
 import { Button, Popover, Text } from "@tarve/core";
 
-let open = false;
+let open = true;
 
 <Popover
   id="filters"

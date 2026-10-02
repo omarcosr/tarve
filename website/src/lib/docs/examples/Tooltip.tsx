@@ -1,6 +1,6 @@
 import { Button, Tooltip } from "@tarve/core";
 
-let open = false;
+let open = true;
 
 <Tooltip
   id="save-tip"

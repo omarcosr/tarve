@@ -1,6 +1,6 @@
-import { Badge, Column, Row, Text, TitleBar, Window } from "@tarve/core";
+import { Badge, Column, Row, Text, TitleBar, Window, darkTheme } from "@tarve/core";
 
-<Window title="Editor" width={960} height={640}>
+<Window title="Editor" width={720} height={280} theme={darkTheme}>
   <TitleBar height={40} showMaximize={false}>
     <Row gap={8} align="center" padding={12}>
       <Text weight={600}>Editor</Text>
