@@ -1752,6 +1752,180 @@ main {
   transform: translateY(-2px);
 }
 
+.doc-preview {
+  margin: 32px 0 0;
+}
+
+.doc-preview-stage {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  background:
+    radial-gradient(80% 120% at 50% 0%, rgba(124, 92, 255, 0.12), transparent 70%),
+    #0a0a0f;
+  overflow: hidden;
+}
+
+.doc-preview-stage img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 10px;
+}
+
+.doc-preview figcaption {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.playground {
+  margin: 32px 0 0;
+}
+
+.playground-stage {
+  position: relative;
+  width: 100%;
+  margin: 0 auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 18px;
+  background: #09090b;
+  overflow: hidden;
+}
+
+/* The poster is drawn at its CSS size (its 2x bitmap downsampled), centred, never scaled to fit,
+   so the hand-over to the live canvas does not rescale anything. */
+.playground-poster {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  max-width: none;
+  transform: translateX(-50%);
+}
+
+.playground-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.playground-canvas {
+  display: block;
+  opacity: 0;
+  outline: none;
+  touch-action: pan-y pinch-zoom;
+  transition: opacity 0.12s linear;
+}
+
+.playground[data-phase="live"] .playground-canvas {
+  opacity: 1;
+}
+
+.playground-canvas:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--cyan);
+}
+
+.playground-window-state {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: #09090b;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.playground-window-state button {
+  padding: 6px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--fg);
+  font: 500 13px var(--sans);
+  cursor: pointer;
+}
+
+.playground figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.playground-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.playground-status i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.playground[data-phase="loading"] .playground-status i {
+  background: #fbbf24;
+}
+
+.playground[data-phase="live"] .playground-status i {
+  background: #4ade80;
+}
+
+.playground[data-phase="error"] .playground-status i {
+  background: var(--pink);
+}
+
+.playground-reset {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--fg);
+  font: 500 12px var(--sans);
+  cursor: pointer;
+}
+
+.playground-reset:hover {
+  border-color: rgba(124, 92, 255, 0.6);
+}
+
+.doc-card-thumb {
+  display: grid;
+  place-items: center;
+  height: 120px;
+  margin: -14px -16px 6px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 14px 14px 0 0;
+  background: #0a0a0f;
+  overflow: hidden;
+}
+
+.doc-card-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  transition: transform 0.3s ease;
+}
+
+.doc-card:hover .doc-card-thumb img {
+  transform: scale(1.04);
+}
+
 .doc-details {
   margin-top: 14px;
   border: 1px solid var(--line);

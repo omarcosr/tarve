@@ -12,6 +12,17 @@ export interface DocLink {
   summary: string;
 }
 
+/** A native render of the example: the `left/top/width/height` crop of a `frameWidth × frameHeight` window. */
+export interface PreviewImage {
+  src: string;
+  width: number;
+  height: number;
+  left: number;
+  top: number;
+  frameWidth: number;
+  frameHeight: number;
+}
+
 export interface ComponentDoc {
   name: string;
   category: { id: string; title: string };
@@ -27,6 +38,7 @@ export interface ComponentDoc {
   inherited: { from: string; props: PropDoc[] }[];
   common: string[];
   types: { name: string; code: string }[];
+  preview?: PreviewImage;
   prev?: DocLink;
   next?: DocLink;
 }

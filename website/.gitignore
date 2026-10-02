@@ -2,3 +2,5 @@ node_modules
 dist
 dist-cf
 .wrangler
+scripts/previews/.generated
+src/lib/playground/wasm

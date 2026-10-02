@@ -1,6 +1,7 @@
 import api from "../generated/api.json";
+import previews from "../generated/previews.json";
 import { catalog, findEntry, orderedNames } from "./catalog";
-import type { ComponentDoc, PropDoc } from "./types";
+import type { ComponentDoc, PreviewImage, PropDoc } from "./types";
 
 const REPO = "https://github.com/omarcosr/tarve";
 
@@ -29,8 +30,16 @@ export function commonProps(): PropDoc[] {
   return api.commonProps.map((prop) => ({ ...prop, doc: prop.doc || commonPropNotes[prop.name] }));
 }
 
+export function previewFor(name: string): ComponentDoc["preview"] {
+  const size = (previews as Record<string, Omit<PreviewImage, "src">>)[name];
+  return size ? { src: `/previews/${name}.png`, ...size } : undefined;
+}
+
 export function docsCatalog() {
-  return catalog;
+  return catalog.map((category) => ({
+    ...category,
+    items: category.items.map((item) => ({ ...item, preview: previewFor(item.name) })),
+  }));
 }
 
 export function buildComponentDoc(name: string): ComponentDoc | undefined {
@@ -66,6 +75,7 @@ export function buildComponentDoc(name: string): ComponentDoc | undefined {
     inherited: [...inheritedFrom].map(([from, list]) => ({ from, props: list })),
     common: component.common,
     types: component.types.filter((type) => types[type]).map((type) => ({ name: type, code: types[type] })),
+    preview: previewFor(name),
     prev: link(orderedNames[index - 1]),
     next: link(orderedNames[index + 1]),
   };

@@ -1,6 +1,7 @@
 export interface CatalogEntry {
   name: string;
   summary: string;
+  preview?: import("./types").PreviewImage;
 }
 
 export interface CatalogCategory {

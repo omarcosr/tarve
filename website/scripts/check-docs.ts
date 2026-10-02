@@ -28,4 +28,9 @@ const tsc = Bun.spawnSync(["bun", resolve(repo, "node_modules/typescript/bin/tsc
   stderr: "inherit",
 });
 if (tsc.exitCode !== 0) process.exit(tsc.exitCode ?? 1);
+const playground = Bun.spawnSync(
+  ["bun", resolve(repo, "node_modules/typescript/bin/tsc"), "--noEmit", "-p", resolve(import.meta.dir, "../src/lib/playground/tsconfig.json")],
+  { cwd: repo, stdout: "inherit", stderr: "inherit" },
+);
+if (playground.exitCode !== 0) process.exit(playground.exitCode ?? 1);
 console.log(`[check-docs] ${documented.size} components documented, ${examples.size} examples type-check.`);

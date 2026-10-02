@@ -1,0 +1,762 @@
+{
+  "Accordion": {
+    "width": 481,
+    "height": 220,
+    "left": 189,
+    "top": 259,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Alert": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "AlertDialog": {
+    "width": 560,
+    "height": 240,
+    "left": 149,
+    "top": 240,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "AnimatePresence": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 245,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "AspectRatio": {
+    "width": 560,
+    "height": 350,
+    "left": 149,
+    "top": 185,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Attachment": {
+    "width": 481,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Avatar": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Badge": {
+    "width": 481,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Breadcrumb": {
+    "width": 481,
+    "height": 221,
+    "left": 191,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Bubble": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Button": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "ButtonGroup": {
+    "width": 481,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Calendar": {
+    "width": 480,
+    "height": 361,
+    "left": 189,
+    "top": 180,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Card": {
+    "width": 481,
+    "height": 286,
+    "left": 189,
+    "top": 217,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Carousel": {
+    "width": 480,
+    "height": 282,
+    "left": 189,
+    "top": 219,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Chart": {
+    "width": 480,
+    "height": 276,
+    "left": 189,
+    "top": 224,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Checkbox": {
+    "width": 481,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Circle": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Code": {
+    "width": 481,
+    "height": 221,
+    "left": 193,
+    "top": 249,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Collapsible": {
+    "width": 481,
+    "height": 221,
+    "left": 187,
+    "top": 251,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Column": {
+    "width": 481,
+    "height": 205,
+    "left": 189,
+    "top": 0,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Combobox": {
+    "width": 480,
+    "height": 276,
+    "left": 189,
+    "top": 301,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Command": {
+    "width": 480,
+    "height": 265,
+    "left": 189,
+    "top": 228,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "CommandPalette": {
+    "width": 600,
+    "height": 377,
+    "left": 129,
+    "top": 32,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "ContextMenu": {
+    "width": 480,
+    "height": 220,
+    "left": 187,
+    "top": 315,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "DataGrid": {
+    "width": 858,
+    "height": 480,
+    "left": 0,
+    "top": 120,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "DataTable": {
+    "width": 480,
+    "height": 221,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "DatePicker": {
+    "width": 480,
+    "height": 403,
+    "left": 189,
+    "top": 302,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Dialog": {
+    "width": 500,
+    "height": 220,
+    "left": 179,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Diff": {
+    "width": 481,
+    "height": 220,
+    "left": 189,
+    "top": 249,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Direction": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Drawer": {
+    "width": 858,
+    "height": 406,
+    "left": 0,
+    "top": 314,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "DropdownMenu": {
+    "width": 480,
+    "height": 234,
+    "left": 239,
+    "top": 302,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Ellipse": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Empty": {
+    "width": 500,
+    "height": 268,
+    "left": 179,
+    "top": 226,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Field": {
+    "width": 481,
+    "height": 221,
+    "left": 189,
+    "top": 249,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "HoverCard": {
+    "width": 480,
+    "height": 221,
+    "left": 291,
+    "top": 290,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Icon": {
+    "width": 480,
+    "height": 220,
+    "left": 188,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Image": {
+    "width": 480,
+    "height": 265,
+    "left": 189,
+    "top": 220,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Input": {
+    "width": 481,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "InputGroup": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "InputOTP": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Item": {
+    "width": 480,
+    "height": 221,
+    "left": 189,
+    "top": 251,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Kbd": {
+    "width": 481,
+    "height": 221,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Label": {
+    "width": 481,
+    "height": 221,
+    "left": 189,
+    "top": 251,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Line": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Link": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 253,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "List": {
+    "width": 481,
+    "height": 221,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Markdown": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 254,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Marker": {
+    "width": 480,
+    "height": 221,
+    "left": 189,
+    "top": 252,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Menubar": {
+    "width": 480,
+    "height": 220,
+    "left": 233,
+    "top": 285,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Message": {
+    "width": 400,
+    "height": 221,
+    "left": 0,
+    "top": 246,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "MessageScroller": {
+    "width": 485,
+    "height": 434,
+    "left": 191,
+    "top": 146,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Modal": {
+    "width": 560,
+    "height": 298,
+    "left": 149,
+    "top": 211,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "NativeSelect": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "NavigationMenu": {
+    "width": 480,
+    "height": 252,
+    "left": 244,
+    "top": 302,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Pagination": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Path": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Polygon": {
+    "width": 480,
+    "height": 221,
+    "left": 189,
+    "top": 248,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Polyline": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Popover": {
+    "width": 480,
+    "height": 221,
+    "left": 243,
+    "top": 268,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Portal": {
+    "width": 480,
+    "height": 221,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Pressable": {
+    "width": 480,
+    "height": 221,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Progress": {
+    "width": 480,
+    "height": 221,
+    "left": 189,
+    "top": 251,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Questionnaire": {
+    "width": 520,
+    "height": 226,
+    "left": 169,
+    "top": 249,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "RadioGroup": {
+    "width": 481,
+    "height": 220,
+    "left": 188,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Resizable": {
+    "width": 420,
+    "height": 400,
+    "left": 0,
+    "top": 160,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Row": {
+    "width": 481,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Scroll": {
+    "width": 481,
+    "height": 305,
+    "left": 194,
+    "top": 206,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "ScrollArea": {
+    "width": 480,
+    "height": 291,
+    "left": 192,
+    "top": 216,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Select": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Separator": {
+    "width": 480,
+    "height": 221,
+    "left": 189,
+    "top": 252,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Sheet": {
+    "width": 509,
+    "height": 720,
+    "left": 349,
+    "top": 0,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Sidebar": {
+    "width": 480,
+    "height": 720,
+    "left": 193,
+    "top": 0,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Skeleton": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Slider": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Spinner": {
+    "width": 481,
+    "height": 220,
+    "left": 189,
+    "top": 251,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Svg": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "SvgRect": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Switch": {
+    "width": 481,
+    "height": 220,
+    "left": 188,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Table": {
+    "width": 520,
+    "height": 220,
+    "left": 169,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Tabs": {
+    "width": 480,
+    "height": 221,
+    "left": 189,
+    "top": 249,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Text": {
+    "width": 480,
+    "height": 221,
+    "left": 187,
+    "top": 255,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "TextArea": {
+    "width": 480,
+    "height": 240,
+    "left": 189,
+    "top": 240,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "TitleBar": {
+    "width": 720,
+    "height": 280,
+    "left": 0,
+    "top": 0,
+    "frameWidth": 720,
+    "frameHeight": 280
+  },
+  "Toast": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Toaster": {
+    "width": 520,
+    "height": 320,
+    "left": 169,
+    "top": 200,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Toggle": {
+    "width": 480,
+    "height": 220,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "ToggleGroup": {
+    "width": 481,
+    "height": 220,
+    "left": 184,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Tooltip": {
+    "width": 480,
+    "height": 220,
+    "left": 206,
+    "top": 232,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "TreeView": {
+    "width": 480,
+    "height": 221,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Typography": {
+    "width": 480,
+    "height": 221,
+    "left": 189,
+    "top": 253,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "View": {
+    "width": 480,
+    "height": 221,
+    "left": 189,
+    "top": 250,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "VirtualList": {
+    "width": 480,
+    "height": 530,
+    "left": 192,
+    "top": 86,
+    "frameWidth": 858,
+    "frameHeight": 720
+  },
+  "Window": {
+    "width": 640,
+    "height": 320,
+    "left": 0,
+    "top": 0,
+    "frameWidth": 640,
+    "frameHeight": 320
+  }
+}

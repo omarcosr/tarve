@@ -7,16 +7,19 @@
     "node": ">=26"
   },
   "scripts": {
+    "build:wasm": "bun scripts/build-wasm.ts",
     "docs:api": "bun scripts/extract-api.ts",
     "docs:check": "bun scripts/check-docs.ts",
+    "docs:previews": "bun --cwd scripts/previews capture.tsx",
+    "docs:interactions": "bun --cwd scripts/previews interactions.tsx",
     "dev": "vite",
-    "build": "bun run docs:api && bun run build:client && bun run build:server",
+    "build": "bun run build:wasm && bun run docs:api && bun run build:client && bun run build:server",
     "build:client": "vite build --mode client",
     "build:server": "vite build --mode production",
     "typecheck": "tsc --noEmit",
     "start": "bun ./dist/index.js",
     "start:node": "node ./dist/index.js",
-    "build:cf": "bun run docs:api && vite build --mode client-cf && vite build --mode worker",
+    "build:cf": "bun run build:wasm && bun run docs:api && vite build --mode client-cf && vite build --mode worker",
     "preview:cf": "bun run build:cf && wrangler dev",
     "deploy": "bun run build:cf && wrangler deploy"
   },

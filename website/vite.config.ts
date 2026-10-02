@@ -10,12 +10,13 @@
 //   worker     → Cloudflare Worker in dist-cf/worker.js
 import bunBuild from "@hono/vite-build/bun";
 import workerBuild from "@hono/vite-build/cloudflare-workers";
-import devServer from "@hono/vite-dev-server";
+import devServer, { defaultOptions as devServerDefaults } from "@hono/vite-dev-server";
 import bunAdapter from "@hono/vite-dev-server/bun";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { pages } from "hono-svelte/vite";
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
+import { tarvePlayground } from "./src/lib/playground/vite-plugin";
 
 const appPages = pages({ dts: true });
 const entry = "src/routes/index.ts";
@@ -23,7 +24,7 @@ const entry = "src/routes/index.ts";
 export default defineConfig(({ command, mode }) => {
   if (mode === "client" || mode === "client-cf") {
     return {
-      plugins: [svelte(), appPages],
+      plugins: [tarvePlayground(), svelte(), appPages],
       build: {
         outDir: mode === "client-cf" ? "dist-cf/public" : "dist",
         emptyOutDir: true,
@@ -32,7 +33,11 @@ export default defineConfig(({ command, mode }) => {
           output: {
             entryFileNames: "static/[name].js",
             chunkFileNames: "static/chunks/[name]-[hash].js",
-            assetFileNames: "static/[name][extname]",
+            // The playground runtime is hashed into chunks/ so it can be cached as immutable.
+            assetFileNames: (asset) =>
+              asset.names.some((name) => name.endsWith(".wasm"))
+                ? "static/chunks/[name]-[hash][extname]"
+                : "static/[name][extname]",
           },
         },
       },
@@ -41,7 +46,12 @@ export default defineConfig(({ command, mode }) => {
 
   if (command === "serve") {
     return {
-      plugins: [svelte(), appPages, devServer({ entry, adapter: bunAdapter() })],
+      plugins: [tarvePlayground(), svelte(), appPages, devServer({
+          entry,
+          adapter: bunAdapter(),
+          // Let Vite serve the playground's WebAssembly runtime instead of routing it to Hono.
+          exclude: [...devServerDefaults.exclude, /\.wasm(\?.*)?$/],
+        })],
     };
   }
 
@@ -50,11 +60,11 @@ export default defineConfig(({ command, mode }) => {
       publicDir: false,
       // Workers run Svelte's server build: resolve the "worker" export condition, never "browser".
       ssr: { resolve: { conditions: ["workerd", "worker", "module", "import", "default"] } },
-      plugins: [svelte(), appPages, workerBuild({ entry, outputDir: "dist-cf", output: "worker.js" })],
+      plugins: [tarvePlayground(), svelte(), appPages, workerBuild({ entry, outputDir: "dist-cf", output: "worker.js" })],
     };
   }
 
   return {
-    plugins: [svelte(), appPages, bunBuild({ entry, staticRoot: "./dist" })],
+    plugins: [tarvePlayground(), svelte(), appPages, bunBuild({ entry, staticRoot: "./dist" })],
   };
 });

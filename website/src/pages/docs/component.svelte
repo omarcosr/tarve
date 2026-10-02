@@ -1,6 +1,7 @@
 <script lang="ts">
   import CodeBlock from "../../lib/CodeBlock.svelte";
   import DocsShell from "../../lib/DocsShell.svelte";
+  import Playground from "../../lib/Playground.svelte";
   import PropsTable from "../../lib/PropsTable.svelte";
   import type { ComponentDoc } from "../../lib/docs/types";
 
@@ -23,6 +24,8 @@
       <a class="doc-chip doc-source" href={doc.sourceUrl}>{doc.sourceLabel} ↗</a>
     </div>
   </header>
+
+  <Playground name={doc.name} poster={doc.preview} />
 
   <section class="doc-section">
     <h2 id="import">Import</h2>

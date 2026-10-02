@@ -74,6 +74,11 @@
         <div class="doc-cards">
           {#each category.items as item (item.name)}
             <a class="doc-card" href="/docs/components/{item.name}">
+              {#if item.preview}
+                <span class="doc-card-thumb">
+                  <img src={item.preview.src} width={item.preview.width} height={item.preview.height} alt="" loading="lazy" decoding="async" />
+                </span>
+              {/if}
               <strong>{item.name}</strong>
               <span>{item.summary}</span>
             </a>
