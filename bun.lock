@@ -16,6 +16,13 @@
         "@tarve/protocol": "workspace:*",
       },
     },
+    "packages/headless": {
+      "name": "@tarve/headless",
+      "version": "0.4.0",
+      "peerDependencies": {
+        "@tarve/core": ">=0.4.0",
+      },
+    },
     "packages/protocol": {
       "name": "@tarve/protocol",
       "version": "0.4.0",
@@ -32,7 +39,11 @@
     },
   },
   "packages": {
+    "@tarve/core": ["@tarve/core@0.4.0", "", { "os": [ "linux", "win32", ], "cpu": "x64", "bin": { "tarve": "dist/npm/cli.js" } }, "sha512-w90kisue5M1jFXbMsZQDq/gvB7TyQtop1ZBsmfnKKD6KelNHo+z0KntGqD3BcQoij4jifL5zjG6pdQNsjnFpDg=="],
+
     "@tarve/core-internal": ["@tarve/core-internal@workspace:packages/core"],
+
+    "@tarve/headless": ["@tarve/headless@workspace:packages/headless"],
 
     "@tarve/protocol": ["@tarve/protocol@workspace:packages/protocol"],
 

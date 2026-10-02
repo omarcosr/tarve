@@ -4,7 +4,7 @@
     "strict": true, "noEmit": true, "skipLibCheck": true,
     "jsx": "react-jsx", "jsxImportSource": "@tarve/core",
     "types": ["bun"], "allowImportingTsExtensions": true,
-    "paths": { "@tarve/core": ["./packages/core/src/index.ts"], "@tarve/core/*": ["./packages/core/src/*"], "@tarve/core-internal": ["./packages/core/src/index.ts"], "@tarve/core-internal/*": ["./packages/core/src/*"], "@tarve/protocol": ["./packages/protocol/src/index.ts"], "@tarve/react-icons": ["./packages/react-icons/src/index.ts"], "@tarve/react-icons/*": ["./packages/react-icons/src/*"] }
+    "paths": { "@tarve/core": ["./packages/core/src/index.ts"], "@tarve/core/*": ["./packages/core/src/*"], "@tarve/core-internal": ["./packages/core/src/index.ts"], "@tarve/core-internal/*": ["./packages/core/src/*"], "@tarve/protocol": ["./packages/protocol/src/index.ts"], "@tarve/react-icons": ["./packages/react-icons/src/index.ts"], "@tarve/react-icons/*": ["./packages/react-icons/src/*"], "@tarve/headless": ["./packages/headless/src/index.ts"] }
   },
   "include": ["packages", "scripts"]
 }

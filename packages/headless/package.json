@@ -1,0 +1,40 @@
+{
+  "name": "@tarve/headless",
+  "version": "0.4.0",
+  "description": "Render Tarve UIs to pixels without a window or GPU: tests, visual snapshots and image generation on any platform",
+  "license": "Apache-2.0",
+  "keywords": ["tarve", "headless", "testing", "visual-regression", "snapshot", "wasm"],
+  "homepage": "https://github.com/omarcosr/tarve/tree/main/packages/headless#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/omarcosr/tarve.git",
+    "directory": "packages/headless"
+  },
+  "bugs": {
+    "url": "https://github.com/omarcosr/tarve/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.tsx",
+    "wasm",
+    "fonts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun scripts/build-wasm.ts"
+  },
+  "peerDependencies": {
+    "@tarve/core": ">=0.4.0"
+  },
+  "engines": {
+    "bun": ">=1.4.0"
+  }
+}

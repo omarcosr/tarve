@@ -429,6 +429,17 @@ test.close();
 
 Use `launchTestProcess` to isolate CPU/GPU test runs in child processes. `readPngRgba`, `comparePngCaptures`, and `assertPngMatches` are reusable pixel-regression helpers; Tarve's own visual smoke tests use the same public PNG decoder.
 
+### Without a window: `@tarve/headless`
+
+[`@tarve/headless`](packages/headless) runs the same tree, layout, text, input and CPU painter compiled to WebAssembly, so tests need no window, GPU or native library and run on any CI machine. Text uses bundled fonts and time only moves with `advanceMotion`, so captures are byte-identical across platforms.
+
+```tsx
+import { createHeadlessTestRenderer, matchImageSnapshot, renderToRgba } from "@tarve/headless";
+
+const test = await createHeadlessTestRenderer(App); // the TestRenderer API above
+await matchImageSnapshot(await renderToRgba(App, { scale: 2 }), "__snapshots__/app.png");
+```
+
 ## Custom title bar
 
 Render `TitleBar` inside `Window` to opt into Tarve-managed window chrome:
