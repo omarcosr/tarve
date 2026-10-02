@@ -39,6 +39,7 @@ pub struct WebTree {
     scale: f64,
     events: Vec<Value>,
     painted: bool,
+    frames: u64,
 }
 
 #[wasm_bindgen]
@@ -66,10 +67,12 @@ impl WebTree {
             scale: 1.0,
             events: Vec::new(),
             painted: false,
+            frames: 0,
         })
     }
 
-    /// Applies a JSON `NativeCommand`. Commands that need a desktop window are ignored.
+    /// Applies a JSON `NativeCommand`, including the diagnostic `inspect`, `input` and
+    /// `motionAdvance` commands. Commands that need a desktop window are ignored.
     pub fn command(&mut self, command: &str) -> Result<(), JsError> {
         let command: Command =
             serde_json::from_str(command).map_err(|error| JsError::new(&error.to_string()))?;
@@ -104,6 +107,66 @@ impl WebTree {
             }
             Command::Resize { width, height } => {
                 self.resize(width as f32, height as f32, self.scale)
+            }
+            Command::Inspect { request_id } => {
+                self.tree
+                    .compute(self.width, self.height)
+                    .map_err(|error| JsError::new(&error))?;
+                let layout_events = self.tree.take_layout_events();
+                self.events.extend(layout_events);
+                self.events.push(json!({"type":"inspect", "requestId":request_id, "snapshot": {
+                    "frames":self.frames, "layouts":self.tree.layouts, "shapes":self.tree.text.shapes,
+                    "paints":self.tree.paints, "hovered":self.tree.hovered, "focused":self.tree.focused,
+                    "nodes":self.tree.snapshots(), "width":self.width, "height":self.height, "scale":self.scale,
+                    "layoutNodes":self.tree.layout_node_count(), "layoutNodesCreated":self.tree.layout_nodes_created,
+                    "measureCalls":self.tree.measure_calls, "paintedNodes":self.tree.painted_nodes,
+                    "activeMotions":self.tree.active_motion_count(), "glyphRasterizations":null
+                }}));
+            }
+            Command::Input {
+                action,
+                x,
+                y,
+                delta,
+                delta_x,
+                delta_y,
+                text,
+            } => {
+                let events = match action.as_str() {
+                    "move" => self.tree.pointer_move(x.unwrap_or(0.0), y.unwrap_or(0.0)),
+                    "down" => self.tree.pointer_down(),
+                    "up" => self.tree.pointer_up(),
+                    "wheel" => self
+                        .tree
+                        .wheel_2d(delta_x.unwrap_or(0.0), delta_y.or(delta).unwrap_or(0.0)),
+                    "text" => self.tree.type_text(text.as_deref().unwrap_or("")),
+                    "key" if text.as_deref() == Some("Escape") => {
+                        vec![json!({"type":"escape"})]
+                    }
+                    "key" => self.tree.key(text.as_deref().unwrap_or("")),
+                    _ => vec![],
+                };
+                self.events.extend(events);
+            }
+            Command::MotionAdvance {
+                milliseconds,
+                request_id,
+            } => {
+                if !milliseconds.is_finite() || !(0.0..=60_000.0).contains(&milliseconds) {
+                    self.events.push(json!({
+                        "type":"motionAdvanced", "requestId":request_id, "milliseconds":milliseconds,
+                        "activeMotions":self.tree.active_motion_count(),
+                        "error":"motionAdvance milliseconds must be finite and between 0 and 60000"
+                    }));
+                } else {
+                    let next = self.tree.motion_time_ms() + milliseconds;
+                    self.tree.advance_motion(next);
+                    self.events.extend(self.tree.take_motion_events());
+                    self.events.push(json!({
+                        "type":"motionAdvanced", "requestId":request_id, "milliseconds":milliseconds,
+                        "activeMotions":self.tree.active_motion_count()
+                    }));
+                }
             }
             _ => {}
         }
@@ -187,6 +250,7 @@ impl WebTree {
             self.context.render(pixmap, &mut self.resources);
         }
         self.painted = true;
+        self.frames += 1;
         Ok(true)
     }
 
