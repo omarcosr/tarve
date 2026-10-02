@@ -42,7 +42,7 @@
     {
       "name": "Alert",
       "source": "packages/core/src/form-controls.ts",
-      "line": 18,
+      "line": 24,
       "generic": false,
       "propsType": "AlertProps",
       "props": [
@@ -87,7 +87,7 @@
     {
       "name": "AlertDialog",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 720,
+      "line": 710,
       "generic": false,
       "propsType": "AlertDialogProps",
       "props": [
@@ -219,7 +219,7 @@
     {
       "name": "AspectRatio",
       "source": "packages/core/src/form-controls.ts",
-      "line": 47,
+      "line": 53,
       "generic": false,
       "propsType": "AspectRatioProps",
       "props": [
@@ -314,7 +314,7 @@
     {
       "name": "Avatar",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 75,
+      "line": 65,
       "generic": false,
       "propsType": "AvatarProps",
       "props": [
@@ -387,7 +387,7 @@
     {
       "name": "Breadcrumb",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 119,
+      "line": 109,
       "generic": false,
       "propsType": "BreadcrumbProps",
       "props": [
@@ -521,7 +521,7 @@
     {
       "name": "ButtonGroup",
       "source": "packages/core/src/form-controls.ts",
-      "line": 57,
+      "line": 63,
       "generic": false,
       "propsType": "ButtonGroupProps",
       "props": [
@@ -555,7 +555,7 @@
     {
       "name": "Calendar",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 352,
+      "line": 342,
       "generic": false,
       "propsType": "CalendarProps",
       "props": [
@@ -970,7 +970,7 @@
     {
       "name": "Collapsible",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 566,
+      "line": 556,
       "generic": false,
       "propsType": "CollapsibleProps",
       "props": [
@@ -1095,7 +1095,7 @@
     {
       "name": "Combobox",
       "source": "packages/core/src/popups.ts",
-      "line": 455,
+      "line": 492,
       "generic": false,
       "propsType": "ComboboxProps",
       "props": [
@@ -1187,7 +1187,7 @@
     {
       "name": "Command",
       "source": "packages/core/src/popups.ts",
-      "line": 601,
+      "line": 640,
       "generic": false,
       "propsType": "CommandProps",
       "props": [
@@ -1262,7 +1262,7 @@
     {
       "name": "CommandPalette",
       "source": "packages/core/src/popups.ts",
-      "line": 722,
+      "line": 763,
       "generic": false,
       "propsType": "CommandPaletteProps",
       "props": [
@@ -1371,7 +1371,7 @@
     {
       "name": "ContextMenu",
       "source": "packages/core/src/popups.ts",
-      "line": 375,
+      "line": 412,
       "generic": false,
       "propsType": "ContextMenuProps",
       "props": [
@@ -1575,7 +1575,7 @@
     {
       "name": "DataTable",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 702,
+      "line": 692,
       "generic": true,
       "propsType": "DataTableProps<T>",
       "props": [
@@ -1629,7 +1629,7 @@
     {
       "name": "DatePicker",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 501,
+      "line": 491,
       "generic": false,
       "propsType": "DatePickerProps",
       "props": [
@@ -1875,7 +1875,7 @@
       "name": "Direction",
       "summary": "Layout direction helper. RTL reverses visual horizontal flow while preserving logical/focus order. Text bidi is not changed.",
       "source": "packages/core/src/form-controls.ts",
-      "line": 382,
+      "line": 397,
       "generic": false,
       "propsType": "DirectionProps",
       "props": [
@@ -1986,7 +1986,7 @@
     {
       "name": "DropdownMenu",
       "source": "packages/core/src/popups.ts",
-      "line": 305,
+      "line": 342,
       "generic": false,
       "propsType": "DropdownMenuProps",
       "props": [
@@ -2101,7 +2101,7 @@
     {
       "name": "Empty",
       "source": "packages/core/src/form-controls.ts",
-      "line": 68,
+      "line": 74,
       "generic": false,
       "propsType": "EmptyProps",
       "props": [
@@ -2143,7 +2143,7 @@
     {
       "name": "Field",
       "source": "packages/core/src/form-controls.ts",
-      "line": 117,
+      "line": 123,
       "generic": false,
       "propsType": "FieldProps",
       "props": [
@@ -2190,7 +2190,7 @@
     {
       "name": "HoverCard",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 1134,
+      "line": 1124,
       "generic": false,
       "propsType": "HoverCardProps",
       "props": [
@@ -2395,7 +2395,7 @@
     {
       "name": "InputGroup",
       "source": "packages/core/src/form-controls.ts",
-      "line": 148,
+      "line": 163,
       "generic": false,
       "propsType": "InputGroupProps",
       "props": [
@@ -2432,7 +2432,7 @@
     {
       "name": "InputOTP",
       "source": "packages/core/src/form-controls.ts",
-      "line": 175,
+      "line": 190,
       "generic": false,
       "propsType": "InputOTPProps",
       "props": [
@@ -2493,7 +2493,7 @@
     {
       "name": "Item",
       "source": "packages/core/src/form-controls.ts",
-      "line": 230,
+      "line": 245,
       "generic": false,
       "propsType": "ItemProps",
       "props": [
@@ -2550,7 +2550,7 @@
     {
       "name": "Kbd",
       "source": "packages/core/src/form-controls.ts",
-      "line": 252,
+      "line": 267,
       "generic": false,
       "propsType": "KbdProps",
       "props": [],
@@ -2571,7 +2571,7 @@
     {
       "name": "Label",
       "source": "packages/core/src/form-controls.ts",
-      "line": 90,
+      "line": 96,
       "generic": false,
       "propsType": "LabelProps",
       "props": [
@@ -2991,7 +2991,7 @@
     {
       "name": "Menubar",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 1005,
+      "line": 995,
       "generic": false,
       "propsType": "MenubarProps",
       "props": [
@@ -3207,7 +3207,7 @@
     {
       "name": "NativeSelect",
       "source": "packages/core/src/form-controls.ts",
-      "line": 268,
+      "line": 283,
       "generic": false,
       "propsType": "NativeSelectProps",
       "props": [
@@ -3318,7 +3318,7 @@
     {
       "name": "Pagination",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 190,
+      "line": 180,
       "generic": false,
       "propsType": "PaginationProps",
       "props": [
@@ -3414,7 +3414,7 @@
     {
       "name": "Popover",
       "source": "packages/core/src/popups.ts",
-      "line": 197,
+      "line": 234,
       "generic": false,
       "propsType": "PopoverProps",
       "props": [
@@ -3742,7 +3742,7 @@
     {
       "name": "Questionnaire",
       "source": "packages/core/src/advanced-controls.ts",
-      "line": 323,
+      "line": 329,
       "generic": false,
       "propsType": "QuestionnaireProps",
       "props": [
@@ -3865,7 +3865,7 @@
     {
       "name": "Resizable",
       "source": "packages/core/src/advanced-controls.ts",
-      "line": 215,
+      "line": 221,
       "generic": false,
       "propsType": "ResizableProps",
       "props": [
@@ -4339,7 +4339,7 @@
     {
       "name": "Sheet",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 796,
+      "line": 786,
       "generic": false,
       "propsType": "SheetProps",
       "props": [
@@ -4418,7 +4418,7 @@
     {
       "name": "Sidebar",
       "source": "packages/core/src/advanced-controls.ts",
-      "line": 263,
+      "line": 269,
       "generic": false,
       "propsType": "SidebarProps",
       "props": [
@@ -4490,7 +4490,7 @@
     {
       "name": "Skeleton",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 26,
+      "line": 29,
       "generic": false,
       "propsType": "SkeletonProps",
       "props": [
@@ -4595,9 +4595,9 @@
     },
     {
       "name": "Spinner",
-      "summary": "A renderer-only loading indicator. Animation can be added once transforms/animation exist natively.",
+      "summary": "A loading indicator: an arc that turns once every 800 ms, rotated natively by `style.spin`.",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 39,
+      "line": 42,
       "generic": false,
       "propsType": "SpinnerProps",
       "props": [
@@ -4805,7 +4805,7 @@
     {
       "name": "Table",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 625,
+      "line": 615,
       "generic": true,
       "propsType": "TableProps<T>",
       "props": [
@@ -5109,7 +5109,7 @@
     {
       "name": "Toast",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 904,
+      "line": 894,
       "generic": false,
       "propsType": "ToastProps",
       "props": [
@@ -5165,7 +5165,7 @@
       "name": "Toaster",
       "summary": "Render-driven toaster: callers own the toast array and remove items in onDismiss.",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 973,
+      "line": 963,
       "generic": false,
       "propsType": "ToasterProps",
       "props": [
@@ -5206,7 +5206,7 @@
     {
       "name": "Toggle",
       "source": "packages/core/src/form-controls.ts",
-      "line": 280,
+      "line": 295,
       "generic": false,
       "propsType": "ToggleProps",
       "props": [
@@ -5262,7 +5262,7 @@
     {
       "name": "ToggleGroup",
       "source": "packages/core/src/form-controls.ts",
-      "line": 310,
+      "line": 325,
       "generic": false,
       "propsType": "ToggleGroupProps",
       "props": [
@@ -5312,7 +5312,7 @@
     {
       "name": "Tooltip",
       "source": "packages/core/src/popups.ts",
-      "line": 143,
+      "line": 167,
       "generic": false,
       "propsType": "TooltipProps",
       "props": [
@@ -5444,7 +5444,7 @@
     {
       "name": "Typography",
       "source": "packages/core/src/form-controls.ts",
-      "line": 353,
+      "line": 368,
       "generic": false,
       "propsType": "TypographyProps",
       "props": [
