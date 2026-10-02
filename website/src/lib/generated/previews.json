@@ -496,10 +496,10 @@
     "frameHeight": 720
   },
   "Pressable": {
-    "width": 480,
-    "height": 221,
-    "left": 189,
-    "top": 250,
+    "width": 604,
+    "height": 280,
+    "left": 127,
+    "top": 220,
     "frameWidth": 858,
     "frameHeight": 720
   },
