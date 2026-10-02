@@ -47,11 +47,12 @@ function cargoPackageLicense(source: string): string | undefined {
 
 export async function assertReleasePolicy(root: string, tag?: string): Promise<ReleasePolicyState> {
   const version = assertVersionsSynchronized(await readProductVersions(root));
-  const [rootPackage, corePackage, protocolPackage, reactIconsPackage, cargoToml, licenseText, tsProtocol, rustProtocol, rustBridge, changelog] = await Promise.all([
+  const [rootPackage, corePackage, protocolPackage, reactIconsPackage, headlessPackage, cargoToml, licenseText, tsProtocol, rustProtocol, rustBridge, changelog] = await Promise.all([
     Bun.file(join(root, "package.json")).json() as Promise<{ license?: string }>,
     Bun.file(join(root, "packages/core/package.json")).json() as Promise<{ license?: string; private?: boolean }>,
     Bun.file(join(root, "packages/protocol/package.json")).json() as Promise<{ license?: string; private?: boolean }>,
     Bun.file(join(root, "packages/react-icons/package.json")).json() as Promise<{ license?: string; private?: boolean }>,
+    Bun.file(join(root, "packages/headless/package.json")).json() as Promise<{ license?: string; private?: boolean }>,
     readFile(join(root, "native/Cargo.toml"), "utf8"),
     readFile(join(root, "LICENSE"), "utf8"),
     readFile(join(root, "packages/protocol/src/index.ts"), "utf8"),
@@ -67,8 +68,10 @@ export async function assertReleasePolicy(root: string, tag?: string): Promise<R
       throw new Error(`${name} must remain private and inherit the root Apache-2.0 policy`);
     }
   }
-  if (reactIconsPackage.private === true || reactIconsPackage.license !== rootPackage.license) {
-    throw new Error("@tarve/react-icons must remain publishable and inherit the root Apache-2.0 policy");
+  for (const [name, manifest] of [["@tarve/react-icons", reactIconsPackage], ["@tarve/headless", headlessPackage]] as const) {
+    if (manifest.private === true || manifest.license !== rootPackage.license) {
+      throw new Error(`${name} must remain publishable and inherit the root Apache-2.0 policy`);
+    }
   }
   if (cargoPackageLicense(cargoToml) !== rootPackage.license) {
     throw new Error("native/Cargo.toml must use license = \"Apache-2.0\"");

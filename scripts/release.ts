@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { nativeRelativePath } from "../packages/core/targets";
+import { verifyHeadlessPack } from "../packages/headless/scripts/verify-pack";
 import { assertReleasePolicy } from "./release-policy";
 
 // Builds the npm release tarball from the staged Windows and Linux runtimes and
@@ -36,6 +37,12 @@ await run([bun, "run", "pack"]);
 const iconsName = `tarve-react-icons-${policy.version}.tgz`;
 await run([bun, "pm", "pack", "--ignore-scripts", "--destination", join(root, "dist")], join(root, "packages/react-icons"));
 const icons = join(root, "dist", iconsName);
+// @tarve/headless ships the WebAssembly runtime, built here from the tagged sources.
+await run([bun, "run", "build:wasm"]);
+const headlessName = `tarve-headless-${policy.version}.tgz`;
+await run([bun, "pm", "pack", "--ignore-scripts", "--destination", join(root, "dist")], join(root, "packages/headless"));
+const headless = join(root, "dist", headlessName);
+await verifyHeadlessPack(headless);
 
 const library = fromRoot(windowsNativeRelative);
 const linuxLibrary = fromRoot(linuxNativeRelative);
@@ -78,6 +85,7 @@ try {
       { file: linuxNativeRelative, sha256: await sha256(linuxLibrary) },
       { file: tarballName, sha256: await sha256(tarball) },
       { file: iconsName, sha256: await sha256(icons) },
+      { file: headlessName, sha256: await sha256(headless) },
     ],
   };
   await writeFile(join(root, "dist/release-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);

@@ -89,6 +89,12 @@ jobs:
           shared-key: windows-x64
           save-if: false
 
+      # @tarve/headless ships the WebAssembly runtime built from the tagged sources.
+      - name: Add the WebAssembly target and wasm-bindgen
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo install wasm-bindgen-cli --version 0.2.129 --locked
+
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
 
@@ -151,6 +157,7 @@ jobs:
           path: |
             dist/tarve-core-*.tgz
             dist/tarve-react-icons-*.tgz
+            dist/tarve-headless-*.tgz
             dist/release-manifest.json
             native/win32-x64/tarve_native.dll
             native/win32-x64/runtime.json
@@ -168,6 +175,7 @@ jobs:
             "release", "create", "$env:GITHUB_REF_NAME",
             $tarball,
             (Get-ChildItem -LiteralPath dist -Filter "tarve-react-icons-*.tgz" -File | Select-Object -First 1).FullName,
+            (Get-ChildItem -LiteralPath dist -Filter "tarve-headless-*.tgz" -File | Select-Object -First 1).FullName,
             "dist/release-manifest.json",
             "native/win32-x64/tarve_native.dll",
             "native/linux-x64/libtarve_native.so",
@@ -215,8 +223,8 @@ jobs:
           version="${TAG#v}"
           dist_tag=latest
           case "${version}" in *-*) dist_tag=next ;; esac
-          # @tarve/core first: @tarve/react-icons declares it as a peer.
-          for pair in "@tarve/core:tarve-core" "@tarve/react-icons:tarve-react-icons"; do
+          # @tarve/core first: @tarve/react-icons and @tarve/headless declare it as a peer.
+          for pair in "@tarve/core:tarve-core" "@tarve/react-icons:tarve-react-icons" "@tarve/headless:tarve-headless"; do
             name="${pair%%:*}"
             tarball="release/dist/${pair#*:}-${version}.tgz"
             if [ ! -f "${tarball}" ]; then
