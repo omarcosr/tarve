@@ -4,14 +4,17 @@
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 mod accessibility;
+#[cfg(not(target_arch = "wasm32"))]
 mod bridge;
 mod controls;
 #[cfg(target_os = "windows")]
 mod d3d11;
 mod paint;
 mod protocol;
+#[cfg(not(target_arch = "wasm32"))]
 mod renderer;
 mod rich;
+#[cfg(not(target_arch = "wasm32"))]
 mod runtime;
 mod shadow;
 mod svg;
@@ -20,6 +23,9 @@ mod syntax;
 mod tests;
 mod text;
 mod tree;
+// Browser build: the same tree, layout, text and CPU paint, driven from JavaScript.
+#[cfg(target_arch = "wasm32")]
+mod web;
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]

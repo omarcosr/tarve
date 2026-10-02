@@ -645,10 +645,58 @@ fn diff_content_inset(node: &Node, max_line_number: u32) -> f64 {
         + DIFF_MARKER_WIDTH
 }
 
+/// Fonts for the browser build. There is no system font database on wasm32, so the
+/// page registers font files before creating a tree; every `TextEngine` sees them.
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod web_fonts {
+    use parley::fontique::{Blob, FamilyId, GenericFamily};
+    use std::sync::{Arc, Mutex};
+
+    static FONTS: Mutex<Vec<(Blob<u8>, Vec<GenericFamily>)>> = Mutex::new(Vec::new());
+
+    pub(crate) fn register(bytes: Vec<u8>, generics: Vec<GenericFamily>) {
+        FONTS
+            .lock()
+            .unwrap()
+            .push((Blob::new(Arc::new(bytes)), generics));
+    }
+
+    pub(crate) fn context() -> parley::FontContext {
+        let mut fonts = parley::FontContext::new();
+        let mut generic_families: Vec<(GenericFamily, Vec<FamilyId>)> = Vec::new();
+        for (blob, generics) in FONTS.lock().unwrap().iter() {
+            let families: Vec<FamilyId> = fonts
+                .collection
+                .register_fonts(blob.clone(), None)
+                .into_iter()
+                .map(|(family, _)| family)
+                .collect();
+            for generic in generics {
+                match generic_families
+                    .iter_mut()
+                    .find(|(known, _)| known == generic)
+                {
+                    Some((_, ids)) => ids.extend(families.iter().copied()),
+                    None => generic_families.push((*generic, families.clone())),
+                }
+            }
+        }
+        for (generic, ids) in generic_families {
+            fonts
+                .collection
+                .set_generic_families(generic, ids.into_iter());
+        }
+        fonts
+    }
+}
+
 impl TextEngine {
     pub fn new() -> Self {
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
             fonts: FontContext::new(),
+            #[cfg(target_arch = "wasm32")]
+            fonts: web_fonts::context(),
             context: LayoutContext::new(),
             layouts: HashMap::default(),
             markdown_lines: HashMap::default(),
