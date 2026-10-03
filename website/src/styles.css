@@ -301,7 +301,7 @@ h3 {
   gap: 8px;
   height: 44px;
   padding: 0 20px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--screen-border);
   font: 500 15px var(--sans);
   text-decoration: none;
   cursor: pointer;
@@ -346,7 +346,7 @@ h3 {
   gap: 12px;
   height: 44px;
   padding: 0 16px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--screen-border);
   background: var(--paper);
   color: var(--ink);
   font: 15px var(--mono);
@@ -548,7 +548,7 @@ h3 {
   gap: 32px 64px;
   margin-top: 48px;
   padding-top: 24px;
-  border-top: 1px solid var(--ink);
+  border-top: 1px solid var(--screen-border);
 }
 
 .lead {
@@ -563,7 +563,7 @@ h3 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 570px;
   gap: 0;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--screen-border);
 }
 
 .specimen-code .code {
@@ -576,7 +576,7 @@ h3 {
   display: flex;
   flex-direction: column;
   margin: 0;
-  border-left: 1px solid var(--ink);
+  border-left: 1px solid var(--screen-border);
   background: var(--paper);
 }
 
@@ -699,7 +699,7 @@ h3 {
   align-items: baseline;
   padding-top: 14px;
   margin-bottom: 40px;
-  border-top: 1px solid var(--ink);
+  border-top: 1px solid var(--screen-border);
 }
 
 .sec {
@@ -731,7 +731,7 @@ h3 {
   align-items: start;
   margin-top: 96px;
   padding-top: 14px;
-  border-top: 1px solid var(--ink);
+  border-top: 1px solid var(--screen-border);
 }
 
 .sheet-split .sheet-head {
@@ -796,8 +796,8 @@ h3 {
   margin: 0;
   padding: 0;
   list-style: none;
-  border-top: 1px solid var(--ink);
-  border-bottom: 1px solid var(--ink);
+  border-top: 1px solid var(--screen-border);
+  border-bottom: 1px solid var(--screen-border);
 }
 
 .stages li {
@@ -816,8 +816,8 @@ h3 {
   left: -5px;
   width: 9px;
   height: 9px;
-  border-top: 1px solid var(--ink);
-  border-right: 1px solid var(--ink);
+  border-top: 1px solid var(--screen-border);
+  border-right: 1px solid var(--screen-border);
   background: var(--paper);
   transform: rotate(45deg);
 }
@@ -895,7 +895,7 @@ h3 {
   justify-content: space-between;
   padding-bottom: 6px;
   margin-bottom: 6px;
-  border-bottom: 1px solid var(--ink);
+  border-bottom: 1px solid var(--screen-border);
   font-size: 16px;
   font-stretch: 85%;
   text-transform: uppercase;
@@ -948,7 +948,7 @@ h3 {
   max-width: var(--page);
   margin: 128px auto 0;
   padding: 20px var(--gutter) 40px;
-  border-top: 1px solid var(--ink);
+  border-top: 1px solid var(--screen-border);
   font-size: 13px;
   color: var(--muted);
 }
@@ -1087,7 +1087,7 @@ h3 {
 
 .seg {
   display: flex;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--screen-border);
   width: fit-content;
 }
 
@@ -1102,7 +1102,7 @@ h3 {
 }
 
 .seg button + button {
-  border-left: 1px solid var(--ink);
+  border-left: 1px solid var(--screen-border);
 }
 
 .seg button.active {
@@ -1154,7 +1154,7 @@ h3 {
 
 .chain-card {
   padding: 20px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--screen-border);
 }
 
 .chain {
@@ -1187,7 +1187,7 @@ h3 {
 }
 
 .chain-active {
-  border-color: var(--ink);
+  border-color: var(--screen-border);
   background: var(--ink);
   color: var(--paper);
 }
@@ -1232,7 +1232,7 @@ h3 {
   margin-top: 16px;
   height: 34px;
   padding: 0 14px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--screen-border);
   background: transparent;
   color: var(--ink);
   font: 500 13px var(--sans);
@@ -1279,7 +1279,7 @@ h3 {
   width: 100%;
   height: 38px;
   padding: 0 34px 0 12px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--screen-border);
   border-radius: 0;
   background: var(--paper);
   color: var(--ink);
@@ -1318,7 +1318,7 @@ h3 {
   justify-content: space-between;
   height: 38px;
   padding: 0 12px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--screen-border);
   background: transparent;
   color: var(--ink);
   font: 500 14px var(--sans);
@@ -1458,7 +1458,7 @@ h3 {
 }
 
 .doc-source:hover {
-  border-color: var(--ink);
+  border-color: var(--screen-border);
   color: var(--ink);
 }
 
@@ -1469,7 +1469,7 @@ h3 {
 .doc-section > h2 {
   margin-bottom: 18px;
   padding-top: 12px;
-  border-top: 1px solid var(--ink);
+  border-top: 1px solid var(--screen-border);
   font-size: 28px;
   font-weight: 800;
   font-stretch: 78%;
@@ -1742,7 +1742,7 @@ h3 {
 .playground-reset {
   flex: none;
   padding: 3px 10px;
-  border: 1px solid var(--ink);
+  border: 1px solid var(--screen-border);
   background: transparent;
   color: var(--ink);
   font: 500 12px var(--mono);
@@ -1813,7 +1813,7 @@ h3 {
   gap: 16px;
   margin-top: 72px;
   padding-top: 16px;
-  border-top: 1px solid var(--ink);
+  border-top: 1px solid var(--screen-border);
 }
 
 .doc-pager-link {
@@ -1851,7 +1851,7 @@ h3 {
 
 .props-wrap {
   overflow-x: auto;
-  border-top: 1px solid var(--ink);
+  border-top: 1px solid var(--screen-border);
 }
 
 .props {
@@ -1970,7 +1970,7 @@ h3 {
 
   .live {
     border-left: 0;
-    border-top: 1px solid var(--ink);
+    border-top: 1px solid var(--screen-border);
   }
 
   .stages {
