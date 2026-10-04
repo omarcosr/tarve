@@ -21,6 +21,8 @@ const allSteps = [
   "smoke:steady-frames",
   "smoke:devtools",
   "smoke:tray",
+  "smoke:studio",
+  "test:css-layout",
   ...(process.platform === "win32" && process.arch === "x64" ? ["smoke:accessibility"] : []),
   "pack",
   "smoke:package",

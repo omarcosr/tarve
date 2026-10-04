@@ -4,7 +4,6 @@ import {
   Code,
   Column,
   DataGrid,
-  Diff,
   Dialog,
   DropdownMenu,
   Input,
@@ -29,6 +28,7 @@ import {
   type DataGridKey,
   type DataGridSort,
 } from "@tarve/core";
+import { ComponentPreview, previewSources } from "./studio-previews";
 
 // "Tarve Studio": the application shown in the launch film, built with real
 // Tarve components. Search filters the DataGrid, "New" opens a DropdownMenu,
@@ -58,19 +58,7 @@ export const componentRows: ComponentRow[] = [
 const FRAME_MS = 1000 / 120;
 const nativeKinds = new Set<ComponentRow["kind"]>(["rich", "data"]);
 
-export const appSource = `import { Window, Row, DataGrid, Markdown } from "@tarve/core";
-
-export function Studio() {
-  return (
-    <Window title="Tarve Studio" width={1280}>
-      <Row flex={1} gap={12}>
-        <Sidebar items={routes} />
-        <DataGrid rows={metrics} virtual />
-        <Markdown source={notes} />
-      </Row>
-    </Window>
-  );
-}`;
+export const appSource = previewSources.Studio!;
 
 export const readme = `# Tarve
 
@@ -88,21 +76,6 @@ const app = createApp(App);
 
 > Retained. Incremental. Native.`;
 
-// Hunk header counts must match the body exactly.
-export const renderPatch = [
-  "diff --git a/native/src/render.rs b/native/src/render.rs",
-  "--- a/native/src/render.rs",
-  "+++ b/native/src/render.rs",
-  "@@ -41,4 +41,6 @@ impl Surface",
-  " fn present(&mut self, scene: &Scene) -> Result<()> {",
-  "-    self.renderer.render(scene)?;",
-  "+    let frame = self.swapchain.acquire()?;",
-  "+    self.renderer.render_to(scene, &frame)?;",
-  "+    frame.present(Present::Immediate);",
-  "     Ok(())",
-  " }",
-  "",
-].join("\n");
 
 type BuildState =
   | { phase: "idle" }
@@ -128,18 +101,19 @@ let dark = true;
 let openedFile: { name: string; path: string; text: string } | undefined;
 
 let refresh = () => {};
-let buildExecutable: () => Promise<string> = async () => {
-  throw new Error("No build handler connected.");
-};
+export type StudioBuild =
+  | { runtime: "bun" | "node"; command: string; run: () => Promise<string> }
+  | { unavailable: string };
+let studioBuild: StudioBuild = { unavailable: "No build handler connected." };
 let pickFile: () => Promise<{ name: string; path: string; text: string } | undefined> = async () => undefined;
 
 export function connectStudio(options: {
   refresh: () => void;
-  build: () => Promise<string>;
+  build: StudioBuild;
   openFile: () => Promise<{ name: string; path: string; text: string } | undefined>;
 }) {
   refresh = options.refresh;
-  buildExecutable = options.build;
+  studioBuild = options.build;
   pickFile = options.openFile;
 }
 
@@ -159,12 +133,13 @@ async function openFile() {
 }
 
 async function runBuild() {
+  if ("unavailable" in studioBuild) return;
   buildState = { phase: "building" };
-  status = "Compiling studio.tsx…";
+  status = `Compiling studio.tsx with ${studioBuild.runtime === "bun" ? "Bun" : "Node.js"}…`;
   refresh();
   const started = performance.now();
   try {
-    const path = await buildExecutable();
+    const path = await studioBuild.run();
     const seconds = (performance.now() - started) / 1000;
     buildState = { phase: "done", path, seconds };
     status = `Built ${path} in ${seconds.toFixed(1)}s`;
@@ -296,6 +271,10 @@ function Toolbar() {
 }
 
 function Documents() {
+  const name = selected[0] === undefined ? undefined : String(selected[0]);
+  const sample = name ? previewSources[name] : undefined;
+  const codeName = openedFile?.name ?? (sample ? `${name}.tsx` : "app.tsx");
+  const codeText = openedFile?.text ?? sample ?? appSource;
   return (
     <Tabs
       id="studio-documents"
@@ -304,18 +283,13 @@ function Documents() {
       items={[
         {
           value: "code",
-          label: openedFile?.name ?? "app.tsx",
-          content: <Code id="studio-code" code={openedFile?.text ?? appSource} path={openedFile?.path ?? "app.tsx"} showLineNumbers style={{ width: "100%", padding: 14, background: c.muted, radius: 8 }} />,
+          label: codeName,
+          content: <Code id="studio-code" code={codeText} path={openedFile?.path ?? codeName} showLineNumbers style={{ width: "100%", padding: 14, background: c.muted, radius: 8 }} />,
         },
         {
           value: "readme",
           label: "README.md",
           content: <Markdown id="studio-readme" source={readme} style={{ width: "100%", padding: 14 }} />,
-        },
-        {
-          value: "diff",
-          label: "render.rs",
-          content: <Diff id="studio-diff" source={renderPatch} wordDiff style={{ width: "100%", padding: 8, fontSize: 12 }} />,
         },
       ]}
       style={{ width: "100%" }}
@@ -323,9 +297,107 @@ function Documents() {
   );
 }
 
+const sections: Record<string, { title: string; summary: string }> = {
+  overview: { title: "Overview", summary: "What this window is built from." },
+  components: { title: "Components", summary: "Pick a row to try a live instance of the component." },
+  layout: { title: "Layout", summary: "Flexbox and grid by Taffy, measured natively." },
+  renderer: { title: "Renderer", summary: "How the window is drawn." },
+  profiler: { title: "Profiler", summary: "Layout cost per component, as a share of a 120 Hz frame." },
+  accessibility: { title: "Accessibility", summary: "Every control is exposed to screen readers through AccessKit." },
+  settings: { title: "Settings", summary: "Studio preferences." },
+};
+
+function Card({ title, children }: { title: string; children: Child }) {
+  return (
+    <Column gap={8} padding={14} style={{ width: "100%", background: c.card, radius: 8, borderWidth: 1, borderColor: c.border }}>
+      <Text size={13} weight={650}>{title}</Text>
+      {children}
+    </Column>
+  );
+}
+
+function Section() {
+  const info = sections[section] ?? sections.overview!;
+  let body: Child;
+  if (section === "components") {
+    body = <Column gap={14} style={{ width: "100%" }}><Toolbar /><ComponentGrid /><ComponentPreview name={selected[0] === undefined ? undefined : String(selected[0])} /><Separator /><Documents /></Column>;
+  } else if (section === "overview") {
+    body = (
+      <Column gap={12} style={{ width: "100%" }}>
+        <Row gap={12} style={{ width: "100%" }}>
+          <Card title="Components"><Text size={22} weight={700}>{componentRows.length}</Text></Card>
+          <Card title="Native rich content"><Text size={22} weight={700}>{componentRows.filter(row => nativeKinds.has(row.kind)).length}</Text></Card>
+          <Card title="Theme"><Text size={22} weight={700}>{dark ? "Dark" : "Light"}</Text></Card>
+        </Row>
+        <Card title="Get started"><Button id="overview-components" onClick={() => { section = "components"; }}>Browse components</Button></Card>
+        <Documents />
+      </Column>
+    );
+  } else if (section === "layout") {
+    body = (
+      <Card title="Flex row with a growing middle child">
+        <Row gap={8} style={{ width: "100%" }}>
+          <View style={{ width: 80, height: 48, background: c.muted, radius: 6 }} />
+          <View style={{ flex: 1, height: 48, background: c.primary, radius: 6 }} />
+          <View style={{ width: 80, height: 48, background: c.muted, radius: 6 }} />
+        </Row>
+        <Text size={12} color={c.mutedForeground}>Resize the window or drag the inspector splitter: only the middle box changes width.</Text>
+      </Card>
+    );
+  } else if (section === "renderer") {
+    body = (
+      <Card title="Pipeline">
+        <Property name="Layout" value="Taffy (flexbox, grid)" />
+        <Property name="Text" value="Parley + Swash" />
+        <Property name="Windows" value="Direct3D 11, Vello/wgpu fallback, CPU last" />
+        <Property name="Linux" value="Vello/wgpu, CPU fallback" />
+        <Property name="VSync" value={vsync ? "on" : "off"} />
+      </Card>
+    );
+  } else if (section === "profiler") {
+    body = (
+      <Card title="Layout share of a 120 Hz frame">
+        {[...componentRows].sort((a, b) => b.layoutMs - a.layoutMs).map(row => (
+          <Column key={row.name} gap={4} style={{ width: "100%" }}>
+            <Row justify="between" style={{ width: "100%" }}><Text size={12}>{row.name}</Text><Text size={12} color={c.mutedForeground}>{row.layoutMs.toFixed(2)} ms</Text></Row>
+            <Progress label={`${row.name} layout share`} value={row.layoutMs} max={FRAME_MS} />
+          </Column>
+        ))}
+      </Card>
+    );
+  } else if (section === "accessibility") {
+    body = (
+      <Card title="Try it">
+        <Text size={12} color={c.mutedForeground}>Tab moves focus between controls, Enter and Space activate them, arrow keys move inside lists, menus and tabs. Narrator and Orca read the same tree.</Text>
+        <Row gap={8}><Button id="a11y-one">First</Button><Button id="a11y-two" variant="outline">Second</Button><Switch id="a11y-switch" label="A switch" checked={vsync} onCheckedChange={value => { vsync = value; }} /></Row>
+      </Card>
+    );
+  } else {
+    body = (
+      <Card title="Preferences">
+        <Switch id="settings-dark" label="Dark theme" checked={dark} onCheckedChange={value => { dark = value; }} />
+        <Switch id="settings-vsync" label="VSync" checked={vsync} onCheckedChange={value => { vsync = value; }} />
+        <Switch id="settings-sidebar" label="Collapsed sidebar" checked={sidebarCollapsed} onCheckedChange={value => { sidebarCollapsed = value; }} />
+        <Button id="settings-build" variant="outline" onClick={() => { buildState = { phase: "idle" }; dialogOpen = true; }}>Build executable…</Button>
+      </Card>
+    );
+  }
+  return (
+    <Column gap={14} style={{ width: "100%" }}>
+      <Column gap={2}>
+        <Text size={18} weight={700}>{info.title}</Text>
+        <Text size={12} color={c.mutedForeground}>{info.summary}</Text>
+      </Column>
+      {body}
+    </Column>
+  );
+}
+
 function BuildDialog() {
   const building = buildState.phase === "building";
+  const available = !("unavailable" in studioBuild);
   let result: Child = null;
+  if (!available) result = <Text id="build-result" size={12} color={c.mutedForeground}>{(studioBuild as { unavailable: string }).unavailable}</Text>;
   if (buildState.phase === "done") result = <Text id="build-result" size={12} color={c.primary}>Built {buildState.path} in {buildState.seconds.toFixed(1)}s</Text>;
   if (buildState.phase === "failed") result = <Text id="build-result" size={12} color={c.destructive}>{buildState.message}</Text>;
   return (
@@ -334,23 +406,27 @@ function BuildDialog() {
       open={dialogOpen}
       onOpenChange={open => { if (!building) dialogOpen = open; }}
       title="Build native executable?"
-      description="Compile studio.tsx into a standalone native executable with tarve/build."
+      description={available
+        ? `Compile studio.tsx into a standalone executable with ${(studioBuild as { runtime: string }).runtime === "bun" ? "Bun" : "Node.js"} through @tarve/core/build.`
+        : "Building needs the Studio source and a bundler."}
       width={460}
       footer={
         <Row gap={8} justify="end">
           <Button id="build-cancel" variant="outline" disabled={building} onClick={() => { dialogOpen = false; }}>
             {buildState.phase === "done" ? "Close" : "Cancel"}
           </Button>
-          <Button id="build-confirm" disabled={building} onClick={() => { void runBuild(); }}>
+          <Button id="build-confirm" disabled={building || !available} onClick={() => { void runBuild(); }}>
             {building ? "Building…" : buildState.phase === "done" ? "Rebuild" : "Build"}
           </Button>
         </Row>
       }
     >
       <Column gap={10} style={{ width: "100%" }}>
-        <View style={{ width: "100%", padding: 10, background: c.muted, radius: 6 }}>
-          <Text size={13}>$ tarve build studio.tsx --outfile dist/Studio</Text>
-        </View>
+        {available
+          ? <View style={{ width: "100%", padding: 10, background: c.muted, radius: 6 }}>
+              <Text size={13}>$ {(studioBuild as { command: string }).command}</Text>
+          </View>
+          : null}
         {result}
       </Column>
     </Dialog>
@@ -393,10 +469,7 @@ export function App() {
           first={
             <Scroll id="studio-main" flex={1} style={{ width: "100%", height: "100%" }}>
               <Column gap={14} padding={18} style={{ width: "100%" }}>
-                <Toolbar />
-                <ComponentGrid />
-                <Separator />
-                <Documents />
+                <Section />
               </Column>
             </Scroll>
           }
