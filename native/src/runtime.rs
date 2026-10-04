@@ -348,6 +348,172 @@ fn configure_custom_window_chrome(
     Ok(())
 }
 
+/// Logical client size of the window, owned by the event-loop thread: set from
+/// resizes, frozen while the user moves the window so DPI changes on the way
+/// can't feed back into it.
+#[derive(Default)]
+struct WindowLogicalSize {
+    size: std::cell::Cell<Option<(f64, f64)>>,
+    moving: std::cell::Cell<bool>,
+}
+
+thread_local! {
+    static WINDOW_LOGICAL_SIZE: WindowLogicalSize = WindowLogicalSize::default();
+}
+
+/// Tracks the user's move loop so DPI changes during a drag between monitors
+/// keep the logical size frozen. Windows otherwise delivers resizes scaled for
+/// the monitor being left; feeding them back made the window grow by the DPI
+/// ratio on every crossing.
+#[cfg(target_os = "windows")]
+fn install_dpi_scaled_size(window: &Window) {
+    use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
+    use windows_sys::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForWindow};
+    use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetMenu, GetWindowLongPtrW, GetWindowRect,
+        WM_EXITSIZEMOVE, WM_MOVING,
+    };
+
+    const WM_GETDPISCALEDSIZE: u32 = 0x02E4;
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    unsafe extern "system" fn proc(
+        hwnd: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+        _: usize,
+        _: usize,
+    ) -> LRESULT {
+        match message {
+            WM_MOVING => WINDOW_LOGICAL_SIZE.with(|state| state.moving.set(true)),
+            WM_EXITSIZEMOVE => WINDOW_LOGICAL_SIZE.with(|state| state.moving.set(false)),
+            // Scale the client area exactly by the DPI ratio; Windows' default
+            // scales the outer rect, which drifts with the frame and compounds.
+            WM_GETDPISCALEDSIZE => {
+                let new_dpi = wparam as u32;
+                let old_dpi = unsafe { GetDpiForWindow(hwnd) };
+                let mut client = RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
+                let mut outer = RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
+                if old_dpi != 0
+                    && new_dpi != 0
+                    && unsafe { GetClientRect(hwnd, &mut client) } != 0
+                    && unsafe { GetWindowRect(hwnd, &mut outer) } != 0
+                {
+                    let scale = |value: i32| {
+                        (value as f64 * new_dpi as f64 / old_dpi as f64).round() as i32
+                    };
+                    let mut rect = RECT {
+                        left: 0,
+                        top: 0,
+                        right: scale(client.right),
+                        bottom: scale(client.bottom),
+                    };
+                    // Frameless windows (custom TitleBar) have no non-client area.
+                    let frameless = outer.right - outer.left == client.right
+                        && outer.bottom - outer.top == client.bottom;
+                    let style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) } as u32;
+                    let ex_style = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+                    let has_menu = !unsafe { GetMenu(hwnd) }.is_null();
+                    if frameless
+                        || unsafe {
+                            AdjustWindowRectExForDpi(
+                                &mut rect,
+                                style,
+                                has_menu as i32,
+                                ex_style,
+                                new_dpi,
+                            )
+                        } != 0
+                    {
+                        let size = lparam as *mut SIZE;
+                        unsafe {
+                            (*size).cx = rect.right - rect.left;
+                            (*size).cy = rect.bottom - rect.top;
+                        }
+                        return 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+        unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+    }
+
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return;
+    };
+    unsafe { SetWindowSubclass(handle.hwnd.get() as HWND, Some(proc), 0x7a1d, 0) };
+}
+
+#[cfg(not(target_os = "windows"))]
+fn install_dpi_scaled_size(_: &Window) {}
+
+/// The DPI scale the window is really at; winit's cached factor lags behind
+/// while Windows moves a window between monitors.
+#[cfg(target_os = "windows")]
+fn window_dpi_scale(window: &Window) -> f64 {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    if let Ok(handle) = window.window_handle()
+        && let RawWindowHandle::Win32(handle) = handle.as_raw()
+    {
+        let dpi = unsafe {
+            windows_sys::Win32::UI::HiDpi::GetDpiForWindow(
+                handle.hwnd.get() as windows_sys::Win32::Foundation::HWND
+            )
+        };
+        if dpi > 0 {
+            return dpi as f64 / 96.0;
+        }
+    }
+    window.scale_factor()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn window_dpi_scale(window: &Window) -> f64 {
+    window.scale_factor()
+}
+
+/// The cursor in physical client coordinates, read from the OS.
+#[cfg(target_os = "windows")]
+fn os_cursor_in_client(window: &Window) -> Option<(f64, f64)> {
+    use windows_sys::Win32::{
+        Foundation::POINT, Graphics::Gdi::ScreenToClient, UI::WindowsAndMessaging::GetCursorPos,
+    };
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let handle = window.window_handle().ok()?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return None;
+    };
+    let mut point = POINT { x: 0, y: 0 };
+    unsafe {
+        if GetCursorPos(&mut point) == 0 || ScreenToClient(handle.hwnd.get() as _, &mut point) == 0
+        {
+            return None;
+        }
+    }
+    Some((point.x as f64, point.y as f64))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn os_cursor_in_client(_: &Window) -> Option<(f64, f64)> {
+    None
+}
+
 #[cfg(not(target_os = "windows"))]
 fn configure_custom_window_chrome(_: &Window, _: &str, _: bool) -> Result<(), String> {
     Ok(())
@@ -1323,6 +1489,23 @@ impl App {
             _ => None,
         }
     }
+    fn sync_pointer_from_os(&mut self) -> Vec<serde_json::Value> {
+        let Some(window) = &self.window else {
+            return vec![];
+        };
+        let Some((x, y)) = os_cursor_in_client(window) else {
+            return vec![];
+        };
+        let scale = window.scale_factor();
+        let (x, y) = (x / scale, y / scale);
+        if self.tree.hovered.is_some()
+            && (self.tree.mouse.0 - x).abs() < 0.5
+            && (self.tree.mouse.1 - y).abs() < 0.5
+        {
+            return vec![];
+        }
+        self.tree.pointer_move(x, y)
+    }
     fn titlebar_pressed(&mut self) {
         let Some(window) = &self.window else {
             return;
@@ -1457,6 +1640,7 @@ impl ApplicationHandler<Command> for App {
                 match Graphics::new(window.clone(), self.document.renderer) {
                     Ok(graphics) => {
                         self.graphics = GraphicsState::Ready(Box::new(graphics));
+                        install_dpi_scaled_size(&window);
                         self.window = Some(window.clone());
                         self.motion_epoch = Instant::now();
                         self.apply_initial_window_position(event_loop, &window, false);
@@ -1826,6 +2010,21 @@ impl ApplicationHandler<Command> for App {
         match event {
             WindowEvent::CloseRequested => self.request_close(event_loop),
             WindowEvent::Resized(size) => {
+                if size.width > 0
+                    && size.height > 0
+                    && let Some(window) = &self.window
+                {
+                    let logical = size.to_logical::<f64>(window_dpi_scale(window));
+                    // While the user moves the window the logical size stays frozen:
+                    // resizes on the way are DPI transitions, not user intent.
+                    // While the user moves the window the logical size stays frozen:
+                    // resizes on the way are DPI transitions, not user intent.
+                    WINDOW_LOGICAL_SIZE.with(|state| {
+                        if !state.moving.get() || state.size.get().is_none() {
+                            state.size.set(Some((logical.width, logical.height)));
+                        }
+                    });
+                }
                 if size.width > 0 && size.height > 0 {
                     let resize_error = if let GraphicsState::Ready(graphics) = &mut self.graphics {
                         graphics.resize(size.width, size.height).err()
@@ -1843,7 +2042,17 @@ impl ApplicationHandler<Command> for App {
                 self.sync_custom_window_chrome_state();
                 accessibility_changed = true;
             }
-            WindowEvent::ScaleFactorChanged { .. } => {
+            WindowEvent::ScaleFactorChanged {
+                scale_factor,
+                mut inner_size_writer,
+            } => {
+                // Keep the window's logical size on the new monitor; recomputing it
+                // from the current physical size would compound a stale resize.
+                if let Some((width, height)) = WINDOW_LOGICAL_SIZE.with(|state| state.size.get()) {
+                    let _ = inner_size_writer.request_inner_size(
+                        LogicalSize::new(width, height).to_physical::<u32>(scale_factor),
+                    );
+                }
                 self.tree.dirty.layout = true;
                 self.tree.dirty.paint = true;
                 accessibility_changed = true;
@@ -1875,7 +2084,11 @@ impl ApplicationHandler<Command> for App {
                 ..
             } => {
                 if state == ElementState::Pressed {
-                    events = self.tree.pointer_down();
+                    // After a window move loop (or a DPI change) Windows may not send a
+                    // move before the next press, leaving hover stale: the press would
+                    // miss the TitleBar and the window could not be dragged again.
+                    events = self.sync_pointer_from_os();
+                    events.extend(self.tree.pointer_down());
                     self.titlebar_pressed();
                 } else {
                     events = self.tree.pointer_up();
