@@ -300,6 +300,8 @@ export function DataGrid<T>({
         ...common,
         style: {
           ...common.style,
+          // Table cells are square: Pressable's default rounding reads as a button.
+          radius: 0,
           background: "#00000000",
           hover: { background: c.muted },
           focus: { outlineWidth: 0, outlineStyle: "none" },
@@ -332,7 +334,7 @@ export function DataGrid<T>({
               ? { role: "option", label: `Row ${entry.sourceIndex + 1}`, selected }
               : { role: "row", label: `Row ${entry.sourceIndex + 1}` },
             onClick: () => { toggleSelection(entry); onRowActivate?.(entry.row, entry.sourceIndex); },
-            style: { width: "100%", height: rowHeight, shrink: 0, direction: "row", background: selected ? c.muted : "#00000000", hover: { background: c.muted }, borderWidth: { bottom: 1 }, borderColor: c.border },
+            style: { width: "100%", height: rowHeight, shrink: 0, direction: "row", radius: 0, background: selected ? c.muted : "#00000000", hover: { background: c.muted }, borderWidth: { bottom: 1 }, borderColor: c.border },
             children: columns.map(column => jsx(View, {
               style: { width: column.width, flex: column.width === undefined ? 1 : undefined, minWidth: 0, height: "100%", padding: { left: 10, right: 10 }, align: column.align ?? "start", justify: "center" },
               children: gridCell(column, entry),
