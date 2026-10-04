@@ -95,7 +95,7 @@ function LaneColumn({ id, title }: { id: Lane; title: string }) {
         borderColor: active ? "#6366f1" : "transparent",
       }}
     >
-      <Row style={{ justify: "space-between" }}>
+      <Row style={{ justify: "between" }}>
         <Text style={{ fontSize: 13, fontWeight: 700, foreground: "#475569" }}>{title}</Text>
         <Text style={{ fontSize: 12, foreground: "#94a3b8" }}>{String(items.length)}</Text>
       </Row>

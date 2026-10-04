@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 49;
+pub const VERSION: u32 = 50;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -365,6 +365,34 @@ pub struct FileDialogOptions {
     pub filters: Vec<FileDialogFilter>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrayOptions {
+    #[serde(default)]
+    pub icon_data: Option<String>,
+    #[serde(default)]
+    pub tooltip: Option<String>,
+    #[serde(default)]
+    pub menu: Vec<TrayMenuItem>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrayMenuItem {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub separator: bool,
+    #[serde(default)]
+    pub checked: Option<bool>,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default)]
+    pub items: Vec<TrayMenuItem>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Command {
@@ -379,6 +407,21 @@ pub enum Command {
     },
     Close,
     CancelCloseRequest,
+    Window {
+        action: String,
+    },
+    Tray {
+        tray: Option<TrayOptions>,
+    },
+    Notify {
+        title: String,
+        #[serde(default)]
+        body: String,
+    },
+    #[serde(skip)]
+    TrayEvent {
+        event: serde_json::Value,
+    },
     FrameOverlay {
         enabled: bool,
     },

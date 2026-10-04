@@ -61,6 +61,9 @@ accesskit = "=0.25.0"
 # AT-SPI over D-Bus (pure Rust zbus); no system libraries required.
 accesskit_winit = { version = "=0.34.0", default-features = false, features = ["rwh_06", "accesskit_unix", "async-io"] }
 rfd = { version = "=0.17.2", default-features = false, features = ["xdg-portal", "pollster"] }
+# System tray (StatusNotifierItem + dbusmenu) and notifications over the same zbus/async-io stack.
+ksni = { version = "=0.3.6", default-features = false, features = ["blocking", "async-io"] }
+notify-rust = { version = "=4.18.1", default-features = false, features = ["z"] }
 
 # Upstream accesskit_windows 0.35.0 does not expose AccessKit Invalid through
 # UIA_IsDataValidForFormPropertyId, so keep the Windows provider patch local.

@@ -19,3 +19,16 @@ test("npm package includes every supported native target directory", async () =>
     expect(files.has(`native/${nativeDirectoryForBuildTarget(target)}`)).toBe(true);
   }
 });
+
+test("npm metadata publishes one tarve CLI and a Node build API", async () => {
+  const metadata = await Bun.file(resolve(import.meta.dirname, "../../package.json")).json() as {
+    exports: Record<string, { default: string }>;
+    bin: Record<string, string>;
+    dependencies: Record<string, string>;
+  };
+  expect(metadata.exports["./build-node"]?.default).toBe("./dist/npm/node-build.js");
+  expect(Object.keys(metadata.bin)).toEqual(["tarve"]);
+  expect(metadata.bin["tarve"]).toBe("./dist/npm/cli.js");
+  expect(metadata.dependencies.esbuild).toBeDefined();
+});
+

@@ -70,6 +70,11 @@ jobs:
         with:
           bun-version: "1.4.2"
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26.10.0"
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -83,7 +88,7 @@ jobs:
           cache-on-failure: true
 
       - name: Install Linux native and virtual display dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev mesa-vulkan-drivers xvfb
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev mesa-vulkan-drivers xvfb dbus python3-dbus python3-gi
 
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
@@ -117,6 +122,18 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Node runtime and hot-reload smoke
+        run: xvfb-run -a -s "-screen 0 1280x800x24" bun test packages/core/node-build.test.ts packages/core/node-dev.test.ts
+
+      # A real StatusNotifierItem + dbusmenu on a private session bus, driven the way
+      # a panel host drives it, with a fake notification server that clicks.
+      - name: Tray and notification smoke
+        env:
+          TARVE_TRAY_ASSUME_SNI: "1"
+          TARVE_SMOKE_NOTIFY: "1"
+        run: |
+          dbus-run-session -- bash -c 'python3 scripts/fake-notification-server.py & sleep 1; xvfb-run -a -s "-screen 0 1280x800x24" bun run smoke:tray'
+
       - name: Upload smoke captures
         if: always()
         uses: actions/upload-artifact@v7
@@ -139,6 +156,11 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26.10.0"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -170,6 +192,9 @@ jobs:
           TARVE_VERIFY_SKIP: pack,smoke:package,smoke:exe
         run: bun run release:check
 
+      - name: Node runtime and hot-reload smoke
+        run: bun test packages/core/node-build.test.ts packages/core/node-dev.test.ts
+
       - name: Upload visual captures
         if: always()
         uses: actions/upload-artifact@v7
@@ -195,6 +220,11 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26.10.0"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -234,6 +264,9 @@ jobs:
 
       - name: Standalone executable smoke
         run: bun run smoke:exe
+
+      - name: Node-only package and executable smoke
+        run: bun scripts/smoke-node-package.ts
 
   # @tarve/headless renders with the WebAssembly build: no window, GPU or native library. Running
   # it on every OS (macOS on ARM included) checks that the stored image snapshots are byte-identical

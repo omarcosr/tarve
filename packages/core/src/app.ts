@@ -1,4 +1,5 @@
-import type { FileDialogOptions, NativeEvent, NativeCommand, NativeNode, Renderer, Snapshot } from "../../protocol/src/index";
+import type { FileDialogOptions, NativeEvent, NativeCommand, NativeNode, NativeTrayMenuItem, Renderer, Snapshot } from "../../protocol/src/index";
+import { readFileSync } from "node:fs";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
 import { compileTree, diffTreeMutations, type CompiledTree, type Handlers } from "./reconciler";
 import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
@@ -38,7 +39,32 @@ export interface AppOptions {
   dev?: boolean;
   /** Show the native frame-time graph. Defaults to TARVE_FRAME_OVERLAY=1. Never schedules frames on its own. */
   frameOverlay?: boolean;
+  /** What the window close button does without an onCloseRequest handler: quit (default) or hide the window, e.g. for tray apps. */
+  closeBehavior?: "exit" | "hide";
 }
+
+export type TrayMenuItem =
+  | { type: "separator" }
+  | { type?: "item"; id: string; label: string; checked?: boolean; disabled?: boolean; onSelect?: () => void; items?: TrayMenuItem[] };
+
+export interface TrayOptions {
+  /** PNG/JPEG/WebP path (also `import icon from "./tray.png" with { type: "file" }` in compiled apps). Defaults to the system application icon. */
+  icon?: string;
+  tooltip?: string;
+  menu?: TrayMenuItem[];
+  onClick?: () => void;
+  onDoubleClick?: () => void;
+  /** Called with the selected item id, after the item's own onSelect. */
+  onMenu?: (id: string) => void;
+}
+
+export interface TrayHandle {
+  /** Merges and re-applies options; the shell icon is modified in place, not recreated. */
+  update(options: Partial<TrayOptions>): void;
+  remove(): void;
+}
+
+export interface NotifyOptions { title: string; body?: string; onClick?: () => void }
 
 const DEV_OVERLAY_SOURCES = new Set<AppErrorSource>(["render", "event-handler", "listener", "hotkey"]);
 const DEV_APP_KEY = Symbol.for("tarve.devApp");
@@ -56,6 +82,13 @@ export interface AppHandle {
   focus(id: string): void;
   scrollToItem(id: string, index: number, offset?: number): void;
   registerHotkey(shortcut: string, handler: HotkeyHandler): () => void;
+  show(): void;
+  hide(): void;
+  minimize(): void;
+  /** Shows a system tray icon (Windows). A second call replaces the first tray. */
+  tray(options: TrayOptions): TrayHandle;
+  /** Shows a system notification from the tray icon; requires an active tray. */
+  notify(options: NotifyOptions): void;
   openFileDialog(options?: FileDialogOptions): Promise<string | undefined>;
   openFilesDialog(options?: FileDialogOptions): Promise<string[]>;
   openFolderDialog(options?: FileDialogOptions): Promise<string | undefined>;
@@ -481,7 +514,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       const targetId = committed.document.root.id;
       const handler = committed.handlers.get(targetId)?.onCloseRequest;
       if (!handler) {
-        if (sendInternal({ type: "close" }, { source: "bridge", event: "closeRequest:close", targetId })) closing = true;
+        if (options.closeBehavior === "hide") {
+          sendInternal({ type: "window", action: "hide" }, { source: "bridge", event: "closeRequest:hide", targetId });
+          sendInternal({ type: "cancelCloseRequest" }, { source: "bridge", event: "cancelCloseRequest", targetId });
+        } else if (sendInternal({ type: "close" }, { source: "bridge", event: "closeRequest:close", targetId })) closing = true;
       } else {
         let defaultPrevented = false;
         const closeRequest = {
@@ -497,6 +533,21 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
           if (sendInternal({ type: "close" }, { source: "bridge", event: "closeRequest:close", targetId })) closing = true;
         }
       }
+    }
+
+    if (!ended && (event.type === "tray" || event.type === "trayMenu" || event.type === "notificationClick")) {
+      const run = (name: string, handler: (() => void) | undefined): boolean => {
+        if (!handler) return false;
+        try { handler(); return true; } catch (error) { reportError(error, { source: "event-handler", event: name }); return false; }
+      };
+      let ran = false;
+      if (event.type === "tray") ran = run(event.action === "click" ? "trayClick" : "trayDoubleClick", event.action === "click" ? trayOptions?.onClick : trayOptions?.onDoubleClick);
+      else if (event.type === "trayMenu") {
+        ran = run("trayMenu", trayItemHandlers.get(event.id));
+        const onMenu = trayOptions?.onMenu;
+        if (onMenu) ran = run("trayMenu", () => onMenu(event.id)) || ran;
+      } else ran = run("notificationClick", notificationClick);
+      if (ran) update();
     }
 
     if (!ended && event.type === "shortcut") {
@@ -617,6 +668,40 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
   }
 
+  let trayOwner: object | undefined;
+  let trayOptions: TrayOptions | undefined;
+  let notificationClick: (() => void) | undefined;
+  let trayIconPath: string | undefined;
+  let trayIconData: string | undefined;
+  let trayIconSent = false;
+  const trayItemHandlers = new Map<string, () => void>();
+
+  function applyTray(): void {
+    if (!trayOptions) return;
+    trayItemHandlers.clear();
+    const seen = new Set<string>();
+    const convert = (items: readonly TrayMenuItem[]): NativeTrayMenuItem[] => items.map(item => {
+      if (item.type === "separator") return { separator: true };
+      if (!item.id) throw new TypeError("tray menu items need an id");
+      if (item.items?.length) return { label: item.label, ...(item.disabled ? { disabled: true } : {}), items: convert(item.items) };
+      if (seen.has(item.id)) throw new TypeError(`duplicate tray menu id "${item.id}"`);
+      seen.add(item.id);
+      if (item.onSelect) trayItemHandlers.set(item.id, item.onSelect);
+      return { id: item.id, label: item.label, ...(item.checked !== undefined ? { checked: item.checked } : {}), ...(item.disabled ? { disabled: true } : {}) };
+    });
+    const menu = convert(trayOptions.menu ?? []);
+    // Read here, not natively: `$bunfs` paths of compiled executables and imported
+    // assets (`import icon from "./tray.png" with { type: "file" }`) only exist in JS.
+    if (trayOptions.icon !== trayIconPath) {
+      trayIconData = trayOptions.icon ? Buffer.from(readFileSync(trayOptions.icon)).toString("base64") : undefined;
+      trayIconPath = trayOptions.icon;
+      trayIconSent = false;
+    }
+    const iconData = trayIconSent ? undefined : trayIconData;
+    trayIconSent = true;
+    if (!ended) sendPublic({ type: "tray", tray: { ...(iconData ? { iconData } : {}), ...(trayOptions.tooltip ? { tooltip: trayOptions.tooltip } : {}), menu } });
+  }
+
   function onNativeEvent(event: NativeEvent): void {
     try {
       dispatchNativeEvent(event);
@@ -650,6 +735,43 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (!Number.isInteger(index) || index < 0) throw new RangeError("scrollToItem index must be a nonnegative integer");
       if (!Number.isFinite(offset)) throw new RangeError("scrollToItem offset must be finite");
       if (!ended) sendPublic({ type: "scrollToItem", id, index, ...(offset !== 0 ? { offset } : {}) });
+    },
+    show(): void {
+      if (!ended) sendPublic({ type: "window", action: "show" });
+    },
+    hide(): void {
+      if (!ended) sendPublic({ type: "window", action: "hide" });
+    },
+    minimize(): void {
+      if (!ended) sendPublic({ type: "window", action: "minimize" });
+    },
+    tray(initial: TrayOptions): TrayHandle {
+      const token = {};
+      trayOwner = token;
+      trayOptions = { ...initial };
+      trayIconSent = false;
+      applyTray();
+      return {
+        update(next: Partial<TrayOptions>): void {
+          if (trayOwner !== token) return;
+          trayOptions = { ...trayOptions, ...next };
+          applyTray();
+        },
+        remove(): void {
+          if (trayOwner !== token) return;
+          trayOwner = undefined;
+          trayOptions = undefined;
+          trayIconPath = undefined;
+          trayIconData = undefined;
+          trayItemHandlers.clear();
+          if (!ended) sendPublic({ type: "tray", tray: null });
+        },
+      };
+    },
+    notify({ title, body = "", onClick }: NotifyOptions): void {
+      if (!title) throw new TypeError("notify requires a title");
+      notificationClick = onClick;
+      if (!ended) sendPublic({ type: "notify", title, body });
     },
     registerHotkey(shortcut: string, handler: HotkeyHandler): () => void {
       const canonical = normalizeHotkey(shortcut);
@@ -767,7 +889,7 @@ export async function render(view: () => VNode, options?: AppOptions): Promise<v
       // `bun --hot` reload re-evaluating the entry) remounts into the open window.
       // Bun defers hot reloads while a top-level await is pending, so under --hot
       // render() resolves once the window is ready and the process exits on close.
-      const hot = process.execArgv.includes("--hot");
+      const hot = process.execArgv.includes("--hot") || process.env.TARVE_HOT === "1";
       const registry = globalThis as { [DEV_APP_KEY]?: AppHandle };
       const existing = registry[DEV_APP_KEY];
       if (existing) {

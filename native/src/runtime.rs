@@ -431,6 +431,7 @@ pub fn run(
         close_request_pending: false,
         #[cfg(any(target_os = "windows", target_os = "linux"))]
         event_proxy,
+        tray: None,
         #[cfg(any(target_os = "windows", target_os = "linux"))]
         accessibility: None,
     };
@@ -465,6 +466,7 @@ struct App {
     close_request_pending: bool,
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     event_proxy: EventLoopProxy<Command>,
+    tray: Option<crate::tray::Tray>,
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     accessibility: Option<AccessibilityBridge>,
 }
@@ -1527,6 +1529,53 @@ impl ApplicationHandler<Command> for App {
             }
             Command::Close => event_loop.exit(),
             Command::CancelCloseRequest => self.close_request_pending = false,
+            Command::Window { action } => {
+                if let Some(window) = &self.window {
+                    match action.as_str() {
+                        "show" => {
+                            window.set_visible(true);
+                            window.set_minimized(false);
+                            window.focus_window();
+                            window.request_redraw();
+                        }
+                        "hide" => window.set_visible(false),
+                        "minimize" => window.set_minimized(true),
+                        "focus" => window.focus_window(),
+                        other => self.events.push(error(format!("unknown window action {other}"))),
+                    }
+                }
+            }
+            Command::Tray { tray } => {
+                let proxy = self.event_proxy.clone();
+                let result = self
+                    .tray
+                    .get_or_insert_with(|| crate::tray::Tray::new(proxy))
+                    .apply(tray);
+                if let Err(message) = result {
+                    self.events.push(error(message));
+                }
+            }
+            Command::Notify { title, body } => {
+                let result = match self.tray.as_mut() {
+                    Some(tray) => tray.notify(&title, &body),
+                    None => Err("notifications need an active tray icon (call app.tray first)".into()),
+                };
+                if let Err(message) = result {
+                    self.events.push(error(message));
+                }
+            }
+            Command::TrayEvent { event } => {
+                if event["type"] == "trayRecreate" {
+                    #[cfg(target_os = "windows")]
+                    if let Some(tray) = self.tray.as_mut()
+                        && let Err(message) = tray.publish(true)
+                    {
+                        self.events.push(error(message));
+                    }
+                } else {
+                    self.events.push(event);
+                }
+            }
             Command::FrameOverlay { enabled } => {
                 if self.tree.set_frame_overlay(enabled) {
                     self.redraw();

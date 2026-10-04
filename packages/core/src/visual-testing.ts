@@ -1,4 +1,5 @@
 import { inflateSync } from "node:zlib";
+import { readFile } from "node:fs/promises";
 
 export interface RgbaImage {
   width: number;
@@ -36,7 +37,7 @@ function validateRgbaImage(image: RgbaImage, label: string): void {
 
 /** Decode Tarve's 8-bit RGBA PNG captures without an external image dependency. */
 export async function readPngRgba(path: string): Promise<RgbaImage> {
-  const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
+  const bytes = await readFile(path);
   const signature = [137, 80, 78, 71, 13, 10, 26, 10];
   if (!signature.every((value, index) => bytes[index] === value)) throw new Error(`Not a PNG capture: ${path}`);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);

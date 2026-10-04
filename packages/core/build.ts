@@ -22,6 +22,9 @@ export interface BuildOptions {
   target?: BuildTarget;
   /** Override for building the repository against a freshly compiled release library. */
   nativeLibrary?: string;
+  runtime?: "bun" | "node";
+  /** Node.js binary for the target OS; required for cross-compiling a Node SEA. */
+  targetExecutable?: string;
 }
 
 function resolveNativeLibrary(target: BuildTarget, override?: string): string {
@@ -52,6 +55,10 @@ function resolveNativeLibrary(target: BuildTarget, override?: string): string {
 
 /** Compile an ordinary Tarve app. No production entrypoint or app-side bridge setup is needed. */
 export async function build(options: BuildOptions): Promise<string> {
+  if (options.runtime === "node") {
+    const { buildNode } = await import("./node-build");
+    return buildNode(options);
+  }
   const target = options.target ?? hostBuildTarget();
   if (!target) throw new Error(`Tarve executable distribution is not supported for ${process.platform}-${process.arch}. Pass an explicit supported target when cross-compiling.`);
   if (!isBuildTarget(target)) throw new TypeError(`Unsupported Tarve build target: ${String(target)}. Expected ${BUILD_TARGETS.join(" or ")}.`);

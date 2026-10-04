@@ -75,32 +75,37 @@ await app.ready;
 await app.closed;
 ```
 
-Run the source directly with Bun:
+Run it with the `tarve` CLI, under Bun or Node.js 26.10+ — the same commands work with either:
 
 ```powershell
-bun app.tsx
+bunx tarve run app.tsx      # Bun
+npx tarve run app.tsx       # Node.js
+bunx tarve dev app.tsx      # hot reload into the same window (npx tarve dev on Node)
 ```
+
+`tarve` uses the runtime that launched it: `bunx`/`bun run` pick Bun, `npx`/`npm run` pick Node (Bun, as before, when Node is older than 26.10). `--runtime bun|node` overrides it. With Bun you can still run the source directly with `bun app.tsx`.
 
 ## Build a standalone executable
 
 The package CLI compiles a Tarve application into a standalone executable and embeds the native runtime. Windows produces a `.exe`; Linux produces an ELF executable with no required extension. The target defaults to the current host. Published Tarve packages contain both Windows x64 and Linux x64 native runtimes, so `--target` can switch between those targets without rebuilding Tarve's Rust runtime.
 
 ```powershell
-bun run tarve build app.tsx --outfile dist/App.exe
+bunx tarve build app.tsx --outfile dist/App.exe   # Bun executable
+npx tarve build app.tsx --outfile dist/App.exe    # Node.js executable
 ```
 
 ```bash
-bun run tarve build app.tsx --outfile dist/App
+bunx tarve build app.tsx --outfile dist/App
 ```
 
 Cross-compile explicitly from either Windows x64 or Linux x64:
 
 ```bash
-bun run tarve build app.tsx --target windows-x64 --outfile dist/App.exe
-bun run tarve build app.tsx --target linux-x64 --outfile dist/App
+bunx tarve build app.tsx --target windows-x64 --outfile dist/App.exe
+npx tarve build app.tsx --target linux-x64 --outfile dist/App
 ```
 
-The published package already contains both runtimes, so `tarve build` needs no Rust toolchain.
+The published package already contains both runtimes, so `tarve build` needs no Rust toolchain. Both runtimes produce a GUI executable (no console window on Windows) named and versioned after the app (`--name`, `--version`).
 
 The build API is also exported:
 
@@ -114,6 +119,20 @@ await build({
   name: "My App"
 });
 ```
+
+## Node.js runtime
+
+The same TSX components, desktop APIs, renderer modes and native bridge run on Node.js 26.10+ with the same `tarve run|dev|build` commands; a Node-only project needs neither Bun nor Rust:
+
+```powershell
+npm install @tarve/core
+npx tarve dev app.tsx
+npx tarve build app.tsx --outfile dist/App.exe
+```
+
+`dev` rebuilds TSX and remounts into the same native window when the entry uses `await render(App)`, as with Bun's hot mode. Node builds compile TSX with esbuild and embed the app and native library in a Node.js single-executable application. Node's FFI and single-executable APIs are experimental in Node 26.
+
+The shared build API also accepts `build({ entrypoint: "app.tsx", runtime: "node" })` from `@tarve/core/build`, and Node-only tooling can call `buildNode` from `@tarve/core/build-node`. Cross-compiling works as with Bun: `npx tarve build app.tsx --target linux-x64 --outfile dist/App`. The first build for a target downloads the official Node.js binary of the same version as the Node running the build from nodejs.org (or `NODEJS_ORG_MIRROR`), checks it against the release `SHASUMS256.txt` and caches it (`TARVE_CACHE_DIR`, by default `%LOCALAPPDATA%\tarve\cache` or `~/.cache/tarve`). Offline or with a custom Node build, pass it with `--target-executable path/to/node`; it must be the same Node.js version. As with Bun, the packaged native runtime for that target must match the current protocol.
 
 ## Renderers
 

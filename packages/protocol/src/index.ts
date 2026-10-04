@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 49;
+export const PROTOCOL_VERSION = 50;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
@@ -222,12 +222,20 @@ export interface FileDialogOptions {
   filters?: FileDialogFilter[];
 }
 export type FileDialogMode = "openFile" | "openFiles" | "openFolder" | "saveFile";
+export type WindowAction = "show" | "hide" | "minimize" | "focus";
+export interface NativeTrayMenuItem {
+  id?: string; label?: string; separator?: boolean; checked?: boolean; disabled?: boolean; items?: NativeTrayMenuItem[];
+}
+export interface NativeTrayOptions { /** Base64 PNG/JPEG/WebP bytes. */ iconData?: string; tooltip?: string; menu: NativeTrayMenuItem[] }
 export type NativeCommand =
   | { type: "patch"; nodes: NativeNode[] }
   | { type: "mutate"; mutations: TreeMutation[] }
   | { type: "update"; root: NativeNode }
   | { type: "close" }
   | { type: "cancelCloseRequest" }
+  | { type: "window"; action: WindowAction }
+  | { type: "tray"; tray: NativeTrayOptions | null }
+  | { type: "notify"; title: string; body: string }
   | { type: "frameOverlay"; enabled: boolean }
   | { type: "focus"; id: string }
   | { type: "scrollToItem"; id: string; index: number; offset?: number }
@@ -256,6 +264,9 @@ export interface Snapshot {
 export type NativeEvent =
   | { type: "ready" | "closed" }
   | { type: "closeRequest" }
+  | { type: "tray"; action: "click" | "doubleClick" }
+  | { type: "trayMenu"; id: string }
+  | { type: "notificationClick" }
   | { type: "escape" }
   | { type: "click"; id: string }
   | { type: "context"; id: string; x: number; y: number }

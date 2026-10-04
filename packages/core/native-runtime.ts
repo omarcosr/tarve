@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, glob } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { NATIVE_ABI_VERSION, PROTOCOL_VERSION } from "../protocol/src/index";
 import { targetConfig, type BuildTarget } from "./targets";
@@ -35,7 +35,7 @@ async function addGlobFiles(
 ): Promise<void> {
   const directory = join(root, "native", prefix);
   if (!existsSync(directory)) return;
-  for await (const relative of new Bun.Glob(pattern).scan({ cwd: directory, onlyFiles: true })) {
+  for await (const relative of glob(pattern, { cwd: directory })) {
     files.push(join(prefix, relative).replaceAll("\\", "/"));
   }
 }

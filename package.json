@@ -26,6 +26,10 @@
       "types": "./dist/types/core/build.d.ts",
       "default": "./dist/npm/build.js"
     },
+    "./build-node": {
+      "types": "./dist/types/core/node-build.d.ts",
+      "default": "./dist/npm/node-build.js"
+    },
     "./protocol": {
       "types": "./dist/types/protocol/src/index.d.ts",
       "default": "./dist/npm/protocol.js"
@@ -44,7 +48,7 @@
   "cpu": [
     "x64"
   ],
-  "description": "Native Bun/TSX GUI with Taffy layout, Parley text and Vello rendering",
+  "description": "Native Bun/Node.js TSX GUI with Taffy layout, Parley text and Vello rendering",
   "engines": {
     "bun": ">=1.4.0"
   },
@@ -67,6 +71,7 @@
     "desktop",
     "native",
     "bun",
+    "node",
     "tsx",
     "jsx",
     "ui",
@@ -122,6 +127,7 @@
     "smoke:steady-frames": "bun run build:native && bun scripts/smoke-steady-frames.tsx",
     "bench:compare": "bun scripts/bench-compare.ts",
     "smoke:devtools": "bun run build:native && bun scripts/smoke-devtools.ts",
+    "smoke:tray": "bun run build:native && bun scripts/smoke-tray.tsx",
     "smoke:accessibility": "bun run build:native && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-accessibility.ps1",
     "smoke:exe": "bun scripts/smoke-exe.ts",
     "smoke:package": "bun scripts/smoke-package.ts",
@@ -130,5 +136,9 @@
   "type": "module",
   "workspaces": [
     "packages/*"
-  ]
+  ],
+  "dependencies": {
+    "esbuild": "0.25.0",
+    "resedit": "3.1.0"
+  }
 }

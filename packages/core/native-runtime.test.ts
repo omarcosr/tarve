@@ -105,7 +105,7 @@ describe("native runtime compatibility manifests", () => {
     await writeFile(join(root, "native", "src", "protocol.rs"), "pub const VERSION: u32 = 41;\n");
     await writeFile(join(root, "native", "src", "bridge.rs"), "pub const ABI_VERSION: u32 = 5;\n");
     await expect(createNativeCompatibilityManifest(root, "1.2.3")).rejects.toThrow(
-      "TypeScript=49, Rust=41",
+      "TypeScript=50, Rust=41",
     );
   });
 });

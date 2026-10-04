@@ -1,6 +1,9 @@
 import type { Control, NodeSnapshot, Renderer, Snapshot } from "../../protocol/src/index";
 import { createApp, type AppHandle, type AppOptions } from "./app";
 import type { VNode } from "./jsx-runtime";
+import { spawn } from "node:child_process";
+import { Readable } from "node:stream";
+import { setTimeout as sleep } from "node:timers/promises";
 
 export interface WaitForOptions {
   timeout?: number;
@@ -92,9 +95,7 @@ export async function waitFor<T>(
       const suffix = lastError instanceof Error ? ` Last error: ${lastError.message}` : "";
       throw new Error(`waitFor timed out after ${timeout}ms.${suffix}`);
     }
-    // Bun.sleep(0) still yields to the host event loop. A microtask-only yield
-    // can starve timers and native callbacks while a zero-interval wait spins.
-    await Bun.sleep(interval);
+    await sleep(interval);
   }
 }
 
@@ -264,26 +265,24 @@ export async function createTestRenderer(view: () => VNode, options?: TestRender
 /** Spawn a renderer test in an isolated process, useful for GPU/backend matrix runs. */
 export function launchTestProcess(options: TestProcessOptions): TestProcess {
   if (options.command.length === 0) throw new TypeError("launchTestProcess requires a command");
-  const child = Bun.spawn([...options.command], {
+  const child = spawn(options.command[0], options.command.slice(1), {
     cwd: options.cwd,
     env: {
       ...process.env,
       ...options.env,
       ...(options.renderer ? { TARVE_RENDERER: options.renderer } : {}),
     },
-    stdin: "ignore",
-    stdout: options.stdout ?? "inherit",
-    stderr: options.stderr ?? "inherit",
+    stdio: ["ignore", options.stdout ?? "inherit", options.stderr ?? "inherit"],
+  });
+  const exited = new Promise<number>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (code, signal) => resolve(code ?? (signal ? 1 : 0)));
   });
   return {
-    pid: child.pid,
-    exited: child.exited,
-    ...(options.stdout === "pipe"
-      ? { stdout: child.stdout as ReadableStream<Uint8Array> }
-      : {}),
-    ...(options.stderr === "pipe"
-      ? { stderr: child.stderr as ReadableStream<Uint8Array> }
-      : {}),
+    pid: child.pid!,
+    exited,
+    ...(options.stdout === "pipe" ? { stdout: Readable.toWeb(child.stdout!) as unknown as ReadableStream<Uint8Array> } : {}),
+    ...(options.stderr === "pipe" ? { stderr: Readable.toWeb(child.stderr!) as unknown as ReadableStream<Uint8Array> } : {}),
     kill(signal) { child.kill(signal); },
   };
 }

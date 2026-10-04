@@ -75,11 +75,14 @@ const entries = [
   ["packages/core/src/embedded-assets.ts", "embedded-assets.js"],
   ["packages/core/build.ts", "build.js"],
   ["packages/core/cli.ts", "cli.js"],
+  ["packages/core/node-build.ts", "node-build.js"],
   ["packages/protocol/src/index.ts", "protocol.js"],
 ];
 const results = await Promise.all(entries.map(([entry, naming]) => Bun.build({
-  entrypoints: [join(root, entry)], outdir: output, naming, target: "bun",
-  external: ["#tarve/runtime", "#tarve/assets"],
+  entrypoints: [join(root, entry)], outdir: output, naming,
+  // The CLI and the Node build API must start under Node as well as Bun.
+  target: entry.endsWith("/cli.ts") || entry.includes("/node-") ? "node" : "bun",
+  external: ["#tarve/runtime", "#tarve/assets", "esbuild", "resedit"],
 })));
 for (const result of results) {
   if (!result.success) throw new AggregateError(result.logs, "Package bundle failed");

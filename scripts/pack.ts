@@ -11,7 +11,7 @@ const stage = join(dist, ".pack");
 
 const PUBLISHED_FIELDS = [
   "name", "version", "description", "license", "keywords", "homepage", "repository", "bugs",
-  "publishConfig", "bin", "files", "os", "cpu", "type", "imports", "exports", "engines",
+  "publishConfig", "bin", "files", "os", "cpu", "type", "imports", "exports", "engines", "dependencies",
 ] as const;
 
 const manifest = await Bun.file(join(root, "package.json")).json() as Record<string, unknown> & { files: string[] };

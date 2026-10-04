@@ -31,23 +31,18 @@ export function nativePath(): string {
   if (!target) throw new Error(`Unsupported native platform: ${process.platform}-${process.arch}`);
   const config = targetConfig(target);
   const name = config.nativeName;
-
   if (process.env.TARVE_NATIVE) return process.env.TARVE_NATIVE;
-
-  // Inside the repository, prefer the content-addressed debug build published
-  // by `bun run build:native`. Installed packages do not contain these locations.
   for (const directory of [
-    resolve(import.meta.dir, "../../../../native/bin"),
-    resolve(import.meta.dir, "../../native/bin"),
+    resolve(import.meta.dirname, "../../../../native/bin"),
+    resolve(import.meta.dirname, "../../native/bin"),
   ]) {
     const path = developmentLibrary(directory, target);
     if (path && existsSync(path)) return path;
   }
-
   const installed = [
-    join(import.meta.dir, name),
-    resolve(import.meta.dir, "../../native", config.nativeDirectory, name),
-    resolve(import.meta.dir, "../../../../native", config.nativeDirectory, name),
+    join(import.meta.dirname, name),
+    resolve(import.meta.dirname, "../../native", config.nativeDirectory, name),
+    resolve(import.meta.dirname, "../../../../native", config.nativeDirectory, name),
   ];
   const found = installed.find((path): path is string => !!path && existsSync(path));
   if (found) return found;

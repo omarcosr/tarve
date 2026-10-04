@@ -273,6 +273,46 @@ describe("controlled native reconciliation", () => {
     expect(() => app.registerHotkey("Ctrl", () => {})).toThrow(TypeError);
   });
 
+  test("tray, notifications and window visibility round-trip through the bridge", async () => {
+    const bridge = new FakeBridge();
+    const app = createApp(() => <Window />, { bridge, closeBehavior: "hide" });
+    await app.ready;
+    const seen: string[] = [];
+    const tray = app.tray({
+      tooltip: "Tray",
+      onClick: () => seen.push("click"),
+      onMenu: id => seen.push(`menu:${id}`),
+      menu: [
+        { id: "open", label: "Open", onSelect: () => seen.push("select:open") },
+        { type: "separator" },
+        { id: "more", label: "More", items: [{ id: "mute", label: "Mute", checked: true }] },
+      ],
+    });
+    expect(bridge.commands.at(-1)).toEqual({ type: "tray", tray: { tooltip: "Tray", menu: [
+      { id: "open", label: "Open" }, { separator: true }, { label: "More", items: [{ id: "mute", label: "Mute", checked: true }] },
+    ] } });
+    bridge.emit({ type: "tray", action: "click" });
+    bridge.emit({ type: "trayMenu", id: "open" });
+    bridge.emit({ type: "trayMenu", id: "mute" });
+    expect(seen).toEqual(["click", "select:open", "menu:open", "menu:mute"]);
+    tray.update({ tooltip: "2 new" });
+    expect((bridge.commands.at(-1) as { tray: { tooltip: string } }).tray.tooltip).toBe("2 new");
+    let clicked = 0;
+    app.notify({ title: "Hi", onClick: () => clicked++ });
+    expect(bridge.commands.at(-1)).toEqual({ type: "notify", title: "Hi", body: "" });
+    bridge.emit({ type: "notificationClick" });
+    expect(clicked).toBe(1);
+    bridge.commands.length = 0;
+    bridge.emit({ type: "closeRequest" });
+    expect(bridge.commands).toEqual([{ type: "window", action: "hide" }, { type: "cancelCloseRequest" }]);
+    app.show();
+    expect(bridge.commands.at(-1)).toEqual({ type: "window", action: "show" });
+    tray.remove();
+    expect(bridge.commands.at(-1)).toEqual({ type: "tray", tray: null });
+    expect(() => app.tray({ menu: [{ id: "a", label: "A" }, { id: "a", label: "B" }] })).toThrow(TypeError);
+    app.close();
+  });
+
   test("native file dialog methods preserve options and return cancellation/results", async () => {
     const bridge = new FakeBridge();
     const app = createApp(() => <Window />, { bridge });

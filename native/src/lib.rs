@@ -22,6 +22,8 @@ mod syntax;
 #[cfg(test)]
 mod tests;
 mod text;
+#[cfg(not(target_arch = "wasm32"))]
+mod tray;
 mod tree;
 // Browser build: the same tree, layout, text and CPU paint, driven from JavaScript.
 #[cfg(target_arch = "wasm32")]
