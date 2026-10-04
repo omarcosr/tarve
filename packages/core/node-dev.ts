@@ -4,6 +4,20 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { context, build } from "esbuild";
 import { nativePath } from "#tarve/runtime";
+import type { Plugin } from "esbuild";
+import { fileImportAttributes } from "./esbuild-file-imports";
+
+/**
+ * The app bundle lives in a temp directory, so modules that locate files next to
+ * themselves (`@tarve/core/build`: native library, compatibility manifest, esbuild)
+ * stay external and load from the installed package by absolute URL.
+ */
+const installedBuildApi: Plugin = {
+  name: "tarve-installed-build-api",
+  setup(build) {
+    build.onResolve({ filter: /^@tarve\/core\/build$/ }, () => ({ path: import.meta.resolve("@tarve/core/build"), external: true }));
+  },
+};
 
 export async function devNode(entrypoint: string): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "tarve-node-dev-"));
@@ -37,7 +51,7 @@ process.on("disconnect", () => process.exit(0));
     bundle: true, platform: "node", format: "esm", target: "node26",
     jsx: "automatic", jsxImportSource: "@tarve/core",
     loader: { ".png": "file", ".jpg": "file", ".jpeg": "file", ".webp": "file", ".gif": "file", ".svg": "file" },
-    plugins: [{
+    plugins: [installedBuildApi, fileImportAttributes, {
       name: "tarve-node-hot",
       setup(build) {
         build.onEnd(result => {
@@ -100,6 +114,7 @@ export async function runNode(entrypoint: string): Promise<number> {
       bundle: true, platform: "node", format: "esm", target: "node26",
       jsx: "automatic", jsxImportSource: "@tarve/core",
       loader: { ".png": "file", ".jpg": "file", ".jpeg": "file", ".webp": "file", ".gif": "file", ".svg": "file" },
+      plugins: [installedBuildApi, fileImportAttributes],
     });
     const result = spawnSync(nodeExecutable(), ["--disable-warning=ExperimentalWarning", app], {
       stdio: "inherit",

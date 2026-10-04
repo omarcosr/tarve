@@ -3,13 +3,12 @@ import { existsSync, mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
-import { build as bundle } from "esbuild";
 import { nativePath } from "#tarve/runtime";
+import { fileImportAttributes } from "./esbuild-file-imports";
 import { hostBuildTarget, targetConfig } from "./targets";
 import type { BuildOptions } from "./build";
 import { NATIVE_COMPATIBILITY_MANIFEST_NAME, assertNativeRuntimeCompatible, readNativeCompatibilityManifest, createNativeCompatibilityManifest } from "./native-runtime";
 import { assertNodeVersion, targetNodeExecutable } from "./node-target";
-import { brandWindowsExecutable } from "./windows-executable";
 
 export interface NodeBuildOptions extends BuildOptions {
   /** Node.js 26.10+ executable used to build the SEA. Defaults to the installed Node. */
@@ -52,6 +51,9 @@ export async function buildNode(options: NodeBuildOptions): Promise<string> {
     if (!executable && target !== hostBuildTarget()) {
       executable = await targetNodeExecutable(target, version.slice(1));
     }
+    // Build-time tools load lazily and stay external, so an app that imports
+    // @tarve/core/build (e.g. Studio) still starts inside a Node single executable.
+    const { build: bundle } = await import("esbuild");
     const result = await bundle({
       entryPoints: [resolve(options.entrypoint)],
       outfile: join(temporary, "app.mjs"),
@@ -63,7 +65,8 @@ export async function buildNode(options: NodeBuildOptions): Promise<string> {
       jsxImportSource: "@tarve/core",
       loader: { ".png": "file", ".jpg": "file", ".jpeg": "file", ".webp": "file", ".gif": "file", ".svg": "file" },
       metafile: true,
-      plugins: [{
+      external: ["esbuild"],
+      plugins: [fileImportAttributes, {
         name: "tarve-node-runtime",
         setup(build) {
           if (source) {
@@ -98,7 +101,7 @@ export async function buildNode(options: NodeBuildOptions): Promise<string> {
     if (config.platform === "win32") {
       const name = options.name ?? basename(options.entrypoint).replace(/\.[^.]+$/, "");
       const tarveVersion = (JSON.parse(readFileSync(resolve(root, "../../package.json"), "utf8")) as { version: string }).version;
-      brandWindowsExecutable(outfile, { name, version: options.version ?? tarveVersion, filename: basename(outfile) });
+      (await import("./windows-executable")).brandWindowsExecutable(outfile, { name, version: options.version ?? tarveVersion, filename: basename(outfile) });
     }
     return outfile;
   } finally {
