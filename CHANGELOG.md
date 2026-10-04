@@ -1,8 +1,13 @@
-# Changelog
+# Changel- Windows: dragging a window between monitors with different display scaling keeps its size; it grew by the scale ratio on every crossing and could bounce on the boundary. A window with a custom `TitleBar` can be dragged again right after a move.
+og
 
 All notable changes to `@tarve/core`, `@tarve/react-icons` and `@tarve/headless` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
 ## Unreleased
+
+### Changed
+- **Breaking:** `flex` follows CSS. `flex: 1` is now `flex: 1 1 0` with CSS's automatic minimum size: the item shrinks when space runs out but not below its content. Before, a numeric `flex` never shrank and could be squeezed below its content. Add `minWidth: 0` (or `minHeight: 0` in a column) where content should be clipped or scroll instead of pushing the layout, as in CSS. Scroll areas already do this.
+- **Breaking:** every flex item shrinks by default (`shrink: 1`, CSS `flex-shrink: 1`), never below its content; sized `Image`s and `Svg`s keep their size like CSS replaced elements. Set `shrink: 0` to keep a fixed size when space runs out.
 
 ### Added
 - `@tarve/headless`: renders and tests Tarve apps with the WebAssembly build of the native tree, with no window, GPU or native library. `renderToPng`/`renderToRgba`, `createHeadlessApp`, `createHeadlessTestRenderer` (the `TestRenderer` API) and `matchImageSnapshot`. Text uses bundled Inter and JetBrains Mono and time only moves with `advanceMotion`, so a view renders to the same bytes on every machine. CI runs its image snapshots on Linux, Windows and macOS; releases publish it next to `@tarve/core`.
@@ -10,10 +15,12 @@ All notable changes to `@tarve/core`, `@tarve/react-icons` and `@tarve/headless`
 - `destructiveText` theme colour for error text and icons.
 - Pointer drag and drop. `draggable` on `Pressable` turns a press that travels past 4px into a drag (a short press still clicks); `onDragStart`, `onDragMove` and `onDragEnd` report position, the target under the pointer and whether the drag was cancelled (Escape or window blur). Any view with `onDrop`, `onDragEnter` or `onDragLeave` becomes a drop target; the innermost visible target wins, targets inside the dragged node, clipped by a scroll area, disabled or behind a modal are skipped. Example: `examples/drag-and-drop.tsx`. Native protocol v49.
 - System tray and notifications on Windows and Linux: `app.tray({ icon, tooltip, menu, onClick, onDoubleClick, onMenu })` shows a tray icon with a native menu (items, separators, checkmarks, disabled items, submenus); `update()` changes it in place. `app.notify({ title, body, onClick })` shows a desktop notification. `app.show()`, `app.hide()`, `app.minimize()` and `closeBehavior: "hide"` keep an app running in the tray. Windows calls `Shell_NotifyIconW`/`TrackPopupMenu` directly (no new dependency) and re-adds the icon after Explorer restarts. Linux publishes a StatusNotifierItem with dbusmenu (`ksni`) and uses org.freedesktop.Notifications (`notify-rust`), both pure-Rust zbus; KDE, XFCE, Cinnamon, MATE and most wlroots bars show it natively, GNOME needs the AppIndicator extension (the app gets an error event otherwise). `onDoubleClick` maps to middle click on Linux. Icons are read in JS so compiled executables can use imported assets. `bun run smoke:tray` drives the real icon and menu on both systems. Example: `examples/tray.tsx`. Native protocol v50.
+- CSS flex and grid sizing: `flex` accepts the CSS shorthand (`"1 1 176px"`, `"auto"`, `"none"`), plus `grow` and `basis`. Grid `columns` and new `rows` accept CSS track lists, including `repeat(auto-fill, minmax(176px, 1fr))`, `fr`, percentages and `auto`. `bun run test:css-layout` lays out 23 cases in Chromium and in Tarve and fails on any box more than a pixel apart. Native protocol v51.
 
 - Node.js 26.10+ runtime alongside Bun: the same TSX apps run through `node:ffi`. One CLI for both: `tarve run|dev|build` uses the runtime that launched it (`bunx`/`bun run` → Bun, `npx`/`npm run` → Node 26.10+, or Bun as before on older Node; `--runtime` overrides). Node builds are single-executable apps with the native library and imported assets embedded, the same GUI subsystem and app name/version metadata as Bun builds; `dev` remounts into the same window on edits; `--target linux-x64`/`windows-x64` cross-compiles by downloading (checksum-verified, cached) the matching official Node.js binary, and `--target-executable` supplies one offline. `build({ runtime: "node" })` and `@tarve/core/build-node` expose the same from code. `TestRenderer`, `launchTestProcess` and `readPngRgba` no longer depend on Bun APIs.
 
 ### Fixed
+- An explicit `minWidth` on an item with numeric `flex` is respected; it was reset to 0. Grid `auto` tracks stretch to fill the container, as in CSS. `DataGrid` rows and sortable headers are square instead of inheriting `Pressable` rounding.
 - `examples/drag-and-drop-view.tsx` used the unsupported `justify: "space-between"` and failed the package smoke typecheck; it now uses `"between"`.
 - A modal opened with the mouse no longer paints the keyboard focus ring on its first control, and closing it no longer rings the trigger.
 - `Tooltip` text no longer wraps to the width of its trigger; `Command` lists no longer clip with group headings; the search field of `Command` and `Combobox` no longer draws a ring across its icon.
