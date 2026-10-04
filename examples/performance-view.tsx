@@ -72,8 +72,8 @@ let flight: { from: number; to: number; started: number; duration: number } | un
 let flightTimer: ReturnType<typeof setInterval> | undefined;
 let lastFlight = "";
 
-let refresh = () => {};
-let scrollToItem: (id: string, index: number, offset?: number) => void = () => {};
+let refresh = () => { };
+let scrollToItem: (id: string, index: number, offset?: number) => void = () => { };
 export function connectPerformance(app: { update(): void; scrollToItem(id: string, index: number, offset?: number): void }) {
   refresh = () => app.update();
   scrollToItem = (id, index, offset) => app.scrollToItem(id, index, offset);
@@ -148,7 +148,7 @@ function Card({ name, index }: { name: string; index: number }) {
     <Column
       gap={8}
       padding={10}
-      style={{ width: 176, shrink: 0, background: c.card, borderWidth: 1, borderColor: c.border, radius: 10 }}
+      style={{ background: c.card, borderWidth: 1, borderColor: c.border, radius: 10 }}
     >
       <View style={{ width: "100%", height: 56, radius: 6, background: index % 4 === 1 ? c.primary : c.muted }} />
       <Text size={13} weight={500}>{name}</Text>
@@ -209,9 +209,9 @@ export function App() {
           </Column>
         ) : (
           <Scroll id="performance-grid" flex={1} style={{ width: "100%" }}>
-            <Row gap={14} style={{ width: "100%", wrap: true }}>
+            <View style={{ width: "100%", display: "grid", columns: "repeat(auto-fill, minmax(176px, 1fr))", gap: 14 }}>
               {cards.map((name, index) => <Card key={name} name={name} index={index} />)}
-            </Row>
+            </View>
           </Scroll>
         )}
       </Column>

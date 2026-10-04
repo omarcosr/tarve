@@ -4,7 +4,8 @@ import { jsx, type BaseProps, type DropTargetProps, type VNode } from "../jsx-ru
 export interface ViewProps extends BaseProps, DropTargetProps {
   gap?: number;
   padding?: Style["padding"];
-  flex?: number;
+  /** CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `"1 1 176px"`. */
+  flex?: number | string;
   align?: Style["align"];
   justify?: Style["justify"];
   portal?: boolean;

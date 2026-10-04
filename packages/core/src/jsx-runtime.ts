@@ -63,7 +63,7 @@ export interface DivProps extends Omit<BaseProps, "style">, DropTargetProps {
   style?: IntrinsicStyle;
   gap?: number;
   padding?: Style["padding"];
-  flex?: number;
+  flex?: number | string;
   align?: Style["align"];
   justify?: Style["justify"];
   portal?: boolean;

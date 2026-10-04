@@ -1,0 +1,139 @@
+// Layout parity with CSS. Each case is written once as CSS and once as Tarve
+// style; `record` lays the CSS out in a real Chromium and saves every box to
+// tests/fixtures/css-layout.json, and `check` lays the Tarve version out in a
+// hidden native window and fails on any box more than one pixel away: Tarve
+// snaps boxes to whole pixels where Chromium keeps 1/64px layout units.
+//   bun scripts/css-layout-parity.ts serve    # open http://localhost:4799 in Chromium to record
+//   bun scripts/css-layout-parity.ts check
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+type Css = Record<string, string | number>;
+type Tarve = Record<string, unknown>;
+interface Item { css: Css; tarve: Tarve }
+interface Case { name: string; container: Item; items: Item[] }
+type Box = [number, number, number, number];
+
+const fixture = join(import.meta.dirname, "..", "tests", "fixtures", "css-layout.json");
+const h = 20;
+const repeatItem = (count: number, css: Css, tarve: Tarve): Item[] =>
+  Array.from({ length: count }, () => ({ css: { height: `${h}px`, ...css }, tarve: { height: h, ...tarve } }));
+const row = (width: number, css: Css = {}, tarve: Tarve = {}): Item => ({
+  css: { display: "flex", "flex-direction": "row", "align-items": "flex-start", width: `${width}px`, ...css },
+  tarve: { direction: "row", align: "start", width, ...tarve },
+});
+const grid = (width: number, columns: string, gap = 0, rows?: string): Item => ({
+  css: { display: "grid", "grid-template-columns": columns, ...(rows ? { "grid-template-rows": rows } : {}), gap: `${gap}px`, width: `${width}px` },
+  tarve: { display: "grid", columns, ...(rows ? { rows } : {}), gap, width },
+});
+
+export const cases: Case[] = [
+  { name: "flex 1 with min-width wraps three per line", container: row(600, { "flex-wrap": "wrap", gap: "14px" }, { wrap: true, gap: 14 }),
+    items: repeatItem(7, { flex: "1", "min-width": "176px" }, { flex: "1", minWidth: 176 }) },
+  { name: "numeric flex is the css shorthand", container: row(300),
+    items: [
+      ...repeatItem(1, { flex: "1", "min-width": "60px" }, { flex: 1, minWidth: 60 }),
+      ...repeatItem(1, { flex: "2" }, { flex: 2 }),
+      ...repeatItem(1, { flex: "0 1 200px" }, { flex: "0 1 200px" }),
+    ] },
+  { name: "numeric flex shrinks fixed siblings first-come", container: row(200),
+    items: [...repeatItem(1, { flex: "1", width: "150px" }, { flex: 1, width: 150 }), ...repeatItem(1, { width: "150px" }, { width: 150, shrink: 1 })] },
+  { name: "items shrink by default", container: row(300),
+    items: [...repeatItem(1, { width: "200px" }, { width: 200 }), ...repeatItem(1, { width: "200px" }, { width: 200 })] },
+  { name: "shrink 0 keeps the width", container: row(300),
+    items: [...repeatItem(1, { width: "200px", "flex-shrink": 0 }, { width: 200, shrink: 0 }), ...repeatItem(1, { width: "200px" }, { width: 200 })] },
+  { name: "column items shrink by default", container: { css: { display: "flex", "flex-direction": "column", width: "100px", height: "100px" }, tarve: { direction: "column", width: 100, height: 100 } },
+    items: [{ css: { height: "80px" }, tarve: { height: 80 } }, { css: { height: "80px" }, tarve: { height: 80 } }] },
+  { name: "flex 1 1 176px wraps by basis", container: row(600, { "flex-wrap": "wrap", gap: "14px" }, { wrap: true, gap: 14 }),
+    items: repeatItem(5, { flex: "1 1 176px" }, { flex: "1 1 176px" }) },
+  { name: "grow and basis longhands", container: row(500),
+    items: [
+      ...repeatItem(1, { "flex-grow": 1, "flex-basis": "100px" }, { grow: 1, basis: 100 }),
+      ...repeatItem(1, { "flex-grow": 3, "flex-basis": "100px" }, { grow: 3, basis: 100 }),
+    ] },
+  { name: "basis percentage", container: row(400),
+    items: [...repeatItem(1, { "flex-basis": "25%" }, { basis: "25%" }), ...repeatItem(1, { "flex-basis": "50%" }, { basis: "50%" })] },
+  { name: "shrink by default with css flex", container: row(300),
+    items: repeatItem(3, { flex: "0 1 150px" }, { flex: "0 1 150px" }) },
+  { name: "shrink weights", container: row(300),
+    items: [...repeatItem(1, { flex: "0 1 200px" }, { flex: "0 1 200px" }), ...repeatItem(1, { flex: "0 3 200px" }, { flex: "0 3 200px" })] },
+  { name: "flex none does not shrink", container: row(300),
+    items: repeatItem(2, { flex: "none", width: "200px" }, { flex: "none", width: 200 }) },
+  { name: "flex auto grows from width", container: row(500),
+    items: [...repeatItem(1, { flex: "auto", width: "100px" }, { flex: "auto", width: 100 }), ...repeatItem(1, { flex: "auto", width: "200px" }, { flex: "auto", width: 200 })] },
+  { name: "max-width caps growth", container: row(600),
+    items: [...repeatItem(1, { flex: "1", "max-width": "120px" }, { flex: "1", maxWidth: 120 }), ...repeatItem(1, { flex: "1" }, { flex: "1" })] },
+  { name: "min-width stops shrinking", container: row(200),
+    items: [...repeatItem(1, { flex: "0 1 300px", "min-width": "150px" }, { flex: "0 1 300px", minWidth: 150 }), ...repeatItem(1, { flex: "0 1 300px" }, { flex: "0 1 300px" })] },
+  { name: "column direction grow", container: { css: { display: "flex", "flex-direction": "column", width: "100px", height: "300px" }, tarve: { direction: "column", width: 100, height: 300 } },
+    items: [...repeatItem(1, { flex: "1" }, { flex: "1" }), ...repeatItem(1, { flex: "2" }, { flex: "2" })].map(item => ({ css: { ...item.css, height: "auto" }, tarve: { ...item.tarve, height: undefined } })) },
+  { name: "grid auto-fill minmax", container: grid(600, "repeat(auto-fill, minmax(176px, 1fr))", 14), items: repeatItem(7, {}, {}) },
+  { name: "grid auto-fit minmax with few items", container: grid(600, "repeat(auto-fit, minmax(120px, 1fr))", 10), items: repeatItem(2, {}, {}) },
+  { name: "grid auto-fill keeps empty tracks", container: grid(600, "repeat(auto-fill, minmax(120px, 1fr))", 10), items: repeatItem(2, {}, {}) },
+  { name: "grid fixed and fr tracks", container: grid(500, "100px 1fr 2fr", 10), items: repeatItem(6, {}, {}) },
+  { name: "grid repeat count", container: grid(400, "repeat(4, 1fr)", 8), items: repeatItem(5, {}, {}) },
+  { name: "grid percent and auto", container: grid(400, "25% auto 100px", 0), items: repeatItem(3, { width: "40px" }, { width: 40 }) },
+  { name: "grid explicit rows", container: { ...grid(300, "1fr 1fr", 0, "40px 1fr"), css: { ...grid(300, "1fr 1fr", 0, "40px 1fr").css, height: "200px" }, tarve: { ...grid(300, "1fr 1fr", 0, "40px 1fr").tarve, height: 200 } },
+    items: Array.from({ length: 4 }, () => ({ css: {}, tarve: {} })) },
+];
+
+function cssText(css: Css): string {
+  return Object.entries(css).map(([key, value]) => `${key}: ${value}`).join("; ");
+}
+
+function page(): string {
+  const blocks = cases.map((c, index) => `<div class="case" id="case-${index}" style="${cssText(c.container.css)}">${c.items.map(item => `<div style="${cssText(item.css)}"></div>`).join("")}</div>`).join("\n");
+  return `<!doctype html><meta charset="utf-8"><style>*{box-sizing:border-box;margin:0;padding:0}body{font:12px sans-serif}.case{position:relative;margin-bottom:40px}.case>div{background:#89b4fa;outline:1px solid #1e1e2e}</style>
+${blocks}
+<script>
+const out = [...document.querySelectorAll(".case")].map(c => { const o = c.getBoundingClientRect(); return [...c.children].map(el => { const r = el.getBoundingClientRect(); return [r.left - o.left, r.top - o.top, r.width, r.height].map(v => Math.round(v * 100) / 100); }); });
+fetch("/save", { method: "POST", body: JSON.stringify({ userAgent: navigator.userAgent, cases: out }) }).then(() => { document.title = "saved"; });
+</script>`;
+}
+
+async function check(): Promise<number> {
+  if (!existsSync(fixture)) throw new Error("No recorded CSS layout. Run: bun scripts/css-layout-parity.ts serve, then open it in Chromium.");
+  const recorded = JSON.parse(readFileSync(fixture, "utf8")) as { names: string[]; cases: Box[][] };
+  const { createTestRenderer, Window, View } = await import("@tarve/core");
+  const { jsx } = await import("@tarve/core/jsx-runtime");
+  let current = 0;
+  const strip = (style: Tarve) => Object.fromEntries(Object.entries(style).filter(([, value]) => value !== undefined));
+  const renderer = await createTestRenderer(() => jsx(Window, { width: 900, height: 700, children:
+    jsx(View, { id: "parity", style: strip(cases[current]!.container.tarve) as never, children: cases[current]!.items.map((item, i) => jsx(View, { id: `parity-${i}`, style: strip(item.tarve) as never }, i)) }) }), { headless: true });
+  let failures = 0;
+  for (let index = 0; index < cases.length; index++) {
+    current = index;
+    renderer.app.update();
+    await new Promise(resolve => setTimeout(resolve, 120));
+    const snapshot = await renderer.app.inspect();
+    const origin = snapshot.nodes.find(node => node.id === "parity")!;
+    const boxes = cases[index]!.items.map((_, i) => {
+      const node = snapshot.nodes.find(candidate => candidate.id === `parity-${i}`)!;
+      return [node.x - origin.x, node.y - origin.y, node.width, node.height] as Box;
+    });
+    const expected = recorded.cases[recorded.names.indexOf(cases[index]!.name)];
+    const bad = !expected || boxes.some((box, i) => box.some((value, k) => Math.abs(value - expected[i]![k]!) >= 1));
+    if (bad) failures++;
+    console.log(`${bad ? "FAIL" : "ok  "} ${cases[index]!.name}${bad ? `\n     css   ${JSON.stringify(expected)}\n     tarve ${JSON.stringify(boxes.map(b => b.map(v => Math.round(v * 100) / 100)))}` : ""}`);
+  }
+  renderer.app.close();
+  console.log(failures ? `${failures}/${cases.length} layouts differ from CSS` : `[tarve css-layout-parity] PASS (${cases.length} layouts match Chromium)`);
+  return failures ? 1 : 0;
+}
+
+const mode = process.argv[2] ?? "check";
+if (mode === "serve") {
+  Bun.serve({ port: 4799, async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === "/save") {
+      const body = await request.json() as { userAgent: string; cases: Box[][] };
+      writeFileSync(fixture, JSON.stringify({ recordedWith: body.userAgent, names: cases.map(c => c.name), cases: body.cases }, null, 1) + "\n");
+      console.log(`saved ${body.cases.length} layouts from ${body.userAgent}`);
+      return new Response("ok");
+    }
+    return new Response(page(), { headers: { "content-type": "text/html" } });
+  } });
+  console.log("open http://localhost:4799");
+} else {
+  process.exit(await check());
+}

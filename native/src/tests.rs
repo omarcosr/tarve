@@ -402,6 +402,42 @@ fn per_side_border_width_affects_layout_independently() {
 }
 
 #[test]
+fn flex_items_keep_an_explicit_min_width_like_css() {
+    let items = (0..4)
+        .map(|i| {
+            node(
+                &format!("c{i}"),
+                "view",
+                json!({"flex": 1, "minWidth": 176}),
+                vec![],
+            )
+        })
+        .collect();
+    let row = node(
+        "row",
+        "row",
+        json!({"width": 600, "gap": 14, "wrap": true}),
+        items,
+    );
+    let mut tree = Tree::new(root(vec![row]));
+    tree.compute(800.0, 600.0).unwrap();
+    // CSS `flex: 1 1 0; min-width: 176px`: three per 600px line, grown to fill it,
+    // and the wrapped fourth item takes the whole next line.
+    let rect = |id: &str| tree.entries[id].rect;
+    assert!(
+        (rect("c0").width() - (600.0 - 28.0) / 3.0).abs() < 1.0,
+        "c0 = {:?}",
+        rect("c0")
+    );
+    assert!(rect("c3").y0 >= rect("c0").y1);
+    assert!(
+        (rect("c3").width() - 600.0).abs() < 1.0,
+        "c3 = {:?}",
+        rect("c3")
+    );
+}
+
+#[test]
 fn custom_window_chrome_border_is_suppressed_when_maximized_or_fullscreen() {
     let child = node(
         "child",

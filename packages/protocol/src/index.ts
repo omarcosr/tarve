@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 50;
+export const PROTOCOL_VERSION = 51;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
@@ -110,12 +110,22 @@ export interface StateStyle {
 }
 export interface Style extends StateStyle {
   width?: Length; height?: Length; minWidth?: Length; minHeight?: Length;
-  maxWidth?: Length; maxHeight?: Length; flex?: number; shrink?: number; aspectRatio?: number;
+  maxWidth?: Length; maxHeight?: Length;
+  /**
+   * CSS `flex`: a number is the shorthand `N 1 0` (`flex: 1`), a string any CSS value
+   * (`"1 1 176px"`, `"auto"`, `"none"`). Like CSS, items don't shrink below their content
+   * unless `minWidth`/`minHeight` is 0.
+   */
+  flex?: number | string; grow?: number; basis?: Length | "auto"; shrink?: number; aspectRatio?: number;
   position?: "relative" | "absolute"; top?: Length; right?: Length; bottom?: Length; left?: Length;
   direction?: "row" | "row-reverse" | "column" | "column-reverse"; wrap?: boolean; gap?: number;
   padding?: Insets; margin?: Insets; align?: "start" | "center" | "end" | "stretch";
   justify?: "start" | "center" | "end" | "between";
-  display?: "flex" | "grid" | "none"; columns?: number;
+  display?: "flex" | "grid" | "none";
+  /** Grid tracks: a count of equal columns, or a CSS track list such as `"repeat(auto-fill, minmax(176px, 1fr))"`. */
+  columns?: number | string;
+  /** Grid row tracks as a CSS track list (`"auto 1fr"`); rows are implicit when omitted. */
+  rows?: number | string;
   zIndex?: number;
   borderWidth?: Insets;
   radius?: number; fontSize?: number; fontWeight?: number; fontFamily?: string;

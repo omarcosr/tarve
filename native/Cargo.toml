@@ -19,7 +19,7 @@ vello_cpu = { version = "=0.2.0", default-features = false, features = ["std", "
 parley = "=0.11.1"
 comrak = { version = "=0.55.0", default-features = false }
 diffy = "=0.5.2"
-taffy = { version = "=0.14.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "content_size"] }
+taffy = { version = "=0.14.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "content_size", "parse"] }
 serde = { version = "1", features = ["derive"] }
 # Glyph rasterization: D3D11 atlas and blurred text shadows on every platform.
 swash = { version = "=0.2.10", default-features = false, features = ["std", "render"] }
@@ -54,7 +54,7 @@ accesskit_winit = { version = "=0.34.0", default-features = false, features = ["
 lyon_tessellation = "=1.0.22"
 rfd = { version = "=0.17.2", default-features = false, features = ["common-controls-v6"] }
 windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common"] }
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 accesskit = "=0.25.0"
