@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { hostBuildTarget, targetConfig } from "./targets";
 import { nativePath } from "./src/bridge/runtime";
@@ -8,7 +8,9 @@ import { nativePath } from "./src/bridge/runtime";
 const root = resolve(import.meta.dirname, "../..");
 const node = Bun.which("node");
 const version = node ? Bun.spawnSync([node, "--version"]).stdout.toString().trim() : "";
-const supported = /^v(?:2[7-9]|[3-9]\d)\.|^v26\.(?:1\d|[2-9]\d)\./.test(version);
+// Unit-test jobs run before `build:native`; this test needs the built library.
+const hasNative = (() => { try { return existsSync(nativePath()); } catch { return false; } })();
+const supported = hasNative && /^v(?:2[7-9]|[3-9]\d)\.|^v26\.(?:1\d|[2-9]\d)\./.test(version);
 
 async function stagedPackage(directory: string): Promise<void> {
   const entries = [

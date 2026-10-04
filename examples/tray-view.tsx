@@ -1,10 +1,12 @@
-import { Button, Column, Row, Text, Window, theme } from "@tarve/core";
+import { Button, Column, Row, Text, TitleBar, Window, theme } from "@tarve/core";
 
-export const state = { muted: false, sent: 0, ping: () => {}, hide: () => {} };
+export const state = { muted: false, sent: 0, ping: () => { }, hide: () => { } };
 
 export function TrayView() {
   return (
-    <Window title="Tray" width={420} height={240} style={{ background: theme.colors.background, padding: 24, gap: 12 }}>
+    <Window title="Tray" width={420} height={280} position="center">
+      <TitleBar title="Tray" />
+      <Column flex={1} gap={12} padding={24} style={{ background: theme.colors.background }}>
       <Column style={{ gap: 8 }}>
         <Text style={{ fontSize: 18, fontWeight: 600 }}>System tray</Text>
         <Text style={{ color: theme.colors.mutedForeground }}>
@@ -16,6 +18,7 @@ export function TrayView() {
         <Button id="ping" disabled={state.muted} onClick={() => state.ping()}>Send notification</Button>
         <Button id="hide" variant="outline" onClick={() => state.hide()}>Hide to tray</Button>
       </Row>
+      </Column>
     </Window>
   );
 }
