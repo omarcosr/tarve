@@ -310,6 +310,8 @@ export namespace JSX {
     dfn: SpanProps;
     mark: SpanProps;
     small: SpanProps;
+    sub: SpanProps;
+    sup: SpanProps;
     br: Omit<SpanProps, "children">;
     p: ParagraphProps;
     h1: HeadingProps;

@@ -79,6 +79,14 @@ test("colour, size, weight and line height are inherited by text, as in CSS", ()
   expect(style("initial")).toMatchObject({ fontSize: 14, fontWeight: 400, lineHeight: 1.5 });
 });
 
+test("sub and sup shift the baseline like Chromium and nest", () => {
+  const node = textOf(<Window><p id="t" style={{ fontSize: 18 }}>x<sup>n<sup>k</sup></sup>H<sub>2</sub></p></Window>, "t");
+  const styles = Object.fromEntries(node.runs!.map(run => [node.text!.slice(run.start, run.end), run.style]));
+  expect(styles.n).toEqual({ fontSize: 15, baselineShift: 7 });
+  expect(styles.k).toEqual({ fontSize: 12.5, baselineShift: 13 });
+  expect(styles["2"]).toEqual({ fontSize: 15, baselineShift: -4.6 });
+});
+
 test("block elements inside text are rejected", () => {
   expect(() => compileTree(<Window><p>a <div>b</div></p></Window>)).toThrow("cannot be inside text");
 });

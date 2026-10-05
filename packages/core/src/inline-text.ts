@@ -17,13 +17,15 @@ const INLINE_TAGS: Record<string, Record<string, unknown>> = {
   code: { fontFamily: "monospace" }, kbd: { fontFamily: "monospace" }, samp: { fontFamily: "monospace" },
   mark: { background: "#ffff00", foreground: "#000000" },
   small: { fontSize: "smaller" },
+  sub: { verticalAlign: "sub", fontSize: "smaller" },
+  sup: { verticalAlign: "super", fontSize: "smaller" },
   a: { textDecoration: "underline" },
   // Chromium: abbr[title] is underline dotted; dotted lines are drawn solid.
   abbr: {},
 };
 export const INLINE_TAG_NAMES = new Set([...Object.keys(INLINE_TAGS), "br"]);
 
-const RUN_KEYS = ["fontWeight", "fontStyle", "fontSize", "fontFamily", "foreground", "background", "textDecoration", "letterSpacing", "wordSpacing", "textTransform"] as const;
+const RUN_KEYS = ["fontWeight", "fontStyle", "fontSize", "fontFamily", "foreground", "background", "textDecoration", "letterSpacing", "wordSpacing", "textTransform", "baselineShift"] as const;
 type RunStyle = Record<string, unknown>;
 type Piece = { text: string; style: RunStyle; id?: string; transform?: string } | { br: true };
 
@@ -55,6 +57,14 @@ function computeStyle(parent: RunStyle, own: RunStyle): RunStyle {
     const weight = Number(parent.fontWeight ?? 400);
     next.fontWeight = weight < 550 ? 100 : weight < 750 ? 400 : 700;
   }
+  // Chromium: super raises by the parent font size / 3 + 1px, sub lowers by / 5 + 1px;
+  // nested shifts add up.
+  if (own.verticalAlign === "super" || own.verticalAlign === "sub") {
+    const size = Number(parent.fontSize ?? 14);
+    const shift = own.verticalAlign === "super" ? size / 3 + 1 : -(size / 5 + 1);
+    next.baselineShift = Math.round((Number(parent.baselineShift ?? 0) + shift) * 100) / 100;
+  }
+  delete next.verticalAlign;
   if (own.fontSize === "smaller") next.fontSize = Number(parent.fontSize ?? 14) / 1.2;
   else if (own.fontSize === "larger") next.fontSize = Number(parent.fontSize ?? 14) * 1.2;
   if (own.textDecoration !== undefined && parent.textDecoration && parent.textDecoration !== "none" && own.textDecoration !== "none") {
