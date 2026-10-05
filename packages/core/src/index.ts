@@ -34,3 +34,4 @@ export type { StateStyle, OutlineStyle, BorderStyle, TextShadow, BoxShadow, Tran
 export type { VNode, Child, PastePayload, DragPosition, DragMoveEvent, DragEndEvent, DropEvent, DraggableProps, DropTargetProps } from "./jsx-runtime";
 export { BunFfiBridge, openExternal } from "./bridge";
 export type { NativeBridge, BunFfiBridgeOptions } from "./bridge";
+export { CanvasRenderingContext2D, CanvasGradient, parseCanvasFont } from "./canvas";

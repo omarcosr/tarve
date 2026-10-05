@@ -263,6 +263,14 @@ export interface IntrinsicFormProps extends IntrinsicBlockProps {
 export interface IntrinsicListProps extends IntrinsicBlockProps { start?: number }
 export interface IntrinsicDetailsProps extends IntrinsicBlockProps { open?: boolean; onToggle?: (open: boolean) => void }
 export interface IntrinsicCellProps extends IntrinsicBlockProps { colSpan?: number; rowSpan?: number }
+export interface IntrinsicCanvasProps extends IntrinsicBlockProps {
+  /** CSS pixels; HTML's default canvas is 300×150. */
+  width?: number;
+  height?: number;
+  /** Draws with the Canvas 2D API; replayed on every render. */
+  onDraw?: (context: import("./canvas").CanvasRenderingContext2D) => void;
+  ariaLabel?: string;
+}
 export interface IntrinsicMeterProps extends IntrinsicBlockProps { value: number; min?: number; max?: number; ariaLabel?: string; title?: string }
 export namespace JSX {
   export type Element = VNode;
@@ -274,6 +282,7 @@ export namespace JSX {
     pre: SpanProps;
     blockquote: IntrinsicBlockProps;
     meter: IntrinsicMeterProps;
+    canvas: IntrinsicCanvasProps;
     abbr: SpanProps & { title?: string };
     fieldset: IntrinsicBlockProps;
     legend: IntrinsicBlockProps;

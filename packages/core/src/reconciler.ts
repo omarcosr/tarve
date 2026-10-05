@@ -17,6 +17,7 @@ import { Label } from "./form-controls";
 import { withRenderScope } from "./render-scope";
 import { openExternal } from "./bridge";
 import { compileInline, INLINE_TAG_NAMES, type InlineContext } from "./inline-text";
+import { expandCanvas } from "./canvas";
 import { expandHtml, expandInput, formValues, HTML_ELEMENTS, HTML_INPUT_TYPES, type FormContext, type FormValue } from "./html-elements";
 export interface Handlers { onClick?: () => void; onMarkdownLink?: (href: string) => void; onDiffToggleFile?: (path: string) => void; onDiffShowMore?: (hidden: number, path?: string) => void; onDiffLineClick?: (event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void; onHighlight?: (event: { matchCount: number }) => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onSubmit?: (value: string) => void; onPaste?: (payload: PastePayload) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onScrollPosition?: (position: ScrollPosition) => void; onVirtualListLayout?: (items: VirtualListMeasurement[]) => void; onVirtualListScrollToItem?: (index: number, offset: number) => void; onVirtualListFocus?: (key: string | null) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void; onTransitionEnd?: (event: { property: MotionProperty }) => void; onDragStart?: (position: DragPosition) => void; onDragMove?: (event: DragMoveEvent) => void; onDragEnd?: (event: DragEndEvent) => void; onDragEnter?: (source: string) => void; onDragLeave?: (source: string) => void; onDrop?: (event: DropEvent) => void }
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode> }
@@ -171,6 +172,9 @@ export function compileTree(
       } finally {
         currentForm = previous;
       }
+    }
+    if (!isNativeVNode && child.type === "canvas") {
+      return visit(expandCanvas(child.props as Record<string, any>, path), path, group);
     }
     if (!isNativeVNode && typeof child.type === "string" && HTML_ELEMENTS.has(child.type)) {
       return visit(expandHtml(child.type, child.props as Record<string, any>, path), path, group);
