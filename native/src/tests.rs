@@ -6497,6 +6497,72 @@ fn textarea_goal_column_belongs_to_one_textarea() {
 }
 
 #[test]
+fn textarea_goal_column_resets_on_focus_assistive_edits_and_value_updates() {
+    // "abcde|f" ArrowDown clamps to the end of "xy" and records column 5.
+    let setup = || {
+        let mut tree = editor_tree("textarea", "abcdef\nxy");
+        tree.scene(1.0);
+        tree.key("Home");
+        for _ in 0..5 {
+            tree.key("ArrowRight");
+        }
+        tree.key("ArrowDown");
+        assert!(tree.has_vertical_goal_for_test());
+        tree
+    };
+    let up = |tree: &mut Tree| {
+        tree.key("ArrowUp");
+        tree.type_text("|")[0]["value"].as_str().unwrap().to_owned()
+    };
+    // A fresh ArrowUp from the end of "xy" lands at column 2.
+    let fresh = {
+        let mut tree = editor_tree("textarea", "abcdef\nxy");
+        tree.scene(1.0);
+        up(&mut tree)
+    };
+    assert_eq!(fresh, "ab|cdef\nxy");
+
+    // blur + focus puts the caret back at the end: a new run, not column 5.
+    let mut tree = setup();
+    tree.blur();
+    assert!(
+        !tree.has_vertical_goal_for_test(),
+        "blur keeps the goal column"
+    );
+    tree.focus("field");
+    assert!(
+        !tree.has_vertical_goal_for_test(),
+        "focus keeps the goal column"
+    );
+    assert_eq!(up(&mut tree), fresh);
+
+    // Assistive technology moving the selection starts a new run too.
+    let mut tree = setup();
+    let end = "abcdef\nxy".chars().count();
+    tree.accessibility_set_text_selection("field", end, end);
+    assert!(
+        !tree.has_vertical_goal_for_test(),
+        "accessibility selection keeps the goal column"
+    );
+    assert_eq!(up(&mut tree), fresh);
+
+    // An assistive-technology value change clears it.
+    let mut tree = setup();
+    tree.accessibility_set_text_value("field", "abcdef\nxy");
+    assert!(
+        !tree.has_vertical_goal_for_test(),
+        "accessibility value keeps the goal column"
+    );
+
+    // An app-driven value update makes a recorded column stale even at the same caret.
+    let mut tree = setup();
+    tree.entries.get_mut("field").unwrap().node.value = Some("abcdef\nxz".into());
+    tree.text.prepare(&tree.entries["field"].node.clone());
+    tree.scene(1.0);
+    assert_eq!(up(&mut tree), "ab|cdef\nxz");
+}
+
+#[test]
 fn typing_and_pasting_replace_the_selection() {
     let mut tree = editor_tree("input", "hello world");
     tree.key("End");

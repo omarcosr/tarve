@@ -1548,9 +1548,11 @@ pub struct Tree {
     visual_snapshot_ids: Vec<String>,
     /// Extra ids to re-check at the next sync (e.g. `disabled` changed).
     state_candidates: Vec<String>,
-    /// Textarea, caret and x of the last Up/Down move (the goal column). Any
-    /// other caret change (keys, typing, clicks, focus) clears it, as browsers do.
-    vertical_goal: Option<(String, usize, f32)>,
+    /// Textarea, caret, x and value of the last Up/Down move (the goal column).
+    /// Any other caret change clears it, as browsers do: keys, typing, clicks,
+    /// focus and blur, IME, undo, assistive-technology edits and selections, and
+    /// app-driven value updates (the stored value must still match).
+    vertical_goal: Option<(String, usize, f32, String)>,
     /// Ids whose entry holds at least one motion track, so frame and
     /// pointer ticks visit only animating nodes instead of the whole tree.
     animating: HashSet<String>,
@@ -2229,6 +2231,7 @@ impl Tree {
                 });
                 self.text.layouts.remove(&format!("{}::ime", node.id));
                 self.selection_anchor = None;
+                self.vertical_goal = None;
                 self.caret = floor_boundary(incoming, self.caret.min(incoming.len()));
                 self.dirty.paint = true;
             }
@@ -4886,6 +4889,7 @@ impl Tree {
     }
 
     fn focus_with_visibility(&mut self, id: &str, visible: bool) -> Option<String> {
+        self.vertical_goal = None;
         let modal = self.active_modal();
         if !self.interactive(id)
             || !self.entries[id].node.focusable
@@ -5426,6 +5430,7 @@ impl Tree {
         }
     }
     pub fn blur(&mut self) -> Option<String> {
+        self.vertical_goal = None;
         self.scroll_drag = None;
         self.text_dragging = false;
         self.static_text_dragging = false;
@@ -6101,6 +6106,7 @@ impl Tree {
     }
 
     pub(crate) fn ime_cancel(&mut self) {
+        self.vertical_goal = None;
         let Some(ime) = self.ime.take() else {
             return;
         };
@@ -6124,6 +6130,7 @@ impl Tree {
     }
 
     pub(crate) fn ime_commit(&mut self, target: &str, text: &str) -> Vec<Value> {
+        self.vertical_goal = None;
         if self.focused.as_deref() != Some(target)
             || !self
                 .entries
@@ -6739,6 +6746,7 @@ impl Tree {
         true
     }
     fn undo_edit(&mut self, id: &str, redo: bool) -> Vec<Value> {
+        self.vertical_goal = None;
         let current = self.entries[id].node.value.clone().unwrap_or_default();
         let Some(history) = self.edit_history.get_mut(id) else {
             return vec![];
@@ -6902,6 +6910,7 @@ impl Tree {
     }
 
     pub(crate) fn accessibility_set_text_value(&mut self, id: &str, value: &str) -> Vec<Value> {
+        self.vertical_goal = None;
         if !self.valid_accessibility_text_value(id, value) {
             return vec![];
         }
@@ -6933,6 +6942,7 @@ impl Tree {
         id: &str,
         replacement: &str,
     ) -> Vec<Value> {
+        self.vertical_goal = None;
         if self.focused.as_deref() != Some(id) {
             return vec![];
         }
@@ -6964,6 +6974,7 @@ impl Tree {
         anchor_character: usize,
         focus_character: usize,
     ) -> Vec<Value> {
+        self.vertical_goal = None;
         let Some(entry) = self.entries.get(id) else {
             return vec![];
         };
@@ -7615,6 +7626,10 @@ impl Tree {
         Some((width, height, entry.node.value.clone().unwrap_or_default()))
     }
 
+    #[cfg(test)]
+    pub(crate) fn has_vertical_goal_for_test(&self) -> bool {
+        self.vertical_goal.is_some()
+    }
     /// Moves focus and caret without the input paths that clear the goal column.
     #[cfg(test)]
     pub(crate) fn place_caret_for_test(&mut self, id: &str, caret: usize) -> bool {
@@ -7637,8 +7652,10 @@ impl Tree {
         let x = self
             .vertical_goal
             .as_ref()
-            .filter(|(goal_id, goal_caret, _)| goal_id == id && *goal_caret == caret)
-            .map_or(cursor.x0 as f32, |(_, _, x)| *x);
+            .filter(|(goal_id, goal_caret, _, goal_value)| {
+                goal_id == id && *goal_caret == caret && *goal_value == value
+            })
+            .map_or(cursor.x0 as f32, |(_, _, x, _)| *x);
         let y = if direction < 0.0 {
             (cursor.y0 as f32 - 1.0).max(0.0)
         } else {
@@ -7646,7 +7663,7 @@ impl Tree {
         };
         let next = self.text.index_at(id, x, y, Some(width))?;
         let next = floor_boundary(&value, next.min(value.len()));
-        self.vertical_goal = Some((id.to_string(), next, x));
+        self.vertical_goal = Some((id.to_string(), next, x, value));
         Some(next)
     }
 
