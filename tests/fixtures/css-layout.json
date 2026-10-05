@@ -19,6 +19,9 @@
   "unordered list indents 40px",
   "ordered list wraps inside its indent",
   "table auto columns with spacing and padding",
+  "sup raises and grows the line box",
+  "sub lowers and grows the line box",
+  "sup on a wrapped line shifts the lines below",
   "paragraph margins collapse in block flow",
   "paragraph margins add up in a flex column",
   "heading margins scale with their font size",
@@ -194,6 +197,30 @@
     0,
     116.82,
     86
+   ]
+  ],
+  [
+   [
+    0,
+    16,
+    400,
+    29.77
+   ]
+  ],
+  [
+   [
+    0,
+    16,
+    400,
+    26.53
+   ]
+  ],
+  [
+   [
+    0,
+    16,
+    120,
+    171.33
    ]
   ],
   [

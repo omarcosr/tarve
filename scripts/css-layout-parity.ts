@@ -85,6 +85,14 @@ const htmlCases: Case[] = [
 // formatting context, so child margins never escape it.
 const blockFlow = (width: number): Item => ({ css: { display: "flow-root", width: `${width}px` }, tarve: { display: "block", width } });
 htmlCases.push(
+  // Shifted runs: Chromium positions their font metrics with its own rounding,
+  // about 0.6px apart from Parley's; with the whole-pixel height that is < 2px.
+  { name: "sup raises and grows the line box", container: blockFlow(400), tolerance: 2,
+    items: [para("E = mc<sup>2</sup> and x<sup>n<sup>k</sup></sup>", j => ["E = mc", j("sup", { children: "2" }), " and x", j("sup", { children: ["n", j("sup", { children: "k" })] })])] },
+  { name: "sub lowers and grows the line box", container: blockFlow(400), tolerance: 2,
+    items: [para("H<sub>2</sub>O and CO<sub>2</sub>", j => ["H", j("sub", { children: "2" }), "O and CO", j("sub", { children: "2" })])] },
+  { name: "sup on a wrapped line shifts the lines below", container: blockFlow(120),
+    items: [para(`${quick}<sup>1</sup> ${quick}`, j => [quick, j("sup", { children: "1" }), " " + quick])] },
   { name: "paragraph margins collapse in block flow", container: blockFlow(300),
     items: [para("First paragraph", () => "First paragraph"), para(quick, () => quick), para("Last", () => "Last")] },
   { name: "paragraph margins add up in a flex column", container: column(300),
