@@ -224,7 +224,124 @@ pub const TEXT_KEYS: &[&str] = &[
     "fontFamily",
     "lineHeight",
     "textAlign",
+    "fontStyle",
+    "letterSpacing",
+    "wordSpacing",
+    "whiteSpace",
+    "textOverflow",
+    "lineClamp",
+    "overflow",
 ];
+
+/// CSS `white-space: nowrap | pre` keep a text node on its source lines.
+pub(crate) fn text_nowrap(node: &Node) -> bool {
+    node.kind == "text" && matches!(node.string("whiteSpace", "normal"), "nowrap" | "pre")
+}
+
+/// Lines a text node may show: `lineClamp`, or one for a single-line ellipsis.
+fn text_line_clamp(node: &Node) -> Option<usize> {
+    if node.kind != "text" {
+        return None;
+    }
+    node.style["lineClamp"]
+        .as_f64()
+        .filter(|n| *n >= 1.0)
+        .map(|n| n as usize)
+}
+
+/// CSS `text-overflow: ellipsis` applies to a box that clips its overflow.
+fn text_ellipsis(node: &Node) -> bool {
+    node.kind == "text"
+        && (text_line_clamp(node).is_some()
+            || (node.string("textOverflow", "clip") == "ellipsis"
+                && matches!(node.string("overflow", "visible"), "hidden" | "clip")))
+}
+
+/// A run of a text node: `{ start, end, style, id }` with byte offsets.
+pub(crate) struct TextRun<'a> {
+    pub start: usize,
+    pub end: usize,
+    pub style: &'a Value,
+    pub id: Option<&'a str>,
+}
+
+pub(crate) fn text_runs<'a>(node: &'a Node, len: usize, text: &str) -> Vec<TextRun<'a>> {
+    let Some(runs) = node.runs.as_array() else {
+        return vec![];
+    };
+    runs.iter()
+        .filter_map(|run| {
+            let start = run["start"].as_u64()? as usize;
+            let end = (run["end"].as_u64()? as usize).min(len);
+            (start < end && text.is_char_boundary(start) && text.is_char_boundary(end)).then(|| {
+                TextRun {
+                    start,
+                    end,
+                    style: &run["style"],
+                    id: run["id"].as_str(),
+                }
+            })
+        })
+        .collect()
+}
+
+fn optical_size(size: f32) -> StyleProperty<'static, TextBrush> {
+    StyleProperty::FontVariations(parley::FontVariations::Source(std::borrow::Cow::Owned(
+        format!("\"opsz\" {size}"),
+    )))
+}
+
+fn push_text_style(
+    builder: &mut parley::RangedBuilder<'_, TextBrush>,
+    style: &Value,
+    range: std::ops::Range<usize>,
+) {
+    if let Some(size) = style["fontSize"].as_f64() {
+        builder.push(StyleProperty::FontSize(size as f32), range.clone());
+        builder.push(optical_size(size as f32), range.clone());
+    }
+    if let Some(weight) = style["fontWeight"].as_f64() {
+        builder.push(
+            StyleProperty::FontWeight(FontWeight::new(weight as f32)),
+            range.clone(),
+        );
+    }
+    match style["fontStyle"].as_str() {
+        Some("italic" | "oblique") => {
+            builder.push(StyleProperty::FontStyle(FontStyle::Italic), range.clone())
+        }
+        Some("normal") => builder.push(StyleProperty::FontStyle(FontStyle::Normal), range.clone()),
+        _ => {}
+    }
+    if let Some(family) = style["fontFamily"].as_str() {
+        builder.push(
+            StyleProperty::FontFamily(font_family_from_name(family)),
+            range.clone(),
+        );
+    }
+    if let Some(color) = style["foreground"].as_str() {
+        builder.push(
+            StyleProperty::Brush(TextBrush(Some(color.to_string()))),
+            range.clone(),
+        );
+    }
+    if let Some(spacing) = style["letterSpacing"].as_f64() {
+        builder.push(StyleProperty::LetterSpacing(spacing as f32), range.clone());
+    }
+    if let Some(spacing) = style["wordSpacing"].as_f64() {
+        builder.push(StyleProperty::WordSpacing(spacing as f32), range.clone());
+    }
+    if let Some(value) = style["textDecoration"].as_str() {
+        builder.push(
+            StyleProperty::Underline(value.contains("underline")),
+            range.clone(),
+        );
+        builder.push(
+            StyleProperty::Strikethrough(value.contains("line-through")),
+            range,
+        );
+    }
+}
 
 fn node_font_family(node: &Node, fallback: GenericFamily) -> FontFamily<'_> {
     node.optional_string("fontFamily")
@@ -283,6 +400,12 @@ pub struct TextEngine {
     /// Gradient-filled text images by node id, cached like `shadow_images`.
     ink_images: HashMap<String, (u64, vello::peniko::ImageData, (f64, f64))>,
     scale_context: swash::scale::ScaleContext,
+    /// Text nodes laid out on their source lines (`white-space: nowrap | pre`).
+    nowrap: HashSet<String>,
+    /// `lineClamp` per text node.
+    clamps: HashMap<String, usize>,
+    /// Ellipsized layout per text node and paint width; `None` when it fits.
+    truncated: HashMap<String, (u32, Option<Layout<TextBrush>>)>,
 }
 
 struct MarkdownLine {
@@ -690,11 +813,33 @@ pub(crate) mod web_fonts {
     }
 }
 
+/// Fonts the app ships (`createApp(view, { fonts })`), registered before the
+/// tree exists so every `TextEngine` resolves them by family name.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod app_fonts {
+    use parley::fontique::Blob;
+    use std::sync::{Arc, Mutex};
+
+    static FONTS: Mutex<Vec<Blob<u8>>> = Mutex::new(Vec::new());
+
+    pub(crate) fn register(bytes: Vec<u8>) {
+        FONTS.lock().unwrap().push(Blob::new(Arc::new(bytes)));
+    }
+
+    pub(crate) fn context() -> parley::FontContext {
+        let mut fonts = parley::FontContext::new();
+        for blob in FONTS.lock().unwrap().iter() {
+            fonts.collection.register_fonts(blob.clone(), None);
+        }
+        fonts
+    }
+}
+
 impl TextEngine {
     pub fn new() -> Self {
         Self {
             #[cfg(not(target_arch = "wasm32"))]
-            fonts: FontContext::new(),
+            fonts: app_fonts::context(),
             #[cfg(target_arch = "wasm32")]
             fonts: web_fonts::context(),
             context: LayoutContext::new(),
@@ -707,6 +852,9 @@ impl TextEngine {
             code_gutter_layouts: HashMap::default(),
             code_gutter_widths: HashMap::default(),
             unwrapped_code: HashSet::default(),
+            nowrap: HashSet::default(),
+            clamps: HashMap::default(),
+            truncated: HashMap::default(),
             diff_column_widths: HashMap::default(),
             shapes: 0,
             #[cfg(test)]
@@ -725,6 +873,7 @@ impl TextEngine {
         let content = node.display_text();
         let mut style_signature = node.signature(TEXT_KEYS);
         style_signature.push(node.syntax_theme.clone());
+        style_signature.push(node.runs.clone());
         // The gutter is a node field, not a style key, so it has to join the
         // signature explicitly. Without it a node that turns line numbers on
         // keeps the geometry of the unnumbered block and paints the code
@@ -753,28 +902,17 @@ impl TextEngine {
             self.shapes += 1;
             return;
         }
-        let mut builder = self
-            .context
-            .ranged_builder(&mut self.fonts, &content, 1.0, true);
-        builder.push_default(StyleProperty::FontSize(node.number("fontSize", 14.0)));
-        builder.push_default(StyleProperty::FontWeight(FontWeight::new(
-            node.number("fontWeight", 400.0),
-        )));
-        builder.push_default(StyleProperty::FontFamily(node_font_family(
-            node,
-            default_ui_generic_family(),
-        )));
-        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
-            node.number("lineHeight", 1.5),
-        )));
-        if let Some(rich) = &node.rich
-            && let RichContent::Text { spans, .. } = rich.as_ref()
-        {
-            for span in spans {
-                push_span(&mut builder, span, node, node.number("fontSize", 14.0));
-            }
+        let mut layout = self.build_text_layout(node, &content, content.len());
+        self.truncated.remove(&node.id);
+        if text_nowrap(node) {
+            self.nowrap.insert(node.id.clone());
+        } else {
+            self.nowrap.remove(&node.id);
         }
-        let mut layout = builder.build(&content);
+        match text_line_clamp(node) {
+            Some(lines) => self.clamps.insert(node.id.clone(), lines),
+            None => self.clamps.remove(&node.id),
+        };
         // `Code` never wraps, so the line breaking has to happen here rather
         // than being deferred to paint. `draw` also breaks, but a caller that
         // only measures — the a11y pass, the hit test, a snapshot — must see the
@@ -831,6 +969,130 @@ impl TextEngine {
         self.alignments
             .insert(node.id.clone(), alignment_for_node(node));
         self.shapes += 1;
+    }
+    /// Shapes `content` with the node's text style, its rich spans and the runs
+    /// that start before `run_limit` (a truncated copy keeps its prefix runs).
+    fn build_text_layout(
+        &mut self,
+        node: &Node,
+        content: &str,
+        run_limit: usize,
+    ) -> Layout<TextBrush> {
+        let mut builder = self
+            .context
+            .ranged_builder(&mut self.fonts, content, 1.0, true);
+        builder.push_default(StyleProperty::FontSize(node.number("fontSize", 14.0)));
+        // CSS `font-optical-sizing: auto`: a variable font's `opsz` axis follows
+        // the font size. Fonts without the axis ignore it.
+        builder.push_default(optical_size(node.number("fontSize", 14.0)));
+        builder.push_default(StyleProperty::FontWeight(FontWeight::new(
+            node.number("fontWeight", 400.0),
+        )));
+        builder.push_default(StyleProperty::FontFamily(node_font_family(
+            node,
+            default_ui_generic_family(),
+        )));
+        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
+            node.number("lineHeight", 1.5),
+        )));
+        if matches!(node.string("fontStyle", "normal"), "italic" | "oblique") {
+            builder.push_default(StyleProperty::FontStyle(FontStyle::Italic));
+        }
+        if let Some(spacing) = node.style["letterSpacing"].as_f64() {
+            builder.push_default(StyleProperty::LetterSpacing(spacing as f32));
+        }
+        if let Some(spacing) = node.style["wordSpacing"].as_f64() {
+            builder.push_default(StyleProperty::WordSpacing(spacing as f32));
+        }
+        if let Some(rich) = &node.rich
+            && let RichContent::Text { spans, .. } = rich.as_ref()
+        {
+            for span in spans {
+                push_span(&mut builder, span, node, node.number("fontSize", 14.0));
+            }
+        }
+        for run in text_runs(node, run_limit.min(content.len()), content) {
+            push_text_style(&mut builder, run.style, run.start..run.end);
+        }
+        builder.build(content)
+    }
+    /// Width and line count of the ellipsized layout painted for `id`.
+    #[cfg(test)]
+    pub(crate) fn truncated_metrics(&mut self, node: &Node, width: f32) -> Option<(f32, usize)> {
+        self.ensure_truncated(node, width);
+        let (_, layout) = self.truncated.get_mut(&node.id)?;
+        let layout = layout.as_mut()?;
+        Some((layout.width(), layout.len()))
+    }
+    fn wrap_width(&self, id: &str, width: Option<f32>) -> Option<f32> {
+        if self.nowrap.contains(id) {
+            None
+        } else {
+            width
+        }
+    }
+    /// `text-overflow: ellipsis` and `lineClamp`: the longest prefix that,
+    /// followed by "…", fits the clamp (or the width for a nowrap line).
+    fn ensure_truncated(&mut self, node: &Node, width: f32) {
+        if self
+            .truncated
+            .get(&node.id)
+            .is_some_and(|(bits, _)| *bits == width.to_bits())
+        {
+            return;
+        }
+        let nowrap = self.nowrap.contains(&node.id);
+        let clamp = self.clamps.get(&node.id).copied().unwrap_or(1);
+        let wrap = if nowrap { None } else { Some(width) };
+        let Some(layout) = self.layouts.get_mut(&node.id) else {
+            return;
+        };
+        layout.break_all_lines(wrap);
+        let too_wide = layout.width() > width + 0.5 && (nowrap || layout.len() == 1);
+        let needs = layout.len() > clamp || too_wide;
+        let end = if layout.len() > clamp {
+            layout
+                .get(clamp - 1)
+                .map(|line| line.text_range().end)
+                .unwrap_or(0)
+        } else {
+            node.text.len()
+        };
+        let mut result = None;
+        if needs {
+            let text = node.display_text();
+            let mut end = end.min(text.len());
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            let bounds: Vec<usize> = (0..=end).filter(|i| text.is_char_boundary(*i)).collect();
+            let (mut lo, mut hi) = (0usize, bounds.len().saturating_sub(1));
+            let mut best = None;
+            while lo <= hi {
+                let mid = (lo + hi) / 2;
+                let cut = bounds[mid];
+                let candidate = format!("{}…", text[..cut].trim_end());
+                let mut built =
+                    self.build_text_layout(node, &candidate, text[..cut].trim_end().len());
+                built.break_all_lines(wrap);
+                let fits = built.len() <= clamp && (!nowrap || built.width() <= width + 0.5);
+                if fits {
+                    best = Some(built);
+                    lo = mid + 1;
+                } else if mid == 0 {
+                    break;
+                } else {
+                    hi = mid - 1;
+                }
+            }
+            result = Some(best.unwrap_or_else(|| {
+                let mut built = self.build_text_layout(node, "…", 0);
+                built.break_all_lines(wrap);
+                built
+            }));
+        }
+        self.truncated
+            .insert(node.id.clone(), (width.to_bits(), result));
     }
     fn prepare_markdown_lines(&mut self, node: &Node, content: &str) {
         let Some(RichContent::Text { spans, blocks, .. }) = node.rich.as_deref() else {
@@ -1097,8 +1359,20 @@ impl TextEngine {
         if self.unwrapped_code.contains(id) {
             return (layout.width().ceil(), code_content_height(layout));
         }
-        layout.break_all_lines(width.map(|w| w.max(0.0)));
-        (layout.width().ceil(), layout.height().ceil())
+        let wrap = if self.nowrap.contains(id) {
+            None
+        } else {
+            width.map(|w| w.max(0.0))
+        };
+        layout.break_all_lines(wrap);
+        let mut height = layout.height();
+        if let Some(lines) = self.clamps.get(id).copied()
+            && layout.len() > lines
+            && let Some(line) = layout.get(lines - 1)
+        {
+            height = line.metrics().block_max_coord;
+        }
+        (layout.width().ceil(), height.ceil())
     }
     /// Paints a plain text layout once more in a single colour, offset by the
     /// caller, before the real text is drawn on top. With `blur` (the CSS
@@ -1277,11 +1551,28 @@ impl TextEngine {
             return;
         }
         let gutter_width = self.code_gutter_width(node);
-        let Some(layout) = self.layouts.get_mut(&node.id) else {
+        let ellipsis = text_ellipsis(node);
+        if ellipsis {
+            self.ensure_truncated(node, width.max(0.0));
+        }
+        let nowrap = self.nowrap.contains(&node.id);
+        let truncated = ellipsis
+            && self
+                .truncated
+                .get(&node.id)
+                .is_some_and(|(_, layout)| layout.is_some());
+        let layout = if truncated {
+            self.truncated
+                .get_mut(&node.id)
+                .and_then(|(_, layout)| layout.as_mut())
+        } else {
+            self.layouts.get_mut(&node.id)
+        };
+        let Some(layout) = layout else {
             return;
         };
         layout.break_all_lines(
-            if matches!(node.kind.as_str(), "text" | "markdown" | "textarea") {
+            if matches!(node.kind.as_str(), "text" | "markdown" | "textarea") && !nowrap {
                 Some(width.max(0.0))
             } else {
                 None
@@ -1363,6 +1654,29 @@ impl TextEngine {
         } else {
             origin
         };
+        if node.kind == "text" {
+            let text = node.display_text();
+            for run in text_runs(node, text.len(), &text) {
+                let Some(background) = run.style["background"].as_str() else {
+                    continue;
+                };
+                let anchor = Cursor::from_byte_index(layout, run.start, Affinity::Downstream);
+                let focus = Cursor::from_byte_index(layout, run.end, Affinity::Upstream);
+                for (rect, _) in Selection::new(anchor, focus).geometry(layout) {
+                    target.fill(
+                        Fill::NonZero,
+                        Affine::scale(scale),
+                        crate::tree::color(background),
+                        &Rect::new(
+                            origin.0 + rect.x0,
+                            origin.1 + rect.y0,
+                            origin.0 + rect.x1,
+                            origin.1 + rect.y1,
+                        ),
+                    );
+                }
+            }
+        }
         draw_layout(target, layout, origin, color, scale);
     }
 
@@ -1898,6 +2212,7 @@ impl TextEngine {
             .get(id)
             .copied()
             .unwrap_or(parley::Alignment::Start);
+        let width = self.wrap_width(id, width);
         let layout = self.layouts.get_mut(id)?;
         layout.break_all_lines(width.map(|width| width.max(0.0)));
         layout.align(align, parley::AlignmentOptions::default());
@@ -1964,6 +2279,7 @@ impl TextEngine {
             .get(id)
             .copied()
             .unwrap_or(parley::Alignment::Start);
+        let width = self.wrap_width(id, width);
         let Some(layout) = self.layouts.get_mut(id) else {
             return vec![];
         };
@@ -1997,6 +2313,7 @@ impl TextEngine {
             .get(id)
             .copied()
             .unwrap_or(parley::Alignment::Start);
+        let width = self.wrap_width(id, width);
         let layout = self.layouts.get_mut(id)?;
         layout.break_all_lines(width.map(|width| width.max(0.0)));
         layout.align(align, parley::AlignmentOptions::default());

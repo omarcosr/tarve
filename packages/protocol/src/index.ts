@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 51;
+export const PROTOCOL_VERSION = 52;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
@@ -133,6 +133,13 @@ export interface Style extends StateStyle {
   transition?: MotionTransitions;
   /** Continuous rotation about the centre, one turn per `spin` milliseconds. Rust drives the frames. */
   spin?: number;
+  /** CSS text: `font-style`, `letter-spacing`, `word-spacing`, `text-transform`, `white-space`, `text-overflow` and `line-clamp`. */
+  fontStyle?: "normal" | "italic" | "oblique"; letterSpacing?: number; wordSpacing?: number;
+  textTransform?: "none" | "uppercase" | "lowercase" | "capitalize";
+  whiteSpace?: "normal" | "nowrap" | "pre" | "pre-wrap" | "pre-line";
+  textOverflow?: "clip" | "ellipsis"; lineClamp?: number;
+  /** CSS `overflow`: `hidden`/`clip` clip children to the box and let it shrink below its content. */
+  overflow?: "visible" | "hidden" | "clip";
   lineHeight?: number; textAlign?: "start" | "center" | "end";
   taskMarkerColor?: string; taskMarkerCheckColor?: string;
   markdownCodeBackground?: string; markdownQuoteBackground?: string; markdownQuoteAccent?: string;
@@ -176,9 +183,15 @@ export interface VirtualListAnchor { index: number; key: string; offset: number 
 export type NativeImageSource =
   | { kind: "encoded"; key: string; data: string; mediaType?: string }
   | { kind: "rgba"; key: string; data: string; width: number; height: number; premultiplied?: boolean };
+/** A styled range of a text node, in UTF-8 byte offsets; `id` makes it a click target. */
+export interface TextRun {
+  start: number; end: number; id?: string;
+  /** Run overrides; `textDecoration` may combine lines ("underline line-through") as in CSS. */
+  style: Partial<Omit<Style, "textDecoration">> & { textDecoration?: string };
+}
 export interface NativeNode {
   id: string; kind: NodeKind; style: Style; children: NativeNode[];
-  text?: string; source?: string; language?: string; path?: string; oldText?: string; newText?: string;
+  text?: string; runs?: TextRun[]; source?: string; language?: string; path?: string; oldText?: string; newText?: string;
   showLineNumbers?: boolean; syntaxTheme?: Partial<SyntaxTheme>;
   wordDiff?: boolean; collapsedPaths?: string[]; maxLines?: number;
   highlight?: TextHighlight;
@@ -218,7 +231,11 @@ export interface WindowOptions {
   /** Test/runtime option: keep the native desktop window hidden. */
   visible?: boolean;
 }
-export interface SceneDocument { version: number; renderer: Renderer; window: WindowOptions; root: NativeNode }
+export interface SceneDocument {
+  version: number; renderer: Renderer; window: WindowOptions; root: NativeNode;
+  /** App font files as base64 (CSS `@font-face`), usable by their family name. */
+  fonts?: string[];
+}
 export type TreeMutation =
   | { type: "create"; node: NativeNode }
   | { type: "patch"; node: NativeNode }

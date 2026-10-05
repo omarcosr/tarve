@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 51;
+pub const VERSION: u32 = 52;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -164,6 +164,10 @@ pub struct Node {
     pub highlight: Option<TextHighlight>,
     #[serde(skip)]
     pub rich: Option<Arc<crate::rich::RichContent>>,
+    /// Inline styled ranges of a text node (`<strong>`, `<a>`, … inside a
+    /// paragraph): `[{ start, end, style, id? }]`, byte offsets into `text`.
+    #[serde(default)]
+    pub runs: Value,
     #[serde(default)]
     pub src: String,
     pub image: Option<ImageSource>,
@@ -333,6 +337,9 @@ pub struct Document {
     pub version: u32,
     #[serde(default)]
     pub renderer: RendererPreference,
+    /// App fonts (CSS `@font-face`): base64 font files, usable by family name.
+    #[serde(default)]
+    pub fonts: Vec<String>,
     pub window: WindowOptions,
     pub root: Node,
 }

@@ -438,6 +438,76 @@ fn flex_items_keep_an_explicit_min_width_like_css() {
 }
 
 #[test]
+fn text_ellipsis_line_clamp_and_clickable_runs() {
+    let quick = "The quick brown fox jumps over the lazy dog";
+    let mut line = node(
+        "line",
+        "text",
+        json!({"width":120,"whiteSpace":"nowrap","overflow":"hidden","textOverflow":"ellipsis","fontSize":16,"lineHeight":1.5}),
+        vec![],
+    );
+    line.text = quick.into();
+    let mut clamp = node(
+        "clamp",
+        "text",
+        json!({"width":150,"lineClamp":2,"overflow":"hidden","fontSize":16,"lineHeight":1.5}),
+        vec![],
+    );
+    clamp.text = format!("{quick} {quick}");
+    let mut link = node(
+        "para",
+        "text",
+        json!({"fontSize":16,"lineHeight":1.5}),
+        vec![],
+    );
+    link.text = "Read the docs now".into();
+    link.runs = json!([{"start":9,"end":13,"style":{"textDecoration":"underline"},"id":"docs"}]);
+    let mut tree = Tree::new(root(vec![line, clamp, link]));
+    tree.compute(800.0, 600.0).unwrap();
+    // nowrap keeps one 24px line; the clamp keeps two.
+    assert_eq!(tree.entries["line"].rect.height(), 24.0);
+    assert_eq!(tree.entries["clamp"].rect.height(), 48.0);
+    let line_node = tree.entries["line"].node.clone();
+    let (width, lines) = tree
+        .text
+        .truncated_metrics(&line_node, 120.0)
+        .expect("ellipsized");
+    assert!(width <= 120.5 && lines == 1, "width {width}, lines {lines}");
+    let clamp_node = tree.entries["clamp"].node.clone();
+    let (_, lines) = tree
+        .text
+        .truncated_metrics(&clamp_node, 150.0)
+        .expect("clamped");
+    assert_eq!(lines, 2);
+    // Pressing and releasing over the run clicks its id; elsewhere does not.
+    let rect = tree.entries["para"].rect;
+    let run = tree
+        .text
+        .range_rects("para", 9, 13, Some(rect.width() as f32))[0];
+    let (x, y) = (
+        rect.x0 + (run.x0 + run.x1) / 2.0,
+        rect.y0 + (run.y0 + run.y1) / 2.0,
+    );
+    tree.pointer_move(x, y);
+    tree.pointer_down();
+    let events = tree.pointer_up();
+    assert!(
+        events
+            .iter()
+            .any(|event| event["type"] == "click" && event["id"] == "docs"),
+        "{events:?}"
+    );
+    tree.pointer_move(rect.x0 + 2.0, y);
+    tree.pointer_down();
+    assert!(
+        !tree
+            .pointer_up()
+            .iter()
+            .any(|event| event["type"] == "click")
+    );
+}
+
+#[test]
 fn custom_window_chrome_border_is_suppressed_when_maximized_or_fullscreen() {
     let child = node(
         "child",

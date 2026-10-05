@@ -568,6 +568,15 @@ pub fn run(
     ready
         .send(Ok(event_proxy.clone()))
         .map_err(|e| e.to_string())?;
+    for font in std::mem::take(&mut document.fonts) {
+        use base64::Engine as _;
+        match base64::engine::general_purpose::STANDARD.decode(font) {
+            Ok(bytes) => crate::text::app_fonts::register(bytes),
+            Err(error) => events.push(crate::protocol::error(format!(
+                "font: invalid base64: {error}"
+            ))),
+        }
+    }
     // The tree owns the nodes from here on; move the children instead of
     // deep-cloning the whole document (~11 ms for 6,000 nodes).
     let tree = Tree::new(Node {
@@ -1418,7 +1427,10 @@ impl App {
             if let Some(direction) = self.resize_direction() {
                 window.set_cursor(CursorIcon::from(direction));
             } else {
-                let cursor = if self.tree.selectable_text_at_pointer().is_some() {
+                // A link or clickable span inside text wins over the text caret, as in a browser.
+                let cursor = if self.tree.text_run_at_pointer().is_some() {
+                    CursorIcon::Pointer
+                } else if self.tree.selectable_text_at_pointer().is_some() {
                     CursorIcon::Text
                 } else {
                     let hovered = self.tree.hovered.as_ref();

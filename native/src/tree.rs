@@ -42,6 +42,7 @@ const LAYOUT_KEYS: &[&str] = &[
     "minHeight",
     "maxWidth",
     "maxHeight",
+    "overflow",
     "flex",
     "grow",
     "basis",
@@ -3237,7 +3238,7 @@ impl Tree {
         entry.scroll_x = entry.scroll_x.clamp(0.0, entry.scroll_max_x);
         entry.scroll = entry.scroll.clamp(0.0, entry.scroll_max);
         let children = entry.children.clone();
-        let clips = entry.node.kind == "scroll";
+        let clips = clips_overflow(&entry.node);
         let mut bounds = entry.rect.inset(3.0);
         for child in children {
             let child_bounds = self.positions(&child, origin)?;
@@ -4428,10 +4429,11 @@ impl Tree {
             }
             target.pop_layer();
         }
-        if node.kind == "scroll" {
+        let clips_children = clips_overflow(&node);
+        if clips_children {
             target.push_clip(Fill::NonZero, transform, &shape);
         }
-        let child_clip = if node.kind == "scroll" {
+        let child_clip = if clips_children {
             clip.intersect(rect)
         } else {
             clip
@@ -4448,7 +4450,7 @@ impl Tree {
                 target,
             );
         }
-        if node.kind == "scroll" {
+        if clips_children {
             target.pop_layer();
         }
         if node.kind == "diff" {
@@ -4567,7 +4569,7 @@ impl Tree {
             return None;
         }
         let rect = entry.rect + Vec2::new(-offset.x, -offset.y);
-        let clip = if entry.node.kind == "scroll" {
+        let clip = if clips_overflow(&entry.node) {
             clip.intersect(rect)
         } else {
             clip
@@ -4641,7 +4643,7 @@ impl Tree {
             return SelectableTextHit::Miss;
         }
         let rect = entry.rect + Vec2::new(-offset.x, -offset.y);
-        let clip = if entry.node.kind == "scroll" {
+        let clip = if clips_overflow(&entry.node) {
             clip.intersect(rect)
         } else {
             clip
@@ -4709,7 +4711,7 @@ impl Tree {
             return None;
         }
         let rect = entry.rect + Vec2::new(-offset.x, -offset.y);
-        let clip = if entry.node.kind == "scroll" {
+        let clip = if clips_overflow(&entry.node) {
             clip.intersect(rect)
         } else {
             clip
@@ -5460,6 +5462,8 @@ impl Tree {
             && let Some(href) = self.markdown_link_at_pointer(id)
         {
             self.pressed_link = Some((id.to_string(), href));
+        } else if let Some(run) = self.text_run_at_pointer() {
+            self.pressed_link = Some(run);
         }
         if let Some(id) = selectable_text.as_deref()
             && self
@@ -5588,6 +5592,17 @@ impl Tree {
                 out.push(json!({"type":"click", "id":id}));
             }
             self.dirty.paint = true;
+        }
+        if let Some((id, run)) = self.pressed_link.clone()
+            && self
+                .entries
+                .get(&id)
+                .is_some_and(|entry| entry.node.kind == "text")
+        {
+            self.pressed_link = None;
+            if !has_selection && self.text_run_at_pointer().as_ref().map(|(_, r)| r) == Some(&run) {
+                out.push(json!({"type":"click", "id":run}));
+            }
         }
         if let Some((id, href)) = self.pressed_link.take()
             && !has_selection
@@ -7273,6 +7288,84 @@ impl Tree {
         Some(floor_boundary(&node.text, index.min(node.text.len())))
     }
 
+    /// The clickable inline run (`<a>`, a `<span onClick>`) under the pointer:
+    /// `(text node id, run id)`. A run behind another node does not count.
+    pub(crate) fn text_run_at_pointer(&mut self) -> Option<(String, String)> {
+        let candidates: Vec<String> = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| {
+                entry.node.kind == "text"
+                    && entry
+                        .node
+                        .runs
+                        .as_array()
+                        .is_some_and(|runs| runs.iter().any(|run| run["id"].is_string()))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in candidates {
+            let Some(rect) = self.visible_rect(&id) else {
+                continue;
+            };
+            if !rect.contains(vello::kurbo::Point::new(self.mouse.0, self.mouse.1)) {
+                continue;
+            }
+            let hovered = self.hit_root(false);
+            if let Some(top) = hovered.as_deref() {
+                let mut current = Some(id.as_str());
+                let mut inside = false;
+                while let Some(node) = current {
+                    if node == top {
+                        inside = true;
+                        break;
+                    }
+                    current = self
+                        .entries
+                        .get(node)
+                        .and_then(|entry| entry.parent.as_deref());
+                }
+                if !inside {
+                    continue;
+                }
+            }
+            let entry = &self.entries[&id];
+            let node = entry.node.clone();
+            let pad = node.insets("padding");
+            let border = node.insets("borderWidth");
+            let width = (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64)
+                .max(0.0) as f32;
+            let x = (self.mouse.0 - rect.x0 - pad[3] as f64 - border[3] as f64) as f32;
+            let y = (self.mouse.1 - rect.y0 - pad[0] as f64 - border[0] as f64) as f32;
+            self.text.prepare(&node);
+            let Some(index) = self.text.index_at(&id, x.max(0.0), y.max(0.0), Some(width)) else {
+                continue;
+            };
+            // index_at snaps to the nearest caret; require the pointer over ink.
+            let text = node.display_text();
+            let hit = crate::text::text_runs(&node, text.len(), &text)
+                .into_iter()
+                .find(|run| {
+                    run.id.is_some()
+                        && self
+                            .text
+                            .range_rects(&id, run.start, run.end, Some(width))
+                            .iter()
+                            .any(|r| {
+                                f64::from(x) >= r.x0
+                                    && f64::from(x) <= r.x1
+                                    && f64::from(y) >= r.y0
+                                    && f64::from(y) <= r.y1
+                            })
+                        && (run.start..=run.end).contains(&index)
+                });
+            if let Some(run) = hit {
+                return Some((id, run.id.unwrap_or_default().to_string()));
+            }
+        }
+        None
+    }
+
     fn markdown_link_at_pointer(&mut self, id: &str) -> Option<String> {
         if self.entries.get(id)?.node.kind != "markdown" {
             return None;
@@ -8354,6 +8447,12 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
         ..Default::default()
     };
     apply_css_flex(node, &mut style);
+    // `overflow: hidden | clip` clips children and, as in CSS, lets the box
+    // shrink below its content (automatic minimum size 0).
+    if clips_overflow(node) && node.kind != "scroll" {
+        style.overflow.x = taffy::style::Overflow::Hidden;
+        style.overflow.y = taffy::style::Overflow::Hidden;
+    }
     // Replaced elements (img, svg): CSS's automatic minimum size is their
     // specified size, so a sized image never shrinks below it.
     if matches!(node.kind.as_str(), "image" | "svg") {
@@ -8383,6 +8482,11 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
         style.grid_template_rows = grid_template(&node.style["rows"], 0);
     }
     style
+}
+
+/// `overflow: hidden | clip` (and scroll areas) clip their children.
+pub(crate) fn clips_overflow(node: &Node) -> bool {
+    node.kind == "scroll" || matches!(node.string("overflow", "visible"), "hidden" | "clip")
 }
 
 /// CSS flex items: `flex` (a number is the shorthand `N 1 0`, a string any CSS
