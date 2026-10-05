@@ -131,6 +131,7 @@
     "test:css-layout": "bun run build:native && bun run setup:examples && bun scripts/css-layout-parity.ts check",
     "smoke:text": "bun run build:native && bun run setup:examples && bun scripts/smoke-text.tsx",
     "smoke:html": "bun run build:native && bun run setup:examples && bun scripts/smoke-html.tsx",
+    "test:canvas": "bun run build:native && bun run setup:examples && bun scripts/canvas-parity.ts check",
     "smoke:studio": "bun run build:native && bun run setup:examples && bun scripts/smoke-studio.tsx",
     "smoke:accessibility": "bun run build:native && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-accessibility.ps1",
     "smoke:exe": "bun scripts/smoke-exe.ts",
