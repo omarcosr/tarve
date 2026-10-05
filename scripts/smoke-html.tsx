@@ -22,6 +22,8 @@ assert.deepEqual({ email: values.email, news: values.news, plan: values.plan }, 
 assert.equal(state.invalid, "");
 const snapshot = await renderer.app.inspect();
 assert.ok(snapshot.nodes.some(node => node.text === "Ana Maria"), "table cells render");
+renderer.app.focus("more-summary");
+await wait();
 await renderer.getById("more-summary").click();
 await wait();
 assert.ok((await renderer.app.inspect()).nodes.some(node => node.text?.includes("laid out like a browser")), "details opens");

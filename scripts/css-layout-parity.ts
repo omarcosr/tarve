@@ -81,6 +81,21 @@ const htmlCases: Case[] = [
         j("tr", { children: [j("td", { children: "Bo" }), j("td", { children: "101" })] }),
       ] }))] },
 ];
+htmlCases.push(
+  { name: "table colspan and rowspan", container: row(600), tolerance: 2,
+    items: [element(`<table style="${font}"><tr><td colspan="2">Wide header cell</td></tr><tr><td rowspan="2">Tall</td><td>b</td></tr><tr><td>c</td></tr></table>`,
+      (j, id) => j("table", { id, style: arial.tarve, children: [
+        j("tr", { children: [j("td", { colSpan: 2, children: "Wide header cell" })] }),
+        j("tr", { children: [j("td", { rowSpan: 2, children: "Tall" }), j("td", { children: "b" })] }),
+        j("tr", { children: [j("td", { children: "c" })] }),
+      ] }))] },
+  { name: "pre keeps spaces in monospace", container: row(600),
+    items: [element(`<pre style="margin: 0; font-family: monospace; font-size: 13px; line-height: 1.5">a  b\n  c</pre>`,
+      (j, id) => j("pre", { id, style: { fontSize: 13, lineHeight: 1.5 }, children: "a  b\n  c" }))] },
+  { name: "blockquote indents 40px on both sides", container: column(300),
+    items: [element(`<blockquote style="margin: 0 40px; ${font}">${quick}</blockquote>`,
+      (j, id) => j("blockquote", { id, style: arial.tarve, children: j("p", { children: quick }) }))] },
+);
 const overflowCases: Case[] = [
   { name: "overflow hidden lets a flex item shrink below its content", container: row(200),
     items: [{ css: { flex: "0 1 300px", overflow: "hidden", height: "20px" }, tarve: { flex: "0 1 300px", overflow: "hidden", height: 20 } },
