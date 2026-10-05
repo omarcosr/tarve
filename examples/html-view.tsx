@@ -11,10 +11,10 @@ export function App() {
     <Window title="Tarve — HTML" width={820} height={760} position="center">
       <TitleBar title="Tarve — HTML" />
       <Row gap={18} padding={18} flex={1} style={{ width: "100%", background: c.background, align: "start", overflow: "hidden" }}>
-        <Column gap={14} style={{ flex: 1 }}>
+        <Column gap={14} style={{ flex: 1, minWidth: 0 }}>
           <h3>Form</h3>
           <form id="signup"
-            onSubmit={values => { state.submitted = JSON.stringify(values); state.invalid = ""; }}
+            onSubmit={values => { state.submitted = JSON.stringify(values).replace(/,/g, ", "); state.invalid = ""; }}
             onInvalid={name => { state.invalid = `${name} is required`; }}>
             <fieldset>
               <legend>Account</legend>
@@ -26,6 +26,8 @@ export function App() {
               <input id="volume" type="range" name="volume" min={0} max={10} label="Volume" />
               <input id="start" type="date" name="start" />
               <input id="avatar" type="file" name="avatar" accept=".png,.jpg" />
+              <input id="accent" type="color" name="accent" defaultValue="#3b82f6" label="Accent colour" />
+              <input id="alarm" type="time" name="alarm" />
             </fieldset>
             <Row gap={8} style={{ margin: { top: 10 } }}>
               <button id="submit">Submit</button>

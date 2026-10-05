@@ -7,7 +7,9 @@ import { App, state } from "../examples/html-view";
 const errors: string[] = [];
 const renderer = await createTestRenderer(App, { headless: true, onError: event => errors.push(event.error.message) });
 const wait = (ms = 200) => new Promise(resolve => setTimeout(resolve, ms));
-await wait(400);
+// Tall enough that both columns fit without scrolling.
+renderer.app.debug({ type: "resize", width: 820, height: 1600 });
+await wait(500);
 await renderer.getById("submit").click();
 await wait();
 assert.equal(state.invalid, "email is required");
@@ -22,9 +24,8 @@ assert.deepEqual({ email: values.email, news: values.news, plan: values.plan }, 
 assert.equal(state.invalid, "");
 const snapshot = await renderer.app.inspect();
 assert.ok(snapshot.nodes.some(node => node.text === "Ana Maria"), "table cells render");
-renderer.app.focus("more-summary");
-await wait();
 await renderer.getById("more-summary").click();
+await wait();
 await wait();
 assert.ok((await renderer.app.inspect()).nodes.some(node => node.text?.includes("laid out like a browser")), "details opens");
 assert.deepEqual(errors, []);
