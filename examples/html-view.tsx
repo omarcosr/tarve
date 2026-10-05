@@ -60,6 +60,20 @@ export function App() {
           <blockquote><p>A quotation, indented 40px on both sides.</p></blockquote>
           <Row gap={8} align="center"><Text>Disk</Text><meter id="disk" value={0.7} /></Row>
           <p>An <abbr title="HyperText Markup Language">HTML</abbr> abbreviation, and a <span style={{ cursor: "help", textDecoration: "underline" }}>help cursor</span>.</p>
+          <h3>Canvas</h3>
+          <canvas id="chart" width={300} height={120} ariaLabel="Weekly chart" onDraw={ctx => {
+            const values = [12, 30, 22, 40, 28, 46, 38];
+            const gradient = ctx.createLinearGradient(0, 0, 0, 120);
+            gradient.addColorStop(0, "#3b82f6"); gradient.addColorStop(1, "#bfdbfe");
+            ctx.fillStyle = gradient;
+            values.forEach((value, i) => { ctx.beginPath(); ctx.roundRect(12 + i * 40, 110 - value * 2, 28, value * 2, 4); ctx.fill(); });
+            ctx.beginPath(); ctx.strokeStyle = "#ef4444"; ctx.lineWidth = 2; ctx.lineJoin = "round";
+            values.forEach((value, i) => { if (i === 0) ctx.moveTo(26, 110 - value * 2); else ctx.lineTo(26 + i * 40, 110 - value * 2); });
+            ctx.stroke();
+            ctx.font = "600 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "top"; ctx.fillStyle = "#334155";
+            ctx.fillText("This week", 150, 4);
+          }} />
+          <p>Water is H<sub>2</sub>O and E = mc<sup>2</sup>.</p>
           <h3>Details</h3>
           <details id="more"><summary>What is this?</summary><p>Plain HTML elements, laid out like a browser.</p></details>
         </Column>
