@@ -39,6 +39,11 @@ export interface AppOptions {
   dev?: boolean;
   /** Show the native frame-time graph. Defaults to TARVE_FRAME_OVERLAY=1. Never schedules frames on its own. */
   frameOverlay?: boolean;
+  /**
+   * Font files the app ships, like CSS `@font-face`: TTF/OTF/WOFF2 paths (or `import font from "./Inter.ttf" with { type: "file" }`).
+   * Each font is then available by its family name in `fontFamily`.
+   */
+  fontFaces?: readonly string[];
   /** What the window close button does without an onCloseRequest handler: quit (default) or hide the window, e.g. for tray apps. */
   closeBehavior?: "exit" | "hide";
 }
@@ -867,7 +872,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   }
 
   try {
-    bridge.start(committed.document, onNativeEvent);
+    const fonts = options.fontFaces?.map(path => Buffer.from(readFileSync(path)).toString("base64"));
+    bridge.start(fonts?.length ? { ...committed.document, fonts } : committed.document, onNativeEvent);
   } catch (error) {
     const startupError = reportError(error, { source: "bridge", event: "start" });
     terminalError = startupError;

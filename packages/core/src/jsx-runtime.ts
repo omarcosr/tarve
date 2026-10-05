@@ -86,6 +86,8 @@ export interface SpanProps extends Omit<BaseProps, "style"> {
   size?: number;
   weight?: number;
   color?: string;
+  /** Inside a paragraph the span becomes a click target. */
+  onClick?: () => void;
 }
 export type ParagraphProps = SpanProps;
 export type HeadingProps = SpanProps;
@@ -103,10 +105,30 @@ export interface ImgProps extends Omit<BaseProps, "style" | "children"> {
   height?: number;
   fit?: "cover" | "contain";
 }
-export type IntrinsicInputType = "text" | "password" | "email" | "number" | "search" | "tel" | "url";
+export type IntrinsicInputType = "text" | "password" | "email" | "number" | "search" | "tel" | "url" | "checkbox" | "radio" | "range" | "date" | "file";
 export interface IntrinsicInputProps extends Omit<BaseProps, "style" | "children"> {
   style?: IntrinsicStyle;
   type?: IntrinsicInputType;
+  /** Form field name: `<form onSubmit>` receives values keyed by it. */
+  name?: string;
+  required?: boolean;
+  /** Initial value of an uncontrolled field. */
+  defaultValue?: string;
+  /** checkbox and radio. */
+  checked?: boolean;
+  defaultChecked?: boolean;
+  /** Visible label of a checkbox, radio or range. */
+  label?: string;
+  ariaLabel?: string;
+  /** range and date. */
+  min?: number | string;
+  max?: number | string;
+  step?: number;
+  /** file: `.png,.jpg` filters and multiple selection; onFiles receives every path. */
+  accept?: string;
+  multiple?: boolean;
+  onFiles?: (paths: string[]) => void;
+  onCheckedChange?: (checked: boolean) => void;
   value?: string;
   placeholder?: string;
   disabled?: boolean;
@@ -128,6 +150,8 @@ export interface IntrinsicButtonProps extends Omit<BaseProps, "style"> {
   size?: "sm" | "default" | "lg";
   disabled?: boolean;
   control?: Control;
+  /** Inside a `<form>` a button submits unless `type="button"`. */
+  type?: "submit" | "button" | "reset";
   onClick?: () => void;
   onHover?: (hovered: boolean) => void;
 }
@@ -228,13 +252,60 @@ export function _isNativeVNode(vnode: VNode): boolean {
 export const jsxs = jsx;
 export const jsxDEV = jsx;
 export function Fragment(props: { children?: Child }): VNode { return jsx("fragment", props); }
+export interface IntrinsicBlockProps extends Omit<BaseProps, "style"> { style?: IntrinsicStyle }
+export interface IntrinsicFormProps extends IntrinsicBlockProps {
+  /** Enter in a field or a submit button: named values, after `required` fields are filled. */
+  onSubmit?: (values: Record<string, string | boolean | string[]>) => void;
+  /** A required field was empty; receives its name. */
+  onInvalid?: (name: string) => void;
+  ariaLabel?: string;
+}
+export interface IntrinsicListProps extends IntrinsicBlockProps { start?: number }
+export interface IntrinsicDetailsProps extends IntrinsicBlockProps { open?: boolean; onToggle?: (open: boolean) => void }
+export interface IntrinsicCellProps extends IntrinsicBlockProps { colSpan?: number }
 export namespace JSX {
   export type Element = VNode;
   export interface ElementChildrenAttribute { children: {} }
   export interface IntrinsicAttributes { key?: string | number }
   export interface IntrinsicElements {
     div: DivProps;
+    form: IntrinsicFormProps;
+    fieldset: IntrinsicBlockProps;
+    legend: IntrinsicBlockProps;
+    ul: IntrinsicListProps;
+    ol: IntrinsicListProps;
+    li: IntrinsicBlockProps;
+    dl: IntrinsicBlockProps;
+    dt: IntrinsicBlockProps;
+    dd: IntrinsicBlockProps;
+    table: IntrinsicBlockProps;
+    caption: IntrinsicBlockProps;
+    thead: IntrinsicBlockProps;
+    tbody: IntrinsicBlockProps;
+    tfoot: IntrinsicBlockProps;
+    tr: IntrinsicBlockProps;
+    th: IntrinsicCellProps;
+    td: IntrinsicCellProps;
+    details: IntrinsicDetailsProps;
+    summary: IntrinsicBlockProps;
     span: SpanProps;
+    strong: SpanProps;
+    b: SpanProps;
+    em: SpanProps;
+    i: SpanProps;
+    u: SpanProps;
+    s: SpanProps;
+    del: SpanProps;
+    ins: SpanProps;
+    code: SpanProps;
+    kbd: SpanProps;
+    samp: SpanProps;
+    var: SpanProps;
+    cite: SpanProps;
+    dfn: SpanProps;
+    mark: SpanProps;
+    small: SpanProps;
+    br: Omit<SpanProps, "children">;
     p: ParagraphProps;
     h1: HeadingProps;
     h2: HeadingProps;

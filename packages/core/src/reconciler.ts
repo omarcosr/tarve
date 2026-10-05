@@ -1,5 +1,5 @@
 import { PROTOCOL_VERSION, type MotionProperty, type NativeNode, type Renderer, type SceneDocument, type ScrollPosition, type TreeMutation, type VirtualListMeasurement, type WindowOptions } from "../../protocol/src/index";
-import { Fragment, _isNativeVNode, type Child, type DragEndEvent, type DragMoveEvent, type DragPosition, type DropEvent, type IntrinsicAnchorProps, type PastePayload, type VNode } from "./jsx-runtime";
+import { Fragment, jsx, _isNativeVNode, type Child, type DragEndEvent, type DragMoveEvent, type DragPosition, type DropEvent, type IntrinsicAnchorProps, type PastePayload, type VNode } from "./jsx-runtime";
 import { lightTheme, resolveStyleString, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
 import type { WindowCloseRequestEvent } from "./components";
@@ -15,6 +15,9 @@ import { Select } from "./select";
 import { Progress, Separator } from "./controls";
 import { Label } from "./form-controls";
 import { withRenderScope } from "./render-scope";
+import { openExternal } from "./bridge";
+import { compileInline, INLINE_TAG_NAMES, type InlineContext } from "./inline-text";
+import { expandHtml, expandInput, formValues, HTML_ELEMENTS, HTML_INPUT_TYPES, type FormContext, type FormValue } from "./html-elements";
 export interface Handlers { onClick?: () => void; onMarkdownLink?: (href: string) => void; onDiffToggleFile?: (path: string) => void; onDiffShowMore?: (hidden: number, path?: string) => void; onDiffLineClick?: (event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void; onHighlight?: (event: { matchCount: number }) => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onSubmit?: (value: string) => void; onPaste?: (payload: PastePayload) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onScrollPosition?: (position: ScrollPosition) => void; onVirtualListLayout?: (items: VirtualListMeasurement[]) => void; onVirtualListScrollToItem?: (index: number, offset: number) => void; onVirtualListFocus?: (key: string | null) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void; onTransitionEnd?: (event: { property: MotionProperty }) => void; onDragStart?: (position: DragPosition) => void; onDragMove?: (event: DragMoveEvent) => void; onDragEnd?: (event: DragEndEvent) => void; onDragEnter?: (source: string) => void; onDragLeave?: (source: string) => void; onDrop?: (event: DropEvent) => void }
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode> }
 const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "markdown", "code", "diff", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter"]);
@@ -43,6 +46,15 @@ function textContent(value: Child): string {
   if (typeof value === "object") throw new Error("Text/Button children must be strings or numbers.");
   return String(value);
 }
+/**
+ * Font properties a node passes to its descendants, as CSS inherits them. The
+ * theme font is the initial value at the root; Code, Diff and `<code>` set
+ * monospace explicitly, like the user-agent style sheet.
+ */
+const INHERITED_FONT = ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "fontSize", "fontWeight", "lineHeight", "foreground", "textAlign", "textTransform", "whiteSpace"] as const;
+/** Kinds whose text takes every inherited value; controls keep their own size, weight and colour. */
+const INHERITING_TEXT = new Set(["text", "markdown"]);
+const TEXT_KINDS = new Set(["text", "button", "input", "textarea", "markdown", "code", "diff"]);
 const DIV_SHORTHANDS = ["gap", "padding", "flex", "align", "justify"] as const;
 
 /** Props copied to the native node unchanged when they are set. */
@@ -66,6 +78,24 @@ export function compileTree(
   const labelableTargets = new Map<string, string>();
   let windowOptions: WindowOptions | undefined;
   let selectedTheme: ThemeDefinition = lightTheme;
+  let inheritedFont: Record<string, unknown> = {};
+  let currentForm: FormContext | undefined;
+  function inlineContext(textId: string, base: Record<string, unknown>): InlineContext {
+    let runs = 0;
+    return {
+      base,
+      linkColor: resolveStyleString("foreground", theme.colors.primary, selectedTheme),
+      resolve: style => resolveThemeStyle(style as never, selectedTheme) as Record<string, unknown>,
+      register(id, onClick) {
+        const runId = id ?? `${textId}/run:${runs++}`;
+        if (ids.has(runId)) throw new Error(`Duplicate node id: ${runId}`);
+        ids.add(runId);
+        handlers.set(runId, { onClick });
+        return runId;
+      },
+      openExternal,
+    };
+  }
   function visit(child: Child, path: string, group?: string, adapterNative = false): NativeNode[] {
     if (child == null || typeof child === "boolean") return [];
     if (Array.isArray(child)) return child.flatMap((item, index) => {
@@ -75,9 +105,9 @@ export function compileTree(
     if (typeof child === "string" || typeof child === "number") {
       if (ids.has(path)) throw new Error(`Duplicate node id: ${path}`);
       ids.add(path);
-      const node: NativeNode = { id: path, kind: "text", style: {}, text: String(child), children: [] };
-      nodes.set(path, node);
-      return [node];
+      // Anonymous text (a bare string child) inherits like any text node.
+      ids.delete(path);
+      return visit(Text({ id: path, children: String(child) }), path, group);
     }
     if (child.type === Fragment || child.type === "fragment") return visit(child.props.children, path, group);
     if (!adapterNative) {
@@ -101,6 +131,11 @@ export function compileTree(
         style: canonicalizeIntrinsicStyle(props.style),
       }), path, group);
     }
+    if (!isNativeVNode && typeof child.type === "string" && child.type !== "span" && child.type !== "a"
+      && INLINE_TAG_NAMES.has(child.type) && !(child.type === "code" && child.props.code !== undefined)) {
+      // A phrasing element outside a paragraph is an anonymous inline box.
+      return visit(Text({ id: child.props.id, children: child }), path, group);
+    }
     if (!isNativeVNode && (child.type === "span" || child.type === "p")) {
       const props = child.props as Parameters<typeof Text>[0];
       return visit(Text({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
@@ -109,17 +144,65 @@ export function compileTree(
       const props = child.props as Parameters<typeof Image>[0];
       return visit(Image({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
     }
+    if (!isNativeVNode && child.type === "form") {
+      const formProps = child.props as Record<string, any>;
+      const values = formValues(String(formProps.id ?? path));
+      const required = new Set<string>();
+      const form: FormContext = {
+        values, required,
+        submit() {
+          for (const name of required) {
+            const value = values.get(name);
+            if (value === undefined || value === "" || value === false || (Array.isArray(value) && value.length === 0)) {
+              formProps.onInvalid?.(name);
+              return;
+            }
+          }
+          formProps.onSubmit?.(Object.fromEntries(values));
+        },
+      };
+      const previous = currentForm;
+      currentForm = form;
+      try {
+        return visit(jsx("div", { id: formProps.id, style: formProps.style, control: { role: "group", label: formProps.ariaLabel ?? "Form" }, children: formProps.children }), path, group);
+      } finally {
+        currentForm = previous;
+      }
+    }
+    if (!isNativeVNode && typeof child.type === "string" && HTML_ELEMENTS.has(child.type)) {
+      return visit(expandHtml(child.type, child.props as Record<string, any>, path), path, group);
+    }
+    if (!isNativeVNode && child.type === "input" && HTML_INPUT_TYPES.has(String(child.props.type))) {
+      return visit(expandInput(child.props as Record<string, any>, path, currentForm), path, group);
+    }
     if (!isNativeVNode && child.type === "input") {
-      const props = child.props as Parameters<typeof Input>[0];
-      return visit(Input({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+      const props = child.props as Parameters<typeof Input>[0] & { name?: string; required?: boolean; defaultValue?: string };
+      const form = currentForm;
+      const name = props.name;
+      if (form && name) {
+        form.values.set(name, props.value ?? form.values.get(name) ?? props.defaultValue ?? "");
+        if (props.required) form.required.add(name);
+      }
+      const { name: _name, required: _required, defaultValue, ...rest } = props;
+      return visit(Input({
+        ...rest,
+        ...(rest.value === undefined && defaultValue !== undefined ? { value: defaultValue } : {}),
+        style: canonicalizeIntrinsicStyle(props.style),
+        onChange: value => { if (form && name) form.values.set(name, value); props.onChange?.(value); },
+        onSubmit: value => { props.onSubmit?.(value); if (form) { if (name) form.values.set(name, value); form.submit(); } },
+      }), path, group);
     }
     if (!isNativeVNode && child.type === "textarea") {
       const props = child.props as Parameters<typeof TextArea>[0];
       return visit(TextArea({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
     }
     if (!isNativeVNode && child.type === "button") {
-      const props = child.props as Parameters<typeof Button>[0];
-      return visit(Button({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+      const { type, ...props } = child.props as Parameters<typeof Button>[0] & { type?: "submit" | "button" | "reset" };
+      const form = currentForm;
+      // Inside a form a button submits unless it is type="button", as in HTML.
+      const submits = form && (type ?? "submit") === "submit";
+      return visit(Button({ ...props, style: canonicalizeIntrinsicStyle(props.style),
+        onClick: () => { props.onClick?.(); if (submits) form!.submit(); } }), path, group);
     }
     if (!isNativeVNode && child.type === "a") {
       const { ariaLabel, style, ...props } = child.props as IntrinsicAnchorProps;
@@ -248,12 +331,44 @@ export function compileTree(
     const imageSource = nativeType === "image" && p.src !== undefined
       ? serializeImageSource(p.src)
       : undefined;
+    const parentFont = inheritedFont;
+    const fontStyle = style as Record<string, unknown>;
+    if (INHERITING_TEXT.has(nativeType)) {
+      const initial: Record<string, unknown> = {
+        fontFamily: theme.font.family, fontSize: theme.font.size, fontWeight: 400, lineHeight: theme.font.lineHeight,
+        foreground: resolveStyleString("foreground", theme.colors.foreground, selectedTheme),
+      };
+      for (const key of INHERITED_FONT) if (fontStyle[key] === undefined) fontStyle[key] = parentFont[key] ?? initial[key];
+      for (const key of INHERITED_FONT) if (fontStyle[key] === undefined) delete fontStyle[key];
+    } else if (TEXT_KINDS.has(nativeType)) {
+      for (const key of ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "textTransform"] as const) {
+        if (fontStyle[key] === undefined && parentFont[key] !== undefined) fontStyle[key] = parentFont[key];
+      }
+      fontStyle.fontFamily ??= theme.font.family;
+    }
+    let ownFont = parentFont;
+    for (const key of INHERITED_FONT) {
+      if (fontStyle[key] !== undefined && fontStyle[key] !== parentFont[key]) {
+        if (ownFont === parentFont) ownFont = { ...parentFont };
+        ownFont[key] = fontStyle[key];
+      }
+    }
+    inheritedFont = ownFont;
     // Plain assignments instead of ~30 conditional object spreads per node:
     // on a 6,000-node first render the spreads alone cost ~10 ms.
-    const node: NativeNode = { id, kind: nativeType as NativeNode["kind"], style,
-      children: isText || isRichLeaf ? [] : visit(p.children, `${path}/children`, childGroup) };
+    let children: NativeNode[];
+    try {
+      children = isText || isRichLeaf ? [] : visit(p.children, `${path}/children`, childGroup);
+    } finally {
+      inheritedFont = parentFont;
+    }
+    const node: NativeNode = { id, kind: nativeType as NativeNode["kind"], style, children };
     const optional = node as unknown as Record<string, unknown>;
-    if (isText) node.text = textContent(p.children);
+    if (nativeType === "text") {
+      const inline = compileInline(p.children, String(style.whiteSpace ?? "normal"), inlineContext(id, style as Record<string, unknown>));
+      node.text = inline.text;
+      if (inline.runs.length) node.runs = inline.runs;
+    } else if (isText) node.text = textContent(p.children);
     if (nativeType === "code") node.text = p.code;
     if (nativeType === "markdown" || nativeType === "diff") node.source = p.source;
     if (p.language !== undefined) node.language = p.language;

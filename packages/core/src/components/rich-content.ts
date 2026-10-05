@@ -46,10 +46,6 @@ export function Markdown(props: MarkdownProps): VNode {
     ...props,
     onMarkdownLink: (href: string) => props.onLinkClick ? props.onLinkClick(href) : openExternal(href),
     style: {
-      fontFamily: theme.font.family,
-      fontSize: theme.font.size,
-      lineHeight: theme.font.lineHeight,
-      foreground: theme.colors.foreground,
       mutedForeground: theme.colors.mutedForeground,
       taskMarkerColor: theme.colors.primary,
       taskMarkerCheckColor: theme.colors.primaryForeground,

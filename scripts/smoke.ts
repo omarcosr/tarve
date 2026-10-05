@@ -111,7 +111,8 @@ try {
   const typed = await settle();
   assert.equal(node(typed, "name-input").text, "Marcos ");
   assert.equal(node(typed, "save-status").text, "Unsaved changes");
-  assert.equal(node(await click("save"), "save-status").text, "Saved for Marcos ");
+  // CSS white-space: the trailing space of a line is not rendered.
+  assert.equal(node(await click("save"), "save-status").text, "Saved for Marcos");
   await app.capture(resolve("work/interaction.png"));
   const beforeScroll = await app.inspect();
   const scroll = node(beforeScroll, "activity-scroll");
