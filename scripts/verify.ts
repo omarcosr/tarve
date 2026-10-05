@@ -23,6 +23,8 @@ const allSteps = [
   "smoke:tray",
   "smoke:studio",
   "test:css-layout",
+  "smoke:text",
+  "smoke:html",
   ...(process.platform === "win32" && process.arch === "x64" ? ["smoke:accessibility"] : []),
   "pack",
   "smoke:package",

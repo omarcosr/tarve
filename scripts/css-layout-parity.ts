@@ -10,8 +10,11 @@ import { join } from "node:path";
 
 type Css = Record<string, string | number>;
 type Tarve = Record<string, unknown>;
-interface Item { css: Css; tarve: Tarve }
-interface Case { name: string; container: Item; items: Item[] }
+type Jsx = (type: unknown, props: Record<string, unknown>, key?: string | number) => unknown;
+/** `html`/`inline` make the item a paragraph: the same text in HTML and in Tarve JSX. */
+interface Item { css: Css; tarve: Tarve; html?: string; inline?: (jsx: Jsx, id?: string) => unknown; raw?: boolean }
+/** `tolerance`: px allowed per box; each text box rounds its width up to a whole pixel, so a row of n texts may drift n px. */
+interface Case { name: string; container: Item; items: Item[]; tolerance?: number }
 type Box = [number, number, number, number];
 
 const fixture = join(import.meta.dirname, "..", "tests", "fixtures", "css-layout.json");
@@ -27,7 +30,69 @@ const grid = (width: number, columns: string, gap = 0, rows?: string): Item => (
   tarve: { display: "grid", columns, ...(rows ? { rows } : {}), gap, width },
 });
 
+// Text cases use the bundled Inter on both sides (an @font-face in Chromium,
+// `fontFaces` in Tarve), so they measure the same glyphs on every OS.
+const interFile = join(import.meta.dirname, "..", "packages", "headless", "fonts", "InterVariable.ttf");
+const arial = { css: { "font-family": "'Inter Variable'", "font-size": "16px", "line-height": "1.5", "font-weight": "400" }, tarve: { fontFamily: "Inter Variable", fontSize: 16, lineHeight: 1.5, fontWeight: 400 } };
+const para = (html: string, inline: (jsx: Jsx) => unknown, css: Css = {}, tarve: Tarve = {}): Item => ({
+  css: { ...arial.css, ...css }, tarve: { ...arial.tarve, ...tarve }, html, inline,
+});
+const column = (width: number): Item => ({
+  css: { display: "flex", "flex-direction": "column", "align-items": "stretch", width: `${width}px` },
+  tarve: { direction: "column", align: "stretch", width },
+});
+const quick = "The quick brown fox jumps over the lazy dog";
+const textCases: Case[] = [
+  { name: "text wraps at the container width", container: column(200), items: [para(quick, () => quick)] },
+  { name: "text shrink-to-fit width", container: row(600), items: [para("Hello world", () => "Hello world")] },
+  { name: "white-space normal collapses runs", container: row(600), items: [para("  a   b \n  c  ", () => "  a   b \n  c  ")] },
+  { name: "white-space nowrap keeps one line", container: column(120), items: [para(quick, () => quick, { "white-space": "nowrap" }, { whiteSpace: "nowrap" })] },
+  { name: "white-space pre keeps newlines and spaces", container: row(600), items: [para("a  b\nc\n  d", () => "a  b\nc\n  d", { "white-space": "pre" }, { whiteSpace: "pre" })] },
+  { name: "white-space pre-line keeps only newlines", container: row(600), items: [para("a   b\nc", () => "a   b\nc", { "white-space": "pre-line" }, { whiteSpace: "pre-line" })] },
+  { name: "br breaks the line", container: row(600), items: [para("one<br>two three", j => ["one", j("br", {}), "two three"])] },
+  { name: "strong and em change the measured width", container: row(600),
+    items: [para("Hello <strong>bold</strong> and <em>italic</em> world", j => ["Hello ", j("strong", { children: "bold" }), " and ", j("em", { children: "italic" }), " world"])] },
+  { name: "nested inline font size", container: row(600),
+    items: [para("Big <span style=\"font-size: 24px\">large</span> end", j => ["Big ", j("span", { style: { fontSize: 24 }, children: "large" }), " end"])] },
+  { name: "letter-spacing widens text", container: row(600), items: [para("Spacing", () => "Spacing", { "letter-spacing": "3px" }, { letterSpacing: 3 })] },
+  { name: "word-spacing widens gaps", container: row(600), items: [para("a b c d", () => "a b c d", { "word-spacing": "10px" }, { wordSpacing: 10 })] },
+  { name: "text-transform uppercase", container: row(600), items: [para("upper case", () => "upper case", { "text-transform": "uppercase" }, { textTransform: "uppercase" })] },
+  { name: "font-style italic", container: row(600), items: [para("Italic text", () => "Italic text", { "font-style": "italic" }, { fontStyle: "italic" })] },
+  { name: "ellipsis keeps one line in the box", container: column(120),
+    items: [para(quick, () => quick, { "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis" }, { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" })] },
+  { name: "line clamp limits the height", container: column(150),
+    items: [para(quick + " " + quick, () => quick + " " + quick, { display: "-webkit-box", "-webkit-box-orient": "vertical", "-webkit-line-clamp": "2", overflow: "hidden" }, { lineClamp: 2, overflow: "hidden" })] },
+];
+/** A whole HTML element (list, table…) written as markup and as Tarve JSX; `inline` puts the id on its root. */
+const element = (html: string, tree: (jsx: Jsx, id?: string) => unknown): Item => ({ css: {}, tarve: {}, html, inline: tree, raw: true });
+const font = "font-family: 'Inter Variable'; font-size: 16px; line-height: 1.5";
+const htmlCases: Case[] = [
+  { name: "unordered list indents 40px", container: column(300),
+    items: [element(`<ul style="margin: 0; ${font}"><li>One</li><li>Two longer item</li><li>Three</li></ul>`,
+      (j, id) => j("ul", { id, style: arial.tarve, children: [j("li", { children: "One" }), j("li", { children: "Two longer item" }), j("li", { children: "Three" })] }))] },
+  { name: "ordered list wraps inside its indent", container: column(160),
+    items: [element(`<ol style="margin: 0; ${font}"><li>${quick}</li><li>b</li></ol>`,
+      (j, id) => j("ol", { id, style: arial.tarve, children: [j("li", { children: quick }), j("li", { children: "b" })] }))] },
+  { name: "table auto columns with spacing and padding", container: row(600), tolerance: 2,
+    items: [element(`<table style="${font}"><tr><th>Name</th><th>Age</th></tr><tr><td>Ana Maria</td><td>30</td></tr><tr><td>Bo</td><td>101</td></tr></table>`,
+      (j, id) => j("table", { id, style: arial.tarve, children: [
+        j("tr", { children: [j("th", { children: "Name" }), j("th", { children: "Age" })] }),
+        j("tr", { children: [j("td", { children: "Ana Maria" }), j("td", { children: "30" })] }),
+        j("tr", { children: [j("td", { children: "Bo" }), j("td", { children: "101" })] }),
+      ] }))] },
+];
+const overflowCases: Case[] = [
+  { name: "overflow hidden lets a flex item shrink below its content", container: row(200),
+    items: [{ css: { flex: "0 1 300px", overflow: "hidden", height: "20px" }, tarve: { flex: "0 1 300px", overflow: "hidden", height: 20 } },
+      { css: { width: "50px", height: "20px", "flex-shrink": "0" }, tarve: { width: 50, height: 20, shrink: 0 } }] },
+  { name: "overflow visible item keeps its min-content", container: row(200),
+    items: [{ css: { flex: "0 1 300px", height: "20px", "min-width": "250px" }, tarve: { flex: "0 1 300px", height: 20, minWidth: 250 } }] },
+];
+
 export const cases: Case[] = [
+  ...textCases,
+  ...htmlCases,
+  ...overflowCases,
   { name: "flex 1 with min-width wraps three per line", container: row(600, { "flex-wrap": "wrap", gap: "14px" }, { wrap: true, gap: 14 }),
     items: repeatItem(7, { flex: "1", "min-width": "176px" }, { flex: "1", minWidth: 176 }) },
   { name: "numeric flex is the css shorthand", container: row(300),
@@ -82,12 +147,12 @@ function cssText(css: Css): string {
 }
 
 function page(): string {
-  const blocks = cases.map((c, index) => `<div class="case" id="case-${index}" style="${cssText(c.container.css)}">${c.items.map(item => `<div style="${cssText(item.css)}"></div>`).join("")}</div>`).join("\n");
-  return `<!doctype html><meta charset="utf-8"><style>*{box-sizing:border-box;margin:0;padding:0}body{font:12px sans-serif}.case{position:relative;margin-bottom:40px}.case>div{background:#89b4fa;outline:1px solid #1e1e2e}</style>
+  const blocks = cases.map((c, index) => `<div class="case" id="case-${index}" style="${cssText(c.container.css)}">${c.items.map(item => item.raw ? item.html! : item.html !== undefined ? `<p style="${cssText(item.css)}">${item.html}</p>` : `<div style="${cssText(item.css)}"></div>`).join("")}</div>`).join("\n");
+  return `<!doctype html><meta charset="utf-8"><style>@font-face{font-family:'Inter Variable';src:url(/inter.ttf);font-weight:100 900}*{box-sizing:border-box;margin:0;padding:0}ul,ol{padding-left:40px}td,th{padding:1px}body{font:12px sans-serif}.case{position:relative;margin-bottom:40px}.case>div,.case>p{background:#89b4fa;outline:1px solid #1e1e2e}</style>
 ${blocks}
 <script>
-const out = [...document.querySelectorAll(".case")].map(c => { const o = c.getBoundingClientRect(); return [...c.children].map(el => { const r = el.getBoundingClientRect(); return [r.left - o.left, r.top - o.top, r.width, r.height].map(v => Math.round(v * 100) / 100); }); });
-fetch("/save", { method: "POST", body: JSON.stringify({ userAgent: navigator.userAgent, cases: out }) }).then(() => { document.title = "saved"; });
+document.fonts.ready.then(() => { const out = [...document.querySelectorAll(".case")].map(c => { const o = c.getBoundingClientRect(); return [...c.children].map(el => { const r = el.getBoundingClientRect(); return [r.left - o.left, r.top - o.top, r.width, r.height].map(v => Math.round(v * 100) / 100); }); });
+fetch("/save", { method: "POST", body: JSON.stringify({ userAgent: navigator.userAgent, cases: out }) }).then(() => { document.title = "saved"; }); });
 </script>`;
 }
 
@@ -99,7 +164,11 @@ async function check(): Promise<number> {
   let current = 0;
   const strip = (style: Tarve) => Object.fromEntries(Object.entries(style).filter(([, value]) => value !== undefined));
   const renderer = await createTestRenderer(() => jsx(Window, { width: 900, height: 700, children:
-    jsx(View, { id: "parity", style: strip(cases[current]!.container.tarve) as never, children: cases[current]!.items.map((item, i) => jsx(View, { id: `parity-${i}`, style: strip(item.tarve) as never }, i)) }) }), { headless: true });
+    jsx(View, { id: "parity", style: strip(cases[current]!.container.tarve) as never, children: cases[current]!.items.map((item, i) => item.raw
+      ? item.inline!(jsx as unknown as Jsx, `parity-${i}`)
+      : item.inline
+      ? jsx("p", { id: `parity-${i}`, style: strip(item.tarve) as never, children: item.inline(jsx as unknown as Jsx) as never }, i)
+      : jsx(View, { id: `parity-${i}`, style: strip(item.tarve) as never }, i)) }) }), { headless: true, fontFaces: [interFile] });
   let failures = 0;
   for (let index = 0; index < cases.length; index++) {
     current = index;
@@ -112,7 +181,7 @@ async function check(): Promise<number> {
       return [node.x - origin.x, node.y - origin.y, node.width, node.height] as Box;
     });
     const expected = recorded.cases[recorded.names.indexOf(cases[index]!.name)];
-    const bad = !expected || boxes.some((box, i) => box.some((value, k) => Math.abs(value - expected[i]![k]!) >= 1));
+    const bad = !expected || boxes.some((box, i) => box.some((value, k) => Math.abs(value - expected[i]![k]!) >= (cases[index]!.tolerance ?? 1)));
     if (bad) failures++;
     console.log(`${bad ? "FAIL" : "ok  "} ${cases[index]!.name}${bad ? `\n     css   ${JSON.stringify(expected)}\n     tarve ${JSON.stringify(boxes.map(b => b.map(v => Math.round(v * 100) / 100)))}` : ""}`);
   }
@@ -125,6 +194,7 @@ const mode = process.argv[2] ?? "check";
 if (mode === "serve") {
   Bun.serve({ port: 4799, async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === "/inter.ttf") return new Response(Bun.file(interFile));
     if (url.pathname === "/save") {
       const body = await request.json() as { userAgent: string; cases: Box[][] };
       writeFileSync(fixture, JSON.stringify({ recordedWith: body.userAgent, names: cases.map(c => c.name), cases: body.cases }, null, 1) + "\n");

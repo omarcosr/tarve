@@ -1,6 +1,26 @@
 {
  "recordedWith": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) @empryo/desktop/3.9.0-beta Chrome/152.0.7977.130 Safari/537.36",
  "names": [
+  "text wraps at the container width",
+  "text shrink-to-fit width",
+  "white-space normal collapses runs",
+  "white-space nowrap keeps one line",
+  "white-space pre keeps newlines and spaces",
+  "white-space pre-line keeps only newlines",
+  "br breaks the line",
+  "strong and em change the measured width",
+  "nested inline font size",
+  "letter-spacing widens text",
+  "word-spacing widens gaps",
+  "text-transform uppercase",
+  "font-style italic",
+  "ellipsis keeps one line in the box",
+  "line clamp limits the height",
+  "unordered list indents 40px",
+  "ordered list wraps inside its indent",
+  "table auto columns with spacing and padding",
+  "overflow hidden lets a flex item shrink below its content",
+  "overflow visible item keeps its min-content",
   "flex 1 with min-width wraps three per line",
   "numeric flex is the css shorthand",
   "numeric flex shrinks fixed siblings first-come",
@@ -26,6 +46,172 @@
   "grid explicit rows"
  ],
  "cases": [
+  [
+   [
+    0,
+    0,
+    200,
+    48
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    84.5,
+    24
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    36.56,
+    24
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    120,
+    24
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    27.52,
+    72
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    23.06,
+    48
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    70.84,
+    48
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    194.66,
+    24
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    114.89,
+    36
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    81.95,
+    24
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    80.72,
+    24
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    98.63,
+    24
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    67.88,
+    24
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    120,
+    24
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    150,
+    48
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    300,
+    72
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    160,
+    120
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    116.83,
+    86
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    150,
+    20
+   ],
+   [
+    150,
+    0,
+    50,
+    20
+   ]
+  ],
+  [
+   [
+    0,
+    0,
+    250,
+    20
+   ]
+  ],
   [
    [
     0,
