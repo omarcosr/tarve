@@ -192,7 +192,11 @@ export type NativeImageSource =
 export interface TextRun {
   start: number; end: number; id?: string;
   /** Run overrides; `textDecoration` may combine lines ("underline line-through") as in CSS. */
-  style: Partial<Omit<Style, "textDecoration">> & { textDecoration?: string };
+  style: Partial<Omit<Style, "textDecoration">> & {
+    textDecoration?: string;
+    /** CSS `vertical-align: super | sub`: baseline shift in px, up. */
+    baselineShift?: number;
+  };
 }
 export interface NativeNode {
   id: string; kind: NodeKind; style: Style; children: NativeNode[];

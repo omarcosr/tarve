@@ -24,8 +24,73 @@ use vello::{
     peniko::{Color, Fill},
 };
 
+/// Run colour, plus CSS `vertical-align: super | sub`: `.1` is the baseline
+/// shift (px, up) and `.2` the run's own line box height (px).
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct TextBrush(pub Option<String>);
+pub struct TextBrush(pub Option<String>, pub f32, pub f32);
+
+impl TextBrush {
+    pub fn color(color: String) -> Self {
+        Self(Some(color), 0.0, 0.0)
+    }
+}
+
+/// Extra space a line needs above and below for raised and lowered runs, as
+/// CSS grows a line box to contain shifted inline boxes. Per line: (top, bottom).
+pub(crate) fn shifted_line_extents(layout: &Layout<TextBrush>) -> Option<Vec<(f32, f32)>> {
+    let mut any = false;
+    let extents = layout
+        .lines()
+        .map(|line| {
+            let metrics = line.metrics();
+            let above = metrics.baseline - metrics.block_min_coord;
+            let below = metrics.block_max_coord - metrics.baseline;
+            let (mut top, mut bottom) = (0.0f32, 0.0f32);
+            for item in line.items() {
+                let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                    continue;
+                };
+                let TextBrush(_, shift, line_box) = &glyph_run.style().brush;
+                if *shift == 0.0 {
+                    continue;
+                }
+                any = true;
+                let run = glyph_run.run().metrics();
+                let half = (line_box - (run.ascent + run.descent)) / 2.0;
+                top = top.max(run.ascent + half + shift - above);
+                bottom = bottom.max(run.descent + half - shift - below);
+            }
+            (top.max(0.0), bottom.max(0.0))
+        })
+        .collect();
+    any.then_some(extents)
+}
+
+/// Moves a layout-space y (selection, caret) onto the line it belongs to once
+/// shifted runs have grown the lines above it.
+pub(crate) fn shifted_y(layout: &Layout<TextBrush>, y: f64) -> f64 {
+    let Some(extents) = shifted_line_extents(layout) else {
+        return y;
+    };
+    let (offsets, _) = shifted_line_offsets(&extents);
+    for (index, line) in layout.lines().enumerate() {
+        if y < f64::from(line.metrics().block_max_coord) || index + 1 == offsets.len() {
+            return y + f64::from(offsets[index]);
+        }
+    }
+    y
+}
+
+/// Cumulative offset of each line once shifted runs have grown the lines above it.
+pub(crate) fn shifted_line_offsets(extents: &[(f32, f32)]) -> (Vec<f32>, f32) {
+    let mut offsets = Vec::with_capacity(extents.len());
+    let mut total = 0.0;
+    for (top, bottom) in extents {
+        offsets.push(total + top);
+        total += top + bottom;
+    }
+    (offsets, total)
+}
 
 pub struct DiffPaintArea {
     pub rect: Rect,
@@ -295,6 +360,7 @@ fn push_text_style(
     builder: &mut parley::RangedBuilder<'_, TextBrush>,
     style: &Value,
     range: std::ops::Range<usize>,
+    base: (f32, f32),
 ) {
     if let Some(size) = style["fontSize"].as_f64() {
         builder.push(StyleProperty::FontSize(size as f32), range.clone());
@@ -319,9 +385,18 @@ fn push_text_style(
             range.clone(),
         );
     }
-    if let Some(color) = style["foreground"].as_str() {
+    let shift = style["baselineShift"].as_f64().unwrap_or(0.0) as f32;
+    if style["foreground"].is_string() || shift != 0.0 {
+        let size = style["fontSize"]
+            .as_f64()
+            .map(|n| n as f32)
+            .unwrap_or(base.0);
         builder.push(
-            StyleProperty::Brush(TextBrush(Some(color.to_string()))),
+            StyleProperty::Brush(TextBrush(
+                style["foreground"].as_str().map(str::to_string),
+                shift,
+                size * base.1,
+            )),
             range.clone(),
         );
     }
@@ -649,12 +724,12 @@ fn push_span(
     }
     if let Some(kind) = span.syntax {
         builder.push(
-            StyleProperty::Brush(TextBrush(Some(syntax_color(node, kind).to_string()))),
+            StyleProperty::Brush(TextBrush::color(syntax_color(node, kind).to_string())),
             range.clone(),
         );
     } else if let Some(role) = span.role {
         builder.push(
-            StyleProperty::Brush(TextBrush(Some(role_color(node, role).to_string()))),
+            StyleProperty::Brush(TextBrush::color(role_color(node, role).to_string())),
             range.clone(),
         );
     }
@@ -686,10 +761,14 @@ fn draw_layout_with<P: PaintTarget>(
     scale: f64,
     solid: bool,
 ) {
-    for line in layout.lines() {
+    let offsets = shifted_line_extents(layout).map(|extents| shifted_line_offsets(&extents).0);
+    for (index, line) in layout.lines().enumerate() {
+        let line_offset = offsets.as_ref().map_or(0.0, |offsets| offsets[index]);
         for item in line.items() {
             if let PositionedLayoutItem::GlyphRun(glyph_run) = item {
                 let run = glyph_run.run();
+                let dy = line_offset - glyph_run.style().brush.1;
+                let origin = (origin.0, origin.1 + f64::from(dy));
                 let glyphs: Vec<_> = glyph_run
                     .positioned_glyphs()
                     .map(|glyph| PaintGlyph {
@@ -1012,7 +1091,15 @@ impl TextEngine {
             }
         }
         for run in text_runs(node, run_limit.min(content.len()), content) {
-            push_text_style(&mut builder, run.style, run.start..run.end);
+            push_text_style(
+                &mut builder,
+                run.style,
+                run.start..run.end,
+                (
+                    node.number("fontSize", 14.0),
+                    node.number("lineHeight", 1.5),
+                ),
+            );
         }
         builder.build(content)
     }
@@ -1366,6 +1453,9 @@ impl TextEngine {
         };
         layout.break_all_lines(wrap);
         let mut height = layout.height();
+        if let Some(extents) = shifted_line_extents(layout) {
+            height += shifted_line_offsets(&extents).1;
+        }
         if let Some(lines) = self.clamps.get(id).copied()
             && layout.len() > lines
             && let Some(line) = layout.get(lines - 1)
@@ -2117,7 +2207,7 @@ impl TextEngine {
                 continue;
             }
             builder.push(
-                StyleProperty::Brush(TextBrush(Some(syntax_color(node, span.kind).to_string()))),
+                StyleProperty::Brush(TextBrush::color(syntax_color(node, span.kind).to_string())),
                 span.range.start.max(offset) - offset..span.range.end - offset,
             );
         }
@@ -2216,7 +2306,12 @@ impl TextEngine {
         let layout = self.layouts.get_mut(id)?;
         layout.break_all_lines(width.map(|width| width.max(0.0)));
         layout.align(align, parley::AlignmentOptions::default());
-        Some(Cursor::from_byte_index(layout, index, Affinity::Downstream).geometry(layout, 1.0))
+        let mut rect =
+            Cursor::from_byte_index(layout, index, Affinity::Downstream).geometry(layout, 1.0);
+        let dy = shifted_y(layout, rect.y0) - rect.y0;
+        rect.y0 += dy;
+        rect.y1 += dy;
+        Some(rect)
     }
     pub fn range_rects(
         &mut self,
@@ -2290,7 +2385,12 @@ impl TextEngine {
         Selection::new(anchor, focus)
             .geometry(layout)
             .into_iter()
-            .map(|(rect, _)| rect)
+            .map(|(mut rect, _)| {
+                let dy = shifted_y(layout, rect.y0) - rect.y0;
+                rect.y0 += dy;
+                rect.y1 += dy;
+                rect
+            })
             .collect()
     }
     pub fn index_at(&mut self, id: &str, x: f32, y: f32, width: Option<f32>) -> Option<usize> {
