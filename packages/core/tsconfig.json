@@ -1,0 +1,6 @@
+{
+  // Lets `bun test` run from packages/core: same JSX settings as the root config.
+  "extends": "../../tsconfig.json",
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["dist", "node_modules"]
+}
