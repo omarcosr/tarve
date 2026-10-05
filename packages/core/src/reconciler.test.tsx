@@ -290,7 +290,8 @@ describe("native TSX protocol", () => {
     const explicit = compileTree(
       <Window>
         <View>
-          <Text id="paragraph" style={{ foreground: "#345678" }}>Paragraph</Text>
+          {/* <p> adds the user-agent 1em vertical margin. */}
+          <Text id="paragraph" style={{ foreground: "#345678", margin: { top: 14, bottom: 14, left: 0, right: 0 } }}>Paragraph</Text>
           <Button id="action" variant="secondary" style={{ background: "#123456" }}>Save</Button>
           <TextArea id="notes" value="Hello" placeholder="Notes" style={{ foreground: "#eeeeee" }} />
           <Svg id="vector-intrinsic" size={32} viewBox="0 0 24 24" color="#abcdef">

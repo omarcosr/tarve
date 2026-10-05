@@ -135,8 +135,8 @@ function childList(children: Child): Child[] {
 function isElement(child: Child, type: string): child is VNode {
   return typeof child === "object" && child != null && !Array.isArray(child) && (child as VNode).type === type;
 }
-function block(props: Record<string, any>, extra: Record<string, unknown>, children: Child): VNode {
-  return View({ ...(props.id ? { id: props.id } : {}), style: { ...extra, ...canonicalizeIntrinsicStyle(props.style) }, children } as never);
+function block(props: Record<string, any>, extra: Record<string, unknown>, children: Child, uaMargin?: { block: number; inline?: number }): VNode {
+  return View({ ...(props.id ? { id: props.id } : {}), ...(uaMargin ? { uaMargin } : {}), style: { ...extra, ...canonicalizeIntrinsicStyle(props.style) }, children } as never);
 }
 
 /** Lists, tables, fieldsets and details, with Chromium's user-agent spacing. */
@@ -147,7 +147,7 @@ export function expandHtml(type: string, props: Record<string, any>, key: string
       // User-agent: white-space: pre; font-family: monospace.
       return jsx("p", { ...props, style: { fontFamily: "monospace", whiteSpace: "pre", ...canonicalizeIntrinsicStyle(props.style) } });
     case "blockquote":
-      return block(props, { direction: "column", margin: { left: 40, right: 40 } }, children);
+      return block(props, { direction: "column" }, children, { block: 1, inline: 40 });
     case "meter": {
       const min = Number(props.min ?? 0);
       const max = Number(props.max ?? 1);
@@ -172,12 +172,12 @@ export function expandHtml(type: string, props: Record<string, any>, key: string
           View({ style: { position: "absolute", left: -40, width: 34, align: "end" }, children: Text({ children: marker }) }),
           View({ ...(itemProps.id ? { id: itemProps.id } : {}), style: { flex: 1, direction: "column", ...canonicalizeIntrinsicStyle(itemProps.style) }, children: itemProps.children }),
         ] } as never);
-      }));
+      }), { block: 1 });
     }
     case "li":
       return block(props, { direction: "column" }, children);
     case "dl":
-      return block(props, { direction: "column" }, children);
+      return block(props, { direction: "column" }, children, { block: 1 });
     case "dt":
       return block(props, { direction: "column" }, children);
     case "dd":

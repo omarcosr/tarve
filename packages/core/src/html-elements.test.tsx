@@ -76,7 +76,7 @@ test("colSpan and rowSpan place cells; pre, blockquote, meter and abbr follow us
   expect(tree.nodes.get("wide")!.style.gridColumn).toBe("span 2");
   expect(tree.nodes.get("tall")!.style.gridRow).toBe("span 2");
   expect(tree.nodes.get("code")!).toMatchObject({ text: "a  b\n c", style: { fontFamily: "monospace", whiteSpace: "pre" } });
-  expect(tree.nodes.get("quote")!.style.margin).toEqual({ left: 40, right: 40 });
+  expect(tree.nodes.get("quote")!.style.margin).toEqual({ top: 14, bottom: 14, left: 40, right: 40 });
   expect(tree.nodes.get("m")!.control).toMatchObject({ role: "progress", value: 0.6, max: 1 });
   expect(tree.nodes.get("p")!.runs).toEqual([{ start: 3, end: 7, style: { textDecoration: "underline" } }]);
 });

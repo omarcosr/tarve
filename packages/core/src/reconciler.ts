@@ -23,6 +23,8 @@ export interface CompiledTree { document: SceneDocument; handlers: Map<string, H
 const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "markdown", "code", "diff", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter"]);
 const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
 const svgIntrinsicElements = new Set(["path", "circle", "ellipse", "g", "line", "polygon", "polyline", "rect"]);
+/** User-agent vertical margins in em (Chromium html.css). */
+const UA_HEADING_MARGIN = { h1: 0.67, h2: 0.83, h3: 1, h4: 1.33, h5: 1.67, h6: 2.33 } as const;
 const headingPreset = {
   h1: { size: 32, weight: 700 },
   h2: { size: 24, weight: 700 },
@@ -125,6 +127,7 @@ export function compileTree(
       const props = child.props as Parameters<typeof Text>[0];
       const preset = headingPreset[child.type as keyof typeof headingPreset];
       return visit(Text({
+        ...({ uaMargin: { block: UA_HEADING_MARGIN[child.type as keyof typeof headingPreset] } } as object),
         ...props,
         size: props.size ?? preset.size,
         weight: props.weight ?? preset.weight,
@@ -138,7 +141,7 @@ export function compileTree(
     }
     if (!isNativeVNode && (child.type === "span" || child.type === "p")) {
       const props = child.props as Parameters<typeof Text>[0];
-      return visit(Text({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+      return visit(Text({ ...(child.type === "p" ? { uaMargin: { block: 1 } } : {}), ...props, style: canonicalizeIntrinsicStyle(props.style) } as never), path, group);
     }
     if (!isNativeVNode && child.type === "img") {
       const props = child.props as Parameters<typeof Image>[0];
@@ -354,6 +357,13 @@ export function compileTree(
       }
     }
     inheritedFont = ownFont;
+    // User-agent margins of HTML block elements (`uaMargin`: em vertically, px inline).
+    const uaMargin = p.uaMargin as { block: number; inline?: number } | undefined;
+    if (uaMargin && style.margin === undefined) {
+      const size = Number(fontStyle.fontSize ?? parentFont.fontSize ?? theme.font.size);
+      const vertical = Math.round(uaMargin.block * size * 100) / 100;
+      style.margin = { top: vertical, bottom: vertical, left: uaMargin.inline ?? 0, right: uaMargin.inline ?? 0 };
+    }
     // Plain assignments instead of ~30 conditional object spreads per node:
     // on a 6,000-node first render the spreads alone cost ~10 ms.
     let children: NativeNode[];
