@@ -13,6 +13,8 @@
     "large-list": "tarve run large-list.tsx",
     "motion": "tarve run motion.tsx",
     "studio": "tarve run studio.tsx",
+    "text": "tarve run text.tsx",
+    "html": "tarve run html.tsx",
     "performance": "tarve run performance.tsx",
     "check": "bun node_modules/typescript/bin/tsc --noEmit && bun node_modules/typescript/bin/tsc --noEmit -p studio-samples && bun studio-samples/generate.ts --check",
     "build:basic": "tarve build basic.tsx --outfile dist/Basic.exe",
@@ -25,6 +27,8 @@
     "build:large-list": "tarve build large-list.tsx --outfile dist/LargeList.exe",
     "build:motion": "tarve build motion.tsx --outfile dist/Motion.exe",
     "build:studio": "tarve build studio.tsx --outfile dist/Studio.exe",
+    "build:text": "tarve build text.tsx --outfile dist/Text.exe",
+    "build:html": "tarve build html.tsx --outfile dist/Html.exe",
     "build:performance": "tarve build performance.tsx --outfile dist/Performance.exe"
   },
   "dependencies": {
