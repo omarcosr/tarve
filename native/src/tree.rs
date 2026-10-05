@@ -58,6 +58,8 @@ const LAYOUT_KEYS: &[&str] = &[
     "display",
     "columns",
     "rows",
+    "gridColumn",
+    "gridRow",
     "borderWidth",
     "position",
     "top",
@@ -8481,6 +8483,13 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
         style.grid_template_columns = grid_template(&node.style["columns"], 2);
         style.grid_template_rows = grid_template(&node.style["rows"], 0);
     }
+    // CSS `grid-column` / `grid-row`: "span 2", "2", "1 / 3", "2 / span 2".
+    if let Some(line) = grid_line(&node.style["gridColumn"]) {
+        style.grid_column = line;
+    }
+    if let Some(line) = grid_line(&node.style["gridRow"]) {
+        style.grid_row = line;
+    }
     style
 }
 
@@ -8563,6 +8572,27 @@ fn css_basis(value: &serde_json::Value) -> Option<Dimension> {
         serde_json::Value::String(text) => css_dimension(text.trim()),
         _ => None,
     }
+}
+
+pub(crate) fn grid_line(
+    value: &serde_json::Value,
+) -> Option<taffy::Line<taffy::GridPlacement<String>>> {
+    let text = match value {
+        serde_json::Value::Number(number) => number.to_string(),
+        serde_json::Value::String(text) => text.trim().to_string(),
+        _ => return None,
+    };
+    let mut parts = text.splitn(2, '/');
+    let start = parts
+        .next()?
+        .trim()
+        .parse::<taffy::GridPlacement<String>>()
+        .ok()?;
+    let end = match parts.next() {
+        Some(end) => end.trim().parse::<taffy::GridPlacement<String>>().ok()?,
+        None => taffy::GridPlacement::Auto,
+    };
+    Some(taffy::Line { start, end })
 }
 
 /// `columns`/`rows`: a count of equal tracks, or a CSS track list such as

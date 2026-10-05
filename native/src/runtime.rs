@@ -209,6 +209,39 @@ pub(crate) fn cursor_for_node(node: Option<&Node>) -> CursorIcon {
     }
 }
 
+/// CSS `cursor` keywords winit can show.
+pub(crate) fn css_cursor(name: &str) -> Option<CursorIcon> {
+    Some(match name {
+        "default" => CursorIcon::Default,
+        "pointer" => CursorIcon::Pointer,
+        "text" => CursorIcon::Text,
+        "vertical-text" => CursorIcon::VerticalText,
+        "move" => CursorIcon::Move,
+        "grab" => CursorIcon::Grab,
+        "grabbing" => CursorIcon::Grabbing,
+        "not-allowed" => CursorIcon::NotAllowed,
+        "no-drop" => CursorIcon::NoDrop,
+        "wait" => CursorIcon::Wait,
+        "progress" => CursorIcon::Progress,
+        "help" => CursorIcon::Help,
+        "crosshair" => CursorIcon::Crosshair,
+        "copy" => CursorIcon::Copy,
+        "alias" => CursorIcon::Alias,
+        "context-menu" => CursorIcon::ContextMenu,
+        "cell" => CursorIcon::Cell,
+        "zoom-in" => CursorIcon::ZoomIn,
+        "zoom-out" => CursorIcon::ZoomOut,
+        "col-resize" => CursorIcon::ColResize,
+        "row-resize" => CursorIcon::RowResize,
+        "ew-resize" => CursorIcon::EwResize,
+        "ns-resize" => CursorIcon::NsResize,
+        "nesw-resize" => CursorIcon::NeswResize,
+        "nwse-resize" => CursorIcon::NwseResize,
+        "all-scroll" => CursorIcon::AllScroll,
+        _ => return None,
+    })
+}
+
 pub(crate) fn ime_allowed_for_node(node: Option<&Node>) -> bool {
     node.is_some_and(|node| matches!(node.kind.as_str(), "input" | "textarea"))
 }
@@ -1428,8 +1461,30 @@ impl App {
                 window.set_cursor(CursorIcon::from(direction));
             } else {
                 // A link or clickable span inside text wins over the text caret, as in a browser.
+                // CSS `cursor` inherits: the nearest ancestor that sets one wins.
+                let explicit = {
+                    let mut current = self.tree.hovered.clone();
+                    let mut found = None;
+                    while let Some(id) = current {
+                        let Some(entry) = self.tree.entries.get(&id) else {
+                            break;
+                        };
+                        if let Some(name) = entry.node.style["cursor"].as_str() {
+                            found = if name == "auto" {
+                                None
+                            } else {
+                                css_cursor(name)
+                            };
+                            break;
+                        }
+                        current = entry.parent.clone();
+                    }
+                    found
+                };
                 let cursor = if self.tree.text_run_at_pointer().is_some() {
                     CursorIcon::Pointer
+                } else if let Some(cursor) = explicit {
+                    cursor
                 } else if self.tree.selectable_text_at_pointer().is_some() {
                     CursorIcon::Text
                 } else {

@@ -508,6 +508,35 @@ fn text_ellipsis_line_clamp_and_clickable_runs() {
 }
 
 #[test]
+fn css_cursor_keywords_and_grid_spans() {
+    use winit::window::CursorIcon;
+    assert_eq!(crate::runtime::css_cursor("grab"), Some(CursorIcon::Grab));
+    assert_eq!(
+        crate::runtime::css_cursor("not-allowed"),
+        Some(CursorIcon::NotAllowed)
+    );
+    assert_eq!(crate::runtime::css_cursor("bogus"), None);
+    let cell = |id: &str, style: serde_json::Value| node(id, "view", style, vec![]);
+    let grid = node(
+        "grid",
+        "view",
+        json!({"display":"grid","columns":"100px 100px","width":200}),
+        vec![
+            cell("wide", json!({"gridColumn":"span 2","height":10})),
+            cell("tall", json!({"gridRow":"span 2"})),
+            cell("c", json!({"height":10})),
+            cell("d", json!({"height":10})),
+        ],
+    );
+    let mut tree = Tree::new(root(vec![grid]));
+    tree.compute(800.0, 600.0).unwrap();
+    let rect = |id: &str| tree.entries[id].rect;
+    assert_eq!(rect("wide").width(), 200.0);
+    assert_eq!(rect("tall").height(), 20.0);
+    assert_eq!(rect("d").x0, rect("c").x0, "d flows past the spanning cell");
+}
+
+#[test]
 fn custom_window_chrome_border_is_suppressed_when_maximized_or_fullscreen() {
     let child = node(
         "child",

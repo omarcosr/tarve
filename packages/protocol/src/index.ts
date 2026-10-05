@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 52;
+export const PROTOCOL_VERSION = 53;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
@@ -124,6 +124,10 @@ export interface Style extends StateStyle {
   display?: "flex" | "grid" | "none";
   /** Grid tracks: a count of equal columns, or a CSS track list such as `"repeat(auto-fill, minmax(176px, 1fr))"`. */
   columns?: number | string;
+  /** CSS `grid-column` / `grid-row` placement: `"span 2"`, `2`, `"1 / 3"`. */
+  gridColumn?: number | string; gridRow?: number | string;
+  /** CSS `cursor` keyword; inherited by descendants. */
+  cursor?: "auto" | "default" | "pointer" | "text" | "vertical-text" | "move" | "grab" | "grabbing" | "not-allowed" | "no-drop" | "wait" | "progress" | "help" | "crosshair" | "copy" | "alias" | "context-menu" | "cell" | "zoom-in" | "zoom-out" | "col-resize" | "row-resize" | "ew-resize" | "ns-resize" | "nesw-resize" | "nwse-resize" | "all-scroll";
   /** Grid row tracks as a CSS track list (`"auto 1fr"`); rows are implicit when omitted. */
   rows?: number | string;
   zIndex?: number;
