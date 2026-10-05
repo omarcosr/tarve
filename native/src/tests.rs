@@ -6400,6 +6400,103 @@ fn textarea_up_and_down_keep_the_column_and_stop_at_the_edges() {
 }
 
 #[test]
+fn textarea_goal_column_resets_on_any_other_caret_change() {
+    let run = |steps: &[&str]| {
+        let mut tree = editor_tree("textarea", "ghij\nef\nghij");
+        tree.scene(1.0);
+        for step in steps {
+            tree.key(step);
+        }
+        tree.type_text("|")[0]["value"].as_str().unwrap().to_owned()
+    };
+    // The goal column (end of "ghij") survives an unbroken Up/Down run...
+    let stale = "ghij|\nef\nghij";
+    assert_eq!(run(&["End", "ArrowUp", "ArrowUp"]), stale);
+    // ...a fresh run from the end of "ef" uses that column instead.
+    let fresh = {
+        let mut tree = editor_tree("textarea", "ghij\nef\nghij");
+        tree.scene(1.0);
+        tree.key("End");
+        tree.key("ArrowUp");
+        let caret = tree.caret_for_test();
+        let mut tree = editor_tree("textarea", "ghij\nef\nghij");
+        tree.scene(1.0);
+        // Same caret at the end of "ef", with no goal column recorded.
+        assert!(!tree.place_caret_for_test("field", caret));
+        tree.key("ArrowUp");
+        tree.type_text("|")[0]["value"].as_str().unwrap().to_owned()
+    };
+    assert_ne!(fresh, stale);
+    // A horizontal move back to the same caret starts a fresh run.
+    assert_eq!(
+        run(&["End", "ArrowUp", "ArrowLeft", "ArrowRight", "ArrowUp"]),
+        fresh
+    );
+    // So does extending and collapsing a selection back to it.
+    assert_eq!(
+        run(&["End", "ArrowUp", "ShiftArrowLeft", "ArrowRight", "ArrowUp"]),
+        fresh
+    );
+    // Typing, a press and any other key drop the recorded goal column too.
+    for step in ["type", "press", "Backspace", "Escape"] {
+        let mut tree = editor_tree("textarea", "ghij\nef\nghij");
+        tree.scene(1.0);
+        tree.key("End");
+        tree.key("ArrowUp");
+        let caret = tree.caret_for_test();
+        match step {
+            "type" => drop(tree.type_text("x")),
+            "press" => {
+                tree.pointer_down();
+                tree.pointer_up();
+            }
+            key => drop(tree.key(key)),
+        }
+        assert!(
+            !tree.place_caret_for_test("field", caret),
+            "{step} keeps a stale goal column"
+        );
+    }
+}
+
+#[test]
+fn textarea_goal_column_belongs_to_one_textarea() {
+    let make = |id: &str| {
+        let mut node = node(
+            id,
+            "textarea",
+            json!({"width":220,"height":90,"fontSize":14}),
+            vec![],
+        );
+        node.value = Some("ghij\nef\nghij".into());
+        node
+    };
+    let mut tree = Tree::new(root(vec![make("a"), make("b")]));
+    tree.compute(800.0, 600.0).unwrap();
+    tree.scene(1.0);
+    tree.focus("a");
+    tree.key("End");
+    tree.key("ArrowUp");
+    let caret = tree.caret_for_test();
+    // Same caret index in another textarea: it must not inherit a's goal column.
+    assert!(
+        tree.place_caret_for_test("b", caret),
+        "a's goal column is still recorded"
+    );
+    tree.key("ArrowUp");
+    let in_b = tree.type_text("|")[0]["value"].as_str().unwrap().to_owned();
+    assert_ne!(in_b, "ghij|\nef\nghij", "b used a's goal column");
+    // b moves from its own caret, exactly like a fresh Up from the end of "ef".
+    let mut fresh = Tree::new(root(vec![make("b")]));
+    fresh.compute(800.0, 600.0).unwrap();
+    fresh.scene(1.0);
+    fresh.focus("b");
+    assert!(!fresh.place_caret_for_test("b", caret));
+    fresh.key("ArrowUp");
+    assert_eq!(in_b, fresh.type_text("|")[0]["value"].as_str().unwrap());
+}
+
+#[test]
 fn typing_and_pasting_replace_the_selection() {
     let mut tree = editor_tree("input", "hello world");
     tree.key("End");

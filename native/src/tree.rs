@@ -1548,8 +1548,9 @@ pub struct Tree {
     visual_snapshot_ids: Vec<String>,
     /// Extra ids to re-check at the next sync (e.g. `disabled` changed).
     state_candidates: Vec<String>,
-    /// Caret and x of the last textarea Up/Down move (the goal column).
-    vertical_goal: Option<(usize, f32)>,
+    /// Textarea, caret and x of the last Up/Down move (the goal column). Any
+    /// other caret change (keys, typing, clicks, focus) clears it, as browsers do.
+    vertical_goal: Option<(String, usize, f32)>,
     /// Ids whose entry holds at least one motion track, so frame and
     /// pointer ticks visit only animating nodes instead of the whole tree.
     animating: HashSet<String>,
@@ -5440,6 +5441,7 @@ impl Tree {
         blurred
     }
     pub fn pointer_down(&mut self) -> Vec<Value> {
+        self.vertical_goal = None;
         self.pointer_drag = None;
         self.pressed_link = None;
         self.pressed_diff_row = None;
@@ -6226,6 +6228,12 @@ impl Tree {
         self.static_selected_text()
     }
     pub fn key(&mut self, key: &str) -> Vec<Value> {
+        if !matches!(
+            key,
+            "ArrowUp" | "ArrowDown" | "ShiftArrowUp" | "ShiftArrowDown"
+        ) {
+            self.vertical_goal = None;
+        }
         if key == "Escape" && self.pointer_drag.as_ref().is_some_and(|drag| drag.active) {
             return self.cancel_pointer_drag();
         }
@@ -6626,6 +6634,7 @@ impl Tree {
         vec![]
     }
     pub fn type_text(&mut self, text: &str) -> Vec<Value> {
+        self.vertical_goal = None;
         self.ime_cancel();
         let Some(id) = self.focused.clone() else {
             return vec![];
@@ -7606,6 +7615,19 @@ impl Tree {
         Some((width, height, entry.node.value.clone().unwrap_or_default()))
     }
 
+    /// Moves focus and caret without the input paths that clear the goal column.
+    #[cfg(test)]
+    pub(crate) fn place_caret_for_test(&mut self, id: &str, caret: usize) -> bool {
+        self.focused = Some(id.to_string());
+        self.caret = caret;
+        self.selection_anchor = None;
+        self.vertical_goal.is_some()
+    }
+    #[cfg(test)]
+    pub(crate) fn caret_for_test(&self) -> usize {
+        self.caret
+    }
+
     fn textarea_vertical_index(&mut self, id: &str, direction: f32) -> Option<usize> {
         let (width, _, value) = self.textarea_metrics(id)?;
         let caret = floor_boundary(&value, self.caret.min(value.len()));
@@ -7614,8 +7636,9 @@ impl Tree {
         // shorter line does not pull the caret left for the rest of the run.
         let x = self
             .vertical_goal
-            .filter(|(goal_caret, _)| *goal_caret == caret)
-            .map_or(cursor.x0 as f32, |(_, x)| x);
+            .as_ref()
+            .filter(|(goal_id, goal_caret, _)| goal_id == id && *goal_caret == caret)
+            .map_or(cursor.x0 as f32, |(_, _, x)| *x);
         let y = if direction < 0.0 {
             (cursor.y0 as f32 - 1.0).max(0.0)
         } else {
@@ -7623,7 +7646,7 @@ impl Tree {
         };
         let next = self.text.index_at(id, x, y, Some(width))?;
         let next = floor_boundary(&value, next.min(value.len()));
-        self.vertical_goal = Some((next, x));
+        self.vertical_goal = Some((id.to_string(), next, x));
         Some(next)
     }
 
