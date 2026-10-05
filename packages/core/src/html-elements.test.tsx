@@ -81,6 +81,32 @@ test("colSpan and rowSpan place cells; pre, blockquote, meter and abbr follow us
   expect(tree.nodes.get("p")!.runs).toEqual([{ start: 3, end: 7, style: { textDecoration: "underline" } }]);
 });
 
+test("color and time inputs normalize their values like HTML", () => {
+  const values: string[] = [];
+  const view = () => <Window>
+    <form id="f" onSubmit={v => values.push(JSON.stringify(v))}>
+      <input id="c" type="color" name="color" defaultValue="#FF0000" />
+      <input id="t" type="time" name="at" />
+      <button id="go">Go</button>
+    </form>
+  </Window>;
+  let tree = compileTree(view());
+  expect(tree.nodes.get("c-hex")!.value).toBe("#ff0000");
+  tree.handlers.get("t")!.onChange!("0930");
+  tree = compileTree(view());
+  expect(tree.nodes.get("t")!.value).toBe("09:30");
+  click(tree, "c-swatch");
+  tree = compileTree(view());
+  click(tree, "c-3b82f6");
+  tree = compileTree(view());
+  click(tree, "go");
+  expect(values.at(-1)).toBe(JSON.stringify({ color: "#3b82f6", at: "09:30" }));
+  tree.handlers.get("t")!.onChange!("25:99");
+  tree = compileTree(view());
+  click(tree, "go");
+  expect(JSON.parse(values.at(-1)!).at).toBe("");
+});
+
 test("details toggles its content and fieldset groups with a legend label", () => {
   const view = () => <Window><details id="d"><summary>More</summary><p id="hidden">body</p></details><fieldset><legend>Account</legend><p>x</p></fieldset></Window>;
   let tree = compileTree(view());

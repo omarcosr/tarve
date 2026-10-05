@@ -4,6 +4,7 @@ import { Button } from "./components/button";
 import { Text } from "./components/text";
 import { Column, Row, View } from "./components/layout";
 import { Pressable } from "./components/pressable";
+import { Input } from "./components/input";
 import { Checkbox, Progress, RadioGroup, Slider } from "./controls";
 import { DatePicker } from "./extra-controls";
 import { canonicalizeIntrinsicStyle } from "./intrinsic-style";
@@ -17,7 +18,8 @@ import { theme } from "./theme";
  */
 
 export const HTML_ELEMENTS = new Set(["pre", "blockquote", "meter", "form", "fieldset", "legend", "ul", "ol", "li", "dl", "dt", "dd", "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption", "details", "summary"]);
-export const HTML_INPUT_TYPES = new Set(["checkbox", "radio", "range", "date", "file"]);
+export const HTML_INPUT_TYPES = new Set(["checkbox", "radio", "range", "date", "file", "color", "time"]);
+const COLOR_PALETTE = ["#000000", "#ffffff", "#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#6366f1", "#a855f7", "#ec4899", "#78716c"];
 
 const state = new Map<string, unknown>();
 /** Named values of a form, kept across renders like the DOM keeps field values. */
@@ -100,6 +102,48 @@ export function expandInput(props: Record<string, any>, key: string, form: FormC
         onOpenChange: next => { state.set(`${id}:open`, next); },
         onMonthChange: next => { state.set(`${id}:month`, next); },
         onValueChange: next => { state.set(id, next); record(next); props.onChange?.(next); } });
+    }
+    case "color": {
+      // HTML: always a lowercase #rrggbb, #000000 by default.
+      const value = uncontrolled<string>(id, props.value, props.defaultValue ?? "#000000").toLowerCase();
+      record(value);
+      const open = (state.get(`${id}:open`) as boolean | undefined) ?? false;
+      const pick = (next: string) => {
+        const normalized = next.trim().toLowerCase();
+        if (!/^#[0-9a-f]{6}$/.test(normalized)) return;
+        state.set(id, normalized);
+        record(normalized);
+        props.onChange?.(normalized);
+      };
+      return Column({ id, gap: 6, style, children: [
+        Row({ gap: 8, align: "center", children: [
+          Pressable({ id: `${id}-swatch`, disabled: props.disabled, control: { role: "button", label: props.label ?? props.ariaLabel ?? "Choose colour", expanded: open } as never,
+            onClick: () => { state.set(`${id}:open`, !open); },
+            style: { width: 44, height: 24, radius: 4, borderWidth: 1, borderColor: theme.colors.border, background: value } }),
+          Input({ id: `${id}-hex`, value, disabled: props.disabled, onChange: pick, style: { width: 100, fontFamily: "monospace" } }),
+        ] }),
+        ...(open ? [Row({ gap: 4, wrap: true, style: { width: 180 }, children: COLOR_PALETTE.map(color =>
+          Pressable({ key: color, id: `${id}-${color.slice(1)}`, control: { role: "button", label: color } as never,
+            onClick: () => { pick(color); state.set(`${id}:open`, false); },
+            style: { width: 24, height: 24, radius: 4, borderWidth: color === value ? 2 : 1, borderColor: color === value ? theme.colors.ring : theme.colors.border, background: color } })) } as never)] : []),
+      ] } as never);
+    }
+    case "time": {
+      // HTML: "HH:MM" (24-hour); anything else leaves the value empty.
+      const value = uncontrolled<string>(id, props.value, props.defaultValue ?? "");
+      const valid = /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+      record(valid ? value : "");
+      return Input({ id, value, placeholder: props.placeholder ?? "--:--", disabled: props.disabled,
+        style: { width: 110, fontFamily: "monospace", ...(value && !valid ? { borderColor: theme.colors.destructive } : {}), ...style },
+        onChange: next => {
+          const digits = next.replace(/[^0-9]/g, "").slice(0, 4);
+          const formatted = digits.length > 2 ? `${digits.slice(0, 2)}:${digits.slice(2)}` : digits;
+          state.set(id, formatted);
+          const ok = /^([01]\d|2[0-3]):[0-5]\d$/.test(formatted);
+          record(ok ? formatted : "");
+          if (ok) props.onChange?.(formatted);
+        },
+        onSubmit: () => form?.submit() });
     }
     case "file": {
       const files = uncontrolled<string[]>(id, undefined, []);

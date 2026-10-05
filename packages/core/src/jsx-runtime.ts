@@ -105,7 +105,7 @@ export interface ImgProps extends Omit<BaseProps, "style" | "children"> {
   height?: number;
   fit?: "cover" | "contain";
 }
-export type IntrinsicInputType = "text" | "password" | "email" | "number" | "search" | "tel" | "url" | "checkbox" | "radio" | "range" | "date" | "file";
+export type IntrinsicInputType = "text" | "password" | "email" | "number" | "search" | "tel" | "url" | "checkbox" | "radio" | "range" | "date" | "file" | "color" | "time";
 export interface IntrinsicInputProps extends Omit<BaseProps, "style" | "children"> {
   style?: IntrinsicStyle;
   type?: IntrinsicInputType;
