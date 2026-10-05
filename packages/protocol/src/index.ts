@@ -121,7 +121,8 @@ export interface Style extends StateStyle {
   direction?: "row" | "row-reverse" | "column" | "column-reverse"; wrap?: boolean; gap?: number;
   padding?: Insets; margin?: Insets; align?: "start" | "center" | "end" | "stretch";
   justify?: "start" | "center" | "end" | "between";
-  display?: "flex" | "grid" | "none";
+  /** `block` stacks children and collapses adjacent vertical margins, as CSS block flow does. */
+  display?: "flex" | "grid" | "block" | "none";
   /** Grid tracks: a count of equal columns, or a CSS track list such as `"repeat(auto-fill, minmax(176px, 1fr))"`. */
   columns?: number | string;
   /** CSS `grid-column` / `grid-row` placement: `"span 2"`, `2`, `"1 / 3"`. */

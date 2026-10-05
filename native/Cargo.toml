@@ -19,7 +19,7 @@ vello_cpu = { version = "=0.2.0", default-features = false, features = ["std", "
 parley = "=0.11.1"
 comrak = { version = "=0.55.0", default-features = false }
 diffy = "=0.5.2"
-taffy = { version = "=0.14.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "content_size", "parse"] }
+taffy = { version = "=0.14.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout", "content_size", "parse"] }
 serde = { version = "1", features = ["derive"] }
 # Glyph rasterization: D3D11 atlas and blurred text shadows on every platform.
 swash = { version = "=0.2.10", default-features = false, features = ["std", "render"] }

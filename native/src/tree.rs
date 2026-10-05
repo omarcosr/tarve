@@ -8365,6 +8365,7 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
     let mut style = Style {
         display: match node.string("display", "flex") {
             "grid" => Display::Grid,
+            "block" => Display::Block,
             "none" => Display::None,
             _ => Display::Flex,
         },
