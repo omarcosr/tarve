@@ -10,7 +10,9 @@ import { App } from "../examples/text-view";
 const out = join(import.meta.dirname, "..", "work");
 mkdirSync(out, { recursive: true });
 const renderer = await createTestRenderer(App, { headless: true });
-await new Promise(resolve => setTimeout(resolve, 400));
+// Tall enough that every demo is on screen without scrolling.
+renderer.app.debug({ type: "resize", width: 760, height: 1500 });
+await new Promise(resolve => setTimeout(resolve, 500));
 const snapshot = await renderer.app.inspect();
 const box = (id: string) => {
   const node = snapshot.nodes.find(candidate => candidate.id === id);

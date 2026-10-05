@@ -68,10 +68,10 @@ const element = (html: string, tree: (jsx: Jsx, id?: string) => unknown): Item =
 const font = "font-family: 'Inter Variable'; font-size: 16px; line-height: 1.5";
 const htmlCases: Case[] = [
   { name: "unordered list indents 40px", container: column(300),
-    items: [element(`<ul style="margin: 0; ${font}"><li>One</li><li>Two longer item</li><li>Three</li></ul>`,
+    items: [element(`<ul style="${font}"><li>One</li><li>Two longer item</li><li>Three</li></ul>`,
       (j, id) => j("ul", { id, style: arial.tarve, children: [j("li", { children: "One" }), j("li", { children: "Two longer item" }), j("li", { children: "Three" })] }))] },
   { name: "ordered list wraps inside its indent", container: column(160),
-    items: [element(`<ol style="margin: 0; ${font}"><li>${quick}</li><li>b</li></ol>`,
+    items: [element(`<ol style="${font}"><li>${quick}</li><li>b</li></ol>`,
       (j, id) => j("ol", { id, style: arial.tarve, children: [j("li", { children: quick }), j("li", { children: "b" })] }))] },
   { name: "table auto columns with spacing and padding", container: row(600), tolerance: 2,
     items: [element(`<table style="${font}"><tr><th>Name</th><th>Age</th></tr><tr><td>Ana Maria</td><td>30</td></tr><tr><td>Bo</td><td>101</td></tr></table>`,
@@ -81,7 +81,17 @@ const htmlCases: Case[] = [
         j("tr", { children: [j("td", { children: "Bo" }), j("td", { children: "101" })] }),
       ] }))] },
 ];
+// flow-root: a Tarve container is a flex item, which starts its own block
+// formatting context, so child margins never escape it.
+const blockFlow = (width: number): Item => ({ css: { display: "flow-root", width: `${width}px` }, tarve: { display: "block", width } });
 htmlCases.push(
+  { name: "paragraph margins collapse in block flow", container: blockFlow(300),
+    items: [para("First paragraph", () => "First paragraph"), para(quick, () => quick), para("Last", () => "Last")] },
+  { name: "paragraph margins add up in a flex column", container: column(300),
+    items: [para("First paragraph", () => "First paragraph"), para("Last", () => "Last")] },
+  { name: "heading margins scale with their font size", container: blockFlow(400),
+    items: [element(`<h2 style="${font}; font-size: 24px">Heading</h2>`, (j, id) => j("h2", { id, style: { ...arial.tarve, fontSize: 24 }, children: "Heading" })),
+      para("Body text", () => "Body text")] },
   { name: "table colspan and rowspan", container: row(600), tolerance: 2,
     items: [element(`<table style="${font}"><tr><td colspan="2">Wide header cell</td></tr><tr><td rowspan="2">Tall</td><td>b</td></tr><tr><td>c</td></tr></table>`,
       (j, id) => j("table", { id, style: arial.tarve, children: [
@@ -90,11 +100,11 @@ htmlCases.push(
         j("tr", { children: [j("td", { children: "c" })] }),
       ] }))] },
   { name: "pre keeps spaces in monospace", container: row(600),
-    items: [element(`<pre style="margin: 0; font-family: monospace; font-size: 13px; line-height: 1.5">a  b\n  c</pre>`,
+    items: [element(`<pre style="font-family: monospace; font-size: 13px; line-height: 1.5">a  b\n  c</pre>`,
       (j, id) => j("pre", { id, style: { fontSize: 13, lineHeight: 1.5 }, children: "a  b\n  c" }))] },
   { name: "blockquote indents 40px on both sides", container: column(300),
-    items: [element(`<blockquote style="margin: 0 40px; ${font}">${quick}</blockquote>`,
-      (j, id) => j("blockquote", { id, style: arial.tarve, children: j("p", { children: quick }) }))] },
+    items: [element(`<blockquote style="${font}">${quick}</blockquote>`,
+      (j, id) => j("blockquote", { id, style: arial.tarve, children: quick }))] },
 );
 const overflowCases: Case[] = [
   { name: "overflow hidden lets a flex item shrink below its content", container: row(200),
@@ -163,7 +173,7 @@ function cssText(css: Css): string {
 
 function page(): string {
   const blocks = cases.map((c, index) => `<div class="case" id="case-${index}" style="${cssText(c.container.css)}">${c.items.map(item => item.raw ? item.html! : item.html !== undefined ? `<p style="${cssText(item.css)}">${item.html}</p>` : `<div style="${cssText(item.css)}"></div>`).join("")}</div>`).join("\n");
-  return `<!doctype html><meta charset="utf-8"><style>@font-face{font-family:'Inter Variable';src:url(/inter.ttf);font-weight:100 900}*{box-sizing:border-box;margin:0;padding:0}ul,ol{padding-left:40px}td,th{padding:1px}body{font:12px sans-serif}.case{position:relative;margin-bottom:40px}.case>div,.case>p{background:#89b4fa;outline:1px solid #1e1e2e}</style>
+  return `<!doctype html><meta charset="utf-8"><style>@font-face{font-family:'Inter Variable';src:url(/inter.ttf);font-weight:100 900}*{box-sizing:border-box;padding:0}body{margin:0}ul,ol{padding-left:40px}td,th{padding:1px}body{font:12px sans-serif}.case{position:relative;margin-bottom:40px}.case>div,.case>p{background:#89b4fa;outline:1px solid #1e1e2e}</style>
 ${blocks}
 <script>
 document.fonts.ready.then(() => { const out = [...document.querySelectorAll(".case")].map(c => { const o = c.getBoundingClientRect(); return [...c.children].map(el => { const r = el.getBoundingClientRect(); return [r.left - o.left, r.top - o.top, r.width, r.height].map(v => Math.round(v * 100) / 100); }); });

@@ -1,4 +1,4 @@
-import { Column, Row, Text, TitleBar, View, Window, theme } from "@tarve/core";
+import { Column, Row, Scroll, Text, TitleBar, View, Window, theme } from "@tarve/core";
 
 // CSS text in Tarve: phrasing elements inside a paragraph, white-space, ellipsis,
 // line clamps and overflow, each next to the CSS it mirrors.
@@ -23,7 +23,8 @@ export function App() {
   return (
     <Window title="Tarve — Text" width={760} height={820} position="center">
       <TitleBar title="Tarve — Text" />
-      <Column gap={12} padding={18} flex={1} style={{ width: "100%", background: c.background, overflow: "hidden" }}>
+      <Scroll id="page" flex={1} style={{ width: "100%", background: c.background }}>
+      <Column gap={12} padding={18} style={{ width: "100%" }}>
         <Demo title="Inline elements" css="<p> + phrasing">
           <p id="inline">
             Text can be <strong>strong</strong>, <em>emphasised</em>, <u>underlined</u>, <s>struck</s>,
@@ -64,6 +65,7 @@ export function App() {
           </Row>
         </Demo>
       </Column>
+      </Scroll>
     </Window>
   );
 }
