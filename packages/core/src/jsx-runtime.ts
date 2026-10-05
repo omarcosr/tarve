@@ -262,7 +262,8 @@ export interface IntrinsicFormProps extends IntrinsicBlockProps {
 }
 export interface IntrinsicListProps extends IntrinsicBlockProps { start?: number }
 export interface IntrinsicDetailsProps extends IntrinsicBlockProps { open?: boolean; onToggle?: (open: boolean) => void }
-export interface IntrinsicCellProps extends IntrinsicBlockProps { colSpan?: number }
+export interface IntrinsicCellProps extends IntrinsicBlockProps { colSpan?: number; rowSpan?: number }
+export interface IntrinsicMeterProps extends IntrinsicBlockProps { value: number; min?: number; max?: number; ariaLabel?: string; title?: string }
 export namespace JSX {
   export type Element = VNode;
   export interface ElementChildrenAttribute { children: {} }
@@ -270,6 +271,10 @@ export namespace JSX {
   export interface IntrinsicElements {
     div: DivProps;
     form: IntrinsicFormProps;
+    pre: SpanProps;
+    blockquote: IntrinsicBlockProps;
+    meter: IntrinsicMeterProps;
+    abbr: SpanProps & { title?: string };
     fieldset: IntrinsicBlockProps;
     legend: IntrinsicBlockProps;
     ul: IntrinsicListProps;

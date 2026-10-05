@@ -64,6 +64,23 @@ test("tables lay out as a grid of auto columns with bold headers", () => {
   expect(() => compileTree(<Window><tr /></Window>)).toThrow("must be inside a <table>");
 });
 
+test("colSpan and rowSpan place cells; pre, blockquote, meter and abbr follow user-agent styles", () => {
+  const tree = compileTree(<Window>
+    <table id="t"><tr><td id="wide" colSpan={2}>a</td></tr><tr><td id="tall" rowSpan={2}>b</td><td>c</td></tr><tr><td>d</td></tr></table>
+    <pre id="code">{"a  b\n c"}</pre>
+    <blockquote id="quote"><p>q</p></blockquote>
+    <meter id="m" value={0.6} />
+    <p id="p">An <abbr title="HyperText Markup Language">HTML</abbr> page</p>
+  </Window>);
+  expect(tree.nodes.get("t")!.style.columns).toBe("repeat(2, auto)");
+  expect(tree.nodes.get("wide")!.style.gridColumn).toBe("span 2");
+  expect(tree.nodes.get("tall")!.style.gridRow).toBe("span 2");
+  expect(tree.nodes.get("code")!).toMatchObject({ text: "a  b\n c", style: { fontFamily: "monospace", whiteSpace: "pre" } });
+  expect(tree.nodes.get("quote")!.style.margin).toEqual({ left: 40, right: 40 });
+  expect(tree.nodes.get("m")!.control).toMatchObject({ role: "progress", value: 0.6, max: 1 });
+  expect(tree.nodes.get("p")!.runs).toEqual([{ start: 3, end: 7, style: { textDecoration: "underline" } }]);
+});
+
 test("details toggles its content and fieldset groups with a legend label", () => {
   const view = () => <Window><details id="d"><summary>More</summary><p id="hidden">body</p></details><fieldset><legend>Account</legend><p>x</p></fieldset></Window>;
   let tree = compileTree(view());

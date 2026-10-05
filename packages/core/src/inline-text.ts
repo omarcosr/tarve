@@ -18,6 +18,8 @@ const INLINE_TAGS: Record<string, Record<string, unknown>> = {
   mark: { background: "#ffff00", foreground: "#000000" },
   small: { fontSize: "smaller" },
   a: { textDecoration: "underline" },
+  // Chromium: abbr[title] is underline dotted; dotted lines are drawn solid.
+  abbr: {},
 };
 export const INLINE_TAG_NAMES = new Set([...Object.keys(INLINE_TAGS), "br"]);
 
@@ -122,6 +124,7 @@ function collect(child: Child, style: RunStyle, id: string | undefined, ctx: Inl
     throw new Error(`<${String(node.type)}> cannot be inside text; only phrasing elements (span, strong, em, a, code, br…) can.`);
   }
   const own: RunStyle = { ...INLINE_TAGS[node.type] };
+  if (node.type === "abbr" && props.title) own.textDecoration = "underline";
   if (node.type === "a") own.foreground = ctx.linkColor;
   Object.assign(own, pick(canonicalizeIntrinsicStyle(props.style) as Record<string, unknown>));
   if (props.size !== undefined) own.fontSize = props.size;

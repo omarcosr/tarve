@@ -4,7 +4,7 @@ import { Button } from "./components/button";
 import { Text } from "./components/text";
 import { Column, Row, View } from "./components/layout";
 import { Pressable } from "./components/pressable";
-import { Checkbox, RadioGroup, Slider } from "./controls";
+import { Checkbox, Progress, RadioGroup, Slider } from "./controls";
 import { DatePicker } from "./extra-controls";
 import { canonicalizeIntrinsicStyle } from "./intrinsic-style";
 import { theme } from "./theme";
@@ -16,7 +16,7 @@ import { theme } from "./theme";
  * their state here, keyed by id, the way a browser keeps it in the DOM.
  */
 
-export const HTML_ELEMENTS = new Set(["form", "fieldset", "legend", "ul", "ol", "li", "dl", "dt", "dd", "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption", "details", "summary"]);
+export const HTML_ELEMENTS = new Set(["pre", "blockquote", "meter", "form", "fieldset", "legend", "ul", "ol", "li", "dl", "dt", "dd", "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption", "details", "summary"]);
 export const HTML_INPUT_TYPES = new Set(["checkbox", "radio", "range", "date", "file"]);
 
 const state = new Map<string, unknown>();
@@ -143,6 +143,18 @@ function block(props: Record<string, any>, extra: Record<string, unknown>, child
 export function expandHtml(type: string, props: Record<string, any>, key: string): VNode {
   const children = props.children as Child;
   switch (type) {
+    case "pre":
+      // User-agent: white-space: pre; font-family: monospace.
+      return jsx("p", { ...props, style: { fontFamily: "monospace", whiteSpace: "pre", ...canonicalizeIntrinsicStyle(props.style) } });
+    case "blockquote":
+      return block(props, { direction: "column", margin: { left: 40, right: 40 } }, children);
+    case "meter": {
+      const min = Number(props.min ?? 0);
+      const max = Number(props.max ?? 1);
+      const value = Math.min(max, Math.max(min, Number(props.value ?? 0)));
+      return Progress({ ...(props.id ? { id: props.id } : {}), value: value - min, max: max - min, label: props.ariaLabel ?? props.title ?? "Meter",
+        style: { width: 80, height: 16, ...canonicalizeIntrinsicStyle(props.style) } } as never);
+    }
     case "fieldset":
       return block(props, { direction: "column", gap: 4, padding: { top: 6, right: 12, bottom: 10, left: 12 }, margin: { left: 2, right: 2 }, borderWidth: 2, borderColor: "#c0c0c0" },
         jsx(View, { control: { role: "group", label: textOf(childList(children).find(child => isElement(child, "legend"))) }, style: { direction: "column", gap: 4 }, children }));
@@ -219,18 +231,32 @@ function expandTable(props: Record<string, any>, key: string): VNode {
     }
   };
   collect(props.children, "tbody");
-  if (rows.some(row => row.cells.some(cell => Number((cell.props as Record<string, any>).colSpan ?? 1) > 1))) throw new Error("table colSpan is not supported yet");
-  const columns = Math.max(1, ...rows.map(row => row.cells.length));
+  // Columns: the widest row, counting colSpan and cells still spanning down from rows above.
+  let columns = 1;
+  const carried: number[] = [];
+  for (const row of rows) {
+    let width = 0;
+    for (const cell of row.cells) width += Number((cell.props as Record<string, any>).colSpan ?? 1);
+    const pending = carried.filter(rowsLeft => rowsLeft > 0).length;
+    columns = Math.max(columns, width + pending);
+    for (let i = 0; i < carried.length; i++) carried[i]!--;
+    for (const cell of row.cells) {
+      const span = Number((cell.props as Record<string, any>).rowSpan ?? 1);
+      for (let c = 0; c < Number((cell.props as Record<string, any>).colSpan ?? 1); c++) if (span > 1) carried.push(span - 1);
+    }
+  }
   const id = String(props.id ?? key);
   const cells = rows.flatMap((row, r) => row.cells.map((cell, c) => {
     const cellProps = cell.props as Record<string, any>;
     const header = cell.type === "th" || row.section === "thead";
     const { background } = row.style;
+    const colSpan = Number(cellProps.colSpan ?? 1);
+    const rowSpan = Number(cellProps.rowSpan ?? 1);
     const content = typeof cellProps.children === "object" && cellProps.children !== null && !Array.isArray(cellProps.children) && typeof (cellProps.children as VNode).type !== "string"
       ? cellProps.children
       : Text({ ...(header ? { weight: 700 } : {}), style: { textAlign: header ? "center" : "start" }, children: cellProps.children });
     return View({ key: `${r}:${c}`, ...(cellProps.id ? { id: cellProps.id } : {}),
-      style: { padding: 1, justify: "center", ...(background ? { background } : {}), ...canonicalizeIntrinsicStyle(cellProps.style) },
+      style: { padding: 1, justify: "center", ...(colSpan > 1 ? { gridColumn: `span ${colSpan}` } : {}), ...(rowSpan > 1 ? { gridRow: `span ${rowSpan}` } : {}), ...(background ? { background } : {}), ...canonicalizeIntrinsicStyle(cellProps.style) },
       children: content } as never);
   }));
   const grid = View({ id, control: { role: "grid", label: textOf(caption) || "Table" } as never,
