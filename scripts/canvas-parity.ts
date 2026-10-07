@@ -10,6 +10,14 @@ import type { CanvasRenderingContext2D as Ctx } from "../packages/core/src/canva
 
 const fixture = join(import.meta.dirname, "..", "tests", "fixtures", "canvas-parity.json");
 const W = 160, H = 120;
+const imageFile = join(import.meta.dirname, "..", "examples", "assets", "studio.png");
+const interFile = join(import.meta.dirname, "..", "packages", "headless", "fonts", "InterVariable.ttf");
+/** The image drawings use: a loaded <img> in Chromium, a path in Tarve. */
+declare const IMG: string;
+(globalThis as Record<string, unknown>).IMG = imageFile;
+/** Upright text uses hinted glyph bitmaps whose edge pixels differ from Chromium's;
+ * those drawings allow more edge pixels but must put the ink at the same place. */
+const tolerance: Record<string, number> = { "text alignment and baselines": 0.04 };
 
 export const drawings: Record<string, (ctx: Ctx) => void> = {
   "fill and stroke rects": ctx => {
@@ -55,6 +63,30 @@ export const drawings: Record<string, (ctx: Ctx) => void> = {
     ctx.beginPath(); ctx.moveTo(20, 20); ctx.arcTo(140, 20, 140, 100, 30); ctx.arcTo(140, 100, 20, 100, 15); ctx.lineTo(20, 100);
     ctx.lineWidth = 5; ctx.strokeStyle = "#dc2626"; ctx.stroke();
   },
+  "partial clearRect cuts earlier drawing": ctx => {
+    ctx.fillStyle = "#2563eb"; ctx.fillRect(10, 10, 140, 100);
+    ctx.fillStyle = "#f97316"; ctx.beginPath(); ctx.arc(80, 60, 40, 0, Math.PI * 2); ctx.fill();
+    ctx.clearRect(40, 30, 50, 40);
+    ctx.translate(120, 90); ctx.rotate(Math.PI / 4); ctx.clearRect(-10, -10, 20, 20);
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = "#16a34a"; ctx.fillRect(60, 50, 20, 20);
+  },
+  "drawImage scaled and cropped": ctx => {
+    ctx.drawImage(IMG, 10, 10, 60, 40);
+    ctx.drawImage(IMG, 0, 0, 40, 40, 80, 10, 70, 70);
+    ctx.fillStyle = "#dc2626"; ctx.fillRect(20, 60, 30, 30);
+    ctx.globalAlpha = 0.5; ctx.drawImage(IMG, 30, 70, 60, 40);
+  },
+  "rotated and scaled text": ctx => {
+    ctx.font = "600 22px 'Inter Variable'"; ctx.fillStyle = "#111827";
+    ctx.translate(30, 90); ctx.rotate(-Math.PI / 8); ctx.fillText("Tarve", 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.scale(1.5, 1); ctx.font = "16px 'Inter Variable'"; ctx.fillStyle = "#b91c1c"; ctx.fillText("wide", 50, 30);
+  },
+  "text alignment and baselines": ctx => {
+    ctx.font = "18px 'Inter Variable'"; ctx.fillStyle = "#1e3a8a";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("center", 80, 30);
+    ctx.textAlign = "right"; ctx.textBaseline = "alphabetic"; ctx.fillText("right", 150, 80);
+    ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.fillText("top", 10, 90);
+  },
   "ellipse rotated": ctx => {
     ctx.beginPath(); ctx.ellipse(80, 60, 60, 25, Math.PI / 5, 0, Math.PI * 2); ctx.fillStyle = "#eab308"; ctx.fill();
   },
@@ -62,15 +94,20 @@ export const drawings: Record<string, (ctx: Ctx) => void> = {
 
 function page(): string {
   const entries = Object.entries(drawings).map(([name, draw]) => `[${JSON.stringify(name)}, ${draw.toString()}]`).join(",\n");
-  return `<!doctype html><meta charset="utf-8"><body style="margin:0"><script>
+  return `<!doctype html><meta charset="utf-8"><style>@font-face{font-family:'Inter Variable';src:url(/inter.ttf);font-weight:100 900}</style><body style="margin:0"><script type="module">
 const drawings = [${entries}];
+const IMG = new Image(); IMG.src = "/image.png"; await IMG.decode();
+await document.fonts.load("16px 'Inter Variable'"); await document.fonts.load("600 16px 'Inter Variable'");
 const out = {};
 for (const [name, draw] of drawings) {
   const canvas = document.createElement("canvas"); canvas.width = ${W}; canvas.height = ${H};
-  const ctx = canvas.getContext("2d"); ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, ${W}, ${H});
-  ctx.fillStyle = "#000000"; draw(ctx);
-  out[name] = Array.from(ctx.getImageData(0, 0, ${W}, ${H}).data);
-  document.body.appendChild(canvas);
+  const ctx = canvas.getContext("2d");
+  draw(ctx);
+  // Composite onto white, as the Tarve window behind the canvas is white.
+  const flat = document.createElement("canvas"); flat.width = ${W}; flat.height = ${H};
+  const fctx = flat.getContext("2d"); fctx.fillStyle = "#ffffff"; fctx.fillRect(0, 0, ${W}, ${H}); fctx.drawImage(canvas, 0, 0);
+  out[name] = Array.from(fctx.getImageData(0, 0, ${W}, ${H}).data);
+  document.body.appendChild(flat);
 }
 fetch("/save", { method: "POST", body: JSON.stringify({ userAgent: navigator.userAgent, images: out }) }).then(() => { document.title = "saved"; });
 </script>`;
@@ -83,7 +120,7 @@ async function check(): Promise<number> {
   const { jsx } = await import("@tarve/core/jsx-runtime");
   let current = Object.keys(drawings)[0]!;
   const renderer = await createTestRenderer(() => jsx(Window, { width: 400, height: 300, style: { background: "#ffffff" },
-    children: jsx("canvas", { id: "c", width: W, height: H, onDraw: drawings[current] }) }), { headless: true });
+    children: jsx("canvas", { id: "c", width: W, height: H, onDraw: drawings[current] }) }), { headless: true, fontFaces: [interFile] });
   let failures = 0;
   const path = join(import.meta.dirname, "..", "work", "canvas-parity.png");
   for (const name of Object.keys(drawings)) {
@@ -116,11 +153,17 @@ async function check(): Promise<number> {
       worst = Math.max(worst, delta);
       if (delta > 48) { different++; if (process.env.CANVAS_DEBUG === name) console.log("diff", x, y, actual.map(Math.round), [0, 1, 2].map(k => expected[e + k])); }
     }
+    const centroid = (get: (x: number, y: number) => number[]) => { let sx = 0, sy = 0, n = 0, minY = 1e9, maxY = 0, minX = 1e9, maxX = 0; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const p = get(x, y); const ink = 765 - p[0]! - p[1]! - p[2]!; if (ink > 150) { sx += x * ink; sy += y * ink; n += ink; minY = Math.min(minY, y); maxY = Math.max(maxY, y); minX = Math.min(minX, x); maxX = Math.max(maxX, x); } } return [sx / n, sy / n, minX, maxX, minY, maxY].map(v => Math.round(v * 10) / 10); };
+    const inkChromium = centroid((x, y) => [0, 1, 2].map(k => expected[(y * W + x) * 4 + k]!));
+    const inkTarve = centroid((x, y) => { const sx = Math.floor((box.x + x + 0.5) * scale), sy = Math.floor((box.y + y + 0.5) * scale); return [0, 1, 2].map(k => image.rgba[(sy * image.width + sx) * 4 + k]!); });
+    const drift = Math.hypot(inkChromium[0]! - inkTarve[0]!, inkChromium[1]! - inkTarve[1]!);
+    if (process.env.CANVAS_DEBUG === name) console.log("chromium", inkChromium, "tarve", inkTarve);
     // Only anti-aliased edge pixels may differ.
     const ratio = different / (W * H);
-    const bad = ratio > 0.005;
+    // The ink's centre of mass must agree within half a pixel, whatever the edges do.
+    const bad = ratio > (tolerance[name] ?? 0.005) || drift > 0.5;
     if (bad) failures++;
-    console.log(`${bad ? "FAIL" : "ok  "} ${name}: ${(ratio * 100).toFixed(2)}% of pixels differ (max channel delta ${worst})`);
+    console.log(`${bad ? "FAIL" : "ok  "} ${name}: ${(ratio * 100).toFixed(2)}% of pixels differ (max channel delta ${worst}), ink centre ${drift.toFixed(2)}px apart`);
   }
   renderer.app.close();
   console.log(failures ? `${failures} drawings differ from Chromium` : `[tarve canvas-parity] PASS (${Object.keys(drawings).length} drawings match Chromium)`);
@@ -129,7 +172,10 @@ async function check(): Promise<number> {
 
 if ((process.argv[2] ?? "check") === "serve") {
   Bun.serve({ port: 4798, async fetch(request) {
-    if (new URL(request.url).pathname === "/save") {
+    const path = new URL(request.url).pathname;
+    if (path === "/image.png") return new Response(Bun.file(imageFile));
+    if (path === "/inter.ttf") return new Response(Bun.file(interFile));
+    if (path === "/save") {
       const body = await request.json() as { userAgent: string; images: Record<string, number[]> };
       writeFileSync(fixture, JSON.stringify({ recordedWith: body.userAgent, width: W, height: H, images: body.images }));
       console.log(`saved ${Object.keys(body.images).length} canvases from ${body.userAgent}`);

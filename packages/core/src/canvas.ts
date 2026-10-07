@@ -1,6 +1,7 @@
 import type { VNode } from "./jsx-runtime";
 import { _nativeJsx } from "./jsx-runtime";
 import { Text } from "./components/text";
+import { Image, type ImageProps } from "./components/image";
 import { View } from "./components/layout";
 import { canonicalizeIntrinsicStyle } from "./intrinsic-style";
 
@@ -36,7 +37,12 @@ export class CanvasGradient {
   }
 }
 
-export interface CanvasText { text: string; x: number; y: number; font: string; color: string; align: CanvasState["textAlign"]; baseline: CanvasState["textBaseline"]; alpha: number; stroke: boolean; lineWidth: number }
+export interface CanvasText { text: string; x: number; y: number; matrix: Matrix; font: string; color: string; align: CanvasState["textAlign"]; baseline: CanvasState["textBaseline"]; alpha: number; stroke: boolean; lineWidth: number }
+/** Anything `<img src>` accepts: a path, an imported asset or RGBA pixels. */
+export type CanvasImageSource = ImageProps["src"] | { src: ImageProps["src"] };
+interface CanvasImage { source: ImageProps["src"]; matrix: Matrix; alpha: number; dx: number; dy: number; dw?: number; dh?: number; crop?: [number, number, number, number] }
+/** Paint order: vector layers, text and images interleave; a partial clearRect cuts everything before it. */
+type CanvasOp = { svg: string[] } | { text: CanvasText } | { image: CanvasImage } | { clear: string };
 
 const fmt = (n: number) => (Math.round(n * 1000) / 1000).toString();
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -50,10 +56,11 @@ export class CanvasRenderingContext2D {
   private path = "";
   private start: [number, number] | null = null;
   private current: [number, number] | null = null;
-  /** SVG body and definitions, in paint order. */
-  readonly elements: string[] = [];
+  /** The open vector layer, in paint order; flushed when text or an image is drawn on top. */
+  elements: string[] = [];
   readonly defs: string[] = [];
   readonly texts: CanvasText[] = [];
+  readonly ops: CanvasOp[] = [];
   private gradients = 0;
 
   constructor(readonly width: number, readonly height: number) {}
@@ -227,27 +234,62 @@ export class CanvasRenderingContext2D {
   }
   fillRect(x: number, y: number, w: number, h: number): void { this.emit(this.rectPath(x, y, w, h), this.paint(this.state.fillStyle), null); }
   strokeRect(x: number, y: number, w: number, h: number): void { this.emit(this.rectPath(x, y, w, h), null, this.paint(this.state.strokeStyle)); }
-  /** Clearing the whole canvas discards what was drawn; partial clears paint nothing over earlier content. */
+  private flush(): void {
+    if (this.elements.length) this.ops.push({ svg: this.elements });
+    this.elements = [];
+  }
+  /** Clears to transparent: the whole canvas drops everything drawn so far; a partial
+   * rectangle cuts a hole (in any transform) through all earlier paths, text and images. */
   clearRect(x: number, y: number, w: number, h: number): void {
-    const [a, b, c, d] = this.state.transform;
-    const [ox, oy] = this.point(x, y);
-    if (b === 0 && c === 0 && a > 0 && d > 0 && ox <= 0 && oy <= 0 && ox + w * a >= this.width && oy + h * d >= this.height) {
-      this.elements.length = 0;
+    const corners = [this.point(x, y), this.point(x + w, y), this.point(x + w, y + h), this.point(x, y + h)];
+    const inside = (px: number, py: number) => {
+      let hit = false;
+      for (let i = 0, j = 3; i < 4; j = i++) {
+        const [xi, yi] = corners[i]!, [xj, yj] = corners[j]!;
+        if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) hit = !hit;
+      }
+      return hit;
+    };
+    const eps = 1e-6;
+    if ([[-eps, -eps], [this.width + eps, -eps], [this.width + eps, this.height + eps], [-eps, this.height + eps]].every(([px, py]) => inside(px!, py!))) {
+      this.elements = [];
       this.texts.length = 0;
+      this.ops.length = 0;
+      return;
     }
+    this.flush();
+    this.ops.push({ clear: `M${corners.map(p => `${fmt(p[0])} ${fmt(p[1])}`).join("L")}Z` });
   }
   private text(text: string, x: number, y: number, stroke: boolean): void {
-    const [px, py] = this.point(x, y);
     const style = this.state[stroke ? "strokeStyle" : "fillStyle"];
     const color = typeof style === "string" ? style : style.stops[0]?.[1] ?? "#000000";
-    this.texts.push({ text, x: px, y: py, font: this.state.font, color, align: this.state.textAlign, baseline: this.state.textBaseline, alpha: this.state.globalAlpha, stroke, lineWidth: this.state.lineWidth });
+    const entry: CanvasText = { text, x, y, matrix: [...this.state.transform] as Matrix, font: this.state.font, color, align: this.state.textAlign, baseline: this.state.textBaseline, alpha: this.state.globalAlpha, stroke, lineWidth: this.state.lineWidth };
+    this.flush();
+    this.texts.push(entry);
+    this.ops.push({ text: entry });
+  }
+  /** drawImage(image, dx, dy[, dw, dh]) or drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh). */
+  drawImage(image: CanvasImageSource, ...args: number[]): void {
+    const source = typeof image === "object" && image !== null && "src" in image && !("rgba" in image) ? (image as { src: ImageProps["src"] }).src : image as ImageProps["src"];
+    const base = { source, matrix: [...this.state.transform] as Matrix, alpha: this.state.globalAlpha };
+    let entry: CanvasImage;
+    if (args.length === 2) entry = { ...base, dx: args[0]!, dy: args[1]! };
+    else if (args.length === 4) entry = { ...base, dx: args[0]!, dy: args[1]!, dw: args[2]!, dh: args[3]! };
+    else if (args.length === 8) entry = { ...base, crop: [args[0]!, args[1]!, args[2]!, args[3]!], dx: args[4]!, dy: args[5]!, dw: args[6]!, dh: args[7]! };
+    else throw new TypeError("drawImage takes 3, 5 or 9 arguments");
+    this.flush();
+    this.ops.push({ image: entry });
   }
   fillText(text: string, x: number, y: number): void { this.text(text, x, y, false); }
   strokeText(text: string, x: number, y: number): void { this.text(text, x, y, true); }
 
-  /** The recorded scene as an SVG document. */
-  toSvg(): string {
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${this.width}" height="${this.height}" viewBox="0 0 ${this.width} ${this.height}">${this.defs.length ? `<defs>${this.defs.join("")}</defs>` : ""}${this.elements.join("")}</svg>`;
+  /** One vector layer as an SVG document (all paths drawn so far by default). */
+  toSvg(elements: readonly string[] = [...this.ops.flatMap(op => "svg" in op ? op.svg : []), ...this.elements]): string {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${this.width}" height="${this.height}" viewBox="0 0 ${this.width} ${this.height}">${this.defs.length ? `<defs>${this.defs.join("")}</defs>` : ""}${elements.join("")}</svg>`;
+  }
+  /** The paint order, with the open layer closed. */
+  layers(): CanvasOp[] {
+    return this.elements.length ? [...this.ops, { svg: this.elements }] : [...this.ops];
   }
 }
 
@@ -264,26 +306,54 @@ export function parseCanvasFont(font: string): { fontStyle?: "italic"; fontWeigh
   };
 }
 
+const isIdentity = (m: Matrix) => m[0] === 1 && m[1] === 0 && m[2] === 0 && m[3] === 1 && m[4] === 0 && m[5] === 0;
+const matrixStyle = (m: Matrix) => (isIdentity(m) ? {} : { transformMatrix: [...m] });
+const layerBox = { position: "absolute", left: 0, top: 0 } as const;
+
+function canvasText(text: CanvasText, index: number): VNode {
+  const font = parseCanvasFont(text.font);
+  // A 1.0 line box puts the alphabetic baseline ~0.86em below its top for common UI fonts.
+  const top = text.baseline === "top" || text.baseline === "hanging" ? text.y
+    : text.baseline === "middle" ? text.y - font.fontSize / 2
+    : text.baseline === "bottom" || text.baseline === "ideographic" ? text.y - font.fontSize
+    : text.y - font.fontSize * 0.86;
+  const align = text.align === "center" ? "center" : text.align === "right" || text.align === "end" ? "end" : "start";
+  // The canvas transform maps the text's own space, so rotation and scale apply to the glyphs.
+  return View({ key: `t${index}`, style: { ...layerBox, width: 0, height: 0, ...matrixStyle(text.matrix) }, children:
+    View({ style: { position: "absolute", left: text.x, top, width: 0, direction: "column", align, opacity: text.alpha },
+      children: Text({ style: { ...font, lineHeight: 1, whiteSpace: "pre", foreground: text.color }, children: text.text }) }) } as never);
+}
+
+function canvasImage(image: CanvasImage, index: number): VNode {
+  const [a, b, c, d, e, f] = image.matrix;
+  const at = (x: number, y: number, sx = 1, sy = 1): Matrix => [a * sx, b * sx, c * sy, d * sy, a * x + c * y + e, b * x + d * y + f];
+  if (image.crop) {
+    const [sx, sy, sw, sh] = image.crop;
+    return View({ key: `i${index}`, style: { ...layerBox, width: sw, height: sh, overflow: "hidden", opacity: image.alpha, ...matrixStyle(at(image.dx, image.dy, image.dw! / sw, image.dh! / sh)) },
+      children: Image({ src: image.source, fit: "fill" as never, style: { position: "absolute", left: -sx, top: -sy } }) } as never);
+  }
+  return View({ key: `i${index}`, style: { ...layerBox, opacity: image.alpha, ...matrixStyle(at(image.dx, image.dy)) },
+    children: Image({ src: image.source, fit: "fill" as never, ...(image.dw !== undefined ? { width: image.dw, height: image.dh } : {}) }) } as never);
+}
+
 /** `<canvas width height onDraw>` — HTML's default size is 300×150. */
 export function expandCanvas(props: Record<string, any>, key: string): VNode {
   const width = Number(props.width ?? 300), height = Number(props.height ?? 150);
   const context = new CanvasRenderingContext2D(width, height);
   props.onDraw?.(context);
   const id = String(props.id ?? key);
+  let children: VNode[] = [];
+  let layer = 0;
+  context.layers().forEach((op, index) => {
+    if ("svg" in op) children.push(_nativeJsx("svg", { id: layer === 0 ? `${id}-scene` : `${id}-scene-${layer}`, svg: context.toSvg(op.svg), style: { ...layerBox, width, height } }, `s${index}`));
+    if ("svg" in op) layer++;
+    if ("text" in op) children.push(canvasText(op.text, index));
+    if ("image" in op) children.push(canvasImage(op.image, index));
+    // Everything drawn before a partial clear is cut by it: an even-odd clip of the
+    // whole canvas minus the cleared polygon.
+    if ("clear" in op) children = [View({ key: `c${index}`, style: { ...layerBox, width, height, clipPath: `path(evenodd, "M0 0H${width}V${height}H0Z${op.clear}")` }, children } as never)];
+  });
   return View({ id, ...(props.ariaLabel ? { control: { role: "group", label: props.ariaLabel } } : {}),
     style: { width, height, shrink: 0, position: "relative", overflow: "hidden", ...canonicalizeIntrinsicStyle(props.style) },
-    children: [
-      _nativeJsx("svg", { id: `${id}-scene`, svg: context.toSvg(), style: { position: "absolute", left: 0, top: 0, width, height } }),
-      ...context.texts.map((text, index) => {
-        const font = parseCanvasFont(text.font);
-        // A 1.0 line box puts the alphabetic baseline ~0.86em below its top for common UI fonts.
-        const top = text.baseline === "top" || text.baseline === "hanging" ? text.y
-          : text.baseline === "middle" ? text.y - font.fontSize / 2
-          : text.baseline === "bottom" || text.baseline === "ideographic" ? text.y - font.fontSize
-          : text.y - font.fontSize * 0.86;
-        const align = text.align === "center" ? "center" : text.align === "right" || text.align === "end" ? "end" : "start";
-        return View({ key: index, style: { position: "absolute", left: text.x, top, width: 0, direction: "column", align, opacity: text.alpha },
-          children: Text({ style: { ...font, lineHeight: 1, whiteSpace: "pre", foreground: text.color, ...(text.stroke ? { textDecoration: "none" } : {}) }, children: text.text }) } as never);
-      }),
-    ] } as never);
+    children } as never);
 }
