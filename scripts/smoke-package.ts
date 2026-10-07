@@ -81,7 +81,7 @@ const examplePackage = await Bun.file(join(root, "examples/package.json")).json(
   scripts?: Record<string, string>;
 };
 const exampleEntrypoints = Object.values(examplePackage.scripts ?? {}).flatMap(command => {
-  const match = command.match(/^bun\s+([\w-]+\.tsx)$/);
+  const match = command.match(/^(?:bun|tarve run)\s+([\w-]+\.tsx)$/);
   return match ? [match[1]] : [];
 });
 assert(exampleEntrypoints.length > 0, "Example package must expose runnable TSX examples");

@@ -33,6 +33,8 @@ const grid = (width: number, columns: string, gap = 0, rows?: string): Item => (
 // Text cases use the bundled Inter on both sides (an @font-face in Chromium,
 // `fontFaces` in Tarve), so they measure the same glyphs on every OS.
 const interFile = join(import.meta.dirname, "..", "packages", "headless", "fonts", "InterVariable.ttf");
+// Monospace cases use the bundled JetBrains Mono: "monospace" resolves to a different face on each OS.
+const monoFile = join(import.meta.dirname, "..", "packages", "headless", "fonts", "JetBrainsMono.ttf");
 const arial = { css: { "font-family": "'Inter Variable'", "font-size": "16px", "line-height": "1.5", "font-weight": "400" }, tarve: { fontFamily: "Inter Variable", fontSize: 16, lineHeight: 1.5, fontWeight: 400 } };
 const para = (html: string, inline: (jsx: Jsx) => unknown, css: Css = {}, tarve: Tarve = {}): Item => ({
   css: { ...arial.css, ...css }, tarve: { ...arial.tarve, ...tarve }, html, inline,
@@ -108,8 +110,8 @@ htmlCases.push(
         j("tr", { children: [j("td", { children: "c" })] }),
       ] }))] },
   { name: "pre keeps spaces in monospace", container: row(600),
-    items: [element(`<pre style="font-family: monospace; font-size: 13px; line-height: 1.5">a  b\n  c</pre>`,
-      (j, id) => j("pre", { id, style: { fontSize: 13, lineHeight: 1.5 }, children: "a  b\n  c" }))] },
+    items: [element(`<pre style="font-family: 'JetBrains Mono'; font-size: 13px; line-height: 1.5">a  b\n  c</pre>`,
+      (j, id) => j("pre", { id, style: { fontFamily: "JetBrains Mono", fontSize: 13, lineHeight: 1.5 }, children: "a  b\n  c" }))] },
   { name: "blockquote indents 40px on both sides", container: column(300),
     items: [element(`<blockquote style="${font}">${quick}</blockquote>`,
       (j, id) => j("blockquote", { id, style: arial.tarve, children: quick }))] },
@@ -181,7 +183,7 @@ function cssText(css: Css): string {
 
 function page(): string {
   const blocks = cases.map((c, index) => `<div class="case" id="case-${index}" style="${cssText(c.container.css)}">${c.items.map(item => item.raw ? item.html! : item.html !== undefined ? `<p style="${cssText(item.css)}">${item.html}</p>` : `<div style="${cssText(item.css)}"></div>`).join("")}</div>`).join("\n");
-  return `<!doctype html><meta charset="utf-8"><style>@font-face{font-family:'Inter Variable';src:url(/inter.ttf);font-weight:100 900}*{box-sizing:border-box;padding:0}body{margin:0}ul,ol{padding-left:40px}td,th{padding:1px}body{font:12px sans-serif}.case{position:relative;margin-bottom:40px}.case>div,.case>p{background:#89b4fa;outline:1px solid #1e1e2e}</style>
+  return `<!doctype html><meta charset="utf-8"><style>@font-face{font-family:'Inter Variable';src:url(/inter.ttf);font-weight:100 900}@font-face{font-family:'JetBrains Mono';src:url(/mono.ttf)}*{box-sizing:border-box;padding:0}body{margin:0}ul,ol{padding-left:40px}td,th{padding:1px}body{font:12px sans-serif}.case{position:relative;margin-bottom:40px}.case>div,.case>p{background:#89b4fa;outline:1px solid #1e1e2e}</style>
 ${blocks}
 <script>
 document.fonts.ready.then(() => { const out = [...document.querySelectorAll(".case")].map(c => { const o = c.getBoundingClientRect(); return [...c.children].map(el => { const r = el.getBoundingClientRect(); return [r.left - o.left, r.top - o.top, r.width, r.height].map(v => Math.round(v * 100) / 100); }); });
@@ -201,7 +203,7 @@ async function check(): Promise<number> {
       ? item.inline!(jsx as unknown as Jsx, `parity-${i}`)
       : item.inline
       ? jsx("p", { id: `parity-${i}`, style: strip(item.tarve) as never, children: item.inline(jsx as unknown as Jsx) as never }, i)
-      : jsx(View, { id: `parity-${i}`, style: strip(item.tarve) as never }, i)) }) }), { headless: true, fontFaces: [interFile] });
+      : jsx(View, { id: `parity-${i}`, style: strip(item.tarve) as never }, i)) }) }), { headless: true, fontFaces: [interFile, monoFile] });
   let failures = 0;
   for (let index = 0; index < cases.length; index++) {
     current = index;
@@ -228,6 +230,7 @@ if (mode === "serve") {
   Bun.serve({ port: 4799, async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === "/inter.ttf") return new Response(Bun.file(interFile));
+    if (url.pathname === "/mono.ttf") return new Response(Bun.file(monoFile));
     if (url.pathname === "/save") {
       const body = await request.json() as { userAgent: string; cases: Box[][] };
       writeFileSync(fixture, JSON.stringify({ recordedWith: body.userAgent, names: cases.map(c => c.name), cases: body.cases }, null, 1) + "\n");
