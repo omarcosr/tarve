@@ -31,7 +31,8 @@ export interface ImageProps extends BaseProps {
   src: ImageSource;
   width?: number;
   height?: number;
-  fit?: "cover" | "contain";
+  /** CSS `object-fit`. */
+  fit?: "cover" | "contain" | "fill";
 }
 
 export type ImageHttpCacheMode = "default" | "reload" | "no-store";

@@ -208,6 +208,7 @@ pub(crate) struct D3d11Graphics {
     images: HashMap<String, CachedImage>,
     used_images: HashSet<String>,
     glyphs: HashMap<GlyphKey, GlyphEntry>,
+    glyph_outlines: HashMap<GlyphKey, vello::kurbo::BezPath>,
     glyph_atlases: Vec<GlyphAtlas>,
     glyph_atlas_exhausted: bool,
     /// Glyphs rasterized since the device was created; steady redraws of
@@ -322,6 +323,7 @@ impl D3d11Graphics {
             images: HashMap::new(),
             used_images: HashSet::new(),
             glyphs: HashMap::new(),
+            glyph_outlines: HashMap::new(),
             glyph_atlases: vec![first_atlas],
             glyph_atlas_exhausted: false,
             glyph_rasterizations: 0,
@@ -955,6 +957,51 @@ impl D3d11Graphics {
         Some(entry)
     }
 
+    /// A glyph's outline in font-size units, y down, for transforms a bitmap
+    /// atlas cannot follow (rotation, skew, non-uniform scale).
+    fn glyph_outline(
+        &mut self,
+        font: &FontData,
+        font_size: f32,
+        normalized_coords: &[i16],
+        glyph_id: u32,
+    ) -> Option<vello::kurbo::BezPath> {
+        use swash::zeno::{Command, PathData};
+        let key = GlyphKey {
+            font_id: font.data.id(),
+            font_index: font.index,
+            font_size_64: (font_size * 64.0).round() as u32,
+            glyph_id,
+            subpixel_x: 255,
+            subpixel_y: 255,
+            coords: normalized_coords.to_vec(),
+        };
+        if let Some(path) = self.glyph_outlines.get(&key) {
+            return Some(path.clone());
+        }
+        let font_ref = FontRef::from_index(font.data.data(), font.index as usize)?;
+        let mut scaler = self
+            .scale_context
+            .builder(font_ref)
+            .size(font_size)
+            .normalized_coords(normalized_coords)
+            .build();
+        let outline = scaler.scale_outline(glyph_id as GlyphId)?;
+        let mut path = vello::kurbo::BezPath::new();
+        let p = |v: swash::zeno::Vector| (f64::from(v.x), -f64::from(v.y));
+        for command in outline.path().commands() {
+            match command {
+                Command::MoveTo(a) => path.move_to(p(a)),
+                Command::LineTo(a) => path.line_to(p(a)),
+                Command::QuadTo(a, b) => path.quad_to(p(a), p(b)),
+                Command::CurveTo(a, b, c) => path.curve_to(p(a), p(b), p(c)),
+                Command::Close => path.close_path(),
+            }
+        }
+        self.glyph_outlines.insert(key, path.clone());
+        Some(path)
+    }
+
     fn allocate_glyph(&mut self, width: u32, height: u32) -> Option<(usize, u32, u32)> {
         for (page, atlas) in self.glyph_atlases.iter_mut().enumerate() {
             if let Some((x, y)) = atlas.allocate(width + 1, height + 1) {
@@ -1409,6 +1456,26 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         let coeffs = transform.as_coeffs();
         let x_scale = (coeffs[0] * coeffs[0] + coeffs[1] * coeffs[1]).sqrt();
         let y_scale = (coeffs[2] * coeffs[2] + coeffs[3] * coeffs[3]).sqrt();
+        // Atlas bitmaps are axis-aligned and uniformly scaled; any other transform
+        // (a rotated canvas, skew, a squashed axis) fills the glyph outlines instead.
+        if coeffs[1].abs() > 1e-6
+            || coeffs[2].abs() > 1e-6
+            || (x_scale - y_scale).abs() > 1e-3 * x_scale.max(y_scale)
+            || coeffs[0] < 0.0
+            || coeffs[3] < 0.0
+        {
+            for glyph in glyphs {
+                if let Some(path) =
+                    self.graphics
+                        .glyph_outline(font, font_size, normalized_coords, glyph.id)
+                {
+                    let at =
+                        transform * Affine::translate((f64::from(glyph.x), f64::from(glyph.y)));
+                    self.fill(Fill::NonZero, at, color, &path);
+                }
+            }
+            return;
+        }
         let scale = x_scale.max(y_scale) as f32;
         let scale = scale.max(0.01);
         for glyph in glyphs {

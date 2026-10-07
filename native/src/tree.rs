@@ -1591,6 +1591,7 @@ fn spin_period(node: &Node) -> Option<f64> {
 /// The node fields `Tree::refresh_stacking` reads, besides children.
 fn stacking_inputs(node: &Node) -> (u32, bool, bool) {
     let transformed = node.style.get("transform").is_some()
+        || node.style.get("transformMatrix").is_some()
         || spin_period(node).is_some()
         || ["hover", "active", "focus", "focusVisible", "disabled"]
             .iter()
@@ -1654,6 +1655,7 @@ impl Tree {
             .iter()
             .filter(|(_, entry)| {
                 entry.node.style.get("transform").is_some()
+                    || entry.node.style.get("transformMatrix").is_some()
                     || spin_period(&entry.node).is_some()
                     || ["hover", "active", "focus", "focusVisible", "disabled"]
                         .iter()
@@ -3769,15 +3771,45 @@ impl Tree {
         target: &mut P,
     ) {
         let Some(local) = self.node_transform(id, offset) else {
-            self.paint_node_content(id, offset, scale, clip, target);
+            self.paint_clipped(id, offset, scale, clip, target);
             return;
         };
         // Culling and visible text ranges run in the node's own space.
         let local_clip = local.inverse().transform_rect_bbox(clip);
         let device = Affine::scale(scale) * local * Affine::scale(1.0 / scale);
         target.push_transform(device);
-        self.paint_node_content(id, offset, scale, local_clip, target);
+        self.paint_clipped(id, offset, scale, local_clip, target);
         target.pop_transform();
+    }
+
+    /// CSS `clip-path: path([nonzero | evenodd,] "<svg path>")` in the box's
+    /// coordinates: clips the node and its subtree when painting.
+    fn paint_clipped<P: PaintTarget>(
+        &mut self,
+        id: &str,
+        offset: Vec2,
+        scale: f64,
+        clip: BoxRect,
+        target: &mut P,
+    ) {
+        let clip_path = self.entries.get(id).and_then(|entry| {
+            entry.node.style["clipPath"]
+                .as_str()
+                .and_then(parse_css_clip_path)
+                .map(|path| (entry.rect, path))
+        });
+        let Some((rect, (fill, path))) = clip_path else {
+            self.paint_node_content(id, offset, scale, clip, target);
+            return;
+        };
+        let origin = rect + Vec2::new(-offset.x, -offset.y);
+        target.push_clip(
+            fill,
+            Affine::scale(scale) * Affine::translate((origin.x0, origin.y0)),
+            &path,
+        );
+        self.paint_node_content(id, offset, scale, clip, target);
+        target.pop_layer();
     }
 
     /// The node's transform in layout space, if it is not the identity.
@@ -3803,16 +3835,41 @@ impl Tree {
         let angle = spin_period(&entry.node).map_or(0.0, |period| {
             std::f64::consts::TAU * (self.motion_time_ms.rem_euclid(period) / period)
         });
-        if x == 0.0 && y == 0.0 && scale_x == 1.0 && scale_y == 1.0 && angle == 0.0 {
+        // `transformMatrix`: CSS `transform: matrix(a, b, c, d, e, f)` with
+        // `transform-origin: 0 0`, applied inside the box's other transforms.
+        let matrix = entry.node.style["transformMatrix"]
+            .as_array()
+            .and_then(|values| {
+                let values: Vec<f64> = values.iter().filter_map(Value::as_f64).collect();
+                (values.len() == 6 && values.iter().all(|v| v.is_finite())).then(|| {
+                    Affine::new([
+                        values[0], values[1], values[2], values[3], values[4], values[5],
+                    ])
+                })
+            });
+        if x == 0.0
+            && y == 0.0
+            && scale_x == 1.0
+            && scale_y == 1.0
+            && angle == 0.0
+            && matrix.is_none()
+        {
             return None;
         }
-        let centre = (entry.rect + Vec2::new(-offset.x, -offset.y)).center();
-        Some(
-            Affine::translate((centre.x + x, centre.y + y))
-                * Affine::rotate(angle)
-                * Affine::scale_non_uniform(scale_x, scale_y)
-                * Affine::translate((-centre.x, -centre.y)),
-        )
+        let rect = entry.rect + Vec2::new(-offset.x, -offset.y);
+        let centre = rect.center();
+        let base = Affine::translate((centre.x + x, centre.y + y))
+            * Affine::rotate(angle)
+            * Affine::scale_non_uniform(scale_x, scale_y)
+            * Affine::translate((-centre.x, -centre.y));
+        Some(match matrix {
+            Some(matrix) => {
+                base * Affine::translate((rect.x0, rect.y0))
+                    * matrix
+                    * Affine::translate((-rect.x0, -rect.y0))
+            }
+            None => base,
+        })
     }
 
     fn paint_node_content<P: PaintTarget>(
@@ -4431,17 +4488,18 @@ impl Tree {
             {
                 let sx = rect.width() / image.width as f64;
                 let sy = rect.height() / image.height as f64;
-                let factor = if node.fit == "contain" {
-                    sx.min(sy)
-                } else {
-                    sx.max(sy)
+                // CSS object-fit: fill stretches each axis; contain/cover keep the ratio.
+                let (fx, fy) = match node.fit.as_str() {
+                    "fill" => (sx, sy),
+                    "contain" => (sx.min(sy), sx.min(sy)),
+                    _ => (sx.max(sy), sx.max(sy)),
                 };
-                let tx = rect.x0 + (rect.width() - image.width as f64 * factor) / 2.0;
-                let ty = rect.y0 + (rect.height() - image.height as f64 * factor) / 2.0;
+                let tx = rect.x0 + (rect.width() - image.width as f64 * fx) / 2.0;
+                let ty = rect.y0 + (rect.height() - image.height as f64 * fy) / 2.0;
                 target.draw_image(
                     key,
                     image,
-                    transform * Affine::translate((tx, ty)) * Affine::scale(factor),
+                    transform * Affine::translate((tx, ty)) * Affine::scale_non_uniform(fx, fy),
                 );
             } else {
                 target.fill(
@@ -8555,6 +8613,30 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
         style.grid_row = line;
     }
     style
+}
+
+/// `path([nonzero | evenodd,] "<svg path data>")`.
+pub(crate) fn parse_css_clip_path(value: &str) -> Option<(Fill, vello::kurbo::BezPath)> {
+    let inner = value
+        .trim()
+        .strip_prefix("path(")?
+        .strip_suffix(')')?
+        .trim();
+    let (fill, data) = match inner.split_once(',') {
+        Some((rule, data)) if matches!(rule.trim(), "evenodd" | "nonzero") => (
+            if rule.trim() == "evenodd" {
+                Fill::EvenOdd
+            } else {
+                Fill::NonZero
+            },
+            data.trim(),
+        ),
+        _ => (Fill::NonZero, inner),
+    };
+    let data = data.trim_matches(|c| c == '"' || c == '\'');
+    vello::kurbo::BezPath::from_svg(data)
+        .ok()
+        .map(|path| (fill, path))
 }
 
 /// `overflow: hidden | clip` (and scroll areas) clip their children.

@@ -143,6 +143,10 @@ export interface Style extends StateStyle {
   textTransform?: "none" | "uppercase" | "lowercase" | "capitalize";
   whiteSpace?: "normal" | "nowrap" | "pre" | "pre-wrap" | "pre-line";
   textOverflow?: "clip" | "ellipsis"; lineClamp?: number;
+  /** CSS `transform: matrix(a, b, c, d, e, f)` with `transform-origin: 0 0`, inside `transform`. */
+  transformMatrix?: [number, number, number, number, number, number];
+  /** CSS `clip-path: path([nonzero | evenodd,] "<svg path>")` in the box's coordinates. */
+  clipPath?: string;
   /** CSS `text-decoration-style`. */
   textDecorationStyle?: "solid" | "double" | "dotted" | "dashed" | "wavy";
   /** CSS `overflow`: `hidden`/`clip` clip children to the box and let it shrink below its content. */
