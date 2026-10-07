@@ -143,6 +143,8 @@ export interface Style extends StateStyle {
   textTransform?: "none" | "uppercase" | "lowercase" | "capitalize";
   whiteSpace?: "normal" | "nowrap" | "pre" | "pre-wrap" | "pre-line";
   textOverflow?: "clip" | "ellipsis"; lineClamp?: number;
+  /** CSS `text-decoration-style`. */
+  textDecorationStyle?: "solid" | "double" | "dotted" | "dashed" | "wavy";
   /** CSS `overflow`: `hidden`/`clip` clip children to the box and let it shrink below its content. */
   overflow?: "visible" | "hidden" | "clip";
   lineHeight?: number; textAlign?: "start" | "center" | "end";

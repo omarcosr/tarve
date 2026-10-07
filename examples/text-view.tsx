@@ -35,6 +35,16 @@ export function App() {
             {" "}({state.clicks} clicks).
           </p>
         </Demo>
+        <Demo title="Decoration styles" css="text-decoration-style">
+          <p id="decorations" style={{ fontSize: 18 }}>
+            <span style={{ textDecoration: "underline", textDecorationStyle: "solid" }}>solid</span>{" "}
+            <span style={{ textDecoration: "underline", textDecorationStyle: "double" }}>double</span>{" "}
+            <span style={{ textDecoration: "underline", textDecorationStyle: "dotted" }}>dotted</span>{" "}
+            <span style={{ textDecoration: "underline", textDecorationStyle: "dashed" }}>dashed</span>{" "}
+            <span style={{ textDecoration: "underline", textDecorationStyle: "wavy" }}>wavy</span>{" "}
+            <abbr id="abbr" title="Cascading Style Sheets">CSS</abbr>
+          </p>
+        </Demo>
         <Demo title="Ellipsis" css="nowrap + overflow: hidden + text-overflow">
           <p id="ellipsis" style={{ width: state.width, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{long}</p>
         </Demo>

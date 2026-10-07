@@ -27,11 +27,126 @@ use vello::{
 /// Run colour, plus CSS `vertical-align: super | sub`: `.1` is the baseline
 /// shift (px, up) and `.2` the run's own line box height (px).
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct TextBrush(pub Option<String>, pub f32, pub f32);
+pub struct TextBrush(pub Option<String>, pub f32, pub f32, pub DecorationStyle);
 
 impl TextBrush {
     pub fn color(color: String) -> Self {
-        Self(Some(color), 0.0, 0.0)
+        Self(Some(color), 0.0, 0.0, DecorationStyle::Solid)
+    }
+}
+
+/// CSS `text-decoration-style`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum DecorationStyle {
+    #[default]
+    Solid,
+    Double,
+    Dotted,
+    Dashed,
+    Wavy,
+}
+
+impl DecorationStyle {
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "double" => Self::Double,
+            "dotted" => Self::Dotted,
+            "dashed" => Self::Dashed,
+            "wavy" => Self::Wavy,
+            _ => Self::Solid,
+        }
+    }
+}
+
+/// One decoration line from x0 to x1 whose top edge is y, drawn like Chromium:
+/// dotted is round dots one thickness wide with equal gaps, dashed is 3:1, double
+/// is two lines a thickness apart, wavy a sine of amplitude ~thickness.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn draw_decoration<P: PaintTarget>(
+    target: &mut P,
+    transform: Affine,
+    color: Color,
+    x0: f64,
+    x1: f64,
+    y: f64,
+    thickness: f64,
+    style: DecorationStyle,
+) {
+    if x1 <= x0 {
+        return;
+    }
+    match style {
+        DecorationStyle::Solid => target.fill(
+            Fill::NonZero,
+            transform,
+            color,
+            &Rect::new(x0, y, x1, y + thickness),
+        ),
+        DecorationStyle::Double => {
+            target.fill(
+                Fill::NonZero,
+                transform,
+                color,
+                &Rect::new(x0, y, x1, y + thickness),
+            );
+            let y2 = y + thickness * 2.0;
+            target.fill(
+                Fill::NonZero,
+                transform,
+                color,
+                &Rect::new(x0, y2, x1, y2 + thickness),
+            );
+        }
+        DecorationStyle::Dotted | DecorationStyle::Dashed => {
+            let (dash, gap) = if style == DecorationStyle::Dotted {
+                (thickness, thickness)
+            } else {
+                (thickness * 3.0, thickness)
+            };
+            let mut x = x0;
+            while x < x1 {
+                let end = (x + dash).min(x1);
+                if style == DecorationStyle::Dotted {
+                    let r = thickness / 2.0;
+                    target.fill(
+                        Fill::NonZero,
+                        transform,
+                        color,
+                        &vello::kurbo::Circle::new((x + r, y + r), r),
+                    );
+                } else {
+                    target.fill(
+                        Fill::NonZero,
+                        transform,
+                        color,
+                        &Rect::new(x, y, end, y + thickness),
+                    );
+                }
+                x += dash + gap;
+            }
+        }
+        DecorationStyle::Wavy => {
+            let amplitude = thickness.max(1.0);
+            let wavelength = amplitude * 4.0;
+            let mut path = vello::kurbo::BezPath::new();
+            let mid = y + thickness / 2.0;
+            path.move_to((x0, mid));
+            let mut x = x0;
+            let mut up = true;
+            while x < x1 {
+                let next = (x + wavelength / 2.0).min(x1);
+                let peak = if up { mid - amplitude } else { mid + amplitude };
+                path.quad_to(((x + next) / 2.0, peak), (next, mid));
+                x = next;
+                up = !up;
+            }
+            target.stroke(
+                &vello::kurbo::Stroke::new(thickness),
+                transform,
+                color,
+                &path,
+            );
+        }
     }
 }
 
@@ -50,7 +165,7 @@ pub(crate) fn shifted_line_extents(layout: &Layout<TextBrush>) -> Option<Vec<(f3
                 let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
                     continue;
                 };
-                let TextBrush(_, shift, line_box) = &glyph_run.style().brush;
+                let TextBrush(_, shift, line_box, _) = &glyph_run.style().brush;
                 if *shift == 0.0 {
                     continue;
                 }
@@ -294,6 +409,7 @@ pub const TEXT_KEYS: &[&str] = &[
     "wordSpacing",
     "whiteSpace",
     "textOverflow",
+    "textDecorationStyle",
     "lineClamp",
     "overflow",
 ];
@@ -386,7 +502,10 @@ fn push_text_style(
         );
     }
     let shift = style["baselineShift"].as_f64().unwrap_or(0.0) as f32;
-    if style["foreground"].is_string() || shift != 0.0 {
+    let decoration = style["textDecorationStyle"]
+        .as_str()
+        .map_or(DecorationStyle::Solid, DecorationStyle::parse);
+    if style["foreground"].is_string() || shift != 0.0 || decoration != DecorationStyle::Solid {
         let size = style["fontSize"]
             .as_f64()
             .map(|n| n as f32)
@@ -396,6 +515,7 @@ fn push_text_style(
                 style["foreground"].as_str().map(str::to_string),
                 shift,
                 size * base.1,
+                decoration,
             )),
             range.clone(),
         );
@@ -801,22 +921,31 @@ fn draw_layout_with<P: PaintTarget>(
                 if x1 > x0 {
                     let baseline = origin.1 + f64::from(glyph_run.baseline());
                     let thickness = f64::from((run.font_size() * 0.07).clamp(1.0, 2.0));
+                    let style = glyph_run.style().brush.3;
                     if glyph_run.style().underline.is_some() {
                         let y = baseline + thickness;
-                        target.fill(
-                            Fill::NonZero,
+                        draw_decoration(
+                            target,
                             Affine::scale(scale),
                             color,
-                            &Rect::new(x0, y, x1, y + thickness),
+                            x0,
+                            x1,
+                            y,
+                            thickness,
+                            style,
                         );
                     }
                     if glyph_run.style().strikethrough.is_some() {
                         let y = baseline - f64::from(run.font_size() * 0.3);
-                        target.fill(
-                            Fill::NonZero,
+                        draw_decoration(
+                            target,
                             Affine::scale(scale),
                             color,
-                            &Rect::new(x0, y, x1, y + thickness),
+                            x0,
+                            x1,
+                            y,
+                            thickness,
+                            style,
                         );
                     }
                 }

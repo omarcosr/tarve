@@ -20,12 +20,11 @@ const INLINE_TAGS: Record<string, Record<string, unknown>> = {
   sub: { verticalAlign: "sub", fontSize: "smaller" },
   sup: { verticalAlign: "super", fontSize: "smaller" },
   a: { textDecoration: "underline" },
-  // Chromium: abbr[title] is underline dotted; dotted lines are drawn solid.
   abbr: {},
 };
 export const INLINE_TAG_NAMES = new Set([...Object.keys(INLINE_TAGS), "br"]);
 
-const RUN_KEYS = ["fontWeight", "fontStyle", "fontSize", "fontFamily", "foreground", "background", "textDecoration", "letterSpacing", "wordSpacing", "textTransform", "baselineShift"] as const;
+const RUN_KEYS = ["fontWeight", "fontStyle", "fontSize", "fontFamily", "foreground", "background", "textDecoration", "letterSpacing", "wordSpacing", "textTransform", "baselineShift", "textDecorationStyle"] as const;
 type RunStyle = Record<string, unknown>;
 type Piece = { text: string; style: RunStyle; id?: string; transform?: string } | { br: true };
 
@@ -134,7 +133,8 @@ function collect(child: Child, style: RunStyle, id: string | undefined, ctx: Inl
     throw new Error(`<${String(node.type)}> cannot be inside text; only phrasing elements (span, strong, em, a, code, br…) can.`);
   }
   const own: RunStyle = { ...INLINE_TAGS[node.type] };
-  if (node.type === "abbr" && props.title) own.textDecoration = "underline";
+  // Chromium: abbr[title] { text-decoration: underline dotted }.
+  if (node.type === "abbr" && props.title) { own.textDecoration = "underline"; own.textDecorationStyle = "dotted"; }
   if (node.type === "a") own.foreground = ctx.linkColor;
   Object.assign(own, pick(canonicalizeIntrinsicStyle(props.style) as Record<string, unknown>));
   if (props.size !== undefined) own.fontSize = props.size;

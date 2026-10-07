@@ -3711,6 +3711,24 @@ impl Tree {
         "none".into()
     }
 
+    /// `text-decoration-style` of the box whose `text-decoration` applies.
+    fn text_decoration_style_for(&self, id: &str) -> crate::text::DecorationStyle {
+        let mut current = Some(id);
+        while let Some(current_id) = current {
+            let Some(entry) = self.entries.get(current_id) else {
+                break;
+            };
+            let state = self.visual_state_for(current_id, &entry.node);
+            if visual_value(&entry.node, "textDecoration", state).is_string() {
+                return entry.node.style["textDecorationStyle"]
+                    .as_str()
+                    .map_or_else(Default::default, crate::text::DecorationStyle::parse);
+            }
+            current = entry.parent.as_deref();
+        }
+        Default::default()
+    }
+
     fn link_foreground_for(&self, id: &str) -> Option<String> {
         let mut current = self.entries.get(id)?.parent.as_deref();
         while let Some(current_id) = current {
@@ -4305,6 +4323,7 @@ impl Tree {
                     .draw(target, &render_node, text_area, color(&foreground), scale);
             }
             let decoration = self.text_decoration_for(id);
+            let decoration_style = self.text_decoration_style_for(id);
             if decoration != "none" {
                 if let Some(source_clip) = code_source_clip {
                     target.push_clip(Fill::NonZero, transform, &source_clip);
@@ -4325,11 +4344,15 @@ impl Tree {
                             "line-through" => y + (line.y0 + line.y1) * 0.5 - thickness * 0.5,
                             _ => continue,
                         };
-                        target.fill(
-                            Fill::NonZero,
+                        crate::text::draw_decoration(
+                            target,
                             transform,
                             color(&foreground),
-                            &BoxRect::new(x + line.x0, line_y, x + line.x1, line_y + thickness),
+                            x + line.x0,
+                            x + line.x1,
+                            line_y,
+                            thickness,
+                            decoration_style,
                         );
                     }
                 }

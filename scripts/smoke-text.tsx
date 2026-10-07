@@ -50,6 +50,33 @@ assert.equal(Math.round(clamp.height), 42, "line-clamp: 2 keeps two 21px lines")
 const below = count(clamp.x, clamp.y + clamp.height + 1, clamp.x + clamp.width, clamp.y + clamp.height + 18, dark);
 assert.equal(below, 0, "clamped lines are not painted");
 
+// text-decoration-style: a dotted underline (abbr[title]) alternates ink and gaps,
+// a solid one does not.
+const decorations = box("decorations");
+const runs = (x0: number, x1: number) => {
+  let best = { gaps: 0, ink: 0 };
+  for (let y = decorations.y + decorations.height * 0.6; y < decorations.y + decorations.height; y += 1 / scale) {
+    let gaps = 0, ink = 0, previous = false;
+    for (let x = x0; x < x1; x += 1 / scale) {
+      const on = dark(pixel(x, y));
+      if (on) ink++;
+      if (previous && !on) gaps++;
+      previous = on;
+    }
+    if (ink > best.ink) best = { gaps, ink };
+  }
+  return best;
+};
+const solidWord = { x0: decorations.x, x1: decorations.x + 40 };
+assert.ok(runs(solidWord.x0, solidWord.x1).gaps <= 1, "solid underline is one stroke");
+// The paragraph is full width; the abbr is its last word, so end at the last ink.
+let decorationsEnd = decorations.x;
+for (let x = decorations.x; x < decorations.x + decorations.width; x += 1 / scale) {
+  if (count(x, decorations.y, x + 1 / scale, decorations.y + decorations.height, dark) > 0) decorationsEnd = x;
+}
+const abbrLine = runs(decorationsEnd - 40, decorationsEnd);
+assert.ok(abbrLine.gaps >= 4, `abbr underline is dotted (${abbrLine.gaps} gaps)`);
+
 const clip = box("clip");
 const blue = (rgb: number[]) => rgb[2]! > 180 && rgb[0]! < 120;
 assert.ok(count(clip.x + 4, clip.y + 4, clip.x + clip.width - 4, clip.y + clip.height - 4, blue) > 100, "the child paints inside the clip");
