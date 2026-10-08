@@ -6,7 +6,11 @@ import { currentRenderEpoch, currentRenderScope } from "./render-scope";
 export interface VirtualListProps<T> extends BaseProps {
   items: readonly T[];
   itemHeight: number;
-  height: number;
+  /**
+   * Viewport height in px. Omit it (with an `id`) to fill the parent like
+   * `flex: 1`: the list follows its real laid-out height, window resizes included.
+   */
+  height?: number;
   offset: number;
   overscan?: number;
   keyForItem?: (item: T, index: number) => string | number;
@@ -173,8 +177,18 @@ function upperBoundPrefix(prefix: readonly number[], offset: number): number {
   return Math.min(low, prefix.length - 2);
 }
 
+/** Height assumed for a filling list until its first layout reports the real one. */
+const FILL_ESTIMATE = 800;
+const filledHeights = new WeakMap<object, Map<string, number>>();
+/** True while rendering a list that fills its parent instead of a fixed height. */
+let filling = false;
+
+function viewportStyle(style: BaseProps["style"], height: number): BaseProps["style"] {
+  return filling ? { flex: 1, minHeight: 0, ...style } : { ...style, height, shrink: 0 };
+}
+
 function fixedVirtualList<T>({
-  items, itemHeight, height, offset, overscan = 2, keyForItem, renderItem, onScroll, style, ...props
+  items, itemHeight, height = FILL_ESTIMATE, offset, overscan = 2, keyForItem, renderItem, onScroll, style, ...props
 }: VirtualListProps<T>): VNode {
   if (![itemHeight, height, offset, overscan].every(Number.isFinite)
     || itemHeight <= 0 || height <= 0 || offset < 0 || overscan < 0 || !Number.isInteger(overscan)) {
@@ -192,7 +206,7 @@ function fixedVirtualList<T>({
       children: renderItem(item, index),
     }, keyForItem?.(item, index) ?? index));
   }
-  return jsx(Scroll, { ...props, onScroll, control: { role: "virtualList", value: scroll }, style: { ...style, height, shrink: 0 },
+  return jsx(Scroll, { ...props, onScroll, control: { role: "virtualList", value: scroll }, style: viewportStyle(style, height),
     children: jsx(Column, { style: { width: "100%" }, children: [
       start > 0 ? jsx(Row, { style: { height: start * itemHeight, shrink: 0 } }, "before") : null,
       ...rows,
@@ -202,7 +216,7 @@ function fixedVirtualList<T>({
 }
 
 function variableVirtualList<T>({
-  id, items, estimatedItemHeight, height, offset, overscan = 2, keyForItem, renderItem, onScroll,
+  id, items, estimatedItemHeight, height = FILL_ESTIMATE, offset, overscan = 2, keyForItem, renderItem, onScroll,
   alignment = "top", followTail = false, style, ...props
 }: VariableVirtualListProps<T>): VNode {
   if (![estimatedItemHeight, height, offset, overscan].every(Number.isFinite)
@@ -365,7 +379,7 @@ function variableVirtualList<T>({
         ? { scrollRequest: { generation: state.scrollRequest.generation, offset: requestedOffset } }
         : {}),
     },
-    style: { ...style, height, shrink: 0 },
+    style: viewportStyle(style, height),
     children: jsx(Column, { style: { width: "100%" }, children: [
       start > 0 ? jsx(Row, { style: { height: prefix[start], shrink: 0 } }, "before") : null,
       ...rows,
@@ -376,7 +390,7 @@ function variableVirtualList<T>({
 }
 
 function windowedVariableVirtualList<T>({
-  id, items, itemCount, windowStart, estimatedItemHeight, height, offset, keyForItem, renderItem, onScroll,
+  id, items, itemCount, windowStart, estimatedItemHeight, height = FILL_ESTIMATE, offset, keyForItem, renderItem, onScroll,
   alignment = "top", followTail = false, style, ...props
 }: WindowedVirtualListProps<T>): VNode {
   if (![estimatedItemHeight, height, offset].every(Number.isFinite)
@@ -567,7 +581,7 @@ function windowedVariableVirtualList<T>({
         ? { scrollRequest: { generation: state.scrollRequest.generation, offset: requestedOffset } }
         : {}),
     },
-    style: { ...style, height, shrink: 0 },
+    style: viewportStyle(style, height),
     children: jsx(Column, { style: { width: "100%" }, children: [
       windowStart > 0 ? jsx(Row, { style: { height: before, shrink: 0 } }, "before") : null,
       ...rows,
@@ -582,6 +596,24 @@ export function VirtualList<T>(props: VirtualListProps<T>): VNode;
 export function VirtualList<T>(props: VariableVirtualListProps<T>): VNode;
 export function VirtualList<T>(props: WindowedVirtualListProps<T>): VNode;
 export function VirtualList<T>(props: VirtualListProps<T> | VariableVirtualListProps<T> | WindowedVirtualListProps<T>): VNode {
+  if (props.height === undefined) {
+    if (!props.id) throw new TypeError("VirtualList without a height needs an id to remember its measured height");
+    let heights = filledHeights.get(currentRenderScope());
+    if (!heights) filledHeights.set(currentRenderScope(), heights = new Map());
+    const id = props.id;
+    const store = heights;
+    const onSize = props.onSize;
+    const measured = { ...props, height: store.get(id) ?? FILL_ESTIMATE, onSize: (size: { width: number; height: number }) => {
+      if (size.height > 0) store.set(id, size.height);
+      onSize?.(size);
+    } };
+    filling = true;
+    try {
+      return (VirtualList as (next: typeof props) => VNode)(measured as typeof props);
+    } finally {
+      filling = false;
+    }
+  }
   if ("itemCount" in props) return windowedVariableVirtualList(props as WindowedVirtualListProps<T>);
   return "estimatedItemHeight" in props
     ? variableVirtualList(props as VariableVirtualListProps<T>)

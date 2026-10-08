@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Image, Window } from "./components";
 import { clearImageSourceCache, loadImageSource, serializeImageSource } from "./components/image";
-import { compileTree } from "./reconciler";
+import { compileTree, diffTreeMutations } from "./reconciler";
 
 afterEach(() => clearImageSourceCache());
 
@@ -138,4 +138,13 @@ describe("image source validation", () => {
     await expect(loadImageSource("https://example.test/a.png", { cache: "bogus" as never })).rejects.toThrow("cache mode");
     await expect(loadImageSource("https://example.test/a.png", { maxBytes: 0 })).rejects.toThrow("maxBytes");
   });
+});
+
+test("changing an image's bytes or cache key patches the node", () => {
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const view = (key: string) => <Window title="i"><Image id="img" src={{ bytes: png, cacheKey: key }} width={10} height={10} /></Window>;
+  const a = compileTree(view("a"));
+  const b = compileTree(view("b"));
+  expect(diffTreeMutations(a, b)!.map(m => m.type === "patch" ? m.node.id : m.type)).toEqual(["img"]);
+  expect(diffTreeMutations(b, compileTree(view("b")))).toEqual([]);
 });

@@ -247,9 +247,22 @@ function resolveShadowColors(style: StateStyle, selected: ThemeDefinition): void
 const COLOR_KEY = /^(background|foreground|color)$|(Color|Background|Foreground|Accent|Rule)$/;
 
 /** Theme token or CSS colour (hex, rgb(), hsl(), names) for colour keys; other strings unchanged. */
+/** Resolved style strings per theme: every node repeats the same few colors. */
+const resolvedStrings = new WeakMap<ThemeDefinition, Map<string, string>>();
+
 export function resolveStyleString(key: string, value: string, selected: ThemeDefinition): string {
-  if ((PAINT_KEYS as readonly string[]).includes(key) && GRADIENT.test(value)) return value;
-  return resolveThemeColor(COLOR_KEY.test(key) ? cssColor(value) : value, selected);
+  let cache = resolvedStrings.get(selected);
+  if (!cache) resolvedStrings.set(selected, cache = new Map());
+  const cacheKey = key + "\u0000" + value;
+  let resolved = cache.get(cacheKey);
+  if (resolved === undefined) {
+    if (cache.size > 4096) cache.clear();
+    resolved = (PAINT_KEYS as readonly string[]).includes(key) && GRADIENT.test(value)
+      ? value
+      : resolveThemeColor(COLOR_KEY.test(key) ? cssColor(value) : value, selected);
+    cache.set(cacheKey, resolved);
+  }
+  return resolved;
 }
 
 export function resolveThemeStyle(style: Style, selected: ThemeDefinition): Style {

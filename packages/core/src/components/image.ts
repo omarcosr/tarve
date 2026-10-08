@@ -124,9 +124,23 @@ function dataUrlSource(value: string): ImageBytesSource {
 export type SerializedImageSource = { path: string } | { image: NativeImageSource };
 
 /** Protocol normalization shared by Image and intrinsic img reconciliation. */
+/** Serialized byte sources, so re-mounting the same image does not base64 it again. */
+const serializedSources = new WeakMap<object, SerializedImageSource>();
+
 export function serializeImageSource(source: ImageSource): SerializedImageSource {
+  if (typeof source === "object" && !(source instanceof Uint8Array)) {
+    const cached = serializedSources.get(source);
+    if (cached) return cached;
+    const serialized = serializeImageSourceNow(source);
+    serializedSources.set(source, serialized);
+    return serialized;
+  }
+  return serializeImageSourceNow(source);
+}
+
+function serializeImageSourceNow(source: ImageSource): SerializedImageSource {
   if (typeof source === "string") {
-    if (source.startsWith("data:")) return serializeImageSource(dataUrlSource(source));
+    if (source.startsWith("data:")) return serializeImageSourceNow(dataUrlSource(source));
     if (/^https?:\/\//i.test(source)) {
       throw new TypeError("HTTP(S) Image sources must be loaded with await loadImageSource(url) before rendering");
     }
