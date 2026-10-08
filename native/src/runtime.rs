@@ -321,10 +321,37 @@ fn window_work_area(_: &Window) -> Option<(PhysicalPosition<i32>, winit::dpi::Ph
     None
 }
 
+/// The window border as opaque 0xRRGGBB for DWM, which has no alpha: a
+/// translucent `#rrggbbaa` (a hairline like `#ffffff14`) is blended over the
+/// window background, as it looks when painted, instead of losing its alpha
+/// and drawing a solid white frame around a dark window.
+pub(crate) fn opaque_border_rgb(border: &str, background: &str) -> u32 {
+    let parse = |value: &str| -> Option<[f32; 4]> {
+        let hex = value.trim().strip_prefix('#')?;
+        let channel = |i: usize| {
+            u8::from_str_radix(hex.get(i..i + 2)?, 16)
+                .ok()
+                .map(f32::from)
+        };
+        match hex.len() {
+            6 => Some([channel(0)?, channel(2)?, channel(4)?, 255.0]),
+            8 => Some([channel(0)?, channel(2)?, channel(4)?, channel(6)?]),
+            _ => None,
+        }
+    };
+    let Some([r, g, b, a]) = parse(border) else {
+        return 0x00e4e4e7;
+    };
+    let [br, bg, bb, _] = parse(background).unwrap_or([255.0; 4]);
+    let t = a / 255.0;
+    let mix = |fg: f32, bg: f32| (fg * t + bg * (1.0 - t)).round() as u32;
+    (mix(r, br) << 16) | (mix(g, bg) << 8) | mix(b, bb)
+}
+
 #[cfg(target_os = "windows")]
 fn configure_custom_window_chrome(
     window: &Window,
-    border: &str,
+    border: u32,
     suppressed: bool,
 ) -> Result<(), String> {
     use std::{ffi::c_void, mem::size_of};
@@ -345,8 +372,7 @@ fn configure_custom_window_chrome(
         DWMWCP_ROUND
     };
     // COLORREF is 0x00BBGGRR.
-    let hex = border.trim_start_matches('#');
-    let rgb = u32::from_str_radix(hex.get(..6).unwrap_or("e4e4e7"), 16).unwrap_or(0x00e4e4e7);
+    let rgb = border;
     let border_color = if suppressed {
         DWMWA_COLOR_NONE
     } else {
@@ -548,7 +574,7 @@ fn os_cursor_in_client(_: &Window) -> Option<(f64, f64)> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn configure_custom_window_chrome(_: &Window, _: &str, _: bool) -> Result<(), String> {
+fn configure_custom_window_chrome(_: &Window, _: u32, _: bool) -> Result<(), String> {
     Ok(())
 }
 
@@ -977,7 +1003,10 @@ impl App {
         };
         if let Err(chrome_error) = configure_custom_window_chrome(
             window,
-            &self.root_color("borderColor", "#e4e4e7"),
+            opaque_border_rgb(
+                &self.root_color("borderColor", "#e4e4e7"),
+                &self.root_color("background", "#ffffff"),
+            ),
             self.window_chrome_suppressed(),
         ) {
             self.events

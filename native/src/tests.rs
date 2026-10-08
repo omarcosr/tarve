@@ -6974,3 +6974,11 @@ fn memory_per_node() {
         drop(tree);
     }
 }
+
+#[test]
+fn translucent_window_border_blends_over_the_background_for_dwm() {
+    use crate::runtime::opaque_border_rgb;
+    assert_eq!(opaque_border_rgb("#ffffff14", "#030303"), 0x171717);
+    assert_eq!(opaque_border_rgb("#27272a", "#000000"), 0x27272a);
+    assert_eq!(opaque_border_rgb("red", "#000000"), 0xe4e4e7);
+}
