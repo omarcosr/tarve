@@ -1,6 +1,27 @@
-struct VSIn { float2 pos : POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; float4 params : TEXCOORD2; };
-struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; float4 params : TEXCOORD2; };
-PSIn vs_main(VSIn i) { PSIn o; o.pos=float4(i.pos,0,1); o.uv=i.uv; o.color=i.color; o.mode=i.mode; o.params=i.params; return o; }
+struct VSIn { float2 pos : POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; float4 params : TEXCOORD2;
+    float2 dev : TEXCOORD3; float4 clip : TEXCOORD4; float4 clipRadii : TEXCOORD5; float4 clipM0 : TEXCOORD6; float4 clipM1 : TEXCOORD7; };
+struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; float4 params : TEXCOORD2;
+    float2 dev : TEXCOORD3; nointerpolation float4 clip : TEXCOORD4; nointerpolation float4 clipRadii : TEXCOORD5;
+    nointerpolation float4 clipM0 : TEXCOORD6; nointerpolation float4 clipM1 : TEXCOORD7; };
+// Window NDC -> render-target NDC: identity, or one tile of a tiled MSAA frame.
+cbuffer Target : register(b0) { float4 target; };
+PSIn vs_main(VSIn i) { PSIn o; o.pos=float4(i.pos*target.xy+target.zw,0,1); o.uv=i.uv; o.color=i.color; o.mode=i.mode; o.params=i.params;
+    o.dev=i.dev; o.clip=i.clip; o.clipRadii=i.clipRadii; o.clipM0=i.clipM0; o.clipM1=i.clipM1; return o; }
+// Signed distance to a rounded rectangle (x0,y0,x1,y1) with per-corner radii
+// (top-left, top-right, bottom-right, bottom-left); negative inside.
+float sdRoundRect(float2 p, float4 rect, float4 radii) {
+    float2 c=(rect.xy+rect.zw)*0.5; float2 h=(rect.zw-rect.xy)*0.5; float2 q=p-c;
+    float r = q.x<0 ? (q.y<0 ? radii.x : radii.w) : (q.y<0 ? radii.y : radii.z);
+    r=min(r,min(h.x,h.y)); float2 d=abs(q)-h+r;
+    return min(max(d.x,d.y),0.0)+length(max(d,0.0))-r;
+}
+// How much of the pixel the antialiased clip keeps; 1 without one.
+float clipCoverage(PSIn i) {
+    if (i.clip.x > i.clip.z) return 1.0;
+    // Into the clip's own space (identity unless it is rotated); distances back in pixels.
+    float2 p = float2(i.clipM0.x*i.dev.x + i.clipM0.z*i.dev.y + i.clipM1.x, i.clipM0.y*i.dev.x + i.clipM0.w*i.dev.y + i.clipM1.y);
+    return saturate(0.5 - sdRoundRect(p, i.clip, i.clipRadii) * i.clipM1.z);
+}
 Texture2D tex0 : register(t0); SamplerState samp0 : register(s0);
 // Analytic gaussian-blurred rounded rectangle (Evan Wallace): exact along x
 // via erf, integrated along y with four gaussian-weighted samples.
@@ -20,7 +41,7 @@ float rounded_box_shadow(float2 p, float4 params) {
     [unroll] for (int k=0;k<4;k++) { value+=shadow_x(p.x,p.y-y,sigma,corner,half_size)*gauss(y,sigma)*step; y+=step; }
     return value;
 }
-float4 ps_main(PSIn i) : SV_TARGET {
+float4 shade(PSIn i) {
     if (i.mode < 0.5) return i.color;
     if (i.mode > 2.5) {
         float coverage=saturate(rounded_box_shadow(i.uv,i.params));
@@ -30,4 +51,9 @@ float4 ps_main(PSIn i) : SV_TARGET {
     float4 sample = tex0.Sample(samp0, i.uv);
     if (i.mode < 1.5) return sample * i.color;
     return float4(i.color.rgb, i.color.a * sample.r);
+}
+float4 ps_main(PSIn i) : SV_TARGET {
+    float4 c = shade(i);
+    c.a *= clipCoverage(i);
+    return c;
 }

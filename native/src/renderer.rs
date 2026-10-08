@@ -854,6 +854,21 @@ impl Graphics {
         }
     }
 
+    /// D3D11 keeps uploaded images only as textures: releases their CPU pixels in
+    /// the document, brings back the ones a lost texture needs, and pins the rest.
+    /// Returns (pixels were released, pixels came back and another frame must be painted).
+    #[cfg(target_os = "windows")]
+    pub(crate) fn sync_d3d11_images(&mut self, tree: &mut crate::tree::Tree) -> (bool, bool) {
+        let GraphicsImpl::D3d11(graphics) = &mut self.backend else {
+            return (false, false);
+        };
+        let (uploaded, missing) = graphics.take_image_residency();
+        tree.release_image_pixels(&uploaded);
+        let restored = tree.restore_image_pixels(&missing);
+        graphics.pin_images(tree.released_image_keys());
+        (!uploaded.is_empty(), restored)
+    }
+
     #[cfg(target_os = "windows")]
     pub(crate) fn prepare_d3d11_frame(
         &mut self,

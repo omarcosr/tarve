@@ -90,7 +90,53 @@ struct Vertex {
     /// Blurred rounded-rect shadow: half width, half height, corner radius,
     /// gaussian sigma, all in device pixels. Zero for every other mode.
     params: [f32; 4],
+    /// Window position in device pixels (set by `push_vertex`).
+    dev: [f32; 2],
+    /// Antialiased rounded clip in device pixels (x0, y0, x1, y1); x0 > x1: none.
+    clip: [f32; 4],
+    /// Its corner radii: top-left, top-right, bottom-right, bottom-left.
+    clip_radii: [f32; 4],
+    /// Device pixels to the clip's own space: x' = a x + c y + e, y' = b x + d y + f,
+    /// as (a, b, c, d) and (e, f, pixels per clip unit, 0). Rotated clips stay exact.
+    clip_m0: [f32; 4],
+    clip_m1: [f32; 4],
 }
+
+/// A clip the pixel shader applies: rectangle and radii in its own space, and
+/// the map from device pixels into that space.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct ShaderClip {
+    rect: [f32; 4],
+    radii: [f32; 4],
+    m0: [f32; 4],
+    m1: [f32; 4],
+}
+
+impl ShaderClip {
+    const IDENTITY_M0: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+    const IDENTITY_M1: [f32; 4] = [0.0, 0.0, 1.0, 0.0];
+
+    fn device(rect: [f32; 4], radii: [f32; 4]) -> Self {
+        Self {
+            rect,
+            radii,
+            m0: Self::IDENTITY_M0,
+            m1: Self::IDENTITY_M1,
+        }
+    }
+
+    fn axis_aligned(&self) -> bool {
+        self.m0 == Self::IDENTITY_M0 && self.m1 == Self::IDENTITY_M1
+    }
+}
+
+/// No analytic clip.
+const NO_CLIP: ShaderClip = ShaderClip {
+    rect: [1.0, 1.0, -1.0, -1.0],
+    radii: [0.0; 4],
+    m0: ShaderClip::IDENTITY_M0,
+    m1: ShaderClip::IDENTITY_M1,
+};
 
 unsafe impl bytemuck::Zeroable for Vertex {}
 unsafe impl bytemuck::Pod for Vertex {}
@@ -175,14 +221,40 @@ impl GlyphAtlas {
     }
 }
 
+/// Edge of the square MSAA tile. 8x MSAA stores 8 colour and 8 depth-stencil
+/// samples per pixel (64 bytes); a window-sized target took ~240 MB at 2560×1400.
+/// Rendering through one 256px tile (~4 MB) and resolving each into a cached
+/// frame keeps 8x quality at a fixed cost, and lets an unchanged tile be skipped.
+/// 256 measured ~40% less GPU time than 512 on hover redraws; 128 saved no more
+/// GPU time and doubled the CPU cost of hashing and replaying.
+const MSAA_TILE: u32 = 256;
+
+struct MsaaTile {
+    color: ID3D11Texture2D,
+    color_view: ID3D11RenderTargetView,
+    resolved: ID3D11Texture2D,
+    depth_view: ID3D11DepthStencilView,
+}
+
 pub(crate) struct D3d11Graphics {
+    /// The innermost antialiased (shader-computed) rounded clip, stamped on vertices.
+    clip: ShaderClip,
+    /// No MSAA (the default, `msaa: 0`): shapes get a one-pixel coverage fringe
+    /// instead, without multisampled targets (~30 MB less on Intel).
+    analytic_aa: bool,
     _window: Arc<Window>,
     device: ID3D11Device,
     context: ID3D11DeviceContext,
     swap_chain: IDXGISwapChain1,
+    /// The swapchain's back buffer.
     render_target: Option<ID3D11RenderTargetView>,
-    multisample_texture: Option<ID3D11Texture2D>,
-    depth_texture: Option<ID3D11Texture2D>,
+    /// With MSAA, frames render tile by tile through this fixed-size target.
+    tile: Option<MsaaTile>,
+    /// Last resolved frame. Tiles whose commands hash the same as last frame
+    /// are not redrawn; a hover or a caret blink repaints only its own tiles.
+    frame_cache: Option<ID3D11Texture2D>,
+    tile_hashes: Vec<u64>,
+    /// Window-sized stencil, single-sample path only.
     depth_view: Option<ID3D11DepthStencilView>,
     vertex_shader: ID3D11VertexShader,
     pixel_shader: ID3D11PixelShader,
@@ -195,6 +267,9 @@ pub(crate) struct D3d11Graphics {
     stencil_draw: ID3D11DepthStencilState,
     stencil_push: ID3D11DepthStencilState,
     stencil_pop: ID3D11DepthStencilState,
+    /// Vertex-shader `scale.xy, offset.zw` that maps window NDC into the
+    /// current render target (identity, or one MSAA tile).
+    target_transform: ID3D11Buffer,
     vertex_buffer: ID3D11Buffer,
     vertex_capacity: usize,
     index_buffer: ID3D11Buffer,
@@ -207,6 +282,10 @@ pub(crate) struct D3d11Graphics {
     commands: Vec<DrawCommand>,
     images: HashMap<String, CachedImage>,
     used_images: HashSet<String>,
+    /// Textures whose CPU pixels were released: kept even when off screen.
+    pinned_images: HashSet<String>,
+    uploaded_images: Vec<String>,
+    missing_images: Vec<String>,
     glyphs: HashMap<GlyphKey, GlyphEntry>,
     glyph_outlines: HashMap<GlyphKey, vello::kurbo::BezPath>,
     glyph_atlases: Vec<GlyphAtlas>,
@@ -226,6 +305,10 @@ pub(crate) struct D3d11PaintTarget<'a> {
 }
 
 enum D3d11PaintLayer {
+    /// A rounded clip the pixel shader applies; holds the clip it replaced.
+    /// A clip the pixel shader applies; holds the clip it replaced and, when
+    /// that one moved to the stencil to make room, its stencil geometry.
+    AnalyticClip(ShaderClip, Option<(u32, u32)>),
     Clip(Option<(u32, u32)>),
     Opacity(f32),
 }
@@ -261,10 +344,23 @@ impl D3d11Graphics {
             unsafe { factory.CreateSwapChainForHwnd(&device, hwnd, &desc, None, None) }
                 .map_err(win_error)?;
 
-        let sample_desc = choose_sample_desc(&device);
-        let (multisample_texture, render_target) =
-            create_color_target(&device, &swap_chain, width, height, sample_desc)?;
-        let (depth_texture, depth_view) = create_depth_target(&device, width, height, sample_desc)?;
+        let samples = msaa_samples();
+        let analytic_aa = samples <= 1;
+        let sample_desc = if analytic_aa {
+            DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            }
+        } else {
+            choose_sample_desc(&device, samples)
+        };
+        let render_target = create_render_target(&device, &swap_chain)?;
+        let (tile, depth_view) = if sample_desc.Count > 1 {
+            (Some(create_msaa_tile(&device, sample_desc)?), None)
+        } else {
+            let (_, view) = create_depth_target(&device, width, height, sample_desc)?;
+            (None, Some(view))
+        };
 
         let (vertex_shader, pixel_shader, input_layout) = create_shaders(&device)?;
 
@@ -276,6 +372,11 @@ impl D3d11Graphics {
         let stencil_draw = create_stencil(&device, D3D11_STENCIL_OP_KEEP)?;
         let stencil_push = create_stencil(&device, D3D11_STENCIL_OP_INCR_SAT)?;
         let stencil_pop = create_stencil(&device, D3D11_STENCIL_OP_DECR_SAT)?;
+        let target_transform = create_dynamic_buffer(
+            &device,
+            16,
+            windows::Win32::Graphics::Direct3D11::D3D11_BIND_CONSTANT_BUFFER,
+        )?;
         let vertex_capacity = 4096;
         let index_capacity = 8192;
         let vertex_buffer = create_dynamic_buffer(
@@ -291,14 +392,17 @@ impl D3d11Graphics {
         let first_atlas = create_glyph_atlas(&device)?;
 
         Ok(Self {
+            clip: NO_CLIP,
+            analytic_aa,
             _window: window,
             device,
             context,
             swap_chain,
             render_target: Some(render_target),
-            multisample_texture,
-            depth_texture: Some(depth_texture),
-            depth_view: Some(depth_view),
+            tile,
+            frame_cache: None,
+            tile_hashes: Vec::new(),
+            depth_view,
             vertex_shader,
             pixel_shader,
             input_layout,
@@ -310,6 +414,7 @@ impl D3d11Graphics {
             stencil_draw,
             stencil_push,
             stencil_pop,
+            target_transform,
             vertex_buffer,
             vertex_capacity,
             index_buffer,
@@ -322,6 +427,9 @@ impl D3d11Graphics {
             commands: Vec::with_capacity(256),
             images: HashMap::new(),
             used_images: HashSet::new(),
+            pinned_images: HashSet::new(),
+            uploaded_images: Vec::new(),
+            missing_images: Vec::new(),
             glyphs: HashMap::new(),
             glyph_outlines: HashMap::new(),
             glyph_atlases: vec![first_atlas],
@@ -350,10 +458,12 @@ impl D3d11Graphics {
             return Err(self.classify_gpu_error("D3D11 resize during frame preparation", error));
         }
         self.vertices.clear();
+        self.clip = NO_CLIP;
         self.indices.clear();
         self.commands.clear();
         self.used_images.clear();
         if self.glyph_atlas_exhausted {
+            self.tile_hashes.clear();
             self.glyphs.clear();
             self.glyph_atlases.clear();
             let atlas = match create_glyph_atlas(&self.device) {
@@ -373,9 +483,26 @@ impl D3d11Graphics {
             opacity: 1.0,
         };
         paint(&mut target);
-        self.images.retain(|key, _| self.used_images.contains(key));
+        let images = self.images.len();
+        self.images
+            .retain(|key, _| self.used_images.contains(key) || self.pinned_images.contains(key));
+        if self.images.len() != images {
+            self.tile_hashes.clear();
+        }
         self.prepared = true;
         Ok(())
+    }
+
+    /// Images uploaded and images missing their pixels since the last call.
+    pub(crate) fn take_image_residency(&mut self) -> (Vec<String>, Vec<String>) {
+        (
+            std::mem::take(&mut self.uploaded_images),
+            std::mem::take(&mut self.missing_images),
+        )
+    }
+
+    pub(crate) fn pin_images<'a>(&mut self, keys: impl IntoIterator<Item = &'a String>) {
+        self.pinned_images = keys.into_iter().cloned().collect();
     }
 
     pub(crate) fn glyph_rasterizations(&self) -> u64 {
@@ -400,9 +527,9 @@ impl D3d11Graphics {
             self.context.Flush();
         }
         self.render_target.take();
-        self.multisample_texture.take();
         self.depth_view.take();
-        self.depth_texture.take();
+        self.frame_cache.take();
+        self.tile_hashes.clear();
         unsafe {
             self.swap_chain.ResizeBuffers(
                 2,
@@ -413,19 +540,11 @@ impl D3d11Graphics {
             )
         }
         .map_err(win_error)?;
-        let (multisample_texture, render_target) = create_color_target(
-            &self.device,
-            &self.swap_chain,
-            width,
-            height,
-            self.sample_desc,
-        )?;
-        self.multisample_texture = multisample_texture;
-        self.render_target = Some(render_target);
-        let (depth_texture, depth_view) =
-            create_depth_target(&self.device, width, height, self.sample_desc)?;
-        self.depth_texture = Some(depth_texture);
-        self.depth_view = Some(depth_view);
+        self.render_target = Some(create_render_target(&self.device, &self.swap_chain)?);
+        if self.tile.is_none() {
+            let (_, view) = create_depth_target(&self.device, width, height, self.sample_desc)?;
+            self.depth_view = Some(view);
+        }
         self.width = width;
         self.height = height;
         Ok(())
@@ -449,34 +568,9 @@ impl D3d11Graphics {
     fn draw_frame(&mut self, background: Color) -> Result<(), String> {
         self.ensure_gpu_buffers()?;
         self.upload_frame_buffers()?;
-        let render_target = self
-            .render_target
-            .as_ref()
-            .ok_or("D3D11 render target is unavailable")?;
-        let depth_view = self
-            .depth_view
-            .as_ref()
-            .ok_or("D3D11 stencil target is unavailable")?;
         let bg = rgba(background);
         unsafe {
-            self.context.ClearRenderTargetView(render_target, &bg);
-            self.context.ClearDepthStencilView(
-                depth_view,
-                windows::Win32::Graphics::Direct3D11::D3D11_CLEAR_STENCIL.0,
-                1.0,
-                0,
-            );
-            self.context
-                .OMSetRenderTargets(Some(&[Some(render_target.clone())]), Some(depth_view));
             self.context.RSSetState(&self.rasterizer);
-            self.context.RSSetViewports(Some(&[D3D11_VIEWPORT {
-                TopLeftX: 0.0,
-                TopLeftY: 0.0,
-                Width: self.width as f32,
-                Height: self.height as f32,
-                MinDepth: 0.0,
-                MaxDepth: 1.0,
-            }]));
             self.context.IASetInputLayout(&self.input_layout);
             self.context
                 .IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -495,82 +589,377 @@ impl D3d11Graphics {
             self.context
                 .IASetIndexBuffer(&self.index_buffer, DXGI_FORMAT_R32_UINT, 0);
             self.context.VSSetShader(&self.vertex_shader, None);
+            self.context
+                .VSSetConstantBuffers(0, Some(&[Some(self.target_transform.clone())]));
             self.context.PSSetShader(&self.pixel_shader, None);
         }
+        let clear_stencil = windows::Win32::Graphics::Direct3D11::D3D11_CLEAR_STENCIL.0;
+        if self.tile.is_none() {
+            let render_target = self
+                .render_target
+                .as_ref()
+                .ok_or("D3D11 render target is unavailable")?;
+            let depth_view = self
+                .depth_view
+                .as_ref()
+                .ok_or("D3D11 stencil target is unavailable")?;
+            upload_dynamic(
+                &self.context,
+                &self.target_transform,
+                bytemuck::cast_slice(&[1.0_f32, 1.0, 0.0, 0.0]),
+            )?;
+            unsafe {
+                self.context.ClearRenderTargetView(render_target, &bg);
+                self.context
+                    .ClearDepthStencilView(depth_view, clear_stencil, 1.0, 0);
+                self.context
+                    .OMSetRenderTargets(Some(&[Some(render_target.clone())]), Some(depth_view));
+            }
+            self.set_viewport(self.width, self.height);
+            self.replay(None, &[]);
+            unsafe { self.context.PSSetShaderResources(0, Some(&[None])) };
+            return Ok(());
+        }
+        // Each tile replays the commands that touch it. The vertex shader maps window
+        // NDC onto the tile (scale W/T, H/T plus an offset) so the viewport stays the
+        // tile itself; a negative viewport origin hung Intel's driver on some scenes.
+        let bounds = self.command_bounds();
+        let command_hashes = self.command_hashes();
+        let backbuffer: ID3D11Texture2D =
+            unsafe { self.swap_chain.GetBuffer(0) }.map_err(win_error)?;
+        if self.frame_cache.is_none() {
+            let mut desc = D3D11_TEXTURE2D_DESC::default();
+            unsafe { backbuffer.GetDesc(&mut desc) };
+            desc.BindFlags = 0;
+            desc.MiscFlags = 0;
+            let mut cache = None;
+            unsafe { self.device.CreateTexture2D(&desc, None, Some(&mut cache)) }
+                .map_err(win_error)?;
+            self.frame_cache = Some(cache.ok_or("D3D11 frame cache was not created")?);
+            self.tile_hashes.clear();
+        }
+        let columns = self.width.div_ceil(MSAA_TILE) as usize;
+        let tiles = columns * self.height.div_ceil(MSAA_TILE) as usize;
+        if self.tile_hashes.len() != tiles {
+            self.tile_hashes = vec![0; tiles];
+        }
+        let size = MSAA_TILE as f32;
+        let mut hashes = std::mem::take(&mut self.tile_hashes);
+        let (Some(tile), Some(cache)) = (&self.tile, &self.frame_cache) else {
+            return Err("D3D11 MSAA tile is unavailable".into());
+        };
+        self.set_viewport(MSAA_TILE, MSAA_TILE);
+        for y in (0..self.height).step_by(MSAA_TILE as usize) {
+            for x in (0..self.width).step_by(MSAA_TILE as usize) {
+                let (left, top) = (x as f32, y as f32);
+                let area = [left, top, left + size, top + size];
+                let slot = (y / MSAA_TILE) as usize * columns + (x / MSAA_TILE) as usize;
+                let hash = self.tile_hash(area, &bounds, &command_hashes, bg);
+                if hashes[slot] == hash {
+                    continue;
+                }
+                hashes[slot] = hash;
+                let transform = tile_transform(self.width, self.height, x, y);
+                upload_dynamic(
+                    &self.context,
+                    &self.target_transform,
+                    bytemuck::cast_slice(&transform),
+                )?;
+                unsafe {
+                    self.context.OMSetRenderTargets(
+                        Some(&[Some(tile.color_view.clone())]),
+                        Some(&tile.depth_view),
+                    );
+                    self.context.ClearRenderTargetView(&tile.color_view, &bg);
+                    self.context
+                        .ClearDepthStencilView(&tile.depth_view, clear_stencil, 1.0, 0);
+                }
+                self.replay(Some(area), &bounds);
+                let region = windows::Win32::Graphics::Direct3D11::D3D11_BOX {
+                    left: 0,
+                    top: 0,
+                    front: 0,
+                    right: MSAA_TILE.min(self.width - x),
+                    bottom: MSAA_TILE.min(self.height - y),
+                    back: 1,
+                };
+                unsafe {
+                    self.context.OMSetRenderTargets(None, None);
+                    self.context.ResolveSubresource(
+                        &tile.resolved,
+                        0,
+                        &tile.color,
+                        0,
+                        DXGI_FORMAT_B8G8R8A8_UNORM,
+                    );
+                    self.context.CopySubresourceRegion(
+                        cache,
+                        0,
+                        x,
+                        y,
+                        0,
+                        &tile.resolved,
+                        0,
+                        Some(&region),
+                    );
+                }
+            }
+        }
+        unsafe {
+            self.context.PSSetShaderResources(0, Some(&[None]));
+            self.context.CopyResource(&backbuffer, cache);
+        }
+        self.tile_hashes = hashes;
+        Ok(())
+    }
+
+    /// One hash per command over what it draws (kind, texture, vertices),
+    /// computed once per frame; tiles then combine only the visible ones.
+    fn command_hashes(&self) -> Vec<u64> {
+        self.commands
+            .iter()
+            .map(|command| {
+                let (tag, first, count, texture) = match command {
+                    DrawCommand::Draw {
+                        first,
+                        count,
+                        texture,
+                    } => (
+                        0_u64,
+                        *first,
+                        *count,
+                        match texture {
+                            TextureRef::Solid => 0,
+                            TextureRef::Glyph(view) | TextureRef::Image(view) => {
+                                windows::core::Interface::as_raw(view) as u64
+                            }
+                        },
+                    ),
+                    DrawCommand::PushClip { first, count } => (1, *first, *count, 0),
+                    DrawCommand::PopClip { first, count } => (2, *first, *count, 0),
+                };
+                let mut hash = mix_hash(mix_hash(mix_hash(0, tag), texture), u64::from(count));
+                for &vertex in &self.indices[first as usize..(first + count) as usize] {
+                    let words: &[u32] =
+                        bytemuck::cast_slice(bytemuck::bytes_of(&self.vertices[vertex as usize]));
+                    for word in words {
+                        hash = mix_hash(hash, u64::from(*word));
+                    }
+                }
+                hash
+            })
+            .collect()
+    }
+
+    /// What one tile would draw: the visible commands in order with their
+    /// stencil depth, plus the clear colour. Equal hashes mean equal pixels, so
+    /// the cached tile is reused. Never zero, so a fresh cache entry misses.
+    fn tile_hash(
+        &self,
+        area: [f32; 4],
+        bounds: &[[f32; 4]],
+        command_hashes: &[u64],
+        background: [f32; 4],
+    ) -> u64 {
+        let mut hash = 0_u64;
+        for channel in background {
+            hash = mix_hash(hash, u64::from(channel.to_bits()));
+        }
+        let mut clip_depth = 0_u64;
+        for (index, command) in self.commands.iter().enumerate() {
+            let b = bounds[index];
+            if b[0] < area[2] && b[2] > area[0] && b[1] < area[3] && b[3] > area[1] {
+                hash = mix_hash(mix_hash(hash, clip_depth), command_hashes[index]);
+            }
+            match command {
+                DrawCommand::PushClip { .. } => clip_depth += 1,
+                DrawCommand::PopClip { .. } => clip_depth = clip_depth.saturating_sub(1),
+                DrawCommand::Draw { .. } => {}
+            }
+        }
+        hash.max(1)
+    }
+
+    fn set_viewport(&self, width: u32, height: u32) {
+        unsafe {
+            self.context.RSSetViewports(Some(&[D3D11_VIEWPORT {
+                TopLeftX: 0.0,
+                TopLeftY: 0.0,
+                Width: width as f32,
+                Height: height as f32,
+                MinDepth: 0.0,
+                MaxDepth: 1.0,
+            }]));
+        }
+    }
+
+    /// Window-pixel bounds of each command's triangles, one pixel wider for
+    /// antialiased edges.
+    fn command_bounds(&self) -> Vec<[f32; 4]> {
+        let (width, height) = (self.width as f32, self.height as f32);
+        // A draw inside a stencil clip can only touch the clip's pixels.
+        let mut clips: Vec<[f32; 4]> = Vec::new();
+        self.commands
+            .iter()
+            .map(|command| {
+                let (DrawCommand::Draw { first, count, .. }
+                | DrawCommand::PushClip { first, count }
+                | DrawCommand::PopClip { first, count }) = command;
+                let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+                for &index in &self.indices[*first as usize..(*first + *count) as usize] {
+                    let [nx, ny] = self.vertices[index as usize].pos;
+                    let x = (nx + 1.0) * 0.5 * width;
+                    let y = (1.0 - ny) * 0.5 * height;
+                    bounds = [
+                        bounds[0].min(x),
+                        bounds[1].min(y),
+                        bounds[2].max(x),
+                        bounds[3].max(y),
+                    ];
+                }
+                let mut bounds = [
+                    bounds[0] - 1.0,
+                    bounds[1] - 1.0,
+                    bounds[2] + 1.0,
+                    bounds[3] + 1.0,
+                ];
+                if let Some(clip) = clips.last() {
+                    bounds = [
+                        bounds[0].max(clip[0]),
+                        bounds[1].max(clip[1]),
+                        bounds[2].min(clip[2]),
+                        bounds[3].min(clip[3]),
+                    ];
+                }
+                match command {
+                    DrawCommand::PushClip { .. } => clips.push(bounds),
+                    DrawCommand::PopClip { .. } => {
+                        clips.pop();
+                    }
+                    DrawCommand::Draw { .. } => {}
+                }
+                bounds
+            })
+            .collect()
+    }
+
+    /// Issues the frame's commands. With an `area`, commands whose bounds miss it
+    /// are skipped; a skipped clip still moves the stencil depth, so whatever it
+    /// would have clipped stays hidden in this tile.
+    fn replay(&self, area: Option<[f32; 4]>, bounds: &[[f32; 4]]) {
+        let visible = |index: usize| {
+            area.is_none_or(|area| {
+                let b = bounds[index];
+                b[0] < area[2] && b[2] > area[0] && b[1] < area[3] && b[3] > area[1]
+            })
+        };
+        // Consecutive draws with the same texture occupy contiguous index
+        // ranges, so a run of them is one DrawIndexed. Draws outside this tile
+        // inside a run are harmless: the viewport clips them. State is only set
+        // when it changes; a UI frame drops from hundreds of calls to a few.
+        #[derive(Clone, Copy, PartialEq)]
+        enum State {
+            Draw(u32),
+            Push(u32),
+            Pop(u32),
+        }
+        let mut state: Option<State> = None;
+        let mut bound_texture: Option<usize> = None;
+        let mut batch: Option<(u32, u32, usize)> = None;
+        let flush = |batch: &mut Option<(u32, u32, usize)>| {
+            if let Some((first, count, _)) = batch.take() {
+                unsafe { self.context.DrawIndexed(count, first, 0) };
+            }
+        };
+        let set_state = |next: State, state: &mut Option<State>| {
+            if *state == Some(next) {
+                return;
+            }
+            let (blend, stencil, depth) = match next {
+                State::Draw(depth) => (&self.blend, &self.stencil_draw, depth),
+                State::Push(depth) => (&self.clip_blend, &self.stencil_push, depth),
+                State::Pop(depth) => (&self.clip_blend, &self.stencil_pop, depth),
+            };
+            unsafe {
+                self.context
+                    .OMSetBlendState(Some(blend), Some(&[0.0, 0.0, 0.0, 0.0]), u32::MAX);
+                self.context.OMSetDepthStencilState(Some(stencil), depth);
+            }
+            *state = Some(next);
+        };
         let mut clip_depth = 0_u32;
-        for command in &self.commands {
+        for (index, command) in self.commands.iter().enumerate() {
             match command {
                 DrawCommand::Draw {
                     first,
                     count,
                     texture,
-                } => unsafe {
-                    self.context.OMSetBlendState(
-                        Some(&self.blend),
-                        Some(&[0.0, 0.0, 0.0, 0.0]),
-                        u32::MAX,
-                    );
-                    self.context
-                        .OMSetDepthStencilState(Some(&self.stencil_draw), clip_depth);
-                    match texture {
-                        TextureRef::Solid => self.context.PSSetShaderResources(0, Some(&[None])),
-                        TextureRef::Glyph(view) => {
-                            self.context
-                                .PSSetSamplers(0, Some(&[Some(self.glyph_sampler.clone())]));
-                            self.context
-                                .PSSetShaderResources(0, Some(&[Some(view.clone())]));
+                } => {
+                    let key = match texture {
+                        TextureRef::Solid => 0,
+                        TextureRef::Glyph(view) | TextureRef::Image(view) => {
+                            windows::core::Interface::as_raw(view) as usize
                         }
-                        TextureRef::Image(view) => {
-                            self.context
-                                .PSSetSamplers(0, Some(&[Some(self.image_sampler.clone())]));
-                            self.context
-                                .PSSetShaderResources(0, Some(&[Some(view.clone())]));
-                        }
+                    };
+                    if let Some((batch_first, batch_count, batch_key)) = &mut batch
+                        && *batch_key == key
+                        && *batch_first + *batch_count == *first
+                    {
+                        *batch_count += *count;
+                        continue;
                     }
-                    self.context.DrawIndexed(*count, *first, 0);
-                },
-                DrawCommand::PushClip { first, count } => unsafe {
-                    self.context.OMSetBlendState(
-                        Some(&self.clip_blend),
-                        Some(&[0.0, 0.0, 0.0, 0.0]),
-                        u32::MAX,
-                    );
-                    self.context
-                        .OMSetDepthStencilState(Some(&self.stencil_push), clip_depth);
-                    self.context.PSSetShaderResources(0, Some(&[None]));
-                    self.context.DrawIndexed(*count, *first, 0);
+                    if !visible(index) {
+                        continue;
+                    }
+                    flush(&mut batch);
+                    set_state(State::Draw(clip_depth), &mut state);
+                    if bound_texture != Some(key) {
+                        unsafe {
+                            match texture {
+                                TextureRef::Solid => {
+                                    self.context.PSSetShaderResources(0, Some(&[None]))
+                                }
+                                TextureRef::Glyph(view) => {
+                                    self.context.PSSetSamplers(
+                                        0,
+                                        Some(&[Some(self.glyph_sampler.clone())]),
+                                    );
+                                    self.context
+                                        .PSSetShaderResources(0, Some(&[Some(view.clone())]));
+                                }
+                                TextureRef::Image(view) => {
+                                    self.context.PSSetSamplers(
+                                        0,
+                                        Some(&[Some(self.image_sampler.clone())]),
+                                    );
+                                    self.context
+                                        .PSSetShaderResources(0, Some(&[Some(view.clone())]));
+                                }
+                            }
+                        }
+                        bound_texture = Some(key);
+                    }
+                    batch = Some((*first, *count, key));
+                }
+                DrawCommand::PushClip { first, count } => {
+                    flush(&mut batch);
+                    if visible(index) {
+                        set_state(State::Push(clip_depth), &mut state);
+                        unsafe { self.context.DrawIndexed(*count, *first, 0) };
+                    }
                     clip_depth = clip_depth.saturating_add(1);
-                },
-                DrawCommand::PopClip { first, count } => unsafe {
-                    self.context.OMSetBlendState(
-                        Some(&self.clip_blend),
-                        Some(&[0.0, 0.0, 0.0, 0.0]),
-                        u32::MAX,
-                    );
-                    self.context
-                        .OMSetDepthStencilState(Some(&self.stencil_pop), clip_depth);
-                    self.context.PSSetShaderResources(0, Some(&[None]));
-                    self.context.DrawIndexed(*count, *first, 0);
+                }
+                DrawCommand::PopClip { first, count } => {
+                    flush(&mut batch);
+                    if visible(index) {
+                        set_state(State::Pop(clip_depth), &mut state);
+                        unsafe { self.context.DrawIndexed(*count, *first, 0) };
+                    }
                     clip_depth = clip_depth.saturating_sub(1);
-                },
+                }
             }
         }
-        unsafe { self.context.PSSetShaderResources(0, Some(&[None])) };
-        if let Some(multisample_texture) = &self.multisample_texture {
-            unsafe {
-                self.context.OMSetRenderTargets(None, None);
-                let backbuffer: ID3D11Texture2D =
-                    self.swap_chain.GetBuffer(0).map_err(win_error)?;
-                self.context.ResolveSubresource(
-                    &backbuffer,
-                    0,
-                    multisample_texture,
-                    0,
-                    DXGI_FORMAT_B8G8R8A8_UNORM,
-                );
-            }
-        }
-        Ok(())
+        flush(&mut batch);
     }
 
     pub(crate) fn capture(&mut self, background: Color, path: &str) -> Result<(), D3d11Error> {
@@ -712,12 +1101,13 @@ impl D3d11Graphics {
         for source in points {
             let texcoord = uv(*source);
             let p = transform * Point::new(f64::from(source.x), f64::from(source.y));
-            self.vertices.push(Vertex {
+            self.push_vertex(Vertex {
                 pos: self.ndc(p.x as f32, p.y as f32),
                 uv: texcoord,
                 color: rgba,
                 mode,
                 params: [0.0; 4],
+                ..Default::default()
             });
         }
         self.indices
@@ -741,12 +1131,13 @@ impl D3d11Graphics {
         let rgba = rgba(color);
         let [[x0, y0], [x1, y1]] = area;
         for [x, y] in [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] {
-            self.vertices.push(Vertex {
+            self.push_vertex(Vertex {
                 pos: self.ndc(x, y),
                 uv: [x - center[0], y - center[1]],
                 color: rgba,
                 mode: if invert { 4.0 } else { 3.0 },
                 params,
+                ..Default::default()
             });
         }
         self.indices
@@ -772,12 +1163,13 @@ impl D3d11Graphics {
         let base = self.vertices.len() as u32;
         for (index, (point, color)) in points.iter().enumerate() {
             let p = transform * *point;
-            self.vertices.push(Vertex {
+            self.push_vertex(Vertex {
                 pos: self.ndc(p.x as f32, p.y as f32),
                 uv: [0.0, 0.0],
                 color: rgba(color.multiply_alpha(opacity)),
                 mode: 0.0,
                 params: [0.0; 4],
+                ..Default::default()
             });
             self.indices.push(base + index as u32);
         }
@@ -786,6 +1178,18 @@ impl D3d11Graphics {
             count: points.len() as u32,
             texture: TextureRef::Solid,
         });
+    }
+
+    fn push_vertex(&mut self, mut vertex: Vertex) {
+        vertex.dev = [
+            (vertex.pos[0] + 1.0) * 0.5 * self.width.max(1) as f32,
+            (1.0 - vertex.pos[1]) * 0.5 * self.height.max(1) as f32,
+        ];
+        vertex.clip = self.clip.rect;
+        vertex.clip_radii = self.clip.radii;
+        vertex.clip_m0 = self.clip.m0;
+        vertex.clip_m1 = self.clip.m1;
+        self.vertices.push(vertex);
     }
 
     fn ndc(&self, x: f32, y: f32) -> [f32; 2] {
@@ -811,12 +1215,13 @@ impl D3d11Graphics {
             .into_iter()
             .zip([[u0, v0], [u1, v0], [u1, v1], [u0, v1]])
         {
-            self.vertices.push(Vertex {
+            self.push_vertex(Vertex {
                 pos: self.ndc(x, y),
                 uv: [u, v],
                 color: rgba,
                 mode,
                 params: [0.0; 4],
+                ..Default::default()
             });
         }
         self.indices
@@ -837,12 +1242,21 @@ impl D3d11Graphics {
             image.format,
             image.alpha_type,
         );
-        if self
-            .images
-            .get(key)
-            .is_some_and(|cached| cached.signature == signature)
-        {
-            return self.images.get(key).map(|cached| cached.view.clone());
+        let released = image.data.data().is_empty();
+        if let Some(cached) = self.images.get_mut(key) {
+            if cached.signature == signature {
+                return Some(cached.view.clone());
+            }
+            // The same image after its CPU pixels were released: the texture is the copy.
+            if released && cached.signature.1 == image.width && cached.signature.2 == image.height {
+                cached.signature = signature;
+                return Some(cached.view.clone());
+            }
+        }
+        if released {
+            // The texture is gone (device lost): the document decodes it again.
+            self.missing_images.push(key.to_string());
+            return None;
         }
         let pixels = image_rgba(image)?;
         let cached =
@@ -850,6 +1264,10 @@ impl D3d11Graphics {
                 .ok()?;
         let view = cached.view.clone();
         self.images.insert(key.to_string(), cached);
+        self.uploaded_images.push(key.to_string());
+        // Tile hashes identify textures by pointer; a new texture may reuse a
+        // freed one's address, so cached tiles cannot be trusted any more.
+        self.tile_hashes.clear();
         Some(view)
     }
 
@@ -1019,6 +1437,317 @@ impl D3d11Graphics {
     }
 }
 
+impl D3d11PaintTarget<'_> {
+    /// Pushes `clip` onto the stencil instead of the shader.
+    fn stencil_shader_clip(&mut self, clip: ShaderClip) -> Option<(u32, u32)> {
+        let [r0, r1, r2, r3] = clip.radii.map(f64::from);
+        let rect = vello::kurbo::Rect::new(
+            f64::from(clip.rect[0]),
+            f64::from(clip.rect[1]),
+            f64::from(clip.rect[2]),
+            f64::from(clip.rect[3]),
+        );
+        let shape = vello::kurbo::RoundedRect::from_rect(rect, (r0, r1, r2, r3));
+        let to_device = Affine::new([
+            f64::from(clip.m0[0]),
+            f64::from(clip.m0[1]),
+            f64::from(clip.m0[2]),
+            f64::from(clip.m0[3]),
+            f64::from(clip.m1[0]),
+            f64::from(clip.m1[1]),
+        ])
+        .inverse();
+        let path = lyon_path(shape.to_path(0.1).elements().iter().copied());
+        let mut tess = FillTessellator::new();
+        let mut geometry: VertexBuffers<LyonPoint, u32> = VertexBuffers::new();
+        tess.tessellate_path(
+            &path,
+            &FillOptions::default(),
+            &mut BuffersBuilder::new(&mut geometry, |vertex: FillVertex| vertex.position()),
+        )
+        .ok()?;
+        // The stencil geometry itself must not be cut by the clip it replaces.
+        let current = self.graphics.clip;
+        self.graphics.clip = NO_CLIP;
+        let (first, count) = self.graphics.append_geometry(
+            &geometry.vertices,
+            &geometry.indices,
+            to_device,
+            Color::WHITE,
+            0.0,
+            |_| [0.0, 0.0],
+        );
+        self.graphics.clip = current;
+        if count == 0 {
+            return None;
+        }
+        self.graphics
+            .commands
+            .push(DrawCommand::PushClip { first, count });
+        Some((first, count))
+    }
+
+    /// Fills `path` without MSAA: the interior as tessellated triangles, then a
+    /// one-device-pixel strip outside every contour fading from `color` to
+    /// transparent, which stands in for the coverage of the edge pixels.
+    /// `inset`: `path` already sits half a pixel inside the true edge (a
+    /// stroke drawn one pixel thinner), so the strip starts on it and spans the
+    /// whole pixel outward instead of straddling it.
+    fn fill_feathered(
+        &mut self,
+        fill: Fill,
+        transform: Affine,
+        color: Color,
+        mut path: BezPath,
+        inset: bool,
+    ) {
+        path.apply_affine(transform);
+        let inside = |point: Point| {
+            let winding = path.winding(point);
+            match fill {
+                Fill::NonZero => winding != 0,
+                Fill::EvenOdd => winding % 2 != 0,
+            }
+        };
+        let mut contours: Vec<Vec<Point>> = vec![];
+        vello::kurbo::flatten(path.iter(), 0.2, |element| match element {
+            vello::kurbo::PathEl::MoveTo(point) => contours.push(vec![point]),
+            vello::kurbo::PathEl::LineTo(point) => {
+                if let Some(contour) = contours.last_mut()
+                    && contour
+                        .last()
+                        .is_none_or(|last| last.distance(point) > 1e-3)
+                {
+                    contour.push(point);
+                }
+            }
+            _ => {}
+        });
+        // Each contour with its per-vertex outward miter offsets (one pixel).
+        let mut edged: Vec<(Vec<Point>, Vec<vello::kurbo::Vec2>)> = vec![];
+        for mut contour in contours {
+            if contour.len() > 1 && contour[0].distance(*contour.last().unwrap()) <= 1e-3 {
+                contour.pop();
+            }
+            let n = contour.len();
+            if n < 3 {
+                continue;
+            }
+            let left = |a: Point, b: Point| {
+                let d = b - a;
+                let len = d.hypot().max(1e-9);
+                vello::kurbo::Vec2::new(d.y / len, -d.x / len)
+            };
+            // Which side of this contour is filled: test beside its longest edge.
+            let longest = (0..n)
+                .max_by(|&i, &j| {
+                    let a = contour[i].distance(contour[(i + 1) % n]);
+                    let b = contour[j].distance(contour[(j + 1) % n]);
+                    a.total_cmp(&b)
+                })
+                .unwrap_or(0);
+            let (a, b) = (contour[longest], contour[(longest + 1) % n]);
+            let probe = a.midpoint(b) + left(a, b) * 0.3;
+            let outward = if inside(probe) { -1.0 } else { 1.0 };
+            let offsets: Vec<vello::kurbo::Vec2> = (0..n)
+                .map(|i| {
+                    let prev = contour[(i + n - 1) % n];
+                    let here = contour[i];
+                    let next = contour[(i + 1) % n];
+                    let a = left(prev, here) * outward;
+                    let b = left(here, next) * outward;
+                    let sum = a + b;
+                    let length = sum.hypot();
+                    if length < 1e-6 {
+                        return b;
+                    }
+                    let miter = sum / length;
+                    miter / miter.dot(b).max(0.5)
+                })
+                .collect();
+            edged.push((contour, offsets));
+        }
+        // The solid interior stops half a pixel inside the edge, where the
+        // fringe reaches full colour: edge pixels then get their coverage, not
+        // a full pixel of colour plus a fringe beside it. Contours too small to
+        // shrink (under ~2px across) keep their edge.
+        let back = if inset { 0.0 } else { 0.5 };
+        let mut solid = BezPath::new();
+        for (contour, offsets) in &edged {
+            let bounds = contour.iter().fold(
+                vello::kurbo::Rect::from_points(contour[0], contour[0]),
+                |r, p| r.union_pt(*p),
+            );
+            let shrink = if bounds.width().min(bounds.height()) > 2.0 {
+                back
+            } else {
+                0.0
+            };
+            for (i, (point, offset)) in contour.iter().zip(offsets).enumerate() {
+                let p = *point - *offset * shrink;
+                if i == 0 {
+                    solid.move_to(p);
+                } else {
+                    solid.line_to(p);
+                }
+            }
+            solid.close_path();
+        }
+        let lyon = lyon_path(solid.elements().iter().copied());
+        let mut tess = FillTessellator::new();
+        let mut geometry: VertexBuffers<LyonPoint, u32> = VertexBuffers::new();
+        let options = FillOptions::default().with_fill_rule(match fill {
+            Fill::EvenOdd => FillRule::EvenOdd,
+            Fill::NonZero => FillRule::NonZero,
+        });
+        if tess
+            .tessellate_path(
+                &lyon,
+                &options,
+                &mut BuffersBuilder::new(&mut geometry, |vertex: FillVertex| vertex.position()),
+            )
+            .is_err()
+        {
+            return;
+        }
+        let (first, count) = self.graphics.append_geometry(
+            &geometry.vertices,
+            &geometry.indices,
+            Affine::IDENTITY,
+            color,
+            0.0,
+            |_| [0.0, 0.0],
+        );
+        if count > 0 {
+            self.graphics.commands.push(DrawCommand::Draw {
+                first,
+                count,
+                texture: TextureRef::Solid,
+            });
+        }
+        let transparent = color.with_alpha(0.0);
+        let out = if inset { 1.0 } else { 0.5 };
+        let mut fringe: Vec<(Point, Color)> = vec![];
+        for (contour, offsets) in &edged {
+            let n = contour.len();
+            for i in 0..n {
+                let j = (i + 1) % n;
+                let (p, q) = (contour[i], contour[j]);
+                // A pixel wide, from full colour to none, centred on the edge.
+                let (pi, qi) = (p - offsets[i] * back, q - offsets[j] * back);
+                let (po, qo) = (p + offsets[i] * out, q + offsets[j] * out);
+                fringe.extend_from_slice(&[
+                    (pi, color),
+                    (qi, color),
+                    (qo, transparent),
+                    (pi, color),
+                    (qo, transparent),
+                    (po, transparent),
+                ]);
+            }
+        }
+        self.graphics
+            .append_colored_triangles(&fringe, Affine::IDENTITY, 1.0);
+    }
+}
+
+/// The intersection of two shader clips when it is still one rounded rectangle:
+/// either has square corners and holds the other, or both are square. Scroll
+/// areas inside rounded cards, rounded cards inside scroll areas.
+fn combine_clips(current: ShaderClip, next: ShaderClip) -> Option<ShaderClip> {
+    if current == NO_CLIP {
+        return Some(next);
+    }
+    // Rotated clips have no rectangle intersection: the stencil takes the inner one.
+    if !current.axis_aligned() || !next.axis_aligned() {
+        return None;
+    }
+    let square = |radii: [f32; 4]| radii.iter().all(|r| *r <= 0.0);
+    let contains = |outer: [f32; 4], inner: [f32; 4]| {
+        outer[0] <= inner[0] + 0.01
+            && outer[1] <= inner[1] + 0.01
+            && outer[2] >= inner[2] - 0.01
+            && outer[3] >= inner[3] - 0.01
+    };
+    let (a, ar) = (current.rect, current.radii);
+    let (b, br) = (next.rect, next.radii);
+    if contains(a, b) && square(ar) {
+        return Some(next);
+    }
+    if contains(b, a) && square(br) {
+        return Some(current);
+    }
+    if square(ar) && square(br) {
+        let rect = [
+            a[0].max(b[0]),
+            a[1].max(b[1]),
+            a[2].min(b[2]),
+            a[3].min(b[3]),
+        ];
+        // An empty intersection still clips everything: a zero-size rectangle.
+        let rect = if rect[0] > rect[2] || rect[1] > rect[3] {
+            [rect[0], rect[1], rect[0], rect[1]]
+        } else {
+            rect
+        };
+        return Some(ShaderClip::device(rect, [0.0; 4]));
+    }
+    None
+}
+
+/// A (rounded) rectangle or circle as a shader clip. Translate/scale keeps it
+/// in device pixels; a rotation (with uniform scale) maps pixels into its space.
+fn analytic_clip<S: Shape>(shape: &S, transform: Affine) -> Option<ShaderClip> {
+    let [a, b, c, d, e, f] = transform.as_coeffs();
+    let (rect, radii) = if let Some(rounded) = shape.as_rounded_rect() {
+        let r = rounded.radii();
+        (
+            rounded.rect(),
+            [r.top_left, r.top_right, r.bottom_right, r.bottom_left],
+        )
+    } else if let Some(circle) = shape.as_circle() {
+        // A circle is a square with fully rounded corners.
+        (circle.bounding_box(), [circle.radius; 4])
+    } else {
+        (shape.as_rect()?, [0.0; 4])
+    };
+    if b.abs() < 1e-6 && c.abs() < 1e-6 && a > 0.0 && d > 0.0 {
+        // Uniform enough for the radii: a circle needs a == d.
+        let scale = (a * d).sqrt();
+        return Some(ShaderClip::device(
+            [
+                (rect.x0 * a + e) as f32,
+                (rect.y0 * d + f) as f32,
+                (rect.x1 * a + e) as f32,
+                (rect.y1 * d + f) as f32,
+            ],
+            radii.map(|radius| (radius * scale) as f32),
+        ));
+    }
+    // Rotation and uniform scale only: the columns are orthogonal, equally long.
+    let (sx, sy) = ((a * a + b * b).sqrt(), (c * c + d * d).sqrt());
+    if (sx - sy).abs() > 1e-4 * sx.max(1.0) || (a * c + b * d).abs() > 1e-4 * sx * sy || sx <= 0.0 {
+        return None;
+    }
+    let inverse = transform.inverse().as_coeffs();
+    Some(ShaderClip {
+        rect: [
+            rect.x0 as f32,
+            rect.y0 as f32,
+            rect.x1 as f32,
+            rect.y1 as f32,
+        ],
+        radii: radii.map(|radius| radius as f32),
+        m0: [
+            inverse[0] as f32,
+            inverse[1] as f32,
+            inverse[2] as f32,
+            inverse[3] as f32,
+        ],
+        m1: [inverse[4] as f32, inverse[5] as f32, sx as f32, 0.0],
+    })
+}
+
 fn quantize_glyph_position(value: f32) -> (f32, u8) {
     let quarter = (value * 4.0).round();
     let base = (quarter / 4.0).floor();
@@ -1029,6 +1758,16 @@ fn quantize_glyph_position(value: f32) -> (f32, u8) {
 impl PaintTarget for D3d11PaintTarget<'_> {
     fn fill<S: Shape>(&mut self, fill: Fill, transform: Affine, color: Color, shape: &S) {
         if self.suppressed_clips > 0 {
+            return;
+        }
+        if self.graphics.analytic_aa {
+            self.fill_feathered(
+                fill,
+                transform,
+                color.multiply_alpha(self.opacity),
+                shape.to_path(0.1),
+                false,
+            );
             return;
         }
         let path = lyon_path(shape.to_path(0.1).elements().iter().copied());
@@ -1163,6 +1902,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             Color::new(out)
         };
         let mut wedges: Vec<(Point, Color)> = Vec::new();
+        let mut linear: Vec<(Point, Color)> = Vec::new();
         let mut triangles: Vec<(Point, Color)> = Vec::new();
         let mut quad = |a: Point, b: Point, c: Point, d: Point, from: Color, to: Color| {
             triangles.extend([(a, from), (b, from), (c, to), (a, from), (c, to), (d, to)]);
@@ -1179,7 +1919,25 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                         * (bounds.width().hypot(bounds.height()) + axis.hypot());
                     let p0 = start + axis * t0;
                     let p1 = start + axis * t1;
-                    quad(p0 - across, p0 + across, p1 + across, p1 - across, c0, c1);
+                    // Cut the band to the shape's box: colour is linear in t, so
+                    // the clipped corners keep exact colours, and the stencil
+                    // and every MSAA tile see a few pixels, not a 7x larger quad.
+                    let band = clip_polygon_to_rect(
+                        &[p0 - across, p0 + across, p1 + across, p1 - across],
+                        bounds,
+                    );
+                    let length2 = axis.hypot2().max(1e-12);
+                    let colour = |point: Point| {
+                        let t = (point - start).dot(axis) / length2;
+                        mix(c0, c1, (t - t0) / (t1 - t0).max(1e-12))
+                    };
+                    for k in 1..band.len().saturating_sub(1) {
+                        linear.extend([
+                            (band[0], colour(band[0])),
+                            (band[k], colour(band[k])),
+                            (band[k + 1], colour(band[k + 1])),
+                        ]);
+                    }
                 }
                 GradientGeometry::Radial {
                     center,
@@ -1251,6 +2009,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             }
         }
         triangles.append(&mut wedges);
+        triangles.append(&mut linear);
         self.push_clip(Fill::NonZero, transform, shape);
         let opacity = self.opacity;
         self.graphics
@@ -1260,6 +2019,33 @@ impl PaintTarget for D3d11PaintTarget<'_> {
 
     fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S) {
         if self.suppressed_clips > 0 {
+            return;
+        }
+        if self.graphics.analytic_aa {
+            // The outline of the stroke one device pixel thinner, filled solid,
+            // then a one-pixel fringe outward: each side's ramp is centred on the
+            // true edge, as coverage is. Filling the full-width outline and
+            // straddling its edge left a 1.5px icon line solid, i.e. aliased.
+            let [a, b, c, d, ..] = transform.as_coeffs();
+            let scale = (a * d - b * c).abs().sqrt().max(1e-6);
+            let device = stroke.width * scale;
+            let mut inner = stroke.clone();
+            inner.width = ((device - 1.0).max(0.02)) / scale;
+            let outline = vello::kurbo::stroke(
+                shape.path_elements(0.1),
+                &inner,
+                &vello::kurbo::StrokeOpts::default(),
+                0.1,
+            );
+            // Hairlines thinner than a pixel cover only part of it.
+            let alpha = self.opacity * (device.min(1.0) as f32);
+            self.fill_feathered(
+                Fill::NonZero,
+                transform,
+                color.multiply_alpha(alpha),
+                outline,
+                true,
+            );
             return;
         }
         let source: BezPath = if stroke.dash_pattern.is_empty() {
@@ -1355,6 +2141,39 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             self.suppressed_clips = self.suppressed_clips.saturating_add(1);
             return;
         }
+        // Without MSAA a stencil clip has hard edges. A (rounded) rectangle on
+        // axis-aligned transforms is clipped in the pixel shader instead, with
+        // coverage, as the innermost clip; others fall back to the stencil.
+        if self.graphics.analytic_aa
+            && let Some(clip) = analytic_clip(shape, transform)
+        {
+            let previous = self.graphics.clip;
+            if let Some(combined) = combine_clips(previous, clip) {
+                self.layers
+                    .push(D3d11PaintLayer::AnalyticClip(previous, None));
+                self.graphics.clip = combined;
+                return;
+            }
+            // Two clips that are not one rounded rectangle together: the inner
+            // (what this content touches) keeps its smooth edge in the shader,
+            // the outer moves to the stencil, as MyGo makes outer ones scissors.
+            // It moves once, for the rest of its layer: a panel of 600 rounded
+            // children costs one stencil draw, not one per child.
+            if let Some(layer) = self
+                .layers
+                .iter()
+                .rposition(|layer| matches!(layer, D3d11PaintLayer::AnalyticClip(_, None)))
+                && let Some(stencil) = self.stencil_shader_clip(previous)
+            {
+                if let D3d11PaintLayer::AnalyticClip(_, slot) = &mut self.layers[layer] {
+                    *slot = Some(stencil);
+                }
+                self.layers
+                    .push(D3d11PaintLayer::AnalyticClip(NO_CLIP, None));
+                self.graphics.clip = clip;
+                return;
+            }
+        }
         let path = lyon_path(shape.to_path(0.1).elements().iter().copied());
         let mut tess = FillTessellator::new();
         let mut geometry: VertexBuffers<LyonPoint, u32> = VertexBuffers::new();
@@ -1414,6 +2233,14 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                 self.suppressed_clips = self.suppressed_clips.saturating_sub(1);
             }
             D3d11PaintLayer::Opacity(previous) => self.opacity = previous,
+            D3d11PaintLayer::AnalyticClip(previous, stencil) => {
+                if let Some((first, count)) = stencil {
+                    self.graphics
+                        .commands
+                        .push(DrawCommand::PopClip { first, count });
+                }
+                self.graphics.clip = previous;
+            }
         }
     }
 
@@ -1586,8 +2413,32 @@ fn create_render_target(
     view.ok_or_else(|| "D3D11 render-target view was not created".into())
 }
 
-fn choose_sample_desc(device: &ID3D11Device) -> DXGI_SAMPLE_DESC {
-    for count in [8_u32, 4, 2] {
+/// Requested MSAA sample count, from the app (`msaa`); `TARVE_MSAA` overrides it.
+static MSAA: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+pub(crate) fn set_msaa(samples: Option<u32>) {
+    MSAA.store(samples.unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// 0: no MSAA, edges get a coverage fringe. Otherwise 2, 4 or 8.
+fn msaa_samples() -> u32 {
+    let requested = std::env::var("TARVE_MSAA")
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .unwrap_or_else(|| MSAA.load(std::sync::atomic::Ordering::Relaxed));
+    match requested {
+        0 | 1 => 0,
+        2 | 3 => 2,
+        4..=7 => 4,
+        _ => 8,
+    }
+}
+
+fn choose_sample_desc(device: &ID3D11Device, requested: u32) -> DXGI_SAMPLE_DESC {
+    for count in [8_u32, 4, 2]
+        .into_iter()
+        .filter(|count| *count <= requested)
+    {
         if unsafe { device.CheckMultisampleQualityLevels(DXGI_FORMAT_B8G8R8A8_UNORM, count) }
             .is_ok_and(|levels| levels > 0)
         {
@@ -1603,37 +2454,104 @@ fn choose_sample_desc(device: &ID3D11Device) -> DXGI_SAMPLE_DESC {
     }
 }
 
-fn create_color_target(
-    device: &ID3D11Device,
-    swap_chain: &IDXGISwapChain1,
-    width: u32,
-    height: u32,
-    sample_desc: DXGI_SAMPLE_DESC,
-) -> Result<(Option<ID3D11Texture2D>, ID3D11RenderTargetView), String> {
-    if sample_desc.Count <= 1 {
-        return create_render_target(device, swap_chain).map(|view| (None, view));
+/// `scale.xy, offset.zw` taking window NDC to the NDC of the MSAA tile whose
+/// top-left corner is window pixel (x, y).
+fn tile_transform(width: u32, height: u32, x: u32, y: u32) -> [f32; 4] {
+    let size = MSAA_TILE as f32;
+    let (width, height) = (width as f32, height as f32);
+    [
+        width / size,
+        height / size,
+        (width - 2.0 * x as f32) / size - 1.0,
+        1.0 - (height - 2.0 * y as f32) / size,
+    ]
+}
+
+/// Word-at-a-time multiplicative hash step (FxHash's constant).
+fn mix_hash(hash: u64, word: u64) -> u64 {
+    (hash.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95)
+}
+
+/// Sutherland–Hodgman: the part of a convex polygon inside `rect`.
+fn clip_polygon_to_rect(polygon: &[Point], rect: vello::kurbo::Rect) -> Vec<Point> {
+    let mut points = polygon.to_vec();
+    type Edge = (fn(Point) -> f64, f64, bool);
+    let edges: [Edge; 4] = [
+        (|p| p.x, rect.x0, true),
+        (|p| p.x, rect.x1, false),
+        (|p| p.y, rect.y0, true),
+        (|p| p.y, rect.y1, false),
+    ];
+    for (axis, limit, lower) in edges {
+        let inside = |p: Point| {
+            if lower {
+                axis(p) >= limit
+            } else {
+                axis(p) <= limit
+            }
+        };
+        let mut next = Vec::with_capacity(points.len() + 2);
+        for (index, &current) in points.iter().enumerate() {
+            let previous = points[(index + points.len() - 1) % points.len()];
+            let (a, b) = (inside(previous), inside(current));
+            if a != b {
+                let t = (limit - axis(previous)) / (axis(current) - axis(previous));
+                next.push(previous.lerp(current, t));
+            }
+            if b {
+                next.push(current);
+            }
+        }
+        points = next;
+        if points.is_empty() {
+            break;
+        }
     }
-    let desc = D3D11_TEXTURE2D_DESC {
-        Width: width,
-        Height: height,
-        MipLevels: 1,
-        ArraySize: 1,
-        Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-        SampleDesc: sample_desc,
-        Usage: D3D11_USAGE_DEFAULT,
-        BindFlags: windows::Win32::Graphics::Direct3D11::D3D11_BIND_RENDER_TARGET.0 as u32,
-        CPUAccessFlags: 0,
-        MiscFlags: 0,
+    points
+}
+
+fn create_msaa_tile(
+    device: &ID3D11Device,
+    sample_desc: DXGI_SAMPLE_DESC,
+) -> Result<MsaaTile, String> {
+    let texture = |samples: DXGI_SAMPLE_DESC, bind: u32| -> Result<ID3D11Texture2D, String> {
+        let desc = D3D11_TEXTURE2D_DESC {
+            Width: MSAA_TILE,
+            Height: MSAA_TILE,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            SampleDesc: samples,
+            Usage: D3D11_USAGE_DEFAULT,
+            BindFlags: bind,
+            CPUAccessFlags: 0,
+            MiscFlags: 0,
+        };
+        let mut texture = None;
+        unsafe { device.CreateTexture2D(&desc, None, Some(&mut texture)) }.map_err(win_error)?;
+        texture.ok_or_else(|| "D3D11 MSAA tile texture was not created".to_string())
     };
-    let mut texture = None;
-    unsafe { device.CreateTexture2D(&desc, None, Some(&mut texture)) }.map_err(win_error)?;
-    let texture = texture.ok_or("D3D11 multisample color texture was not created")?;
-    let mut view = None;
-    unsafe { device.CreateRenderTargetView(&texture, None, Some(&mut view)) }.map_err(win_error)?;
-    Ok((
-        Some(texture),
-        view.ok_or("D3D11 multisample render-target view was not created")?,
-    ))
+    let color = texture(
+        sample_desc,
+        windows::Win32::Graphics::Direct3D11::D3D11_BIND_RENDER_TARGET.0 as u32,
+    )?;
+    let resolved = texture(
+        DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
+        0,
+    )?;
+    let mut color_view = None;
+    unsafe { device.CreateRenderTargetView(&color, None, Some(&mut color_view)) }
+        .map_err(win_error)?;
+    let (_, depth_view) = create_depth_target(device, MSAA_TILE, MSAA_TILE, sample_desc)?;
+    Ok(MsaaTile {
+        color,
+        color_view: color_view.ok_or("D3D11 MSAA tile render-target view was not created")?,
+        resolved,
+        depth_view,
+    })
 }
 
 fn create_depth_target(
@@ -1758,6 +2676,51 @@ fn create_shaders(
             Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
             InputSlot: 0,
             AlignedByteOffset: 36,
+            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+            InstanceDataStepRate: 0,
+        },
+        D3D11_INPUT_ELEMENT_DESC {
+            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
+            SemanticIndex: 3,
+            Format: DXGI_FORMAT_R32G32_FLOAT,
+            InputSlot: 0,
+            AlignedByteOffset: 52,
+            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+            InstanceDataStepRate: 0,
+        },
+        D3D11_INPUT_ELEMENT_DESC {
+            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
+            SemanticIndex: 4,
+            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+            InputSlot: 0,
+            AlignedByteOffset: 60,
+            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+            InstanceDataStepRate: 0,
+        },
+        D3D11_INPUT_ELEMENT_DESC {
+            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
+            SemanticIndex: 5,
+            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+            InputSlot: 0,
+            AlignedByteOffset: 76,
+            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+            InstanceDataStepRate: 0,
+        },
+        D3D11_INPUT_ELEMENT_DESC {
+            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
+            SemanticIndex: 6,
+            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+            InputSlot: 0,
+            AlignedByteOffset: 92,
+            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+            InstanceDataStepRate: 0,
+        },
+        D3D11_INPUT_ELEMENT_DESC {
+            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
+            SemanticIndex: 7,
+            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+            InputSlot: 0,
+            AlignedByteOffset: 108,
             InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
             InstanceDataStepRate: 0,
         },
@@ -2138,6 +3101,52 @@ fn win_error(error: windows::core::Error) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn shader_clips_combine_when_still_one_rounded_rectangle() {
+        use super::{NO_CLIP, ShaderClip, analytic_clip, combine_clips};
+        let scroll = ShaderClip::device([0.0, 0.0, 100.0, 100.0], [0.0; 4]);
+        let card = ShaderClip::device([10.0, 10.0, 50.0, 50.0], [8.0; 4]);
+        assert_eq!(combine_clips(NO_CLIP, card), Some(card));
+        assert_eq!(
+            combine_clips(scroll, card),
+            Some(card),
+            "card inside a scroll area"
+        );
+        assert_eq!(
+            combine_clips(card, scroll),
+            Some(card),
+            "scroll area around a card"
+        );
+        let overlap = ShaderClip::device([40.0, 40.0, 200.0, 200.0], [0.0; 4]);
+        assert_eq!(
+            combine_clips(scroll, overlap),
+            Some(ShaderClip::device([40.0, 40.0, 100.0, 100.0], [0.0; 4]))
+        );
+        assert_eq!(
+            combine_clips(card, overlap),
+            None,
+            "a cut rounded corner needs the stencil"
+        );
+        // A spinning card: rotated clips map pixels into the card's own space.
+        let spin = vello::kurbo::Affine::rotate(0.5).then_translate((100.0, 100.0).into());
+        let rotated = analytic_clip(
+            &vello::kurbo::RoundedRect::new(0.0, 0.0, 28.0, 28.0, 6.0),
+            spin,
+        )
+        .unwrap();
+        assert!(!rotated.axis_aligned());
+        assert_eq!(rotated.radii, [6.0; 4]);
+        assert_eq!(combine_clips(scroll, rotated), None);
+        assert!(
+            analytic_clip(
+                &vello::kurbo::Rect::new(0.0, 0.0, 1.0, 1.0),
+                vello::kurbo::Affine::new([2.0, 0.0, 0.5, 1.0, 0.0, 0.0])
+            )
+            .is_none(),
+            "skew falls back"
+        );
+    }
+
     use super::quantize_glyph_position;
 
     #[test]
@@ -2190,6 +3199,61 @@ mod shader_tests {
                 bytes.starts_with(b"DXBC"),
                 "{name} shader is not DXBC bytecode"
             );
+        }
+    }
+
+    #[test]
+    fn polygon_clipping_keeps_the_part_inside_the_rect() {
+        let rect = vello::kurbo::Rect::new(0.0, 0.0, 10.0, 10.0);
+        let big = [
+            Point::new(-5.0, -5.0),
+            Point::new(15.0, -5.0),
+            Point::new(15.0, 15.0),
+            Point::new(-5.0, 15.0),
+        ];
+        let clipped = clip_polygon_to_rect(&big, rect);
+        let area = |p: &[Point]| {
+            (0..p.len())
+                .map(|i| {
+                    let (a, b) = (p[i], p[(i + 1) % p.len()]);
+                    a.x * b.y - b.x * a.y
+                })
+                .sum::<f64>()
+                .abs()
+                / 2.0
+        };
+        assert!((area(&clipped) - 100.0).abs() < 1e-9);
+        let diamond = [
+            Point::new(5.0, -5.0),
+            Point::new(15.0, 5.0),
+            Point::new(5.0, 15.0),
+            Point::new(-5.0, 5.0),
+        ];
+        // The 10x10 square minus four corner triangles of area 0 (they touch).
+        assert!((area(&clip_polygon_to_rect(&diamond, rect)) - 100.0).abs() < 1e-9);
+        let outside = [
+            Point::new(20.0, 20.0),
+            Point::new(30.0, 20.0),
+            Point::new(30.0, 30.0),
+        ];
+        assert!(clip_polygon_to_rect(&outside, rect).is_empty());
+    }
+
+    #[test]
+    fn tile_transform_maps_window_pixels_onto_the_tile() {
+        let (width, height) = (1300_u32, 900_u32);
+        let ndc = |x: f32, y: f32| [x * 2.0 / width as f32 - 1.0, 1.0 - y * 2.0 / height as f32];
+        for (tx, ty) in [(0, 0), (512, 0), (1024, 512)] {
+            let [sx, sy, ox, oy] = tile_transform(width, height, tx, ty);
+            for (px, py) in [(tx, ty), (tx + 512, ty + 512), (tx + 100, ty + 37)] {
+                let [nx, ny] = ndc(px as f32, py as f32);
+                let (mx, my) = (nx * sx + ox, ny * sy + oy);
+                // Tile NDC back to tile pixels.
+                let qx = (mx + 1.0) * 0.5 * MSAA_TILE as f32;
+                let qy = (1.0 - my) * 0.5 * MSAA_TILE as f32;
+                assert!((qx - (px - tx) as f32).abs() < 1e-3, "x {px} -> {qx}");
+                assert!((qy - (py - ty) as f32).abs() < 1e-3, "y {py} -> {qy}");
+            }
         }
     }
 
