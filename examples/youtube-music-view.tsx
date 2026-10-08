@@ -1,8 +1,8 @@
-import { Column, Image, Input, loadImageSource, memo, Path, VirtualList, type Child, Pressable, Row, Scroll, Slider, Svg, Text, View, Window, type ImageBytesSource, type MediaController } from "@tarve/core";
+import { Column, darkTheme, DropdownMenu, Image, Input, loadImageSource, memo, Path, VirtualList, type Child, Pressable, Row, Scroll, Slider, Svg, Text, Theme, TitleBar, Tooltip, View, Window, type ImageBytesSource, type MediaController } from "@tarve/core";
 import type { Collection, Item, Shelf, Song } from "./youtube-music-source";
 
 export const AUDIO_ID = "ytm-audio";
-export type Page = { kind: "home" } | { kind: "search"; query: string } | { kind: "library" } | { kind: "collection"; entry: Collection };
+export type Page = { kind: "home" } | { kind: "search"; query: string } | { kind: "library" } | { kind: "collection"; entry: Collection } | { kind: "playing" };
 export type Repeat = "off" | "all" | "one";
 
 export const state = {
@@ -40,6 +40,11 @@ export const state = {
   muted: false,
   shuffle: false,
   repeat: "off" as Repeat,
+  /** The icon button whose tooltip is showing. */
+  tip: null as string | null,
+  accountOpen: false,
+  /** Size of the now-playing area, so the artwork fits it. */
+  stage: null as { width: number; height: number } | null,
   media: (): MediaController | undefined => undefined,
   // Wired by youtube-music-actions.ts.
   open: (_page: Page) => { },
@@ -55,21 +60,30 @@ export const state = {
   refresh: () => { },
 };
 
-// Palette after Sonora: deep teal surfaces, one cyan accent.
+// YouTube Music's palette: near-black surfaces, one red accent.
 const c = {
-  window: "#070c0d",
-  panel: "#0c1416",
-  raised: "#13201f",
-  row: "#101a1b",
-  hover: "#ffffff0d",
-  border: "#ffffff12",
-  text: "#e6eef0",
-  muted: "#8a9a9d",
-  accent: "#7fd3e0",
-  accentInk: "#062126",
-  selected: "#173236",
+  window: "#030303",
+  panel: "#0f0f0f",
+  raised: "#212121",
+  row: "#181818",
+  hover: "#ffffff12",
+  border: "#ffffff14",
+  text: "#f1f1f1",
+  muted: "#aaaaaa",
+  accent: "#ff0033",
+  accentInk: "#ffffff",
+  selected: "#2b2b2b",
+  liked: "#7a1426",
 };
 const ellipsis = { whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" } as const;
+// Built-in controls (tooltips, menus, the title bar's buttons, focus rings) follow this palette.
+const ytmTheme = Theme.create(darkTheme, {
+  colors: {
+    background: c.window, card: c.panel, foreground: c.text, muted: c.selected, mutedForeground: c.muted,
+    border: "#272727", input: c.raised, placeholder: "#8a8a8a", selection: "#ff00334d",
+    ring: "#ffffff59", ringSoft: "#ffffff33", primary: c.accent, primaryForeground: c.accentInk, sliderThumb: c.text,
+  },
+});
 
 function clock(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds)) return "-:--";
@@ -107,13 +121,25 @@ function Glyph({ d, size = 18, color = c.text, fill = false, weight = 2 }: { d: 
   );
 }
 
-function IconButton({ id, d, label, onClick, size = 18, fill = false, active = false, disabled = false, box = 32 }: { id: string; d: string; label: string; onClick: () => void; size?: number; fill?: boolean; active?: boolean; disabled?: boolean; box?: number }) {
+/** A hover label for icon-only controls. */
+function Tip({ id, label, side = "top", children }: { id: string; label: string; side?: "top" | "bottom"; children: Child }) {
   return (
-    <Pressable id={id} onClick={disabled ? () => { } : onClick} control={{ role: "button", label }}
-      style={{ width: box, height: box, align: "center", justify: "center", radius: 8, shrink: 0, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.35 : 1,
-        background: active ? c.selected : "transparent", hover: { background: active ? c.selected : c.hover } }}>
-      <Glyph d={d} size={size} fill={fill} color={active ? c.accent : c.text} />
-    </Pressable>
+    <Tooltip id={`${id}-tip`} open={state.tip === id} side={side} label={label} trigger={children}
+      onOpenChange={open => { if (open) state.tip = id; else if (state.tip === id) state.tip = null; }}
+      content={<Text size={12} color={c.text} style={{ whiteSpace: "nowrap" }}>{label}</Text>}
+      contentStyle={{ background: "#333333", borderColor: "#333333", radius: 6 }} />
+  );
+}
+
+function IconButton({ id, d, label, onClick, size = 18, fill = false, active = false, disabled = false, box = 32, tip = "top" }: { id: string; d: string; label: string; onClick: () => void; size?: number; fill?: boolean; active?: boolean; disabled?: boolean; box?: number; tip?: "top" | "bottom" }) {
+  return (
+    <Tip id={id} label={label} side={tip}>
+      <Pressable id={id} onClick={disabled ? () => { } : onClick} control={{ role: "button", label }}
+        style={{ width: box, height: box, align: "center", justify: "center", radius: 8, shrink: 0, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.35 : 1,
+          background: active ? c.selected : "transparent", hover: { background: active ? c.selected : c.hover } }}>
+        <Glyph d={d} size={size} fill={fill} color={active ? c.accent : c.text} />
+      </Pressable>
+    </Tip>
   );
 }
 
@@ -194,7 +220,7 @@ function Sidebar() {
                 <Pressable key={`${j}-${entry.id}`} id={`side-${j}`} onClick={() => state.open({ kind: "collection", entry })} control={{ role: "button", label: entry.title }}
                   style={{ padding: 6, radius: 8, gap: 10, direction: "row", align: "center", cursor: "pointer", background: open ? c.selected : "transparent", hover: { background: open ? c.selected : c.hover } }}>
                   {entry.id === "VLLM"
-                    ? <View style={{ width: 36, height: 36, radius: 6, background: "#2a5d66", align: "center", justify: "center" }}><Glyph d={icons.heart} size={16} fill color={c.text} /></View>
+                    ? <View style={{ width: 36, height: 36, radius: 6, background: c.liked, align: "center", justify: "center" }}><Glyph d={icons.heart} size={16} fill color={c.text} /></View>
                     : <Art url={entry.thumbnail} size={36} />}
                   <Column gap={1} style={{ flex: 1, minWidth: 0 }}>
                     <Text size={13} color={playing ? c.accent : c.text} style={ellipsis}>{entry.title}</Text>
@@ -216,29 +242,42 @@ function Sidebar() {
   );
 }
 
+/** The window's own title bar: drag it to move the window; the controls stay clickable. */
 function TopBar() {
   return (
-    <Row align="center" style={{ height: 44, shrink: 0, padding: { left: 8, right: 8 }, gap: 8, borderColor: c.border, borderWidth: { bottom: 1 }, background: c.panel }}>
+    <TitleBar id="titlebar" height={44} style={{ background: c.panel, foreground: c.text, borderColor: c.border, padding: { left: 8 } }}>
+    <Row align="center" style={{ flex: 1, minWidth: 0, height: "100%", padding: { right: 8 }, gap: 8 }}>
       <Row gap={8} align="center" style={{ width: 200, shrink: 0, padding: { left: 6 } }}>
-        <View style={{ width: 22, height: 22, radius: 6, background: c.accent, align: "center", justify: "center" }}><Glyph d={icons.bars} size={14} color={c.accentInk} weight={2.6} /></View>
-        <Text size={14} weight={700}>Music</Text>
+        <View style={{ width: 24, height: 24, radius: 12, background: c.accent, align: "center", justify: "center" }}><Glyph d={icons.play} size={12} fill color={c.accentInk} /></View>
+        <Text size={15} weight={700}>Music</Text>
       </Row>
-      <IconButton id="back" d={icons.back} label="Back" onClick={state.goBack} disabled={!state.back.length} />
-      <Row align="center" style={{ width: 360, height: 30, radius: 8, background: c.raised, padding: { left: 10 }, gap: 6 }}>
-        <Glyph d={icons.search} size={14} color={c.muted} />
-        <Input id="search" type="search" placeholder="Search songs" value={state.query}
+      <IconButton id="back" d={icons.back} label="Back" tip="bottom" onClick={state.goBack} disabled={!state.back.length} />
+      {/* The field is the pill: hover and focus show on it, the icon sits inside. */}
+      <View style={{ width: 380, height: 34, shrink: 1, minWidth: 160, position: "relative" }}>
+        <Input id="search" type="search" placeholder="Search songs, albums, artists" value={state.query}
           onChange={value => { state.query = value; }}
           onSubmit={value => { if (value.trim()) state.open({ kind: "search", query: value.trim() }); }}
-          style={{ flex: 1, minWidth: 0, height: 30, background: "transparent", borderColor: "transparent", foreground: c.text, fontSize: 13, padding: { left: 0, right: 10 } }} />
-      </Row>
+          style={{ width: "100%", height: 34, minWidth: 0, radius: 17, background: c.raised, borderColor: c.raised, foreground: c.text, caretColor: c.text,
+            fontSize: 13, padding: { left: 36, right: 14 },
+            hover: { background: "#2a2a2a", borderColor: "#2a2a2a" },
+            focus: { background: "#1a1a1a", borderColor: "#ffffff40", outlineWidth: 0 } }} />
+        <View style={{ position: "absolute", left: 12, top: 10, pointerEvents: "auto" }}><Glyph d={icons.search} size={14} color={c.muted} /></View>
+      </View>
       <View flex={1} />
-      <IconButton id="toggle-queue" d={icons.queue} label="Queue" active={state.showQueue} onClick={() => { state.showQueue = !state.showQueue; }} />
-      <Pressable id="account" onClick={() => { if (state.signedIn) state.signOut(); else state.signIn = "choose"; }} control={{ role: "button", label: state.signedIn ? "Sign out" : "Sign in" }}
-        style={{ height: 30, padding: { left: 10, right: 12 }, gap: 6, direction: "row", align: "center", radius: 8, cursor: "pointer", background: c.raised, hover: { background: c.selected } }}>
-        <Glyph d={icons.user} size={14} color={c.muted} />
-        <Text size={12} color={c.text}>{state.signedIn ? "Sign out" : "Sign in"}</Text>
-      </Pressable>
+      <IconButton id="toggle-queue" d={icons.queue} label={state.showQueue ? "Hide queue" : "Show queue"} tip="bottom" active={state.showQueue} onClick={() => { state.showQueue = !state.showQueue; }} />
+      {state.signedIn
+        // Signed in: an avatar; Sign out lives in its menu, out of the way.
+        ? <DropdownMenu id="account" label="Account" open={state.accountOpen} onOpenChange={open => { state.accountOpen = open; }}
+            items={[{ value: "sign-out", label: "Sign out" }]} onSelect={value => { if (value === "sign-out") state.signOut(); }}
+            trigger={<View style={{ width: 30, height: 30, radius: 15, background: c.selected, align: "center", justify: "center", hover: { background: "#3a3a3a" } }}><Glyph d={icons.user} size={15} color={c.text} /></View>}
+            contentStyle={{ left: undefined, right: 0, minWidth: 160, background: c.raised, borderColor: c.border }} />
+        : <Pressable id="account" onClick={() => { state.signIn = "choose"; }} control={{ role: "button", label: "Sign in" }}
+            style={{ height: 30, padding: { left: 10, right: 12 }, gap: 6, direction: "row", align: "center", radius: 15, cursor: "pointer", background: c.raised, hover: { background: c.selected } }}>
+            <Glyph d={icons.user} size={14} color={c.muted} />
+            <Text size={12} color={c.text}>Sign in</Text>
+          </Pressable>}
     </Row>
+    </TitleBar>
   );
 }
 
@@ -354,8 +393,30 @@ function Scrolling({ id, children }: { id: string; children: Child }) {
   );
 }
 
+/** The song playing, large: opened from the player bar. */
+function NowPlaying() {
+  const song = state.queue[state.index];
+  if (!song) return <Scrolling id="main-playing"><Message>Nothing playing. Pick a song to start.</Message></Scrolling>;
+  // The artwork takes what the area leaves after the text below it, so a short
+  // window shrinks it instead of pushing it over the title bar.
+  const stage = state.stage;
+  const art = stage ? Math.max(96, Math.min(420, stage.width - 48, stage.height - 150)) : 320;
+  return (
+    <Column id="main-playing" flex={1} align="center" justify="center" gap={18} style={{ minHeight: 0, minWidth: 0, padding: PAD, overflow: "hidden" }}
+      onSize={size => { if (size.width !== state.stage?.width || size.height !== state.stage?.height) state.stage = size; }}>
+      <Art url={song.thumbnail} size={Math.round(art)} radius={10} />
+      <Column gap={6} align="center" style={{ maxWidth: 520, minWidth: 0 }}>
+        <Text size={26} weight={800} style={{ ...ellipsis, maxWidth: 520 }}>{song.title}</Text>
+        <Text size={15} color={c.muted} style={{ ...ellipsis, maxWidth: 520 }}>{[song.artist, song.album].filter(Boolean).join(" • ")}</Text>
+        {state.source ? <Text size={12} color={c.muted} style={{ ...ellipsis, maxWidth: 520 }}>Playing from {state.source}</Text> : null}
+      </Column>
+    </Column>
+  );
+}
+
 function Content() {
   const page = state.page;
+  if (page.kind === "playing") return <NowPlaying />;
   if (state.pageError) return <Scrolling id="main-error"><Message>{state.pageError}</Message></Scrolling>;
   if (page.kind === "home") {
     if (!state.shelves) return <Scrolling id="main-home"><Message>Loading…</Message></Scrolling>;
@@ -403,7 +464,7 @@ function Content() {
 // four times a second re-renders the player bar, not the song list.
 const SidebarRegion = memo((_: { page: Page; library: Collection[] | null; signedIn: boolean; source: string; playing: boolean; current: string | undefined; art: number }) => <Sidebar />);
 const ContentRegion = memo((_: { page: Page; shelves: Shelf[] | null; results: Song[] | null; opened: unknown; library: Collection[] | null; signedIn: boolean;
-  pageError: string | null; listOffset: number; current: string | undefined; playing: boolean; source: string; art: number }) => <Content />);
+  pageError: string | null; listOffset: number; current: string | undefined; playing: boolean; source: string; art: number; stage: unknown }) => <Content />);
 const QueueRegion = memo((_: { queue: Song[]; index: number; source: string; art: number }) => <QueuePanel />);
 
 function QueueRow({ song, index, dim = false }: { song: Song; index: number; dim?: boolean }) {
@@ -445,6 +506,12 @@ function QueuePanel() {
   );
 }
 
+/** Clicking the bar (outside its controls) opens the playing song as the main view; again, goes back. */
+function togglePlaying(): void {
+  if (state.page.kind === "playing") state.goBack();
+  else state.open({ kind: "playing" });
+}
+
 function PlayerBar() {
   const song = state.queue[state.index];
   const duration = state.duration || song?.duration || 0;
@@ -452,7 +519,8 @@ function PlayerBar() {
   const ready = !!state.path && state.loading === null;
   const status = state.playError ?? (state.loading !== null || (state.path && !state.playing && state.time === 0) ? "Loading…" : null);
   return (
-    <Row align="center" style={{ height: 68, shrink: 0, padding: { left: 12, right: 16 }, gap: 16, background: c.panel, borderColor: c.border, borderWidth: { top: 1 } }}>
+    <Pressable id="player-bar" onClick={togglePlaying} control={{ role: "button", label: state.page.kind === "playing" ? "Close now playing" : "Open now playing" }}
+      style={{ direction: "row", align: "center", height: 68, shrink: 0, padding: { left: 12, right: 16 }, gap: 16, background: state.page.kind === "playing" ? c.raised : c.panel, borderColor: c.border, borderWidth: { top: 1 }, cursor: "pointer" }}>
       <Row gap={12} align="center" style={{ width: 300, shrink: 0, minWidth: 0 }}>
         {song ? <>
           <Art url={song.thumbnail} size={44} radius={6} />
@@ -489,7 +557,7 @@ function PlayerBar() {
           onValueChange={value => { state.volume = value / 100; state.muted = value === 0; }}
           style={{ width: 110, foreground: c.text }} />
       </Row>
-    </Row>
+    </Pressable>
   );
 }
 
@@ -533,7 +601,7 @@ export function YouTubeMusicView() {
   const song = state.queue[state.index];
   return (
     <Window title={state.playing && song ? `${song.title} • ${song.artist}` : "Music"} width={1320} height={820} minWidth={960} minHeight={580}
-      position="center" style={{ background: c.window, foreground: c.text, fontFamily: "Inter" }}>
+      position="center" theme={ytmTheme} style={{ background: c.window, foreground: c.text, fontFamily: "Inter", borderColor: c.border }}>
       <audio id={AUDIO_ID} src={state.path} autoPlay volume={state.volume} muted={state.muted} loop={state.repeat === "one"}
         onPlay={() => { state.playing = true; }}
         onPause={() => { state.playing = false; }}
@@ -548,7 +616,7 @@ export function YouTubeMusicView() {
           <SidebarRegion page={state.page} library={state.library} signedIn={state.signedIn} source={state.source} playing={state.playing} current={song?.id} art={state.art} />
           <Column flex={1} style={{ minHeight: 0, minWidth: 0 }}>
             <ContentRegion page={state.page} shelves={state.shelves} results={state.results} opened={state.opened} library={state.library} signedIn={state.signedIn}
-              pageError={state.pageError} listOffset={state.listOffset} current={song?.id} playing={state.playing} source={state.source} art={state.art} />
+              pageError={state.pageError} listOffset={state.listOffset} current={song?.id} playing={state.playing} source={state.source} art={state.art} stage={state.stage} />
           </Column>
           {state.showQueue ? <QueueRegion queue={state.queue} index={state.index} source={state.source} art={state.art} /> : null}
         </Row>

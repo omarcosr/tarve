@@ -38,6 +38,7 @@ export function connect(app: ReturnType<typeof createApp>): void {
     if (page.kind === "home") { if (!state.shelves) void load(token, source.home(), shelves => { state.shelves = shelves; }); }
     else if (page.kind === "search") { state.results = null; if (page.query) void load(token, source.search(page.query), songs => { state.results = songs; prefetch(songs[0]); }); }
     else if (page.kind === "library") { if (state.signedIn) void load(token, source.library(), list => { state.library = list; }); }
+    else if (page.kind === "playing") { /* the queue already holds it */ }
     else if (state.opened?.header.id !== page.entry.id) { state.opened = null; void load(token, source.collection(page.entry), opened => { state.opened = opened; prefetch(opened.songs[0]); }); }
     refresh();
   }
