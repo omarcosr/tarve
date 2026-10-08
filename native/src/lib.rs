@@ -9,6 +9,8 @@ mod bridge;
 mod controls;
 #[cfg(target_os = "windows")]
 mod d3d11;
+#[cfg(not(target_arch = "wasm32"))]
+mod media;
 mod paint;
 mod protocol;
 #[cfg(not(target_arch = "wasm32"))]
@@ -29,6 +31,29 @@ mod tree;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
+#[cfg(all(test, not(feature = "mimalloc")))]
+pub(crate) mod counting_alloc {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicIsize, Ordering};
+    pub static LIVE: AtomicIsize = AtomicIsize::new(0);
+    pub struct Counting;
+    unsafe impl GlobalAlloc for Counting {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            LIVE.fetch_add(layout.size() as isize, Ordering::Relaxed);
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            LIVE.fetch_sub(layout.size() as isize, Ordering::Relaxed);
+            unsafe { System.dealloc(ptr, layout) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+            LIVE.fetch_add(size as isize - layout.size() as isize, Ordering::Relaxed);
+            unsafe { System.realloc(ptr, layout, size) }
+        }
+    }
+    #[global_allocator]
+    static GLOBAL: Counting = Counting;
+}
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -46,5 +71,24 @@ pub(crate) fn release_free_memory() {
     // SAFETY: mi_collect only walks and trims mimalloc's own heap state.
     unsafe {
         mi_collect(true);
+    }
+}
+
+/// Lets Windows take back the pages the process touched once and not since:
+/// driver and shader setup, startup parsing. They stay committed and come back
+/// from the standby list without disk I/O if touched again; the resident set,
+/// what Task Manager shows, drops to what the app actually uses.
+/// When it runs is the app's `memoryTrimDelay` (`App::trim_delay`).
+pub(crate) fn trim_working_set() {
+    #[cfg(target_os = "windows")]
+    {
+        unsafe extern "system" {
+            fn GetCurrentProcess() -> isize;
+            fn K32EmptyWorkingSet(process: isize) -> i32;
+        }
+        // SAFETY: both calls only act on this process's own memory manager state.
+        unsafe {
+            K32EmptyWorkingSet(GetCurrentProcess());
+        }
     }
 }

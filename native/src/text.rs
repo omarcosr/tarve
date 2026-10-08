@@ -106,13 +106,31 @@ pub(crate) fn draw_decoration<P: PaintTarget>(
             let mut x = x0;
             while x < x1 {
                 let end = (x + dash).min(x1);
-                if style == DecorationStyle::Dotted {
+                // Browsers draw thin dotted lines as square dots: a round dot a pixel
+                // wide antialiases into a grey smear (and does, on the CPU renderer).
+                if style == DecorationStyle::Dotted && thickness >= 3.0 {
                     let r = thickness / 2.0;
                     target.fill(
                         Fill::NonZero,
                         transform,
                         color,
                         &vello::kurbo::Circle::new((x + r, y + r), r),
+                    );
+                } else if style == DecorationStyle::Dotted {
+                    // Snap square dots to whole device pixels: at fractional scales an
+                    // unsnapped 1px dot straddles two pixels and antialiases to grey.
+                    let [sx, _, _, sy, tx, ty] = transform.as_coeffs();
+                    let snap = |v: f64, s: f64, t: f64| ((v * s + t).round() - t) / s;
+                    let (sx, sy) = (sx.abs().max(1e-6), sy.abs().max(1e-6));
+                    let x0 = snap(x, sx, tx);
+                    let y0 = snap(y, sy, ty);
+                    let side_x = ((thickness * sx).round().max(1.0)) / sx;
+                    let side_y = ((thickness * sy).round().max(1.0)) / sy;
+                    target.fill(
+                        Fill::NonZero,
+                        transform,
+                        color,
+                        &Rect::new(x0, y0, x0 + side_x, y0 + side_y),
                     );
                 } else {
                     target.fill(
@@ -570,7 +588,16 @@ fn default_ui_generic_family() -> GenericFamily {
     }
 }
 
+/// Sizes a text measured to, by wrap width; reset when its layout is rebuilt.
+#[derive(Default)]
+struct MeasureCache {
+    sizes: Vec<(Option<u32>, (f32, f32))>,
+    /// Unwrapped line width and size: every wider wrap measures the same.
+    natural: Option<(f32, (f32, f32))>,
+}
+
 pub struct TextEngine {
+    measure_cache: HashMap<String, MeasureCache>,
     fonts: FontContext,
     context: LayoutContext<TextBrush>,
     pub layouts: HashMap<String, Layout<TextBrush>>,
@@ -1046,6 +1073,7 @@ pub(crate) mod app_fonts {
 impl TextEngine {
     pub fn new() -> Self {
         Self {
+            measure_cache: HashMap::default(),
             #[cfg(not(target_arch = "wasm32"))]
             fonts: app_fonts::context(),
             #[cfg(target_arch = "wasm32")]
@@ -1075,6 +1103,7 @@ impl TextEngine {
         }
     }
     pub fn prepare(&mut self, node: &Node) {
+        self.measure_cache.remove(&node.id);
         if !node.is_text() {
             return;
         }
@@ -1538,6 +1567,7 @@ impl TextEngine {
     }
     pub fn retain(&mut self, mut keep: impl FnMut(&str) -> bool) {
         self.layouts.retain(|id, _| keep(id));
+        self.measure_cache.retain(|id, _| keep(id));
         self.markdown_lines.retain(|id, _| keep(id));
         self.markdown_scroll.retain(|(id, _), _| keep(id));
         self.markdown_metrics.retain(|id, _| keep(id));
@@ -1580,6 +1610,20 @@ impl TextEngine {
         } else {
             width.map(|w| w.max(0.0))
         };
+        // Layout asks for the same text at a handful of widths on every pass
+        // (min-content, max-content, the final width), and a window resize asks
+        // again for every text: answer repeats from the cache, and any width at
+        // least as wide as the unwrapped line from the unwrapped measurement.
+        let cache = self.measure_cache.entry(id.to_string()).or_default();
+        let key = wrap.map(f32::to_bits);
+        if let Some((_, size)) = cache.sizes.iter().find(|(width, _)| *width == key) {
+            return *size;
+        }
+        if let (Some(w), Some((natural, size))) = (wrap, cache.natural)
+            && w >= natural
+        {
+            return size;
+        }
         layout.break_all_lines(wrap);
         let mut height = layout.height();
         if let Some(extents) = shifted_line_extents(layout) {
@@ -1591,7 +1635,16 @@ impl TextEngine {
         {
             height = line.metrics().block_max_coord;
         }
-        (layout.width().ceil(), height.ceil())
+        let size = (layout.width().ceil(), height.ceil());
+        let cache = self.measure_cache.entry(id.to_string()).or_default();
+        if wrap.is_none() {
+            cache.natural = Some((layout.width(), size));
+        }
+        if cache.sizes.len() >= 4 {
+            cache.sizes.remove(0);
+        }
+        cache.sizes.push((key, size));
+        size
     }
     /// Paints a plain text layout once more in a single colour, offset by the
     /// caller, before the real text is drawn on top. With `blur` (the CSS

@@ -1090,5 +1090,16 @@ describe("development runtime tooling", () => {
     expect(bridge.commands.at(-1)).toEqual({ type: "frameOverlay", enabled: false });
     app.close();
   });
+
+  test("maxFps and setMaxFps send the animation frame rate", async () => {
+    const bridge = new FakeBridge();
+    const app = createApp(() => <Window />, { bridge, maxFps: 30 });
+    await app.ready;
+    expect(bridge.commands.filter(command => command.type === "frameRate")).toEqual([{ type: "frameRate", maxFps: 30 }]);
+    app.setMaxFps(null);
+    expect(bridge.commands.at(-1)).toEqual({ type: "frameRate", maxFps: null });
+    expect(() => app.setMaxFps(0)).toThrow(RangeError);
+    app.close();
+  });
 });
 

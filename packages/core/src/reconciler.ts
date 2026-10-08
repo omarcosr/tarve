@@ -15,12 +15,14 @@ import { Select } from "./select";
 import { Progress, Separator } from "./controls";
 import { Label } from "./form-controls";
 import { withRenderScope } from "./render-scope";
+import { MEMO, type MemoInfo } from "./memo";
 import { openExternal } from "./bridge";
 import { compileInline, INLINE_TAG_NAMES, type InlineContext } from "./inline-text";
 import { expandCanvas } from "./canvas";
+import { expandAudio, mediaRequest, type MediaElementProps, type MediaRequest } from "./media-element";
 import { expandHtml, expandInput, formValues, HTML_ELEMENTS, HTML_INPUT_TYPES, type FormContext, type FormValue } from "./html-elements";
-export interface Handlers { onClick?: () => void; onMarkdownLink?: (href: string) => void; onDiffToggleFile?: (path: string) => void; onDiffShowMore?: (hidden: number, path?: string) => void; onDiffLineClick?: (event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void; onHighlight?: (event: { matchCount: number }) => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onSubmit?: (value: string) => void; onPaste?: (payload: PastePayload) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onScrollPosition?: (position: ScrollPosition) => void; onVirtualListLayout?: (items: VirtualListMeasurement[]) => void; onVirtualListScrollToItem?: (index: number, offset: number) => void; onVirtualListFocus?: (key: string | null) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void; onTransitionEnd?: (event: { property: MotionProperty }) => void; onDragStart?: (position: DragPosition) => void; onDragMove?: (event: DragMoveEvent) => void; onDragEnd?: (event: DragEndEvent) => void; onDragEnter?: (source: string) => void; onDragLeave?: (source: string) => void; onDrop?: (event: DropEvent) => void }
-export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode> }
+export interface Handlers { onClick?: () => void; onMarkdownLink?: (href: string) => void; onDiffToggleFile?: (path: string) => void; onDiffShowMore?: (hidden: number, path?: string) => void; onDiffLineClick?: (event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void; onHighlight?: (event: { matchCount: number }) => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onSubmit?: (value: string) => void; onPaste?: (payload: PastePayload) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onScrollPosition?: (position: ScrollPosition) => void; onVirtualListLayout?: (items: VirtualListMeasurement[]) => void; onVirtualListScrollToItem?: (index: number, offset: number) => void; onVirtualListFocus?: (key: string | null) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void; onTransitionEnd?: (event: { property: MotionProperty }) => void; onDragStart?: (position: DragPosition) => void; onDragMove?: (event: DragMoveEvent) => void; onDragEnd?: (event: DragEndEvent) => void; onDragEnter?: (source: string) => void; onDragLeave?: (source: string) => void; onDrop?: (event: DropEvent) => void; onSize?: (size: { width: number; height: number }) => void }
+export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode>; media?: Map<string, MediaRequest> }
 const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "markdown", "code", "diff", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter"]);
 const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
 const svgIntrinsicElements = new Set(["path", "circle", "ellipse", "g", "line", "polygon", "polyline", "rect"]);
@@ -66,6 +68,40 @@ const COPIED_PROPS = [
   "portal", "dismissOnOutside", "focusable", "dragRegion", "draggable", "dropTarget", "windowAction",
 ] as const;
 
+/** One memoized subtree: what produced it and everything compiling it registered. */
+interface MemoEntry {
+  render: MemoInfo<object>["render"];
+  props: object;
+  group: string | undefined;
+  theme: ThemeDefinition;
+  font: Record<string, unknown>;
+  form: FormContext | undefined;
+  result: NativeNode[];
+  ids: string[];
+  nodes: [string, NativeNode][];
+  handlers: [string, Handlers][];
+  media: [string, MediaRequest][];
+  /** Memoized components inside this one, kept alive when it is reused. */
+  nested: string[];
+  idSet?: Set<string>;
+}
+const memoStores = new WeakMap<object, Map<string, MemoEntry>>();
+
+/**
+ * Forgets every memoized subtree containing `id`, so the next render compiles it
+ * again. Called when a handler of that node runs: handlers update the state a
+ * component reads (VirtualList's measured height, a row's own module state),
+ * which its props alone do not show.
+ */
+export function invalidateMemos(renderScope: object, id: string): void {
+  const store = memoStores.get(renderScope);
+  if (!store) return;
+  for (const [path, entry] of store) {
+    entry.idSet ??= new Set(entry.ids);
+    if (entry.idSet.has(id)) store.delete(path);
+  }
+}
+
 export function compileTree(
   element: VNode,
   debug = false,
@@ -76,6 +112,8 @@ export function compileTree(
 ): CompiledTree {
   const handlers = new Map<string, Handlers>();
   const ids = new Set<string>();
+  /** Every id in the order it was claimed: memo entries slice their own span. */
+  const idLog: string[] = [];
   const nodes = new Map<string, NativeNode>();
   const labelAssociations = new Map<string, string[]>();
   const labelableTargets = new Map<string, string>();
@@ -83,6 +121,64 @@ export function compileTree(
   let selectedTheme: ThemeDefinition = lightTheme;
   let inheritedFont: Record<string, unknown> = {};
   let currentForm: FormContext | undefined;
+  const media = new Map<string, MediaRequest>();
+  let memoStore: Map<string, MemoEntry> | undefined;
+  if (renderScope) {
+    memoStore = memoStores.get(renderScope);
+    if (!memoStore) memoStores.set(renderScope, memoStore = new Map());
+  }
+  const memoSeen = new Set<string>();
+  /** What compiling a subtree registered: the ids claimed since `mark` and their nodes, handlers and media. */
+  function claimedSince(mark: number): Pick<MemoEntry, "ids" | "nodes" | "handlers" | "media"> {
+    const own = idLog.slice(mark).filter(id => ids.has(id));
+    const pick = <T>(map: Map<string, T>) => {
+      const out: [string, T][] = [];
+      for (const id of own) { const value = map.get(id); if (value !== undefined) out.push([id, value]); }
+      return out;
+    };
+    return { ids: own, nodes: pick(nodes), handlers: pick(handlers), media: pick(media) };
+  }
+  function added(set: Set<string>, skip: number): string[] {
+    // Only reached on a cache miss; Sets iterate in insertion order.
+    const out: string[] = [];
+    let index = 0;
+    for (const value of set) if (index++ >= skip) out.push(value);
+    return out;
+  }
+  function visitMemo(store: Map<string, MemoEntry>, info: MemoInfo<object>, props: object, path: string, group?: string): NativeNode[] {
+    memoSeen.add(path);
+    const previous = store.get(path);
+    if (previous && previous.render === info.render && previous.group === group && previous.theme === selectedTheme
+      && previous.form === currentForm && sameValue(previous.font, inheritedFont) && info.equal(previous.props, props)) {
+      for (const id of previous.ids) {
+        if (ids.has(id)) throw new Error(`Duplicate node id: ${id}`);
+        ids.add(id); idLog.push(id);
+      }
+      for (const [id, node] of previous.nodes) nodes.set(id, node);
+      for (const [id, handler] of previous.handlers) handlers.set(id, handler);
+      for (const [id, request] of previous.media) media.set(id, request);
+      // Memoized components nested in a reused subtree stay cached too.
+      for (const key of previous.nested) memoSeen.add(key);
+      previous.props = props;
+      return previous.result;
+    }
+    const seenBefore = memoSeen.size;
+    const before = { log: idLog.length, labels: labelAssociations.size, labelable: labelableTargets.size, window: windowOptions };
+    const font = inheritedFont;
+    const theme = selectedTheme;
+    const form = currentForm;
+    const result = visit(info.render(props), path, group);
+    // Labels and windows tie a subtree to nodes outside it; such subtrees always recompile.
+    const selfContained = labelAssociations.size === before.labels && labelableTargets.size === before.labelable && windowOptions === before.window;
+    if (selfContained) {
+      store.set(path, {
+        render: info.render, props, group, theme, font, form, result,
+        ...claimedSince(before.log),
+        nested: added(memoSeen, seenBefore),
+      });
+    } else store.delete(path);
+    return result;
+  }
   function inlineContext(textId: string, base: Record<string, unknown>): InlineContext {
     let runs = 0;
     return {
@@ -92,7 +188,7 @@ export function compileTree(
       register(id, onClick) {
         const runId = id ?? `${textId}/run:${runs++}`;
         if (ids.has(runId)) throw new Error(`Duplicate node id: ${runId}`);
-        ids.add(runId);
+        ids.add(runId); idLog.push(runId);
         handlers.set(runId, { onClick });
         return runId;
       },
@@ -107,7 +203,7 @@ export function compileTree(
     });
     if (typeof child === "string" || typeof child === "number") {
       if (ids.has(path)) throw new Error(`Duplicate node id: ${path}`);
-      ids.add(path);
+      ids.add(path); idLog.push(path);
       // Anonymous text (a bare string child) inherits like any text node.
       ids.delete(path);
       return visit(Text({ id: path, children: String(child) }), path, group);
@@ -122,7 +218,11 @@ export function compileTree(
         return visit(adapted, path, group, adaptedIsNative);
       }
     }
-    if (typeof child.type === "function") return visit(child.type(child.props), path, group);
+    if (typeof child.type === "function") {
+      const info = (child.type as unknown as Record<symbol, MemoInfo<object> | undefined>)[MEMO];
+      if (info && memoStore) return visitMemo(memoStore, info, child.props as object, path, group);
+      return visit(child.type(child.props), path, group);
+    }
     const isNativeVNode = adapterNative || _isNativeVNode(child);
     if (!isNativeVNode && child.type in headingPreset) {
       const props = child.props as Parameters<typeof Text>[0];
@@ -172,6 +272,12 @@ export function compileTree(
       } finally {
         currentForm = previous;
       }
+    }
+    if (!isNativeVNode && child.type === "audio") {
+      const props = child.props as MediaElementProps;
+      const id = String(props.id ?? path);
+      media.set(id, mediaRequest(props));
+      return visit(expandAudio(props, id), path, group);
     }
     if (!isNativeVNode && child.type === "canvas") {
       return visit(expandCanvas(child.props as Record<string, any>, path), path, group);
@@ -284,7 +390,7 @@ export function compileTree(
     const p = child.props;
     const id = p.id ?? path;
     if (ids.has(id)) throw new Error(`Duplicate node id: ${id}`);
-    ids.add(id);
+    ids.add(id); idLog.push(id);
     if (nativeType === "window") {
       if (windowOptions) throw new Error("This bootstrap supports one Window per app.");
       selectedTheme = p.theme ?? lightTheme;
@@ -300,7 +406,7 @@ export function compileTree(
           else p.onMouseLeave?.();
         }
       : p.onHover;
-    handlers.set(id, { onClick: p.onClick, onMarkdownLink: p.onMarkdownLink, onDiffToggleFile: p.onToggleFile, onDiffShowMore: p.onShowMore, onDiffLineClick: p.onLineClick, onHighlight: p.onHighlight, onContextMenu: p.onContextMenu, onOutsideClick: p.onOutsideClick, onHover: hoverHandler, onChange: p.onChange, onSubmit: p.onSubmit, onPaste: p.onPaste, onValueChange: p.onValueChange, onScroll: p.onScroll, onScrollPosition: p.onScrollPosition, onVirtualListLayout: p.onVirtualListLayout, onVirtualListScrollToItem: p.onVirtualListScrollToItem, onVirtualListFocus: p.onVirtualListFocus, onEscape: p.onEscape, onKeyDown: p.onKeyDown, onBlur: p.onBlur, onCloseRequest: p.onCloseRequest, onTransitionEnd: p.onTransitionEnd, onDragStart: p.onDragStart, onDragMove: p.onDragMove, onDragEnd: p.onDragEnd, onDragEnter: p.onDragEnter, onDragLeave: p.onDragLeave, onDrop: p.onDrop });
+    handlers.set(id, { onClick: p.onClick, onMarkdownLink: p.onMarkdownLink, onDiffToggleFile: p.onToggleFile, onDiffShowMore: p.onShowMore, onDiffLineClick: p.onLineClick, onHighlight: p.onHighlight, onContextMenu: p.onContextMenu, onOutsideClick: p.onOutsideClick, onHover: hoverHandler, onChange: p.onChange, onSubmit: p.onSubmit, onPaste: p.onPaste, onValueChange: p.onValueChange, onScroll: p.onScroll, onScrollPosition: p.onScrollPosition, onVirtualListLayout: p.onVirtualListLayout, onVirtualListScrollToItem: p.onVirtualListScrollToItem, onVirtualListFocus: p.onVirtualListFocus, onEscape: p.onEscape, onKeyDown: p.onKeyDown, onBlur: p.onBlur, onCloseRequest: p.onCloseRequest, onTransitionEnd: p.onTransitionEnd, onDragStart: p.onDragStart, onDragMove: p.onDragMove, onDragEnd: p.onDragEnd, onDragEnter: p.onDragEnter, onDragLeave: p.onDragLeave, onDrop: p.onDrop, onSize: p.onSize });
     const control = p.control ? { ...p.control } : undefined;
     const childGroup = control?.role === "radiogroup" || control?.role === "tablist" || control?.role === "navigation" || control?.role === "togglegroup"
       || control?.role === "tree" || control?.role === "grid" ? id : group;
@@ -372,7 +478,9 @@ export function compileTree(
     // on a 6,000-node first render the spreads alone cost ~10 ms.
     let children: NativeNode[];
     try {
-      children = isText || isRichLeaf ? [] : visit(p.children, `${path}/children`, childGroup);
+      // Anonymous descendants are named from the nearest node, not the root: short,
+      // stable ids that survive the subtree moving (a scrolled list row, a reordered key).
+      children = isText || isRichLeaf ? [] : visit(p.children, `${id}/children`, childGroup);
     } finally {
       inheritedFont = parentFont;
     }
@@ -388,6 +496,7 @@ export function compileTree(
     if (p.language !== undefined) node.language = p.language;
     if (p.path !== undefined) node.path = p.path;
     if (p.dropTarget === undefined && (p.onDrop || p.onDragEnter || p.onDragLeave)) node.dropTarget = true;
+    if (p.onSize) node.reportSize = true;
     if (p.showLineNumbers !== undefined) node.showLineNumbers = p.showLineNumbers;
     if (p.wordDiff !== undefined) node.wordDiff = p.wordDiff;
     if (p.collapsedPaths !== undefined) node.collapsedPaths = [...p.collapsedPaths];
@@ -415,6 +524,7 @@ export function compileTree(
     return [node];
   }
   const roots = withRenderScope(renderScope, () => visit(element, "root"));
+  if (memoStore) for (const path of memoStore.keys()) if (!memoSeen.has(path)) memoStore.delete(path);
   for (const [targetId, labelIds] of labelAssociations) {
     const nativeTargetId = labelableTargets.get(targetId);
     if (!nativeTargetId) throw new Error(`label htmlFor references unknown or unsupported target: ${targetId}`);
@@ -431,7 +541,7 @@ export function compileTree(
     roots[0].style.borderColor ??= selectedTheme.colors.border;
     roots[0].style.radius ??= theme.radius.md;
   }
-  return { document: { version: PROTOCOL_VERSION, renderer, window: windowOptions, root: roots[0] }, handlers, nodes };
+  return { document: { version: PROTOCOL_VERSION, renderer, window: windowOptions, root: roots[0] }, handlers, nodes, media };
 }
 
 function sameValue(a: unknown, b: unknown): boolean {
@@ -464,9 +574,11 @@ function nodePropertiesChanged(old: NativeNode, node: NativeNode): boolean {
     || old.wordDiff !== node.wordDiff || !sameValue(old.collapsedPaths, node.collapsedPaths) || old.maxLines !== node.maxLines
     || old.oldText !== node.oldText || old.newText !== node.newText
     || old.src !== node.src || old.fit !== node.fit || !sameValue(old.svg, node.svg)
+    // Image bytes: the serialized string is shared per source object, so equal sources compare by identity.
+    || old.image?.key !== node.image?.key || old.image?.kind !== node.image?.kind || old.image?.data !== node.image?.data
     || old.value !== node.value || old.placeholder !== node.placeholder || old.inputType !== node.inputType || old.submitOnEnter !== node.submitOnEnter || old.scrollSpeed !== node.scrollSpeed || old.scrollOrientation !== node.scrollOrientation || !sameValue(old.virtualList, node.virtualList) || old.disabled !== node.disabled
     || old.modal !== node.modal || old.rovingGroup !== node.rovingGroup || old.portal !== node.portal || old.dismissOnOutside !== node.dismissOnOutside || !sameValue(old.labelledBy, node.labelledBy) || old.closeIntercept !== node.closeIntercept || old.focusable !== node.focusable
-    || old.dragRegion !== node.dragRegion || old.draggable !== node.draggable || old.dropTarget !== node.dropTarget || old.windowAction !== node.windowAction || !sameValue(old.motionFrom, node.motionFrom)
+    || old.dragRegion !== node.dragRegion || old.draggable !== node.draggable || old.dropTarget !== node.dropTarget || old.reportSize !== node.reportSize || old.windowAction !== node.windowAction || !sameValue(old.motionFrom, node.motionFrom)
     || !sameValue(old.highlight, node.highlight)
     || !sameFields(old.control ?? {}, node.control ?? {})
     || !sameStyle(old.style, node.style);
@@ -492,7 +604,7 @@ export function diffTrees(previous: CompiledTree, next: CompiledTree): NativeNod
  * Computes one atomic retained-tree mutation batch. A null result is reserved for
  * identity-incompatible replacements (root ID or an existing keyed node kind changed).
  */
-export function diffTreeMutations(previous: CompiledTree, next: CompiledTree): TreeMutation[] | null {
+export function diffTreeMutations(previous: CompiledTree, next: CompiledTree, unchanged?: (old: NativeNode, node: NativeNode) => boolean): TreeMutation[] | null {
   if (previous.document.root.id !== next.document.root.id) return null;
 
   const creates: TreeMutation[] = [];
@@ -509,6 +621,8 @@ export function diffTreeMutations(previous: CompiledTree, next: CompiledTree): T
       }
       continue;
     }
+    // A memoized subtree reused as is: nothing in it changed.
+    if (old === node || unchanged?.(old, node)) continue;
     if (old.kind !== node.kind) return null;
     if (nodePropertiesChanged(old, node)) patches.push({ type: "patch", node: flatNode(node) });
     if (!sameChildren(old, node)) {

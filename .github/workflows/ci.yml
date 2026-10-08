@@ -38,7 +38,7 @@ jobs:
           cache-on-failure: true
 
       - name: Install Linux native dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev libasound2-dev
 
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
@@ -88,7 +88,7 @@ jobs:
           cache-on-failure: true
 
       - name: Install Linux native and virtual display dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev mesa-vulkan-drivers xvfb dbus python3-dbus python3-gi
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev libasound2-dev mesa-vulkan-drivers xvfb dbus python3-dbus python3-gi
 
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
@@ -116,7 +116,7 @@ jobs:
         env:
           TARVE_SMOKE_OS_INPUT: "0"
         run: |
-          for step in smoke smoke:controls smoke:virtual-list smoke:rich-content smoke:motion smoke:editor smoke:steady-frames smoke:devtools smoke:text smoke:html test:css-layout test:canvas; do
+          for step in smoke smoke:controls smoke:virtual-list smoke:rich-content smoke:motion smoke:editor smoke:steady-frames smoke:devtools smoke:text smoke:html smoke:media test:css-layout test:canvas; do
             echo "::group::$step"
             xvfb-run -a -s "-screen 0 1920x1080x24" bun run "$step"
             echo "::endgroup::"

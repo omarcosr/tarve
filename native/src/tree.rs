@@ -917,6 +917,10 @@ fn reveal_delta(start: f64, end: f64, viewport_start: f64, viewport_end: f64, ma
     }
 }
 
+/** Images kept decoded after their last node goes away. */
+const MAX_IDLE_IMAGES: usize = 256;
+const MAX_IDLE_IMAGE_BYTES: usize = 32 * 1024 * 1024;
+
 fn image_cache_key(node: &Node) -> Option<&str> {
     node.image
         .as_ref()
@@ -1518,12 +1522,21 @@ pub struct Tree {
     pub highlight_searches: u64,
     highlight_dirty: bool,
     images: HashMap<String, ImageData>,
+    /// Keys whose decoded pixels were dropped because a GPU texture holds them.
+    released_images: HashSet<String>,
+    /// Prune generation each cached image was last shown in.
+    image_last_used: HashMap<String, u64>,
+    image_generation: u64,
     svgs: HashMap<String, crate::svg::SvgScene>,
     virtual_measurements: HashMap<String, HashMap<String, f64>>,
     pending_layout_events: Vec<Value>,
+    /// Last inner size sent for each node with `reportSize`.
+    reported_sizes: HashMap<String, (f64, f64)>,
     pending_interaction_events: Vec<Value>,
     pending_motion_events: Vec<Value>,
     motion_time_ms: f64,
+    /// Interval of the animation clock; 60 Hz unless `app.setMaxFps` changes it.
+    motion_frame_ms: f64,
     caret_activity_ms: f64,
     edit_history: HashMap<String, EditHistory>,
     frame_overlay: Option<VecDeque<f32>>,
@@ -1785,12 +1798,17 @@ impl Tree {
             highlight_searches: 0,
             highlight_dirty: true,
             images: HashMap::default(),
+            released_images: HashSet::default(),
+            image_last_used: HashMap::default(),
+            image_generation: 0,
             svgs: HashMap::default(),
             virtual_measurements: HashMap::default(),
             pending_layout_events: Vec::new(),
+            reported_sizes: HashMap::default(),
             pending_interaction_events: Vec::new(),
             pending_motion_events: Vec::new(),
             motion_time_ms: 0.0,
+            motion_frame_ms: MOTION_FRAME_MS,
             caret_activity_ms: 0.0,
             edit_history: HashMap::default(),
             frame_overlay: None,
@@ -2013,7 +2031,7 @@ impl Tree {
                 if self.motion_time_ms < track.start_ms {
                     track.start_ms
                 } else {
-                    (self.motion_time_ms + MOTION_FRAME_MS).min(track.end_ms())
+                    self.next_frame_ms().min(track.end_ms())
                 }
             })
             .min_by(f64::total_cmp)
@@ -2024,9 +2042,21 @@ impl Tree {
     pub fn motion_time_ms(&self) -> f64 {
         self.motion_time_ms
     }
+    pub fn set_motion_frame_ms(&mut self, frame_ms: f64) {
+        if frame_ms.is_finite() && frame_ms > 0.0 {
+            self.motion_frame_ms = frame_ms;
+        }
+    }
+    /// Next point on a fixed grid of animation frames. A frame that wakes late
+    /// does not push the grid back, so the clock keeps its rate (a "+ frame"
+    /// schedule ran at ~52 fps for a 60 Hz clock).
+    fn next_frame_ms(&self) -> f64 {
+        let frame = self.motion_frame_ms;
+        ((self.motion_time_ms / frame + 1e-6).floor() + 1.0) * frame
+    }
     /// Earliest native clock deadline: motion frames or the next caret blink phase.
     pub fn next_clock_tick_ms(&self) -> Option<f64> {
-        let spin = (!self.spinning.is_empty()).then_some(self.motion_time_ms + MOTION_FRAME_MS);
+        let spin = (!self.spinning.is_empty()).then_some(self.next_frame_ms());
         [self.next_motion_tick_ms(), self.next_caret_blink_ms(), spin]
             .into_iter()
             .flatten()
@@ -2281,7 +2311,9 @@ impl Tree {
         if node.kind == "image"
             && let Some(key) = image_cache_key(&node).map(str::to_string)
         {
-            let source_changed = previous.as_ref().is_none_or(|entry| {
+            // A key names one image: a new node showing a cached key (a list row
+            // scrolled back into view, the same cover twice) reuses the decode.
+            let source_changed = previous.as_ref().is_some_and(|entry| {
                 entry.node.kind != "image"
                     || entry.node.src != node.src
                     || entry.node.image != node.image
@@ -2297,6 +2329,7 @@ impl Tree {
                             .sum();
                         let next_bytes = current_bytes.saturating_add(image.data.data().len());
                         if next_bytes <= MAX_IMAGE_CACHE_BYTES {
+                            self.released_images.remove(&key);
                             self.images.insert(key, image);
                         } else {
                             self.images.remove(&key);
@@ -2738,7 +2771,38 @@ impl Tree {
             .filter(|entry| entry.node.kind == "image")
             .filter_map(|entry| image_cache_key(&entry.node).map(str::to_string))
             .collect();
-        self.images.retain(|key, _| used.contains(key));
+        self.image_generation += 1;
+        for key in &used {
+            self.image_last_used
+                .insert(key.clone(), self.image_generation);
+        }
+        // Images no node shows stay for a while (most recent first, within a
+        // count and byte budget), so a row scrolling back does not decode again.
+        let mut idle: Vec<(u64, String, usize)> = self
+            .images
+            .iter()
+            .filter(|(key, _)| !used.contains(*key))
+            .map(|(key, image)| {
+                let last = self.image_last_used.get(key).copied().unwrap_or(0);
+                (last, key.clone(), image.data.data().len())
+            })
+            .collect();
+        idle.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+        let mut kept: HashSet<String> = HashSet::default();
+        let mut bytes = 0usize;
+        for (_, key, size) in idle {
+            if kept.len() >= MAX_IDLE_IMAGES || bytes + size > MAX_IDLE_IMAGE_BYTES {
+                break;
+            }
+            bytes += size;
+            kept.insert(key);
+        }
+        self.images
+            .retain(|key, _| used.contains(key) || kept.contains(key));
+        let images = &self.images;
+        self.released_images.retain(|key| images.contains_key(key));
+        self.image_last_used
+            .retain(|key, _| images.contains_key(key));
     }
     fn prune_svgs(&mut self) {
         self.svgs.retain(|id, _| {
@@ -3137,6 +3201,7 @@ impl Tree {
         self.measure_virtual_rows();
         self.refresh_virtual_anchors();
         self.ensure_focused_textarea_caret_visible();
+        self.report_sizes();
         self.resolve_highlights();
         self.highlight_dirty = false;
         self.layouts += 1;
@@ -3145,6 +3210,36 @@ impl Tree {
         self.dirty.paint = true;
         Ok(())
     }
+    /// `size` events for nodes that asked for their size, like a ResizeObserver
+    /// on the content box: sent on first layout and whenever it changes.
+    fn report_sizes(&mut self) {
+        let mut seen: HashSet<String> = HashSet::default();
+        for (id, entry) in &self.entries {
+            if !entry.node.report_size {
+                continue;
+            }
+            seen.insert(id.clone());
+            let pad = entry.node.insets("padding");
+            let border = entry.node.insets("borderWidth");
+            let width =
+                (entry.rect.width() - f64::from(pad[1] + pad[3] + border[1] + border[3])).max(0.0);
+            let height =
+                (entry.rect.height() - f64::from(pad[0] + pad[2] + border[0] + border[2])).max(0.0);
+            let size = (
+                (width * 100.0).round() / 100.0,
+                (height * 100.0).round() / 100.0,
+            );
+            if self.reported_sizes.get(id) == Some(&size) {
+                continue;
+            }
+            self.reported_sizes.insert(id.clone(), size);
+            self.pending_layout_events.push(json!({
+                "type":"size", "id":id, "width":size.0, "height":size.1
+            }));
+        }
+        self.reported_sizes.retain(|id, _| seen.contains(id));
+    }
+
     fn build_layout(&mut self, id: &str, viewport: Option<(f32, f32)>) -> Result<NodeId, String> {
         let child_ids = self.entries[id].children.clone();
         let children = child_ids
@@ -7830,6 +7925,63 @@ impl Tree {
     pub fn layout_node_count(&self) -> usize {
         self.layout.total_node_count()
     }
+    /// Drops the decoded pixels of images a GPU renderer now holds as textures,
+    /// keeping their size and format: the texture becomes the one copy.
+    pub(crate) fn release_image_pixels(&mut self, keys: &[String]) {
+        for key in keys {
+            let Some(image) = self.images.get_mut(key) else {
+                continue;
+            };
+            if image.data.data().is_empty() {
+                continue;
+            }
+            *image = ImageData {
+                data: Blob::new(Arc::new(Vec::<u8>::new())),
+                ..image.clone()
+            };
+            self.released_images.insert(key.clone());
+        }
+    }
+
+    /// Decodes again images whose pixels were released (a texture was lost or
+    /// evicted, or the frame is painted on the CPU). True when any came back.
+    pub(crate) fn restore_image_pixels(&mut self, keys: &[String]) -> bool {
+        let mut restored = false;
+        for key in keys {
+            if !self.released_images.remove(key) {
+                continue;
+            }
+            let node = self
+                .entries
+                .values()
+                .map(|entry| &entry.node)
+                .find(|node| node.kind == "image" && image_cache_key(node) == Some(key.as_str()))
+                .cloned();
+            match node.map(|node| load_image_data(&node)) {
+                Some(Ok(image)) => {
+                    self.images.insert(key.clone(), image);
+                    restored = true;
+                }
+                _ => {
+                    self.images.remove(key);
+                }
+            }
+        }
+        if restored {
+            self.dirty.paint = true;
+        }
+        restored
+    }
+
+    pub(crate) fn restore_all_image_pixels(&mut self) -> bool {
+        let keys: Vec<String> = self.released_images.iter().cloned().collect();
+        self.restore_image_pixels(&keys)
+    }
+
+    pub(crate) fn released_image_keys(&self) -> &HashSet<String> {
+        &self.released_images
+    }
+
     #[cfg(test)]
     pub(crate) fn image_cache_len(&self) -> usize {
         self.images.len()

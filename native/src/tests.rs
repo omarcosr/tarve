@@ -3471,10 +3471,118 @@ fn removed_images_are_released_from_cache() {
     image::RgbaImage::new(4, 4).save(&path).unwrap();
     let mut image = node("image", "image", json!({"width":4,"height":4}), vec![]);
     image.src = path.to_string_lossy().into_owned();
-    let mut tree = Tree::new(root(vec![image]));
+    let mut tree = Tree::new(root(vec![image.clone()]));
     assert_eq!(tree.image_cache_len(), 1);
+    // A removed image stays decoded for a while, so showing it again is free.
     tree.update(root(vec![]));
-    assert_eq!(tree.image_cache_len(), 0);
+    assert_eq!(tree.image_cache_len(), 1);
+    // Past the idle budget, the least recently shown images go first.
+    let others: Vec<Node> = (0..300)
+        .map(|i| {
+            let mut other = node(&format!("other-{i}"), "image", json!({"width":4,"height":4}), vec![]);
+            other.image = Some(
+                serde_json::from_value(json!({"kind":"rgba","key":format!("k{i}"),"data":"AAAA/w==","width":1,"height":1}))
+                    .unwrap(),
+            );
+            other
+        })
+        .collect();
+    tree.update(root(others));
+    tree.update(root(vec![]));
+    assert_eq!(tree.image_cache_len(), 256);
+    let _ = std::fs::remove_file(path);
+    let _ = image;
+}
+
+#[test]
+fn a_new_node_reuses_a_cached_image_key_without_decoding() {
+    let mut first = node("a", "image", json!({"width":1,"height":1}), vec![]);
+    first.image = Some(
+        serde_json::from_value(
+            json!({"kind":"rgba","key":"shared","data":"AAAA/w==","width":1,"height":1}),
+        )
+        .unwrap(),
+    );
+    let mut tree = Tree::new(root(vec![first.clone()]));
+    let before = tree.image_cache_bytes("shared").unwrap();
+    // Same key, different bytes on a new node: the cached decode is used (keys name content).
+    let mut second = node("b", "image", json!({"width":1,"height":1}), vec![]);
+    second.image = Some(
+        serde_json::from_value(
+            json!({"kind":"rgba","key":"shared","data":"/wAA/w==","width":1,"height":1}),
+        )
+        .unwrap(),
+    );
+    tree.update(root(vec![first, second]));
+    assert_eq!(tree.image_cache_bytes("shared").unwrap(), before);
+}
+
+#[test]
+fn report_size_sends_the_inner_size_once_per_change() {
+    let mut list = node("list", "scroll", json!({"flex":1,"padding":4}), vec![]);
+    list.report_size = true;
+    let mut tree = Tree::new(root(vec![list]));
+    let sizes = |tree: &mut Tree| -> Vec<(f64, f64)> {
+        tree.take_layout_events()
+            .into_iter()
+            .filter(|event| event["type"] == "size")
+            .map(|event| {
+                (
+                    event["width"].as_f64().unwrap(),
+                    event["height"].as_f64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    tree.compute(300.0, 200.0).unwrap();
+    let first = sizes(&mut tree);
+    assert_eq!(first.len(), 1);
+    assert!(
+        (first[0].1 - (tree.entries["list"].rect.height() - 8.0)).abs() < 0.01,
+        "{first:?}"
+    );
+    tree.compute(300.0, 200.0).unwrap();
+    assert!(sizes(&mut tree).is_empty(), "unchanged size sends nothing");
+    // A window resize marks layout dirty, as the runtime does.
+    tree.dirty.layout = true;
+    tree.compute(300.0, 420.0).unwrap();
+    let grown = sizes(&mut tree);
+    assert_eq!(grown.len(), 1);
+    assert!(grown[0].1 > first[0].1, "{grown:?} after {first:?}");
+}
+
+#[test]
+fn released_image_pixels_come_back_when_a_texture_needs_them() {
+    let path = std::env::temp_dir().join(format!("tarve-image-release-{}.png", std::process::id()));
+    image::RgbaImage::from_pixel(4, 4, image::Rgba([10, 20, 30, 255]))
+        .save(&path)
+        .unwrap();
+    let mut image = node("image", "image", json!({"width":4,"height":4}), vec![]);
+    image.src = path.to_string_lossy().into_owned();
+    let mut tree = Tree::new(root(vec![image]));
+    let key = path.to_string_lossy().into_owned();
+    let decoded = tree.image_cache_bytes(&key).unwrap();
+    assert_eq!(decoded.len(), 4 * 4 * 4);
+
+    // A GPU texture now holds the image: the document keeps no pixels.
+    tree.release_image_pixels(std::slice::from_ref(&key));
+    assert_eq!(tree.image_cache_bytes(&key).unwrap().len(), 0);
+    assert!(tree.released_image_keys().contains(&key));
+    assert_eq!(tree.image_cache_len(), 1, "the entry and its size stay");
+
+    // The texture was lost: the pixels are decoded again from the node.
+    assert!(tree.restore_image_pixels(std::slice::from_ref(&key)));
+    assert_eq!(tree.image_cache_bytes(&key).unwrap(), decoded);
+    assert!(tree.released_image_keys().is_empty());
+    assert!(
+        !tree.restore_image_pixels(std::slice::from_ref(&key)),
+        "nothing left to restore"
+    );
+
+    // A removed image stays released while it is kept idle: its texture is the copy.
+    tree.release_image_pixels(std::slice::from_ref(&key));
+    tree.update(root(vec![]));
+    assert!(tree.released_image_keys().contains(&key));
     let _ = std::fs::remove_file(path);
 }
 
@@ -6781,4 +6889,88 @@ fn pointer_delegate_sends_presses_on_a_group_to_its_field_and_shares_its_focus()
         "other rows do not delegate"
     );
     assert!(!tree.delegate_focused("group"));
+}
+
+#[test]
+fn motion_clock_runs_on_a_fixed_grid_at_the_requested_rate() {
+    let spinner = node(
+        "spinner",
+        "view",
+        json!({"width":20,"height":20,"spin":1000}),
+        vec![],
+    );
+    let mut tree = Tree::new(root(vec![spinner]));
+    tree.compute(100.0, 100.0).unwrap();
+    tree.advance_motion(0.0);
+    assert_eq!(tree.next_clock_tick_ms(), Some(1000.0 / 60.0));
+    // A frame that wakes 5ms late keeps the next one on the 60 Hz grid.
+    tree.advance_motion(1000.0 / 60.0 + 5.0);
+    let next = tree.next_clock_tick_ms().unwrap();
+    assert!((next - 2000.0 / 60.0).abs() < 1e-9, "next {next}");
+    tree.set_motion_frame_ms(1000.0 / 240.0);
+    tree.advance_motion(100.0);
+    let next = tree.next_clock_tick_ms().unwrap();
+    assert!((next - 25.0 * 1000.0 / 240.0).abs() < 1e-9, "next {next}");
+    tree.set_motion_frame_ms(f64::NAN);
+    tree.set_motion_frame_ms(0.0);
+    let next = tree.next_clock_tick_ms().unwrap();
+    assert!(
+        (next - 25.0 * 1000.0 / 240.0).abs() < 1e-9,
+        "invalid rates are ignored"
+    );
+}
+
+#[cfg(not(feature = "mimalloc"))]
+#[test]
+#[ignore = "memory probe: cargo test --no-default-features memory_per_node -- --ignored --nocapture"]
+fn memory_per_node() {
+    use crate::counting_alloc::LIVE;
+    use std::sync::atomic::Ordering;
+    let live = || LIVE.load(Ordering::Relaxed);
+    eprintln!(
+        "size_of Node {} Entry {}",
+        std::mem::size_of::<Node>(),
+        std::mem::size_of::<crate::tree::Entry>()
+    );
+    for (label, make) in [
+        (
+            "view",
+            Box::new(|i: usize| {
+                node(
+                    &format!("r{i}"),
+                    "row",
+                    json!({"height":12,"shrink":0,"background":"#eeeeee"}),
+                    vec![],
+                )
+            }) as Box<dyn Fn(usize) -> Node>,
+        ),
+        (
+            "text",
+            Box::new(|i: usize| {
+                let mut n = node(&format!("t{i}"), "text", json!({"fontSize":14}), vec![]);
+                n.text = format!("Record {i}: native layout and text");
+                n
+            }),
+        ),
+    ] {
+        let rows: Vec<Node> = (0..6000).map(&make).collect();
+        let json_bytes = serde_json::to_vec(&root(rows.clone())).unwrap().len();
+        let base = live();
+        let parsed: Node =
+            serde_json::from_slice(&serde_json::to_vec(&root(rows)).unwrap()).unwrap();
+        let after_parse = live();
+        let mut tree = Tree::new(parsed);
+        let after_new = live();
+        tree.compute(1024.0, 760.0).unwrap();
+        let after_layout = live();
+        eprintln!(
+            "{label}: json {:.0} B/node | parsed Node {:.0} B/node | Tree::new +{:.0} B/node | layout +{:.0} B/node | total {:.0} B/node",
+            json_bytes as f64 / 6000.0,
+            (after_parse - base) as f64 / 6000.0,
+            (after_new - after_parse) as f64 / 6000.0,
+            (after_layout - after_new) as f64 / 6000.0,
+            (after_layout - base) as f64 / 6000.0,
+        );
+        drop(tree);
+    }
 }

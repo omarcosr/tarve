@@ -40,6 +40,8 @@ export interface BaseProps {
   onTransitionEnd?: (event: { property: MotionProperty }) => void;
   /** Receives non-text clipboard content (files or a bitmap) pasted while focused. */
   onPaste?: (payload: PastePayload) => void;
+  /** Content-box size after layout, on mount and whenever it changes (a ResizeObserver). */
+  onSize?: (size: { width: number; height: number }) => void;
 }
 export type IntrinsicStateStyle = StateStyle & {
   backgroundColor?: string;
@@ -283,6 +285,7 @@ export namespace JSX {
     blockquote: IntrinsicBlockProps;
     meter: IntrinsicMeterProps;
     canvas: IntrinsicCanvasProps;
+    audio: import("./media-element").MediaElementProps;
     abbr: SpanProps & { title?: string };
     fieldset: IntrinsicBlockProps;
     legend: IntrinsicBlockProps;

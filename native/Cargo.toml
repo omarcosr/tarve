@@ -41,6 +41,10 @@ arboard = { version = "3.6", default-features = false, features = ["image-data"]
 mimalloc = { version = "0.1", default-features = false, optional = true }
 syntect = { version = "=5.3.0", default-features = false, features = ["regex-onig"] }
 two-face = { version = "=0.5.2", default-features = false, features = ["syntect-onig"] }
+# <audio>/<video> sound: WASAPI on Windows, ALSA on Linux; MP3, WAV, FLAC, Ogg Vorbis and AAC in MP4, all pure Rust.
+rodio = { version = "=0.22.2", default-features = false, features = ["playback", "mp3", "wav", "flac", "vorbis", "mp4"] }
+# <audio src="https://…">: range-request streaming over rustls (no system TLS library).
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 # Browser build (bun run build:web): no windowing, clipboard or C regex engine.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

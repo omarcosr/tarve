@@ -3,6 +3,7 @@ export type { WindowProps, WindowCloseRequestEvent, ViewProps, PortalProps, Pres
 export { Checkbox, Switch, RadioGroup, Slider, Card, Badge, Separator, Progress, Tabs, Accordion } from "./controls";
 export type { CheckboxProps, SwitchProps, RadioOption, RadioGroupProps, SliderProps, CardProps, BadgeProps, SeparatorProps, ProgressProps, TabItem, TabsProps, AccordionItem, AccordionProps } from "./controls";
 export { VirtualList } from "./virtual-list";
+export { memo, shallowEqual } from "./memo";
 export type { VirtualListProps } from "./virtual-list";
 export { AnimatePresence } from "./motion";
 export type { AnimatePresenceProps } from "./motion";
@@ -35,3 +36,4 @@ export type { VNode, Child, PastePayload, DragPosition, DragMoveEvent, DragEndEv
 export { BunFfiBridge, openExternal } from "./bridge";
 export type { NativeBridge, BunFfiBridgeOptions } from "./bridge";
 export { CanvasRenderingContext2D, CanvasGradient, parseCanvasFont } from "./canvas";
+export type { MediaController, MediaElementProps, MediaEventInfo } from "./media-element";

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 53;
+pub const VERSION: u32 = 55;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -210,6 +210,9 @@ pub struct Node {
     pub draggable: bool,
     #[serde(default)]
     pub drop_target: bool,
+    /// Emit a `size` event with the inner (padding box minus padding) size whenever it changes.
+    #[serde(default)]
+    pub report_size: bool,
     #[serde(default)]
     pub window_action: String,
     #[serde(default)]
@@ -340,6 +343,14 @@ pub struct Document {
     /// App fonts (CSS `@font-face`): base64 font files, usable by family name.
     #[serde(default)]
     pub fonts: Vec<String>,
+    /// D3D11 multisampling: 0 (default) draws edges with a coverage fringe
+    /// instead of MSAA; 2, 4 or 8 use that many samples where supported.
+    #[serde(default)]
+    pub msaa: Option<u32>,
+    /// Idle milliseconds after the last frame before the working set is
+    /// trimmed (Windows); negative turns it off. Default 3000.
+    #[serde(default, rename = "memoryTrimDelay")]
+    pub memory_trim_delay: Option<f64>,
     pub window: WindowOptions,
     pub root: Node,
 }
@@ -425,12 +436,27 @@ pub enum Command {
         #[serde(default)]
         body: String,
     },
+    Media {
+        id: String,
+        action: String,
+        src: Option<String>,
+        time: Option<f64>,
+        volume: Option<f64>,
+        muted: Option<bool>,
+        #[serde(rename = "loop")]
+        looped: Option<bool>,
+    },
     #[serde(skip)]
     TrayEvent {
         event: serde_json::Value,
     },
     FrameOverlay {
         enabled: bool,
+    },
+    /// Animation frames per second; `None` follows the display's refresh rate.
+    FrameRate {
+        #[serde(rename = "maxFps")]
+        max_fps: Option<f64>,
     },
     Focus {
         id: String,

@@ -1,7 +1,8 @@
 import type { FileDialogOptions, NativeEvent, NativeCommand, NativeNode, NativeTrayMenuItem, Renderer, Snapshot } from "../../protocol/src/index";
 import { readFileSync } from "node:fs";
+import { applyMediaEvent, type MediaController, type MediaRequest } from "./media-element";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
-import { compileTree, diffTreeMutations, type CompiledTree, type Handlers } from "./reconciler";
+import { compileTree, diffTreeMutations, type CompiledTree, type Handlers, invalidateMemos } from "./reconciler";
 import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
 import type { VNode, PastePayload } from "./jsx-runtime";
 import { withRenderScope } from "./render-scope";
@@ -39,6 +40,8 @@ export interface AppOptions {
   dev?: boolean;
   /** Show the native frame-time graph. Defaults to TARVE_FRAME_OVERLAY=1. Never schedules frames on its own. */
   frameOverlay?: boolean;
+  /** Animation frames per second (transitions, `spin`, keyframes); `null` follows the display's refresh rate. Default 60. */
+  maxFps?: number | null;
   /**
    * Font files the app ships, like CSS `@font-face`: TTF/OTF/WOFF2 paths (or `import font from "./Inter.ttf" with { type: "file" }`).
    * Each font is then available by its family name in `fontFamily`.
@@ -46,6 +49,18 @@ export interface AppOptions {
   fontFaces?: readonly string[];
   /** What the window close button does without an onCloseRequest handler: quit (default) or hide the window, e.g. for tray apps. */
   closeBehavior?: "exit" | "hide";
+  /**
+   * GPU antialiasing on Windows (D3D11). `0` (default): no multisampling; shape edges
+   * get a one-pixel coverage fringe, ~30 MB less memory. `2`, `4` or `8`: MSAA with that
+   * many samples, smoother clip edges (rounded `overflow: hidden`, gradients). `TARVE_MSAA` overrides it.
+   */
+  msaa?: 0 | 2 | 4 | 8;
+  /**
+   * Windows: after this many ms without a new frame (default 3000), return the pages only
+   * startup touched to the OS, so Task Manager shows what the app really uses. `false` never
+   * does. `TARVE_TRIM` (ms, or 0 to disable) overrides it.
+   */
+  memoryTrimDelay?: number | false;
 }
 
 export type TrayMenuItem =
@@ -73,6 +88,9 @@ export interface NotifyOptions { title: string; body?: string; onClick?: () => v
 
 const DEV_OVERLAY_SOURCES = new Set<AppErrorSource>(["render", "event-handler", "listener", "hotkey"]);
 const DEV_APP_KEY = Symbol.for("tarve.devApp");
+// <input type="file"> and <audio controls> reach the app that is rendering or
+// handling an event through this slot, as DOM elements reach their document.
+const ACTIVE_APP_KEY = Symbol.for("tarve.activeApp");
 
 function envFlag(name: string): boolean {
   return typeof process !== "undefined" && process.env?.[name] === "1";
@@ -94,6 +112,8 @@ export interface AppHandle {
   tray(options: TrayOptions): TrayHandle;
   /** Shows a system notification from the tray icon; requires an active tray. */
   notify(options: NotifyOptions): void;
+  /** HTMLMediaElement methods for an `<audio>` element by id. */
+  media(id: string): MediaController;
   openFileDialog(options?: FileDialogOptions): Promise<string | undefined>;
   openFilesDialog(options?: FileDialogOptions): Promise<string[]>;
   openFolderDialog(options?: FileDialogOptions): Promise<string | undefined>;
@@ -108,6 +128,8 @@ export interface AppHandle {
   remount(view: () => VNode): void;
   /** Toggle the native frame-time overlay. */
   setFrameOverlay(enabled: boolean): void;
+  /** Animation frames per second; `null` follows the display's refresh rate. Motion keeps its speed. */
+  setMaxFps(fps: number | null): void;
 }
 
 function asError(value: unknown): Error {
@@ -137,10 +159,28 @@ function validateFileDialogOptions(options: FileDialogOptions): void {
  * styles and other nested values are shared with the compiled tree instead of
  * deep-cloned, which kept a second copy of every style object alive.
  */
+/** The compiled node each shadow node copies; a memoized subtree keeps its shadow. */
+const shadowSources = new WeakMap<NativeNode, NativeNode>();
+/** Set when a native edit mutates a shadow node, so the next shadow copies every node. */
+let shadowEdited = false;
+
 function nativeShadow(tree: CompiledTree, previous?: CompiledTree): CompiledTree {
   const nodes = new Map<string, NativeNode>();
+  // A native edit (typing, a slider drag) changed a shadow node in place: copy everything once.
+  const reuse = !shadowEdited;
+  shadowEdited = false;
+  const keep = (node: NativeNode): void => {
+    nodes.set(node.id, node);
+    for (const child of node.children) keep(child);
+  };
   const copy = (source: NativeNode): NativeNode => {
+    const kept = previous?.nodes.get(source.id);
+    if (reuse && kept && shadowSources.get(kept) === source) {
+      keep(kept);
+      return kept;
+    }
     const node: NativeNode = { ...source, children: source.children.map(copy) };
+    shadowSources.set(node, source);
     const old = previous?.nodes.get(node.id);
     if ((node.kind === "input" || node.kind === "textarea") && node.value === undefined && old?.kind === node.kind) {
       node.value = old.value;
@@ -153,7 +193,7 @@ function nativeShadow(tree: CompiledTree, previous?: CompiledTree): CompiledTree
 }
 
 function reconciliationCommand(previous: CompiledTree, next: CompiledTree): NativeCommand | undefined {
-  const mutations = diffTreeMutations(previous, next);
+  const mutations = diffTreeMutations(previous, next, (old, node) => shadowSources.get(old) === node);
   if (mutations === null) return { type: "update", root: next.document.root };
   if (mutations.length === 0) return undefined;
   if (mutations.every(mutation => mutation.type === "patch")) {
@@ -175,7 +215,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
   function compileView(): CompiledTree {
     const scope = renderScope;
-    const renderer = options.renderer ?? "auto";
+    // A hidden (headless) window never reaches the screen: the CPU renderer draws and
+    // captures the same pixels without loading a GPU driver (~85 MB, ~70 ms on Windows).
+    const renderer = options.renderer ?? (options.headless ? "cpu" : "auto");
     const shown = devError;
     const shownWindow = appWindow;
     overlayCompiled = false;
@@ -194,10 +236,13 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         try { console.error("[tarve] dev error overlay failed", asError(overlayError)); } catch {}
       }
     }
+    (globalThis as Record<symbol, unknown>)[ACTIVE_APP_KEY] = app;
     const tree = withRenderScope(scope, () => compileTree(
       currentView(), options.debug, renderer, options.componentAdapters, scope, !options.headless,
     ));
     appWindow = tree.document.window;
+    if (options.msaa !== undefined) tree.document.msaa = options.msaa;
+    if (options.memoryTrimDelay !== undefined) tree.document.memoryTrimDelay = options.memoryTrimDelay === false ? -1 : options.memoryTrimDelay;
     return tree;
   }
 
@@ -259,6 +304,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     readySettled = true;
     started = true;
     resolveReady();
+    if (options.maxFps !== undefined) {
+      sendInternal({ type: "frameRate", maxFps: options.maxFps }, { source: "bridge", event: "frameRate" });
+    }
     if (options.frameOverlay ?? envFlag("TARVE_FRAME_OVERLAY")) {
       sendInternal({ type: "frameOverlay", enabled: true }, { source: "bridge", event: "frameOverlay" });
     }
@@ -371,6 +419,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
       committed = next;
       observed = nextObserved;
+      syncMedia();
     });
   }
 
@@ -496,6 +545,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   }
 
   function dispatchNativeEvent(event: NativeEvent): void {
+    (globalThis as Record<symbol, unknown>)[ACTIVE_APP_KEY] = app;
     if (event.type === "ready") settleReadySuccess();
 
     if (event.type === "error") {
@@ -555,6 +605,14 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (ran) update();
     }
 
+    if (!ended && event.type === "media") {
+      const handler = applyMediaEvent(event, committed?.media?.get(event.id));
+      if (handler) {
+        try { handler(); } catch (error) { reportError(error, { source: "event-handler", event: `media:${event.event}`, targetId: event.id }); }
+      }
+      update();
+    }
+
     if (!ended && event.type === "shortcut") {
       const handlers = hotkeys.get(event.shortcut);
       if (handlers) {
@@ -582,11 +640,14 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
     if (!ended && committed && observed && "id" in event) {
       const handlers = committed.handlers.get(event.id);
+      if (handlers) invalidateMemos(renderScope, event.id);
       let optimisticEdit = false;
       if (event.type === "change") {
         const node = observed.nodes.get(event.id);
         if (node && (node.kind === "input" || node.kind === "textarea")) {
           node.value = event.value;
+          shadowSources.delete(node);
+            shadowEdited = true;
           optimisticEdit = true;
         }
       }
@@ -594,6 +655,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         const node = observed.nodes.get(event.id);
         if (node?.control) {
           node.control = { ...node.control, value: event.value };
+          shadowSources.delete(node);
+            shadowEdited = true;
           optimisticEdit = true;
         }
       }
@@ -629,6 +692,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (event.type === "virtualListLayout" && handlers?.onVirtualListLayout) {
         handled = true;
         succeeded = invokeHandler("virtualListLayout", event.id, handlers.onVirtualListLayout as (...args: never[]) => void, event.items as never) && succeeded;
+      }
+      if (event.type === "size" && handlers?.onSize) {
+        handled = true;
+        succeeded = invokeHandler("size", event.id, handlers.onSize as (...args: never[]) => void, { width: event.width, height: event.height } as never) && succeeded;
       }
       if (event.type === "virtualListScrollToItem" && handlers?.onVirtualListScrollToItem) {
         handled = true;
@@ -707,6 +774,36 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     if (!ended) sendPublic({ type: "tray", tray: { ...(iconData ? { iconData } : {}), ...(trayOptions.tooltip ? { tooltip: trayOptions.tooltip } : {}), menu } });
   }
 
+  // Loaded media per element id; reconciled with each committed render.
+  const loadedMedia = new Map<string, MediaRequest>();
+  function syncMedia(): void {
+    if (ended || !committed) return;
+    const wanted = committed.media ?? new Map<string, MediaRequest>();
+    for (const id of [...loadedMedia.keys()]) {
+      if (!wanted.has(id) || !wanted.get(id)!.src) {
+        loadedMedia.delete(id);
+        sendInternal({ type: "media", id, action: "unload" }, { source: "bridge", event: "media:unload", targetId: id });
+      }
+    }
+    for (const [id, request] of wanted) {
+      if (!request.src) continue;
+      const previous = loadedMedia.get(id);
+      const src = resolveMediaPath(request.src);
+      if (!previous || resolveMediaPath(previous.src!) !== src) {
+        sendInternal({ type: "media", id, action: "load", src, loop: request.loop, muted: request.muted, volume: request.volume },
+          { source: "bridge", event: "media:load", targetId: id });
+        if (request.autoPlay) sendInternal({ type: "media", id, action: "play" }, { source: "bridge", event: "media:play", targetId: id });
+      } else if (previous.loop !== request.loop || previous.muted !== request.muted || previous.volume !== request.volume) {
+        sendInternal({ type: "media", id, action: "set", loop: request.loop, muted: request.muted, volume: request.volume },
+          { source: "bridge", event: "media:set", targetId: id });
+      }
+      loadedMedia.set(id, request);
+    }
+  }
+  function resolveMediaPath(src: string): string {
+    return src.startsWith("file://") ? new URL(src).pathname.replace(/^\/([A-Za-z]:)/, "$1") : src;
+  }
+
   function onNativeEvent(event: NativeEvent): void {
     try {
       dispatchNativeEvent(event);
@@ -777,6 +874,18 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (!title) throw new TypeError("notify requires a title");
       notificationClick = onClick;
       if (!ended) sendPublic({ type: "notify", title, body });
+    },
+    media(id: string): MediaController {
+      const send = (command: Omit<Extract<NativeCommand, { type: "media" }>, "type" | "id">) => {
+        if (!ended) sendPublic({ type: "media", id, ...command });
+      };
+      return {
+        play: () => send({ action: "play" }),
+        pause: () => send({ action: "pause" }),
+        seek: seconds => send({ action: "seek", time: Math.max(0, seconds) }),
+        setVolume: volume => send({ action: "set", volume: Math.min(1, Math.max(0, volume)) }),
+        setMuted: muted => send({ action: "set", muted }),
+      };
     },
     registerHotkey(shortcut: string, handler: HotkeyHandler): () => void {
       const canonical = normalizeHotkey(shortcut);
@@ -857,6 +966,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     setFrameOverlay(enabled: boolean): void {
       if (!ended) sendPublic({ type: "frameOverlay", enabled });
     },
+    setMaxFps(fps: number | null): void {
+      if (fps !== null && !(Number.isFinite(fps) && fps > 0)) throw new RangeError("setMaxFps expects a positive number or null");
+      if (!ended) sendPublic({ type: "frameRate", maxFps: fps });
+    },
   };
 
   try {
@@ -874,6 +987,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   try {
     const fonts = options.fontFaces?.map(path => Buffer.from(readFileSync(path)).toString("base64"));
     bridge.start(fonts?.length ? { ...committed.document, fonts } : committed.document, onNativeEvent);
+    syncMedia();
   } catch (error) {
     const startupError = reportError(error, { source: "bridge", event: "start" });
     terminalError = startupError;

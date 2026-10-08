@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 53;
+export const PROTOCOL_VERSION = 55;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
@@ -229,6 +229,8 @@ export interface NativeNode {
   /** Interactive nodes only: a press past 4px becomes a pointer drag. */
   draggable?: boolean;
   dropTarget?: boolean;
+  /** Native sends a `size` event with the content-box size on first layout and on every change. */
+  reportSize?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "close";
   /** Optional initial numeric values used only when the native node is first mounted. */
   motionFrom?: MotionValues;
@@ -248,6 +250,10 @@ export interface WindowOptions {
 }
 export interface SceneDocument {
   version: number; renderer: Renderer; window: WindowOptions; root: NativeNode;
+  /** D3D11 MSAA samples: 0 (default) uses a coverage fringe instead; 2, 4 or 8. */
+  msaa?: number;
+  /** Idle ms after the last frame before the working set is trimmed (Windows); negative: never. */
+  memoryTrimDelay?: number;
   /** App font files as base64 (CSS `@font-face`), usable by their family name. */
   fonts?: string[];
 }
@@ -278,7 +284,9 @@ export type NativeCommand =
   | { type: "window"; action: WindowAction }
   | { type: "tray"; tray: NativeTrayOptions | null }
   | { type: "notify"; title: string; body: string }
+  | { type: "media"; id: string; action: "load" | "unload" | "play" | "pause" | "seek" | "set"; src?: string; time?: number; volume?: number; muted?: boolean; loop?: boolean }
   | { type: "frameOverlay"; enabled: boolean }
+  | { type: "frameRate"; maxFps: number | null }
   | { type: "focus"; id: string }
   | { type: "scrollToItem"; id: string; index: number; offset?: number }
   | { type: "inspect"; requestId: string }
@@ -309,6 +317,7 @@ export type NativeEvent =
   | { type: "tray"; action: "click" | "doubleClick" }
   | { type: "trayMenu"; id: string }
   | { type: "notificationClick" }
+  | { type: "media"; id: string; event: "loadedmetadata" | "play" | "pause" | "timeupdate" | "seeked" | "ended" | "error"; time?: number; duration?: number | null; paused?: boolean; message?: string }
   | { type: "escape" }
   | { type: "click"; id: string }
   | { type: "context"; id: string; x: number; y: number }
@@ -319,6 +328,7 @@ export type NativeEvent =
   | { type: "valueChange"; id: string; value: number }
   | { type: "scroll"; id: string; offset: number; max: number; offsetX?: number; offsetY?: number; maxX?: number; maxY?: number }
   | { type: "virtualListLayout"; id: string; items: VirtualListMeasurement[] }
+  | { type: "size"; id: string; width: number; height: number }
   | { type: "virtualListScrollToItem"; id: string; index: number; offset: number }
   | { type: "virtualListFocus"; id: string; key: string | null }
   | { type: "markdownLink"; id: string; href: string }

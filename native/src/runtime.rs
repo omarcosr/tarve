@@ -628,6 +628,8 @@ pub fn run(
         ready_emitted: false,
         presentation_retry_at: None,
         memory_dirty: std::cell::Cell::new(false),
+        trim_at: std::cell::Cell::new(None),
+        startup_trim_pending: std::cell::Cell::new(true),
         last_memory_release: std::cell::Cell::new(Instant::now()),
         motion_epoch: Instant::now(),
         motion_test_clock: false,
@@ -640,6 +642,7 @@ pub fn run(
         #[cfg(any(target_os = "windows", target_os = "linux"))]
         event_proxy,
         tray: None,
+        media: Default::default(),
         #[cfg(any(target_os = "windows", target_os = "linux"))]
         accessibility: None,
     };
@@ -653,6 +656,8 @@ pub fn run(
 struct App {
     /// Frames were painted since free memory was last released.
     memory_dirty: std::cell::Cell<bool>,
+    trim_at: std::cell::Cell<Option<Instant>>,
+    startup_trim_pending: std::cell::Cell<bool>,
     last_memory_release: std::cell::Cell<Instant>,
     document: Document,
     events: Arc<Events>,
@@ -675,6 +680,7 @@ struct App {
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     event_proxy: EventLoopProxy<Command>,
     tray: Option<crate::tray::Tray>,
+    media: crate::media::Media,
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     accessibility: Option<AccessibilityBridge>,
 }
@@ -683,6 +689,8 @@ const MAX_GRAPHICS_RECOVERY_ATTEMPTS: u8 = 3;
 const MAX_GRAPHICS_RECOVERY_EPISODES: usize = 3;
 const GRAPHICS_RECOVERY_WINDOW: Duration = Duration::from_secs(30);
 const PRESENT_RETRY_DELAY: Duration = Duration::from_millis(16);
+/// Default idle time after the last frame before the working set is trimmed.
+const IDLE_TRIM_DELAY: Duration = Duration::from_secs(3);
 const MEMORY_RELEASE_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_PASTE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PASTE_IMAGE_DIMENSION: usize = 16_384;
@@ -1151,8 +1159,34 @@ impl App {
         self.presentation_retry_at = Some(Instant::now() + PRESENT_RETRY_DELAY);
         self.sync_control_flow(event_loop);
     }
+    /// The app's `memoryTrimDelay` (ms; negative: never), `TARVE_TRIM` overriding it (0: never).
+    fn trim_delay(&self) -> Option<Duration> {
+        let ms = std::env::var("TARVE_TRIM")
+            .ok()
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .map(|value| if value == 0.0 { -1.0 } else { value })
+            .or(self.document.memory_trim_delay);
+        match ms {
+            None => Some(IDLE_TRIM_DELAY),
+            Some(ms) if ms.is_finite() && ms >= 0.0 => Some(Duration::from_secs_f64(ms / 1000.0)),
+            _ => None,
+        }
+    }
     fn sync_control_flow(&self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
+        let startup_trim_at = if self.startup_trim_pending.get() {
+            match self.trim_at.get() {
+                Some(at) if at <= now => {
+                    crate::trim_working_set();
+                    self.trim_at.set(None);
+                    self.startup_trim_pending.set(false);
+                    None
+                }
+                at => at,
+            }
+        } else {
+            None
+        };
         let recovery_at = match &self.graphics {
             GraphicsState::Recovering(recovery) if recovery.next_attempt > now => {
                 Some(recovery.next_attempt)
@@ -1163,16 +1197,36 @@ impl App {
             .presentation_retry_at
             .filter(|deadline| *deadline > now);
         let motion_at = self.motion_deadline(now);
-        let deadline = [recovery_at, present_at, motion_at]
-            .into_iter()
-            .flatten()
-            .min();
+        let media_at = self.media.deadline();
+        let deadline = [
+            recovery_at,
+            present_at,
+            motion_at,
+            media_at,
+            startup_trim_at,
+        ]
+        .into_iter()
+        .flatten()
+        .min();
         if let Some(deadline) = deadline {
             event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
             return;
         }
         // Idle: hand free allocator pages back once activity settles, at most
         // every MEMORY_RELEASE_INTERVAL, so hover bursts don't trim per frame.
+        // Once the app has been idle a few seconds after drawing, give the
+        // pages startup and the last burst touched back to the OS.
+        if let Some(at) = self.trim_at.get() {
+            if at > now {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(at));
+                return;
+            }
+            crate::release_free_memory();
+            crate::trim_working_set();
+            self.trim_at.set(None);
+            self.memory_dirty.set(false);
+            self.last_memory_release.set(now);
+        }
         if self.memory_dirty.get() {
             let release_at = self.last_memory_release.get() + MEMORY_RELEASE_INTERVAL;
             if release_at > now {
@@ -1315,6 +1369,16 @@ impl App {
             }
             _ => Err(RenderError::Fatal("Renderer not ready".into())),
         }?;
+        if result == PresentResult::Presented
+            && let Some(delay) = self.trim_delay()
+        {
+            // The first trim runs `delay` after the first frame even while
+            // animating (startup's pages are done with by then); later ones
+            // wait until the window has been still that long.
+            if !(self.startup_trim_pending.get() && self.trim_at.get().is_some()) {
+                self.trim_at.set(Some(Instant::now() + delay));
+            }
+        }
         if result == PresentResult::Presented && self.document.window.debug {
             let frames = match &self.graphics {
                 GraphicsState::Ready(graphics) => graphics.frames(),
@@ -1330,7 +1394,26 @@ impl App {
         };
         let scale = window.scale_factor();
         let physical = window.inner_size();
+        // Minimized: nothing to paint, and D3D11 cannot size targets to zero.
+        if physical.width == 0 || physical.height == 0 {
+            return Ok(false);
+        }
         let size = window.inner_size().to_logical::<f32>(scale);
+        // Only D3D11 paints released images (from their textures); any other
+        // renderer, e.g. after a fallback, needs the pixels back.
+        let d3d11 = {
+            #[cfg(target_os = "windows")]
+            {
+                matches!(&self.graphics, GraphicsState::Ready(graphics) if graphics.backend() == crate::renderer::RendererBackend::D3d11)
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                false
+            }
+        };
+        if !d3d11 && !self.tree.released_image_keys().is_empty() {
+            self.tree.restore_all_image_pixels();
+        }
         self.tree
             .compute(size.width, size.height)
             .map_err(RenderError::Fatal)?;
@@ -1348,6 +1431,16 @@ impl App {
                         physical.height,
                         |target| tree.paint(scale, target),
                     )?;
+                    if retained_prepared {
+                        let (released, restored) = graphics.sync_d3d11_images(tree);
+                        if released {
+                            // The freed pixels go back to the OS on the next idle trim.
+                            self.memory_dirty.set(true);
+                        }
+                        if restored {
+                            window.request_redraw();
+                        }
+                    }
                 }
                 if !retained_prepared {
                     retained_prepared = graphics
@@ -1806,6 +1899,21 @@ impl ApplicationHandler<Command> for App {
                     self.events.push(error(message));
                 }
             }
+            Command::Media {
+                id,
+                action,
+                src,
+                time,
+                volume,
+                muted,
+                looped,
+            } => {
+                let events =
+                    self.media
+                        .command(&id, &action, src.as_deref(), time, volume, muted, looped);
+                self.emit(events);
+                self.sync_control_flow(event_loop);
+            }
             Command::Notify { title, body } => {
                 let result = match self.tray.as_mut() {
                     Some(tray) => tray.notify(&title, &body),
@@ -1826,6 +1934,21 @@ impl ApplicationHandler<Command> for App {
                 } else {
                     self.events.push(event);
                 }
+            }
+            Command::FrameRate { max_fps } => {
+                // Animation frames per second: the requested rate, or the
+                // display's refresh rate for `null`. Motion is clock-based, so
+                // this changes how many frames are drawn, not animation speed.
+                let fps = max_fps
+                    .filter(|fps| fps.is_finite() && *fps > 0.0)
+                    .or_else(|| {
+                        let monitor = self.window.as_ref()?.current_monitor()?;
+                        Some(f64::from(monitor.refresh_rate_millihertz()?) / 1000.0)
+                    })
+                    .unwrap_or(60.0)
+                    .min(1000.0);
+                self.tree.set_motion_frame_ms(1000.0 / fps);
+                self.sync_control_flow(event_loop);
             }
             Command::FrameOverlay { enabled } => {
                 if self.tree.set_frame_overlay(enabled) {
@@ -2047,6 +2170,8 @@ impl ApplicationHandler<Command> for App {
         if present_due {
             self.presentation_retry_at = None;
         }
+        let media_events = self.media.tick(now);
+        self.emit(media_events);
         if motion_due {
             self.advance_live_motion();
         }
