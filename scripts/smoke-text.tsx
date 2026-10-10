@@ -54,6 +54,8 @@ assert.equal(below, 0, "clamped lines are not painted");
 // a solid one does not.
 const decorations = box("decorations");
 const runs = (x0: number, x1: number) => {
+  // The underline is the lowest inked row: glyph rows above it can carry more ink
+  // (a bold baseline row at 1x) and their own gaps.
   let best = { gaps: 0, ink: 0 };
   for (let y = decorations.y + decorations.height * 0.6; y < decorations.y + decorations.height; y += 1 / scale) {
     let gaps = 0, ink = 0, previous = false;
@@ -63,7 +65,7 @@ const runs = (x0: number, x1: number) => {
       if (previous && !on) gaps++;
       previous = on;
     }
-    if (ink > best.ink) best = { gaps, ink };
+    if (ink > 0) best = { gaps, ink };
   }
   return best;
 };
