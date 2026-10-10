@@ -346,6 +346,7 @@ pub struct Document {
     /// D3D11 multisampling: 0 (default) draws edges with a coverage fringe
     /// instead of MSAA; 2, 4 or 8 use that many samples where supported.
     #[serde(default)]
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub msaa: Option<u32>,
     /// Idle milliseconds after the last frame before the working set is
     /// trimmed (Windows); negative turns it off. Default 3000.

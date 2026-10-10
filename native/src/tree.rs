@@ -7927,6 +7927,7 @@ impl Tree {
     }
     /// Drops the decoded pixels of images a GPU renderer now holds as textures,
     /// keeping their size and format: the texture becomes the one copy.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub(crate) fn release_image_pixels(&mut self, keys: &[String]) {
         for key in keys {
             let Some(image) = self.images.get_mut(key) else {
