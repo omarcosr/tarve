@@ -330,10 +330,11 @@ function canvasImage(image: CanvasImage, index: number): VNode {
   if (image.crop) {
     const [sx, sy, sw, sh] = image.crop;
     return View({ key: `i${index}`, style: { ...layerBox, width: sw, height: sh, overflow: "hidden", opacity: image.alpha, ...matrixStyle(at(image.dx, image.dy, image.dw! / sw, image.dh! / sh)) },
-      children: Image({ src: image.source, fit: "fill" as never, style: { position: "absolute", left: -sx, top: -sy } }) } as never);
+      children: Image({ src: image.source, fit: "fill" as never, style: { position: "absolute", left: -sx, top: -sy, radius: 0 } }) } as never);
   }
   return View({ key: `i${index}`, style: { ...layerBox, opacity: image.alpha, ...matrixStyle(at(image.dx, image.dy)) },
-    children: Image({ src: image.source, fit: "fill" as never, ...(image.dw !== undefined ? { width: image.dw, height: image.dh } : {}) }) } as never);
+    // radius 0: the Image component's themed corner radius has no place on a canvas.
+    children: Image({ src: image.source, fit: "fill" as never, style: { radius: 0 }, ...(image.dw !== undefined ? { width: image.dw, height: image.dh } : {}) }) } as never);
 }
 
 /** `<canvas width height onDraw>` — HTML's default size is 300×150. */

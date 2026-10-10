@@ -4577,10 +4577,28 @@ impl Tree {
             );
         }
         if node.kind == "image" {
-            target.push_clip(Fill::NonZero, transform, &shape);
-            if let Some((key, image)) = image_cache_key(&node)
-                .and_then(|key| self.images.get(key).map(|image| (key, image)))
-            {
+            let cached = image_cache_key(&node)
+                .and_then(|key| self.images.get(key).map(|image| (key, image)));
+            // Clip only where the picture can leave its box (cover, rounded
+            // corners): an antialiased clip on the image's own antialiased edge
+            // multiplies the two coverages and leaves a fractional edge half as
+            // strong as it should be.
+            let clipped = cached.is_none_or(|(_, image)| {
+                let sx = rect.width() / image.width as f64;
+                let sy = rect.height() / image.height as f64;
+                let r = shape.radii();
+                let rounded = [r.top_left, r.top_right, r.bottom_right, r.bottom_left]
+                    .iter()
+                    .any(|v| *v > 0.0);
+                rounded
+                    || (node.fit.as_str() != "fill"
+                        && node.fit.as_str() != "contain"
+                        && (sx - sy).abs() > 1e-9)
+            });
+            if clipped {
+                target.push_clip(Fill::NonZero, transform, &shape);
+            }
+            if let Some((key, image)) = cached {
                 let sx = rect.width() / image.width as f64;
                 let sy = rect.height() / image.height as f64;
                 // CSS object-fit: fill stretches each axis; contain/cover keep the ratio.
@@ -4609,7 +4627,9 @@ impl Tree {
                     &shape,
                 );
             }
-            target.pop_layer();
+            if clipped {
+                target.pop_layer();
+            }
         }
         let clips_children = clips_overflow(&node);
         if clips_children {
