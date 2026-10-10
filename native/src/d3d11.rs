@@ -2253,6 +2253,44 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         };
         let width = f64::from(image.width);
         let height = f64::from(image.height);
+        // Without MSAA a quad covers only the pixels whose centres it contains,
+        // so an image on fractional pixels lost its edge column. Draw it one
+        // device pixel larger (the sampler clamps to the edge texels) and clip
+        // it to its own rectangle in the shader, which gives the edge pixels
+        // their coverage.
+        if self.graphics.analytic_aa
+            && let Some(edge) =
+                analytic_clip(&vello::kurbo::Rect::new(0.0, 0.0, width, height), transform)
+            && let Some(combined) = combine_clips(self.graphics.clip, edge)
+        {
+            let [a, b, c, d, ..] = transform.as_coeffs();
+            let (sx, sy) = ((a * a + b * b).sqrt(), (c * c + d * d).sqrt());
+            if sx > 0.0 && sy > 0.0 {
+                let (ex, ey) = (1.0 / sx, 1.0 / sy);
+                let corners = [
+                    transform * Point::new(-ex, -ey),
+                    transform * Point::new(width + ex, -ey),
+                    transform * Point::new(width + ex, height + ey),
+                    transform * Point::new(-ex, height + ey),
+                ];
+                let previous = self.graphics.clip;
+                self.graphics.clip = combined;
+                self.graphics.append_quad_points(
+                    corners.map(|point| [point.x as f32, point.y as f32]),
+                    [
+                        (-ex / width) as f32,
+                        (-ey / height) as f32,
+                        (1.0 + ex / width) as f32,
+                        (1.0 + ey / height) as f32,
+                    ],
+                    Color::WHITE.multiply_alpha(self.opacity),
+                    1.0,
+                    TextureRef::Image(view),
+                );
+                self.graphics.clip = previous;
+                return;
+            }
+        }
         let corners = [
             transform * Point::new(0.0, 0.0),
             transform * Point::new(width, 0.0),
