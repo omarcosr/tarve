@@ -8,6 +8,15 @@ import { PROTOCOL_VERSION } from "../../protocol/src/index";
 import { AnimatePresence } from "./motion";
 
 describe("native TSX protocol", () => {
+  test("custom-chrome window border follows a background darker or lighter than the theme", () => {
+    const border = (background: string, selected = lightTheme) => compileTree(
+      <Window theme={selected} style={{ background }}><TitleBar title="x" /></Window>,
+    ).document.root.style.borderColor;
+    expect(border("#030303")).toBe("#ffffff1f");
+    expect(border("#ffffff")).toBe(lightTheme.colors.border);
+    expect(border("#fafafa", darkTheme)).toBe("#0000001f");
+    expect(border("#09090b", darkTheme)).toBe(darkTheme.colors.border);
+  });
   test("serializes native motion targets and retains exit content until completion", () => {
     const scope = {};
     let present = true;

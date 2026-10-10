@@ -22,6 +22,21 @@ import { expandCanvas } from "./canvas";
 import { expandAudio, mediaRequest, type MediaElementProps, type MediaRequest } from "./media-element";
 import { expandHtml, expandInput, formValues, HTML_ELEMENTS, HTML_INPUT_TYPES, type FormContext, type FormValue } from "./html-elements";
 export interface Handlers { onClick?: () => void; onMarkdownLink?: (href: string) => void; onDiffToggleFile?: (path: string) => void; onDiffShowMore?: (hidden: number, path?: string) => void; onDiffLineClick?: (event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void; onHighlight?: (event: { matchCount: number }) => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onSubmit?: (value: string) => void; onPaste?: (payload: PastePayload) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onScrollPosition?: (position: ScrollPosition) => void; onVirtualListLayout?: (items: VirtualListMeasurement[]) => void; onVirtualListScrollToItem?: (index: number, offset: number) => void; onVirtualListFocus?: (key: string | null) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void; onTransitionEnd?: (event: { property: MotionProperty }) => void; onDragStart?: (position: DragPosition) => void; onDragMove?: (event: DragMoveEvent) => void; onDragEnd?: (event: DragEndEvent) => void; onDragEnter?: (source: string) => void; onDragLeave?: (source: string) => void; onDrop?: (event: DropEvent) => void; onSize?: (size: { width: number; height: number }) => void }
+/** Relative luminance (0–1) of `#rgb`/`#rrggbb`, or null for other colors. */
+function luminance(color: string): number | null {
+  const hex = color.trim().replace(/^#/, "");
+  const full = hex.length === 3 || hex.length === 4 ? [...hex.slice(0, 3)].map(c => c + c).join("") : hex.slice(0, 6);
+  if (!/^[0-9a-f]{6}$/i.test(full)) return null;
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+}
+
+function windowBorder(background: string, selected: ThemeDefinition): string {
+  const own = luminance(background), themed = luminance(selected.colors.background);
+  if (own === null || themed === null || (own < 0.5) === (themed < 0.5)) return selected.colors.border;
+  return own < 0.5 ? "#ffffff1f" : "#0000001f";
+}
+
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode>; media?: Map<string, MediaRequest> }
 const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "markdown", "code", "diff", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter"]);
 const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
@@ -538,7 +553,9 @@ export function compileTree(
   if (titleBars.length === 1) {
     windowOptions.decorations = false;
     roots[0].style.borderWidth ??= 1;
-    roots[0].style.borderColor ??= selectedTheme.colors.border;
+    // A window painted darker or lighter than its theme (a dark app on the
+    // default light theme) gets a hairline that reads on its own background.
+    roots[0].style.borderColor ??= windowBorder(String(roots[0].style.background ?? ""), selectedTheme);
     roots[0].style.radius ??= theme.radius.md;
   }
   return { document: { version: PROTOCOL_VERSION, renderer, window: windowOptions, root: roots[0] }, handlers, nodes, media };
