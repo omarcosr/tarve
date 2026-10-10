@@ -54,9 +54,8 @@ assert.equal(below, 0, "clamped lines are not painted");
 // a solid one does not.
 const decorations = box("decorations");
 const runs = (x0: number, x1: number) => {
-  // The underline is the lowest inked row: glyph rows above it can carry more ink
-  // (a bold baseline row at 1x) and their own gaps.
-  let best = { gaps: 0, ink: 0 };
+  // Every row in the underline band: its inked pixels and the gaps between them.
+  const rows: { gaps: number; ink: number }[] = [];
   for (let y = decorations.y + decorations.height * 0.6; y < decorations.y + decorations.height; y += 1 / scale) {
     let gaps = 0, ink = 0, previous = false;
     for (let x = x0; x < x1; x += 1 / scale) {
@@ -65,19 +64,23 @@ const runs = (x0: number, x1: number) => {
       if (previous && !on) gaps++;
       previous = on;
     }
-    if (ink > 0) best = { gaps, ink };
+    rows.push({ gaps, ink });
   }
-  return best;
+  return rows;
 };
 const solidWord = { x0: decorations.x, x1: decorations.x + 40 };
-assert.ok(runs(solidWord.x0, solidWord.x1).gaps <= 1, "solid underline is one stroke");
+// A solid underline is a row inked across the word in one stroke.
+const span = (solidWord.x1 - solidWord.x0) * scale;
+assert.ok(runs(solidWord.x0, solidWord.x1).some(row => row.ink >= span * 0.8 && row.gaps <= 1), "solid underline is one stroke");
 // The paragraph is full width; the abbr is its last word, so end at the last ink.
 let decorationsEnd = decorations.x;
 for (let x = decorations.x; x < decorations.x + decorations.width; x += 1 / scale) {
   if (count(x, decorations.y, x + 1 / scale, decorations.y + decorations.height, dark) > 0) decorationsEnd = x;
 }
-const abbrLine = runs(decorationsEnd - 40, decorationsEnd);
-assert.ok(abbrLine.gaps >= 4, `abbr underline is dotted (${abbrLine.gaps} gaps)`);
+// A dotted one alternates ink and gaps along a row (13+ in 40px), far more often
+// than a row through glyphs does (7 at most).
+const abbrGaps = Math.max(...runs(decorationsEnd - 40, decorationsEnd).map(row => row.gaps));
+assert.ok(abbrGaps >= 10, `abbr underline is dotted (${abbrGaps} gaps)`);
 
 const clip = box("clip");
 const blue = (rgb: number[]) => rgb[2]! > 180 && rgb[0]! < 120;
