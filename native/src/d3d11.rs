@@ -2031,6 +2031,25 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             let device = stroke.width * scale;
             let mut inner = stroke.clone();
             inner.width = ((device - 1.0).max(0.02)) / scale;
+            // A butt-capped dash ends where its fringe starts, so the ramp would
+            // centre half a pixel past the dash's true end: shorten each dash by a
+            // pixel (half at each end) and widen each gap to match.
+            if !inner.dash_pattern.is_empty() && inner.start_cap == vello::kurbo::Cap::Butt {
+                let px = 1.0 / scale;
+                let mut pattern = inner.dash_pattern.to_vec();
+                if pattern.len() % 2 == 1 {
+                    pattern.extend_from_within(..);
+                }
+                for (i, length) in pattern.iter_mut().enumerate() {
+                    if i % 2 == 0 {
+                        *length = (*length - px).max(0.01);
+                    } else {
+                        *length += px;
+                    }
+                }
+                inner.dash_pattern = pattern.into_iter().collect();
+                inner.dash_offset -= px / 2.0;
+            }
             let outline = vello::kurbo::stroke(
                 shape.path_elements(0.1),
                 &inner,
