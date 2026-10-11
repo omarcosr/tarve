@@ -48,6 +48,7 @@ All notable changes to `@tarve/core`, `@tarve/react-icons` and `@tarve/headless`
 ### Fixed
 - A column of auto height whose child has `flex: 1` (basis 0) is as tall as its content when its row sits in a sized parent, as in browsers; it came out as if the child were empty. Fixed in a vendored Taffy 0.14 (`native/vendor/taffy`, one change marked "Tarve patch").
 - Headless (hidden) windows lay out as soon as the tree changes, so `onSize` and virtual-list events arrive without waiting for a capture; nodes created after the first render never got `onSize`.
+- Windows (D3D11) without MSAA: a path of many small shapes (an SVG dot matrix) is no longer quadratic in its contour count; 1,800 dots updated once a second went from ~11% to ~2% of a core.
 - Thin dotted underlines (`text-decoration-style: dotted`, `abbr[title]`) draw square dots snapped to device pixels, as browsers do; round 1px dots smeared into a grey line at fractional scales, on the CPU renderer most visibly.
 - Changing an `<Image>`'s byte source (its `cacheKey` or bytes) on an existing node now repaints; the diff ignored `image` and sent nothing.
 - An explicit `minWidth` on an item with numeric `flex` is respected; it was reset to 0. Grid `auto` tracks stretch to fill the container, as in CSS. `DataGrid` rows and sortable headers are square instead of inheriting `Pressable` rounding.

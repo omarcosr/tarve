@@ -1502,13 +1502,6 @@ impl D3d11PaintTarget<'_> {
         inset: bool,
     ) {
         path.apply_affine(transform);
-        let inside = |point: Point| {
-            let winding = path.winding(point);
-            match fill {
-                Fill::NonZero => winding != 0,
-                Fill::EvenOdd => winding % 2 != 0,
-            }
-        };
         let mut contours: Vec<Vec<Point>> = vec![];
         vello::kurbo::flatten(path.iter(), 0.2, |element| match element {
             vello::kurbo::PathEl::MoveTo(point) => contours.push(vec![point]),
@@ -1523,9 +1516,43 @@ impl D3d11PaintTarget<'_> {
             }
             _ => {}
         });
+        // Winding from the flattened contours, skipping those whose box does not
+        // hold the point: a path of hundreds of dots (an SVG dot matrix) asked the
+        // whole path once per contour, quadratic in the dot count.
+        let boxes: Vec<vello::kurbo::Rect> = contours
+            .iter()
+            .map(|contour| {
+                contour.iter().fold(
+                    vello::kurbo::Rect::from_points(contour[0], contour[0]),
+                    |r, p| r.union_pt(*p),
+                )
+            })
+            .collect();
+        let inside = |point: Point| {
+            let mut winding = 0i32;
+            for (contour, bounds) in contours.iter().zip(&boxes) {
+                if point.y < bounds.y0 || point.y > bounds.y1 || point.x > bounds.x1 {
+                    continue;
+                }
+                let n = contour.len();
+                for i in 0..n {
+                    let (a, b) = (contour[i], contour[(i + 1) % n]);
+                    if (a.y <= point.y) != (b.y <= point.y) {
+                        let x = a.x + (point.y - a.y) / (b.y - a.y) * (b.x - a.x);
+                        if x > point.x {
+                            winding += if b.y > a.y { 1 } else { -1 };
+                        }
+                    }
+                }
+            }
+            match fill {
+                Fill::NonZero => winding != 0,
+                Fill::EvenOdd => winding % 2 != 0,
+            }
+        };
         // Each contour with its per-vertex outward miter offsets (one pixel).
         let mut edged: Vec<(Vec<Point>, Vec<vello::kurbo::Vec2>)> = vec![];
-        for mut contour in contours {
+        for mut contour in contours.clone() {
             if contour.len() > 1 && contour[0].distance(*contour.last().unwrap()) <= 1e-3 {
                 contour.pop();
             }
