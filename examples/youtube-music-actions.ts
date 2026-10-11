@@ -3,17 +3,48 @@ import type { createApp } from "@tarve/core";
 import { signInWithBrowser } from "./youtube-music-login";
 import * as source from "./youtube-music-source";
 import { AUDIO_ID, state, type Page } from "./youtube-music-view";
+import { onArtworkChanged } from "./youtube-music-artwork";
 
 export function connect(app: ReturnType<typeof createApp>): void {
   // One render per burst: artwork arriving for a page of rows must not render it once per cover.
   let queued = false;
+  let mediaKey = "";
+  const syncSystemMedia = () => {
+    const song = state.queue[state.index];
+    const duration = state.duration || song?.duration || 0;
+    const key = song ? [song.id, state.playing, duration, Math.floor(state.time), state.index > 0, state.index + 1 < state.queue.length || state.repeat === "all"].join("|") : "";
+    if (key === mediaKey) return;
+    mediaKey = key;
+    app.systemMedia(song ? {
+      title: song.title,
+      artist: song.artist,
+      album: song.album,
+      artwork: song.thumbnail?.replace(/=w\d+-h\d+/, "=w544-h544").replace(/=s\d+/, "=s544"),
+      playing: state.playing,
+      duration: duration || undefined,
+      position: state.time,
+      canSeek: !!state.path && duration > 0,
+      canNext: state.index + 1 < state.queue.length || (state.repeat === "all" && state.queue.length > 0),
+      canPrevious: state.index >= 0,
+      onAction: (action, time) => {
+        if (action === "play") state.media()?.play();
+        else if (action === "pause") state.media()?.pause();
+        else if (action === "next") state.next();
+        else if (action === "previous") state.previous();
+        else if (time !== undefined) { state.media()?.seek(time); state.time = time; }
+        refresh();
+      },
+    } : null);
+  };
   const refresh = () => {
     if (queued) return;
     queued = true;
-    setTimeout(() => { queued = false; app.update(); }, 16);
+    setTimeout(() => { queued = false; syncSystemMedia(); app.update(); }, 16);
   };
   const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
   state.refresh = refresh;
+  state.hide = () => app.hide();
+  onArtworkChanged(() => { state.art++; refresh(); });
   state.media = () => app.media(AUDIO_ID);
 
   // The likeliest next click (Play, or the top result) resolves its stream URL ahead.
@@ -21,25 +52,44 @@ export function connect(app: ReturnType<typeof createApp>): void {
   source.warmUp();
 
   let pageToken = 0;
+  let pageAbort: AbortController | null = null;
   async function load<T>(token: number, task: Promise<T>, apply: (value: T) => void): Promise<void> {
     try {
       const value = await task;
       if (token === pageToken) apply(value);
     } catch (error) {
-      if (token === pageToken) state.pageError = message(error);
+      if (token === pageToken && !(state.page.kind === "home" && state.shelves) && !(state.page.kind === "collection" && state.opened)) state.pageError = message(error);
     }
     refresh();
   }
   function show(page: Page): void {
+    pageAbort?.abort();
+    const abort = pageAbort = new AbortController();
     const token = ++pageToken;
     state.page = page;
     state.pageError = null;
     state.listOffset = 0;
-    if (page.kind === "home") { if (!state.shelves) void load(token, source.home(), shelves => { state.shelves = shelves; }); }
-    else if (page.kind === "search") { state.results = null; if (page.query) void load(token, source.search(page.query), songs => { state.results = songs; prefetch(songs[0]); }); }
-    else if (page.kind === "library") { if (state.signedIn) void load(token, source.library(), list => { state.library = list; }); }
-    else if (page.kind === "playing") { /* the queue already holds it */ }
-    else if (state.opened?.header.id !== page.entry.id) { state.opened = null; void load(token, source.collection(page.entry), opened => { state.opened = opened; prefetch(opened.songs[0]); }); }
+    if (page.kind === "home") { state.homeScroll = 0; state.shelfScroll = []; }
+    if (page.kind === "library") state.libraryScroll = 0;
+    if (page.kind === "home") {
+      if (!state.shelves) void load(token, source.home(shelves => {
+        if (token !== pageToken) return;
+        state.shelves = shelves;
+        refresh();
+      }, abort.signal), shelves => { state.shelves = shelves; });
+    } else if (page.kind === "search") {
+      state.results = null;
+      if (page.query) void load(token, source.search(page.query), songs => { state.results = songs; prefetch(songs[0]); });
+    } else if (page.kind === "library") {
+      if (state.signedIn) void load(token, source.library(), list => { state.library = list; });
+    } else if (page.kind === "collection" && state.opened?.header.id !== page.entry.id) {
+      state.opened = null;
+      void load(token, source.collection(page.entry, opened => {
+        if (token !== pageToken) return;
+        state.opened = opened;
+        refresh();
+      }, abort.signal), opened => { state.opened = opened; prefetch(opened.songs[0]); });
+    }
     refresh();
   }
   state.open = page => {
@@ -78,6 +128,7 @@ export function connect(app: ReturnType<typeof createApp>): void {
   }
   state.play = (queue, index, from = "") => {
     state.queue = [...queue];
+    state.queueScroll = 0;
     state.index = index;
     state.source = from;
     if (state.shuffle) { state.shuffle = false; state.toggleShuffle(); }
@@ -98,7 +149,7 @@ export function connect(app: ReturnType<typeof createApp>): void {
     if (!state.shuffle || state.index < 0) return;
     // Shuffle what is still to come; history and the current song stay put.
     const rest = state.queue.slice(state.index + 1);
-    for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [rest[i], rest[j]] = [rest[j]!, rest[i]!]; }
+    for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[rest[i], rest[j]] = [rest[j]!, rest[i]!]; }
     state.queue = [...state.queue.slice(0, state.index + 1), ...rest];
   };
 
@@ -134,7 +185,8 @@ export function connect(app: ReturnType<typeof createApp>): void {
 
   // Closing the dialog while the browser window is open cancels that sign-in.
   const closeWatch = setInterval(() => { if (state.signIn !== "browser" && signInAbort && !signInAbort.signal.aborted) signInAbort.abort(); }, 500);
-  void app.closed.then(() => { clearInterval(closeWatch); signInAbort?.abort(); });
+  const mediaWatch = setInterval(syncSystemMedia, 1000);
+  void app.closed.then(() => { clearInterval(closeWatch); clearInterval(mediaWatch); signInAbort?.abort(); });
 
   app.registerHotkey("Space", () => { if (!state.path) return; if (state.playing) state.media()?.pause(); else state.media()?.play(); });
   state.signedIn = source.signedIn();

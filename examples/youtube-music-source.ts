@@ -80,12 +80,12 @@ function authorization(): string | null {
   return `SAPISIDHASH ${now}_${createHash("sha1").update(`${now} ${sapisid} ${ORIGIN}`).digest("hex")}`;
 }
 
-async function call(endpoint: "browse" | "search", body: Record<string, unknown>, query = ""): Promise<any> {
+async function call(endpoint: "browse" | "search", body: Record<string, unknown>, query = "", signal?: AbortSignal): Promise<any> {
   const headers: Record<string, string> = { "content-type": "application/json", origin: ORIGIN, "x-origin": ORIGIN, "user-agent": USER_AGENT };
   const auth = authorization();
   if (cookie && auth) Object.assign(headers, { cookie, authorization: auth, "x-goog-authuser": "0" });
   const context = { client: { clientName: "WEB_REMIX", clientVersion: "1.20250101.01.00", hl: "en", gl: "US" } };
-  const response = await fetch(`${ORIGIN}/youtubei/v1/${endpoint}?prettyPrint=false${query}`, { method: "POST", headers, body: JSON.stringify({ context, ...body }) });
+  const response = await fetch(`${ORIGIN}/youtubei/v1/${endpoint}?prettyPrint=false${query}`, { method: "POST", headers, body: JSON.stringify({ context, ...body }), signal });
   if (!response.ok) throw new Error(`YouTube Music answered HTTP ${response.status}${response.status === 401 ? " (signed out? sign in again)" : ""}`);
   return response.json();
 }
@@ -170,19 +170,19 @@ const continuationOf = (json: any): string | null =>
 
 // ---- api ------------------------------------------------------------------
 
-export async function home(): Promise<Shelf[]> {
+export async function home(onProgress?: (shelves: Shelf[]) => void, signal?: AbortSignal): Promise<Shelf[]> {
   const shelves: Shelf[] = [];
-  let json = await call("browse", { browseId: "FEmusic_home" });
-  // The first page holds a few shelves; the web app loads the rest as you scroll.
+  let json = await call("browse", { browseId: "FEmusic_home" }, "", signal);
   for (let page = 0; page < 4; page++) {
     for (const shelf of findAll(json, "musicCarouselShelfRenderer")) {
       const items = shelfItems(shelf.contents);
       const title = plain(first(shelf.header, "title"));
       if (title && items.length) shelves.push({ title, items });
     }
+    onProgress?.([...shelves]);
     const token = continuationOf(json);
-    if (!token) break;
-    json = await call("browse", {}, `&ctoken=${token}&continuation=${token}&type=next`);
+    if (!token || page === 3) break;
+    json = await call("browse", {}, `&ctoken=${token}&continuation=${token}&type=next`, signal);
   }
   return shelves;
 }
@@ -193,9 +193,8 @@ export async function search(query: string): Promise<Song[]> {
   return findAll(json, "musicResponsiveListItemRenderer").map(row => listItem(row)).filter((song): song is Song => song !== null);
 }
 
-/** A playlist, album or artist page with its songs (long playlists up to ~1000). */
-export async function collection(entry: Pick<Collection, "kind" | "id"> & Partial<Collection>): Promise<CollectionPage> {
-  let json = await call("browse", { browseId: entry.id });
+export async function collection(entry: Pick<Collection, "kind" | "id"> & Partial<Collection>, onProgress?: (page: CollectionPage) => void, signal?: AbortSignal): Promise<CollectionPage> {
+  let json = await call("browse", { browseId: entry.id }, "", signal);
   const head = first(json, "musicResponsiveHeaderRenderer") ?? first(json, "musicImmersiveHeaderRenderer") ?? first(json, "musicVisualHeaderRenderer") ?? first(json, "musicDetailHeaderRenderer");
   const header: Collection = {
     kind: entry.kind, id: entry.id,
@@ -212,13 +211,14 @@ export async function collection(entry: Pick<Collection, "kind" | "id"> & Partia
       if (song && !seen.has(song.id)) { seen.add(song.id); songs.push(song); }
     }
   };
-  // Artist pages: only the songs shelf, not every carousel of albums/videos.
   take(entry.kind === "artist" ? findAll(json, "musicShelfRenderer").slice(0, 1) : first(json, "contents"));
+  onProgress?.({ header, songs: [...songs] });
   for (let page = 0; page < 10 && entry.kind === "playlist"; page++) {
     const token = continuationOf(first(json, "musicPlaylistShelfRenderer") ?? json.continuationContents ?? json.onResponseReceivedActions ?? null);
     if (!token) break;
-    json = await call("browse", { continuation: token });
+    json = await call("browse", { continuation: token }, "", signal);
     take(json.onResponseReceivedActions ?? json.continuationContents);
+    onProgress?.({ header, songs: [...songs] });
   }
   return { header, songs };
 }

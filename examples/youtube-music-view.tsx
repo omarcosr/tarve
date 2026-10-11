@@ -1,5 +1,6 @@
-import { Column, darkTheme, DropdownMenu, Image, Input, loadImageSource, memo, Path, VirtualList, type Child, Pressable, Row, Scroll, Slider, Svg, Text, Theme, TitleBar, Tooltip, View, Window, type ImageBytesSource, type MediaController } from "@tarve/core";
+import { Column, darkTheme, DropdownMenu, Image, Input, memo, Path, Pressable, Row, Scroll, Slider, Svg, Text, Theme, TitleBar, Tooltip, View, VirtualList, Window, type Child, type ImageBytesSource, type MediaController } from "@tarve/core";
 import type { Collection, Item, Shelf, Song } from "./youtube-music-source";
+import { artwork } from "./youtube-music-artwork";
 
 export const AUDIO_ID = "ytm-audio";
 export type Page = { kind: "home" } | { kind: "search"; query: string } | { kind: "library" } | { kind: "collection"; entry: Collection } | { kind: "playing" };
@@ -16,6 +17,20 @@ export const state = {
   query: "",
   /** Scroll offset of the open song list. */
   listOffset: 0,
+  homeScroll: 0,
+  viewport: 0,
+  sidebarScroll: 0,
+  sidebarHeight: 600,
+  queueScroll: 0,
+  queueHeight: 600,
+  queueViewport: 0,
+  homeHeight: 600,
+  libraryScroll: 0,
+  libraryHeight: 600,
+  libraryWidth: 750,
+  shelfScroll: [] as number[],
+  shelfWidth: [] as number[],
+  shelfHeight: [] as number[],
   /** Bumped when artwork arrives, so the parts showing it render again. */
   art: 0,
   pageError: null as string | null,
@@ -28,7 +43,7 @@ export const state = {
   index: -1,
   /** Where the queue came from, shown in the queue panel. */
   source: "",
-  showQueue: true,
+  showQueue: false,
   /** The current song's stream URL; undefined while it resolves. */
   path: undefined as string | undefined,
   loading: null as number | null,
@@ -58,6 +73,7 @@ export const state = {
   savePastedCookies: () => { },
   signOut: () => { },
   refresh: () => { },
+  hide: () => { },
 };
 
 // YouTube Music's palette: near-black surfaces, one red accent.
@@ -135,55 +151,24 @@ function IconButton({ id, d, label, onClick, size = 18, fill = false, active = f
   return (
     <Tip id={id} label={label} side={tip}>
       <Pressable id={id} onClick={disabled ? () => { } : onClick} control={{ role: "button", label }}
-        style={{ width: box, height: box, align: "center", justify: "center", radius: 8, shrink: 0, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.35 : 1,
-          background: active ? c.selected : "transparent", hover: { background: active ? c.selected : c.hover } }}>
+        style={{
+          width: box, height: box, align: "center", justify: "center", radius: 8, shrink: 0, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.35 : 1,
+          background: active ? c.selected : "transparent", hover: { background: active ? c.selected : c.hover }
+        }}>
         <Glyph d={d} size={size} fill={fill} color={active ? c.accent : c.text} />
       </Pressable>
     </Tip>
   );
 }
 
-// Remote artwork, fetched once at 1.5× its on-screen size: sharp at 125–150% scaling,
-// and each decoded image costs a quarter of a 2× (let alone the 544 px original) one.
-const thumbs = new Map<string, ImageBytesSource | "loading" | "failed">();
-// A few downloads at a time: a page of covers must not open hundreds of sockets.
-const waiting: string[] = [];
-let fetching = 0;
-function pump(): void {
-  while (fetching < 6 && waiting.length) {
-    const src = waiting.shift()!;
-    fetching++;
-    // no-store: this map is the cache; loadImageSource's own LRU would hold every cover a second time.
-    loadImageSource(src, { cache: "no-store" }).then(bytes => { thumbs.set(src, bytes); state.art++; state.refresh(); }, () => thumbs.set(src, "failed"))
-      .finally(() => { fetching--; pump(); });
-  }
-}
-const sizedUrls = new Map<string, string>();
-function sized(url: string, px: number): string {
-  const key = `${px} ${url}`;
-  let out = sizedUrls.get(key);
-  if (out === undefined) {
-    if (sizedUrls.size > 5000) sizedUrls.clear();
-    sizedUrls.set(key, out = url.replace(/=w\d+-h\d+/, `=w${px}-h${px}`).replace(/=s\d+/, `=s${px}`));
-  }
-  return out;
-}
-/** The artwork for `url` at `size`, once loaded (starting the download if needed). */
-function cover(url: string | null | undefined, size: number): ImageBytesSource | undefined {
-  const src = url ? sized(url, Math.min(544, Math.ceil(size * 1.5 / 30) * 30)) : null;
-  const entry = src ? thumbs.get(src) : undefined;
-  if (src && entry === undefined) {
-    // Keep the encoded artwork of the last few hundred covers; the oldest go first.
-    if (thumbs.size >= 400) thumbs.delete(thumbs.keys().next().value!);
-    thumbs.set(src, "loading");
-    waiting.push(src);
-    pump();
-  }
-  return typeof entry === "object" ? entry : undefined;
+// Artwork requests are scheduled for visible cards and reused across the view.
+
+function cover(url: string | null | undefined, size: number, priority = 0): ImageBytesSource | undefined {
+  return artwork(url, size, priority);
 }
 
-function Art({ url, size, radius = 6, round = false }: { url: string | null | undefined; size: number; radius?: number; round?: boolean }) {
-  const entry = cover(url, size);
+function Art({ url, size, radius = 6, round = false, image, deferred = false, priority = 2000 }: { url: string | null | undefined; size: number; radius?: number; round?: boolean; image?: ImageBytesSource; deferred?: boolean; priority?: number }) {
+  const entry = deferred ? image : cover(url, size, priority);
   const shape = { width: size, height: size, shrink: 0, radius: round ? size / 2 : radius, overflow: "hidden" as const, background: c.raised };
   return entry
     ? <Image src={entry} width={size} height={size} fit="cover" style={shape} />
@@ -193,8 +178,10 @@ function Art({ url, size, radius = 6, round = false }: { url: string | null | un
 function NavItem({ id, d, label, active, onClick }: { id: string; d: string; label: string; active: boolean; onClick: () => void }) {
   return (
     <Pressable id={id} onClick={onClick} control={{ role: "button", label }}
-      style={{ height: 32, padding: { left: 10, right: 10 }, gap: 10, direction: "row", align: "center", radius: 8, cursor: "pointer",
-        background: active ? c.selected : "transparent", hover: { background: active ? c.selected : c.hover } }}>
+      style={{
+        height: 32, padding: { left: 10, right: 10 }, gap: 10, direction: "row", align: "center", radius: 8, cursor: "pointer",
+        background: active ? c.selected : "transparent", hover: { background: active ? c.selected : c.hover }
+      }}>
       <Glyph d={d} size={16} color={active ? c.accent : c.muted} />
       <Text size={13} color={active ? c.text : "#c3cfd1"} weight={active ? 600 : 400}>{label}</Text>
     </Pressable>
@@ -211,7 +198,9 @@ function Sidebar() {
       <NavItem id="nav-library" d={icons.library} label="Your Library" active={page.kind === "library"} onClick={() => state.open({ kind: "library" })} />
       <Text size={11} weight={700} color={c.muted} style={{ padding: { left: 10, top: 18, bottom: 6 }, letterSpacing: 0.6 }}>PLAYLISTS</Text>
       {state.signedIn
-        ? <Scroll flex={1} style={{ minHeight: 0 }}>
+        ? <Scroll flex={1} style={{ minHeight: 0 }}
+            onScroll={offset => { if (state.sidebarScroll !== offset) { state.sidebarScroll = offset; state.viewport++; state.refresh(); } }}
+            onSize={size => { if (state.sidebarHeight !== size.height) { state.sidebarHeight = size.height; state.viewport++; state.refresh(); } }}>
           <Column gap={2}>
             {(state.library ?? []).map((entry, j) => {
               const open = page.kind === "collection" && page.entry.id === entry.id;
@@ -221,7 +210,7 @@ function Sidebar() {
                   style={{ padding: 6, radius: 8, gap: 10, direction: "row", align: "center", cursor: "pointer", background: open ? c.selected : "transparent", hover: { background: open ? c.selected : c.hover } }}>
                   {entry.id === "VLLM"
                     ? <View style={{ width: 36, height: 36, radius: 6, background: c.liked, align: "center", justify: "center" }}><Glyph d={icons.heart} size={16} fill color={c.text} /></View>
-                    : <Art url={entry.thumbnail} size={36} />}
+                    : <Art url={entry.thumbnail} size={36} image={j * 48 < state.sidebarScroll + state.sidebarHeight + 96 && (j + 1) * 48 > state.sidebarScroll - 96 ? cover(entry.thumbnail, 36, 1200 + Math.abs(j * 48 - state.sidebarScroll)) : undefined} deferred />}
                   <Column gap={1} style={{ flex: 1, minWidth: 0 }}>
                     <Text size={13} color={playing ? c.accent : c.text} style={ellipsis}>{entry.title}</Text>
                     <Text size={11} color={c.muted} style={ellipsis}>{entry.subtitle}</Text>
@@ -246,37 +235,39 @@ function Sidebar() {
 function TopBar() {
   return (
     <TitleBar id="titlebar" height={44} style={{ background: c.panel, foreground: c.text, borderColor: c.border, padding: { left: 8 } }}>
-    <Row align="center" style={{ flex: 1, minWidth: 0, height: "100%", padding: { right: 8 }, gap: 8 }}>
-      <Row gap={8} align="center" style={{ width: 200, shrink: 0, padding: { left: 6 } }}>
-        <View style={{ width: 24, height: 24, radius: 12, background: c.accent, align: "center", justify: "center" }}><Glyph d={icons.play} size={12} fill color={c.accentInk} /></View>
-        <Text size={15} weight={700}>Music</Text>
-      </Row>
-      <IconButton id="back" d={icons.back} label="Back" tip="bottom" onClick={state.goBack} disabled={!state.back.length} />
-      {/* The field is the pill: hover and focus show on it, the icon sits inside. */}
-      <View style={{ width: 380, height: 34, shrink: 1, minWidth: 160, position: "relative" }}>
-        <Input id="search" type="search" placeholder="Search songs, albums, artists" value={state.query}
-          onChange={value => { state.query = value; }}
-          onSubmit={value => { if (value.trim()) state.open({ kind: "search", query: value.trim() }); }}
-          style={{ width: "100%", height: 34, minWidth: 0, radius: 17, background: c.raised, borderColor: c.raised, foreground: c.text, caretColor: c.text,
-            fontSize: 13, padding: { left: 36, right: 14 },
-            hover: { background: "#2a2a2a", borderColor: "#2a2a2a" },
-            focus: { background: "#1a1a1a", borderColor: "#ffffff40", outlineWidth: 0 } }} />
-        <View style={{ position: "absolute", left: 12, top: 10, pointerEvents: "auto" }}><Glyph d={icons.search} size={14} color={c.muted} /></View>
-      </View>
-      <View flex={1} />
-      <IconButton id="toggle-queue" d={icons.queue} label={state.showQueue ? "Hide queue" : "Show queue"} tip="bottom" active={state.showQueue} onClick={() => { state.showQueue = !state.showQueue; }} />
-      {state.signedIn
-        // Signed in: an avatar; Sign out lives in its menu, out of the way.
-        ? <DropdownMenu id="account" label="Account" open={state.accountOpen} onOpenChange={open => { state.accountOpen = open; }}
+      <Row align="center" style={{ flex: 1, minWidth: 0, height: "100%", padding: { right: 8 }, gap: 8 }}>
+        <Row gap={8} align="center" style={{ width: 200, shrink: 0, padding: { left: 6 } }}>
+          <View style={{ width: 24, height: 24, radius: 12, background: c.accent, align: "center", justify: "center" }}><Glyph d={icons.play} size={12} fill color={c.accentInk} /></View>
+          <Text size={15} weight={700}>Music</Text>
+        </Row>
+        <IconButton id="back" d={icons.back} label="Back" tip="bottom" onClick={state.goBack} disabled={!state.back.length} />
+        {/* The field is the pill: hover and focus show on it, the icon sits inside. */}
+        <View style={{ width: 380, height: 34, shrink: 1, minWidth: 160, position: "relative" }}>
+          <Input id="search" type="search" placeholder="Search songs, albums, artists" value={state.query}
+            onChange={value => { state.query = value; }}
+            onSubmit={value => { if (value.trim()) state.open({ kind: "search", query: value.trim() }); }}
+            style={{
+              width: "100%", height: 34, minWidth: 0, radius: 17, background: c.raised, borderColor: c.raised, foreground: c.text, caretColor: c.text,
+              fontSize: 13, padding: { left: 36, right: 14 },
+              hover: { background: "#2a2a2a", borderColor: "#2a2a2a" },
+              focus: { background: "#1a1a1a", borderColor: "#ffffff40", outlineWidth: 0 }
+            }} />
+          <View style={{ position: "absolute", left: 12, top: 10, pointerEvents: "auto" }}><Glyph d={icons.search} size={14} color={c.muted} /></View>
+        </View>
+        <View flex={1} />
+        <IconButton id="toggle-queue" d={icons.queue} label={state.showQueue ? "Hide queue" : "Show queue"} tip="bottom" active={state.showQueue} onClick={() => { state.showQueue = !state.showQueue; }} />
+        {state.signedIn
+          // Signed in: an avatar; Sign out lives in its menu, out of the way.
+          ? <DropdownMenu id="account" label="Account" open={state.accountOpen} onOpenChange={open => { state.accountOpen = open; }}
             items={[{ value: "sign-out", label: "Sign out" }]} onSelect={value => { if (value === "sign-out") state.signOut(); }}
             trigger={<View style={{ width: 30, height: 30, radius: 15, background: c.selected, align: "center", justify: "center", hover: { background: "#3a3a3a" } }}><Glyph d={icons.user} size={15} color={c.text} /></View>}
             contentStyle={{ left: undefined, right: 0, minWidth: 160, background: c.raised, borderColor: c.border }} />
-        : <Pressable id="account" onClick={() => { state.signIn = "choose"; }} control={{ role: "button", label: "Sign in" }}
+          : <Pressable id="account" onClick={() => { state.signIn = "choose"; }} control={{ role: "button", label: "Sign in" }}
             style={{ height: 30, padding: { left: 10, right: 12 }, gap: 6, direction: "row", align: "center", radius: 15, cursor: "pointer", background: c.raised, hover: { background: c.selected } }}>
             <Glyph d={icons.user} size={14} color={c.muted} />
             <Text size={12} color={c.text}>Sign in</Text>
           </Pressable>}
-    </Row>
+      </Row>
     </TitleBar>
   );
 }
@@ -289,12 +280,12 @@ function openItem(item: Item, shelf: Shelf): void {
 }
 
 // `image` is the loaded cover: a memoized card renders again only when its own cover arrives.
-const Card = memo(({ item, shelf, slot }: { item: Item; shelf: Shelf; slot: string; image: ImageBytesSource | undefined }) => {
+const Card = memo(({ item, shelf, slot, image }: { item: Item; shelf: Shelf; slot: string; image: ImageBytesSource | undefined }) => {
   const subtitle = item.kind === "song" ? item.artist : item.subtitle;
   return (
     <Pressable id={`card-${slot}`} onClick={() => openItem(item, shelf)} control={{ role: "button", label: item.title }}
       style={{ width: 168, shrink: 0, direction: "column", gap: 8, padding: 8, radius: 10, cursor: "pointer", hover: { background: c.hover } }}>
-      <Art url={item.thumbnail} size={152} radius={8} round={item.kind === "artist"} />
+      <Art url={item.thumbnail} size={152} radius={8} round={item.kind === "artist"} image={image} deferred />
       <Column gap={2}>
         <Text size={13} weight={600} style={ellipsis}>{item.title}</Text>
         <Text size={12} color={c.muted} style={ellipsis}>{subtitle}</Text>
@@ -307,15 +298,17 @@ const ROW = 40;
 const PAD = { left: 24, right: 24, top: 20, bottom: 28 } as const;
 
 /** One song row; memoized, so scrolling reuses the rows already on screen. */
-const SongRow = memo(({ song, index, list, source, isCurrent, playing }: { song: Song; index: number; list: Song[]; source: string; isCurrent: boolean; playing: boolean; image: ImageBytesSource | undefined }) => (
+const SongRow = memo(({ song, index, list, source, isCurrent, playing, image }: { song: Song; index: number; list: Song[]; source: string; isCurrent: boolean; playing: boolean; image: ImageBytesSource | undefined }) => (
   <Pressable id={`row-${index}-${song.id}`} onClick={() => state.play(list, index, source)} control={{ role: "button", label: `Play ${song.title}` }}
-    style={{ width: "100%", height: ROW, direction: "row", align: "center", gap: 16, padding: { left: 12, right: 16 }, radius: 6, cursor: "pointer",
-      background: isCurrent ? c.selected : "transparent", hover: { background: isCurrent ? c.selected : c.hover } }}>
+    style={{
+      width: "100%", height: ROW, direction: "row", align: "center", gap: 16, padding: { left: 12, right: 16 }, radius: 6, cursor: "pointer",
+      background: isCurrent ? c.selected : "transparent", hover: { background: isCurrent ? c.selected : c.hover }
+    }}>
     <View style={{ width: 24, shrink: 0, align: "center" }}>
       {isCurrent ? <Glyph d={playing ? icons.bars : icons.note} size={14} color={c.accent} /> : <Text size={12} color={c.muted}>{index + 1}</Text>}
     </View>
     <Row gap={10} align="center" style={{ flex: 1, minWidth: 0 }}>
-      <Art url={song.thumbnail} size={28} radius={4} />
+      <Art url={song.thumbnail} size={28} radius={4} image={image} deferred />
       <Text size={13} color={isCurrent ? c.accent : c.text} style={{ ...ellipsis, flex: 1, minWidth: 0 }}>{song.title}</Text>
     </Row>
     <Text size={13} color={c.muted} style={{ ...ellipsis, width: "26%" }}>{song.artist}</Text>
@@ -384,10 +377,9 @@ function CollectionPage({ entry }: { entry: Collection }) {
   );
 }
 
-/** Pages of cards scroll as a whole; song lists keep their header and scroll their rows. */
-function Scrolling({ id, children }: { id: string; children: Child }) {
+function Scrolling({ id, children, onScroll, onSize }: { id: string; children: Child; onScroll?: (offset: number) => void; onSize?: (size: { width: number; height: number }) => void }) {
   return (
-    <Scroll id={id} flex={1} style={{ minHeight: 0, minWidth: 0 }}>
+    <Scroll id={id} flex={1} style={{ minHeight: 0, minWidth: 0 }} onScroll={onScroll} onSize={onSize}>
       <Column style={{ padding: PAD }}>{children}</Column>
     </Scroll>
   );
@@ -404,7 +396,7 @@ function NowPlaying() {
   return (
     <Column id="main-playing" flex={1} align="center" justify="center" gap={18} style={{ minHeight: 0, minWidth: 0, padding: PAD, overflow: "hidden" }}
       onSize={size => { if (size.width !== state.stage?.width || size.height !== state.stage?.height) state.stage = size; }}>
-      <Art url={song.thumbnail} size={Math.round(art)} radius={10} />
+      <Art url={song.thumbnail} size={Math.round(art)} radius={10} priority={0} />
       <Column gap={6} align="center" style={{ maxWidth: 520, minWidth: 0 }}>
         <Text size={26} weight={800} style={{ ...ellipsis, maxWidth: 520 }}>{song.title}</Text>
         <Text size={15} color={c.muted} style={{ ...ellipsis, maxWidth: 520 }}>{[song.artist, song.album].filter(Boolean).join(" • ")}</Text>
@@ -420,20 +412,11 @@ function Content() {
   if (state.pageError) return <Scrolling id="main-error"><Message>{state.pageError}</Message></Scrolling>;
   if (page.kind === "home") {
     if (!state.shelves) return <Scrolling id="main-home"><Message>Loading…</Message></Scrolling>;
-    return (
-      <Scrolling id="main-home">
-        <Column gap={28}>
-          {state.shelves.map((shelf, i) => (
-            <Column key={`${i}-${shelf.title}`} gap={6}>
-              <Text size={20} weight={700} style={{ padding: { left: 8 } }}>{shelf.title}</Text>
-              <Scroll orientation="horizontal" style={{ shrink: 0 }}>
-                <Row gap={4} style={{ padding: { bottom: 6 } }}>{shelf.items.map((item, j) => <Card key={`${j}-${item.id}`} slot={`${i}-${j}`} item={item} shelf={shelf} image={cover(item.thumbnail, 152)} />)}</Row>
-              </Scroll>
-            </Column>
-          ))}
-        </Column>
-      </Scrolling>
-    );
+    return <Scrolling id="main-home" onScroll={offset => {
+      if (state.homeScroll !== offset) { state.homeScroll = offset; state.viewport++; state.refresh(); }
+    }} onSize={size => {
+      if (state.homeHeight !== size.height) { state.homeHeight = size.height; state.viewport++; state.refresh(); }
+    }}><HomeShelves /></Scrolling>;
   }
   if (page.kind === "search") {
     if (!page.query) return <Scrolling id="main-search"><Message>Type in the search box and press Enter.</Message></Scrolling>;
@@ -448,11 +431,25 @@ function Content() {
     if (!state.signedIn) return <Scrolling id="main-library"><Message>Sign in to see your library.</Message></Scrolling>;
     if (!state.library) return <Scrolling id="main-library"><Message>Loading…</Message></Scrolling>;
     const shelf = { title: "Your Library", items: state.library };
+    const perRow = Math.max(1, Math.floor((state.libraryWidth - PAD.left - PAD.right) / 172));
     return (
-      <Scrolling id="main-library">
+      <Scrolling id="main-library" onScroll={offset => {
+        if (state.libraryScroll !== offset) { state.libraryScroll = offset; state.viewport++; state.refresh(); }
+      }} onSize={size => {
+        if (state.libraryHeight !== size.height || state.libraryWidth !== size.width) {
+          state.libraryHeight = size.height;
+          state.libraryWidth = size.width;
+          state.viewport++;
+          state.refresh();
+        }
+      }}>
         <Column gap={12}>
           <Text size={24} weight={800}>Your Library</Text>
-          <Row gap={4} style={{ wrap: true }}>{state.library.map((entry, j) => <Card key={`${j}-${entry.id}`} slot={`lib-${j}`} item={entry} shelf={shelf} image={cover(entry.thumbnail, 152)} />)}</Row>
+          <Row gap={4} style={{ wrap: true }}>{state.library.map((entry, j) => {
+            const y = Math.floor(j / perRow) * 230;
+            const visible = y < state.libraryScroll + state.libraryHeight + 230 && y + 230 > state.libraryScroll - 230;
+            return <Card key={`${j}-${entry.id}`} slot={`lib-${j}`} item={entry} shelf={shelf} image={visible ? cover(entry.thumbnail, 152, Math.abs(y - state.libraryScroll)) : undefined} />;
+          })}</Row>
         </Column>
       </Scrolling>
     );
@@ -462,17 +459,19 @@ function Content() {
 
 // Each region renders again only when what it shows changes: the clock ticking
 // four times a second re-renders the player bar, not the song list.
-const SidebarRegion = memo((_: { page: Page; library: Collection[] | null; signedIn: boolean; source: string; playing: boolean; current: string | undefined; art: number }) => <Sidebar />);
-const ContentRegion = memo((_: { page: Page; shelves: Shelf[] | null; results: Song[] | null; opened: unknown; library: Collection[] | null; signedIn: boolean;
-  pageError: string | null; listOffset: number; current: string | undefined; playing: boolean; source: string; art: number; stage: unknown }) => <Content />);
-const QueueRegion = memo((_: { queue: Song[]; index: number; source: string; art: number }) => <QueuePanel />);
+const SidebarRegion = memo((_: { page: Page; library: Collection[] | null; signedIn: boolean; source: string; playing: boolean; current: string | undefined; art: number; viewport: number }) => <Sidebar />);
+const ContentRegion = memo((_: {
+  page: Page; shelves: Shelf[] | null; results: Song[] | null; opened: unknown; library: Collection[] | null; signedIn: boolean;
+  pageError: string | null; viewport: number; listOffset: number; current: string | undefined; playing: boolean; source: string; art: number; stage: unknown
+}) => <Content />);
+const QueueRegion = memo((_: { queue: Song[]; index: number; source: string; art: number; viewport: number }) => <QueuePanel />);
 
-function QueueRow({ song, index, dim = false }: { song: Song; index: number; dim?: boolean }) {
+function QueueRow({ song, index, dim = false, image }: { song: Song; index: number; dim?: boolean; image?: ImageBytesSource }) {
   const current = index === state.index;
   return (
     <Pressable id={`queue-${index}`} onClick={() => state.jump(index)} control={{ role: "button", label: `Play ${song.title}` }}
       style={{ padding: 6, gap: 10, direction: "row", align: "center", radius: 8, cursor: "pointer", opacity: dim ? 0.6 : 1, hover: { background: c.hover } }}>
-      <Art url={song.thumbnail} size={36} radius={4} />
+      <Art url={song.thumbnail} size={36} radius={4} image={image} deferred />
       <Column gap={1} style={{ flex: 1, minWidth: 0 }}>
         <Text size={13} color={current ? c.accent : c.text} style={ellipsis}>{song.title}</Text>
         <Text size={11} color={c.muted} style={ellipsis}>{song.artist}</Text>
@@ -485,6 +484,8 @@ function QueuePanel() {
   const history = state.queue.slice(Math.max(0, state.index - 3), Math.max(0, state.index));
   const upNext = state.queue.slice(state.index + 1, state.index + 51);
   const current = state.queue[state.index];
+  const imageFor = (song: Song, y: number) => y < state.queueScroll + state.queueHeight + 100 && y + 56 > state.queueScroll - 100
+    ? cover(song.thumbnail, 36, 900 + Math.abs(y - state.queueScroll)) : undefined;
   const label = (text: string) => <Text size={11} weight={700} color={c.muted} style={{ padding: { left: 6, top: 14, bottom: 4 }, letterSpacing: 0.6 }}>{text}</Text>;
   return (
     <Column style={{ width: 264, shrink: 0, background: c.panel, borderColor: c.border, borderWidth: { left: 1 }, minHeight: 0 }}>
@@ -492,13 +493,15 @@ function QueuePanel() {
         <Text size={11} weight={700} color={c.muted} style={{ letterSpacing: 0.6, flex: 1 }}>QUEUE</Text>
         <Text size={11} color={c.muted}>{state.queue.length ? `${state.index + 1} / ${state.queue.length}` : ""}</Text>
       </Row>
-      <Scroll flex={1} style={{ minHeight: 0 }}>
+      <Scroll flex={1} style={{ minHeight: 0 }}
+          onScroll={offset => { if (state.queueScroll !== offset) { state.queueScroll = offset; state.queueViewport++; state.refresh(); } }}
+          onSize={size => { if (state.queueHeight !== size.height) { state.queueHeight = size.height; state.queueViewport++; state.refresh(); } }}>
         <Column style={{ padding: { left: 8, right: 8, bottom: 12 } }}>
           {current ? <>
-            {history.length ? <>{label("HISTORY")}{history.map((song, i) => <QueueRow key={`h${i}`} song={song} index={state.index - history.length + i} dim />)}</> : null}
+            {history.length ? <>{label("HISTORY")}{history.map((song, i) => <QueueRow key={`h${i}`} song={song} index={state.index - history.length + i} image={imageFor(song, 24 + i * 56)} dim />)}</> : null}
             {label(state.source ? `NOW PLAYING · ${state.source.toUpperCase()}` : "NOW PLAYING")}
-            <QueueRow song={current} index={state.index} />
-            {upNext.length ? <>{label("UP NEXT")}{upNext.map((song, i) => <QueueRow key={`n${i}-${song.id}`} song={song} index={state.index + 1 + i} />)}</> : null}
+            <QueueRow song={current} index={state.index} image={imageFor(current, 88 + history.length * 56)} />
+            {upNext.length ? <>{label("UP NEXT")}{upNext.map((song, i) => <QueueRow key={`n${i}-${song.id}`} song={song} index={state.index + 1 + i} image={imageFor(song, 152 + history.length * 56 + i * 56)} />)}</> : null}
           </> : <Text size={12} color={c.muted} style={{ padding: { top: 14, left: 6 } }}>Play something to fill the queue.</Text>}
         </Column>
       </Scroll>
@@ -523,7 +526,7 @@ function PlayerBar() {
       style={{ direction: "row", align: "center", height: 68, shrink: 0, padding: { left: 12, right: 16 }, gap: 16, background: state.page.kind === "playing" ? c.raised : c.panel, borderColor: c.border, borderWidth: { top: 1 }, cursor: "pointer" }}>
       <Row gap={12} align="center" style={{ width: 300, shrink: 0, minWidth: 0 }}>
         {song ? <>
-          <Art url={song.thumbnail} size={44} radius={6} />
+          <Art url={song.thumbnail} size={44} radius={6} priority={0} />
           <Column gap={2} style={{ flex: 1, minWidth: 0 }}>
             <Text id="now-title" size={13} weight={600} style={ellipsis}>{song.title}</Text>
             <Text id="now-status" size={12} color={state.playError ? "#ff8a8a" : c.muted} style={ellipsis}>{status ?? song.artist}</Text>
@@ -565,8 +568,10 @@ function SignInDialog() {
   if (state.signIn === "closed") return null;
   const button = (id: string, label: string, onClick: () => void, primary = false) => (
     <Pressable id={id} onClick={onClick} control={{ role: "button", label }}
-      style={{ height: 34, padding: { left: 16, right: 16 }, radius: 8, align: "center", justify: "center", cursor: "pointer",
-        background: primary ? c.accent : c.raised, hover: { opacity: 0.88 } }}>
+      style={{
+        height: 34, padding: { left: 16, right: 16 }, radius: 8, align: "center", justify: "center", cursor: "pointer",
+        background: primary ? c.accent : c.raised, hover: { opacity: 0.88 }
+      }}>
       <Text size={13} weight={600} color={primary ? c.accentInk : c.text}>{label}</Text>
     </Pressable>
   );
@@ -600,7 +605,7 @@ function SignInDialog() {
 export function YouTubeMusicView() {
   const song = state.queue[state.index];
   return (
-    <Window title={state.playing && song ? `${song.title} • ${song.artist}` : "Music"} width={1320} height={820} minWidth={960} minHeight={580}
+    <Window onCloseRequest={event => { event.preventDefault(); state.hide(); }} title={state.playing && song ? `${song.title} • ${song.artist}` : "Music"} width={1320} height={820} minWidth={960} minHeight={580}
       position="center" theme={ytmTheme} style={{ background: c.window, foreground: c.text, fontFamily: "Inter", borderColor: c.border }}>
       <audio id={AUDIO_ID} src={state.path} autoPlay volume={state.volume} muted={state.muted} loop={state.repeat === "one"}
         onPlay={() => { state.playing = true; }}
@@ -613,16 +618,44 @@ export function YouTubeMusicView() {
       <Column flex={1} style={{ minHeight: 0 }}>
         <TopBar />
         <Row flex={1} align="stretch" style={{ minHeight: 0 }}>
-          <SidebarRegion page={state.page} library={state.library} signedIn={state.signedIn} source={state.source} playing={state.playing} current={song?.id} art={state.art} />
+          <SidebarRegion page={state.page} library={state.library} signedIn={state.signedIn} source={state.source} playing={state.playing} current={song?.id} art={state.art} viewport={state.viewport} />
           <Column flex={1} style={{ minHeight: 0, minWidth: 0 }}>
             <ContentRegion page={state.page} shelves={state.shelves} results={state.results} opened={state.opened} library={state.library} signedIn={state.signedIn}
-              pageError={state.pageError} listOffset={state.listOffset} current={song?.id} playing={state.playing} source={state.source} art={state.art} stage={state.stage} />
+              pageError={state.pageError} viewport={state.viewport} listOffset={state.listOffset} current={song?.id} playing={state.playing} source={state.source} art={state.art} stage={state.stage} />
           </Column>
-          {state.showQueue ? <QueueRegion queue={state.queue} index={state.index} source={state.source} art={state.art} /> : null}
+          {state.showQueue ? <QueueRegion queue={state.queue} index={state.index} source={state.source} art={state.art} viewport={state.queueViewport} /> : null}
         </Row>
         <PlayerBar />
       </Column>
       <SignInDialog />
     </Window>
   );
+}
+function HomeShelves() {
+  let top = PAD.top;
+  return <Column gap={28}>
+    {state.shelves?.map((shelf, i) => {
+      const y = top;
+      const height = state.shelfHeight[i] ?? 250;
+      top += height + 28;
+      const visible = y < state.homeScroll + state.homeHeight + 200 && y + height > state.homeScroll - 200;
+      const x = state.shelfScroll[i] ?? 0;
+      const width = state.shelfWidth[i] ?? 750;
+      return <Column key={`${i}-${shelf.title}`} gap={6}
+        onSize={size => { if (state.shelfHeight[i] !== size.height) { state.shelfHeight[i] = size.height; state.viewport++; state.refresh(); } }}>
+        <Text size={20} weight={700} style={{ padding: { left: 8 } }}>{shelf.title}</Text>
+        <Scroll orientation="horizontal" style={{ shrink: 0 }}
+          onScroll={offset => { if (state.shelfScroll[i] !== offset) { state.shelfScroll[i] = offset; state.viewport++; state.refresh(); } }}
+          onSize={size => { if (state.shelfWidth[i] !== size.width) { state.shelfWidth[i] = size.width; state.viewport++; state.refresh(); } }}>
+          <Row gap={4} style={{ padding: { bottom: 6 } }}>
+            {shelf.items.map((item, j) => {
+              const inViewport = visible && j * 172 < x + width + 172 && (j + 1) * 172 > x - 172;
+              const priority = Math.abs(y + height / 2 - (state.homeScroll + state.homeHeight / 2)) + Math.abs(j * 172 + 86 - (x + width / 2)) / 2;
+              return <Card key={`${j}-${item.id}`} slot={`${i}-${j}`} item={item} shelf={shelf} image={inViewport ? cover(item.thumbnail, 152, priority) : undefined} />;
+            })}
+          </Row>
+        </Scroll>
+      </Column>;
+    })}
+  </Column>;
 }
