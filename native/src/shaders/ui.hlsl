@@ -43,6 +43,9 @@ float rounded_box_shadow(float2 p, float4 params) {
 }
 float4 shade(PSIn i) {
     if (i.mode < 0.5) return i.color;
+    // A solid rounded rectangle (circle, pill) from its distance field: uv is the
+    // offset from its centre in pixels; params = half size, corner radius.
+    if (i.mode > 4.5) return float4(i.color.rgb, i.color.a*saturate(0.5-sdRoundRect(i.uv, float4(-i.params.xy, i.params.xy), i.params.zzzz)));
     if (i.mode > 2.5) {
         float coverage=saturate(rounded_box_shadow(i.uv,i.params));
         if (i.mode > 3.5) coverage=1.0-coverage;

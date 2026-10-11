@@ -1149,6 +1149,34 @@ impl D3d11Graphics {
         });
     }
 
+    /// One quad whose pixels evaluate a solid rounded rectangle (mode 5) from its
+    /// distance field, antialiased like `fill_feathered`: full inside, fading
+    /// over the pixel that straddles the edge. Circles and pills this way cost
+    /// four vertices instead of a flattened, tessellated, feathered outline.
+    fn append_round_rect_quad(&mut self, center: [f32; 2], half: [f32; 2], radius: f32, color: Color) {
+        let first = self.indices.len() as u32;
+        let base = self.vertices.len() as u32;
+        let rgba = rgba(color);
+        let (x0, y0, x1, y1) = (center[0] - half[0] - 1.0, center[1] - half[1] - 1.0, center[0] + half[0] + 1.0, center[1] + half[1] + 1.0);
+        for [x, y] in [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] {
+            self.push_vertex(Vertex {
+                pos: self.ndc(x, y),
+                uv: [x - center[0], y - center[1]],
+                color: rgba,
+                mode: 5.0,
+                params: [half[0], half[1], radius, 0.0],
+                ..Default::default()
+            });
+        }
+        self.indices
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        self.commands.push(DrawCommand::Draw {
+            first,
+            count: 6,
+            texture: TextureRef::Solid,
+        });
+    }
+
     /// Plain triangles with per-vertex colours (three entries per triangle).
     fn append_colored_triangles(
         &mut self,
@@ -1788,6 +1816,10 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             return;
         }
         if self.graphics.analytic_aa {
+            if let Some((center, half, radius)) = sdf_round_rect(shape, transform) {
+                self.graphics.append_round_rect_quad(center, half, radius, color.multiply_alpha(self.opacity));
+                return;
+            }
             self.fill_feathered(
                 fill,
                 transform,
@@ -2049,6 +2081,22 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             return;
         }
         if self.graphics.analytic_aa {
+            // Round dots (zero-length round-capped segments, as a dot-matrix
+            // chart draws hundreds of): each one a circle quad.
+            if stroke.dash_pattern.is_empty()
+                && stroke.start_cap == vello::kurbo::Cap::Round
+                && stroke.end_cap == vello::kurbo::Cap::Round
+                && let Some(scale) = uniform_scale(transform)
+                && let Some(dots) = dot_centers(shape, stroke.width)
+            {
+                let radius = (stroke.width * scale / 2.0) as f32;
+                let color = color.multiply_alpha(self.opacity);
+                for dot in dots {
+                    let p = transform * dot;
+                    self.graphics.append_round_rect_quad([p.x as f32, p.y as f32], [radius, radius], radius, color);
+                }
+                return;
+            }
             // The outline of the stroke one device pixel thinner, filled solid,
             // then a one-pixel fringe outward: each side's ramp is centred on the
             // true edge, as coverage is. Filling the full-width outline and
@@ -3111,6 +3159,56 @@ fn image_rgba(image: &ImageData) -> Option<Vec<u8>> {
     Some(pixels)
 }
 
+/// The scale of a transform that only scales evenly and translates.
+fn uniform_scale(transform: Affine) -> Option<f64> {
+    let [a, b, c, d, ..] = transform.as_coeffs();
+    (b == 0.0 && c == 0.0 && a > 0.0 && (a - d).abs() <= a * 1e-6).then_some(a)
+}
+
+/// Centre, half size and corner radius in device pixels of a circle or a
+/// rounded rectangle with one radius, under a transform that keeps it one.
+fn sdf_round_rect<S: Shape>(shape: &S, transform: Affine) -> Option<([f32; 2], [f32; 2], f32)> {
+    let scale = uniform_scale(transform)?;
+    let (rect, radius) = if let Some(circle) = shape.as_circle() {
+        (vello::kurbo::Rect::from_center_size(circle.center, (circle.radius * 2.0, circle.radius * 2.0)), circle.radius)
+    } else {
+        let rounded = shape.as_rounded_rect()?;
+        let radii = rounded.radii();
+        if radii.top_left != radii.top_right || radii.top_left != radii.bottom_right || radii.top_left != radii.bottom_left {
+            return None;
+        }
+        (rounded.rect(), radii.top_left)
+    };
+    let center = transform * rect.center();
+    let half = [(rect.width() * scale / 2.0) as f32, (rect.height() * scale / 2.0) as f32];
+    if !(half[0] > 0.0 && half[1] > 0.0) {
+        return None;
+    }
+    Some(([center.x as f32, center.y as f32], half, ((radius * scale) as f32).clamp(0.0, half[0].min(half[1]))))
+}
+
+/// The dots of a path made only of zero-length segments (`M x y h.01`, at
+/// most a twentieth of the stroke width long): where each round cap pair
+/// draws a circle. None for any other path.
+fn dot_centers<S: Shape>(shape: &S, width: f64) -> Option<Vec<Point>> {
+    let mut dots = vec![];
+    let mut start: Option<Point> = None;
+    for element in shape.path_elements(0.1) {
+        match element {
+            PathEl::MoveTo(point) => start = Some(point),
+            PathEl::LineTo(point) => {
+                let from = start.take()?;
+                if from.distance(point) > width * 0.05 {
+                    return None;
+                }
+                dots.push(from.midpoint(point));
+            }
+            _ => return None,
+        }
+    }
+    (!dots.is_empty()).then_some(dots)
+}
+
 fn lyon_path(elements: impl IntoIterator<Item = PathEl>) -> LyonPath {
     let mut builder = LyonPath::builder();
     let mut open = false;
@@ -3185,6 +3283,39 @@ fn win_error(error: windows::core::Error) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn round_dots_and_rounded_rects_take_the_quad_path() {
+        use super::{dot_centers, sdf_round_rect, uniform_scale};
+        use vello::kurbo::{Affine, BezPath, Circle, Point, Rect, RoundedRect};
+        let dots = BezPath::from_svg("M10 20h.01M16.5 20h.01").unwrap();
+        let found = dots_of(&dots, 3.0).unwrap();
+        assert_eq!(found.len(), 2);
+        assert!(found[0].distance(Point::new(10.005, 20.0)) < 1e-9 && found[1].distance(Point::new(16.505, 20.0)) < 1e-9);
+        let line = BezPath::from_svg("M0 0h4").unwrap();
+        assert_eq!(dots_of(&line, 3.0), None, "a real segment is not a dot");
+        let curve = BezPath::from_svg("M0 0q1 1 2 0").unwrap();
+        assert_eq!(dots_of(&curve, 3.0), None);
+        fn dots_of(path: &BezPath, width: f64) -> Option<Vec<Point>> {
+            dot_centers(path, width)
+        }
+
+        let at = Affine::translate((5.0, 7.0)) * Affine::scale(2.0);
+        assert_eq!(uniform_scale(at), Some(2.0));
+        assert_eq!(uniform_scale(Affine::scale_non_uniform(2.0, 3.0)), None);
+        assert_eq!(uniform_scale(Affine::rotate(0.3)), None);
+        assert_eq!(
+            sdf_round_rect(&RoundedRect::new(0.0, 0.0, 20.0, 10.0, 4.0), at),
+            Some(([25.0, 17.0], [20.0, 10.0], 8.0))
+        );
+        assert_eq!(sdf_round_rect(&Circle::new((1.0, 1.0), 3.0), Affine::IDENTITY), Some(([1.0, 1.0], [3.0, 3.0], 3.0)));
+        assert_eq!(
+            sdf_round_rect(&RoundedRect::new(0.0, 0.0, 20.0, 10.0, (4.0, 0.0, 4.0, 0.0)), Affine::IDENTITY),
+            None,
+            "mixed corner radii keep the tessellated path"
+        );
+        assert_eq!(sdf_round_rect(&Rect::new(0.0, 0.0, 4.0, 4.0), Affine::IDENTITY), None);
+    }
+
     #[test]
     fn shader_clips_combine_when_still_one_rounded_rectangle() {
         use super::{NO_CLIP, ShaderClip, analytic_clip, combine_clips};

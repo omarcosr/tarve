@@ -4,10 +4,8 @@ All notable changes to `@tarve/core`, `@tarve/react-icons` and `@tarve/headless`
 
 ## Unreleased
 
-### Changed
-- Windows (D3D11): 8x MSAA renders through a fixed 256px tile instead of window-sized targets, and each tile is hashed so an unchanged one is reused from the last frame. Memory no longer grows with the window (2560×1400: 369 → 151 MB of working set) and a hover redraws only the tiles it touches (player example: median GPU time per hover frame 3.9 → 1.3 ms). Linear-gradient bands are cut to the shape's box instead of covering ~7× its area, and draws inside a clip only mark the clip's tiles dirty; the tile hash is computed once per command per frame. With 600 spinning gradient squares: tiles redrawn per frame 16 → 12, CPU time per frame 3.2 → 0.85 ms. Output is identical (gradient edges within 1/255).
-- **Breaking:** `flex` follows CSS. `flex: 1` is now `flex: 1 1 0` with CSS's automatic minimum size: the item shrinks when space runs out but not below its content. Before, a numeric `flex` never shrank and could be squeezed below its content. Add `minWidth: 0` (or `minHeight: 0` in a column) where content should be clipped or scroll instead of pushing the layout, as in CSS. Scroll areas already do this.
-- **Breaking:** every flex item shrinks by default (`shrink: 1`, CSS `flex-shrink: 1`), never below its content; sized `Image`s and `Svg`s keep their size like CSS replaced elements. Set `shrink: 0` to keep a fixed size when space runs out.
+### Performance
+- D3D11 draws circles, rounded rectangles with one radius and round SVG dots (zero-length round-capped segments, as dot-matrix charts use) as one quad each from a distance field, instead of flattening, tessellating and feathering an outline. On the Pulse example (eight dot charts refreshed every second) the app process went from ~3.2% to ~1.9% of a core and from ~120 MB to ~77 MB of working set.
 
 ### Added
 - `fontVariantNumeric` (`tabular-nums`, `slashed-zero`, …) and `fontFeatureSettings` (`'"ss01" 1'`), as in CSS; both inherit. Tabular digits keep live numbers from jittering.
@@ -63,6 +61,9 @@ All notable changes to `@tarve/core`, `@tarve/react-icons` and `@tarve/headless`
 - `InputGroup` is clickable across its whole box: presses on the prefix, suffix or padding focus the field (text cursor included), and the group shows a focus border. New style value `pointerEvents: "delegate"` sends presses on a node's own area to its first enabled input or textarea and gives the node that field's focus state.
 
 ### Changed
+- Windows (D3D11): 8x MSAA renders through a fixed 256px tile instead of window-sized targets, and each tile is hashed so an unchanged one is reused from the last frame. Memory no longer grows with the window (2560×1400: 369 → 151 MB of working set) and a hover redraws only the tiles it touches (player example: median GPU time per hover frame 3.9 → 1.3 ms). Linear-gradient bands are cut to the shape's box instead of covering ~7× its area, and draws inside a clip only mark the clip's tiles dirty; the tile hash is computed once per command per frame. With 600 spinning gradient squares: tiles redrawn per frame 16 → 12, CPU time per frame 3.2 → 0.85 ms. Output is identical (gradient edges within 1/255).
+- **Breaking:** `flex` follows CSS. `flex: 1` is now `flex: 1 1 0` with CSS's automatic minimum size: the item shrinks when space runs out but not below its content. Before, a numeric `flex` never shrank and could be squeezed below its content. Add `minWidth: 0` (or `minHeight: 0` in a column) where content should be clipped or scroll instead of pushing the layout, as in CSS. Scroll areas already do this.
+- **Breaking:** every flex item shrinks by default (`shrink: 1`, CSS `flex-shrink: 1`), never below its content; sized `Image`s and `Svg`s keep their size like CSS replaced elements. Set `shrink: 0` to keep a fixed size when space runs out.
 - Startup: the native tree takes the startup document's nodes instead of deep-cloning them (~11 ms and ~23 MB less for a 2,000-row list), and the first layout and text shaping run while the prewarmed D3D11 device finishes. First paint of a 2,000-row list on D3D11 drops from ~384 ms to ~349 ms.
 
 ## 0.4.0 — 2026-10-01
