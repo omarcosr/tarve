@@ -1156,7 +1156,7 @@ enum VirtualAnchorEdge {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ScrollbarAxis {
+pub(crate) enum ScrollbarAxis {
     Horizontal,
     Vertical,
 }
@@ -4683,7 +4683,9 @@ impl Tree {
             );
             target.pop_layer();
         }
-        if matches!(node.kind.as_str(), "scroll" | "textarea") && scroll_max > 0.0 {
+        // CSS `scrollbar-width`: `none` keeps the box scrollable without a bar.
+        let bar = scrollbar_width(&node);
+        if matches!(node.kind.as_str(), "scroll" | "textarea") && scroll_max > 0.0 && bar > 0.0 {
             let track = rect.height() - 12.0;
             let thumb = (track * rect.height() / (rect.height() + scroll_max)).max(28.0);
             let top = rect.y0 + 6.0 + (track - thumb) * scroll / scroll_max;
@@ -4691,10 +4693,16 @@ impl Tree {
                 Fill::NonZero,
                 transform,
                 color(visual_string(&node, "scrollbarColor", "#d4d4d8", state)),
-                &RoundedRect::new(rect.x1 - 7.0, top, rect.x1 - 3.0, top + thumb, 2.0),
+                &RoundedRect::new(
+                    rect.x1 - 3.0 - bar,
+                    top,
+                    rect.x1 - 3.0,
+                    top + thumb,
+                    bar / 2.0,
+                ),
             );
         }
-        if node.kind == "scroll" && scroll_max_x > 0.0 {
+        if node.kind == "scroll" && scroll_max_x > 0.0 && bar > 0.0 {
             let track = rect.width() - 12.0;
             let thumb = (track * rect.width() / (rect.width() + scroll_max_x))
                 .max(28.0)
@@ -4704,7 +4712,13 @@ impl Tree {
                 Fill::NonZero,
                 transform,
                 color(visual_string(&node, "scrollbarColor", "#d4d4d8", state)),
-                &RoundedRect::new(left, rect.y1 - 7.0, left + thumb, rect.y1 - 3.0, 2.0),
+                &RoundedRect::new(
+                    left,
+                    rect.y1 - 3.0 - bar,
+                    left + thumb,
+                    rect.y1 - 3.0,
+                    bar / 2.0,
+                ),
             );
         }
         if opacity_layer {
@@ -5916,11 +5930,12 @@ impl Tree {
         }
         vec![]
     }
-    fn scrollbar_at_pointer(&self) -> Option<(String, ScrollbarAxis, f64)> {
+    pub(crate) fn scrollbar_at_pointer(&self) -> Option<(String, ScrollbarAxis, f64)> {
         let id = self.hit_root(true)?;
         let entry = self.entries.get(&id)?;
         if !matches!(entry.node.kind.as_str(), "scroll" | "textarea")
             || (entry.scroll_max <= 0.0 && entry.scroll_max_x <= 0.0)
+            || scrollbar_width(&entry.node) <= 0.0
         {
             return None;
         }
@@ -8820,6 +8835,16 @@ pub(crate) fn clips_overflow(node: &Node) -> bool {
 /// CSS flex items: `flex` (a number is the shorthand `N 1 0`, a string any CSS
 /// `flex` value), `grow`, `shrink` and `basis`, with CSS's automatic minimum
 /// size. Set `minWidth: 0`/`minHeight: 0` to let an item shrink below its content.
+/// Thumb thickness for CSS `scrollbar-width`: auto 4px, thin 3px, none 0 (no bar,
+/// still scrollable by wheel, keys and touch).
+fn scrollbar_width(node: &Node) -> f64 {
+    match node.string("scrollbarWidth", "auto") {
+        "none" => 0.0,
+        "thin" => 3.0,
+        _ => 4.0,
+    }
+}
+
 fn apply_css_flex(node: &Node, style: &mut Style) {
     let shorthand = match &node.style["flex"] {
         serde_json::Value::Number(number) => number

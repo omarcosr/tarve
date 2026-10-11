@@ -7040,3 +7040,25 @@ fn font_variant_numeric_switches_digit_widths() {
         "proportional ones are narrower"
     );
 }
+
+#[test]
+fn scrollbar_width_none_hides_the_bar_but_keeps_scrolling() {
+    let grab = |width: &str| {
+        let tall = node("tall", "view", json!({"height":400,"shrink":0}), vec![]);
+        let mut scroll = node(
+            "s",
+            "scroll",
+            json!({"height":100,"width":100,"scrollbarWidth":width}),
+            vec![tall],
+        );
+        scroll.scroll_orientation = "vertical".into();
+        let mut tree = Tree::new(root(vec![scroll]));
+        tree.compute(300.0, 300.0).unwrap();
+        tree.scene(1.0);
+        assert!(tree.entries["s"].scroll_max > 0.0, "scrollable");
+        tree.mouse = (97.0, 50.0);
+        tree.scrollbar_at_pointer().is_some()
+    };
+    assert!(grab("auto"), "the default bar can be grabbed");
+    assert!(!grab("none"), "no bar to grab");
+}

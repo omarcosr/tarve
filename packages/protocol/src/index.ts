@@ -142,6 +142,8 @@ export interface Style extends StateStyle {
   fontStyle?: "normal" | "italic" | "oblique"; letterSpacing?: number; wordSpacing?: number;
   /** CSS `font-variant-numeric` (e.g. `"tabular-nums"`, `"slashed-zero"`) and `font-feature-settings` (`'"ss01" 1, "cv11" 1'`). Inherited. */
   fontVariantNumeric?: string; fontFeatureSettings?: string;
+  /** CSS `scrollbar-width` on scroll boxes and text areas: `none` hides the bar (still scrollable), `thin` narrows it. */
+  scrollbarWidth?: "auto" | "thin" | "none";
   textTransform?: "none" | "uppercase" | "lowercase" | "capitalize";
   whiteSpace?: "normal" | "nowrap" | "pre" | "pre-wrap" | "pre-line";
   textOverflow?: "clip" | "ellipsis"; lineClamp?: number;
