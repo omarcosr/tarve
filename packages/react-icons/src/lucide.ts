@@ -1,4 +1,4 @@
-import { REACT_FORWARD_REF, finiteNumber, reactSvgElementToTarve, record, type ComponentAdapter, type SvgAttributes, type SvgNode } from "./react-svg";
+import { REACT_FORWARD_REF, memoizeAdapter, finiteNumber, reactSvgElementToTarve, record, type ComponentAdapter, type SvgAttributes, type SvgNode } from "./react-svg";
 
 const SVG_ELEMENTS = new Set(["path", "circle", "ellipse", "g", "line", "polygon", "polyline", "rect"]);
 type LucideData = {
@@ -43,7 +43,7 @@ function lucideData(value: unknown): LucideData | undefined {
   };
 }
 
-export const lucideReactAdapter: ComponentAdapter = ({ type, props }) => {
+export const lucideReactAdapter: ComponentAdapter = memoizeAdapter(({ type, props }) => {
   const component = record(type);
   if (component?.$$typeof !== REACT_FORWARD_REF || typeof component.render !== "function") return undefined;
 
@@ -94,7 +94,7 @@ export const lucideReactAdapter: ComponentAdapter = ({ type, props }) => {
       })),
     },
   });
-};
+});
 
 function toReactLike(nodes: readonly SvgNode[]): unknown[] {
   return nodes.map(([tag, attrs, children]) => ({

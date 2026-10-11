@@ -161,8 +161,45 @@ export function reactSvgElementToTarve(value: unknown): TarveVNode | undefined {
   });
 }
 
+/**
+ * Remembers an adapter's result per component and props, so an icon drawn on
+ * every render (a sidebar, a toolbar, a list row) runs its React component and
+ * serializes its SVG once instead of on each update. Props other than strings,
+ * numbers and booleans (children, style objects, handlers) skip the cache.
+ */
+export function memoizeAdapter(adapter: ComponentAdapter, limit = 256): ComponentAdapter {
+  const cache = new WeakMap<object, Map<string, TarveVNode | undefined>>();
+  return input => {
+    const type = input.type;
+    if (type === null || (typeof type !== "object" && typeof type !== "function")) return adapter(input);
+    const key = propsKey(input.props);
+    if (key === undefined) return adapter(input);
+    let entries = cache.get(type);
+    if (!entries) cache.set(type, entries = new Map());
+    if (entries.has(key)) return entries.get(key);
+    const adapted = adapter(input);
+    if (entries.size >= limit) entries.delete(entries.keys().next().value!);
+    entries.set(key, adapted);
+    return adapted;
+  };
+}
+
+function propsKey(props: Readonly<Record<string, unknown>>): string | undefined {
+  let key = "";
+  // Unsorted: one call site always lists its props in the same order, and a
+  // different order only costs a second cache entry.
+  for (const name in props) {
+    const value = props[name];
+    if (value === undefined) continue;
+    const kind = typeof value;
+    if (kind !== "string" && kind !== "number" && kind !== "boolean") return undefined;
+    key += name + "\u0000" + kind[0] + String(value) + "\u0000";
+  }
+  return key;
+}
+
 /** Generic adapter for React icon components whose forwardRef renders a static <svg>. */
-export const reactSvgAdapter: ComponentAdapter = ({ type, props }) => {
+export const reactSvgAdapter: ComponentAdapter = memoizeAdapter(({ type, props }) => {
   const component = record(type);
   if (component?.$$typeof !== REACT_FORWARD_REF || typeof component.render !== "function") return undefined;
   try {
@@ -172,4 +209,4 @@ export const reactSvgAdapter: ComponentAdapter = ({ type, props }) => {
   } catch {
     return undefined;
   }
-};
+});

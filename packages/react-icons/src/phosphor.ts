@@ -1,8 +1,8 @@
-import { REACT_FORWARD_REF, finiteNumber, reactSvgElementToTarve, record, type ComponentAdapter } from "./react-svg";
+import { REACT_FORWARD_REF, memoizeAdapter, finiteNumber, reactSvgElementToTarve, record, type ComponentAdapter } from "./react-svg";
 
 const WEIGHTS = new Set(["thin", "light", "regular", "bold", "fill", "duotone"]);
 
-export const phosphorReactAdapter: ComponentAdapter = ({ type, props }) => {
+export const phosphorReactAdapter: ComponentAdapter = memoizeAdapter(({ type, props }) => {
   const component = record(type);
   if (component?.$$typeof !== REACT_FORWARD_REF || typeof component.render !== "function") return undefined;
 
@@ -36,4 +36,4 @@ export const phosphorReactAdapter: ComponentAdapter = ({ type, props }) => {
       children: [renderedProps.children, weightNode],
     },
   });
-};
+});
