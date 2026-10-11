@@ -49,11 +49,64 @@ test("forms submit named values on Enter and on a submit button, after required 
   expect(submitted).toEqual([{ email: "a@b.c", news: true }]);
 });
 
+test("a select shows its first option, keeps the choice and submits it with a textarea", () => {
+  const submitted: unknown[] = [];
+  const invalid: string[] = [];
+  const view = () => <Window>
+    <form onSubmit={values => submitted.push(values)} onInvalid={name => invalid.push(name)}>
+      <select id="plan" name="plan"><option value="free" disabled>Free</option><option value="pro">Pro</option><option value="team">Team</option></select>
+      <textarea id="note" name="note" required />
+      <button id="send">Send</button>
+    </form>
+  </Window>;
+  let tree = compileTree(view());
+  // The first enabled option, as in HTML.
+  expect(tree.nodes.get("plan-trigger")!.control).toMatchObject({ role: "select", label: "Pro" });
+  click(tree, "send");
+  expect(invalid).toEqual(["note"]);
+  tree = compileTree(view());
+  click(tree, "plan-trigger");
+  tree = compileTree(view());
+  click(tree, "plan-option-team");
+  tree = compileTree(view());
+  expect(tree.nodes.get("plan-trigger")!.control).toMatchObject({ label: "Team" });
+  tree.handlers.get("note")!.onChange!("Hello");
+  click(tree, "send");
+  expect(submitted).toEqual([{ plan: "team", note: "Hello" }]);
+});
+
 test("lists get markers and the user-agent 40px indent", () => {
   const tree = compileTree(<Window><ol id="steps" start={3}><li>a</li><li>b</li></ol><ul id="bullets"><li>x</li></ul></Window>);
   expect(tree.nodes.get("steps")!.style.padding).toEqual({ left: 40 });
   const texts = [...tree.nodes.values()].filter(node => node.kind === "text").map(node => node.text);
   expect(texts).toEqual(["3.", "a", "4.", "b", "•", "x"]);
+});
+
+test("phrasing elements in a list item flow into one line box", () => {
+  const tree = compileTree(<Window><ul><li id="item">Inline text with <strong>runs</strong> and <code>code</code></li></ul></Window>);
+  const texts = [...tree.nodes.values()].filter(node => node.kind === "text" && node.text?.includes("Inline"));
+  expect(texts.length).toBe(1);
+  expect(texts[0]!.text).toBe("Inline text with runs and code");
+  expect(texts[0]!.runs?.length).toBeGreaterThan(1);
+});
+
+test("a div with overflow auto scrolls, and CSS style names map to native ones", () => {
+  const tree = compileTree(<Window>
+    <div id="pane" style={{ overflow: "auto", height: 100 }}><p>Tall</p></div>
+    <div id="sideways" style={{ overflowX: "scroll" }}><p>Wide</p></div>
+    <div id="clipped" style={{ overflowY: "hidden" }} />
+    <div id="row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderRadius: 6 }} />
+    <img id="photo" src="a.png" width={10} height={10} style={{ objectFit: "cover" }} />
+    <label htmlFor="disk">Disk</label><meter id="disk" value={0.5} />
+    <label htmlFor="upload">Upload</label><progress id="upload" value={5} max={10} />
+  </Window>);
+  expect(tree.nodes.get("pane")!.kind).toBe("scroll");
+  expect(tree.nodes.get("pane")!.scrollOrientation).toBe("vertical");
+  expect(tree.nodes.get("sideways")!.scrollOrientation).toBe("horizontal");
+  expect(tree.nodes.get("clipped")!.kind).toBe("view");
+  expect(tree.nodes.get("clipped")!.style.overflow).toBe("hidden");
+  expect(tree.nodes.get("row")!.style).toMatchObject({ direction: "row", align: "center", justify: "between", radius: 6 });
+  expect(JSON.stringify(tree.nodes.get("photo"))).toContain('"cover"');
 });
 
 test("tables lay out as a grid of auto columns with bold headers", () => {

@@ -11,6 +11,7 @@ import { Input, TextArea } from "./components/input";
 import { Button } from "./components/button";
 import { Link } from "./components/link";
 import { Svg } from "./components/svg";
+import { Scroll } from "./components/scroll";
 import { Select } from "./select";
 import { Progress, Separator } from "./controls";
 import { Label } from "./form-controls";
@@ -20,7 +21,7 @@ import { openExternal } from "./bridge";
 import { compileInline, INLINE_TAG_NAMES, type InlineContext } from "./inline-text";
 import { expandCanvas } from "./canvas";
 import { expandAudio, mediaRequest, type MediaElementProps, type MediaRequest } from "./media-element";
-import { expandHtml, expandInput, formValues, HTML_ELEMENTS, HTML_INPUT_TYPES, type FormContext, type FormValue } from "./html-elements";
+import { expandHtml, expandInput, formValues, HTML_ELEMENTS, HTML_INPUT_TYPES, storedValue, storeValue, type FormContext, type FormValue } from "./html-elements";
 export interface Handlers { onClick?: () => void; onMarkdownLink?: (href: string) => void; onDiffToggleFile?: (path: string) => void; onDiffShowMore?: (hidden: number, path?: string) => void; onDiffLineClick?: (event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void; onHighlight?: (event: { matchCount: number }) => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onSubmit?: (value: string) => void; onPaste?: (payload: PastePayload) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number) => void; onScrollPosition?: (position: ScrollPosition) => void; onVirtualListLayout?: (items: VirtualListMeasurement[]) => void; onVirtualListScrollToItem?: (index: number, offset: number) => void; onVirtualListFocus?: (key: string | null) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void; onTransitionEnd?: (event: { property: MotionProperty }) => void; onDragStart?: (position: DragPosition) => void; onDragMove?: (event: DragMoveEvent) => void; onDragEnd?: (event: DragEndEvent) => void; onDragEnter?: (source: string) => void; onDragLeave?: (source: string) => void; onDrop?: (event: DropEvent) => void; onSize?: (size: { width: number; height: number }) => void; onPointerMove?: (point: { x: number; y: number }) => void; onPointerLeave?: () => void }
 /** Relative luminance (0–1) of `#rgb`/`#rrggbb`, or null for other colors. */
 function luminance(color: string): number | null {
@@ -261,7 +262,9 @@ export function compileTree(
     }
     if (!isNativeVNode && child.type === "img") {
       const props = child.props as Parameters<typeof Image>[0];
-      return visit(Image({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+      const objectFit = (props.style as { objectFit?: string } | undefined)?.objectFit;
+      const fit = props.fit ?? (objectFit === "scale-down" ? "contain" : objectFit) as typeof props.fit;
+      return visit(Image({ ...props, ...(fit ? { fit } : {}), style: canonicalizeIntrinsicStyle(props.style) }), path, group);
     }
     if (!isNativeVNode && child.type === "form") {
       const formProps = child.props as Record<string, any>;
@@ -298,6 +301,8 @@ export function compileTree(
       return visit(expandCanvas(child.props as Record<string, any>, path), path, group);
     }
     if (!isNativeVNode && typeof child.type === "string" && HTML_ELEMENTS.has(child.type)) {
+      // <meter> is labelable, as in HTML.
+      if (child.type === "meter" && child.props.id !== undefined) labelableTargets.set(String(child.props.id), String(child.props.id));
       return visit(expandHtml(child.type, child.props as Record<string, any>, path), path, group);
     }
     if (!isNativeVNode && child.type === "input" && HTML_INPUT_TYPES.has(String(child.props.type))) {
@@ -321,8 +326,21 @@ export function compileTree(
       }), path, group);
     }
     if (!isNativeVNode && child.type === "textarea") {
-      const props = child.props as Parameters<typeof TextArea>[0];
-      return visit(TextArea({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+      const props = child.props as Parameters<typeof TextArea>[0] & { name?: string; required?: boolean; defaultValue?: string };
+      // In a form a named textarea submits its text, like a text input.
+      const form = currentForm;
+      const name = props.name;
+      if (form && name) {
+        form.values.set(name, props.value ?? form.values.get(name) ?? props.defaultValue ?? "");
+        if (props.required) form.required.add(name);
+      }
+      const { name: _name, required: _required, defaultValue, ...rest } = props;
+      return visit(TextArea({
+        ...rest,
+        ...(rest.value === undefined && defaultValue !== undefined ? { value: defaultValue } : {}),
+        style: canonicalizeIntrinsicStyle(props.style),
+        onChange: value => { if (form && name) form.values.set(name, value); props.onChange?.(value); },
+      }), path, group);
     }
     if (!isNativeVNode && child.type === "button") {
       const { type, ...props } = child.props as Parameters<typeof Button>[0] & { type?: "submit" | "button" | "reset" };
@@ -359,7 +377,7 @@ export function compileTree(
       return visit(Label({ ...props, id: String(id), style: canonicalizeIntrinsicStyle(props.style) }), path, group);
     }
     if (!isNativeVNode && child.type === "select") {
-      const { children, onChange, onValueChange, ...rawProps } = child.props;
+      const { children, onChange, onValueChange, name, required, defaultValue, ...rawProps } = child.props;
       const id = String(rawProps.id ?? path);
       const optionNodes = Array.isArray(children) ? children.flat(Infinity) : [children];
       const options = optionNodes
@@ -377,14 +395,28 @@ export function compileTree(
         });
       labelableTargets.set(id, `${id}-trigger`);
       const props = rawProps as Omit<Parameters<typeof Select>[0], "options" | "id" | "onValueChange">;
+      // As in HTML, an uncontrolled select shows defaultValue or its first enabled
+      // option, keeps the user's choice, and submits it with its form under `name`.
+      const form = currentForm;
+      const key = `select:${id}`;
+      const value: string | undefined = props.value
+        ?? (form && name && form.values.has(name) ? String(form.values.get(name)) : undefined)
+        ?? storedValue<string | undefined>(key, defaultValue ?? options.find(option => !option.disabled)?.value);
+      if (form && name) {
+        form.values.set(name, value ?? "");
+        if (required) form.required.add(name);
+      }
       return visit(Select({
         ...props,
         id,
         options,
+        value,
         style: canonicalizeIntrinsicStyle(props.style),
-        onValueChange: (value) => {
-          onValueChange?.(value);
-          onChange?.(value);
+        onValueChange: (next) => {
+          storeValue(key, next);
+          if (form && name) form.values.set(name, next);
+          onValueChange?.(next);
+          onChange?.(next);
         },
       }), path, group);
     }
@@ -393,11 +425,33 @@ export function compileTree(
     }
     if (!isNativeVNode && child.type === "progress") {
       const props = child.props as Parameters<typeof Progress>[0];
-      return visit(Progress({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+      // <progress> is labelable, as in HTML.
+      if (props.id !== undefined) labelableTargets.set(String(props.id), String(props.id));
+      // Chrome's progress bar: its accent blue in a light grey, rounded track.
+      return visit(Progress({ ...props, style: { width: 160, height: 16, radius: 3, background: "#e6e6e6", foreground: "#0075ff", ...canonicalizeIntrinsicStyle(props.style) } }), path, group);
     }
     if (!isNativeVNode && child.type === "hr") {
       const props = child.props as Parameters<typeof Separator>[0];
       return visit(Separator({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
+    }
+    // `<div style={{ overflow: "auto" }}>` scrolls, as in CSS. `overflow` scrolls
+    // vertically (block content still wraps to the box's width, as text in a CSS
+    // block does); `overflowX` adds the horizontal axis.
+    if (!isNativeVNode && child.type === "div") {
+      const { style: divStyle, ...divProps } = child.props as Record<string, any>;
+      const { overflow, overflowX: explicitX, overflowY = overflow, ...rest } = (divStyle ?? {}) as Record<string, any>;
+      const scrolls = (value: unknown) => value === "auto" || value === "scroll";
+      const overflowX = explicitX ?? (scrolls(overflow) ? "visible" : overflow);
+      if (scrolls(overflowX) || scrolls(overflowY)) {
+        const shorthands: Record<string, unknown> = {};
+        for (const key of DIV_SHORTHANDS) if (divProps[key] !== undefined) { shorthands[key] = divProps[key]; delete divProps[key]; }
+        return visit(Scroll({ ...divProps, orientation: scrolls(overflowX) && scrolls(overflowY) ? "both" : scrolls(overflowX) ? "horizontal" : "vertical",
+          style: { ...shorthands, ...canonicalizeIntrinsicStyle(rest) } } as never), path, group);
+      }
+      // Other overflow values pass through; overflowX/overflowY collapse into overflow.
+      if (explicitX !== undefined || overflowY !== overflow) {
+        return visit(jsx("div", { ...child.props, style: { ...rest, overflow: (overflowX ?? "visible") === "visible" && (overflowY ?? "visible") === "visible" ? "visible" : "hidden" } }, child.key), path, group);
+      }
     }
     const isIntrinsicDiv = child.type === "div";
     const nativeType = isIntrinsicDiv ? "view" : child.type;
@@ -439,6 +493,8 @@ export function compileTree(
     const rawStyle = isIntrinsicDiv
       ? { ...divShorthands, ...canonicalizeIntrinsicStyle(p.style) }
       : { ...p.style };
+    // CSS: `display: flex` lays a div's children in a row unless flex-direction says otherwise.
+    if (isIntrinsicDiv && rawStyle.display === "flex" && rawStyle.direction === undefined) rawStyle.direction = "row";
     if ((interactiveKinds.has(nativeType) && p.focusable !== false) || control?.role === "otpSlot") {
       rawStyle.focusVisible = {
         outlineColor: theme.colors.ring,

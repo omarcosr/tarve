@@ -139,9 +139,11 @@ export function Separator({ orientation = "horizontal", style, ...props }: Separ
 export interface ProgressProps extends BaseProps { value: number; max?: number; label?: string }
 export function Progress({ value, max = 100, label, style, ...props }: ProgressProps): VNode {
   const ratio = Number.isFinite(value) && Number.isFinite(max) && max > 0 ? Math.max(0, Math.min(value / max, 1)) : 0;
+  // `foreground` colours the filled part (the theme's primary colour by default).
+  const { foreground, ...track } = (style ?? {}) as Record<string, unknown>;
   return jsx(View, { ...props, control: { role: "progress", label, value: ratio * max, min: 0, max },
-    style: { width: "100%", height: 8, radius: 4, background: c.secondary, ...style },
-    children: jsx(View, { style: { width: `${ratio * 100}%`, height: "100%", radius: 4, background: c.primary } }),
+    style: { width: "100%", height: 8, radius: 4, background: c.secondary, ...track },
+    children: jsx(View, { style: { width: `${ratio * 100}%`, height: "100%", radius: track.radius ?? 4, background: foreground ?? c.primary } }),
   });
 }
 

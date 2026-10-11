@@ -51,13 +51,24 @@ export type IntrinsicStateStyle = StateStyle & {
   backgroundColor?: string;
   color?: string;
 };
-export type IntrinsicStyle = Omit<Style, "hover" | "focus" | "focusVisible" | "active" | "disabled"> & {
+export type IntrinsicStyle = Omit<Style, "hover" | "focus" | "focusVisible" | "active" | "disabled" | "overflow"> & {
+  /** CSS `overflow`; on a `<div>`, `auto` or `scroll` makes it a scroll container. */
+  overflow?: Style["overflow"] | "auto" | "scroll";
+  overflowX?: Style["overflow"] | "auto" | "scroll";
+  overflowY?: Style["overflow"] | "auto" | "scroll";
   /** CSS-like alias for Tarve's native `direction`. */
   flexDirection?: Style["direction"];
   /** CSS-like alias for Tarve's native `background`. */
   backgroundColor?: string;
   /** CSS-like alias for Tarve's native `foreground`. */
   color?: string;
+  /** CSS-like alias for Tarve's native `radius`. */
+  borderRadius?: number;
+  /** CSS `align-items` and `justify-content` (Tarve's `align` and `justify`). */
+  alignItems?: "flex-start" | "start" | "center" | "flex-end" | "end" | "stretch";
+  justifyContent?: "flex-start" | "start" | "center" | "flex-end" | "end" | "space-between";
+  /** CSS `object-fit` on an `<img>` (its `fit` prop). */
+  objectFit?: "fill" | "contain" | "cover" | "none" | "scale-down";
   hover?: IntrinsicStateStyle;
   focus?: IntrinsicStateStyle;
   focusVisible?: IntrinsicStateStyle;
@@ -143,6 +154,11 @@ export interface IntrinsicInputProps extends Omit<BaseProps, "style" | "children
 }
 export interface IntrinsicTextareaProps extends Omit<BaseProps, "style" | "children"> {
   style?: IntrinsicStyle;
+  /** Form field name: `<form onSubmit>` receives the text keyed by it. */
+  name?: string;
+  required?: boolean;
+  /** Initial text of an uncontrolled textarea. */
+  defaultValue?: string;
   value?: string;
   placeholder?: string;
   disabled?: boolean;
@@ -223,6 +239,11 @@ export interface IntrinsicOptionProps {
 }
 export interface IntrinsicSelectProps extends Omit<BaseProps, "style"> {
   style?: IntrinsicStyle;
+  /** Form field name: `<form onSubmit>` receives the chosen value keyed by it. */
+  name?: string;
+  required?: boolean;
+  /** Initial choice of an uncontrolled select; without it, the first enabled option. */
+  defaultValue?: string;
   value?: string;
   placeholder?: string;
   disabled?: boolean;

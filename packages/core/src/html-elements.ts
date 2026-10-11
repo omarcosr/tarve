@@ -1,7 +1,9 @@
 import type { Child, VNode } from "./jsx-runtime";
+import { INLINE_TAG_NAMES } from "./inline-text";
 import { jsx } from "./jsx-runtime";
 import { Button } from "./components/button";
 import { Text } from "./components/text";
+import { Icon } from "./components/icon";
 import { Column, Row, View } from "./components/layout";
 import { Pressable } from "./components/pressable";
 import { Input } from "./components/input";
@@ -29,6 +31,11 @@ export function formValues(key: string): Map<string, FormValue> {
   if (!values) state.set(id, values = new Map());
   return values;
 }
+/** An uncontrolled element's value, kept across renders like the DOM keeps it. */
+export function storedValue<T>(key: string, initial: T): T {
+  return (state.has(key) ? state.get(key) : initial) as T;
+}
+export function storeValue(key: string, value: unknown): void { state.set(key, value); }
 /** Forgets uncontrolled HTML element state (tests and remounts). */
 export function resetHtmlState(): void { state.clear(); }
 
@@ -179,6 +186,31 @@ function childList(children: Child): Child[] {
 function isElement(child: Child, type: string): child is VNode {
   return typeof child === "object" && child != null && !Array.isArray(child) && (child as VNode).type === type;
 }
+function isInline(child: Child): boolean {
+  if (typeof child === "string" || typeof child === "number") return true;
+  return typeof child === "object" && child != null && !Array.isArray(child) && typeof (child as VNode).type === "string" && INLINE_TAG_NAMES.has((child as VNode).type as string);
+}
+/**
+ * A block's content as CSS lays it out: each run of text and phrasing elements
+ * (`strong`, `code`, `a`, …) becomes one line box, styled runs of a single text
+ * node, instead of one block per element; nested blocks stay as they are.
+ */
+function flow(children: Child): Child {
+  const items = childList(children);
+  if (!items.some(child => typeof child === "object") || items.every(child => !isInline(child))) return children;
+  const out: Child[] = [];
+  let run: Child[] = [];
+  const flush = () => {
+    if (run.length) out.push(run.length === 1 && typeof run[0] !== "object" ? run[0]! : Text({ children: run } as never));
+    run = [];
+  };
+  for (const child of items) {
+    if (isInline(child)) run.push(child);
+    else { flush(); out.push(child); }
+  }
+  flush();
+  return out;
+}
 function block(props: Record<string, any>, extra: Record<string, unknown>, children: Child, uaMargin?: { block: number; inline?: number }): VNode {
   return View({ ...(props.id ? { id: props.id } : {}), ...(uaMargin ? { uaMargin } : {}), style: { ...extra, ...canonicalizeIntrinsicStyle(props.style) }, children } as never);
 }
@@ -197,13 +229,25 @@ export function expandHtml(type: string, props: Record<string, any>, key: string
       const max = Number(props.max ?? 1);
       const value = Math.min(max, Math.max(min, Number(props.value ?? 0)));
       return Progress({ ...(props.id ? { id: props.id } : {}), value: value - min, max: max - min, label: props.ariaLabel ?? props.title ?? "Meter",
-        style: { width: 80, height: 16, ...canonicalizeIntrinsicStyle(props.style) } } as never);
+        // Chrome's meter: a green bar in a light grey, rounded track.
+        style: { width: 80, height: 16, radius: 3, background: "#e6e6e6", foreground: "#107c10", ...canonicalizeIntrinsicStyle(props.style) } } as never);
     }
-    case "fieldset":
-      return block(props, { direction: "column", gap: 4, padding: { top: 6, right: 12, bottom: 10, left: 12 }, margin: { left: 2, right: 2 }, borderWidth: 2, borderColor: "#c0c0c0" },
-        jsx(View, { control: { role: "group", label: textOf(childList(children).find(child => isElement(child, "legend"))) }, style: { direction: "column", gap: 4 }, children }));
+    case "fieldset": {
+      // As in browsers, the first <legend> sits on the top border, which stops
+      // either side of it; the 2px groove border reads as a light grey line.
+      const items = childList(children);
+      const legend = items.find(child => isElement(child, "legend")) as VNode | undefined;
+      const rest = items.filter(child => child !== legend);
+      const legendProps = legend?.props as Record<string, any> | undefined;
+      return block(props, { direction: "column", gap: 4, position: "relative", padding: { top: legend ? 10 : 6, right: 12, bottom: 10, left: 12 },
+        margin: { left: 2, right: 2, top: legend ? 9 : 0 }, borderWidth: 1, borderColor: "#b4b4b4" }, [
+        legend ? View({ ...(legendProps!.id ? { id: legendProps!.id } : {}), style: { position: "absolute", top: -10, left: 8, padding: { left: 2, right: 2 }, background: theme.colors.background,
+          ...canonicalizeIntrinsicStyle(legendProps!.style) }, children: Text({ children: legendProps!.children }) } as never) : null,
+        jsx(View, { control: { role: "group", label: textOf(legend) }, style: { direction: "column", gap: 4 }, children: rest }),
+      ]);
+    }
     case "legend":
-      return Text({ ...(props.id ? { id: props.id } : {}), weight: 600, style: canonicalizeIntrinsicStyle(props.style), children });
+      return Text({ ...(props.id ? { id: props.id } : {}), style: canonicalizeIntrinsicStyle(props.style), children });
     case "ul":
     case "ol": {
       const items = childList(children);
@@ -214,18 +258,18 @@ export function expandHtml(type: string, props: Record<string, any>, key: string
         const itemProps = item.props as Record<string, any>;
         return Row({ key: itemProps.id ?? index, align: "start", style: { width: "100%" }, children: [
           View({ style: { position: "absolute", left: -40, width: 34, align: "end" }, children: Text({ children: marker }) }),
-          View({ ...(itemProps.id ? { id: itemProps.id } : {}), style: { flex: 1, direction: "column", ...canonicalizeIntrinsicStyle(itemProps.style) }, children: itemProps.children }),
+          View({ ...(itemProps.id ? { id: itemProps.id } : {}), style: { flex: 1, direction: "column", ...canonicalizeIntrinsicStyle(itemProps.style) }, children: flow(itemProps.children) }),
         ] } as never);
       }), { block: 1 });
     }
     case "li":
-      return block(props, { direction: "column" }, children);
+      return block(props, { direction: "column" }, flow(children));
     case "dl":
       return block(props, { direction: "column" }, children, { block: 1 });
     case "dt":
-      return block(props, { direction: "column" }, children);
+      return block(props, { direction: "column" }, flow(children));
     case "dd":
-      return block(props, { direction: "column", padding: { left: 40 } }, children);
+      return block(props, { direction: "column", padding: { left: 40 } }, flow(children));
     case "details": {
       const id = String(props.id ?? key);
       const open = uncontrolled<boolean>(id, props.open, false);
@@ -236,7 +280,7 @@ export function expandHtml(type: string, props: Record<string, any>, key: string
       return block({ ...props, id }, { direction: "column" }, [
         Pressable({ id: `${id}-summary`, control: { role: "button", label: textOf(summary) || "Details", expanded: open } as never, onClick: toggle,
           style: { direction: "row", gap: 6, align: "center", radius: 0 }, children: [
-            Text({ children: open ? "▾" : "▸" }),
+            Icon({ name: open ? "chevron-down" : "chevron-right", size: 12 } as never),
             ...(summary ? childList((summary.props as Record<string, any>).children).map(child => typeof child === "string" ? Text({ children: child }) : child) : [Text({ children: "Details" })]),
           ] }),
         ...(open ? rest : []),
@@ -305,5 +349,10 @@ function expandTable(props: Record<string, any>, key: string): VNode {
   }));
   const grid = View({ id, control: { role: "grid", label: textOf(caption) || "Table" } as never,
     style: { display: "grid", columns: `repeat(${columns}, auto)`, gap: 2, padding: 2, justify: "start", ...canonicalizeIntrinsicStyle(props.style) }, children: cells } as never);
-  return caption ? Column({ align: "start", children: [Text({ style: { textAlign: "center" }, children: (caption.props as Record<string, any>).children }), grid] } as never) : grid;
+  // The caption is centred over the table's own width, as in CSS.
+  // A table is as wide as its content (CSS display: table), not its container's
+  // width as a block would be; a caption is centred over it.
+  return Column({ align: "start", children: [caption
+    ? View({ style: { display: "grid", columns: "auto", justify: "start" }, children: [Text({ style: { textAlign: "center", width: "100%" }, children: (caption.props as Record<string, any>).children }), grid] } as never)
+    : grid] } as never);
 }
