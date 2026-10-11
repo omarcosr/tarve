@@ -412,8 +412,10 @@ pub struct AppIdentity {
     pub icon: Option<String>,
 }
 
+// Media controls exist on Windows only; elsewhere the session is parsed and ignored.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub struct SystemMediaSession {
     pub title: String,
     pub artist: Option<String>,
@@ -471,6 +473,7 @@ pub enum Command {
         session: Option<SystemMediaSession>,
     },
     #[serde(skip)]
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     SystemMediaEvent {
         action: String,
         time: Option<f64>,
