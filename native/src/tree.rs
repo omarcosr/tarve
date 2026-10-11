@@ -1532,6 +1532,8 @@ pub struct Tree {
     pending_layout_events: Vec<Value>,
     /// Last inner size sent for each node with `reportSize`.
     reported_sizes: HashMap<String, (f64, f64)>,
+    /// Last `pointerMove` sent: node and position.
+    last_pointer_report: Option<(String, f64, f64)>,
     pending_interaction_events: Vec<Value>,
     pending_motion_events: Vec<Value>,
     motion_time_ms: f64,
@@ -1805,6 +1807,7 @@ impl Tree {
             virtual_measurements: HashMap::default(),
             pending_layout_events: Vec::new(),
             reported_sizes: HashMap::default(),
+            last_pointer_report: None,
             pending_interaction_events: Vec::new(),
             pending_motion_events: Vec::new(),
             motion_time_ms: 0.0,
@@ -5612,6 +5615,7 @@ impl Tree {
             self.dirty.paint = true;
         }
         self.refresh_hover_chain();
+        events.extend(self.report_pointer());
         if let Some(drag_events) = self.pointer_drag_move() {
             events.extend(drag_events);
             return events;
@@ -5629,15 +5633,47 @@ impl Tree {
         }
         events
     }
+    /// `pointerMove` for the innermost node under the pointer that asked for it
+    /// (`onPointerMove`), in that node's own coordinates, like DOM `offsetX`.
+    fn report_pointer(&mut self) -> Vec<Value> {
+        let target = self.hover_path().into_iter().rev().find(|id| {
+            self.entries
+                .get(id)
+                .is_some_and(|entry| entry.node.report_pointer)
+        });
+        let mut events = vec![];
+        if let Some((previous, ..)) = &self.last_pointer_report
+            && target.as_ref() != Some(previous)
+        {
+            events.push(json!({"type":"pointerLeave", "id":previous}));
+            self.last_pointer_report = None;
+        }
+        let Some(id) = target else {
+            return events;
+        };
+        let entry = &self.entries[&id];
+        let offset = self.ancestor_scroll_offset(&id);
+        let x = ((self.mouse.0 - (entry.rect.x0 - offset.x)) * 10.0).round() / 10.0;
+        let y = ((self.mouse.1 - (entry.rect.y0 - offset.y)) * 10.0).round() / 10.0;
+        if self.last_pointer_report.as_ref() == Some(&(id.clone(), x, y)) {
+            return events;
+        }
+        self.last_pointer_report = Some((id.clone(), x, y));
+        events.push(json!({"type":"pointerMove", "id":id, "x":x, "y":y}));
+        events
+    }
     pub fn pointer_leave(&mut self) -> Vec<Value> {
+        let mut events = vec![];
+        if let Some((id, ..)) = self.last_pointer_report.take() {
+            events.push(json!({"type":"pointerLeave", "id":id}));
+        }
         self.mouse = (-1.0, -1.0);
         self.refresh_hover_chain();
         if let Some(id) = self.hovered.take() {
             self.dirty.paint = true;
-            vec![json!({"type":"hover", "id":id, "entered":false})]
-        } else {
-            vec![]
+            events.push(json!({"type":"hover", "id":id, "entered":false}));
         }
+        events
     }
     pub fn blur(&mut self) -> Option<String> {
         self.vertical_goal = None;

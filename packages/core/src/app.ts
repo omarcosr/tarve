@@ -697,6 +697,14 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         handled = true;
         succeeded = invokeHandler("size", event.id, handlers.onSize as (...args: never[]) => void, { width: event.width, height: event.height } as never) && succeeded;
       }
+      if (event.type === "pointerMove" && handlers?.onPointerMove) {
+        handled = true;
+        succeeded = invokeHandler("pointerMove", event.id, handlers.onPointerMove as (...args: never[]) => void, { x: event.x, y: event.y } as never) && succeeded;
+      }
+      if (event.type === "pointerLeave" && handlers?.onPointerLeave) {
+        handled = true;
+        succeeded = invokeHandler("pointerLeave", event.id, handlers.onPointerLeave as (...args: never[]) => void) && succeeded;
+      }
       if (event.type === "virtualListScrollToItem" && handlers?.onVirtualListScrollToItem) {
         handled = true;
         succeeded = invokeHandler(

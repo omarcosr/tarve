@@ -135,6 +135,14 @@ export class Locator {
     this.renderer.app.debug({ type: "input", action: "up" });
   }
 
+  /** Moves the pointer over the node: its centre, or `offset` from its top-left corner. */
+  async hover(offset?: Point): Promise<void> {
+    const node = await this.node();
+    const point = offset ? { x: node.x + offset.x, y: node.y + offset.y } : center(node);
+    if (![point.x, point.y].every(Number.isFinite)) throw new RangeError("hover coordinates must be finite");
+    this.renderer.app.debug({ type: "input", action: "move", ...point });
+  }
+
   async fill(value: string): Promise<void> {
     if (typeof value !== "string") throw new TypeError("fill value must be a string");
     const node = await this.node();

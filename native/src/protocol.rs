@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 55;
+pub const VERSION: u32 = 56;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -213,6 +213,10 @@ pub struct Node {
     /// Emit a `size` event with the inner (padding box minus padding) size whenever it changes.
     #[serde(default)]
     pub report_size: bool,
+    /// Emit `pointerMove` events with the pointer's position inside this node
+    /// while it is over the node or anything in it.
+    #[serde(default)]
+    pub report_pointer: bool,
     #[serde(default)]
     pub window_action: String,
     #[serde(default)]

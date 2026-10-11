@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 55;
+export const PROTOCOL_VERSION = 56;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
@@ -235,6 +235,8 @@ export interface NativeNode {
   dropTarget?: boolean;
   /** Native sends a `size` event with the content-box size on first layout and on every change. */
   reportSize?: boolean;
+  /** Native sends `pointerMove` events with the pointer's position inside the node while it is over it. */
+  reportPointer?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "close";
   /** Optional initial numeric values used only when the native node is first mounted. */
   motionFrom?: MotionValues;
@@ -333,6 +335,8 @@ export type NativeEvent =
   | { type: "scroll"; id: string; offset: number; max: number; offsetX?: number; offsetY?: number; maxX?: number; maxY?: number }
   | { type: "virtualListLayout"; id: string; items: VirtualListMeasurement[] }
   | { type: "size"; id: string; width: number; height: number }
+  | { type: "pointerMove"; id: string; x: number; y: number }
+  | { type: "pointerLeave"; id: string }
   | { type: "virtualListScrollToItem"; id: string; index: number; offset: number }
   | { type: "virtualListFocus"; id: string; key: string | null }
   | { type: "markdownLink"; id: string; href: string }

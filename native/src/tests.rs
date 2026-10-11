@@ -7062,3 +7062,42 @@ fn scrollbar_width_none_hides_the_bar_but_keeps_scrolling() {
     assert!(grab("auto"), "the default bar can be grabbed");
     assert!(!grab("none"), "no bar to grab");
 }
+
+#[test]
+fn pointer_move_reports_local_position_to_the_innermost_listener() {
+    let dot = node("dot", "view", json!({"width":20,"height":20}), vec![]);
+    let mut chart = node(
+        "chart",
+        "view",
+        json!({"width":200,"height":50,"margin":{"left":30,"top":10}}),
+        vec![dot],
+    );
+    chart.report_pointer = true;
+    let mut tree = Tree::new(root(vec![chart]));
+    tree.compute(300.0, 200.0).unwrap();
+    let events = tree.pointer_move(45.0, 22.0);
+    let moved: Vec<_> = events
+        .iter()
+        .filter(|e| e["type"] == "pointerMove")
+        .collect();
+    assert_eq!(moved.len(), 1, "{events:?}");
+    assert_eq!(moved[0]["id"], "chart");
+    assert_eq!(moved[0]["x"], 15.0);
+    assert_eq!(moved[0]["y"], 12.0);
+    assert!(
+        tree.pointer_move(45.0, 22.0)
+            .iter()
+            .all(|e| e["type"] != "pointerMove"),
+        "unchanged position is not resent"
+    );
+    let left = tree.pointer_move(280.0, 150.0);
+    assert!(
+        left.iter().all(|e| e["type"] != "pointerMove"),
+        "outside the node"
+    );
+    assert!(
+        left.iter()
+            .any(|e| e["type"] == "pointerLeave" && e["id"] == "chart"),
+        "{left:?}"
+    );
+}
