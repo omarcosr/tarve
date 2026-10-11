@@ -230,6 +230,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         ));
         overlayCompiled = true;
         overlay.document.window = shownWindow;
+        if (options.closeBehavior === "hide") overlay.document.root.closeIntercept = true;
         return overlay;
       } catch (overlayError) {
         devOverlayBroken = true;
@@ -241,6 +242,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       currentView(), options.debug, renderer, options.componentAdapters, scope, !options.headless,
     ));
     appWindow = tree.document.window;
+    if (options.closeBehavior === "hide") tree.document.root.closeIntercept = true;
     if (options.msaa !== undefined) tree.document.msaa = options.msaa;
     if (options.memoryTrimDelay !== undefined) tree.document.memoryTrimDelay = options.memoryTrimDelay === false ? -1 : options.memoryTrimDelay;
     return tree;

@@ -275,7 +275,8 @@ describe("controlled native reconciliation", () => {
 
   test("tray, notifications and window visibility round-trip through the bridge", async () => {
     const bridge = new FakeBridge();
-    const app = createApp(() => <Window />, { bridge, closeBehavior: "hide" });
+    const app = createApp(() => <Window><TitleBar /></Window>, { bridge, closeBehavior: "hide" });
+    expect(bridge.document?.root.closeIntercept).toBe(true);
     await app.ready;
     const seen: string[] = [];
     const tray = app.tray({
