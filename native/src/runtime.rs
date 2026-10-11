@@ -1144,6 +1144,28 @@ impl App {
             self.events.push(event);
         }
     }
+    /// A hidden window (headless apps and tests) gets no redraws from the OS,
+    /// so its layout, and the `size` and virtual-list events layout sends,
+    /// would wait for the next capture. Lay it out as soon as the tree changes.
+    fn layout_hidden_window(&mut self) {
+        let Some(window) = self.window.as_ref() else {
+            return;
+        };
+        if window.is_visible() != Some(false) {
+            return;
+        }
+        let size = window.inner_size().to_logical::<f32>(window.scale_factor());
+        if size.width <= 0.0 || size.height <= 0.0 {
+            return;
+        }
+        if let Err(message) = self.tree.compute(size.width, size.height) {
+            self.events
+                .push(error(format!("Layout update failed: {message}")));
+            return;
+        }
+        let layout_events = self.tree.take_layout_events();
+        self.emit(layout_events);
+    }
     fn redraw(&self) {
         if (self.tree.dirty.paint || self.tree.dirty.layout || self.tree.dirty.text)
             && let Some(window) = &self.window
@@ -2165,6 +2187,7 @@ impl ApplicationHandler<Command> for App {
         self.emit(interaction_events);
         if accessibility_changed {
             self.sync_accessibility();
+            self.layout_hidden_window();
         }
         self.sync_cursor();
         self.redraw();
@@ -2492,6 +2515,7 @@ impl ApplicationHandler<Command> for App {
         self.emit(events);
         if accessibility_changed {
             self.sync_accessibility();
+            self.layout_hidden_window();
         }
         self.sync_cursor();
         self.redraw();
