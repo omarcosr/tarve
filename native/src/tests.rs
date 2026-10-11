@@ -6982,3 +6982,33 @@ fn translucent_window_border_blends_over_the_background_for_dwm() {
     assert_eq!(opaque_border_rgb("#27272a", "#000000"), 0x27272a);
     assert_eq!(opaque_border_rgb("red", "#000000"), 0xe4e4e7);
 }
+
+/// A column of auto height whose child grows from a zero basis (`flex: 1`) is
+/// as tall as its content, as in Chromium (143px here), also when its row sits
+/// in a sized parent (fixed in vendor/taffy).
+#[test]
+fn flex_one_child_counts_toward_an_auto_height_column() {
+    let leaf = node("leaf", "view", json!({"width":50,"height":87}), vec![]);
+    let body = node(
+        "body",
+        "row",
+        json!({"direction":"row","flex":1}),
+        vec![leaf],
+    );
+    let head = node("head", "view", json!({"height":22}), vec![]);
+    let card = node(
+        "card",
+        "column",
+        json!({"direction":"column","flex":1,"gap":10,"padding":12}),
+        vec![head, body],
+    );
+    let row = node(
+        "row",
+        "row",
+        json!({"direction":"row","align":"center","minHeight":190}),
+        vec![card],
+    );
+    let mut tree = Tree::new(node("root", "window", json!({}), vec![row]));
+    tree.compute(780.0, 600.0).unwrap();
+    assert_eq!(tree.entries["card"].rect.height().round(), 143.0);
+}

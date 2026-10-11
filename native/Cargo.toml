@@ -73,6 +73,9 @@ notify-rust = { version = "=4.18.1", default-features = false, features = ["z"] 
 # UIA_IsDataValidForFormPropertyId, so keep the Windows provider patch local.
 [patch.crates-io]
 accesskit_windows = { path = "vendor/accesskit_windows" }
+# Taffy 0.14 with one fix: an auto-sized flex container counts its items' automatic
+# minimum size (see vendor/taffy/src/compute/flexbox.rs, "Tarve patch").
+taffy = { path = "vendor/taffy" }
 
 [profile.dev]
 opt-level = 1
