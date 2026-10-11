@@ -24,7 +24,7 @@ const INLINE_TAGS: Record<string, Record<string, unknown>> = {
 };
 export const INLINE_TAG_NAMES = new Set([...Object.keys(INLINE_TAGS), "br"]);
 
-const RUN_KEYS = ["fontWeight", "fontStyle", "fontSize", "fontFamily", "foreground", "background", "textDecoration", "letterSpacing", "wordSpacing", "textTransform", "baselineShift", "textDecorationStyle"] as const;
+const RUN_KEYS = ["fontWeight", "fontStyle", "fontSize", "fontFamily", "foreground", "background", "textDecoration", "letterSpacing", "wordSpacing", "fontVariantNumeric", "fontFeatureSettings", "textTransform", "baselineShift", "textDecorationStyle"] as const;
 type RunStyle = Record<string, unknown>;
 type Piece = { text: string; style: RunStyle; id?: string; transform?: string } | { br: true };
 

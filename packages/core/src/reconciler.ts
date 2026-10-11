@@ -71,7 +71,7 @@ function textContent(value: Child): string {
  * theme font is the initial value at the root; Code, Diff and `<code>` set
  * monospace explicitly, like the user-agent style sheet.
  */
-const INHERITED_FONT = ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "fontSize", "fontWeight", "lineHeight", "foreground", "textAlign", "textTransform", "whiteSpace"] as const;
+const INHERITED_FONT = ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "fontVariantNumeric", "fontFeatureSettings", "fontSize", "fontWeight", "lineHeight", "foreground", "textAlign", "textTransform", "whiteSpace"] as const;
 /** Kinds whose text takes every inherited value; controls keep their own size, weight and colour. */
 const INHERITING_TEXT = new Set(["text", "markdown"]);
 const TEXT_KINDS = new Set(["text", "button", "input", "textarea", "markdown", "code", "diff"]);

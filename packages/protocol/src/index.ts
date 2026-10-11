@@ -140,6 +140,8 @@ export interface Style extends StateStyle {
   spin?: number;
   /** CSS text: `font-style`, `letter-spacing`, `word-spacing`, `text-transform`, `white-space`, `text-overflow` and `line-clamp`. */
   fontStyle?: "normal" | "italic" | "oblique"; letterSpacing?: number; wordSpacing?: number;
+  /** CSS `font-variant-numeric` (e.g. `"tabular-nums"`, `"slashed-zero"`) and `font-feature-settings` (`'"ss01" 1, "cv11" 1'`). Inherited. */
+  fontVariantNumeric?: string; fontFeatureSettings?: string;
   textTransform?: "none" | "uppercase" | "lowercase" | "capitalize";
   whiteSpace?: "normal" | "nowrap" | "pre" | "pre-wrap" | "pre-line";
   textOverflow?: "clip" | "ellipsis"; lineClamp?: number;

@@ -425,6 +425,8 @@ pub const TEXT_KEYS: &[&str] = &[
     "fontStyle",
     "letterSpacing",
     "wordSpacing",
+    "fontVariantNumeric",
+    "fontFeatureSettings",
     "whiteSpace",
     "textOverflow",
     "textDecorationStyle",
@@ -490,6 +492,39 @@ fn optical_size(size: f32) -> StyleProperty<'static, TextBrush> {
     )))
 }
 
+/// CSS `font-variant-numeric` and `font-feature-settings` as OpenType features
+/// (`tabular-nums` → `"tnum" 1`), or None when neither asks for any.
+pub(crate) fn font_features(style: &Value) -> Option<String> {
+    let mut features: Vec<String> = vec![];
+    if let Some(numeric) = style["fontVariantNumeric"].as_str() {
+        for token in numeric.split_whitespace() {
+            let tag = match token {
+                "tabular-nums" => "tnum",
+                "proportional-nums" => "pnum",
+                "lining-nums" => "lnum",
+                "oldstyle-nums" => "onum",
+                "slashed-zero" => "zero",
+                "diagonal-fractions" => "frac",
+                "stacked-fractions" => "afrc",
+                "ordinal" => "ordn",
+                _ => continue,
+            };
+            features.push(format!("\"{tag}\" 1"));
+        }
+    }
+    if let Some(settings) = style["fontFeatureSettings"].as_str()
+        && settings.trim() != "normal"
+    {
+        features.extend(
+            settings
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+        );
+    }
+    (!features.is_empty()).then(|| features.join(", "))
+}
+
 fn push_text_style(
     builder: &mut parley::RangedBuilder<'_, TextBrush>,
     style: &Value,
@@ -543,6 +578,14 @@ fn push_text_style(
     }
     if let Some(spacing) = style["wordSpacing"].as_f64() {
         builder.push(StyleProperty::WordSpacing(spacing as f32), range.clone());
+    }
+    if let Some(features) = font_features(style) {
+        builder.push(
+            StyleProperty::FontFeatures(parley::FontFeatures::Source(std::borrow::Cow::Owned(
+                features,
+            ))),
+            range.clone(),
+        );
     }
     if let Some(value) = style["textDecoration"].as_str() {
         builder.push(
@@ -1240,6 +1283,11 @@ impl TextEngine {
         }
         if let Some(spacing) = node.style["wordSpacing"].as_f64() {
             builder.push_default(StyleProperty::WordSpacing(spacing as f32));
+        }
+        if let Some(features) = font_features(&node.style) {
+            builder.push_default(StyleProperty::FontFeatures(parley::FontFeatures::Source(
+                std::borrow::Cow::Owned(features),
+            )));
         }
         if let Some(rich) = &node.rich
             && let RichContent::Text { spans, .. } = rich.as_ref()

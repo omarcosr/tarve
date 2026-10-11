@@ -7012,3 +7012,31 @@ fn flex_one_child_counts_toward_an_auto_height_column() {
     tree.compute(780.0, 600.0).unwrap();
     assert_eq!(tree.entries["card"].rect.height().round(), 143.0);
 }
+
+#[test]
+fn font_variant_numeric_switches_digit_widths() {
+    crate::text::app_fonts::register(
+        include_bytes!("../../packages/headless/fonts/InterVariable.ttf").to_vec(),
+    );
+    let width = |text: &str, numeric: &str| {
+        let n = node(
+            "t",
+            "text",
+            json!({"fontFamily":"Inter Variable","fontSize":20,"fontVariantNumeric":numeric}),
+            vec![],
+        );
+        let mut n = n;
+        n.text = text.into();
+        let mut tree = Tree::new(node("root", "window", json!({}), vec![n]));
+        tree.compute(800.0, 200.0).unwrap();
+        tree.text.measure("t", None).0
+    };
+    assert!(
+        (width("1111", "tabular-nums") - width("0000", "tabular-nums")).abs() < 0.01,
+        "tabular digits share one advance"
+    );
+    assert!(
+        (width("1111", "proportional-nums") - width("0000", "proportional-nums")).abs() > 1.0,
+        "proportional ones are narrower"
+    );
+}
