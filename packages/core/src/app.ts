@@ -1,5 +1,6 @@
-import type { FileDialogOptions, NativeEvent, NativeCommand, NativeNode, NativeTrayMenuItem, Renderer, Snapshot } from "../../protocol/src/index";
+import type { FileDialogOptions, NativeEvent, NativeCommand, NativeNode, NativeTrayMenuItem, NativeSystemMediaSession, Renderer, Snapshot } from "../../protocol/src/index";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { applyMediaEvent, type MediaController, type MediaRequest } from "./media-element";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
 import { compileTree, diffTreeMutations, type CompiledTree, type Handlers, invalidateMemos } from "./reconciler";
@@ -61,6 +62,15 @@ export interface AppOptions {
    * does. `TARVE_TRIM` (ms, or 0 to disable) overrides it.
    */
   memoryTrimDelay?: number | false;
+  /**
+   * Windows app identity (AppUserModelID). Without it, media controls and notifications show
+   * the host executable (bun.exe, node.exe) or "Unknown app". `icon` is an .ico/.png path.
+   */
+  appIdentity?: { id: string; name: string; icon?: string };
+}
+
+export interface SystemMediaSession extends NativeSystemMediaSession {
+  onAction?: (action: "play" | "pause" | "next" | "previous" | "seek", time?: number) => void;
 }
 
 export type TrayMenuItem =
@@ -110,6 +120,7 @@ export interface AppHandle {
   minimize(): void;
   /** Shows a system tray icon (Windows). A second call replaces the first tray. */
   tray(options: TrayOptions): TrayHandle;
+  systemMedia(session: SystemMediaSession | null): void;
   /** Shows a system notification from the tray icon; requires an active tray. */
   notify(options: NotifyOptions): void;
   /** HTMLMediaElement methods for an `<audio>` element by id. */
@@ -243,6 +254,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     ));
     appWindow = tree.document.window;
     if (options.closeBehavior === "hide") tree.document.root.closeIntercept = true;
+    if (options.appIdentity) tree.document.appIdentity = { ...options.appIdentity, ...(options.appIdentity.icon ? { icon: resolve(options.appIdentity.icon) } : {}) };
     if (options.msaa !== undefined) tree.document.msaa = options.msaa;
     if (options.memoryTrimDelay !== undefined) tree.document.memoryTrimDelay = options.memoryTrimDelay === false ? -1 : options.memoryTrimDelay;
     return tree;
@@ -607,6 +619,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (ran) update();
     }
 
+    if (!ended && event.type === "systemMedia" && systemMediaAction) {
+      try { systemMediaAction(event.action, event.time); } catch (error) { reportError(error, { source: "event-handler", event: `systemMedia:${event.action}` }); }
+    }
+
     if (!ended && event.type === "media") {
       const handler = applyMediaEvent(event, committed?.media?.get(event.id));
       if (handler) {
@@ -750,6 +766,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
   }
 
+  let systemMediaAction: SystemMediaSession["onAction"];
   let trayOwner: object | undefined;
   let trayOptions: TrayOptions | undefined;
   let notificationClick: (() => void) | undefined;
@@ -879,6 +896,16 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
           if (!ended) sendPublic({ type: "tray", tray: null });
         },
       };
+    },
+    systemMedia(session: SystemMediaSession | null): void {
+      if (session) {
+        const { onAction, ...nativeSession } = session;
+        systemMediaAction = onAction;
+        if (!ended) sendPublic({ type: "systemMedia", session: nativeSession });
+      } else {
+        systemMediaAction = undefined;
+        if (!ended) sendPublic({ type: "systemMedia", session: null });
+      }
     },
     notify({ title, body = "", onClick }: NotifyOptions): void {
       if (!title) throw new TypeError("notify requires a title");

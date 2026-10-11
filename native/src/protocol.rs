@@ -356,6 +356,10 @@ pub struct Document {
     /// trimmed (Windows); negative turns it off. Default 3000.
     #[serde(default, rename = "memoryTrimDelay")]
     pub memory_trim_delay: Option<f64>,
+    /// Windows AppUserModelID identity for media controls and notifications.
+    #[serde(default, rename = "appIdentity")]
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub app_identity: Option<AppIdentity>,
     pub window: WindowOptions,
     pub root: Node,
 }
@@ -399,6 +403,33 @@ pub struct TrayOptions {
     pub menu: Vec<TrayMenuItem>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub struct AppIdentity {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub icon: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemMediaSession {
+    pub title: String,
+    pub artist: Option<String>,
+    pub album: Option<String>,
+    pub artwork: Option<String>,
+    pub playing: bool,
+    pub duration: Option<f64>,
+    pub position: Option<f64>,
+    #[serde(default)]
+    pub can_seek: bool,
+    #[serde(default)]
+    pub can_next: bool,
+    #[serde(default)]
+    pub can_previous: bool,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrayMenuItem {
@@ -435,6 +466,14 @@ pub enum Command {
     },
     Tray {
         tray: Option<TrayOptions>,
+    },
+    SystemMedia {
+        session: Option<SystemMediaSession>,
+    },
+    #[serde(skip)]
+    SystemMediaEvent {
+        action: String,
+        time: Option<f64>,
     },
     Notify {
         title: String,

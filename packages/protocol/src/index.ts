@@ -262,6 +262,8 @@ export interface SceneDocument {
   memoryTrimDelay?: number;
   /** App font files as base64 (CSS `@font-face`), usable by their family name. */
   fonts?: string[];
+  /** Windows app identity (AppUserModelID): names the app in media controls and notifications. */
+  appIdentity?: { id: string; name: string; icon?: string };
 }
 export type TreeMutation =
   | { type: "create"; node: NativeNode }
@@ -289,6 +291,7 @@ export type NativeCommand =
   | { type: "cancelCloseRequest" }
   | { type: "window"; action: WindowAction }
   | { type: "tray"; tray: NativeTrayOptions | null }
+  | { type: "systemMedia"; session: NativeSystemMediaSession | null }
   | { type: "notify"; title: string; body: string }
   | { type: "media"; id: string; action: "load" | "unload" | "play" | "pause" | "seek" | "set"; src?: string; time?: number; volume?: number; muted?: boolean; loop?: boolean }
   | { type: "frameOverlay"; enabled: boolean }
@@ -321,6 +324,7 @@ export type NativeEvent =
   | { type: "ready" | "closed" }
   | { type: "closeRequest" }
   | { type: "tray"; action: "click" | "doubleClick" }
+  | { type: "systemMedia"; action: "play" | "pause" | "next" | "previous" | "seek"; time?: number }
   | { type: "trayMenu"; id: string }
   | { type: "notificationClick" }
   | { type: "media"; id: string; event: "loadedmetadata" | "play" | "pause" | "timeupdate" | "seeked" | "ended" | "error"; time?: number; duration?: number | null; paused?: boolean; message?: string }
@@ -359,3 +363,4 @@ export type NativeEvent =
   | { type: "motionAdvanced"; requestId: string; milliseconds: number; activeMotions: number; error?: string }
   | { type: "fileDialog"; requestId: string; paths: string[]; error?: string }
   | { type: "frame"; frames: number };
+export interface NativeSystemMediaSession { title: string; artist?: string; album?: string; artwork?: string; playing: boolean; duration?: number; position?: number; canSeek?: boolean; canNext?: boolean; canPrevious?: boolean; }

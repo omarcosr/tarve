@@ -596,6 +596,12 @@ pub fn run(
     events: Arc<Events>,
     ready: SyncSender<Result<EventLoopProxy<Command>, String>>,
 ) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    if let Some(identity) = document.app_identity.as_ref()
+        && let Err(message) = crate::smtc::register_app_identity(identity)
+    {
+        events.push(crate::protocol::error(format!("app identity: {message}")));
+    }
     let mut builder = EventLoop::<Command>::with_user_event();
     #[cfg(target_os = "windows")]
     {
@@ -669,6 +675,8 @@ pub fn run(
         event_proxy,
         tray: None,
         media: Default::default(),
+        #[cfg(target_os = "windows")]
+        system_media: None,
         #[cfg(any(target_os = "windows", target_os = "linux"))]
         accessibility: None,
     };
@@ -707,6 +715,8 @@ struct App {
     event_proxy: EventLoopProxy<Command>,
     tray: Option<crate::tray::Tray>,
     media: crate::media::Media,
+    #[cfg(target_os = "windows")]
+    system_media: Option<crate::smtc::SystemMedia>,
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     accessibility: Option<AccessibilityBridge>,
 }
@@ -1964,6 +1974,34 @@ impl ApplicationHandler<Command> for App {
                         .command(&id, &action, src.as_deref(), time, volume, muted, looped);
                 self.emit(events);
                 self.sync_control_flow(event_loop);
+            }
+            Command::SystemMedia { session } => {
+                #[cfg(target_os = "windows")]
+                {
+                    if self.system_media.is_none()
+                        && session.is_some()
+                        && let Some(window) = self.window.as_ref()
+                    {
+                        match crate::smtc::SystemMedia::new(window, self.event_proxy.clone()) {
+                            Ok(controls) => self.system_media = Some(controls),
+                            Err(message) => self.events.push(error(format!("system media: {message}"))),
+                        }
+                    }
+                    if let Some(controls) = self.system_media.as_mut()
+                        && let Err(message) = controls.update(session.as_ref())
+                    {
+                        self.events.push(error(format!("system media: {message}")));
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
+                let _ = session;
+            }
+            Command::SystemMediaEvent { action, time } => {
+                let mut event = json!({"type":"systemMedia", "action":action});
+                if let Some(time) = time {
+                    event["time"] = json!(time);
+                }
+                self.events.push(event);
             }
             Command::Notify { title, body } => {
                 let result = match self.tray.as_mut() {

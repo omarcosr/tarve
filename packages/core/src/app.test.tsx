@@ -314,6 +314,21 @@ describe("controlled native reconciliation", () => {
     app.close();
   });
 
+  test("system media state and hardware actions round-trip through the bridge", async () => {
+    const bridge = new FakeBridge();
+    const app = createApp(() => <Window />, { bridge });
+    await app.ready;
+    const actions: string[] = [];
+    app.systemMedia({ title: "Song", artist: "Artist", playing: true, duration: 120, position: 12, canSeek: true, canNext: true, onAction: (action, time) => actions.push(action + ":" + (time ?? "")) });
+    expect(bridge.commands.at(-1)).toEqual({ type: "systemMedia", session: { title: "Song", artist: "Artist", playing: true, duration: 120, position: 12, canSeek: true, canNext: true } });
+    bridge.emit({ type: "systemMedia", action: "pause" });
+    bridge.emit({ type: "systemMedia", action: "seek", time: 42 });
+    expect(actions).toEqual(["pause:", "seek:42"]);
+    app.systemMedia(null);
+    expect(bridge.commands.at(-1)).toEqual({ type: "systemMedia", session: null });
+    app.close();
+  });
+
   test("native file dialog methods preserve options and return cancellation/results", async () => {
     const bridge = new FakeBridge();
     const app = createApp(() => <Window />, { bridge });
