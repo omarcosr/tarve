@@ -3,7 +3,7 @@
 // fixed (2,000-row list) or components, R picks the renderer.
 const t0 = performance.now();
 import { Button, Column, Row, Scroll, Text, Window, createApp } from "@tarve/core";
-import { App as ComponentsApp } from "./components-view";
+import { App as ComponentsApp } from "../components/components-view";
 import { lucideReactAdapter, phosphorReactAdapter, reactSvgAdapter } from "@tarve/react-icons";
 const tImport = performance.now();
 const scene = process.env.SCENE ?? "empty";

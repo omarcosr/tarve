@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { App, itemHeight, records } from "../examples/large-list-view";
+import { App, itemHeight, records } from "../examples/large-list/large-list-view";
 import { createApp } from "@tarve/core-internal";
 import type { NativeEvent, NodeSnapshot, Snapshot } from "@tarve/protocol";
 

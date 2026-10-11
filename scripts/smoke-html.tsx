@@ -1,8 +1,8 @@
-// Drives examples/html-view.tsx in a hidden window: required validation, a
+// Drives examples/html/html-view.tsx in a hidden window: required validation, a
 // checkbox, a radio group and form submission through real native input.
 import { createTestRenderer } from "@tarve/core";
 import { strict as assert } from "node:assert";
-import { App, state } from "../examples/html-view";
+import { App, state } from "../examples/html/html-view";
 
 const errors: string[] = [];
 const renderer = await createTestRenderer(App, { headless: true, onError: event => errors.push(event.error.message) });

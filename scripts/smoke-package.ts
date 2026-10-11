@@ -81,7 +81,7 @@ const examplePackage = await Bun.file(join(root, "examples/package.json")).json(
   scripts?: Record<string, string>;
 };
 const exampleEntrypoints = Object.values(examplePackage.scripts ?? {}).flatMap(command => {
-  const match = command.match(/^(?:bun|tarve run)\s+([\w-]+\.tsx)$/);
+  const match = command.match(/^(?:bun|tarve run)\s+([\w/-]+\.tsx)$/);
   return match ? [match[1]] : [];
 });
 assert(exampleEntrypoints.length > 0, "Example package must expose runnable TSX examples");
@@ -107,7 +107,7 @@ assert.equal(source.virtualList, true);
 const appExecutableName = `App${hostConfig.executableSuffix}`;
 await run([process.execPath, "run", "tarve", "build", "app.tsx", "--outfile", appExecutableName]);
 for (const entry of exampleEntrypoints) {
-  const base = entry.replace(/\.tsx$/, "");
+  const base = entry.replace(/\.tsx$/, "").split("/").at(-1)!;
   await run([process.execPath, "run", "tarve", "build", entry, "--outfile", join(directory, "example-build", `${base}${hostConfig.executableSuffix}`)], examples);
 }
 const portable = join(directory, "portable");

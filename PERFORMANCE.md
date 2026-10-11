@@ -89,7 +89,7 @@ Of the ~42 MB private that Tarve adds on `cpu`, ~19 MB is Bun's FFI itself (any 
 
 ## 0.3.0 → main (Windows x64, compiled)
 
-Measured on 2026-10-01 on the same machine with `bun run bench:compare` (`examples/bench.tsx` compiled per version, median of 3 runs). "Busy" is 4 s of simulated wheel scrolling and pointer movement; CPU is a percentage of one core.
+Measured on 2026-10-01 on the same machine with `bun run bench:compare` (`examples/bench/bench.tsx` compiled per version, median of 3 runs). "Busy" is 4 s of simulated wheel scrolling and pointer movement; CPU is a percentage of one core.
 
 | Scene | Renderer | First frame | Working set | Private | Busy CPU |
 | --- | --- | ---: | ---: | ---: | ---: |

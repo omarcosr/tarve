@@ -11,6 +11,8 @@ cd examples
 bun run check
 ```
 
+Each example lives in its own folder (`basic/`, `pulse/`, `studio/`, …): the entry file has the folder's name (`pulse/pulse.tsx`) and its views and helpers sit beside it. Shared media are in `assets/`.
+
 Run an example with one of the package scripts:
 
 ```powershell
@@ -44,8 +46,8 @@ The examples cover:
 Build any example as a standalone Windows executable with the package CLI:
 
 ```powershell
-bun run tarve build counter.tsx --outfile dist/Counter.exe
-bun run tarve build rich-content.tsx --outfile dist/RichContent.exe
+bun run tarve build counter/counter.tsx --outfile dist/Counter.exe
+bun run tarve build rich-content/rich-content.tsx --outfile dist/RichContent.exe
 ```
 
 To run the examples against the published package instead of the local build, replace the staged copy with:

@@ -17,7 +17,7 @@ const source = [
 if (process.argv.includes("--check")) {
   const current = readFileSync(target, "utf8").replace(/\r\n/g, "\n");
   if (current !== source) {
-    console.error("studio-samples.generated.ts is stale: run bun studio-samples/generate.ts");
+    console.error("studio-samples.generated.ts is stale: run bun studio/studio-samples/generate.ts");
     process.exit(1);
   }
 } else {

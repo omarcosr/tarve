@@ -17,7 +17,7 @@ import {
   type Child,
   type Style
 } from "@tarve/core";
-import studio from "./assets/studio.png" with { type: "file" };
+import studio from "../assets/studio.png" with { type: "file" };
 
 const c = theme.colors;
 const card: Style = {

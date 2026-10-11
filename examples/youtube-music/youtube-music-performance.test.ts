@@ -164,14 +164,15 @@ test("an aborted feed keeps its published shelf and stops the continuation", asy
 });
 
 test("the music window intercepts the titlebar close and hides instead of quitting", async () => {
-  const { compileTree } = await import("../packages/core/src/reconciler");
+  // Public API only (this folder is a standalone consumer project): a Window with
+  // onCloseRequest intercepts its title bar's close button.
   const { YouTubeMusicView, state } = await import("./youtube-music-view");
-  const tree = compileTree(YouTubeMusicView());
-  expect(tree.document.root.closeIntercept).toBe(true);
+  const window = YouTubeMusicView() as unknown as { props: { onCloseRequest?: (event: { defaultPrevented: boolean; preventDefault(): void }) => void } };
+  expect(typeof window.props.onCloseRequest).toBe("function");
   let hidden = false;
   state.hide = () => { hidden = true; };
   let prevented = false;
-  tree.handlers.get(tree.document.root.id)?.onCloseRequest?.({
+  window.props.onCloseRequest?.({
     defaultPrevented: false,
     preventDefault() { prevented = true; },
   });

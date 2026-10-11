@@ -19,14 +19,14 @@ test.skipIf(!supported)("Node SEA runs the same native TSX app without Bun", asy
   try {
     const outfile = join(directory, process.platform === "win32" ? "App.exe" : "App");
     await buildNode({
-      entrypoint: resolve(import.meta.dirname, "../../examples/node-smoke.tsx"),
+      entrypoint: resolve(import.meta.dirname, "../../examples/node-smoke/node-smoke.tsx"),
       outfile,
       nativeLibrary: library,
       nodeExecutable: node ?? undefined,
     });
     expect(execFileSync(outfile, { encoding: "utf8", timeout: 15000 })).toContain("tarve-node-ready");
     // Rebuilding over an existing executable succeeds, as with Bun builds.
-    await buildNode({ entrypoint: resolve(import.meta.dirname, "../../examples/node-smoke.tsx"), outfile, nativeLibrary: library, nodeExecutable: node ?? undefined });
+    await buildNode({ entrypoint: resolve(import.meta.dirname, "../../examples/node-smoke/node-smoke.tsx"), outfile, nativeLibrary: library, nodeExecutable: node ?? undefined });
     expect(execFileSync(outfile, { encoding: "utf8", timeout: 15000 })).toContain("tarve-node-ready");
     if (process.platform === "win32") {
       // Same identity as a Bun-compiled app: GUI subsystem (no console window) and Tarve metadata.

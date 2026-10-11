@@ -560,7 +560,7 @@ bun run studio
 bun run performance
 ```
 
-From the repository root, `bun run dev --entry examples/<name>.tsx` runs an example with hot reload and the development tools enabled.
+From the repository root, `bun run dev --entry examples/<name>/<name>.tsx` runs an example with hot reload and the development tools enabled.
 
 `setup:examples` builds host-local package staging itself; it does not require the universal publishable tarball.
 

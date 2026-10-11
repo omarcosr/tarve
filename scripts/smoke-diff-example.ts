@@ -2,8 +2,8 @@ import { strict as assert } from "node:assert";
 import { mkdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createApp } from "@tarve/core-internal";
-import { App, connectRefresh, patch, setPatchSource } from "../examples/diff-view";
-import { normalizePatch } from "../examples/patch-file";
+import { App, connectRefresh, patch, setPatchSource } from "../examples/diff/diff-view";
+import { normalizePatch } from "../examples/diff/patch-file";
 
 assert.equal(normalizePatch(patch), patch);
 assert.throws(() => normalizePatch("not a patch"));
@@ -24,7 +24,7 @@ try {
   const output = resolve(`work/diff-example-${renderer}.png`);
   await app.capture(output);
   for (const name of ["api.patch", "readme.diff"]) {
-    const source = await readFile(resolve("examples/patches", name), "utf8");
+    const source = await readFile(resolve("examples/diff/patches", name), "utf8");
     setPatchSource(normalizePatch(source), name);
     await Bun.sleep(100);
     assert.equal((await app.inspect()).nodes.find(node => node.id === "diff-demo")?.kind, "diff");

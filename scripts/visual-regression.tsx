@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { strict as assert } from "node:assert";
 import { lucideReactAdapter, phosphorReactAdapter, reactSvgAdapter } from "@tarve/react-icons";
-import { App as ShowcaseApp } from "../examples/components-view";
+import { App as ShowcaseApp } from "../examples/components/components-view";
 
 // Runtime must use the freshly packed package installed into examples/node_modules.
 // Resolve through Bun's package resolver from the consumer project instead of knowing
@@ -233,7 +233,7 @@ try {
 
   console.log(JSON.stringify({
     result: "PASS",
-    showcase: "examples/components-view.tsx",
+    showcase: "examples/components/components-view.tsx",
     chart: {
       height: chart.height,
       bottom: Number((chart.y + chart.height).toFixed(1)),

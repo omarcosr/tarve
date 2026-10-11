@@ -55,7 +55,7 @@ import {
   type SvgNode,
 } from "@tarve/core";
 import { Camera } from 'lucide-react';
-import vectorScene from "./assets/vector-scene.svg" with { type: "file" };
+import vectorScene from "../assets/vector-scene.svg" with { type: "file" };
 const c = theme.colors;
 
 const panel: Style = {

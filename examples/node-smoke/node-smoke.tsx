@@ -1,5 +1,5 @@
 import { Button, Column, Text, Window, createApp, Image, readPngRgba } from "@tarve/core";
-import studio from "./assets/studio.png";
+import studio from "../assets/studio.png";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

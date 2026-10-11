@@ -1,11 +1,11 @@
-// Paints examples/text-view.tsx in a hidden window and checks the pixels CSS
+// Paints examples/text/text-view.tsx in a hidden window and checks the pixels CSS
 // text features must produce: the <mark> background, the ellipsis ink at the
 // end of a cut line, the two-line clamp and overflow clipping.
 import { createTestRenderer, readPngRgba } from "@tarve/core";
 import { strict as assert } from "node:assert";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { App } from "../examples/text-view";
+import { App } from "../examples/text/text-view";
 
 const out = join(import.meta.dirname, "..", "work");
 mkdirSync(out, { recursive: true });

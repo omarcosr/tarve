@@ -17,7 +17,7 @@
 import os from "node:os";
 import { createApp } from "@tarve/core";
 import { phosphorReactAdapter } from "@tarve/react-icons";
-import inter from "./assets/fonts/InterVariable.ttf" with { type: "file" };
+import inter from "../assets/fonts/InterVariable.ttf" with { type: "file" };
 import { onIconReady, watch } from "./pulse-source";
 import { PulseView, state } from "./pulse-view";
 

@@ -31,7 +31,8 @@ async function run(command: string[], timeoutMs = 60_000): Promise<void> {
 try {
   await writeFile(join(directory, "package.json"), JSON.stringify({ name: "tarve-node-consumer", private: true, type: "module" }));
   await mkdir(join(directory, "assets"));
-  await copyFile(join(root, "examples/node-smoke.tsx"), join(directory, "app.tsx"));
+  // The example reads its image from examples/assets; the copy sits beside its own assets/.
+  await Bun.write(join(directory, "app.tsx"), (await Bun.file(join(root, "examples/node-smoke/node-smoke.tsx")).text()).replaceAll("../assets/", "./assets/"));
   await copyFile(join(root, "examples/assets/studio.png"), join(directory, "assets/studio.png"));
   await run([npm, "install", "--ignore-scripts", "--no-audit", "--no-fund", tarball], 240_000);
   const cli = join(directory, "node_modules/@tarve/core/dist/npm/cli.js");

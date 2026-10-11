@@ -10,5 +10,6 @@
     "jsxImportSource": "@tarve/core",
     "types": ["bun", "@tarve/core/assets"]
   },
-  "include": ["*.ts", "*.tsx"]
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "**/dist", "studio/studio-samples"]
 }

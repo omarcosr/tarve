@@ -1,7 +1,7 @@
 // Clicks through every Studio section and every component preview in a hidden
 // window and fails on any render or native error.
 import { createTestRenderer } from "@tarve/core";
-import { App, connectStudio, componentRows } from "../examples/studio-view";
+import { App, connectStudio, componentRows } from "../examples/studio/studio-view";
 const errors: string[] = [];
 let r: any;
 connectStudio({ refresh: () => r?.app.update(), openFile: async () => undefined, build: { unavailable: "x" } });

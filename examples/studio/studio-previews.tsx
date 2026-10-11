@@ -178,5 +178,5 @@ export function ComponentPreview({ name }: { name: string | undefined }) {
 
 export const previewNames = Object.keys(previews);
 
-/** A runnable app per preview (examples/studio-samples), shown in Studio's code tab. */
+/** A runnable app per preview (examples/studio/studio-samples), shown in Studio's code tab. */
 export { previewSources } from "./studio-samples.generated";

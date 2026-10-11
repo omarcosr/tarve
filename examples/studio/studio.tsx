@@ -13,14 +13,15 @@ const runtime = process.versions.bun ? "bun" : "node";
 // hands the build to the tarve CLI installed next to the sources.
 const compiled = !/^(node|bun)(\.exe)?$/i.test(basename(process.execPath));
 // `tarve run` bundles this file under Node, so import.meta points at a temp
-// bundle there; scripts run from examples/, so also try the working directory.
-const sourceDirectory = [import.meta.dirname, process.cwd(), dirname(dirname(process.execPath))]
+// bundle there; scripts run from examples/, so also try examples/studio below it.
+const sourceDirectory = [import.meta.dirname, process.cwd(), join(process.cwd(), "studio"), dirname(dirname(process.execPath))]
   .find(dir => dir && existsSync(join(dir, "studio.tsx")));
 const exe = process.platform === "win32" ? ".exe" : "";
 let outfile = join(sourceDirectory ?? ".", "dist", `Studio-${runtime}${exe}`);
 // Windows cannot overwrite a running executable.
 if (compiled && outfile.toLowerCase() === process.execPath.toLowerCase()) outfile = outfile.slice(0, outfile.length - exe.length) + `-next${exe}`;
-const cli = sourceDirectory && join(sourceDirectory, "node_modules", "@tarve", "core", "dist", "npm", "cli.js");
+// The examples' dependencies are installed one level up, in examples/node_modules.
+const cli = sourceDirectory && [sourceDirectory, dirname(sourceDirectory)].map(dir => join(dir, "node_modules", "@tarve", "core", "dist", "npm", "cli.js")).find(path => existsSync(path));
 const args = ["build", "studio.tsx", "--runtime", runtime, "--outfile", join("dist", basename(outfile)), "--name", "Tarve Studio"];
 
 function runCli(): Promise<string> {

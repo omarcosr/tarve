@@ -1,8 +1,8 @@
 /**
- * Compares compiled benchmark executables (built from examples/bench.tsx)
+ * Compares compiled benchmark executables (built from examples/bench/bench.tsx)
  * scene by scene: first frame, memory, idle and busy CPU, frames.
  *
- *   (cd examples && bun run tarve build bench.tsx --outfile ../work/bench-head.exe)
+ *   (cd examples && bun run tarve build bench/bench.tsx --outfile ../work/bench-head.exe)
  *   bun run bench:compare work/bench-old.exe work/bench-head.exe
  *
  * SCENES=fixed,components limits the scenes; RUNS sets the runs per cell
