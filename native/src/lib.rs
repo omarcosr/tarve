@@ -9,8 +9,6 @@ mod bridge;
 mod controls;
 #[cfg(target_os = "windows")]
 mod d3d11;
-#[cfg(target_os = "windows")]
-mod smtc;
 #[cfg(not(target_arch = "wasm32"))]
 mod media;
 mod paint;
@@ -21,6 +19,8 @@ mod rich;
 #[cfg(not(target_arch = "wasm32"))]
 mod runtime;
 mod shadow;
+#[cfg(target_os = "windows")]
+mod smtc;
 mod svg;
 mod syntax;
 #[cfg(test)]

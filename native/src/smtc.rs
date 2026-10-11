@@ -1,6 +1,5 @@
 //! Windows System Media Transport Controls: publish the current track and forward hardware keys.
 use crate::protocol::{Command, SystemMediaSession};
-use windows::core::{factory, HSTRING};
 use windows::Foundation::{TimeSpan, TypedEventHandler, Uri};
 use windows::Media::{
     MediaPlaybackStatus, MediaPlaybackType, PlaybackPositionChangeRequestedEventArgs,
@@ -11,8 +10,9 @@ use windows::Media::{
 use windows::Storage::Streams::RandomAccessStreamReference;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::WinRT::{
-    ISystemMediaTransportControlsInterop, RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED,
+    ISystemMediaTransportControlsInterop, RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize,
 };
+use windows::core::{HSTRING, factory};
 use winit::event_loop::EventLoopProxy;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
@@ -20,7 +20,9 @@ use winit::window::Window;
 fn valid_app_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128
-        && !id.chars().any(|c| c.is_whitespace() || c == '\\' || c.is_control())
+        && !id
+            .chars()
+            .any(|c| c.is_whitespace() || c == '\\' || c.is_control())
 }
 
 fn wide(text: &str) -> Vec<u16> {
@@ -35,7 +37,6 @@ fn wide(text: &str) -> Vec<u16> {
 /// session's AppUserModelID; the registry entry alone only covers notifications. Writes
 /// %APPDATA%\Microsoft\Windows\Start Menu\Programs\<name>.lnk pointing at this process.
 fn write_start_menu_shortcut(identity: &crate::protocol::AppIdentity) -> Result<(), String> {
-    use windows::core::{HSTRING, Interface};
     use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
     use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
     use windows::Win32::System::Com::{
@@ -44,19 +45,32 @@ fn write_start_menu_shortcut(identity: &crate::protocol::AppIdentity) -> Result<
     };
     use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+    use windows::core::{HSTRING, Interface};
     let appdata = std::env::var_os("APPDATA").ok_or("APPDATA is not set")?;
     let file_name: String = identity
         .name
         .trim()
         .chars()
-        .map(|c| if "<>:\"/\\|?*".contains(c) || c.is_control() { '_' } else { c })
+        .map(|c| {
+            if "<>:\"/\\|?*".contains(c) || c.is_control() {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     let folder = std::path::Path::new(&appdata).join("Microsoft\\Windows\\Start Menu\\Programs");
     let path = folder.join(format!("{file_name}.lnk"));
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let arguments = std::env::args()
         .skip(1)
-        .map(|arg| if arg.contains(' ') { format!("\"{arg}\"") } else { arg })
+        .map(|arg| {
+            if arg.contains(' ') {
+                format!("\"{arg}\"")
+            } else {
+                arg
+            }
+        })
         .collect::<Vec<_>>()
         .join(" ");
     let initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok();
@@ -68,7 +82,11 @@ fn write_start_menu_shortcut(identity: &crate::protocol::AppIdentity) -> Result<
             if let Ok(directory) = std::env::current_dir() {
                 link.SetWorkingDirectory(&HSTRING::from(directory.as_os_str()))?;
             }
-            if let Some(icon) = identity.icon.as_deref().filter(|icon| icon.to_ascii_lowercase().ends_with(".ico")) {
+            if let Some(icon) = identity
+                .icon
+                .as_deref()
+                .filter(|icon| icon.to_ascii_lowercase().ends_with(".ico"))
+            {
                 link.SetIconLocation(&HSTRING::from(icon), 0)?;
             }
             let store: IPropertyStore = link.cast()?;
@@ -76,7 +94,9 @@ fn write_start_menu_shortcut(identity: &crate::protocol::AppIdentity) -> Result<
             store.SetValue(&PKEY_AppUserModel_ID, &value)?;
             store.Commit()?;
             let file: IPersistFile = link.cast()?;
-            std::fs::create_dir_all(&folder).map_err(|error| windows::core::Error::new(windows::core::HRESULT(-1), error.to_string()))?;
+            std::fs::create_dir_all(&folder).map_err(|error| {
+                windows::core::Error::new(windows::core::HRESULT(-1), error.to_string())
+            })?;
             file.Save(&HSTRING::from(path.as_os_str()), true)?;
         }
         Ok(())
@@ -99,7 +119,10 @@ pub(crate) fn register_app_identity(identity: &crate::protocol::AppIdentity) -> 
     if identity.name.trim().is_empty() {
         return Err("appIdentity.name must not be empty".into());
     }
-    let path = wide(&format!("Software\\Classes\\AppUserModelId\\{}", identity.id));
+    let path = wide(&format!(
+        "Software\\Classes\\AppUserModelId\\{}",
+        identity.id
+    ));
     let mut key: HKEY = std::ptr::null_mut();
     let status = unsafe {
         RegCreateKeyExW(
@@ -115,7 +138,9 @@ pub(crate) fn register_app_identity(identity: &crate::protocol::AppIdentity) -> 
         )
     };
     if status != 0 {
-        return Err(format!("could not register the app identity (error {status})"));
+        return Err(format!(
+            "could not register the app identity (error {status})"
+        ));
     }
     let set = |name: &str, value: &str| -> u32 {
         let name = wide(name);
@@ -133,19 +158,26 @@ pub(crate) fn register_app_identity(identity: &crate::protocol::AppIdentity) -> 
     };
     let mut status = set("DisplayName", identity.name.trim());
     if status == 0
-        && let Some(icon) = identity.icon.as_deref().filter(|icon| std::path::Path::new(icon).is_file())
+        && let Some(icon) = identity
+            .icon
+            .as_deref()
+            .filter(|icon| std::path::Path::new(icon).is_file())
     {
         status = set("IconUri", icon);
     }
     unsafe { RegCloseKey(key) };
     if status != 0 {
-        return Err(format!("could not register the app identity (error {status})"));
+        return Err(format!(
+            "could not register the app identity (error {status})"
+        ));
     }
     write_start_menu_shortcut(identity)?;
     let id = wide(&identity.id);
     let result = unsafe { SetCurrentProcessExplicitAppUserModelID(id.as_ptr()) };
     if result < 0 {
-        return Err(format!("could not set the AppUserModelID (HRESULT {result:#010x})"));
+        return Err(format!(
+            "could not set the AppUserModelID (HRESULT {result:#010x})"
+        ));
     }
     Ok(())
 }
@@ -179,12 +211,12 @@ impl SystemMedia {
         let RawWindowHandle::Win32(handle) = handle.as_raw() else {
             return Err("SMTC requires a Win32 window".into());
         };
-        let interop = factory::<SystemMediaTransportControls, ISystemMediaTransportControlsInterop>()
-            .map_err(|error| error.to_string())?;
-        let controls: SystemMediaTransportControls = unsafe {
-            interop.GetForWindow(HWND(handle.hwnd.get() as *mut _))
-        }
-        .map_err(|error| error.to_string())?;
+        let interop =
+            factory::<SystemMediaTransportControls, ISystemMediaTransportControlsInterop>()
+                .map_err(|error| error.to_string())?;
+        let controls: SystemMediaTransportControls =
+            unsafe { interop.GetForWindow(HWND(handle.hwnd.get() as *mut _)) }
+                .map_err(|error| error.to_string())?;
         let button_proxy = proxy.clone();
         let button_handler = TypedEventHandler::<
             SystemMediaTransportControls,
@@ -206,7 +238,9 @@ impl SystemMedia {
             });
             Ok(())
         });
-        let button_token = controls.ButtonPressed(&button_handler).map_err(|error| error.to_string())?;
+        let button_token = controls
+            .ButtonPressed(&button_handler)
+            .map_err(|error| error.to_string())?;
         let position_handler = TypedEventHandler::<
             SystemMediaTransportControls,
             PlaybackPositionChangeRequestedEventArgs,
@@ -233,9 +267,14 @@ impl SystemMedia {
     }
 
     pub(crate) fn update(&mut self, session: Option<&SystemMediaSession>) -> Result<(), String> {
-        let controls = self.controls.as_ref().expect("SMTC controls released only on drop");
+        let controls = self
+            .controls
+            .as_ref()
+            .expect("SMTC controls released only on drop");
         let Some(session) = session else {
-            controls.SetIsEnabled(false).map_err(|error| error.to_string())?;
+            controls
+                .SetIsEnabled(false)
+                .map_err(|error| error.to_string())?;
             self.metadata = None;
             return Ok(());
         };
@@ -249,49 +288,92 @@ impl SystemMedia {
             session.artwork.clone(),
         );
         if self.metadata.as_ref() != Some(&metadata) {
-            let updater = controls.DisplayUpdater().map_err(|error| error.to_string())?;
+            let updater = controls
+                .DisplayUpdater()
+                .map_err(|error| error.to_string())?;
             updater.ClearAll().map_err(|error| error.to_string())?;
-            updater.SetType(MediaPlaybackType::Music).map_err(|error| error.to_string())?;
-            let music = updater.MusicProperties().map_err(|error| error.to_string())?;
-            music.SetTitle(&HSTRING::from(&metadata.0)).map_err(|error| error.to_string())?;
-            music.SetArtist(&HSTRING::from(&metadata.1)).map_err(|error| error.to_string())?;
-            music.SetAlbumTitle(&HSTRING::from(&metadata.2)).map_err(|error| error.to_string())?;
-            if let Some(url) = metadata.3.as_deref().filter(|url| url.starts_with("https://"))
+            updater
+                .SetType(MediaPlaybackType::Music)
+                .map_err(|error| error.to_string())?;
+            let music = updater
+                .MusicProperties()
+                .map_err(|error| error.to_string())?;
+            music
+                .SetTitle(&HSTRING::from(&metadata.0))
+                .map_err(|error| error.to_string())?;
+            music
+                .SetArtist(&HSTRING::from(&metadata.1))
+                .map_err(|error| error.to_string())?;
+            music
+                .SetAlbumTitle(&HSTRING::from(&metadata.2))
+                .map_err(|error| error.to_string())?;
+            if let Some(url) = metadata
+                .3
+                .as_deref()
+                .filter(|url| url.starts_with("https://"))
                 && let Ok(uri) = Uri::CreateUri(&HSTRING::from(url))
                 && let Ok(reference) = RandomAccessStreamReference::CreateFromUri(&uri)
             {
-                updater.SetThumbnail(&reference).map_err(|error| error.to_string())?;
+                updater
+                    .SetThumbnail(&reference)
+                    .map_err(|error| error.to_string())?;
             }
             updater.Update().map_err(|error| error.to_string())?;
             self.metadata = Some(metadata);
         }
-        controls.SetIsPlayEnabled(true).map_err(|error| error.to_string())?;
-        controls.SetIsPauseEnabled(true).map_err(|error| error.to_string())?;
-        controls.SetIsNextEnabled(session.can_next).map_err(|error| error.to_string())?;
-        controls.SetIsPreviousEnabled(session.can_previous).map_err(|error| error.to_string())?;
-        if let Some(duration) = session.duration.filter(|value| value.is_finite() && *value > 0.0) {
+        controls
+            .SetIsPlayEnabled(true)
+            .map_err(|error| error.to_string())?;
+        controls
+            .SetIsPauseEnabled(true)
+            .map_err(|error| error.to_string())?;
+        controls
+            .SetIsNextEnabled(session.can_next)
+            .map_err(|error| error.to_string())?;
+        controls
+            .SetIsPreviousEnabled(session.can_previous)
+            .map_err(|error| error.to_string())?;
+        if let Some(duration) = session
+            .duration
+            .filter(|value| value.is_finite() && *value > 0.0)
+        {
             let timeline = SystemMediaTransportControlsTimelineProperties::new()
                 .map_err(|error| error.to_string())?;
-            timeline.SetStartTime(time_span(0.0)).map_err(|error| error.to_string())?;
-            timeline.SetEndTime(time_span(duration)).map_err(|error| error.to_string())?;
+            timeline
+                .SetStartTime(time_span(0.0))
+                .map_err(|error| error.to_string())?;
+            timeline
+                .SetEndTime(time_span(duration))
+                .map_err(|error| error.to_string())?;
             let position = time_span(session.position.unwrap_or(0.0).min(duration));
             let (min_seek, max_seek) = if session.can_seek {
                 (time_span(0.0), time_span(duration))
             } else {
                 (position, position)
             };
-            timeline.SetMinSeekTime(min_seek).map_err(|error| error.to_string())?;
-            timeline.SetMaxSeekTime(max_seek).map_err(|error| error.to_string())?;
-            timeline.SetPosition(position).map_err(|error| error.to_string())?;
-            controls.UpdateTimelineProperties(&timeline).map_err(|error| error.to_string())?;
+            timeline
+                .SetMinSeekTime(min_seek)
+                .map_err(|error| error.to_string())?;
+            timeline
+                .SetMaxSeekTime(max_seek)
+                .map_err(|error| error.to_string())?;
+            timeline
+                .SetPosition(position)
+                .map_err(|error| error.to_string())?;
+            controls
+                .UpdateTimelineProperties(&timeline)
+                .map_err(|error| error.to_string())?;
         }
-        controls.SetIsEnabled(true).map_err(|error| error.to_string())?;
-        controls.SetPlaybackStatus(if session.playing {
-            MediaPlaybackStatus::Playing
-        } else {
-            MediaPlaybackStatus::Paused
-        })
-        .map_err(|error| error.to_string())?;
+        controls
+            .SetIsEnabled(true)
+            .map_err(|error| error.to_string())?;
+        controls
+            .SetPlaybackStatus(if session.playing {
+                MediaPlaybackStatus::Playing
+            } else {
+                MediaPlaybackStatus::Paused
+            })
+            .map_err(|error| error.to_string())?;
         Ok(())
     }
 }

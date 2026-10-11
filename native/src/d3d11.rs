@@ -1153,11 +1153,22 @@ impl D3d11Graphics {
     /// distance field, antialiased like `fill_feathered`: full inside, fading
     /// over the pixel that straddles the edge. Circles and pills this way cost
     /// four vertices instead of a flattened, tessellated, feathered outline.
-    fn append_round_rect_quad(&mut self, center: [f32; 2], half: [f32; 2], radius: f32, color: Color) {
+    fn append_round_rect_quad(
+        &mut self,
+        center: [f32; 2],
+        half: [f32; 2],
+        radius: f32,
+        color: Color,
+    ) {
         let first = self.indices.len() as u32;
         let base = self.vertices.len() as u32;
         let rgba = rgba(color);
-        let (x0, y0, x1, y1) = (center[0] - half[0] - 1.0, center[1] - half[1] - 1.0, center[0] + half[0] + 1.0, center[1] + half[1] + 1.0);
+        let (x0, y0, x1, y1) = (
+            center[0] - half[0] - 1.0,
+            center[1] - half[1] - 1.0,
+            center[0] + half[0] + 1.0,
+            center[1] + half[1] + 1.0,
+        );
         for [x, y] in [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] {
             self.push_vertex(Vertex {
                 pos: self.ndc(x, y),
@@ -1817,7 +1828,12 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         }
         if self.graphics.analytic_aa {
             if let Some((center, half, radius)) = sdf_round_rect(shape, transform) {
-                self.graphics.append_round_rect_quad(center, half, radius, color.multiply_alpha(self.opacity));
+                self.graphics.append_round_rect_quad(
+                    center,
+                    half,
+                    radius,
+                    color.multiply_alpha(self.opacity),
+                );
                 return;
             }
             self.fill_feathered(
@@ -2093,7 +2109,12 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                 let color = color.multiply_alpha(self.opacity);
                 for dot in dots {
                     let p = transform * dot;
-                    self.graphics.append_round_rect_quad([p.x as f32, p.y as f32], [radius, radius], radius, color);
+                    self.graphics.append_round_rect_quad(
+                        [p.x as f32, p.y as f32],
+                        [radius, radius],
+                        radius,
+                        color,
+                    );
                 }
                 return;
             }
@@ -3170,21 +3191,37 @@ fn uniform_scale(transform: Affine) -> Option<f64> {
 fn sdf_round_rect<S: Shape>(shape: &S, transform: Affine) -> Option<([f32; 2], [f32; 2], f32)> {
     let scale = uniform_scale(transform)?;
     let (rect, radius) = if let Some(circle) = shape.as_circle() {
-        (vello::kurbo::Rect::from_center_size(circle.center, (circle.radius * 2.0, circle.radius * 2.0)), circle.radius)
+        (
+            vello::kurbo::Rect::from_center_size(
+                circle.center,
+                (circle.radius * 2.0, circle.radius * 2.0),
+            ),
+            circle.radius,
+        )
     } else {
         let rounded = shape.as_rounded_rect()?;
         let radii = rounded.radii();
-        if radii.top_left != radii.top_right || radii.top_left != radii.bottom_right || radii.top_left != radii.bottom_left {
+        if radii.top_left != radii.top_right
+            || radii.top_left != radii.bottom_right
+            || radii.top_left != radii.bottom_left
+        {
             return None;
         }
         (rounded.rect(), radii.top_left)
     };
     let center = transform * rect.center();
-    let half = [(rect.width() * scale / 2.0) as f32, (rect.height() * scale / 2.0) as f32];
+    let half = [
+        (rect.width() * scale / 2.0) as f32,
+        (rect.height() * scale / 2.0) as f32,
+    ];
     if !(half[0] > 0.0 && half[1] > 0.0) {
         return None;
     }
-    Some(([center.x as f32, center.y as f32], half, ((radius * scale) as f32).clamp(0.0, half[0].min(half[1]))))
+    Some((
+        [center.x as f32, center.y as f32],
+        half,
+        ((radius * scale) as f32).clamp(0.0, half[0].min(half[1])),
+    ))
 }
 
 /// The dots of a path made only of zero-length segments (`M x y h.01`, at
@@ -3290,7 +3327,10 @@ mod tests {
         let dots = BezPath::from_svg("M10 20h.01M16.5 20h.01").unwrap();
         let found = dots_of(&dots, 3.0).unwrap();
         assert_eq!(found.len(), 2);
-        assert!(found[0].distance(Point::new(10.005, 20.0)) < 1e-9 && found[1].distance(Point::new(16.505, 20.0)) < 1e-9);
+        assert!(
+            found[0].distance(Point::new(10.005, 20.0)) < 1e-9
+                && found[1].distance(Point::new(16.505, 20.0)) < 1e-9
+        );
         let line = BezPath::from_svg("M0 0h4").unwrap();
         assert_eq!(dots_of(&line, 3.0), None, "a real segment is not a dot");
         let curve = BezPath::from_svg("M0 0q1 1 2 0").unwrap();
@@ -3307,13 +3347,22 @@ mod tests {
             sdf_round_rect(&RoundedRect::new(0.0, 0.0, 20.0, 10.0, 4.0), at),
             Some(([25.0, 17.0], [20.0, 10.0], 8.0))
         );
-        assert_eq!(sdf_round_rect(&Circle::new((1.0, 1.0), 3.0), Affine::IDENTITY), Some(([1.0, 1.0], [3.0, 3.0], 3.0)));
         assert_eq!(
-            sdf_round_rect(&RoundedRect::new(0.0, 0.0, 20.0, 10.0, (4.0, 0.0, 4.0, 0.0)), Affine::IDENTITY),
+            sdf_round_rect(&Circle::new((1.0, 1.0), 3.0), Affine::IDENTITY),
+            Some(([1.0, 1.0], [3.0, 3.0], 3.0))
+        );
+        assert_eq!(
+            sdf_round_rect(
+                &RoundedRect::new(0.0, 0.0, 20.0, 10.0, (4.0, 0.0, 4.0, 0.0)),
+                Affine::IDENTITY
+            ),
             None,
             "mixed corner radii keep the tessellated path"
         );
-        assert_eq!(sdf_round_rect(&Rect::new(0.0, 0.0, 4.0, 4.0), Affine::IDENTITY), None);
+        assert_eq!(
+            sdf_round_rect(&Rect::new(0.0, 0.0, 4.0, 4.0), Affine::IDENTITY),
+            None
+        );
     }
 
     #[test]
