@@ -57,66 +57,6 @@ test("a continuation failure preserves the first shelf", async () => {
   expect(snapshots).toEqual([["First"]]);
 });
 
-test("artwork schedules nearer visible covers first and deduplicates URLs", async () => {
-  const { artwork, onArtworkChanged } = await import("./youtube-music-artwork");
-  const received: string[] = [];
-  const releases: Array<() => void> = [];
-  const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg=="), ch => ch.charCodeAt(0));
-  globalThis.fetch = (async (url: string) => {
-    received.push(url);
-    await new Promise<void>(resolve => releases.push(resolve));
-    return new Response(png, { headers: { "content-type": "image/png" } });
-  }) as unknown as typeof fetch;
-  let loaded = 0;
-  onArtworkChanged(() => { loaded++; });
-  const base = `https://example.com/cover-${Date.now()}-`;
-  for (let i = 0; i < 8; i++) artwork(`${base}${i}=s300`, 28, 100 - i);
-  artwork(`${base}7=s300`, 28, 0);
-  await Bun.sleep(1);
-  expect(received.length).toBe(6);
-  expect(received.some(url => url.includes("-7=s60"))).toBe(true);
-  expect(received.some(url => url.includes("-0=s60"))).toBe(false);
-  expect(new Set(received).size).toBe(6);
-  for (const release of releases.splice(0)) release();
-  for (let i = 0; i < 20 && loaded < 8; i++) {
-    await Bun.sleep(1);
-    for (const release of releases.splice(0)) release();
-  }
-  expect(loaded).toBe(8);
-  expect(received.length).toBe(8);
-});
-
-test("a second artwork store reads disk without another request", async () => {
-  const { mkdtemp, rm } = await import("node:fs/promises");
-  const { tmpdir } = await import("node:os");
-  const { join } = await import("node:path");
-  const { ArtworkStore } = await import("./youtube-music-artwork");
-  const dir = await mkdtemp(join(tmpdir(), "ytm-artwork-test-"));
-  let requests = 0;
-  const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg=="), ch => ch.charCodeAt(0));
-  globalThis.fetch = (async () => {
-    requests++;
-    return new Response(png, { headers: { "content-type": "image/png" } });
-  }) as unknown as typeof fetch;
-  const url = "https://example.com/album=s300";
-  try {
-    const first = new ArtworkStore(dir);
-    const loaded = new Promise<void>(resolve => first.onChanged(resolve));
-    first.request(url, 28);
-    await loaded;
-    await first.flush();
-    expect(requests).toBe(1);
-    const reopened = new ArtworkStore(dir);
-    const cached = new Promise<void>(resolve => reopened.onChanged(resolve));
-    reopened.request(url, 28);
-    await cached;
-    expect(requests).toBe(1);
-    expect(reopened.request(url, 28)?.bytes).toEqual(png);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
 test("a playlist shows its first song while later pages are pending", async () => {
   const { collection } = await import("./youtube-music-source");
   const row = (id: string) => ({ musicResponsiveListItemRenderer: {

@@ -1,9 +1,11 @@
 import type { BunPlugin } from "bun";
-import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nativePath } from "#tarve/runtime";
+import { buildMetadata, writeLinuxDesktopEntry } from "./app-metadata";
 import { BUILD_TARGETS, hostBuildTarget, isBuildTarget, targetConfig, type BuildTarget } from "./targets";
 import {
   NATIVE_COMPATIBILITY_MANIFEST_NAME,
@@ -17,8 +19,16 @@ export { BUILD_TARGETS, hostBuildTarget, isBuildTarget, nativeDirectoryForBuildT
 export interface BuildOptions {
   entrypoint: string;
   outfile?: string;
+  /** Executable, window and app-identity metadata; each also reads from package.json `tarve`. */
   name?: string;
   version?: string;
+  description?: string;
+  publisher?: string;
+  copyright?: string;
+  /** .png (square, 256 px or more) or .ico. */
+  icon?: string;
+  /** Windows AppUserModelID / Linux app id, e.g. `Acme.Notes`. */
+  appId?: string;
   target?: BuildTarget;
   /** Override for building the repository against a freshly compiled release library. */
   nativeLibrary?: string;
@@ -68,7 +78,8 @@ export async function build(options: BuildOptions): Promise<string> {
   if (typeof packageMetadata.version !== "string" || packageMetadata.version.length === 0) {
     throw new Error("Tarve package version is missing.");
   }
-  const name = options.name ?? basename(entrypoint).replace(/\.[^.]+$/, "");
+  const { metadata, images, define } = buildMetadata(entrypoint, metadataOverrides(options));
+  const name = metadata.name;
   const outfile = resolve(options.outfile ?? `dist/${name}${config.executableSuffix}`);
   const library = resolveNativeLibrary(target, options.nativeLibrary);
   const assetsModule = fileURLToPath(import.meta.resolve("#tarve/assets"));
@@ -108,22 +119,44 @@ export async function build(options: BuildOptions): Promise<string> {
     },
   };
   await mkdir(dirname(outfile), { recursive: true });
-  const result = await Bun.build({
-    entrypoints: [entrypoint],
-    target: "bun",
-    plugins: [runtime],
-    define: { "process.env.NODE_ENV": JSON.stringify("production") },
-    minify: true,
-    compile: {
-      target: config.bunTarget,
-      outfile,
-      autoloadDotenv: false,
-      autoloadBunfig: false,
-      ...(config.platform === "win32" ? {
-        windows: { hideConsole: true, title: name, version: options.version ?? packageMetadata.version, description: `${name} — native Tarve application` },
-      } : {}),
-    },
-  });
-  if (!result.success) throw new AggregateError(result.logs, "Could not compile the Tarve application");
+  // Bun reads the executable icon from a file.
+  const iconDirectory = images && config.platform === "win32" ? mkdtempSync(join(tmpdir(), "tarve-icon-")) : undefined;
+  const icoPath = iconDirectory ? join(iconDirectory, "app.ico") : undefined;
+  if (icoPath) writeFileSync(icoPath, images!.ico);
+  try {
+    const result = await Bun.build({
+      entrypoints: [entrypoint],
+      target: "bun",
+      plugins: [runtime],
+      define: { "process.env.NODE_ENV": JSON.stringify("production"), ...define },
+      minify: true,
+      compile: {
+        target: config.bunTarget,
+        outfile,
+        autoloadDotenv: false,
+        autoloadBunfig: false,
+        ...(config.platform === "win32" ? {
+          windows: {
+            hideConsole: true,
+            title: name,
+            version: metadata.version ?? packageMetadata.version,
+            description: metadata.description ?? `${name} — native Tarve application`,
+            ...(metadata.publisher ? { publisher: metadata.publisher } : {}),
+            ...(metadata.copyright ? { copyright: metadata.copyright } : {}),
+            ...(icoPath ? { icon: icoPath } : {}),
+          },
+        } : {}),
+      },
+    });
+    if (!result.success) throw new AggregateError(result.logs, "Could not compile the Tarve application");
+  } finally {
+    if (iconDirectory) await rm(iconDirectory, { recursive: true, force: true });
+  }
+  if (config.platform === "linux" && (metadata.icon || metadata.appId)) writeLinuxDesktopEntry(outfile, metadata, images?.png);
   return outfile;
+}
+
+/** The metadata fields of build options, as overrides of package.json `tarve`. */
+export function metadataOverrides(options: BuildOptions) {
+  return { name: options.name, version: options.version, description: options.description, publisher: options.publisher, copyright: options.copyright, icon: options.icon, appId: options.appId };
 }

@@ -47,5 +47,22 @@
   "devDependencies": {
     "@types/bun": "^1.4.2",
     "typescript": "^7.0.2"
+  },
+  "tarve": {
+    "publisher": "Tarve",
+    "apps": {
+      "pulse/pulse.tsx": {
+        "name": "Pulse",
+        "description": "System monitor built with Tarve",
+        "icon": "pulse/icon.png",
+        "appId": "Tarve.Examples.Pulse"
+      },
+      "youtube-music/youtube-music.tsx": {
+        "name": "YouTube Music (Tarve)",
+        "description": "YouTube Music client built with Tarve",
+        "icon": "youtube-music/icon.png",
+        "appId": "Tarve.Examples.YouTubeMusic"
+      }
+    }
   }
 }

@@ -6,11 +6,21 @@
 // counter names), the battery (WMI) and NVIDIA's own figures. Rates, load
 // averages and per-app power are derived here. Elsewhere only node:os. Not
 // part of Tarve.
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { once } from "node:events";
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import os, { tmpdir } from "node:os";
 import { join } from "node:path";
 import samplerSource from "./pulse-sampler.cs" with { type: "file" };
+
+/** Runs a command without a console window and resolves with its exit code (null when it could not start). */
+async function exitCode(command: string[]): Promise<number | null> {
+  const child = spawn(command[0]!, command.slice(1), { stdio: "ignore", windowsHide: true });
+  const [code] = await Promise.race([once(child, "exit"), once(child, "error").then(() => [null])]) as [number | null];
+  return code;
+}
 
 export interface Proc {
   pid: number;
@@ -133,7 +143,7 @@ const cpuTimes = () => os.cpus().map(c => c.times);
  */
 async function helperCommand(): Promise<string[]> {
   const source = readFileSync(samplerSource, "utf8");
-  const file = join(tmpdir(), "tarve-pulse-" + Bun.hash(source).toString(36));
+  const file = join(tmpdir(), "tarve-pulse-" + createHash("sha256").update(source).digest("hex").slice(0, 16));
   if (existsSync(file + ".exe")) return [file + ".exe"];
   // Earlier versions' helpers: removed where no other instance still runs them.
   for (const old of readdirSync(tmpdir()).filter(f => f.startsWith("tarve-pulse-") && /\.(exe|cs|exe\.config)$/.test(f))) {
@@ -142,9 +152,8 @@ async function helperCommand(): Promise<string[]> {
   writeFileSync(file + ".cs", source);
   const csc = join(process.env.WINDIR ?? "C:\\Windows", "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe");
   if (existsSync(csc)) {
-    const build = Bun.spawn([csc, "/nologo", "/optimize+", "/target:winexe", "/r:System.Management.dll", "/r:System.Drawing.dll", "/out:" + file + ".exe", file + ".cs"],
-      { stdout: "ignore", stderr: "ignore", windowsHide: true } as never);
-    if (await build.exited === 0 && existsSync(file + ".exe")) {
+    const code = await exitCode([csc, "/nologo", "/optimize+", "/target:winexe", "/r:System.Management.dll", "/r:System.Drawing.dll", "/out:" + file + ".exe", file + ".cs"]);
+    if (code === 0 && existsSync(file + ".exe")) {
       // One GC thread is plenty for a sample a second.
       writeFileSync(file + ".exe.config", '<?xml version="1.0"?><configuration><runtime><gcConcurrent enabled="false"/></runtime></configuration>');
       return [file + ".exe"];
@@ -158,7 +167,7 @@ async function helperCommand(): Promise<string[]> {
 async function designCapacity(): Promise<number | null> {
   try {
     const file = join(tmpdir(), "tarve-pulse-battery.xml");
-    await Bun.spawn(["powercfg", "/batteryreport", "/xml", "/output", file], { stdout: "ignore", stderr: "ignore", windowsHide: true } as never).exited;
+    await exitCode(["powercfg", "/batteryreport", "/xml", "/output", file]);
     const value = /<DesignCapacity>(\d+)</.exec(await readFile(file, "utf8"))?.[1];
     return value ? Number(value) : null;
   } catch { return null; }
@@ -219,11 +228,12 @@ export function watch(onSample: (sample: Sample) => void): () => void {
   void (async () => {
     const command = await helperCommand();
     if (stopped) return;
-    const proc = Bun.spawn(command, { stdin: "pipe", stdout: "pipe", stderr: "ignore", windowsHide: true } as never);
+    const proc = spawn(command[0]!, command.slice(1), { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
+    proc.on("error", () => undefined);
+    proc.stdin.on("error", () => undefined);
     child = proc;
-    const stdin = proc.stdin as unknown as { write(data: string): void; flush?(): void };
-    connectIcons(line => { stdin.write(line + "\n"); stdin.flush?.(); });
-    for await (const line of lines(proc.stdout as unknown as AsyncIterable<Uint8Array>)) {
+    connectIcons(line => { proc.stdin.write(line + "\n"); });
+    for await (const line of lines(proc.stdout)) {
       if (!line || stopped) continue;
       if (line.startsWith("icon|")) { iconAnswer(line.slice(5)); continue; }
       let raw: Raw;

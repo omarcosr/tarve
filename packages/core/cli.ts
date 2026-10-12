@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { resolveAppMetadata, runtimeMetadata } from "./app-metadata";
 import { build } from "./build";
 import { devNode, runNode } from "./node-dev";
 import { selectRuntime } from "./runtime-select";
@@ -22,7 +23,11 @@ function usage(target?: BuildTarget): string {
     "  --runtime bun|node              defaults to the runtime that launched tarve",
     `  --target ${BUILD_TARGETS.join("|")}  build: target OS (cross-compiles)`,
     `  --outfile ${output}              build: output path`,
-    "  --name App, --version 1.0.0     build: executable metadata",
+    "  --name App, --version 1.0.0     app metadata (executable, window, app identity)",
+    "  --icon icon.png                 app icon: .png (square, 256 px+) or .ico",
+    "  --app-id Acme.App               Windows AppUserModelID / Linux app id",
+    "  --description, --publisher, --copyright  build: executable details",
+    "                                  each defaults to the \"tarve\" field of package.json",
     "  --target-executable path        build (node): target OS Node binary for offline cross-builds",
   ].join("\n");
 }
@@ -55,6 +60,8 @@ async function main(): Promise<number> {
     allowPositionals: true,
     options: {
       outfile: { type: "string" }, name: { type: "string" }, version: { type: "string" },
+      icon: { type: "string" }, "app-id": { type: "string" }, description: { type: "string" },
+      publisher: { type: "string" }, copyright: { type: "string" },
       target: { type: "string" }, runtime: { type: "string" },
       "target-executable": { type: "string" },
       help: { type: "boolean", short: "h" },
@@ -79,12 +86,17 @@ async function main(): Promise<number> {
   if (command === "build") {
     console.log(await build({
       entrypoint, outfile: values.outfile, name: values.name, version: values.version,
+      icon: values.icon, appId: values["app-id"], description: values.description,
+      publisher: values.publisher, copyright: values.copyright,
       target: values.target as BuildTarget | undefined,
       runtime,
       targetExecutable: values["target-executable"],
     }));
     return 0;
   }
+  // The app reads its name, id and icon from here (a built executable has them baked in).
+  const metadata = resolveAppMetadata(entrypoint, { name: values.name, icon: values.icon, appId: values["app-id"] });
+  process.env.TARVE_APP_METADATA = runtimeMetadata(metadata, metadata.icon);
   if (runtime === "node") {
     if (command === "dev") {
       await devNode(entrypoint);

@@ -1626,14 +1626,14 @@ fn variable_virtual_list_scroll_request_applies_each_generation_once_and_inspect
     tree.compute(240.0, 180.0).unwrap();
     tree.take_layout_events();
     assert_eq!(
-        tree.request_virtual_scroll_to_item("requested-list", 3, 5.0)
+        tree.request_virtual_scroll_to_item("requested-list", 3, 5.0, false)
             .unwrap(),
         vec![json!({
             "type":"virtualListScrollToItem", "id":"requested-list", "index":3, "offset":5.0
         })]
     );
     assert!(
-        tree.request_virtual_scroll_to_item("requested-list", 5, 0.0)
+        tree.request_virtual_scroll_to_item("requested-list", 5, 0.0, false)
             .is_err()
     );
 
@@ -1669,6 +1669,36 @@ fn variable_virtual_list_scroll_request_applies_each_generation_once_and_inspect
     tree.update(root(vec![requested_list(Some((2, 40.0)))]));
     tree.compute(240.0, 180.0).unwrap();
     assert_eq!(tree.entries["requested-list"].scroll, 40.0);
+
+    // A smooth request eases there on the motion clock, reporting each step.
+    assert_eq!(
+        tree.request_virtual_scroll_to_item("requested-list", 3, 0.0, true)
+            .unwrap()[0]["smooth"],
+        true
+    );
+    tree.advance_motion(1000.0);
+    let mut smooth = requested_list(None);
+    smooth.virtual_list.as_mut().unwrap().scroll_request =
+        Some(serde_json::from_value(json!({"generation":3,"offset":120.0,"smooth":true})).unwrap());
+    tree.update(root(vec![smooth]));
+    tree.compute(240.0, 180.0).unwrap();
+    tree.take_layout_events();
+    assert_eq!(
+        tree.entries["requested-list"].scroll, 40.0,
+        "a smooth request does not jump"
+    );
+    assert_eq!(tree.active_motion_count(), 1, "it keeps frames coming");
+    tree.advance_motion(1150.0);
+    let mid = tree.entries["requested-list"].scroll;
+    assert!(mid > 40.0 && mid < 120.0, "halfway: {mid}");
+    assert!(
+        tree.take_layout_events()
+            .iter()
+            .any(|event| event["type"] == "scroll")
+    );
+    tree.advance_motion(5000.0);
+    assert_eq!(tree.entries["requested-list"].scroll, 120.0);
+    assert_eq!(tree.active_motion_count(), 0);
 }
 
 #[test]
@@ -3670,6 +3700,163 @@ fn dynamic_images_reject_oversized_dimensions_before_entering_the_cache() {
         tree.warnings
             .iter()
             .any(|warning| warning.contains("dimensions"))
+    );
+}
+
+#[test]
+fn remote_images_load_once_painted_and_lay_out_again() {
+    let mut shown = node("shown", "image", json!({"width":16}), vec![]);
+    shown.src = "https://example.com/cover.png".into();
+    let mut below = node(
+        "below",
+        "image",
+        json!({"position":"absolute","top":1000,"width":10,"height":10}),
+        vec![],
+    );
+    below.src = "https://example.com/later.png".into();
+    let mut tree = Tree::new(root(vec![shown, below]));
+    tree.compute(200.0, 100.0).unwrap();
+    assert!(tree.warnings.is_empty(), "{:?}", tree.warnings);
+    assert_eq!(tree.entries["shown"].rect.height(), 0.0);
+    assert_eq!(
+        tree.image_cache_len(),
+        0,
+        "reconcile must not block on the network"
+    );
+    assert!(
+        tree.take_remote_image_requests().is_empty(),
+        "nothing is fetched before paint"
+    );
+    tree.scene(1.0);
+    assert_eq!(
+        tree.take_remote_image_requests(),
+        vec!["https://example.com/cover.png".to_string()]
+    );
+    tree.dirty.paint = true;
+    tree.scene(1.0);
+    assert!(
+        tree.take_remote_image_requests().is_empty(),
+        "a pending image is requested once"
+    );
+    let mut png = Vec::new();
+    image::RgbaImage::new(8, 6)
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    let decoded = crate::tree::decode_remote_image(&png).unwrap();
+    tree.finish_remote_image("https://example.com/cover.png".into(), Ok(decoded));
+    assert_eq!(tree.image_cache_len(), 1);
+    tree.compute(200.0, 100.0).unwrap();
+    assert_eq!(
+        tree.entries["shown"].rect.height(),
+        12.0,
+        "the decoded aspect ratio feeds layout"
+    );
+    tree.finish_remote_image(
+        "https://example.com/later.png".into(),
+        Err("HTTP 404".into()),
+    );
+    assert_eq!(tree.warnings.len(), 1);
+}
+
+#[test]
+fn window_icons_decode_png_and_ico_and_reject_garbage() {
+    use base64::Engine;
+    let encode = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+    let mut png = Vec::new();
+    image::RgbaImage::from_pixel(300, 300, image::Rgba([10, 20, 30, 255]))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    assert!(crate::runtime::window_icons(&encode(&png)).is_ok());
+    // A one-entry .ico wrapping a 32 px PNG, as the TypeScript side writes them.
+    let mut small = Vec::new();
+    image::RgbaImage::from_pixel(32, 32, image::Rgba([200, 0, 0, 255]))
+        .write_to(
+            &mut std::io::Cursor::new(&mut small),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+    let mut ico = vec![0, 0, 1, 0, 1, 0, 32, 32, 0, 0, 1, 0, 32, 0];
+    ico.extend_from_slice(&(small.len() as u32).to_le_bytes());
+    ico.extend_from_slice(&22u32.to_le_bytes());
+    ico.extend_from_slice(&small);
+    assert!(crate::runtime::window_icons(&encode(&ico)).is_ok());
+    assert!(crate::runtime::window_icons(&encode(b"not an image")).is_err());
+    assert!(crate::runtime::window_icons("%%%").is_err());
+}
+
+#[test]
+fn remote_svgs_cannot_read_local_files() {
+    let path = std::env::temp_dir().join(format!("tarve-secret-{}.svg", std::process::id()));
+    // resvg is built without raster images, so a nested SVG is what a local href could pull in.
+    std::fs::write(&path, r##"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" height="4" fill="#ff0000"/></svg>"##).unwrap();
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="4" height="4"><image width="4" height="4" xlink:href="{}"/></svg>"#,
+        path.to_string_lossy().replace('\\', "/")
+    );
+    let decoded = crate::tree::decode_remote_image(svg.as_bytes()).unwrap();
+    assert!(
+        format!("{decoded:?}").contains("4x4"),
+        "the SVG itself still decodes"
+    );
+    let mut tree = Tree::new(root(vec![]));
+    tree.finish_remote_image("https://example.com/a.svg".into(), Ok(decoded));
+    let pixels = tree.image_cache_bytes("https://example.com/a.svg").unwrap();
+    assert!(
+        pixels.iter().all(|byte| *byte == 0),
+        "the local file must not be drawn"
+    );
+    // The same SVG from the app itself (trusted bytes) does draw the file, so the
+    // href above really points at it.
+    let mut trusted = node("trusted", "image", json!({"width":4,"height":4}), vec![]);
+    trusted.image = Some(
+        serde_json::from_value(json!({
+            "kind":"encoded", "key":"trusted-svg", "mediaType":"image/svg+xml",
+            "data": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, svg.as_bytes())
+        }))
+        .unwrap(),
+    );
+    let tree = Tree::new(root(vec![trusted]));
+    let pixels = tree.image_cache_bytes("trusted-svg").unwrap();
+    assert!(
+        pixels.chunks(4).any(|px| px[0] > 200 && px[3] > 200),
+        "trusted SVGs keep local hrefs"
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn failed_remote_images_retry_when_shown_again_and_schemes_ignore_case() {
+    let mut image = node("img", "image", json!({"width":10,"height":10}), vec![]);
+    image.src = "HTTPS://example.com/x.png".into();
+    let mut tree = Tree::new(root(vec![image.clone()]));
+    tree.compute(100.0, 100.0).unwrap();
+    assert!(
+        tree.warnings.is_empty(),
+        "an upper-case scheme is still remote: {:?}",
+        tree.warnings
+    );
+    tree.scene(1.0);
+    assert_eq!(
+        tree.take_remote_image_requests(),
+        vec!["HTTPS://example.com/x.png".to_string()]
+    );
+    tree.finish_remote_image("HTTPS://example.com/x.png".into(), Err("offline".into()));
+    tree.warnings.clear();
+    tree.dirty.paint = true;
+    tree.scene(1.0);
+    assert!(
+        tree.take_remote_image_requests().is_empty(),
+        "no retry while it stays on screen"
+    );
+    tree.update(root(vec![]));
+    tree.compute(100.0, 100.0).unwrap();
+    tree.update(root(vec![image]));
+    tree.compute(100.0, 100.0).unwrap();
+    tree.scene(1.0);
+    assert_eq!(
+        tree.take_remote_image_requests().len(),
+        1,
+        "shown again, it is fetched again"
     );
 }
 

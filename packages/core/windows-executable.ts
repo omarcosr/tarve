@@ -1,10 +1,15 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { NtExecutable, NtExecutableResource, Resource } from "resedit";
+import { Data, NtExecutable, NtExecutableResource, Resource } from "resedit";
 
 export interface WindowsExecutableInfo {
   name: string;
   version: string;
   filename: string;
+  description?: string;
+  publisher?: string;
+  copyright?: string;
+  /** .ico bytes; replace the host executable's icon. */
+  ico?: Uint8Array;
 }
 
 const IMAGE_SUBSYSTEM_WINDOWS_GUI = 2;
@@ -36,7 +41,9 @@ export function brandWindowsExecutable(path: string, info: WindowsExecutableInfo
       versionInfo.removeStringValue(language, key);
     }
     versionInfo.setStringValues(language, {
-      FileDescription: `${info.name} — native Tarve application`,
+      FileDescription: info.description ?? `${info.name} — native Tarve application`,
+      ...(info.publisher ? { CompanyName: info.publisher } : {}),
+      ...(info.copyright ? { LegalCopyright: info.copyright } : {}),
       ProductName: info.name,
       InternalName: info.name,
       OriginalFilename: info.filename,
@@ -47,6 +54,13 @@ export function brandWindowsExecutable(path: string, info: WindowsExecutableInfo
   versionInfo.setFileVersion(major, minor, patch, revision);
   versionInfo.setProductVersion(major, minor, patch, revision);
   versionInfo.outputToResourceEntries(resources.entries);
+  if (info.ico) {
+    // Explorer shows the first icon group: replace it (Node's) in place.
+    const groups = Resource.IconGroupEntry.fromEntries(resources.entries);
+    const group = groups[0];
+    const icons = Data.IconFile.from(info.ico).icons.map(icon => icon.data);
+    Resource.IconGroupEntry.replaceIconsForResource(resources.entries, group?.id ?? 1, group?.lang ?? 1033, icons);
+  }
   resources.outputResource(executable);
   const output = Buffer.from(executable.generate());
   output.writeUInt16LE(IMAGE_SUBSYSTEM_WINDOWS_GUI, output.readUInt32LE(0x3c) + 24 + 68);

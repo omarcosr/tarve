@@ -14,6 +14,8 @@ mod media;
 mod paint;
 mod protocol;
 #[cfg(not(target_arch = "wasm32"))]
+mod remote_image;
+#[cfg(not(target_arch = "wasm32"))]
 mod renderer;
 mod rich;
 #[cfg(not(target_arch = "wasm32"))]

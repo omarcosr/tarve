@@ -3,7 +3,7 @@
     {
       "name": "Accordion",
       "source": "packages/core/src/controls.ts",
-      "line": 177,
+      "line": 179,
       "generic": false,
       "propsType": "AccordionProps",
       "props": [
@@ -31,6 +31,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -76,6 +79,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -159,6 +165,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -243,6 +252,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -303,6 +315,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -350,6 +365,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -378,6 +396,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -411,6 +432,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -453,6 +477,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -465,7 +492,7 @@
     {
       "name": "Button",
       "source": "packages/core/src/components/button.ts",
-      "line": 101,
+      "line": 100,
       "generic": false,
       "propsType": "ButtonProps",
       "props": [
@@ -510,6 +537,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -546,6 +576,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -614,6 +647,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -654,8 +690,9 @@
         },
         {
           "name": "flex",
-          "type": "number",
+          "type": "number | string",
           "optional": true,
+          "doc": "CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `\"1 1 176px\"`.",
           "from": "ViewProps"
         },
         {
@@ -723,6 +760,9 @@
         "onDrop",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -784,6 +824,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -842,6 +885,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -886,6 +932,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -923,7 +972,7 @@
     {
       "name": "Code",
       "source": "packages/core/src/components/rich-content.ts",
-      "line": 74,
+      "line": 70,
       "generic": false,
       "propsType": "CodeProps",
       "props": [
@@ -965,6 +1014,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -1013,6 +1065,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -1022,7 +1077,7 @@
     {
       "name": "Column",
       "source": "packages/core/src/components/layout.ts",
-      "line": 35,
+      "line": 36,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
@@ -1043,8 +1098,9 @@
         },
         {
           "name": "flex",
-          "type": "number",
-          "optional": true
+          "type": "number | string",
+          "optional": true,
+          "doc": "CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `\"1 1 176px\"`."
         },
         {
           "name": "focusable",
@@ -1094,6 +1150,9 @@
         "onDrop",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -1103,7 +1162,7 @@
     {
       "name": "Combobox",
       "source": "packages/core/src/popups.ts",
-      "line": 492,
+      "line": 499,
       "generic": false,
       "propsType": "ComboboxProps",
       "props": [
@@ -1184,6 +1243,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -1195,7 +1257,7 @@
     {
       "name": "Command",
       "source": "packages/core/src/popups.ts",
-      "line": 640,
+      "line": 647,
       "generic": false,
       "propsType": "CommandProps",
       "props": [
@@ -1259,6 +1321,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -1270,7 +1335,7 @@
     {
       "name": "CommandPalette",
       "source": "packages/core/src/popups.ts",
-      "line": 763,
+      "line": 770,
       "generic": false,
       "propsType": "CommandPaletteProps",
       "props": [
@@ -1369,6 +1434,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup"
       ],
@@ -1379,7 +1447,7 @@
     {
       "name": "ContextMenu",
       "source": "packages/core/src/popups.ts",
-      "line": 412,
+      "line": 419,
       "generic": false,
       "propsType": "ContextMenuProps",
       "props": [
@@ -1443,6 +1511,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -1570,6 +1641,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -1626,6 +1700,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -1718,6 +1795,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -1795,6 +1875,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -1804,7 +1887,7 @@
     {
       "name": "Diff",
       "source": "packages/core/src/components/rich-content.ts",
-      "line": 92,
+      "line": 88,
       "generic": false,
       "propsType": "DiffProps",
       "props": [
@@ -1873,6 +1956,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -1914,6 +2000,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -1983,6 +2072,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -1994,7 +2086,7 @@
     {
       "name": "DropdownMenu",
       "source": "packages/core/src/popups.ts",
-      "line": 342,
+      "line": 349,
       "generic": false,
       "propsType": "DropdownMenuProps",
       "props": [
@@ -2063,6 +2155,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -2142,6 +2237,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -2189,6 +2287,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -2238,6 +2339,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -2290,6 +2394,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -2302,7 +2409,7 @@
     {
       "name": "Image",
       "source": "packages/core/src/components/image.ts",
-      "line": 263,
+      "line": 280,
       "generic": false,
       "propsType": "ImageProps",
       "props": [
@@ -2310,12 +2417,13 @@
           "name": "src",
           "type": "ImageSource",
           "optional": false,
-          "doc": "Local path, data URL, encoded bytes, or raw RGBA8 pixels."
+          "doc": "Local path, `http(s)://` URL, data URL, encoded bytes, or raw RGBA8 pixels.\nA URL is fetched and decoded natively, off the UI thread, the first time the\nimage is on screen (like `loading=\"lazy\"`); until then it shows its placeholder."
         },
         {
           "name": "fit",
-          "type": "\"cover\" | \"contain\"",
-          "optional": true
+          "type": "\"cover\" | \"contain\" | \"fill\"",
+          "optional": true,
+          "doc": "CSS `object-fit`."
         },
         {
           "name": "height",
@@ -2336,6 +2444,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -2392,6 +2503,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -2431,6 +2545,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -2492,6 +2609,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -2549,6 +2669,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -2570,6 +2693,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -2607,6 +2733,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -2686,8 +2815,9 @@
         },
         {
           "name": "flex",
-          "type": "number",
+          "type": "number | string",
           "optional": true,
+          "doc": "CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `\"1 1 176px\"`.",
           "from": "ViewProps"
         },
         {
@@ -2802,6 +2932,9 @@
         "onDrop",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup"
       ],
@@ -2835,8 +2968,9 @@
         },
         {
           "name": "flex",
-          "type": "number",
+          "type": "number | string",
           "optional": true,
+          "doc": "CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `\"1 1 176px\"`.",
           "from": "ViewProps"
         },
         {
@@ -2933,6 +3067,9 @@
         "onDrop",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -2975,6 +3112,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3002,6 +3142,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3044,6 +3187,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3105,6 +3251,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3147,6 +3296,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3218,6 +3370,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3278,6 +3433,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3327,6 +3485,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3377,6 +3538,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3434,7 +3598,7 @@
     {
       "name": "Popover",
       "source": "packages/core/src/popups.ts",
-      "line": 234,
+      "line": 241,
       "generic": false,
       "propsType": "PopoverProps",
       "props": [
@@ -3493,6 +3657,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3504,7 +3671,7 @@
     {
       "name": "Portal",
       "source": "packages/core/src/components/layout.ts",
-      "line": 41,
+      "line": 42,
       "generic": false,
       "propsType": "PortalProps",
       "props": [
@@ -3528,8 +3695,9 @@
         },
         {
           "name": "flex",
-          "type": "number",
+          "type": "number | string",
           "optional": true,
+          "doc": "CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `\"1 1 176px\"`.",
           "from": "ViewProps"
         },
         {
@@ -3587,6 +3755,9 @@
         "onDrop",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3630,8 +3801,9 @@
         },
         {
           "name": "flex",
-          "type": "number",
+          "type": "number | string",
           "optional": true,
+          "doc": "CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `\"1 1 176px\"`.",
           "from": "ViewProps"
         },
         {
@@ -3727,6 +3899,9 @@
         "onDrop",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3765,6 +3940,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3835,6 +4013,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3886,6 +4067,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3965,6 +4149,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -3974,7 +4161,7 @@
     {
       "name": "Row",
       "source": "packages/core/src/components/layout.ts",
-      "line": 31,
+      "line": 32,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
@@ -3995,8 +4182,9 @@
         },
         {
           "name": "flex",
-          "type": "number",
-          "optional": true
+          "type": "number | string",
+          "optional": true,
+          "doc": "CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `\"1 1 176px\"`."
         },
         {
           "name": "focusable",
@@ -4046,6 +4234,9 @@
         "onDrop",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -4079,8 +4270,9 @@
         },
         {
           "name": "flex",
-          "type": "number",
+          "type": "number | string",
           "optional": true,
+          "doc": "CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `\"1 1 176px\"`.",
           "from": "ViewProps"
         },
         {
@@ -4160,6 +4352,9 @@
         "onDrop",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -4195,8 +4390,9 @@
         },
         {
           "name": "flex",
-          "type": "number",
+          "type": "number | string",
           "optional": true,
+          "doc": "CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `\"1 1 176px\"`.",
           "from": "ViewProps"
         },
         {
@@ -4278,6 +4474,9 @@
         "onDrop",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -4344,6 +4543,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -4374,6 +4576,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -4451,6 +4656,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -4523,6 +4731,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -4565,6 +4776,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -4631,6 +4845,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -4666,6 +4883,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -4750,6 +4970,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -4840,6 +5063,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -4888,6 +5114,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -4899,7 +5128,7 @@
     {
       "name": "Tabs",
       "source": "packages/core/src/controls.ts",
-      "line": 154,
+      "line": 156,
       "generic": false,
       "propsType": "TabsProps",
       "props": [
@@ -4927,6 +5156,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -4938,7 +5170,7 @@
     {
       "name": "Text",
       "source": "packages/core/src/components/text.ts",
-      "line": 13,
+      "line": 12,
       "generic": false,
       "propsType": "TextProps",
       "props": [
@@ -4975,6 +5207,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup"
       ],
@@ -4983,7 +5218,7 @@
     {
       "name": "TextArea",
       "source": "packages/core/src/components/input.ts",
-      "line": 59,
+      "line": 58,
       "generic": false,
       "propsType": "TextAreaProps",
       "props": [
@@ -5027,6 +5262,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -5036,7 +5274,7 @@
     {
       "name": "TitleBar",
       "source": "packages/core/src/components/titlebar.ts",
-      "line": 37,
+      "line": 46,
       "generic": false,
       "propsType": "TitleBarProps",
       "props": [
@@ -5060,8 +5298,9 @@
         },
         {
           "name": "flex",
-          "type": "number",
+          "type": "number | string",
           "optional": true,
+          "doc": "CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `\"1 1 176px\"`.",
           "from": "ViewProps"
         },
         {
@@ -5148,6 +5387,9 @@
         "onDrop",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -5200,6 +5442,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -5242,6 +5487,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -5299,6 +5547,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -5349,6 +5600,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -5360,7 +5614,7 @@
     {
       "name": "Tooltip",
       "source": "packages/core/src/popups.ts",
-      "line": 167,
+      "line": 170,
       "generic": false,
       "propsType": "TooltipProps",
       "props": [
@@ -5372,11 +5626,6 @@
         {
           "name": "id",
           "type": "string",
-          "optional": false
-        },
-        {
-          "name": "open",
-          "type": "boolean",
           "optional": false
         },
         {
@@ -5400,6 +5649,12 @@
           "optional": true
         },
         {
+          "name": "open",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Controlled visibility. Omit it and the tooltip shows while its trigger is hovered, one at a time."
+        },
+        {
           "name": "side",
           "type": "PopupSide",
           "optional": true,
@@ -5413,6 +5668,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -5481,6 +5739,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -5511,6 +5772,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -5522,7 +5786,7 @@
     {
       "name": "View",
       "source": "packages/core/src/components/layout.ts",
-      "line": 27,
+      "line": 28,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
@@ -5543,8 +5807,9 @@
         },
         {
           "name": "flex",
-          "type": "number",
-          "optional": true
+          "type": "number | string",
+          "optional": true,
+          "doc": "CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `\"1 1 176px\"`."
         },
         {
           "name": "focusable",
@@ -5594,6 +5859,9 @@
         "onDrop",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -5604,15 +5872,10 @@
       "name": "VirtualList",
       "summary": "Fixed-height rows; the caller keeps `offset` and updates it from `onScroll`.",
       "source": "packages/core/src/virtual-list.ts",
-      "line": 584,
+      "line": 600,
       "generic": true,
       "propsType": "VirtualListProps<T> | VariableVirtualListProps<T> | WindowedVirtualListProps<T>",
       "props": [
-        {
-          "name": "height",
-          "type": "number",
-          "optional": false
-        },
         {
           "name": "items",
           "type": "readonly T[]",
@@ -5650,6 +5913,12 @@
           "type": "boolean",
           "optional": true,
           "from": "VariableVirtualListProps"
+        },
+        {
+          "name": "height",
+          "type": "number",
+          "optional": true,
+          "doc": "Viewport height in px. Omit it (with an `id`) to fill the parent like\r\n`flex: 1`: the list follows its real laid-out height, window resizes included."
         },
         {
           "name": "id",
@@ -5696,6 +5965,9 @@
         "motionFrom",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -5729,8 +6001,9 @@
         },
         {
           "name": "flex",
-          "type": "number",
+          "type": "number | string",
           "optional": true,
+          "doc": "CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `\"1 1 176px\"`.",
           "from": "ViewProps"
         },
         {
@@ -5833,6 +6106,9 @@
         "onDrop",
         "onHighlight",
         "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
         "onTransitionEnd",
         "rovingGroup",
         "style"
@@ -5934,6 +6210,27 @@
       "type": "(payload: PastePayload) => void",
       "optional": true,
       "doc": "Receives non-text clipboard content (files or a bitmap) pasted while focused.",
+      "from": "BaseProps"
+    },
+    {
+      "name": "onPointerLeave",
+      "type": "() => void",
+      "optional": true,
+      "doc": "The pointer left this node and its children (DOM `pointerleave`).",
+      "from": "BaseProps"
+    },
+    {
+      "name": "onPointerMove",
+      "type": "(point: { x: number; y: number }) => void",
+      "optional": true,
+      "doc": "Pointer position inside this node (like DOM `offsetX`/`offsetY`) while it is over it or its children.",
+      "from": "BaseProps"
+    },
+    {
+      "name": "onSize",
+      "type": "(size: { width: number; height: number }) => void",
+      "optional": true,
+      "doc": "Content-box size after layout, on mount and whenever it changes (a ResizeObserver).",
       "from": "BaseProps"
     },
     {

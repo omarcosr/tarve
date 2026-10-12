@@ -26,6 +26,8 @@ const allSteps = [
   "test:canvas",
   "smoke:text",
   "smoke:html",
+  "smoke:remote-image",
+  ...(process.platform === "win32" ? ["smoke:app-icon"] : []),
   ...(process.platform === "win32" && process.arch === "x64" ? ["smoke:accessibility"] : []),
   "pack",
   "smoke:package",

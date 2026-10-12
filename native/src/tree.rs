@@ -995,6 +995,62 @@ fn looks_like_svg(bytes: &[u8]) -> bool {
     trimmed.starts_with(b"<svg") || trimmed.starts_with(b"<?xml")
 }
 
+/// A list easing from one scroll offset to another on the motion clock.
+#[derive(Clone, Copy, Debug)]
+struct ScrollAnimation {
+    from: f64,
+    to: f64,
+    start_ms: f64,
+    duration_ms: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RemoteImageState {
+    Pending,
+    Failed,
+}
+
+/// A remote image decoded on a worker thread, on its way to the cache.
+pub(crate) struct DecodedImage(ImageData);
+
+impl std::fmt::Debug for DecodedImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DecodedImage({}x{})", self.0.width, self.0.height)
+    }
+}
+
+/// Decodes fetched image bytes (PNG, JPEG, WebP or SVG).
+pub(crate) fn decode_remote_image(bytes: &[u8]) -> Result<DecodedImage, String> {
+    let image = if looks_like_svg(bytes) {
+        load_untrusted_svg_data(bytes)?
+    } else {
+        decode_raster_image(bytes)?
+    };
+    Ok(DecodedImage(image))
+}
+
+/// An SVG from the network: its `<image href>`s may embed data URLs but never
+/// read local files, which usvg's default resolver would.
+fn load_untrusted_svg_data(bytes: &[u8]) -> Result<ImageData, String> {
+    let options = resvg::usvg::Options {
+        image_href_resolver: resvg::usvg::ImageHrefResolver {
+            resolve_data: resvg::usvg::ImageHrefResolver::default_data_resolver(),
+            resolve_string: Box::new(|_, _| None),
+        },
+        ..resvg::usvg::Options::default()
+    };
+    render_svg_tree(bytes, &options)
+}
+
+pub(crate) fn is_remote_url(src: &str) -> bool {
+    let scheme = src.get(..8).unwrap_or(src).to_ascii_lowercase();
+    scheme.starts_with("http://") || scheme.starts_with("https://")
+}
+
+fn is_remote_image(node: &Node) -> bool {
+    node.image.is_none() && is_remote_url(&node.src)
+}
+
 fn load_image_data(node: &Node) -> Result<ImageData, String> {
     if let Some(source) = &node.image {
         return match source {
@@ -1063,16 +1119,20 @@ fn load_svg_image(path: &str) -> Result<ImageData, String> {
 }
 
 fn load_svg_data(bytes: &[u8], resources_dir: Option<PathBuf>) -> Result<ImageData, String> {
+    let options = resvg::usvg::Options {
+        resources_dir,
+        ..resvg::usvg::Options::default()
+    };
+    render_svg_tree(bytes, &options)
+}
+
+fn render_svg_tree(bytes: &[u8], options: &resvg::usvg::Options) -> Result<ImageData, String> {
     if bytes.is_empty() || bytes.len() > MAX_IMAGE_ENCODED_BYTES {
         return Err(format!(
             "encoded SVG size must be 1..={MAX_IMAGE_ENCODED_BYTES} bytes"
         ));
     }
-    let options = resvg::usvg::Options {
-        resources_dir,
-        ..resvg::usvg::Options::default()
-    };
-    let tree = resvg::usvg::Tree::from_data(bytes, &options).map_err(|error| error.to_string())?;
+    let tree = resvg::usvg::Tree::from_data(bytes, options).map_err(|error| error.to_string())?;
     let intrinsic = tree.size().to_int_size();
     let largest = intrinsic.width().max(intrinsic.height()).max(1);
     let scale = if largest > MAX_SVG_RASTER_DIMENSION {
@@ -1524,6 +1584,12 @@ pub struct Tree {
     images: HashMap<String, ImageData>,
     /// Keys whose decoded pixels were dropped because a GPU texture holds them.
     released_images: HashSet<String>,
+    /// Smooth `scrollToItem` requests in flight, by list id.
+    scroll_animations: HashMap<String, ScrollAnimation>,
+    /// Remote (`http(s)://`) image sources being fetched, or that failed.
+    remote_images: HashMap<String, RemoteImageState>,
+    /// Remote sources painted since the last request batch that still need fetching.
+    remote_requests: Vec<String>,
     /// Prune generation each cached image was last shown in.
     image_last_used: HashMap<String, u64>,
     image_generation: u64,
@@ -1801,6 +1867,9 @@ impl Tree {
             highlight_dirty: true,
             images: HashMap::default(),
             released_images: HashSet::default(),
+            scroll_animations: HashMap::default(),
+            remote_images: HashMap::default(),
+            remote_requests: Vec::new(),
             image_last_used: HashMap::default(),
             image_generation: 0,
             svgs: HashMap::default(),
@@ -1929,6 +1998,39 @@ impl Tree {
             self.pending_motion_events
                 .push(json!({"type":"motionComplete", "id":id, "property":property}));
         }
+        self.advance_scroll_animations();
+    }
+    fn advance_scroll_animations(&mut self) {
+        if self.scroll_animations.is_empty() {
+            return;
+        }
+        let now = self.motion_time_ms;
+        let animations: Vec<(String, ScrollAnimation)> = self
+            .scroll_animations
+            .iter()
+            .map(|(id, animation)| (id.clone(), *animation))
+            .collect();
+        for (id, animation) in animations {
+            if !self.entries.contains_key(&id) {
+                self.scroll_animations.remove(&id);
+                continue;
+            }
+            let t = ((now - animation.start_ms) / animation.duration_ms).clamp(0.0, 1.0);
+            // CSS `ease-in-out`-like cubic.
+            let eased = if t < 0.5 {
+                4.0 * t * t * t
+            } else {
+                1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+            };
+            let events = self.scroll_to(
+                &id,
+                animation.from + (animation.to - animation.from) * eased,
+            );
+            self.pending_layout_events.extend(events);
+            if t >= 1.0 {
+                self.scroll_animations.remove(&id);
+            }
+        }
     }
     /// Starts transitions for nodes whose hover/active/focus/disabled state
     /// changed since the last sync. Only nodes that held or now hold a state
@@ -2023,7 +2125,8 @@ impl Tree {
             .iter()
             .filter_map(|id| self.entries.get(id))
             .map(|entry| entry.motions.len())
-            .sum()
+            .sum::<usize>()
+            + self.scroll_animations.len()
     }
     pub fn next_motion_tick_ms(&self) -> Option<f64> {
         self.animating
@@ -2037,6 +2140,7 @@ impl Tree {
                     self.next_frame_ms().min(track.end_ms())
                 }
             })
+            .chain((!self.scroll_animations.is_empty()).then(|| self.next_frame_ms()))
             .min_by(f64::total_cmp)
     }
     pub fn take_motion_events(&mut self) -> Vec<Value> {
@@ -2321,7 +2425,8 @@ impl Tree {
                     || entry.node.src != node.src
                     || entry.node.image != node.image
             });
-            if source_changed || !self.images.contains_key(&key) {
+            // Remote sources load off the UI thread once painted (see paint_node_content).
+            if (source_changed || !self.images.contains_key(&key)) && !is_remote_image(&node) {
                 match load_image_data(&node) {
                     Ok(image) => {
                         let current_bytes: usize = self
@@ -2767,6 +2872,54 @@ impl Tree {
             }
         }
     }
+    /// Remote image URLs painted since the last call that need fetching.
+    pub fn take_remote_image_requests(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.remote_requests)
+    }
+
+    /// Stores a fetched remote image and lays out the nodes showing it again.
+    pub(crate) fn finish_remote_image(
+        &mut self,
+        url: String,
+        result: Result<DecodedImage, String>,
+    ) {
+        let image = match result {
+            Ok(DecodedImage(image)) => image,
+            Err(message) => {
+                self.remote_images
+                    .insert(url.clone(), RemoteImageState::Failed);
+                self.warnings.push(format!("Image '{url}': {message}"));
+                return;
+            }
+        };
+        self.remote_images.remove(&url);
+        let current: usize = self
+            .images
+            .iter()
+            .filter(|(key, _)| **key != url)
+            .map(|(_, cached)| cached.data.data().len())
+            .sum();
+        if current.saturating_add(image.data.data().len()) > MAX_IMAGE_CACHE_BYTES {
+            self.remote_images
+                .insert(url.clone(), RemoteImageState::Failed);
+            self.warnings.push(format!(
+                "Image '{url}': decoded image cache would exceed the {MAX_IMAGE_CACHE_BYTES} byte limit"
+            ));
+            return;
+        }
+        self.released_images.remove(&url);
+        self.image_last_used
+            .insert(url.clone(), self.image_generation);
+        self.images.insert(url.clone(), image);
+        for entry in self.entries.values_mut() {
+            if entry.node.kind == "image" && entry.node.image.is_none() && entry.node.src == url {
+                entry.measure_dirty = true;
+            }
+        }
+        self.dirty.layout = true;
+        self.dirty.paint = true;
+    }
+
     fn prune_images(&mut self) {
         let used: HashSet<String> = self
             .entries
@@ -2802,6 +2955,9 @@ impl Tree {
         }
         self.images
             .retain(|key, _| used.contains(key) || kept.contains(key));
+        // A failed remote image is tried again once it is shown again.
+        self.remote_images
+            .retain(|url, state| *state == RemoteImageState::Pending || used.contains(url));
         let images = &self.images;
         self.released_images.retain(|key| images.contains_key(key));
         self.image_last_used
@@ -3036,8 +3192,32 @@ impl Tree {
             };
             let next = desired.clamp(0.0, list.scroll_max);
             let changed = (next - list.scroll).abs() > 1e-6;
-            let (scroll_x, max_x, max_y) = (list.scroll_x, list.scroll_max_x, list.scroll_max);
+            let (from, scroll_x, max_x, max_y) = (
+                list.scroll,
+                list.scroll_x,
+                list.scroll_max_x,
+                list.scroll_max,
+            );
             let list = self.entries.get_mut(&list_id).unwrap();
+            if let Some(request) = &scroll_request {
+                if request.smooth && changed {
+                    list.virtual_scroll_generation = request.generation;
+                    list.virtual_following_tail = false;
+                    // Longer trips take longer, within what still reads as one gesture.
+                    let duration_ms = (300.0 + (next - from).abs().sqrt() * 6.0).min(900.0);
+                    self.scroll_animations.insert(
+                        list_id.clone(),
+                        ScrollAnimation {
+                            from,
+                            to: next,
+                            start_ms: self.motion_time_ms,
+                            duration_ms,
+                        },
+                    );
+                    continue;
+                }
+                self.scroll_animations.remove(&list_id);
+            }
             list.scroll = next;
             if let Some(request) = &scroll_request {
                 list.virtual_scroll_generation = request.generation;
@@ -4580,6 +4760,15 @@ impl Tree {
             );
         }
         if node.kind == "image" {
+            // Only images that reach the screen are fetched, like `loading="lazy"`.
+            if is_remote_image(&node)
+                && !self.images.contains_key(node.src.as_str())
+                && !self.remote_images.contains_key(&node.src)
+            {
+                self.remote_images
+                    .insert(node.src.clone(), RemoteImageState::Pending);
+                self.remote_requests.push(node.src.clone());
+            }
             let cached = image_cache_key(&node)
                 .and_then(|key| self.images.get(key).map(|image| (key, image)));
             // Clip only where the picture can leave its box (cover, rounded
@@ -5911,6 +6100,8 @@ impl Tree {
         self.wheel_2d(0.0, delta)
     }
     pub fn wheel_2d(&mut self, delta_x: f64, delta_y: f64) -> Vec<Value> {
+        // The user's own scrolling takes over from a smooth scrollToItem.
+        self.scroll_animations.clear();
         if let Some(id) = self.hit_root(false)
             && let Some(entry) = self.entries.get(&id)
             && entry.node.kind == "markdown"
@@ -6019,6 +6210,7 @@ impl Tree {
         None
     }
     fn drag_scrollbar(&mut self, id: &str, axis: ScrollbarAxis, grab: f64) -> Vec<Value> {
+        self.scroll_animations.remove(id);
         let Some(entry) = self.entries.get(id) else {
             return vec![];
         };
@@ -6060,6 +6252,7 @@ impl Tree {
         id: &str,
         index: usize,
         offset: f64,
+        smooth: bool,
     ) -> Result<Vec<Value>, String> {
         if !offset.is_finite() {
             return Err("VirtualList scrollToItem offset must be finite".into());
@@ -6075,9 +6268,13 @@ impl Tree {
                 metadata.item_count
             ));
         }
-        Ok(vec![json!({
+        let mut event = json!({
             "type":"virtualListScrollToItem", "id":id, "index":index, "offset":offset
-        })])
+        });
+        if smooth {
+            event["smooth"] = json!(true);
+        }
+        Ok(vec![event])
     }
     fn scroll_to_2d(&mut self, id: &str, offset_x: f64, offset_y: f64) -> Vec<Value> {
         if !offset_x.is_finite() || !offset_y.is_finite() {
@@ -8029,7 +8226,11 @@ impl Tree {
                 .map(|entry| &entry.node)
                 .find(|node| node.kind == "image" && image_cache_key(node) == Some(key.as_str()))
                 .cloned();
-            match node.map(|node| load_image_data(&node)) {
+            // A remote image is fetched again the next time it is painted.
+            match node
+                .filter(|node| !is_remote_image(node))
+                .map(|node| load_image_data(&node))
+            {
                 Some(Ok(image)) => {
                     self.images.insert(key.clone(), image);
                     restored = true;

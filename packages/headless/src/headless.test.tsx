@@ -150,6 +150,33 @@ describe("@tarve/headless", () => {
     }
   });
 
+  test("http(s) Image sources are fetched once painted and laid out with their size", async () => {
+    const hits: string[] = [];
+    const server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        hits.push(new URL(request.url).pathname);
+        return new Response('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#e11d48"/></svg>', { headers: { "content-type": "image/svg+xml" } });
+      },
+    });
+    const app = await createHeadlessApp(() => (
+      <Window width={200} height={120}>
+        <Image id="remote" src={`http://127.0.0.1:${server.port}/a.svg`} width={40} />
+      </Window>
+    ));
+    try {
+      await app.settle();
+      for (let i = 0; i < 100 && !hits.length; i++) await Bun.sleep(10);
+      await app.settle();
+      expect(hits).toEqual(["/a.svg"]);
+      expect((await app.inspect()).nodes.find((node) => node.id === "remote")!.height).toBe(20);
+      expect(inkWithin(app.pixels(), 0, 0, 40, 20)).toBeGreaterThan(500);
+    } finally {
+      app.close();
+      server.stop(true);
+    }
+  });
+
   test("capture writes a PNG through the AppHandle API", async () => {
     const dir = mkdtempSync(join(tmpdir(), "tarve-headless-"));
     const app = await createHeadlessApp(settingsCard);

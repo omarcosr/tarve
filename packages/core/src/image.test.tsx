@@ -33,13 +33,16 @@ describe("dynamic image sources", () => {
     });
   });
 
-  test("rejects malformed RGBA and direct HTTP strings with actionable errors", () => {
+  test("rejects malformed RGBA with an actionable error", () => {
     expect(() => compileTree(
       <Window><Image id="bad" src={{ rgba: Uint8Array.of(1, 2, 3), width: 1, height: 1 }}/></Window>,
     )).toThrow("exactly 4 bytes");
-    expect(() => compileTree(
-      <Window><Image id="remote" src="https://example.test/image.png"/></Window>,
-    )).toThrow("loadImageSource");
+  });
+
+  test("passes HTTP(S) URLs to the native side, which fetches them once painted", () => {
+    const tree = compileTree(<Window><Image id="remote" src="https://example.test/image.png"/></Window>);
+    expect(tree.nodes.get("remote")?.src).toBe("https://example.test/image.png");
+    expect(tree.nodes.get("remote")?.image).toBeUndefined();
   });
 
   test("HTTP loader reuses its bounded cache and forwards AbortSignal", async () => {

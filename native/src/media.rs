@@ -41,6 +41,8 @@ mod remote {
     /// Consecutive failed requests before the stream reports an error.
     const ATTEMPTS: u32 = 4;
 
+    use super::failure;
+
     pub(super) fn is_remote(src: &str) -> bool {
         src.starts_with("http://") || src.starts_with("https://")
     }
@@ -91,7 +93,7 @@ mod remote {
                 .get(url)
                 .header("Range", format!("bytes=0-{}", CHUNK - 1))
                 .call()
-                .map_err(|error| format!("media {url}: {error}"))?;
+                .map_err(|error| failure(url, error))?;
             let total = header(&response, "content-range")
                 .and_then(|range| range.rsplit('/').next()?.parse::<u64>().ok());
             let ranged = response.status().as_u16() == 206 && total.is_some();
@@ -99,10 +101,10 @@ mod remote {
                 Some(total) => total,
                 None => header(&response, "content-length")
                     .and_then(|length| length.parse::<u64>().ok())
-                    .ok_or_else(|| format!("media {url}: the server sends no length"))?,
+                    .ok_or_else(|| failure(url, "the server sends no length"))?,
             };
             if len == 0 {
-                return Err(format!("media {url}: empty response"));
+                return Err(failure(url, "empty response"));
             }
             let mime = header(&response, "content-type")
                 .and_then(|value| value.split(';').next().map(str::trim).map(str::to_string))
@@ -125,7 +127,7 @@ mod remote {
             if ranged {
                 stream
                     .fill(&mut body, 0, 1)
-                    .map_err(|error| format!("media {url}: {error}"))?;
+                    .map_err(|error| failure(url, error))?;
                 for _ in 0..CONNECTIONS.min(count - 1) {
                     let downloader = Arc::downgrade(&stream);
                     std::thread::Builder::new()
@@ -240,7 +242,7 @@ mod remote {
                     Err(error) => {
                         failures += 1;
                         if failures >= ATTEMPTS {
-                            stream.fail(format!("media {}: {error}", stream.url));
+                            stream.fail(failure(&stream.url, error));
                             return;
                         }
                         std::thread::sleep(Duration::from_millis(250 << failures));
@@ -428,6 +430,23 @@ fn event(id: &str, name: &str, track: Option<&Track>) -> Value {
     })
 }
 
+/// "<reason> (<source>)": the reason first, so a cut-off message still says it,
+/// and a URL as its host only, as a browser's media error names no query string.
+pub(crate) fn failure(src: &str, reason: impl std::fmt::Display) -> String {
+    let source = src.split_once("://").map_or(src, |(_, rest)| {
+        rest.split(['/', '?', '#']).next().unwrap_or(rest)
+    });
+    format!("{reason} ({source})")
+}
+
+/// rodio's Display of an I/O error drops its reason ("An IO error occurred …"); keep it.
+fn decoder_failure(src: &str, error: rodio::decoder::DecoderError) -> String {
+    match error {
+        rodio::decoder::DecoderError::IoError(reason) => failure(src, reason),
+        other => failure(src, other),
+    }
+}
+
 fn error(id: &str, message: impl Into<String>) -> Value {
     json!({"type":"media", "id":id, "event":"error", "message":message.into()})
 }
@@ -449,7 +468,7 @@ fn decode<R: Read + Seek + Send + Sync + 'static>(
     }
     let decoder = builder
         .build()
-        .map_err(|error| format!("media {src}: {error}"))?;
+        .map_err(|error| decoder_failure(src, error))?;
     let duration = decoder
         .total_duration()
         .map(|duration| duration.as_secs_f64());
@@ -469,10 +488,12 @@ fn decode_remote(
         src,
         seekable,
     )
+    // A failed download is the cause; the decoder only saw a read that failed.
+    .map_err(|error| stream.error().unwrap_or(error))
 }
 
 fn open_file(src: &str) -> Result<(Sound, Option<f64>), String> {
-    let file = File::open(src).map_err(|error| format!("media {src}: {error}"))?;
+    let file = File::open(src).map_err(|error| failure(src, error))?;
     let length = file.metadata().map(|meta| meta.len()).ok();
     decode(BufReader::new(file), length, None, src, true)
 }
@@ -942,6 +963,18 @@ mod tests {
             }
         });
         format!("http://{address}/song.wav")
+    }
+
+    #[test]
+    fn a_read_failure_names_its_reason_not_rodios_generic_text() {
+        let error = super::decoder_failure(
+            "https://rr1.googlevideo.com/videoplayback?sig=x",
+            rodio::decoder::DecoderError::IoError("range request answered 403 Forbidden".into()),
+        );
+        assert_eq!(
+            error,
+            "range request answered 403 Forbidden (rr1.googlevideo.com)"
+        );
     }
 
     #[test]

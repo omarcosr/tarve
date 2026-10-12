@@ -3,10 +3,9 @@ import type { createApp } from "@tarve/core";
 import { signInWithBrowser } from "./youtube-music-login";
 import * as source from "./youtube-music-source";
 import { AUDIO_ID, state, type Page } from "./youtube-music-view";
-import { onArtworkChanged } from "./youtube-music-artwork";
 
 export function connect(app: ReturnType<typeof createApp>): void {
-  // One render per burst: artwork arriving for a page of rows must not render it once per cover.
+  // One system-media sync per burst of state changes; app.update() batches the render itself.
   let queued = false;
   let mediaKey = "";
   const syncSystemMedia = () => {
@@ -39,12 +38,11 @@ export function connect(app: ReturnType<typeof createApp>): void {
   const refresh = () => {
     if (queued) return;
     queued = true;
-    setTimeout(() => { queued = false; syncSystemMedia(); app.update(); }, 16);
+    queueMicrotask(() => { queued = false; syncSystemMedia(); app.update(); });
   };
   const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
   state.refresh = refresh;
   state.hide = () => app.hide();
-  onArtworkChanged(() => { state.art++; refresh(); });
   state.media = () => app.media(AUDIO_ID);
 
   // The likeliest next click (Play, or the top result) resolves its stream URL ahead.
@@ -69,8 +67,6 @@ export function connect(app: ReturnType<typeof createApp>): void {
     state.page = page;
     state.pageError = null;
     state.listOffset = 0;
-    if (page.kind === "home") { state.homeScroll = 0; state.shelfScroll = []; }
-    if (page.kind === "library") state.libraryScroll = 0;
     if (page.kind === "home") {
       if (!state.shelves) void load(token, source.home(shelves => {
         if (token !== pageToken) return;
@@ -99,6 +95,39 @@ export function connect(app: ReturnType<typeof createApp>): void {
   state.goBack = () => { const page = state.back.pop(); if (page) show(page); };
 
   let playToken = 0;
+  /** The play whose stream was already re-resolved once after an error. */
+  let retriedToken = -1;
+  // Stream URLs expire and the CDN sometimes refuses one mid-song (403, dropped
+  // connections): resolve a fresh URL once and continue where it stopped.
+  state.mediaFailed = failure => {
+    const song = state.queue[state.index];
+    const token = playToken;
+    if (!song || retriedToken === token) {
+      state.playError = failure;
+      state.playing = false;
+      refresh();
+      return;
+    }
+    retriedToken = token;
+    const resumeAt = state.time;
+    source.forgetStreamUrl(song.id);
+    state.path = undefined;
+    state.loading = 0;
+    refresh();
+    source.streamUrl(song.id).then(url => {
+      if (token !== playToken) return;
+      state.loading = null;
+      state.resumeAt = resumeAt;
+      state.path = url;
+      refresh();
+    }, error => {
+      if (token !== playToken) return;
+      state.loading = null;
+      state.playError = message(error);
+      state.playing = false;
+      refresh();
+    });
+  };
   function start(): void {
     const song = state.queue[state.index];
     if (!song) return;
@@ -108,6 +137,7 @@ export function connect(app: ReturnType<typeof createApp>): void {
     state.time = 0;
     state.duration = song.duration ?? 0;
     state.playError = null;
+    state.resumeAt = 0;
     state.loading = 0;
     source.streamUrl(song.id).then(url => {
       if (token !== playToken) return;
@@ -128,7 +158,6 @@ export function connect(app: ReturnType<typeof createApp>): void {
   }
   state.play = (queue, index, from = "") => {
     state.queue = [...queue];
-    state.queueScroll = 0;
     state.index = index;
     state.source = from;
     if (state.shuffle) { state.shuffle = false; state.toggleShuffle(); }

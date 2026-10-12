@@ -260,6 +260,11 @@ export function warmUp(): void {
   void visitorData().catch(() => undefined);
 }
 
+/** Drops a song's cached URL, e.g. after the CDN refused it, so the next streamUrl resolves a fresh one. */
+export function forgetStreamUrl(id: string): void {
+  resolved.delete(id);
+}
+
 export function streamUrl(id: string): Promise<string> {
   const cached = resolved.get(id);
   if (cached) {

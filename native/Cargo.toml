@@ -24,7 +24,7 @@ serde = { version = "1", features = ["derive"] }
 # Glyph rasterization: D3D11 atlas and blurred text shadows on every platform.
 swash = { version = "=0.2.10", default-features = false, features = ["std", "render"] }
 serde_json = "1"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "ico"] }
 base64 = "0.22"
 resvg = { version = "=0.48.1", default-features = false }
 unicode-segmentation = "1.12"

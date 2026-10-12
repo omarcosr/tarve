@@ -27,7 +27,11 @@ export interface ImageRgbaSource {
 export type ImageSource = string | Uint8Array | ImageBytesSource | ImageRgbaSource;
 
 export interface ImageProps extends BaseProps {
-  /** Local path, data URL, encoded bytes, or raw RGBA8 pixels. */
+  /**
+   * Local path, `http(s)://` URL, data URL, encoded bytes, or raw RGBA8 pixels.
+   * A URL is fetched and decoded natively, off the UI thread, the first time the
+   * image is on screen (like `loading="lazy"`); until then it shows its placeholder.
+   */
   src: ImageSource;
   width?: number;
   height?: number;
@@ -141,9 +145,7 @@ export function serializeImageSource(source: ImageSource): SerializedImageSource
 function serializeImageSourceNow(source: ImageSource): SerializedImageSource {
   if (typeof source === "string") {
     if (source.startsWith("data:")) return serializeImageSourceNow(dataUrlSource(source));
-    if (/^https?:\/\//i.test(source)) {
-      throw new TypeError("HTTP(S) Image sources must be loaded with await loadImageSource(url) before rendering");
-    }
+    // http(s) URLs pass through as paths; the native side fetches them lazily.
     if (!source) throw new TypeError("Image src must not be empty");
     return { path: source };
   }

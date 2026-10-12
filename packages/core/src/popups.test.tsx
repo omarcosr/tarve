@@ -20,6 +20,27 @@ describe("popup and selection components", () => {
     expect(changes).toEqual([false]);
   });
 
+  test("uncontrolled Tooltip opens on hover, one at a time", () => {
+    const view = () => (
+      <Window>
+        <Tooltip id="a" trigger={<Text>A</Text>} content="First" />
+        <Tooltip id="b" trigger={<Text>B</Text>} content="Second" />
+      </Window>
+    );
+    let tree = compileTree(view());
+    expect(tree.nodes.has("a-content")).toBe(false);
+    tree.handlers.get("a-trigger")?.onHover?.(true);
+    tree = compileTree(view());
+    expect(tree.nodes.has("a-content")).toBe(true);
+    tree.handlers.get("b-trigger")?.onHover?.(true);
+    tree.handlers.get("a-trigger")?.onHover?.(false);
+    tree = compileTree(view());
+    expect(tree.nodes.has("a-content")).toBe(false);
+    expect(tree.nodes.has("b-content")).toBe(true);
+    tree.handlers.get("b-trigger")?.onHover?.(false);
+    expect(compileTree(view()).nodes.has("b-content")).toBe(false);
+  });
+
   test("interactive triggers keep their native node and chain existing popup handlers", () => {
     const events: string[] = [];
     const tree = compileTree(

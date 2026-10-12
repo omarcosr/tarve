@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { nativePath } from "./src/bridge/runtime";
 import { buildNode } from "./node-build";
+import { encodePng } from "./src/png";
 import { NtExecutable, NtExecutableResource, Resource } from "resedit";
 
 const node = Bun.which("node");
@@ -26,7 +27,13 @@ test.skipIf(!supported)("Node SEA runs the same native TSX app without Bun", asy
     });
     expect(execFileSync(outfile, { encoding: "utf8", timeout: 15000 })).toContain("tarve-node-ready");
     // Rebuilding over an existing executable succeeds, as with Bun builds.
-    await buildNode({ entrypoint: resolve(import.meta.dirname, "../../examples/node-smoke/node-smoke.tsx"), outfile, nativeLibrary: library, nodeExecutable: node ?? undefined });
+    // with every metadata field, and an icon.
+    const icon = join(directory, "icon.png");
+    writeFileSync(icon, encodePng(new Uint8Array(64 * 64 * 4).fill(200), 64, 64));
+    await buildNode({
+      entrypoint: resolve(import.meta.dirname, "../../examples/node-smoke/node-smoke.tsx"), outfile, nativeLibrary: library, nodeExecutable: node ?? undefined,
+      name: "Smoke", version: "2.3.4", description: "Node smoke app", publisher: "Acme", copyright: "© Acme", icon, appId: "Acme.Smoke",
+    });
     expect(execFileSync(outfile, { encoding: "utf8", timeout: 15000 })).toContain("tarve-node-ready");
     if (process.platform === "win32") {
       // Same identity as a Bun-compiled app: GUI subsystem (no console window) and Tarve metadata.
@@ -34,9 +41,14 @@ test.skipIf(!supported)("Node SEA runs the same native TSX app without Bun", asy
       expect(binary.readUInt16LE(binary.readUInt32LE(0x3c) + 24 + 68)).toBe(2);
       const info = Resource.VersionInfo.fromEntries(NtExecutableResource.from(NtExecutable.from(binary, { ignoreCert: true })).entries)[0]!;
       const strings = info.getStringValues(info.getAllLanguagesForStringValues()[0]!);
-      expect(strings.FileDescription).toBe("node-smoke — native Tarve application");
-      expect(strings.ProductName).toBe("node-smoke");
-      expect(strings.CompanyName).toBeUndefined();
+      expect(strings.FileDescription).toBe("Node smoke app");
+      expect(strings.ProductName).toBe("Smoke");
+      expect(strings.CompanyName).toBe("Acme");
+      expect(strings.LegalCopyright).toBe("© Acme");
+      expect(strings.ProductVersion).toBe("2.3.4.0");
+      const resources = NtExecutableResource.from(NtExecutable.from(binary, { ignoreCert: true }));
+      const group = Resource.IconGroupEntry.fromEntries(resources.entries)[0]!;
+      expect(group.icons.map(entry => entry.width || 256)).toEqual([16, 20, 24, 32, 40, 48, 64]);
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });

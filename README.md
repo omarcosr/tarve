@@ -302,9 +302,30 @@ Base numeric style targets participate in native motion. Interactive `hover`, `f
 
 `createTextSearchController` and `findRanges` provide search/navigation helpers for `Text`, `Markdown`, `Code`, and `Diff`.
 
+## App icon and metadata
+
+Name, icon and publisher live in the app's `package.json` under `"tarve"`; `tarve build`, `tarve run` and `tarve dev` read them, and CLI flags (`--name`, `--version`, `--icon`, `--publisher`, `--copyright`, `--description`, `--app-id`) override them.
+
+```json
+{
+  "name": "pulse",
+  "version": "1.2.0",
+  "tarve": {
+    "name": "Pulse",
+    "description": "System monitor",
+    "publisher": "Example Inc.",
+    "copyright": "© 2026 Example Inc.",
+    "icon": "assets/icon.png",
+    "appId": "Example.Pulse"
+  }
+}
+```
+
+A monorepo of apps sets per-entry values under `"tarve": { "apps": { "pulse/pulse.tsx": { … } } }`. The icon is a square PNG (256 px or larger) or an `.ico`: on Windows the build writes a multi-size icon and the version info into the `.exe`, for Bun and Node builds alike; on Linux it writes `<App>.desktop` and `<App>.png` beside the binary. At run time the window and taskbar use the same icon, and `appId` names the app in media controls and notifications. `createApp(view, { icon })` sets the window icon directly.
+
 ## Images
 
-`Image` accepts local paths, data URLs, encoded PNG/JPEG/WebP/SVG bytes, and raw RGBA8 pixels. Raw RGBA is sent directly to the native image cache, so live pixel updates do not require a PNG encode/decode round trip.
+`Image` accepts local paths, `http(s)://` URLs, data URLs, encoded PNG/JPEG/WebP/SVG bytes, and raw RGBA8 pixels. Raw RGBA is sent directly to the native image cache, so live pixel updates do not require a PNG encode/decode round trip.
 
 ```tsx
 <Image
@@ -320,7 +341,13 @@ Base numeric style targets participate in native motion. Interactive `hover`, `f
 />
 ```
 
-HTTP(S) loading is explicit and asynchronous. `loadImageSource` supports `AbortSignal`, payload limits, and a bounded in-process LRU cache:
+A URL is fetched and decoded natively, off the UI thread, the first time the image is painted, like `loading="lazy"`: covers further down a list or in a closed panel cost nothing until they scroll in. Until then the image shows its `placeholderBackground`; once decoded it lays out again with its intrinsic size. At most six downloads run at once, and responses with `Cache-Control: max-age` are kept in a disk cache (256 MB) so they survive a restart.
+
+```tsx
+<Image src="https://example.com/cover.webp" width={152} height={152} fit="cover" />
+```
+
+To load bytes yourself (for an `AbortSignal`, a payload limit or to process them), `loadImageSource` fetches into a bounded in-process LRU cache:
 
 ```tsx
 const controller = new AbortController();

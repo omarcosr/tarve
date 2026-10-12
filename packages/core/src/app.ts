@@ -9,6 +9,8 @@ import type { VNode, PastePayload } from "./jsx-runtime";
 import { withRenderScope } from "./render-scope";
 import type { ComponentAdapter } from "./component-adapter";
 import { DevErrorOverlay } from "./dev-overlay";
+import { iconBytes, iconFileForShell, runtimeAppMetadata } from "./app-metadata";
+import { nativeAssetPath } from "./embedded-assets";
 
 export type AppErrorSource =
   | "render"
@@ -67,6 +69,11 @@ export interface AppOptions {
    * the host executable (bun.exe, node.exe) or "Unknown app". `icon` is an .ico/.png path.
    */
   appIdentity?: { id: string; name: string; icon?: string };
+  /**
+   * Window and taskbar icon: a .png/.ico/.jpg/.webp path (or `import icon from "./icon.png" with { type: "file" }`)
+   * or a data URL. Defaults to the `tarve.icon` of the app's package.json under `tarve run`/`dev`/`build`.
+   */
+  icon?: string;
 }
 
 export interface SystemMediaSession extends NativeSystemMediaSession {
@@ -78,7 +85,7 @@ export type TrayMenuItem =
   | { type?: "item"; id: string; label: string; checked?: boolean; disabled?: boolean; onSelect?: () => void; items?: TrayMenuItem[] };
 
 export interface TrayOptions {
-  /** PNG/JPEG/WebP path (also `import icon from "./tray.png" with { type: "file" }` in compiled apps). Defaults to the system application icon. */
+  /** PNG/JPEG/WebP/ICO path or data URL (also `import icon from "./tray.png" with { type: "file" }` in compiled apps). Defaults to the app icon (`createApp({ icon })` or package.json `tarve.icon`), then the system application icon. */
   icon?: string;
   tooltip?: string;
   menu?: TrayMenuItem[];
@@ -113,7 +120,8 @@ export interface AppHandle {
   update(): void;
   close(): void;
   focus(id: string): void;
-  scrollToItem(id: string, index: number, offset?: number): void;
+  /** Scrolls a variable VirtualList to an item; `smooth` eases there like CSS `scroll-behavior: smooth`. */
+  scrollToItem(id: string, index: number, offset?: number, options?: { smooth?: boolean }): void;
   registerHotkey(shortcut: string, handler: HotkeyHandler): () => void;
   show(): void;
   hide(): void;
@@ -223,6 +231,23 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   let overlayCompiled = false;
   const overlayScope = {};
   let appWindow: CompiledTree["document"]["window"] | undefined;
+  // Read once: the window is created from the first document only.
+  let identityDocument: Pick<CompiledTree["document"], "windowIcon" | "appIdentity"> | undefined;
+  /** The app's own icon: `createApp({ icon })`, else package.json `tarve.icon`. */
+  const appIcon = (): string | undefined => options.icon ?? runtimeAppMetadata().icon;
+  function appIdentityDocument(): Pick<CompiledTree["document"], "windowIcon" | "appIdentity"> {
+    if (identityDocument) return identityDocument;
+    const metadata = runtimeAppMetadata();
+    const icon = appIcon();
+    // package.json `tarve.appId` names the app to Windows without code; an explicit appIdentity wins.
+    const identity = options.appIdentity ?? (metadata.appId ? { id: metadata.appId, name: metadata.name ?? metadata.appId, ...(icon ? { icon } : {}) } : undefined);
+    const shellIcon = identity?.icon ? iconFileForShell(identity.icon) : undefined;
+    identityDocument = {
+      ...(icon ? { windowIcon: Buffer.from(iconBytes(icon)).toString("base64") } : {}),
+      ...(identity ? { appIdentity: { id: identity.id, name: identity.name, ...(shellIcon ? { icon: shellIcon } : {}) } } : {}),
+    };
+    return identityDocument;
+  }
 
   function compileView(): CompiledTree {
     const scope = renderScope;
@@ -254,7 +279,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     ));
     appWindow = tree.document.window;
     if (options.closeBehavior === "hide") tree.document.root.closeIntercept = true;
-    if (options.appIdentity) tree.document.appIdentity = { ...options.appIdentity, ...(options.appIdentity.icon ? { icon: resolve(options.appIdentity.icon) } : {}) };
+    Object.assign(tree.document, appIdentityDocument());
     if (options.msaa !== undefined) tree.document.msaa = options.msaa;
     if (options.memoryTrimDelay !== undefined) tree.document.memoryTrimDelay = options.memoryTrimDelay === false ? -1 : options.memoryTrimDelay;
     return tree;
@@ -731,6 +756,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
           handlers.onVirtualListScrollToItem as (...args: never[]) => void,
           event.index as never,
           event.offset as never,
+          (event.smooth === true) as never,
         ) && succeeded;
       }
       if (event.type === "virtualListFocus" && handlers?.onVirtualListFocus) {
@@ -791,9 +817,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     const menu = convert(trayOptions.menu ?? []);
     // Read here, not natively: `$bunfs` paths of compiled executables and imported
     // assets (`import icon from "./tray.png" with { type: "file" }`) only exist in JS.
-    if (trayOptions.icon !== trayIconPath) {
-      trayIconData = trayOptions.icon ? Buffer.from(readFileSync(trayOptions.icon)).toString("base64") : undefined;
-      trayIconPath = trayOptions.icon;
+    const trayIcon = trayOptions.icon ?? appIcon();
+    if (trayIcon !== trayIconPath) {
+      trayIconData = trayIcon ? Buffer.from(iconBytes(trayIcon)).toString("base64") : undefined;
+      trayIconPath = trayIcon;
       trayIconSent = false;
     }
     const iconData = trayIconSent ? undefined : trayIconData;
@@ -859,11 +886,11 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     focus(id: string): void {
       if (!ended) sendPublic({ type: "focus", id });
     },
-    scrollToItem(id: string, index: number, offset = 0): void {
+    scrollToItem(id: string, index: number, offset = 0, options: { smooth?: boolean } = {}): void {
       if (!id) throw new TypeError("scrollToItem requires a list id");
       if (!Number.isInteger(index) || index < 0) throw new RangeError("scrollToItem index must be a nonnegative integer");
       if (!Number.isFinite(offset)) throw new RangeError("scrollToItem offset must be finite");
-      if (!ended) sendPublic({ type: "scrollToItem", id, index, ...(offset !== 0 ? { offset } : {}) });
+      if (!ended) sendPublic({ type: "scrollToItem", id, index, ...(offset !== 0 ? { offset } : {}), ...(options.smooth ? { smooth: true } : {}) });
     },
     show(): void {
       if (!ended) sendPublic({ type: "window", action: "show" });
@@ -1022,7 +1049,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   }
 
   try {
-    const fonts = options.fontFaces?.map(path => Buffer.from(readFileSync(path)).toString("base64"));
+    const fonts = options.fontFaces?.map(path => Buffer.from(readFileSync(nativeAssetPath(path))).toString("base64"));
     bridge.start(fonts?.length ? { ...committed.document, fonts } : committed.document, onNativeEvent);
     syncMedia();
   } catch (error) {

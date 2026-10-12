@@ -12,6 +12,8 @@ export interface WebTreeHandle {
   deviceHeight(): number;
   nextTickMs(): number;
   takeEvents(): string;
+  takeRemoteImageRequests(): string;
+  finishRemoteImage(url: string, bytes: Uint8Array, error?: string): void;
   free(): void;
 }
 

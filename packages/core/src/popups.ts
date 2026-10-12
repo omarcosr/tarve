@@ -131,7 +131,8 @@ function includesQuery(label: string, value: string, keywords: readonly string[]
 
 export interface TooltipProps extends BaseProps {
   id: string;
-  open: boolean;
+  /** Controlled visibility. Omit it and the tooltip shows while its trigger is hovered, one at a time. */
+  open?: boolean;
   trigger: Child;
   content: Child;
   side?: PopupSide;
@@ -141,6 +142,8 @@ export interface TooltipProps extends BaseProps {
 }
 
 const TOOLTIP_MAX_WIDTH = 320;
+/** The uncontrolled tooltip under the pointer; like a browser, only one shows at a time. */
+let hoveredTooltip: string | null = null;
 
 /**
  * An absolute box takes its wrapping width from its containing block, which for a tooltip is the
@@ -166,7 +169,7 @@ function tooltipLane(side: PopupSide): Style {
 
 export function Tooltip({
   id,
-  open,
+  open: controlledOpen,
   trigger,
   content,
   side = "top",
@@ -175,6 +178,7 @@ export function Tooltip({
   contentStyle,
   style,
 }: TooltipProps): VNode {
+  const open = controlledOpen ?? hoveredTooltip === id;
   const tooltipContent = typeof content === "string" || typeof content === "number"
     ? jsx(Text, { size: 12, color: c.background, children: content })
     : content;
@@ -186,7 +190,10 @@ export function Tooltip({
         id: `${id}-trigger`,
         focusable: false,
         fallbackControl: { role: "button", label: triggerLabel(label, trigger) },
-        onHover: (hovered: boolean) => onOpenChange?.(hovered),
+        onHover: (hovered: boolean) => {
+          if (controlledOpen === undefined) hoveredTooltip = hovered ? id : hoveredTooltip === id ? null : hoveredTooltip;
+          onOpenChange?.(hovered);
+        },
       }),
       open
         ? jsx(View, {

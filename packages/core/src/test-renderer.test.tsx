@@ -10,6 +10,7 @@ function snapshot(): Snapshot {
     layoutNodesCreated: 4,
     measureCalls: 2,
     paintedNodes: 4,
+    fps: 0,
     frames: 3,
     layouts: 1,
     shapes: 2,

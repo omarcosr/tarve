@@ -6,7 +6,8 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { nativePath } from "#tarve/runtime";
 import { fileImportAttributes } from "./esbuild-file-imports";
 import { hostBuildTarget, targetConfig } from "./targets";
-import type { BuildOptions } from "./build";
+import { metadataOverrides, type BuildOptions } from "./build";
+import { buildMetadata, writeLinuxDesktopEntry } from "./app-metadata";
 import { NATIVE_COMPATIBILITY_MANIFEST_NAME, assertNativeRuntimeCompatible, readNativeCompatibilityManifest, createNativeCompatibilityManifest } from "./native-runtime";
 import { assertNodeVersion, targetNodeExecutable } from "./node-target";
 
@@ -26,7 +27,8 @@ export async function buildNode(options: NodeBuildOptions): Promise<string> {
   if (!match || Number(match[1]) < 26 || (Number(match[1]) === 26 && Number(match[2]) < 10)) {
     throw new Error(`Node.js 26.10+ is required for node:ffi inside a SEA (found ${version})`);
   }
-  const outfile = resolve(options.outfile ?? `dist/${options.name ?? basename(options.entrypoint).replace(/\.[^.]+$/, "")}${config.executableSuffix}`);
+  const { metadata, images, define } = buildMetadata(options.entrypoint, metadataOverrides(options));
+  const outfile = resolve(options.outfile ?? `dist/${metadata.name}${config.executableSuffix}`);
 
   let executable: string | undefined;
   if (options.targetExecutable) {
@@ -65,6 +67,7 @@ export async function buildNode(options: NodeBuildOptions): Promise<string> {
       jsxImportSource: "@tarve/core",
       loader: { ".png": "file", ".jpg": "file", ".jpeg": "file", ".webp": "file", ".gif": "file", ".svg": "file" },
       metafile: true,
+      define,
       external: ["esbuild"],
       plugins: [fileImportAttributes, {
         name: "tarve-node-runtime",
@@ -99,10 +102,18 @@ export async function buildNode(options: NodeBuildOptions): Promise<string> {
     await rm(outfile, { force: true });
     execFileSync(node, ["--build-sea", sea], { stdio: "pipe" });
     if (config.platform === "win32") {
-      const name = options.name ?? basename(options.entrypoint).replace(/\.[^.]+$/, "");
       const tarveVersion = (JSON.parse(readFileSync(resolve(root, "../../package.json"), "utf8")) as { version: string }).version;
-      (await import("./windows-executable")).brandWindowsExecutable(outfile, { name, version: options.version ?? tarveVersion, filename: basename(outfile) });
+      (await import("./windows-executable")).brandWindowsExecutable(outfile, {
+        name: metadata.name,
+        version: metadata.version ?? tarveVersion,
+        filename: basename(outfile),
+        description: metadata.description,
+        publisher: metadata.publisher,
+        copyright: metadata.copyright,
+        ico: images?.ico,
+      });
     }
+    if (config.platform === "linux" && (metadata.icon || metadata.appId)) writeLinuxDesktopEntry(outfile, metadata, images?.png);
     return outfile;
   } finally {
     await rm(temporary, { recursive: true, force: true });

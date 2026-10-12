@@ -2,12 +2,15 @@
 // `tarve build bench.tsx` from that checkout's examples/ directory; SCENE picks empty,
 // fixed (2,000-row list) or components, R picks the renderer.
 const t0 = performance.now();
-import { Button, Column, Row, Scroll, Text, Window, createApp } from "@tarve/core";
+import { execFile } from "node:child_process";
+import { setTimeout as sleep } from "node:timers/promises";
+import { promisify } from "node:util";
+import { Button, Column, Row, Scroll, Text, Window, createApp, type Renderer } from "@tarve/core";
 import { App as ComponentsApp } from "../components/components-view";
 import { lucideReactAdapter, phosphorReactAdapter, reactSvgAdapter } from "@tarve/react-icons";
 const tImport = performance.now();
 const scene = process.env.SCENE ?? "empty";
-const renderer = (process.env.R ?? "auto") as never;
+const renderer = (process.env.R ?? "auto") as Renderer;
 function Empty() { return <Window title="bench" width={800} height={600}><Text>hi</Text></Window>; }
 function Fixed() {
   return <Window title="bench" width={1024} height={760}><Column padding={16} gap={12} flex={1}><Scroll id="list" flex={1}><Column>
@@ -15,21 +18,21 @@ function Fixed() {
   </Column></Scroll></Column></Window>;
 }
 const View = scene === "fixed" ? Fixed : scene === "components" ? ComponentsApp : Empty;
-const app = createApp(View, { debug: true, renderer, componentAdapters: [reactSvgAdapter, lucideReactAdapter, phosphorReactAdapter] } as never) as any;
+const app = createApp(View, { debug: true, renderer, componentAdapters: [reactSvgAdapter, lucideReactAdapter, phosphorReactAdapter] });
 await app.ready;
 let s = await app.inspect();
-while (s.frames === 0) { await Bun.sleep(1); s = await app.inspect(); }
+while (s.frames === 0) { await sleep(1); s = await app.inspect(); }
 const tFrame = performance.now();
 const r = Math.round;
 const mb = (x: number) => r(x / 1048576);
-const ps = async (cmd: string) => (await new Response(Bun.spawn(["powershell", "-NoProfile", "-Command", cmd], { stdout: "pipe", stderr: "ignore" }).stdout).text()).trim();
+const ps = async (cmd: string) => (await promisify(execFile)("powershell", ["-NoProfile", "-Command", cmd], { windowsHide: true })).stdout.trim();
 const cpu = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; };
 const out: Record<string, unknown> = { scene, renderer, importsMs: r(tImport - t0), firstFrameMs: r(tFrame) };
-await Bun.sleep(3000);
+await sleep(3000);
 out.privateMb = mb(Number(await ps(`(Get-Process -Id ${process.pid}).PrivateMemorySize64`)));
 out.wsMb = mb(process.memoryUsage().rss);
 let f0 = (await app.inspect()).frames, c0 = cpu(), w0 = performance.now();
-await Bun.sleep(4000);
+await sleep(4000);
 out.idleCpuPct = +((cpu() - c0) / (performance.now() - w0) * 100).toFixed(2);
 out.idleFrames = (await app.inspect()).frames - f0;
 const cx = s.width / 2, cy = s.height / 2;
@@ -38,7 +41,7 @@ let peak = 0;
 for (let i = 0; i < 240; i++) {
   app.debug({ type: "input", action: "wheel", delta: i % 80 < 40 ? 60 : -60 });
   app.debug({ type: "input", action: "move", x: cx + Math.sin(i / 7) * cx * 0.8, y: cy + Math.cos(i / 9) * cy * 0.6 });
-  await Bun.sleep(16);
+  await sleep(16);
   if (i % 20 === 0) peak = Math.max(peak, process.memoryUsage().rss);
 }
 out.busyCpuPct = +((cpu() - c0) / (performance.now() - w0) * 100).toFixed(1);

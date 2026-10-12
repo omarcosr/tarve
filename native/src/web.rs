@@ -40,6 +40,8 @@ pub struct WebTree {
     events: Vec<Value>,
     painted: bool,
     frames: u64,
+    /// Clock time of each frame painted in the last second, for `inspect().fps`.
+    frame_times: std::collections::VecDeque<f64>,
 }
 
 #[wasm_bindgen]
@@ -68,6 +70,7 @@ impl WebTree {
             events: Vec::new(),
             painted: false,
             frames: 0,
+            frame_times: Default::default(),
         })
     }
 
@@ -93,11 +96,18 @@ impl WebTree {
                     self.events.push(json!({"type":"blur", "id":blurred}));
                 }
             }
-            Command::ScrollToItem { id, index, offset } => {
-                match self
-                    .tree
-                    .request_virtual_scroll_to_item(&id, index, offset.unwrap_or(0.0))
-                {
+            Command::ScrollToItem {
+                id,
+                index,
+                offset,
+                smooth,
+            } => {
+                match self.tree.request_virtual_scroll_to_item(
+                    &id,
+                    index,
+                    offset.unwrap_or(0.0),
+                    smooth,
+                ) {
                     Ok(events) => self.events.extend(events),
                     Err(message) => self.events.push(crate::protocol::error(message)),
                 }
@@ -115,7 +125,7 @@ impl WebTree {
                 let layout_events = self.tree.take_layout_events();
                 self.events.extend(layout_events);
                 self.events.push(json!({"type":"inspect", "requestId":request_id, "snapshot": {
-                    "frames":self.frames, "layouts":self.tree.layouts, "shapes":self.tree.text.shapes,
+                    "frames":self.frames, "fps":self.frame_times.len(), "layouts":self.tree.layouts, "shapes":self.tree.text.shapes,
                     "paints":self.tree.paints, "hovered":self.tree.hovered, "focused":self.tree.focused,
                     "nodes":self.tree.snapshots(), "width":self.width, "height":self.height, "scale":self.scale,
                     "layoutNodes":self.tree.layout_node_count(), "layoutNodesCreated":self.tree.layout_nodes_created,
@@ -252,6 +262,14 @@ impl WebTree {
         }
         self.painted = true;
         self.frames += 1;
+        self.frame_times.push_back(now_ms);
+        while self
+            .frame_times
+            .front()
+            .is_some_and(|time| *time < now_ms - 1000.0)
+        {
+            self.frame_times.pop_front();
+        }
         Ok(true)
     }
 
@@ -411,5 +429,23 @@ impl WebTree {
         let interaction = self.tree.take_interaction_events();
         self.events.extend(interaction);
         serde_json::to_string(&std::mem::take(&mut self.events)).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Remote (`http(s)://`) image URLs painted since the last call, as a JSON array.
+    /// The host fetches them and hands the bytes to `finishRemoteImage`.
+    #[wasm_bindgen(js_name = takeRemoteImageRequests)]
+    pub fn take_remote_image_requests(&mut self) -> String {
+        serde_json::to_string(&self.tree.take_remote_image_requests())
+            .unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Decodes a fetched remote image, or records why it failed when `error` is set.
+    #[wasm_bindgen(js_name = finishRemoteImage)]
+    pub fn finish_remote_image(&mut self, url: String, bytes: Vec<u8>, error: Option<String>) {
+        let result = match error {
+            Some(message) => Err(message),
+            None => crate::tree::decode_remote_image(&bytes),
+        };
+        self.tree.finish_remote_image(url, result);
     }
 }

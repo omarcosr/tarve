@@ -45,7 +45,7 @@ interface VariableListState {
   anchorEdge: "top" | "bottom";
   followingTail: boolean;
   lastFollowTail: boolean;
-  scrollRequest?: { generation: number; index: number; offset: number };
+  scrollRequest?: { generation: number; index: number; offset: number; smooth: boolean };
   focusedKey?: string;
   retainedRow?: { key: string; index: number; vnode: VNode };
   logicalIndexByKey: Map<string, number>;
@@ -257,7 +257,9 @@ function variableVirtualList<T>({
   const requestedOffset = requestedIndex !== undefined
     ? Math.max(0, Math.min(prefix[requestedIndex]! + state.scrollRequest!.offset, max))
     : undefined;
-  if (requestedOffset !== undefined) {
+  // A smooth request leaves the window where the viewport is; the runtime's
+  // scroll events move it as the list eases to the target.
+  if (requestedOffset !== undefined && !state.scrollRequest!.smooth) {
     state.effectiveOffset = requestedOffset;
   } else if (followTail && state.followingTail) {
     state.effectiveOffset = max;
@@ -339,13 +341,14 @@ function variableVirtualList<T>({
       rememberHeight(state, measurement.key, measurement.height);
     }
   };
-  const onVirtualListScrollToItem = (index: number, itemOffset: number) => {
+  const onVirtualListScrollToItem = (index: number, itemOffset: number, smooth = false) => {
     if (!Number.isInteger(index) || index < 0 || !Number.isFinite(itemOffset)) return;
     state.followingTail = false;
     state.scrollRequest = {
       generation: ++store.nextScrollGeneration,
       index,
       offset: itemOffset,
+      smooth,
     };
   };
   const onVirtualListFocus = (key: string | null) => {
@@ -376,7 +379,7 @@ function variableVirtualList<T>({
       alignment,
       followTail,
       ...(requestedOffset !== undefined && state.scrollRequest
-        ? { scrollRequest: { generation: state.scrollRequest.generation, offset: requestedOffset } }
+        ? { scrollRequest: { generation: state.scrollRequest.generation, offset: requestedOffset, ...(state.scrollRequest.smooth ? { smooth: true } : {}) } }
         : {}),
     },
     style: viewportStyle(style, height),
@@ -458,6 +461,8 @@ function windowedVariableVirtualList<T>({
       if (measured !== undefined) logicalTop += measured - estimatedItemHeight;
     }
     requestedOffset = Math.max(0, Math.min(logicalTop + state.scrollRequest.offset, max));
+  }
+  if (requestedOffset !== undefined && !state.scrollRequest!.smooth) {
     state.effectiveOffset = requestedOffset;
   } else if (followTail && state.followingTail) {
     state.effectiveOffset = max;
@@ -538,13 +543,14 @@ function windowedVariableVirtualList<T>({
       rememberHeight(state, measurement.key, measurement.height, windowStart + localIndex);
     }
   };
-  const onVirtualListScrollToItem = (index: number, itemOffset: number) => {
+  const onVirtualListScrollToItem = (index: number, itemOffset: number, smooth = false) => {
     if (!Number.isInteger(index) || index < 0 || !Number.isFinite(itemOffset)) return;
     state.followingTail = false;
     state.scrollRequest = {
       generation: ++store.nextScrollGeneration,
       index,
       offset: itemOffset,
+      smooth,
     };
   };
   const onVirtualListFocus = (key: string | null) => {
@@ -578,7 +584,7 @@ function windowedVariableVirtualList<T>({
       alignment,
       followTail,
       ...(requestedOffset !== undefined && state.scrollRequest
-        ? { scrollRequest: { generation: state.scrollRequest.generation, offset: requestedOffset } }
+        ? { scrollRequest: { generation: state.scrollRequest.generation, offset: requestedOffset, ...(state.scrollRequest.smooth ? { smooth: true } : {}) } }
         : {}),
     },
     style: viewportStyle(style, height),

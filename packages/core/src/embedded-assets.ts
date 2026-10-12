@@ -8,6 +8,7 @@ const materialized = new Map<string, string>();
 
 /** Native APIs cannot open Bun's virtual files. Resolve them once before sending the scene. */
 export function nativeAssetPath(source: string): string {
+  if (/^https?:\/\//i.test(source)) return source;
   const path = isAbsolute(source) ? source : resolve(sourceRoot(source), source);
   const normalized = path.replaceAll("\\", "/");
   if (normalized.startsWith("/$bunfs/") || /^[a-z]:\/~BUN\//i.test(normalized)) {

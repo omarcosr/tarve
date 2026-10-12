@@ -591,6 +591,51 @@ fn prefer_x11_on_wsl() -> bool {
     should_force_x11_on_wsl(&kernel_release, display.as_deref())
 }
 
+pub(crate) struct WindowIcons {
+    /// Title bar icon (Windows); X11 takes the large one and scales it.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) small: winit::window::Icon,
+    /// Windows taskbar and Alt+Tab icon.
+    pub(crate) large: winit::window::Icon,
+}
+
+/// Decodes the app icon (PNG, ICO, JPEG or WebP) into a title-bar and a taskbar size.
+pub(crate) fn window_icons(base64: &str) -> Result<WindowIcons, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64)
+        .map_err(|error| format!("invalid base64: {error}"))?;
+    if bytes.len() > 16 * 1024 * 1024 {
+        return Err("the icon file exceeds 16 MB".into());
+    }
+    let image = image::load_from_memory(&bytes)
+        .map_err(|error| error.to_string())?
+        .to_rgba8();
+    let sized = |side: u32| -> Result<winit::window::Icon, String> {
+        let (width, height) = image.dimensions();
+        let scale = (side as f32 / width.max(height) as f32).min(1.0);
+        let resized = if scale < 1.0 {
+            image::imageops::resize(
+                &image,
+                ((width as f32 * scale).round() as u32).max(1),
+                ((height as f32 * scale).round() as u32).max(1),
+                image::imageops::FilterType::Lanczos3,
+            )
+        } else {
+            image.clone()
+        };
+        let (width, height) = resized.dimensions();
+        winit::window::Icon::from_rgba(resized.into_raw(), width, height)
+            .map_err(|error| error.to_string())
+    };
+    // Windows scales the title-bar icon from this to 16–32 px by DPI; 64 keeps
+    // the small sizes sharp without a 256 px icon in every window.
+    Ok(WindowIcons {
+        small: sized(64)?,
+        large: sized(256)?,
+    })
+}
+
 pub fn run(
     mut document: Document,
     events: Arc<Events>,
@@ -630,6 +675,7 @@ pub fn run(
     };
     event_loop.set_control_flow(ControlFlow::Wait);
     let event_proxy = event_loop.create_proxy();
+    let remote_images = crate::remote_image::RemoteImages::new(event_proxy.clone());
     ready
         .send(Ok(event_proxy.clone()))
         .map_err(|e| e.to_string())?;
@@ -675,6 +721,8 @@ pub fn run(
         event_proxy,
         tray: None,
         media: Default::default(),
+        remote_images,
+        present_times: Default::default(),
         #[cfg(target_os = "windows")]
         system_media: None,
         #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -715,6 +763,9 @@ struct App {
     event_proxy: EventLoopProxy<Command>,
     tray: Option<crate::tray::Tray>,
     media: crate::media::Media,
+    remote_images: crate::remote_image::RemoteImages,
+    /// When each of the last second's frames was presented, for `inspect().fps`.
+    present_times: std::collections::VecDeque<Instant>,
     #[cfg(target_os = "windows")]
     system_media: Option<crate::smtc::SystemMedia>,
     #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -1440,6 +1491,10 @@ impl App {
                 self.trim_at.set(Some(Instant::now() + delay));
             }
         }
+        if result == PresentResult::Presented {
+            self.present_times.push_back(Instant::now());
+            self.prune_present_times();
+        }
         if result == PresentResult::Presented && self.document.window.debug {
             let frames = match &self.graphics {
                 GraphicsState::Ready(graphics) => graphics.frames(),
@@ -1448,6 +1503,16 @@ impl App {
             self.events.push(json!({"type":"frame", "frames":frames}));
         }
         Ok(result)
+    }
+    fn prune_present_times(&mut self) {
+        let second = Duration::from_secs(1);
+        while self
+            .present_times
+            .front()
+            .is_some_and(|time| time.elapsed() > second)
+        {
+            self.present_times.pop_front();
+        }
     }
     fn prepare(&mut self) -> Result<bool, RenderError> {
         let Some(window) = &self.window else {
@@ -1515,6 +1580,8 @@ impl App {
                 self.scene = self.tree.scene(scale);
             }
         }
+        let requests = self.tree.take_remote_image_requests();
+        self.remote_images.request(requests);
         for message in self.tree.warnings.drain(..) {
             self.events.push(error(message));
         }
@@ -1843,13 +1910,45 @@ impl ApplicationHandler<Command> for App {
         }
         let options = &self.document.window;
         let visible = options.visible;
-        let attributes = Window::default_attributes()
+        let icon = self.document.window_icon.as_deref().map(window_icons);
+        if let Some(Err(message)) = &icon {
+            self.events.push(error(format!("window icon: {message}")));
+        }
+        let icon = icon.and_then(Result::ok);
+        let mut attributes = Window::default_attributes()
             .with_title(&options.title)
             .with_inner_size(LogicalSize::new(options.width, options.height))
             .with_min_inner_size(LogicalSize::new(options.min_width, options.min_height))
             .with_resizable(options.resizable)
             .with_decorations(options.decorations)
             .with_visible(false);
+        // Windows: a small title-bar icon and a large taskbar one. Elsewhere the
+        // one window icon (X11 _NET_WM_ICON) serves every size, so it is the large one.
+        #[cfg(target_os = "windows")]
+        {
+            use winit::platform::windows::WindowAttributesExtWindows;
+            attributes = attributes
+                .with_window_icon(icon.as_ref().map(|icons| icons.small.clone()))
+                .with_taskbar_icon(icon.map(|icons| icons.large));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            attributes = attributes.with_window_icon(icon.map(|icons| icons.large));
+        }
+        // X11 WM_CLASS / Wayland app_id: matches the desktop entry's StartupWMClass.
+        #[cfg(target_os = "linux")]
+        if let Some(identity) = self.document.app_identity.as_ref() {
+            attributes = winit::platform::x11::WindowAttributesExtX11::with_name(
+                attributes,
+                identity.id.clone(),
+                identity.id.clone(),
+            );
+            attributes = winit::platform::wayland::WindowAttributesExtWayland::with_name(
+                attributes,
+                identity.id.clone(),
+                identity.id.clone(),
+            );
+        }
         match event_loop.create_window(attributes) {
             Ok(window) => {
                 let window = Arc::new(window);
@@ -2012,6 +2111,13 @@ impl ApplicationHandler<Command> for App {
                     self.events.push(error(message));
                 }
             }
+            Command::RemoteImage { url, result } => {
+                self.tree.finish_remote_image(url, result);
+                for message in self.tree.warnings.drain(..) {
+                    self.events.push(error(message));
+                }
+                self.redraw();
+            }
             Command::TrayEvent { event } => {
                 if event["type"] == "trayRecreate" {
                     #[cfg(target_os = "windows")]
@@ -2050,10 +2156,15 @@ impl ApplicationHandler<Command> for App {
                 }
                 accessibility_changed = true;
             }
-            Command::ScrollToItem { id, index, offset } => {
+            Command::ScrollToItem {
+                id,
+                index,
+                offset,
+                smooth,
+            } => {
                 match self
                     .tree
-                    .request_virtual_scroll_to_item(&id, index, offset.unwrap_or(0.0))
+                    .request_virtual_scroll_to_item(&id, index, offset.unwrap_or(0.0), smooth)
                 {
                     Ok(events) => self.emit(events),
                     Err(message) => self.events.push(error(message)),
@@ -2076,8 +2187,13 @@ impl ApplicationHandler<Command> for App {
                         GraphicsState::Ready(graphics) => graphics.glyph_rasterizations(),
                         _ => None,
                     };
+                    let fps = self
+                        .present_times
+                        .iter()
+                        .filter(|time| time.elapsed() <= Duration::from_secs(1))
+                        .count();
                     self.events.push(json!({"type":"inspect", "requestId":request_id, "snapshot": {
-                        "frames": frames, "layouts":self.tree.layouts, "shapes":self.tree.text.shapes, "paints":self.tree.paints,
+                        "frames": frames, "fps": fps, "layouts":self.tree.layouts, "shapes":self.tree.text.shapes, "paints":self.tree.paints,
                         "hovered":self.tree.hovered, "focused":self.tree.focused, "nodes":self.tree.snapshots(), "width":size.width, "height":size.height, "scale":window.scale_factor(),
                         "layoutNodes":self.tree.layout_node_count(), "layoutNodesCreated":self.tree.layout_nodes_created, "measureCalls":self.tree.measure_calls, "paintedNodes":self.tree.painted_nodes,
                         "activeMotions":self.tree.active_motion_count(), "glyphRasterizations": glyph_rasterizations

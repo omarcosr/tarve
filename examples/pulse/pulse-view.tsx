@@ -23,7 +23,7 @@ import { StackIcon } from "@phosphor-icons/react/dist/csr/Stack";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { XCircleIcon } from "@phosphor-icons/react/dist/csr/XCircle";
-import { Column, darkTheme, Image, Input, memo, Path, Pressable, Row, Scroll, Svg, Text, Theme, TitleBar, Tooltip, View, VirtualList, Window, type Child, type VNode } from "@tarve/core";
+import { Column, darkTheme, Image, Input, memo, Modal, Path, Pressable, Row, Scroll, Svg, Text, Theme, TitleBar, Tooltip, View, VirtualList, Window, type Child, type VNode } from "@tarve/core";
 import { cpuBasis, iconFor, setCpuBasis, type CpuBasis, type Proc, type Sample } from "./pulse-source";
 
 export type Page = "overview" | "processes" | "cpu" | "memory" | "gpu" | "disk" | "network" | "energy" | "system";
@@ -53,7 +53,6 @@ export const state = {
   expanded: new Set<string>(),
   selectedGroup: null as string | null,
   /** The toolbar button whose tooltip shows. */
-  tip: null as string | null,
   /** The quit confirmation: which processes, and why the last attempt failed. */
   quit: null as { pids: number[]; name: string; error?: string } | null,
   /** Processes just ended: out of every list at once, and out of later samples until Windows stops reporting them. */
@@ -113,7 +112,7 @@ const ellipsis = { whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hi
 const pulseTheme = Theme.create(darkTheme, {
   colors: {
     background: c.content, card: c.card, foreground: c.text, muted: c.segmentOn, mutedForeground: c.muted, border: c.line, input: c.segment,
-    scrollbar: "#4a494f", ring: "#ffffff55", selection: "#3b82f666", placeholder: c.faint
+    scrollbar: "#4a494f", ring: "#ffffff55", selection: "#3b82f666", placeholder: c.faint, overlay: "#00000066"
   },
 });
 
@@ -1039,7 +1038,7 @@ function Segment<T extends string>({ id, options, value, onChange }: { id: strin
 /** A toolbar button's hover tooltip, dark like Pulse's. */
 function Tip({ id, label, children }: { id: string; label: string; children: Child }) {
   return (
-    <Tooltip id={id + "-tip"} open={state.tip === id} side="bottom" label={label} onOpenChange={open => { if (open) state.tip = id; else if (state.tip === id) state.tip = null; }}
+    <Tooltip id={id + "-tip"} side="bottom" label={label}
       contentStyle={{ background: "#2c2b31", foreground: c.text, borderWidth: 1, borderColor: "#ffffff1a", radius: 6, boxShadow: "0 4px 14px #00000080" }}
       content={<Text size={12} color={c.text} style={{ whiteSpace: "nowrap" }}>{label}</Text>} trigger={children} />
   );
@@ -1090,18 +1089,14 @@ function QuitDialog() {
       <Text size={13} weight={600}>{label}</Text>
     </Pressable>
   );
+  // Modal brings the backdrop, Escape and the focus scope; the panel keeps Pulse's look.
   return (
-    <>
-      <Pressable id="quit-backdrop" onClick={() => { state.quit = null; }} control={{ role: "button", label: "Cancel" }}
-        style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0, zIndex: 50, background: "#00000066" }} />
-      <Row justify="center" style={{ position: "absolute", left: 0, right: 0, top: 180, zIndex: 51 }}>
-        <Column id="quit-dialog" gap={10} style={{ width: 340, padding: 18, radius: 14, background: "#232227", borderWidth: 1, borderColor: "#ffffff14", boxShadow: "0 16px 40px #000000aa" }}>
-          <Text size={15} weight={700} style={ellipsis}>{q.pids.length > 1 ? "Quit all " + q.pids.length + " processes of “" + q.name + "”?" : "Quit “" + q.name + "”?"}</Text>
-          <Text size={12} color={q.error ? c.system : c.muted}>{q.error ?? "Unsaved work in it will be lost."}</Text>
-          <Row justify="end" gap={8} style={{ margin: { top: 6 } }}>{button("quit-cancel", "Cancel", false, () => { state.quit = null; })}{button("quit-confirm", q.error ? "Try Again" : "Quit", true, end)}</Row>
-        </Column>
-      </Row>
-    </>
+    <Modal id="quit-dialog" open width={340} showClose={false} onOpenChange={open => { if (!open) state.quit = null; }}
+      style={{ padding: 18, gap: 10, radius: 14, background: "#232227", borderWidth: 1, borderColor: "#ffffff14", boxShadow: "0 16px 40px #000000aa" }}>
+      <Text size={15} weight={700} style={ellipsis}>{q.pids.length > 1 ? "Quit all " + q.pids.length + " processes of “" + q.name + "”?" : "Quit “" + q.name + "”?"}</Text>
+      <Text size={12} color={q.error ? c.system : c.muted}>{q.error ?? "Unsaved work in it will be lost."}</Text>
+      <Row justify="end" gap={8} style={{ margin: { top: 6 } }}>{button("quit-cancel", "Cancel", false, () => { state.quit = null; })}{button("quit-confirm", q.error ? "Try Again" : "Quit", true, end)}</Row>
+    </Modal>
   );
 }
 function Tools() {

@@ -68,52 +68,46 @@ export const cards = ["Dialog", "Sidebar", "Tabs", "Table", "Slider", "Toast", "
 let view = "list";
 let offset = 0;
 let jumpText = String(TARGET_ROW);
-let flight: { from: number; to: number; started: number; duration: number } | undefined;
-let flightTimer: ReturnType<typeof setInterval> | undefined;
+let flight: { to: number; rows: number; started: number; updates: number; timeout: ReturnType<typeof setTimeout> } | undefined;
 let lastFlight = "";
 
+type ScrollToItem = (id: string, index: number, offset?: number, options?: { smooth?: boolean }) => void;
 let refresh = () => { };
-let scrollToItem: (id: string, index: number, offset?: number) => void = () => { };
-export function connectPerformance(app: { update(): void; scrollToItem(id: string, index: number, offset?: number): void }) {
+let scrollToItem: ScrollToItem = () => { };
+export function connectPerformance(app: { update(): void; scrollToItem: ScrollToItem }) {
   refresh = () => app.update();
-  scrollToItem = (id, index, offset) => app.scrollToItem(id, index, offset);
+  scrollToItem = (id, index, offset, options) => app.scrollToItem(id, index, offset, options);
 }
 
 const maxOffset = () => ROW_COUNT * ROW_HEIGHT - LIST_HEIGHT;
 const clampOffset = (value: number) => Math.max(0, Math.min(value, maxOffset()));
-const easeInOutQuint = (t: number) => (t < 0.5 ? 16 * t ** 5 : 1 - (-2 * t + 2) ** 5 / 2);
-
-function scrollListTo(position: number) {
-  offset = clampOffset(position);
-  const index = Math.floor(offset / ROW_HEIGHT);
-  scrollToItem(LIST_ID, index, offset - index * ROW_HEIGHT);
-}
-
-function stopFlight() {
-  if (flightTimer) clearInterval(flightTimer);
-  flightTimer = undefined;
+function endFlight(status: string) {
+  if (flight) clearTimeout(flight.timeout);
   flight = undefined;
+  lastFlight = status;
 }
 
-/** Eases the list to `row` with one native scroll request per ~16 ms tick. */
-export function flyTo(row: number, duration = 900) {
-  stopFlight();
+/** Eases the list to `row`: the runtime animates the scroll and reports every step through onScroll. */
+export function flyTo(row: number) {
   const to = clampOffset(Math.max(0, Math.min(Math.floor(row), ROW_COUNT - 1)) * ROW_HEIGHT);
-  flight = { from: offset, to, started: performance.now(), duration };
-  let ticks = 0;
-  flightTimer = setInterval(() => {
-    if (!flight) return;
-    ticks++;
+  if (Math.abs(to - offset) < 0.5) return;
+  if (flight) clearTimeout(flight.timeout);
+  // Wheeling mid-flight hands the scroll back to the user; stop waiting for the arrival then.
+  const timeout = setTimeout(() => { endFlight(""); refresh(); }, 2000);
+  flight = { to, rows: Math.round(Math.abs(to - offset) / ROW_HEIGHT), started: performance.now(), updates: 0, timeout };
+  const index = Math.floor(to / ROW_HEIGHT);
+  scrollToItem(LIST_ID, index, to - index * ROW_HEIGHT, { smooth: true });
+  refresh();
+}
+
+function onListScroll(next: number) {
+  offset = next;
+  if (!flight) return;
+  flight.updates++;
+  if (Math.abs(next - flight.to) < 0.5) {
     const elapsed = performance.now() - flight.started;
-    const k = Math.min(1, elapsed / flight.duration);
-    scrollListTo(flight.from + (flight.to - flight.from) * easeInOutQuint(k));
-    if (k >= 1) {
-      const rows = Math.round(Math.abs(flight.to - flight.from) / ROW_HEIGHT);
-      lastFlight = `${rows.toLocaleString("en-US")} rows in ${Math.round(elapsed)} ms · ${Math.round(ticks / (elapsed / 1000))} scroll updates/s`;
-      stopFlight();
-    }
-    refresh();
-  }, 16);
+    endFlight(`${flight.rows.toLocaleString("en-US")} rows in ${Math.round(elapsed)} ms · ${Math.round(flight.updates / (elapsed / 1000))} scroll updates/s`);
+  }
 }
 
 function ListRow({ row, target }: { row: ListItem; target: boolean }) {
@@ -185,7 +179,7 @@ export function App() {
             <Row gap={8} align="center" style={{ width: "100%" }}>
               <Input id="jump-row" type="number" value={jumpText} onChange={value => { jumpText = value; }} style={{ width: 140 }} />
               <Button id="fly-to-row" disabled={!Number.isFinite(target) || flight !== undefined} onClick={() => flyTo(target)}>Fly to row</Button>
-              <Button id="fly-to-top" variant="outline" disabled={flight !== undefined} onClick={() => flyTo(0, 700)}>Top</Button>
+              <Button id="fly-to-top" variant="outline" disabled={flight !== undefined} onClick={() => flyTo(0)}>Top</Button>
               <Badge variant="secondary">{rows.length.toLocaleString("en-US")} rows</Badge>
               <Text id="flight-status" size={12} color={c.mutedForeground}>{flight ? "Scrolling…" : lastFlight}</Text>
             </Row>
@@ -199,7 +193,7 @@ export function App() {
                 height={LIST_HEIGHT}
                 offset={offset}
                 keyForItem={row => row.index}
-                onScroll={next => { if (!flight) offset = next; }}
+                onScroll={onListScroll}
                 renderItem={row => <ListRow row={row} target={row.index === target} />}
               />
             </View>

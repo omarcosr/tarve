@@ -29,8 +29,10 @@ export const rmSync = () => unavailable("fs.rmSync");
 export const statSync = () => unavailable("fs.statSync");
 export const writeFileSync = () => unavailable("fs.writeFileSync");
 export const tmpdir = () => "/tmp";
+export const homedir = () => "/";
 export const createConnection = () => unavailable("net.createConnection");
 export const inflateSync = () => unavailable("zlib.inflateSync");
+export const deflateSync = () => unavailable("zlib.deflateSync");
 
 export const isAbsolute = (path: string) => path.startsWith("/");
 export const basename = (path: string, suffix = "") => {

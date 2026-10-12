@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 56;
+pub const VERSION: u32 = 58;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -75,6 +75,9 @@ pub struct VirtualListLayout {
 pub struct VirtualListScrollRequest {
     pub generation: u64,
     pub offset: f64,
+    /// Ease to the offset over a few hundred milliseconds instead of jumping.
+    #[serde(default)]
+    pub smooth: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
@@ -360,6 +363,9 @@ pub struct Document {
     #[serde(default, rename = "appIdentity")]
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub app_identity: Option<AppIdentity>,
+    /// Window and taskbar icon: base64 PNG, ICO, JPEG or WebP bytes.
+    #[serde(default, rename = "windowIcon")]
+    pub window_icon: Option<String>,
     pub window: WindowOptions,
     pub root: Node,
 }
@@ -494,6 +500,11 @@ pub enum Command {
         looped: Option<bool>,
     },
     #[serde(skip)]
+    RemoteImage {
+        url: String,
+        result: Result<crate::tree::DecodedImage, String>,
+    },
+    #[serde(skip)]
     TrayEvent {
         event: serde_json::Value,
     },
@@ -512,6 +523,8 @@ pub enum Command {
         id: String,
         index: usize,
         offset: Option<f64>,
+        #[serde(default)]
+        smooth: bool,
     },
     Inspect {
         #[serde(rename = "requestId")]

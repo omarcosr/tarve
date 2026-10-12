@@ -47,6 +47,8 @@ export class HeadlessBridge implements NativeBridge {
   private closed = false;
   /** Bumped by every command and every delivered event, so `settle` can tell when work stops. */
   private activity = 0;
+  /** Remote images being fetched; `settle` waits for them. */
+  private fetching = 0;
 
   constructor(private readonly options: HeadlessBridgeOptions = {}) {}
 
@@ -123,7 +125,7 @@ export class HeadlessBridge implements NativeBridge {
       const before = this.activity;
       await new Promise((resolve) => setTimeout(resolve, 0));
       this.flush();
-      quiet = this.activity === before ? quiet + 1 : 0;
+      quiet = this.activity === before && this.fetching === 0 ? quiet + 1 : 0;
     }
   }
 
@@ -152,6 +154,7 @@ export class HeadlessBridge implements NativeBridge {
     } catch (error) {
       this.onEvent?.({ type: "error", message: error instanceof Error ? error.message : String(error) });
     }
+    for (const url of JSON.parse(tree.takeRemoteImageRequests()) as string[]) this.fetchImage(url);
     const events = JSON.parse(tree.takeEvents()) as NativeEvent[];
     if (events.length > 0) this.activity++;
     for (const event of events) {
@@ -167,6 +170,26 @@ export class HeadlessBridge implements NativeBridge {
     if (next < 0) return;
     this.tickTimer = setTimeout(() => this.flush(), Math.max(0, next - this.now()));
     (this.tickTimer as { unref?: () => void }).unref?.();
+  }
+
+  /** A painted `http(s)://` image: fetched here, decoded by the tree like in a window. */
+  private fetchImage(url: string): void {
+    this.fetching++;
+    const finish = (bytes: Uint8Array, error?: string) => {
+      this.fetching--;
+      this.activity++;
+      if (this.closed || !this.tree) return;
+      this.tree.finishRemoteImage(url, bytes, error);
+      this.queueFlush();
+    };
+    // Settle the fetch first, then hand it over once: a throw inside finish must not finish twice.
+    fetch(url)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return { bytes: new Uint8Array(await response.arrayBuffer()) };
+      })
+      .catch((error: unknown) => ({ bytes: new Uint8Array(), error: error instanceof Error ? error.message : String(error) }))
+      .then(({ bytes, error }: { bytes: Uint8Array; error?: string }) => finish(bytes, error));
   }
 
   private emitSoon(event: NativeEvent): void {

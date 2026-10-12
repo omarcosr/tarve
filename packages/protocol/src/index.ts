@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 56;
+export const PROTOCOL_VERSION = 58;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
@@ -191,7 +191,7 @@ export interface VirtualListLayout {
   retainedKey?: string;
   alignment: "top" | "bottom";
   followTail: boolean;
-  scrollRequest?: { generation: number; offset: number };
+  scrollRequest?: { generation: number; offset: number; smooth?: boolean };
 }
 export interface VirtualListMeasurement { key: string; height: number }
 export interface VirtualListAnchor { index: number; key: string; offset: number }
@@ -264,6 +264,8 @@ export interface SceneDocument {
   fonts?: string[];
   /** Windows app identity (AppUserModelID): names the app in media controls and notifications. */
   appIdentity?: { id: string; name: string; icon?: string };
+  /** Window and taskbar icon: base64 PNG, ICO, JPEG or WebP bytes. */
+  windowIcon?: string;
 }
 export type TreeMutation =
   | { type: "create"; node: NativeNode }
@@ -297,7 +299,7 @@ export type NativeCommand =
   | { type: "frameOverlay"; enabled: boolean }
   | { type: "frameRate"; maxFps: number | null }
   | { type: "focus"; id: string }
-  | { type: "scrollToItem"; id: string; index: number; offset?: number }
+  | { type: "scrollToItem"; id: string; index: number; offset?: number; smooth?: boolean }
   | { type: "inspect"; requestId: string }
   | { type: "resize"; width: number; height: number }
   | { type: "capture"; path: string; requestId: string }
@@ -314,6 +316,8 @@ export interface NodeSnapshot {
 export interface Snapshot {
   layoutNodes: number; layoutNodesCreated: number; measureCalls: number; paintedNodes: number;
   frames: number; layouts: number; shapes: number; paints: number;
+  /** Frames presented in the last second. */
+  fps: number;
   activeMotions: number;
   /** Glyphs rasterized so far on renderers with their own glyph atlas (D3D11); null elsewhere. */
   glyphRasterizations?: number | null;
@@ -341,7 +345,7 @@ export type NativeEvent =
   | { type: "size"; id: string; width: number; height: number }
   | { type: "pointerMove"; id: string; x: number; y: number }
   | { type: "pointerLeave"; id: string }
-  | { type: "virtualListScrollToItem"; id: string; index: number; offset: number }
+  | { type: "virtualListScrollToItem"; id: string; index: number; offset: number; smooth?: boolean }
   | { type: "virtualListFocus"; id: string; key: string | null }
   | { type: "markdownLink"; id: string; href: string }
   | { type: "diffToggleFile"; id: string; path: string }

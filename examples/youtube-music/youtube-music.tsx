@@ -9,11 +9,8 @@ import { createApp } from "@tarve/core";
 import { connect } from "./youtube-music-actions";
 import { YouTubeMusicView } from "./youtube-music-view";
 
-const app = createApp(() => <YouTubeMusicView />, {
-  closeBehavior: "hide",
-  // Names the app in Windows' media controls instead of "Unknown app" / bun.exe.
-  appIdentity: { id: "Tarve.Examples.YouTubeMusic", name: "YouTube Music (Tarve)" },
-});
+// Name, icon and app id (media controls, taskbar) come from examples/package.json "tarve".
+const app = createApp(() => <YouTubeMusicView />, { closeBehavior: "hide" });
 connect(app);
 await app.ready;
 app.tray({

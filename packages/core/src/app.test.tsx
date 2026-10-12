@@ -273,6 +273,21 @@ describe("controlled native reconciliation", () => {
     expect(() => app.registerHotkey("Ctrl", () => {})).toThrow(TypeError);
   });
 
+  test("the tray shows the app icon unless it names its own", async () => {
+    const png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+    const bridge = new FakeBridge();
+    const app = createApp(() => <Window><TitleBar /></Window>, { bridge, icon: png });
+    await app.ready;
+    const tray = app.tray({ tooltip: "Tray" });
+    const sent = bridge.commands.at(-1) as { tray: { iconData?: string } };
+    expect(sent.tray.iconData).toBe(png.slice(png.indexOf(",") + 1));
+    tray.update({ tooltip: "again" });
+    expect((bridge.commands.at(-1) as { tray: { iconData?: string } }).tray.iconData).toBeUndefined();
+    tray.update({ icon: "data:image/png;base64,AAAA" });
+    expect((bridge.commands.at(-1) as { tray: { iconData?: string } }).tray.iconData).toBe("AAAA");
+    app.close();
+  });
+
   test("tray, notifications and window visibility round-trip through the bridge", async () => {
     const bridge = new FakeBridge();
     const app = createApp(() => <Window><TitleBar /></Window>, { bridge, closeBehavior: "hide" });
@@ -655,6 +670,18 @@ describe("controlled native reconciliation", () => {
     if (acknowledged?.type === "patch") {
       expect(acknowledged.nodes.find(node => node.id === "imperative-list")?.virtualList?.scrollRequest).toBeUndefined();
     }
+
+    // A smooth request carries the flag to native and back into the list's request.
+    app.scrollToItem("imperative-list", 1, 0, { smooth: true });
+    expect(bridge.commands.at(-1)).toEqual({ type: "scrollToItem", id: "imperative-list", index: 1, smooth: true });
+    bridge.commands.length = 0;
+    bridge.emit({ type: "virtualListScrollToItem", id: "imperative-list", index: 1, offset: 0, smooth: true });
+    await Bun.sleep(0);
+    const smooth = bridge.commands.at(-1);
+    const smoothList = smooth?.type === "mutate"
+      ? smooth.mutations.flatMap(mutation => mutation.type === "patch" ? [mutation.node] : []).find(node => node.id === "imperative-list")
+      : smooth?.type === "patch" ? smooth.nodes.find(node => node.id === "imperative-list") : undefined;
+    expect(smoothList?.virtualList?.scrollRequest).toEqual({ generation: 2, offset: 40, smooth: true });
   });
 
   test("separate apps do not share variable VirtualList measurements for the same id", async () => {
