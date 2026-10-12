@@ -4,6 +4,8 @@ All notable changes to `@tarve/core`, `@tarve/react-icons` and `@tarve/headless`
 
 ## Unreleased
 
+## 0.5.0 — 2026-10-12
+
 ### Performance
 - D3D11 draws circles, rounded rectangles with one radius and round SVG dots (zero-length round-capped segments, as dot-matrix charts use) as one quad each from a distance field, instead of flattening, tessellating and feathering an outline. On the Pulse example (eight dot charts refreshed every second) the app process went from ~3.2% to ~1.9% of a core and from ~120 MB to ~77 MB of working set.
 - `@tarve/react-icons` adapters remember their result per icon component and props (`memoizeAdapter`), so an icon on screen runs its React component and serializes its SVG once, not on every update.
