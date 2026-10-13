@@ -45,7 +45,7 @@ describe("chat controls", () => {
       <Text>One</Text><Text>Two</Text></MessageScroller></Window>);
     expect(tree.nodes.get("messages")?.kind).toBe("scroll");
     expect(tree.nodes.get("messages")?.style.height).toBe(240);
-    tree.handlers.get("messages")?.onScroll?.(20, 100);
+    tree.handlers.get("messages")?.onScroll?.(20, 100, { source: "user" });
     expect(events).toEqual([[20, 100]]);
     expect(() => compileTree(<Window><MessageScroller height={0}>Bad</MessageScroller></Window>)).toThrow(RangeError);
     expect(() => compileTree(<Window><MessageScroller gap={-1}>Bad</MessageScroller></Window>)).toThrow(RangeError);

@@ -242,7 +242,14 @@ export interface NativeNode {
   motionFrom?: MotionValues;
 }
 export type ScrollOrientation = "vertical" | "horizontal" | "both";
-export interface ScrollPosition { x: number; y: number; maxX: number; maxY: number }
+/**
+ * What moved a scroll container: input (wheel, scrollbar, keyboard, assistive
+ * technology), the app (scrollToItem, including each step of a smooth one), or
+ * layout (rows above the anchor changed height).
+ */
+export type ScrollSource = "user" | "program" | "layout";
+export interface ScrollInfo { source: ScrollSource }
+export interface ScrollPosition { x: number; y: number; maxX: number; maxY: number; source: ScrollSource }
 export type WindowPositionPreset =
   | "top-left" | "top" | "top-right"
   | "left" | "center" | "right"
@@ -340,7 +347,7 @@ export type NativeEvent =
   | { type: "submit"; id: string; value: string }
   | { type: "paste"; id: string; files?: string[]; image?: { width: number; height: number; rgba: string } }
   | { type: "valueChange"; id: string; value: number }
-  | { type: "scroll"; id: string; offset: number; max: number; offsetX?: number; offsetY?: number; maxX?: number; maxY?: number }
+  | { type: "scroll"; id: string; offset: number; max: number; offsetX?: number; offsetY?: number; maxX?: number; maxY?: number; source?: ScrollSource }
   | { type: "virtualListLayout"; id: string; items: VirtualListMeasurement[] }
   | { type: "size"; id: string; width: number; height: number }
   | { type: "pointerMove"; id: string; x: number; y: number }

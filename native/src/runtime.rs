@@ -246,6 +246,35 @@ pub(crate) fn ime_allowed_for_node(node: Option<&Node>) -> bool {
     node.is_some_and(|node| matches!(node.kind.as_str(), "input" | "textarea"))
 }
 
+/// Keys a focused text field uses for typing, editing and moving the caret.
+/// Alone or with Shift they belong to the field, so they are not hotkeys:
+/// typing a space in a search box must not also press "Space".
+pub(crate) fn text_field_consumes(key: &Key, modifiers: ModifiersState) -> bool {
+    if modifiers.control_key() || modifiers.alt_key() || modifiers.super_key() {
+        return false;
+    }
+    match key {
+        Key::Character(_) => true,
+        Key::Named(named) => matches!(
+            named,
+            NamedKey::Space
+                | NamedKey::Enter
+                | NamedKey::Backspace
+                | NamedKey::Delete
+                | NamedKey::Tab
+                | NamedKey::Home
+                | NamedKey::End
+                | NamedKey::PageUp
+                | NamedKey::PageDown
+                | NamedKey::ArrowUp
+                | NamedKey::ArrowDown
+                | NamedKey::ArrowLeft
+                | NamedKey::ArrowRight
+        ),
+        _ => false,
+    }
+}
+
 pub(crate) fn anchored_window_position(
     preset: &WindowPositionPreset,
     monitor_position: PhysicalPosition<i32>,
@@ -2632,7 +2661,15 @@ impl ApplicationHandler<Command> for App {
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 events = self.clipboard_shortcut(&event.logical_key);
+                let typing = ime_allowed_for_node(
+                    self.tree
+                        .focused
+                        .as_ref()
+                        .and_then(|id| self.tree.entries.get(id))
+                        .map(|entry| &entry.node),
+                ) && text_field_consumes(&event.logical_key, self.modifiers);
                 if !event.repeat
+                    && !typing
                     && let Some(shortcut) = shortcut_name(&event.logical_key, self.modifiers)
                 {
                     events.push(json!({"type":"shortcut", "shortcut":shortcut}));

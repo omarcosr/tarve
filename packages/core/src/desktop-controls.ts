@@ -1,4 +1,4 @@
-import type { Style } from "../../protocol/src/index";
+import type { ScrollInfo, Style } from "../../protocol/src/index";
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
 import { Icon, Pressable, Row, Text, View, Column, type IconName } from "./components";
 import { VirtualList } from "./virtual-list";
@@ -174,7 +174,7 @@ export interface DataGridProps<T> extends BaseProps {
   onSortChange?: (sort: DataGridSort | undefined) => void;
   onSelectionChange?: (keys: DataGridKey[]) => void;
   onRowActivate?: (row: T, index: number) => void;
-  onScroll?: (offset: number, max: number) => void;
+  onScroll?: (offset: number, max: number, info: ScrollInfo) => void;
 }
 
 interface GridEntry<T> {

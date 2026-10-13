@@ -1,5 +1,5 @@
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
-import type { VirtualListMeasurement } from "../../protocol/src/index";
+import type { ScrollInfo, VirtualListMeasurement } from "../../protocol/src/index";
 import { Column, Row, Scroll } from "./components";
 import { currentRenderEpoch, currentRenderScope } from "./render-scope";
 
@@ -15,7 +15,8 @@ export interface VirtualListProps<T> extends BaseProps {
   overscan?: number;
   keyForItem?: (item: T, index: number) => string | number;
   renderItem: (item: T, index: number) => Child;
-  onScroll: (offset: number, max: number) => void;
+  /** `info.source` tells the user's scrolling from a scrollToItem (and its smooth steps). */
+  onScroll: (offset: number, max: number, info: ScrollInfo) => void;
 }
 
 export interface VariableVirtualListProps<T> extends Omit<VirtualListProps<T>, "itemHeight" | "keyForItem"> {
@@ -328,12 +329,12 @@ function variableVirtualList<T>({
     children: renderItem(items[retainedIndex]!, retainedIndex),
   }, keyForItem(items[retainedIndex]!, retainedIndex)));
 
-  const onVariableScroll = (next: number, nextMax: number) => {
+  const onVariableScroll = (next: number, nextMax: number, info: ScrollInfo) => {
     state.effectiveOffset = next;
     state.lastExternalOffset = offset;
     state.followingTail = followTail && Math.abs(next - nextMax) <= 0.5;
     state.scrollRequest = undefined;
-    onScroll(next, nextMax);
+    onScroll(next, nextMax, info);
   };
   const onVirtualListLayout = (measurements: VirtualListMeasurement[]) => {
     for (const measurement of measurements) {
@@ -528,12 +529,12 @@ function windowedVariableVirtualList<T>({
     ? state.focusedKey
     : undefined;
   const retained = retainedKey === undefined ? undefined : parkedRow(state.retainedRow!.vnode);
-  const onVariableScroll = (next: number, nextMax: number) => {
+  const onVariableScroll = (next: number, nextMax: number, info: ScrollInfo) => {
     state.effectiveOffset = next;
     state.lastExternalOffset = offset;
     state.followingTail = followTail && Math.abs(next - nextMax) <= 0.5;
     state.scrollRequest = undefined;
-    onScroll(next, nextMax);
+    onScroll(next, nextMax, info);
   };
   const onVirtualListLayout = (measurements: VirtualListMeasurement[]) => {
     for (const measurement of measurements) {

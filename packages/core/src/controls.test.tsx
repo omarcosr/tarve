@@ -150,19 +150,19 @@ describe("control kit", () => {
     const initial = view();
     expect(initial.nodes.get("tail-list")?.control?.value).toBe(120);
     expect(initial.nodes.get("tail-list")?.virtualList?.renderedKeys).toEqual(["s:d", "s:e"]);
-    initial.handlers.get("tail-list")?.onScroll?.(120, 120);
+    initial.handlers.get("tail-list")?.onScroll?.(120, 120, { source: "user" });
 
     items = [...items, "f"];
     const appended = view();
     expect(appended.nodes.get("tail-list")?.control?.value).toBe(160);
     expect(appended.nodes.has("tail-f")).toBe(true);
-    appended.handlers.get("tail-list")?.onScroll?.(80, 160);
+    appended.handlers.get("tail-list")?.onScroll?.(80, 160, { source: "user" });
 
     items = [...items, "g"];
     const paused = view();
     expect(paused.nodes.get("tail-list")?.control?.value).toBe(80);
     expect(paused.nodes.has("tail-g")).toBe(false);
-    paused.handlers.get("tail-list")?.onScroll?.(200, 200);
+    paused.handlers.get("tail-list")?.onScroll?.(200, 200, { source: "user" });
 
     items = [...items, "h"];
     const resumed = view();

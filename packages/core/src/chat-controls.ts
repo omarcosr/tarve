@@ -1,3 +1,4 @@
+import type { ScrollInfo } from "../../protocol/src/index";
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
 import { Button, Column, Row, Scroll, Text, View } from "./components";
 import { Avatar } from "./extra-controls";
@@ -130,7 +131,7 @@ export function Message({ side = "incoming", author, avatarSrc, avatarFallback, 
 export interface MessageScrollerProps extends BaseProps {
   height?: number;
   gap?: number;
-  onScroll?: (offset: number, max: number) => void;
+  onScroll?: (offset: number, max: number, info: ScrollInfo) => void;
 }
 export function MessageScroller({ height = 360, gap = 12, onScroll, children, style, ...props }: MessageScrollerProps): VNode {
   if (!Number.isFinite(height) || height <= 0) throw new RangeError("MessageScroller height must be greater than zero");

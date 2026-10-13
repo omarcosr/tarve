@@ -12,7 +12,7 @@ import {
   VirtualList,
   Window,
   darkTheme,
-  theme,
+  theme, type ScrollInfo
 } from "@tarve/core";
 
 // The performance sequence from the launch film: a 100,000-row VirtualList
@@ -68,7 +68,7 @@ export const cards = ["Dialog", "Sidebar", "Tabs", "Table", "Slider", "Toast", "
 let view = "list";
 let offset = 0;
 let jumpText = String(TARGET_ROW);
-let flight: { to: number; rows: number; started: number; updates: number; timeout: ReturnType<typeof setTimeout> } | undefined;
+let flight: { to: number; rows: number; started: number; updates: number } | undefined;
 let lastFlight = "";
 
 type ScrollToItem = (id: string, index: number, offset?: number, options?: { smooth?: boolean }) => void;
@@ -82,7 +82,6 @@ export function connectPerformance(app: { update(): void; scrollToItem: ScrollTo
 const maxOffset = () => ROW_COUNT * ROW_HEIGHT - LIST_HEIGHT;
 const clampOffset = (value: number) => Math.max(0, Math.min(value, maxOffset()));
 function endFlight(status: string) {
-  if (flight) clearTimeout(flight.timeout);
   flight = undefined;
   lastFlight = status;
 }
@@ -91,18 +90,17 @@ function endFlight(status: string) {
 export function flyTo(row: number) {
   const to = clampOffset(Math.max(0, Math.min(Math.floor(row), ROW_COUNT - 1)) * ROW_HEIGHT);
   if (Math.abs(to - offset) < 0.5) return;
-  if (flight) clearTimeout(flight.timeout);
-  // Wheeling mid-flight hands the scroll back to the user; stop waiting for the arrival then.
-  const timeout = setTimeout(() => { endFlight(""); refresh(); }, 2000);
-  flight = { to, rows: Math.round(Math.abs(to - offset) / ROW_HEIGHT), started: performance.now(), updates: 0, timeout };
+  flight = { to, rows: Math.round(Math.abs(to - offset) / ROW_HEIGHT), started: performance.now(), updates: 0 };
   const index = Math.floor(to / ROW_HEIGHT);
   scrollToItem(LIST_ID, index, to - index * ROW_HEIGHT, { smooth: true });
   refresh();
 }
 
-function onListScroll(next: number) {
+function onListScroll(next: number, _max: number, info: ScrollInfo) {
   offset = next;
   if (!flight) return;
+  // Wheeling mid-flight hands the scroll back to the user: the flight is over.
+  if (info.source === "user") { endFlight(""); return; }
   flight.updates++;
   if (Math.abs(next - flight.to) < 0.5) {
     const elapsed = performance.now() - flight.started;

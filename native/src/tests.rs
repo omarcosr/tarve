@@ -7,7 +7,7 @@ use crate::{
         GraphicsRecoveryFailureAction, anchored_window_position, close_request_action,
         cursor_for_node, graphics_fault_action, graphics_recoveries_after_stability,
         graphics_recovery_circuit_action, graphics_recovery_delay,
-        graphics_recovery_failure_action, ime_allowed_for_node, shortcut_name,
+        graphics_recovery_failure_action, ime_allowed_for_node, shortcut_name, text_field_consumes,
     },
     tree::Tree,
 };
@@ -227,6 +227,21 @@ fn file_dialog_protocol_and_hotkey_names_are_explicit() {
         shortcut_name(&Key::Named(NamedKey::F2), ModifiersState::empty()).as_deref(),
         Some("F2")
     );
+
+    // In a text field, typing and caret keys are the field's; chords and F-keys stay hotkeys.
+    let none = ModifiersState::empty();
+    assert!(text_field_consumes(&Key::Named(NamedKey::Space), none));
+    assert!(text_field_consumes(
+        &Key::Character("k".into()),
+        ModifiersState::SHIFT
+    ));
+    assert!(text_field_consumes(&Key::Named(NamedKey::ArrowLeft), none));
+    assert!(!text_field_consumes(
+        &Key::Character("k".into()),
+        ModifiersState::CONTROL
+    ));
+    assert!(!text_field_consumes(&Key::Named(NamedKey::F2), none));
+    assert!(!text_field_consumes(&Key::Named(NamedKey::Escape), none));
 }
 
 #[test]
@@ -1636,13 +1651,25 @@ fn variable_virtual_list_scroll_request_applies_each_generation_once_and_inspect
         tree.request_virtual_scroll_to_item("requested-list", 5, 0.0, false)
             .is_err()
     );
+    // A list that is not mounted has nowhere to scroll; a node that is not a list is a mistake.
+    assert_eq!(
+        tree.request_virtual_scroll_to_item("not-mounted", 0, 0.0, false),
+        Ok(vec![])
+    );
+    assert!(
+        tree.request_virtual_scroll_to_item("requested-content", 0, 0.0, false)
+            .is_err()
+    );
 
     tree.update(root(vec![requested_list(Some((1, 125.0)))]));
     tree.compute(240.0, 180.0).unwrap();
     assert_eq!(tree.entries["requested-list"].scroll, 120.0);
     let applied = tree.take_layout_events();
     assert!(applied.iter().any(|event| {
-        event["type"] == "scroll" && event["id"] == "requested-list" && event["offset"] == 120.0
+        event["type"] == "scroll"
+            && event["id"] == "requested-list"
+            && event["offset"] == 120.0
+            && event["source"] == "program"
     }));
     let snapshots = tree.snapshots();
     let list = snapshots
@@ -1691,14 +1718,24 @@ fn variable_virtual_list_scroll_request_applies_each_generation_once_and_inspect
     tree.advance_motion(1150.0);
     let mid = tree.entries["requested-list"].scroll;
     assert!(mid > 40.0 && mid < 120.0, "halfway: {mid}");
+    // Its steps say they are the app's, so a list can tell them from the user's.
     assert!(
         tree.take_layout_events()
             .iter()
-            .any(|event| event["type"] == "scroll")
+            .any(|event| event["type"] == "scroll" && event["source"] == "program")
     );
     tree.advance_motion(5000.0);
     assert_eq!(tree.entries["requested-list"].scroll, 120.0);
     assert_eq!(tree.active_motion_count(), 0);
+    tree.take_layout_events();
+    // The wheel is the user's.
+    tree.pointer_move(20.0, 20.0);
+    let user = tree.wheel(-40.0);
+    let wheel = user
+        .iter()
+        .find(|event| event["type"] == "scroll")
+        .expect("the wheel scrolls the list");
+    assert_eq!(wheel["source"], "user");
 }
 
 #[test]

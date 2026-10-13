@@ -462,6 +462,16 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     });
   }
 
+  /**
+   * Sends a command that targets nodes after the render already queued by
+   * `update()`: `update(); focus("new-field")` must find the field it adds.
+   */
+  function sendAfterRender(command: NativeCommand): void {
+    if (!queued) { sendPublic(command); return; }
+    // The render's microtask was queued first, so this one runs after it.
+    queueMicrotask(() => { if (!ended) sendPublic(command); });
+  }
+
   async function flushQueuedUpdate(): Promise<void> {
     while (queued && !ended && !closing) {
       // `update()` batches rendering in a microtask. Request-style APIs that
@@ -721,7 +731,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       }
       if (event.type === "change" && handlers?.onChange) { handled = true; succeeded = invokeHandler("change", event.id, handlers.onChange as (...args: never[]) => void, event.value as never); }
       if (event.type === "valueChange" && handlers?.onValueChange) { handled = true; succeeded = invokeHandler("valueChange", event.id, handlers.onValueChange as (...args: never[]) => void, event.value as never); }
-      if (event.type === "scroll" && handlers?.onScroll) { handled = true; succeeded = invokeHandler("scroll", event.id, handlers.onScroll as (...args: never[]) => void, event.offset as never, event.max as never); }
+      if (event.type === "scroll" && handlers?.onScroll) { handled = true; succeeded = invokeHandler("scroll", event.id, handlers.onScroll as (...args: never[]) => void, event.offset as never, event.max as never, { source: event.source ?? "user" } as never); }
       if (event.type === "scroll" && handlers?.onScrollPosition) {
         handled = true;
         const position = {
@@ -729,6 +739,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
           y: event.offsetY ?? event.offset,
           maxX: event.maxX ?? 0,
           maxY: event.maxY ?? event.max,
+          source: event.source ?? "user",
         };
         succeeded = invokeHandler("scrollPosition", event.id, handlers.onScrollPosition as (...args: never[]) => void, position as never) && succeeded;
       }
@@ -884,13 +895,13 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       closing = true;
     },
     focus(id: string): void {
-      if (!ended) sendPublic({ type: "focus", id });
+      if (!ended) sendAfterRender({ type: "focus", id });
     },
     scrollToItem(id: string, index: number, offset = 0, options: { smooth?: boolean } = {}): void {
       if (!id) throw new TypeError("scrollToItem requires a list id");
       if (!Number.isInteger(index) || index < 0) throw new RangeError("scrollToItem index must be a nonnegative integer");
       if (!Number.isFinite(offset)) throw new RangeError("scrollToItem offset must be finite");
-      if (!ended) sendPublic({ type: "scrollToItem", id, index, ...(offset !== 0 ? { offset } : {}), ...(options.smooth ? { smooth: true } : {}) });
+      if (!ended) sendAfterRender({ type: "scrollToItem", id, index, ...(offset !== 0 ? { offset } : {}), ...(options.smooth ? { smooth: true } : {}) });
     },
     show(): void {
       if (!ended) sendPublic({ type: "window", action: "show" });

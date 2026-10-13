@@ -4,7 +4,13 @@ All notable changes to `@tarve/core`, `@tarve/react-icons` and `@tarve/headless`
 
 ## Unreleased
 
+### Added
+- `onScroll` (Scroll, ScrollArea, VirtualList, DataGrid, MessageScroller) gets a third argument, `{ source }`: `"user"` for the wheel, scrollbar, keyboard and assistive technology, `"program"` for `scrollToItem` and every step of a smooth one, `"layout"` when rows around the anchor change height. `onScrollPosition` carries the same `source`. A view that follows something (lyrics, a log, a "fly to" animation) can now step aside when the user scrolls, without guessing from timing. Runtimes that predate it report `"user"`.
+
 ### Fixed
+- A hotkey made of a typing key (`Space`, a letter, `Enter`, an arrow…, alone or with Shift) no longer fires while a text field has focus: typing a space in a search box also toggled playback in the player and YouTube Music examples. Chords (`Ctrl+K`), F-keys and `Escape` still fire.
+- `app.focus` and `app.scrollToItem` called right after `app.update()` (or a state change in an event handler) reach the nodes that render adds: they used to go out before the queued render and miss a field or list it was about to create.
+- `app.scrollToItem` on a list that is not mounted (another page, a hidden panel) does nothing, like `scrollIntoView` on a detached element, instead of reporting an error. A mounted node that is not a variable `VirtualList` still errors.
 - `<audio src="https://…">` from googlevideo (YouTube) failed on many songs: the CDN answers 403 to a second request to a file while one is in flight, and to a range behind what it already served, and the stream used four parallel connections plus jumps for seeks. A remote file now downloads in one forward pass (4 MB ranges, one connection; a seek more than 8 MB ahead, as in a long podcast, starts a pass there), retrying 403, 429, 5xx and network errors with backoff (not 404). A 40-song soak went from 32 errors to none, in a third of the time; first sound ~0.6 s.
 - `<audio>` follows the output device: when it goes away (unplugged, sleep, a driver restart) or the default output changes, a new output stream plays on from the same sample. Tracks are mixed (in the first device's own format, so samples are converted once) into one mix that outlives output streams, so nothing is reopened, reloaded or sought (a switch used to restart the song, and failing to seek could skip it).
 - `<audio>` never blocks the window on the audio thread: rodio's `try_seek` and `clear` wait for the audio thread to acknowledge, so a stalled network read or a lost device froze the whole app on the next seek or song change. Seeks now run on a helper thread (`seeked` fires once done) and a replay swaps in a new player.

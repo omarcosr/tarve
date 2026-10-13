@@ -264,7 +264,7 @@
     {
       "name": "Attachment",
       "source": "packages/core/src/chat-controls.ts",
-      "line": 19,
+      "line": 20,
       "generic": false,
       "propsType": "AttachmentProps",
       "props": [
@@ -446,7 +446,7 @@
     {
       "name": "Bubble",
       "source": "packages/core/src/chat-controls.ts",
-      "line": 66,
+      "line": 67,
       "generic": false,
       "propsType": "BubbleProps",
       "props": [
@@ -1583,7 +1583,7 @@
         },
         {
           "name": "onScroll",
-          "type": "(offset: number, max: number) => void",
+          "type": "(offset: number, max: number, info: ScrollInfo) => void",
           "optional": true,
           "default": "() => {}"
         },
@@ -1651,7 +1651,8 @@
       "types": [
         "DataGridColumn",
         "DataGridKey",
-        "DataGridSort"
+        "DataGridSort",
+        "ScrollInfo"
       ]
     },
     {
@@ -3009,7 +3010,7 @@
         },
         {
           "name": "onScroll",
-          "type": "(offset: number, max: number) => void",
+          "type": "(offset: number, max: number, info: ScrollInfo) => void",
           "optional": true,
           "from": "ScrollProps"
         },
@@ -3075,6 +3076,7 @@
         "style"
       ],
       "types": [
+        "ScrollInfo",
         "ScrollOrientation",
         "ScrollPosition"
       ]
@@ -3124,7 +3126,7 @@
     {
       "name": "Marker",
       "source": "packages/core/src/chat-controls.ts",
-      "line": 86,
+      "line": 87,
       "generic": false,
       "propsType": "MarkerProps",
       "props": [
@@ -3201,7 +3203,7 @@
     {
       "name": "Message",
       "source": "packages/core/src/chat-controls.ts",
-      "line": 107,
+      "line": 108,
       "generic": false,
       "propsType": "MessageProps",
       "props": [
@@ -3266,7 +3268,7 @@
     {
       "name": "MessageScroller",
       "source": "packages/core/src/chat-controls.ts",
-      "line": 135,
+      "line": 136,
       "generic": false,
       "propsType": "MessageScrollerProps",
       "props": [
@@ -3284,7 +3286,7 @@
         },
         {
           "name": "onScroll",
-          "type": "(offset: number, max: number) => void",
+          "type": "(offset: number, max: number, info: ScrollInfo) => void",
           "optional": true
         }
       ],
@@ -3303,7 +3305,9 @@
         "rovingGroup",
         "style"
       ],
-      "types": []
+      "types": [
+        "ScrollInfo"
+      ]
     },
     {
       "name": "Modal",
@@ -4301,7 +4305,7 @@
         },
         {
           "name": "onScroll",
-          "type": "(offset: number, max: number) => void",
+          "type": "(offset: number, max: number, info: ScrollInfo) => void",
           "optional": true
         },
         {
@@ -4360,6 +4364,7 @@
         "style"
       ],
       "types": [
+        "ScrollInfo",
         "ScrollOrientation",
         "ScrollPosition"
       ]
@@ -4421,7 +4426,7 @@
         },
         {
           "name": "onScroll",
-          "type": "(offset: number, max: number) => void",
+          "type": "(offset: number, max: number, info: ScrollInfo) => void",
           "optional": true,
           "from": "ScrollProps"
         },
@@ -4482,6 +4487,7 @@
         "style"
       ],
       "types": [
+        "ScrollInfo",
         "ScrollOrientation",
         "ScrollPosition"
       ]
@@ -5872,7 +5878,7 @@
       "name": "VirtualList",
       "summary": "Fixed-height rows; the caller keeps `offset` and updates it from `onScroll`.",
       "source": "packages/core/src/virtual-list.ts",
-      "line": 600,
+      "line": 605,
       "generic": true,
       "propsType": "VirtualListProps<T> | VariableVirtualListProps<T> | WindowedVirtualListProps<T>",
       "props": [
@@ -5888,8 +5894,9 @@
         },
         {
           "name": "onScroll",
-          "type": "(offset: number, max: number) => void",
-          "optional": false
+          "type": "(offset: number, max: number, info: ScrollInfo) => void",
+          "optional": false,
+          "doc": "`info.source` tells the user's scrolling from a scrollToItem (and its smooth steps)."
         },
         {
           "name": "renderItem",
@@ -5972,7 +5979,9 @@
         "rovingGroup",
         "style"
       ],
-      "types": []
+      "types": [
+        "ScrollInfo"
+      ]
     },
     {
       "name": "Window",
@@ -6290,8 +6299,10 @@
     "QuestionnaireAnswer": "type QuestionnaireAnswer = string | string[];",
     "QuestionnaireQuestion": "interface QuestionnaireQuestion {\n  id: string;\n  title: string;\n  description?: string;\n  type: \"text\" | \"single\" | \"multiple\";\n  options?: readonly RadioOption[];\n  required?: boolean;\n  placeholder?: string;\n}",
     "RadioOption": "interface RadioOption { value: string; label: string; disabled?: boolean }",
+    "ScrollInfo": "interface ScrollInfo { source: ScrollSource }",
     "ScrollOrientation": "type ScrollOrientation = \"vertical\" | \"horizontal\" | \"both\";",
-    "ScrollPosition": "interface ScrollPosition { x: number; y: number; maxX: number; maxY: number }",
+    "ScrollPosition": "interface ScrollPosition { x: number; y: number; maxX: number; maxY: number; source: ScrollSource }",
+    "ScrollSource": "type ScrollSource = \"user\" | \"program\" | \"layout\";",
     "SelectOption": "interface SelectOption { value: string; label: string; disabled?: boolean }",
     "SheetSide": "type SheetSide = \"left\" | \"right\" | \"top\" | \"bottom\";",
     "SidebarItem": "interface SidebarItem {\n  value: string;\n  label: string;\n  icon?: IconName;\n  disabled?: boolean;\n  badge?: Child;\n}",

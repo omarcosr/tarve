@@ -472,16 +472,35 @@ describe("controlled native reconciliation", () => {
     if (patch?.type === "patch") expect(patch.nodes.find(node => node.id === "slider")?.control?.value).toBe(20);
   });
 
+  test("focus and scrollToItem after update() reach the nodes that render adds", async () => {
+    const bridge = new FakeBridge();
+    let editing = false;
+    const app = createApp(() => (
+      <Window>{editing ? <Input id="name" value="" /> : <Text id="label">Name</Text>}</Window>
+    ), { bridge });
+    await app.ready;
+    bridge.commands.length = 0;
+    editing = true;
+    app.update();
+    app.focus("name");
+    await Bun.sleep(0);
+    expect(bridge.commands.map(command => command.type)).toEqual(["mutate", "focus"]);
+    // With no render queued, the command goes out at once.
+    bridge.commands.length = 0;
+    app.focus("name");
+    expect(bridge.commands.map(command => command.type)).toEqual(["focus"]);
+  });
+
   test("scroll dispatch keeps the scalar callback and exposes optional 2D position", async () => {
     const bridge = new FakeBridge();
-    const scalar: number[][] = [];
+    const scalar: unknown[][] = [];
     const positions: unknown[] = [];
     const app = createApp(() => (
       <Window>
         <ScrollArea
           id="scroll"
           orientation="both"
-          onScroll={(offset, max) => scalar.push([offset, max])}
+          onScroll={(offset, max, info) => scalar.push([offset, max, info.source])}
           onScrollPosition={position => positions.push(position)}
         />
       </Window>
@@ -496,15 +515,19 @@ describe("controlled native reconciliation", () => {
       offsetY: 30,
       maxX: 200,
       maxY: 300,
+      source: "program",
     });
+    // A runtime that predates `source` reports input.
+    bridge.emit({ type: "scroll", id: "scroll", offset: 40, max: 300 });
     await Bun.sleep(0);
-    expect(scalar).toEqual([[30, 300]]);
-    expect(positions).toEqual([{ x: 20, y: 30, maxX: 200, maxY: 300 }]);
+    expect(scalar).toEqual([[30, 300, "program"], [40, 300, "user"]]);
+    expect(positions).toEqual([{ x: 20, y: 30, maxX: 200, maxY: 300, source: "program" }, { x: 0, y: 40, maxX: 0, maxY: 300, source: "user" }]);
   });
 
   test("native variable-list measurements feed the next keyed window through normal event dispatch", async () => {
     const bridge = new FakeBridge();
     let offset = 0;
+    const sources: string[] = [];
     const items = ["a", "b", "c", "d"];
     const app = createApp(() => (
       <Window>
@@ -516,7 +539,7 @@ describe("controlled native reconciliation", () => {
           offset={offset}
           overscan={0}
           keyForItem={item => item}
-          onScroll={next => { offset = next; }}
+          onScroll={(next, _max, info) => { offset = next; sources.push(info.source); }}
           renderItem={item => <Text id={`measured-${item}`}>{item}</Text>}
         />
       </Window>
@@ -540,10 +563,12 @@ describe("controlled native reconciliation", () => {
       offsetY: 90,
       maxX: 0,
       maxY: 120,
+      source: "layout",
     });
     await Bun.sleep(0);
 
     expect(offset).toBe(90);
+    expect(sources).toEqual(["layout"]);
     const command = bridge.commands.at(-1);
     expect(command?.type).toBe("mutate");
     if (command?.type !== "mutate") throw new Error("expected measured virtual-list mutation");

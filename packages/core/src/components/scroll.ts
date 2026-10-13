@@ -1,12 +1,12 @@
 import type { VNode } from "../jsx-runtime";
-import type { ScrollOrientation, ScrollPosition } from "../../../protocol/src/index";
+import type { ScrollInfo, ScrollOrientation, ScrollPosition } from "../../../protocol/src/index";
 import { theme } from "../theme";
 import { container, type ViewProps } from "./layout";
 
 export interface ScrollProps extends ViewProps {
   speed?: number;
   orientation?: ScrollOrientation;
-  onScroll?: (offset: number, max: number) => void;
+  onScroll?: (offset: number, max: number, info: ScrollInfo) => void;
   onScrollPosition?: (position: ScrollPosition) => void;
 }
 

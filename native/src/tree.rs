@@ -2022,10 +2022,13 @@ impl Tree {
             } else {
                 1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
             };
-            let events = self.scroll_to(
+            let mut events = self.scroll_to(
                 &id,
                 animation.from + (animation.to - animation.from) * eased,
             );
+            for event in &mut events {
+                event["source"] = json!("program");
+            }
             self.pending_layout_events.extend(events);
             if t >= 1.0 {
                 self.scroll_animations.remove(&id);
@@ -3234,9 +3237,16 @@ impl Tree {
             if !changed && scroll_request.is_none() {
                 continue;
             }
+            // A scrollToItem lands, or rows changed height around the anchor.
+            let source = if scroll_request.is_some() {
+                "program"
+            } else {
+                "layout"
+            };
             self.pending_layout_events.push(json!({
                 "type":"scroll", "id":list_id, "offset":next, "max":max_y,
-                "offsetX":scroll_x, "offsetY":next, "maxX":max_x, "maxY":max_y
+                "offsetX":scroll_x, "offsetY":next, "maxX":max_x, "maxY":max_y,
+                "source":source
             }));
         }
     }
@@ -6257,11 +6267,15 @@ impl Tree {
         if !offset.is_finite() {
             return Err("VirtualList scrollToItem offset must be finite".into());
         }
-        let metadata = self
-            .entries
-            .get(id)
-            .and_then(|entry| entry.node.virtual_list.as_ref())
-            .ok_or_else(|| format!("scrollToItem target is not a variable VirtualList: {id}"))?;
+        // A list that is not on screen (another page, a collapsed panel) has
+        // nowhere to scroll, as with `scrollIntoView` on a detached element.
+        let Some(entry) = self.entries.get(id) else {
+            return Ok(vec![]);
+        };
+        let metadata =
+            entry.node.virtual_list.as_ref().ok_or_else(|| {
+                format!("scrollToItem target is not a variable VirtualList: {id}")
+            })?;
         if index >= metadata.item_count {
             return Err(format!(
                 "VirtualList scrollToItem index {index} is outside itemCount {}",
@@ -6311,10 +6325,13 @@ impl Tree {
             } else {
                 (next_y, entry.scroll_max)
             };
+        // Wheel, scrollbar, keyboard and assistive technology; a smooth
+        // scrollToItem relabels its steps as "program".
         let events = vec![json!({
             "type":"scroll", "id":id, "offset":offset, "max":max,
             "offsetX":next_x, "offsetY":next_y,
-            "maxX":entry.scroll_max_x, "maxY":entry.scroll_max
+            "maxX":entry.scroll_max_x, "maxY":entry.scroll_max,
+            "source":"user"
         })];
         if variable_list {
             self.refresh_virtual_anchor(id);
