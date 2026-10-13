@@ -79,7 +79,7 @@ export function diffTreeMutations(previous: CompiledTree, next: CompiledTree, un
       }
       continue;
     }
-    // A memoized subtree reused as is: nothing in it changed.
+    // The same compiled node (a memoized subtree, or a shadow sharing it): nothing changed.
     if (old === node || unchanged?.(old, node)) continue;
     if (old.kind !== node.kind) return null;
     if (nodePropertiesChanged(old, node)) patches.push({ type: "patch", node: flatNode(node) });

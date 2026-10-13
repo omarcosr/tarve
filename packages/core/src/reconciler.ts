@@ -15,6 +15,28 @@ import type { MediaRequest } from "./media-element";
 import type { FormContext } from "./html-elements";
 import { DIV_SHORTHANDS, expandIntrinsic, textContent } from "./reconciler/intrinsics";
 import { sameValue } from "./reconciler/diff";
+
+/** The handler name the app dispatches each `on*` prop under. Most nodes have none: no object is made for them. */
+const HANDLER_BY_PROP = new Map<string, keyof Handlers>([
+  ["onClick", "onClick"], ["onMarkdownLink", "onMarkdownLink"], ["onToggleFile", "onDiffToggleFile"], ["onShowMore", "onDiffShowMore"], ["onLineClick", "onDiffLineClick"],
+  ["onHighlight", "onHighlight"], ["onContextMenu", "onContextMenu"], ["onOutsideClick", "onOutsideClick"], ["onChange", "onChange"], ["onSubmit", "onSubmit"],
+  ["onPaste", "onPaste"], ["onValueChange", "onValueChange"], ["onScroll", "onScroll"], ["onScrollPosition", "onScrollPosition"], ["onVirtualListLayout", "onVirtualListLayout"],
+  ["onVirtualListScrollToItem", "onVirtualListScrollToItem"], ["onVirtualListFocus", "onVirtualListFocus"], ["onEscape", "onEscape"], ["onKeyDown", "onKeyDown"], ["onBlur", "onBlur"],
+  ["onCloseRequest", "onCloseRequest"], ["onTransitionEnd", "onTransitionEnd"], ["onDragStart", "onDragStart"], ["onDragMove", "onDragMove"], ["onDragEnd", "onDragEnd"],
+  ["onDragEnter", "onDragEnter"], ["onDragLeave", "onDragLeave"], ["onDrop", "onDrop"], ["onSize", "onSize"], ["onPointerMove", "onPointerMove"], ["onPointerLeave", "onPointerLeave"],
+]);
+
+function handlersOf(p: Record<string, any>, onHover: ((entered: boolean) => void) | undefined): Handlers | undefined {
+  let result: Handlers | undefined;
+  for (const prop in p) {
+    if (prop.charCodeAt(0) !== 111 /* o */ || prop.charCodeAt(1) !== 110 /* n */) continue;
+    const name = HANDLER_BY_PROP.get(prop);
+    if (name !== undefined && p[prop] !== undefined) (result ??= {})[name] = p[prop];
+  }
+  if (onHover !== undefined) (result ??= {}).onHover = onHover;
+  return result;
+}
+
 export { diffTrees, diffTreeMutations } from "./reconciler/diff";
 export interface Handlers { onClick?: () => void; onMarkdownLink?: (href: string) => void; onDiffToggleFile?: (path: string) => void; onDiffShowMore?: (hidden: number, path?: string) => void; onDiffLineClick?: (event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void; onHighlight?: (event: { matchCount: number }) => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onSubmit?: (value: string) => void; onPaste?: (payload: PastePayload) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number, info: ScrollInfo) => void; onScrollPosition?: (position: ScrollPosition) => void; onVirtualListLayout?: (items: VirtualListMeasurement[]) => void; onVirtualListScrollToItem?: (index: number, offset: number, smooth?: boolean) => void; onVirtualListFocus?: (key: string | null) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void; onTransitionEnd?: (event: { property: MotionProperty }) => void; onDragStart?: (position: DragPosition) => void; onDragMove?: (event: DragMoveEvent) => void; onDragEnd?: (event: DragEndEvent) => void; onDragEnter?: (source: string) => void; onDragLeave?: (source: string) => void; onDrop?: (event: DropEvent) => void; onSize?: (size: { width: number; height: number }) => void; onPointerMove?: (point: { x: number; y: number }) => void; onPointerLeave?: () => void }
 /** Relative luminance (0–1) of `#rgb`/`#rrggbb`, or null for other colors. */
@@ -260,7 +282,8 @@ export function compileTree(
           else p.onMouseLeave?.();
         }
       : p.onHover;
-    handlers.set(id, { onClick: p.onClick, onMarkdownLink: p.onMarkdownLink, onDiffToggleFile: p.onToggleFile, onDiffShowMore: p.onShowMore, onDiffLineClick: p.onLineClick, onHighlight: p.onHighlight, onContextMenu: p.onContextMenu, onOutsideClick: p.onOutsideClick, onHover: hoverHandler, onChange: p.onChange, onSubmit: p.onSubmit, onPaste: p.onPaste, onValueChange: p.onValueChange, onScroll: p.onScroll, onScrollPosition: p.onScrollPosition, onVirtualListLayout: p.onVirtualListLayout, onVirtualListScrollToItem: p.onVirtualListScrollToItem, onVirtualListFocus: p.onVirtualListFocus, onEscape: p.onEscape, onKeyDown: p.onKeyDown, onBlur: p.onBlur, onCloseRequest: p.onCloseRequest, onTransitionEnd: p.onTransitionEnd, onDragStart: p.onDragStart, onDragMove: p.onDragMove, onDragEnd: p.onDragEnd, onDragEnter: p.onDragEnter, onDragLeave: p.onDragLeave, onDrop: p.onDrop, onSize: p.onSize, onPointerMove: p.onPointerMove, onPointerLeave: p.onPointerLeave });
+    const nodeHandlers = handlersOf(p, hoverHandler);
+    if (nodeHandlers) handlers.set(id, nodeHandlers);
     const control = p.control ? { ...p.control } : undefined;
     const childGroup = control?.role === "radiogroup" || control?.role === "tablist" || control?.role === "navigation" || control?.role === "togglegroup"
       || control?.role === "tree" || control?.role === "grid" ? id : group;

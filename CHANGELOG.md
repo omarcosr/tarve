@@ -26,6 +26,7 @@ All notable changes to `@tarve/core`, `@tarve/react-icons` and `@tarve/headless`
 
 ### Performance
 - D3D11 draws circles, rounded rectangles with one radius and round SVG dots (zero-length round-capped segments, as dot-matrix charts use) as one quad each from a distance field, instead of flattening, tessellating and feathering an outline. On the Pulse example (eight dot charts refreshed every second) the app process went from ~3.2% to ~1.9% of a core and from ~120 MB to ~77 MB of working set.
+- Each update no longer copies every native node into the shadow tree the reconciler diffs against; nodes are shared with the compiled tree and copied only when native edited them (typed text, a dragged slider). Nodes without handlers no longer allocate a 32-slot handler record. On a 2 000-row list (6 000 nodes) one update went from ~23 ms to ~19 ms of TypeScript time and the retained heap from 12.5 MB to 7.2 MB; at 30 000 nodes, 140 ms → 112 ms and 54 MB → 26 MB (`bun run bench:reconcile`). Rendering a list through `memo` stays the real win: 2.9 ms → 2.0 ms on the same tree.
 - `@tarve/react-icons` adapters remember their result per icon component and props (`memoizeAdapter`), so an icon on screen runs its React component and serializes its SVG once, not on every update.
 
 ### Added

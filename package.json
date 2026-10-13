@@ -141,7 +141,8 @@
     "smoke:accessibility": "bun run build:native && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-accessibility.ps1",
     "smoke:exe": "bun scripts/smoke-exe.ts",
     "smoke:package": "bun scripts/smoke-package.ts",
-    "bench": "bun scripts/benchmark.tsx"
+    "bench": "bun scripts/benchmark.tsx",
+    "bench:reconcile": "bun scripts/bench-reconcile.tsx"
   },
   "type": "module",
   "workspaces": [

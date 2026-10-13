@@ -526,16 +526,14 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (event.type === "change") {
         const node = observed.nodes.get(event.id);
         if (node && (node.kind === "input" || node.kind === "textarea")) {
-          node.value = event.value;
-          editShadowNode(node);
+          editShadowNode(observed, event.id, { value: event.value });
           optimisticEdit = true;
         }
       }
       if (event.type === "valueChange") {
         const node = observed.nodes.get(event.id);
         if (node?.control) {
-          node.control = { ...node.control, value: event.value };
-          editShadowNode(node);
+          editShadowNode(observed, event.id, { control: { ...node.control, value: event.value } });
           optimisticEdit = true;
         }
       }
