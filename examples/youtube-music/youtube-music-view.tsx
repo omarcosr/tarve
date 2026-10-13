@@ -59,6 +59,8 @@ export const state = {
   signOut: () => { },
   refresh: () => { },
   mediaFailed: (_message: string) => { },
+  /** A song started playing: resets the skip-unplayable counter. */
+  played: () => { },
   hide: () => { },
 };
 
@@ -569,7 +571,7 @@ export function YouTubeMusicView() {
     <Window onCloseRequest={event => { event.preventDefault(); state.hide(); }} title={state.playing && song ? `${song.title} • ${song.artist}` : "Music"} width={1320} height={820} minWidth={960} minHeight={580}
       position="center" theme={ytmTheme} style={{ background: c.window, foreground: c.text, fontFamily: "Inter", borderColor: c.border }}>
       <audio id={AUDIO_ID} src={state.path} autoPlay volume={state.volume} muted={state.muted} loop={state.repeat === "one"}
-        onPlay={() => { state.playing = true; }}
+        onPlay={() => { state.playing = true; state.played(); }}
         onPause={() => { state.playing = false; }}
         onTimeUpdate={info => { state.time = info.currentTime; }}
         onSeeked={info => { state.time = info.currentTime; }}

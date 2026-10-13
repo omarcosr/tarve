@@ -11,7 +11,7 @@ export function connect(app: ReturnType<typeof createApp>): void {
   const syncSystemMedia = () => {
     const song = state.queue[state.index];
     const duration = state.duration || song?.duration || 0;
-    const key = song ? [song.id, state.playing, duration, Math.floor(state.time), state.index > 0, state.index + 1 < state.queue.length || state.repeat === "all"].join("|") : "";
+    const key = song ? [song.id, state.playing, duration, Math.floor(state.time), state.index > 0].join("|") : "";
     if (key === mediaKey) return;
     mediaKey = key;
     app.systemMedia(song ? {
@@ -23,7 +23,8 @@ export function connect(app: ReturnType<typeof createApp>): void {
       duration: duration || undefined,
       position: state.time,
       canSeek: !!state.path && duration > 0,
-      canNext: state.index + 1 < state.queue.length || (state.repeat === "all" && state.queue.length > 0),
+      // Autoplay adds the radio at the end of the queue, so there is always a next song.
+      canNext: state.queue.length > 0,
       canPrevious: state.index >= 0,
       onAction: (action, time) => {
         if (action === "play") state.media()?.play();
@@ -97,15 +98,47 @@ export function connect(app: ReturnType<typeof createApp>): void {
   let playToken = 0;
   /** The play whose stream was already re-resolved once after an error. */
   let retriedToken = -1;
+  /** Songs skipped in a row because they would not play; stops a run of failures from looping. */
+  let skipped = 0;
+
+  // Autoplay, as YouTube Music does: when the queue runs low, the radio of its
+  // last song is added after it, so playback never just stops.
+  let radioFor: string | null = null;
+  let radioLoad: Promise<void> | null = null;
+  function extendQueue(): Promise<void> {
+    const seed = state.queue.at(-1);
+    if (!seed || state.repeat !== "off") return Promise.resolve();
+    if (seed.id === radioFor && radioLoad) return radioLoad;
+    radioFor = seed.id;
+    const queueAtStart = state.queue;
+    radioLoad = source.radio(seed.id).then(songs => {
+      // A new queue (another song played) replaces this one; its own radio comes later.
+      if (state.queue !== queueAtStart) return;
+      const have = new Set(state.queue.map(song => song.id));
+      const more = songs.filter(song => !have.has(song.id));
+      if (!more.length) return;
+      state.queue = [...state.queue, ...more];
+      if (!state.source.endsWith("radio")) state.source = state.source ? `${state.source} · radio` : `${seed.title} radio`;
+      refresh();
+    }, () => { radioFor = null; }).finally(() => { radioLoad = null; });
+    return radioLoad;
+  }
+  /** After a song that cannot play: on to the next one, unless several failed in a row. */
+  function skipUnplayable(failure: string): void {
+    state.playError = failure;
+    state.playing = false;
+    if (++skipped > 3) { refresh(); return; }
+    const token = playToken;
+    setTimeout(() => { if (token === playToken) state.next(); }, 1500);
+    refresh();
+  }
   // Stream URLs expire and the CDN sometimes refuses one mid-song (403, dropped
   // connections): resolve a fresh URL once and continue where it stopped.
   state.mediaFailed = failure => {
     const song = state.queue[state.index];
     const token = playToken;
     if (!song || retriedToken === token) {
-      state.playError = failure;
-      state.playing = false;
-      refresh();
+      skipUnplayable(failure);
       return;
     }
     retriedToken = token;
@@ -123,14 +156,27 @@ export function connect(app: ReturnType<typeof createApp>): void {
     }, error => {
       if (token !== playToken) return;
       state.loading = null;
-      state.playError = message(error);
-      state.playing = false;
-      refresh();
+      skipUnplayable(message(error));
     });
   };
+  /** The song whose stream is loaded in <audio>. */
+  let loadedId: string | null = null;
   function start(): void {
     const song = state.queue[state.index];
     if (!song) return;
+    // The same song again (clicked twice, or picked by autoplay and by a click):
+    // its stream is loaded, so it restarts in place. Reloading the same URL
+    // would not reach <audio> at all and leave the player showing paused.
+    if (song.id === loadedId && state.path && !state.playError) {
+      ++playToken;
+      // Play first: an ended track reopens from the start; a playing one then seeks back.
+      state.media()?.play();
+      state.media()?.seek(0);
+      state.time = 0;
+      refresh();
+      return;
+    }
+    loadedId = null;
     const token = ++playToken;
     state.path = undefined;
     state.playing = false;
@@ -144,6 +190,7 @@ export function connect(app: ReturnType<typeof createApp>): void {
       // <audio> streams it: playback starts with the first chunk.
       state.loading = null;
       state.path = url;
+      loadedId = song.id;
       refresh();
       // Resolve the next song meanwhile so it starts at once.
       const upcoming = state.queue[state.index + 1];
@@ -151,11 +198,12 @@ export function connect(app: ReturnType<typeof createApp>): void {
     }, error => {
       if (token !== playToken) return;
       state.loading = null;
-      state.playError = message(error);
-      refresh();
+      skipUnplayable(message(error));
     });
+    if (state.index + 3 >= state.queue.length) void extendQueue();
     refresh();
   }
+  state.played = () => { skipped = 0; };
   state.play = (queue, index, from = "") => {
     state.queue = [...queue];
     state.index = index;
@@ -167,6 +215,17 @@ export function connect(app: ReturnType<typeof createApp>): void {
   state.next = () => {
     if (state.index + 1 < state.queue.length) { state.index++; start(); }
     else if (state.repeat === "all" && state.queue.length) { state.index = 0; start(); }
+    else if (state.queue.length) {
+      // The end of the queue: wait for its radio, then go on.
+      const token = playToken;
+      state.loading = 0;
+      refresh();
+      void extendQueue().then(() => {
+        if (token !== playToken) return;
+        state.loading = null;
+        if (state.index + 1 < state.queue.length) { state.index++; start(); } else refresh();
+      });
+    }
   };
   state.previous = () => {
     if (state.time > 3 || state.index === 0) { state.media()?.seek(0); state.time = 0; return; }

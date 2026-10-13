@@ -80,7 +80,7 @@ function authorization(): string | null {
   return `SAPISIDHASH ${now}_${createHash("sha1").update(`${now} ${sapisid} ${ORIGIN}`).digest("hex")}`;
 }
 
-async function call(endpoint: "browse" | "search", body: Record<string, unknown>, query = "", signal?: AbortSignal): Promise<any> {
+async function call(endpoint: "browse" | "search" | "next", body: Record<string, unknown>, query = "", signal?: AbortSignal): Promise<any> {
   const headers: Record<string, string> = { "content-type": "application/json", origin: ORIGIN, "x-origin": ORIGIN, "user-agent": USER_AGENT };
   const auth = authorization();
   if (cookie && auth) Object.assign(headers, { cookie, authorization: auth, "x-goog-authuser": "0" });
@@ -223,6 +223,34 @@ export async function collection(entry: Pick<Collection, "kind" | "id"> & Partia
   return { header, songs };
 }
 
+/** A queue row of the "next" endpoint (Up next, radio). */
+function panelItem(row: any): Song | null {
+  const id = row.videoId;
+  const title = plain(row.title);
+  if (!id || !title) return null;
+  const byline: any[] = runs(row.longBylineText ?? row.shortBylineText);
+  const artists = byline.filter(run => browseTarget(run)?.kind === "artist").map(run => run.text);
+  const albumRun = byline.find(run => browseTarget(run)?.kind === "album");
+  return {
+    kind: "song", id, title,
+    artist: artists.join(", ") || plain(row.shortBylineText),
+    album: albumRun?.text ?? "",
+    duration: seconds(plain(row.lengthText)),
+    thumbnail: thumbnail(row.thumbnail),
+  };
+}
+
+/**
+ * The radio YouTube Music plays after a song (its "Up next"): songs like it,
+ * the song itself first. Signed in, it follows the account's taste.
+ */
+export async function radio(id: string, signal?: AbortSignal): Promise<Song[]> {
+  const json = await call("next", { videoId: id, playlistId: `RDAMVM${id}`, isAudioOnly: true, enablePersistentPlaylistPanel: true, tunerSettingValue: "AUTOMIX_SETTING_NORMAL" }, "", signal);
+  const seen = new Set<string>();
+  return findAll(json, "playlistPanelVideoRenderer").map(panelItem)
+    .filter((song): song is Song => !!song && !seen.has(song.id) && !!seen.add(song.id));
+}
+
 /** The signed-in user's playlists, liked music first. */
 export async function library(): Promise<Collection[]> {
   if (!signedIn()) return [];
@@ -244,11 +272,21 @@ const VISION_CLIENT = {
   deviceMake: "Apple", deviceModel: "RealityDevice17,1", osName: "visionOS", osVersion: "26.5.23O471",
 };
 
-/** A visitor id, as a browser keeps in a cookie: the player answers "are you a bot?" without one. */
-let visitor: Promise<string> | null = null;
-function visitorData(): Promise<string> {
-  visitor ??= call("browse", { browseId: "FEmusic_home" }).then(json => String(json?.responseContext?.visitorData ?? ""), error => { visitor = null; throw error; });
-  return visitor;
+/**
+ * A visitor id, as a browser keeps in a cookie: the player answers "are you a bot?" without one.
+ * It goes stale after a while (a session left open for hours), so it is renewed every half hour
+ * and whenever the player refuses a song with it.
+ */
+const VISITOR_TTL = 30 * 60_000;
+let visitor: { id: Promise<string>; at: number } | null = null;
+function visitorData(fresh = false): Promise<string> {
+  if (fresh || !visitor || Date.now() - visitor.at > VISITOR_TTL) {
+    const id = call("browse", { browseId: "FEmusic_home" }).then(json => String(json?.responseContext?.visitorData ?? ""));
+    const entry = { id, at: Date.now() };
+    visitor = entry;
+    id.catch(() => { if (visitor === entry) visitor = null; });
+  }
+  return visitor!.id;
 }
 
 interface Resolved { url: string; expires: number }
@@ -271,24 +309,32 @@ export function streamUrl(id: string): Promise<string> {
     return cached.then(entry => entry.expires - Date.now() > 10 * 60_000 ? entry.url : (resolved.delete(id), streamUrl(id)));
   }
   const job = (async (): Promise<Resolved> => {
-    const visitorId = await visitorData();
-    const response = await fetch("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
-      method: "POST",
-      headers: { "content-type": "application/json", "user-agent": VISION_UA, "x-youtube-client-name": "101", "x-youtube-client-version": VISION_CLIENT.clientVersion, "x-goog-visitor-id": visitorId },
-      body: JSON.stringify({ context: { client: { ...VISION_CLIENT, visitorData: visitorId } }, videoId: id, contentCheckOk: true, racyCheckOk: true }),
-    });
-    if (!response.ok) throw new Error(`YouTube player answered HTTP ${response.status}`);
-    const json: any = await response.json();
-    const status = json?.playabilityStatus;
-    if (status?.status !== "OK") throw new Error(status?.reason || `not playable (${status?.status ?? "no status"})`);
-    const formats: any[] = (json?.streamingData?.adaptiveFormats ?? []).filter((format: any) => format.url && String(format.mimeType).startsWith("audio/mp4"));
-    // AAC in MP4, the codec Tarve's <audio> decodes; 256 kbps (141) when offered.
-    const format = formats.find(f => f.itag === 141) ?? formats.find(f => f.itag === 140) ?? formats.sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
-    if (!format) throw new Error("no AAC audio for this song");
-    const expire = Number(new URL(format.url).searchParams.get("expire"));
-    return { url: format.url, expires: Number.isFinite(expire) && expire > 0 ? expire * 1000 : Date.now() + 3_600_000 };
+    try {
+      return await resolve(id, await visitorData());
+    } catch (error) {
+      // A stale visitor id is the usual reason a song that played an hour ago is refused now.
+      return resolve(id, await visitorData(true)).catch(() => { throw error; });
+    }
   })();
   resolved.set(id, job);
   job.catch(() => resolved.delete(id));
   return job.then(entry => entry.url);
+}
+
+async function resolve(id: string, visitorId: string): Promise<Resolved> {
+  const response = await fetch("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
+    method: "POST",
+    headers: { "content-type": "application/json", "user-agent": VISION_UA, "x-youtube-client-name": "101", "x-youtube-client-version": VISION_CLIENT.clientVersion, "x-goog-visitor-id": visitorId },
+    body: JSON.stringify({ context: { client: { ...VISION_CLIENT, visitorData: visitorId } }, videoId: id, contentCheckOk: true, racyCheckOk: true }),
+  });
+  if (!response.ok) throw new Error(`YouTube player answered HTTP ${response.status}`);
+  const json: any = await response.json();
+  const status = json?.playabilityStatus;
+  if (status?.status !== "OK") throw new Error(status?.reason || `not playable (${status?.status ?? "no status"})`);
+  const formats: any[] = (json?.streamingData?.adaptiveFormats ?? []).filter((format: any) => format.url && String(format.mimeType).startsWith("audio/mp4"));
+  // AAC in MP4, the codec Tarve's <audio> decodes; 256 kbps (141) when offered.
+  const format = formats.find(f => f.itag === 141) ?? formats.find(f => f.itag === 140) ?? formats.sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
+  if (!format) throw new Error("no AAC audio for this song");
+  const expire = Number(new URL(format.url).searchParams.get("expire"));
+  return { url: format.url, expires: Number.isFinite(expire) && expire > 0 ? expire * 1000 : Date.now() + 3_600_000 };
 }
