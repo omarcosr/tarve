@@ -1,27 +1,21 @@
-import { PROTOCOL_VERSION, type MotionProperty, type NativeNode, type Renderer, type SceneDocument, type ScrollInfo, type ScrollPosition, type TreeMutation, type VirtualListMeasurement, type WindowOptions } from "../../protocol/src/index";
-import { Fragment, jsx, _isNativeVNode, type Child, type DragEndEvent, type DragMoveEvent, type DragPosition, type DropEvent, type IntrinsicAnchorProps, type PastePayload, type VNode } from "./jsx-runtime";
+import { PROTOCOL_VERSION, type MotionProperty, type NativeNode, type Renderer, type SceneDocument, type ScrollInfo, type ScrollPosition, type VirtualListMeasurement, type WindowOptions } from "./protocol";
+import { Fragment, _isNativeVNode, type Child, type DragEndEvent, type DragMoveEvent, type DragPosition, type DropEvent, type PastePayload, type VNode } from "./jsx-runtime";
 import { lightTheme, resolveStyleString, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
 import type { WindowCloseRequestEvent } from "./components";
 import type { ComponentAdapter } from "./component-adapter";
 import { canonicalizeIntrinsicStyle } from "./intrinsic-style";
 import { Text } from "./components/text";
-import { Image, serializeImageSource } from "./components/image";
-import { Input, TextArea } from "./components/input";
-import { Button } from "./components/button";
-import { Link } from "./components/link";
-import { Svg } from "./components/svg";
-import { Scroll } from "./components/scroll";
-import { Select } from "./select";
-import { Progress, Separator } from "./controls";
-import { Label } from "./form-controls";
+import { serializeImageSource } from "./components/image";
 import { withRenderScope } from "./render-scope";
 import { MEMO, type MemoInfo } from "./memo";
 import { openExternal } from "./bridge";
-import { compileInline, INLINE_TAG_NAMES, type InlineContext } from "./inline-text";
-import { expandCanvas } from "./canvas";
-import { expandAudio, mediaRequest, type MediaElementProps, type MediaRequest } from "./media-element";
-import { expandHtml, expandInput, formValues, HTML_ELEMENTS, HTML_INPUT_TYPES, storedValue, storeValue, type FormContext, type FormValue } from "./html-elements";
+import { compileInline, type InlineContext } from "./inline-text";
+import type { MediaRequest } from "./media-element";
+import type { FormContext } from "./html-elements";
+import { DIV_SHORTHANDS, expandIntrinsic, textContent } from "./reconciler/intrinsics";
+import { sameValue } from "./reconciler/diff";
+export { diffTrees, diffTreeMutations } from "./reconciler/diff";
 export interface Handlers { onClick?: () => void; onMarkdownLink?: (href: string) => void; onDiffToggleFile?: (path: string) => void; onDiffShowMore?: (hidden: number, path?: string) => void; onDiffLineClick?: (event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void; onHighlight?: (event: { matchCount: number }) => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onSubmit?: (value: string) => void; onPaste?: (payload: PastePayload) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number, info: ScrollInfo) => void; onScrollPosition?: (position: ScrollPosition) => void; onVirtualListLayout?: (items: VirtualListMeasurement[]) => void; onVirtualListScrollToItem?: (index: number, offset: number, smooth?: boolean) => void; onVirtualListFocus?: (key: string | null) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void; onTransitionEnd?: (event: { property: MotionProperty }) => void; onDragStart?: (position: DragPosition) => void; onDragMove?: (event: DragMoveEvent) => void; onDragEnd?: (event: DragEndEvent) => void; onDragEnter?: (source: string) => void; onDragLeave?: (source: string) => void; onDrop?: (event: DropEvent) => void; onSize?: (size: { width: number; height: number }) => void; onPointerMove?: (point: { x: number; y: number }) => void; onPointerLeave?: () => void }
 /** Relative luminance (0–1) of `#rgb`/`#rrggbb`, or null for other colors. */
 function luminance(color: string): number | null {
@@ -41,17 +35,6 @@ function windowBorder(background: string, selected: ThemeDefinition): string {
 export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode>; media?: Map<string, MediaRequest> }
 const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "markdown", "code", "diff", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter"]);
 const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
-const svgIntrinsicElements = new Set(["path", "circle", "ellipse", "g", "line", "polygon", "polyline", "rect"]);
-/** User-agent vertical margins in em (Chromium html.css). */
-const UA_HEADING_MARGIN = { h1: 0.67, h2: 0.83, h3: 1, h4: 1.33, h5: 1.67, h6: 2.33 } as const;
-const headingPreset = {
-  h1: { size: 32, weight: 700 },
-  h2: { size: 24, weight: 700 },
-  h3: { size: 20, weight: 600 },
-  h4: { size: 18, weight: 600 },
-  h5: { size: 16, weight: 600 },
-  h6: { size: 14, weight: 600 },
-} as const;
 
 function focusOutlineOverrides(style: NonNullable<NativeNode["style"]["focus"]> | undefined) {
   if (!style) return {};
@@ -60,12 +43,6 @@ function focusOutlineOverrides(style: NonNullable<NativeNode["style"]["focus"]> 
     Object.entries({ outlineWidth, outlineColor, outlineOffset, outlineRadius, outlineStyle })
       .filter(([, value]) => value !== undefined),
   );
-}
-function textContent(value: Child): string {
-  if (Array.isArray(value)) return value.map(textContent).join("");
-  if (value == null || typeof value === "boolean") return "";
-  if (typeof value === "object") throw new Error("Text/Button children must be strings or numbers.");
-  return String(value);
 }
 /**
  * Font properties a node passes to its descendants, as CSS inherits them. The
@@ -76,7 +53,6 @@ const INHERITED_FONT = ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing
 /** Kinds whose text takes every inherited value; controls keep their own size, weight and colour. */
 const INHERITING_TEXT = new Set(["text", "markdown"]);
 const TEXT_KINDS = new Set(["text", "button", "input", "textarea", "markdown", "code", "diff"]);
-const DIV_SHORTHANDS = ["gap", "padding", "flex", "align", "justify"] as const;
 
 /** Props copied to the native node unchanged when they are set. */
 const COPIED_PROPS = [
@@ -240,217 +216,26 @@ export function compileTree(
       return visit(child.type(child.props), path, group);
     }
     const isNativeVNode = adapterNative || _isNativeVNode(child);
-    if (!isNativeVNode && child.type in headingPreset) {
-      const props = child.props as Parameters<typeof Text>[0];
-      const preset = headingPreset[child.type as keyof typeof headingPreset];
-      return visit(Text({
-        ...({ uaMargin: { block: UA_HEADING_MARGIN[child.type as keyof typeof headingPreset] } } as object),
-        ...props,
-        size: props.size ?? preset.size,
-        weight: props.weight ?? preset.weight,
-        style: canonicalizeIntrinsicStyle(props.style),
-      }), path, group);
-    }
-    if (!isNativeVNode && typeof child.type === "string" && child.type !== "span" && child.type !== "a"
-      && INLINE_TAG_NAMES.has(child.type) && !(child.type === "code" && child.props.code !== undefined)) {
-      // A phrasing element outside a paragraph is an anonymous inline box.
-      return visit(Text({ id: child.props.id, children: child }), path, group);
-    }
-    if (!isNativeVNode && (child.type === "span" || child.type === "p")) {
-      const props = child.props as Parameters<typeof Text>[0];
-      return visit(Text({ ...(child.type === "p" ? { uaMargin: { block: 1 } } : {}), ...props, style: canonicalizeIntrinsicStyle(props.style) } as never), path, group);
-    }
-    if (!isNativeVNode && child.type === "img") {
-      const props = child.props as Parameters<typeof Image>[0];
-      const objectFit = (props.style as { objectFit?: string } | undefined)?.objectFit;
-      const fit = props.fit ?? (objectFit === "scale-down" ? "contain" : objectFit) as typeof props.fit;
-      return visit(Image({ ...props, ...(fit ? { fit } : {}), style: canonicalizeIntrinsicStyle(props.style) }), path, group);
-    }
-    if (!isNativeVNode && child.type === "form") {
-      const formProps = child.props as Record<string, any>;
-      const values = formValues(String(formProps.id ?? path));
-      const required = new Set<string>();
-      const form: FormContext = {
-        values, required,
-        submit() {
-          for (const name of required) {
-            const value = values.get(name);
-            if (value === undefined || value === "" || value === false || (Array.isArray(value) && value.length === 0)) {
-              formProps.onInvalid?.(name);
-              return;
-            }
-          }
-          formProps.onSubmit?.(Object.fromEntries(values));
+    if (!isNativeVNode) {
+      const expanded = expandIntrinsic(child, path, {
+        form: currentForm,
+        labelable: (id, nativeId) => { labelableTargets.set(id, nativeId); },
+        label: (targetId, labelId) => {
+          const labels = labelAssociations.get(targetId) ?? [];
+          labels.push(labelId);
+          labelAssociations.set(targetId, labels);
         },
-      };
-      const previous = currentForm;
-      currentForm = form;
-      try {
-        return visit(jsx("div", { id: formProps.id, style: formProps.style, control: { role: "group", label: formProps.ariaLabel ?? "Form" }, children: formProps.children }), path, group);
-      } finally {
-        currentForm = previous;
-      }
-    }
-    if (!isNativeVNode && child.type === "audio") {
-      const props = child.props as MediaElementProps;
-      const id = String(props.id ?? path);
-      media.set(id, mediaRequest(props));
-      return visit(expandAudio(props, id), path, group);
-    }
-    if (!isNativeVNode && child.type === "canvas") {
-      return visit(expandCanvas(child.props as Record<string, any>, path), path, group);
-    }
-    if (!isNativeVNode && typeof child.type === "string" && HTML_ELEMENTS.has(child.type)) {
-      // <meter> is labelable, as in HTML.
-      if (child.type === "meter" && child.props.id !== undefined) labelableTargets.set(String(child.props.id), String(child.props.id));
-      return visit(expandHtml(child.type, child.props as Record<string, any>, path), path, group);
-    }
-    if (!isNativeVNode && child.type === "input" && HTML_INPUT_TYPES.has(String(child.props.type))) {
-      return visit(expandInput(child.props as Record<string, any>, path, currentForm), path, group);
-    }
-    if (!isNativeVNode && child.type === "input") {
-      const props = child.props as Parameters<typeof Input>[0] & { name?: string; required?: boolean; defaultValue?: string };
-      const form = currentForm;
-      const name = props.name;
-      if (form && name) {
-        form.values.set(name, props.value ?? form.values.get(name) ?? props.defaultValue ?? "");
-        if (props.required) form.required.add(name);
-      }
-      const { name: _name, required: _required, defaultValue, ...rest } = props;
-      return visit(Input({
-        ...rest,
-        ...(rest.value === undefined && defaultValue !== undefined ? { value: defaultValue } : {}),
-        style: canonicalizeIntrinsicStyle(props.style),
-        onChange: value => { if (form && name) form.values.set(name, value); props.onChange?.(value); },
-        onSubmit: value => { props.onSubmit?.(value); if (form) { if (name) form.values.set(name, value); form.submit(); } },
-      }), path, group);
-    }
-    if (!isNativeVNode && child.type === "textarea") {
-      const props = child.props as Parameters<typeof TextArea>[0] & { name?: string; required?: boolean; defaultValue?: string };
-      // In a form a named textarea submits its text, like a text input.
-      const form = currentForm;
-      const name = props.name;
-      if (form && name) {
-        form.values.set(name, props.value ?? form.values.get(name) ?? props.defaultValue ?? "");
-        if (props.required) form.required.add(name);
-      }
-      const { name: _name, required: _required, defaultValue, ...rest } = props;
-      return visit(TextArea({
-        ...rest,
-        ...(rest.value === undefined && defaultValue !== undefined ? { value: defaultValue } : {}),
-        style: canonicalizeIntrinsicStyle(props.style),
-        onChange: value => { if (form && name) form.values.set(name, value); props.onChange?.(value); },
-      }), path, group);
-    }
-    if (!isNativeVNode && child.type === "button") {
-      const { type, ...props } = child.props as Parameters<typeof Button>[0] & { type?: "submit" | "button" | "reset" };
-      const form = currentForm;
-      // Inside a form a button submits unless it is type="button", as in HTML.
-      const submits = form && (type ?? "submit") === "submit";
-      return visit(Button({ ...props, style: canonicalizeIntrinsicStyle(props.style),
-        onClick: () => { props.onClick?.(); if (submits) form!.submit(); } }), path, group);
-    }
-    if (!isNativeVNode && child.type === "a") {
-      const { ariaLabel, style, ...props } = child.props as IntrinsicAnchorProps;
-      return visit(Link({
-        ...props,
-        label: ariaLabel,
-        style: canonicalizeIntrinsicStyle(style),
-      }), path, group);
-    }
-    if (!isNativeVNode && child.type === "svg") {
-      const props = child.props as Parameters<typeof Svg>[0];
-      return visit(Svg({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
-    }
-    if (!isNativeVNode && typeof child.type === "string" && svgIntrinsicElements.has(child.type)) {
-      throw new Error(`SVG element <${child.type}> must be a child of <svg>.`);
-    }
-    if (!isNativeVNode && child.type === "label") {
-      const { htmlFor, ...rawProps } = child.props;
-      const id = rawProps.id ?? path;
-      if (htmlFor) {
-        const labels = labelAssociations.get(String(htmlFor)) ?? [];
-        labels.push(String(id));
-        labelAssociations.set(String(htmlFor), labels);
-      }
-      const props = rawProps as Parameters<typeof Label>[0];
-      return visit(Label({ ...props, id: String(id), style: canonicalizeIntrinsicStyle(props.style) }), path, group);
-    }
-    if (!isNativeVNode && child.type === "select") {
-      const { children, onChange, onValueChange, name, required, defaultValue, ...rawProps } = child.props;
-      const id = String(rawProps.id ?? path);
-      const optionNodes = Array.isArray(children) ? children.flat(Infinity) : [children];
-      const options = optionNodes
-        .filter(option => option != null && option !== false && option !== true)
-        .map(option => {
-          if (typeof option !== "object" || Array.isArray(option) || option.type !== "option") {
-            throw new Error("select children must be option elements.");
-          }
-          if (option.props.value === undefined) throw new Error("option requires a value.");
-          return {
-            value: String(option.props.value),
-            label: textContent(option.props.children),
-            disabled: option.props.disabled === true,
-          };
-        });
-      labelableTargets.set(id, `${id}-trigger`);
-      const props = rawProps as Omit<Parameters<typeof Select>[0], "options" | "id" | "onValueChange">;
-      // As in HTML, an uncontrolled select shows defaultValue or its first enabled
-      // option, keeps the user's choice, and submits it with its form under `name`.
-      const form = currentForm;
-      const key = `select:${id}`;
-      const value: string | undefined = props.value
-        ?? (form && name && form.values.has(name) ? String(form.values.get(name)) : undefined)
-        ?? storedValue<string | undefined>(key, defaultValue ?? options.find(option => !option.disabled)?.value);
-      if (form && name) {
-        form.values.set(name, value ?? "");
-        if (required) form.required.add(name);
-      }
-      return visit(Select({
-        ...props,
-        id,
-        options,
-        value,
-        style: canonicalizeIntrinsicStyle(props.style),
-        onValueChange: (next) => {
-          storeValue(key, next);
-          if (form && name) form.values.set(name, next);
-          onValueChange?.(next);
-          onChange?.(next);
-        },
-      }), path, group);
-    }
-    if (!isNativeVNode && child.type === "option") {
-      throw new Error("option must be a direct child of select.");
-    }
-    if (!isNativeVNode && child.type === "progress") {
-      const props = child.props as Parameters<typeof Progress>[0];
-      // <progress> is labelable, as in HTML.
-      if (props.id !== undefined) labelableTargets.set(String(props.id), String(props.id));
-      // Chrome's progress bar: its accent blue in a light grey, rounded track.
-      return visit(Progress({ ...props, style: { width: 160, height: 16, radius: 3, background: "#e6e6e6", foreground: "#0075ff", ...canonicalizeIntrinsicStyle(props.style) } }), path, group);
-    }
-    if (!isNativeVNode && child.type === "hr") {
-      const props = child.props as Parameters<typeof Separator>[0];
-      return visit(Separator({ ...props, style: canonicalizeIntrinsicStyle(props.style) }), path, group);
-    }
-    // `<div style={{ overflow: "auto" }}>` scrolls, as in CSS. `overflow` scrolls
-    // vertically (block content still wraps to the box's width, as text in a CSS
-    // block does); `overflowX` adds the horizontal axis.
-    if (!isNativeVNode && child.type === "div") {
-      const { style: divStyle, ...divProps } = child.props as Record<string, any>;
-      const { overflow, overflowX: explicitX, overflowY = overflow, ...rest } = (divStyle ?? {}) as Record<string, any>;
-      const scrolls = (value: unknown) => value === "auto" || value === "scroll";
-      const overflowX = explicitX ?? (scrolls(overflow) ? "visible" : overflow);
-      if (scrolls(overflowX) || scrolls(overflowY)) {
-        const shorthands: Record<string, unknown> = {};
-        for (const key of DIV_SHORTHANDS) if (divProps[key] !== undefined) { shorthands[key] = divProps[key]; delete divProps[key]; }
-        return visit(Scroll({ ...divProps, orientation: scrolls(overflowX) && scrolls(overflowY) ? "both" : scrolls(overflowX) ? "horizontal" : "vertical",
-          style: { ...shorthands, ...canonicalizeIntrinsicStyle(rest) } } as never), path, group);
-      }
-      // Other overflow values pass through; overflowX/overflowY collapse into overflow.
-      if (explicitX !== undefined || overflowY !== overflow) {
-        return visit(jsx("div", { ...child.props, style: { ...rest, overflow: (overflowX ?? "visible") === "visible" && (overflowY ?? "visible") === "visible" ? "visible" : "hidden" } }, child.key), path, group);
+        media: (id, request) => { media.set(id, request); },
+      });
+      if (expanded) {
+        if (!expanded.form) return visit(expanded.element, path, group);
+        const previous = currentForm;
+        currentForm = expanded.form;
+        try {
+          return visit(expanded.element, path, group);
+        } finally {
+          currentForm = previous;
+        }
       }
     }
     const isIntrinsicDiv = child.type === "div";
@@ -616,97 +401,4 @@ export function compileTree(
     roots[0].style.radius ??= theme.radius.md;
   }
   return { document: { version: PROTOCOL_VERSION, renderer, window: windowOptions, root: roots[0] }, handlers, nodes, media };
-}
-
-function sameValue(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((value, index) => sameValue(value, b[index]));
-  }
-  const left = a as Record<string, unknown>;
-  const right = b as Record<string, unknown>;
-  const keys = Object.keys(left);
-  return keys.length === Object.keys(right).length && keys.every(key => sameValue(left[key], right[key]));
-}
-function sameFields(a: object, b: object): boolean {
-  return sameValue(a, b);
-}
-function sameStyle(a: NativeNode["style"], b: NativeNode["style"]): boolean {
-  return sameValue(a, b);
-}
-
-function sameChildren(a: NativeNode, b: NativeNode): boolean {
-  return a.children.length === b.children.length
-    && a.children.every((child, index) => child.id === b.children[index]?.id);
-}
-
-function nodePropertiesChanged(old: NativeNode, node: NativeNode): boolean {
-  return old.text !== node.text || old.source !== node.source || old.language !== node.language || old.path !== node.path
-    || old.showLineNumbers !== node.showLineNumbers || !sameValue(old.syntaxTheme, node.syntaxTheme)
-    || old.wordDiff !== node.wordDiff || !sameValue(old.collapsedPaths, node.collapsedPaths) || old.maxLines !== node.maxLines
-    || old.oldText !== node.oldText || old.newText !== node.newText
-    || old.src !== node.src || old.fit !== node.fit || !sameValue(old.svg, node.svg)
-    // Image bytes: the serialized string is shared per source object, so equal sources compare by identity.
-    || old.image?.key !== node.image?.key || old.image?.kind !== node.image?.kind || old.image?.data !== node.image?.data
-    || old.value !== node.value || old.placeholder !== node.placeholder || old.inputType !== node.inputType || old.submitOnEnter !== node.submitOnEnter || old.scrollSpeed !== node.scrollSpeed || old.scrollOrientation !== node.scrollOrientation || !sameValue(old.virtualList, node.virtualList) || old.disabled !== node.disabled
-    || old.modal !== node.modal || old.rovingGroup !== node.rovingGroup || old.portal !== node.portal || old.dismissOnOutside !== node.dismissOnOutside || !sameValue(old.labelledBy, node.labelledBy) || old.closeIntercept !== node.closeIntercept || old.focusable !== node.focusable
-    || old.dragRegion !== node.dragRegion || old.draggable !== node.draggable || old.dropTarget !== node.dropTarget || old.reportSize !== node.reportSize || old.reportPointer !== node.reportPointer || old.windowAction !== node.windowAction || !sameValue(old.motionFrom, node.motionFrom)
-    || !sameValue(old.highlight, node.highlight)
-    || !sameFields(old.control ?? {}, node.control ?? {})
-    || !sameStyle(old.style, node.style);
-}
-
-function flatNode(node: NativeNode): NativeNode {
-  return { ...node, children: [] };
-}
-
-/** null requests a structural replacement; an empty list means no native work is needed. */
-export function diffTrees(previous: CompiledTree, next: CompiledTree): NativeNode[] | null {
-  if (previous.nodes.size !== next.nodes.size || previous.document.root.id !== next.document.root.id) return null;
-  const changed: NativeNode[] = [];
-  for (const [id, node] of next.nodes) {
-    const old = previous.nodes.get(id);
-    if (!old || old.kind !== node.kind || !sameChildren(old, node)) return null;
-    if (nodePropertiesChanged(old, node)) changed.push(flatNode(node));
-  }
-  return changed;
-}
-
-/**
- * Computes one atomic retained-tree mutation batch. A null result is reserved for
- * identity-incompatible replacements (root ID or an existing keyed node kind changed).
- */
-export function diffTreeMutations(previous: CompiledTree, next: CompiledTree, unchanged?: (old: NativeNode, node: NativeNode) => boolean): TreeMutation[] | null {
-  if (previous.document.root.id !== next.document.root.id) return null;
-
-  const creates: TreeMutation[] = [];
-  const patches: TreeMutation[] = [];
-  const children: TreeMutation[] = [];
-  const removes: TreeMutation[] = [];
-
-  for (const [id, node] of next.nodes) {
-    const old = previous.nodes.get(id);
-    if (!old) {
-      creates.push({ type: "create", node: flatNode(node) });
-      if (node.children.length > 0) {
-        children.push({ type: "children", id, children: node.children.map(child => child.id) });
-      }
-      continue;
-    }
-    // A memoized subtree reused as is: nothing in it changed.
-    if (old === node || unchanged?.(old, node)) continue;
-    if (old.kind !== node.kind) return null;
-    if (nodePropertiesChanged(old, node)) patches.push({ type: "patch", node: flatNode(node) });
-    if (!sameChildren(old, node)) {
-      children.push({ type: "children", id, children: node.children.map(child => child.id) });
-    }
-  }
-
-  for (const id of previous.nodes.keys()) {
-    if (!next.nodes.has(id)) removes.push({ type: "remove", id });
-  }
-
-  return [...creates, ...patches, ...children, ...removes];
 }

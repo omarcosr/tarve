@@ -11,6 +11,7 @@ import { Checkbox, Progress, RadioGroup, Slider } from "./controls";
 import { DatePicker } from "./extra-controls";
 import { canonicalizeIntrinsicStyle } from "./intrinsic-style";
 import { theme } from "./theme";
+import { resetScopedState, scopedState } from "./render-scope";
 
 /**
  * HTML elements that are not single native nodes: the remaining `<input>` types,
@@ -23,9 +24,14 @@ export const HTML_ELEMENTS = new Set(["pre", "blockquote", "meter", "form", "fie
 export const HTML_INPUT_TYPES = new Set(["checkbox", "radio", "range", "date", "file", "color", "time"]);
 const COLOR_PALETTE = ["#000000", "#ffffff", "#ef4444", "#f97316", "#eab308", "#22c55e", "#14b8a6", "#3b82f6", "#6366f1", "#a855f7", "#ec4899", "#78716c"];
 
-const state = new Map<string, unknown>();
+const HTML_STATE = Symbol("tarve.htmlState");
+/** The current render scope's element state; call during render and close over the result in handlers. */
+function htmlState(): Map<string, unknown> {
+  return scopedState(HTML_STATE, () => new Map<string, unknown>());
+}
 /** Named values of a form, kept across renders like the DOM keeps field values. */
 export function formValues(key: string): Map<string, FormValue> {
+  const state = htmlState();
   const id = `form:${key}`;
   let values = state.get(id) as Map<string, FormValue> | undefined;
   if (!values) state.set(id, values = new Map());
@@ -33,11 +39,16 @@ export function formValues(key: string): Map<string, FormValue> {
 }
 /** An uncontrolled element's value, kept across renders like the DOM keeps it. */
 export function storedValue<T>(key: string, initial: T): T {
-  return (state.has(key) ? state.get(key) : initial) as T;
+    const state = htmlState();
+      return (state.has(key) ? state.get(key) : initial) as T;
 }
-export function storeValue(key: string, value: unknown): void { state.set(key, value); }
+export function storeValue(key: string, value: unknown): void {
+    htmlState().set(key, value);
+}
 /** Forgets uncontrolled HTML element state (tests and remounts). */
-export function resetHtmlState(): void { state.clear(); }
+export function resetHtmlState(): void {
+    resetScopedState();
+}
 
 export type FormValue = string | boolean | string[];
 export interface FormContext {
@@ -58,6 +69,7 @@ function activeApp(): ActiveApp | undefined {
 
 function uncontrolled<T>(key: string, controlled: T | undefined, initial: T): T {
   if (controlled !== undefined) return controlled;
+  const state = htmlState();
   return (state.has(key) ? state.get(key) : initial) as T;
 }
 
@@ -69,6 +81,7 @@ function acceptFilters(accept: unknown): { name: string; extensions: string[] }[
 
 /** `<input type="checkbox|radio|range|date|file">`. */
 export function expandInput(props: Record<string, any>, key: string, form: FormContext | undefined): VNode {
+  const state = htmlState();
   const id = String(props.id ?? key);
   const name = props.name as string | undefined;
   const style = canonicalizeIntrinsicStyle(props.style);
@@ -272,6 +285,7 @@ export function expandHtml(type: string, props: Record<string, any>, key: string
       return block(props, { direction: "column", padding: { left: 40 } }, flow(children));
     case "details": {
       const id = String(props.id ?? key);
+      const state = htmlState();
       const open = uncontrolled<boolean>(id, props.open, false);
       const items = childList(children);
       const summary = items.find(child => isElement(child, "summary")) as VNode | undefined;

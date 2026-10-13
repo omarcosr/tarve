@@ -1,5 +1,5 @@
 import type { VNode } from "../jsx-runtime";
-import type { ScrollInfo, ScrollOrientation, ScrollPosition } from "../../../protocol/src/index";
+import type { ScrollInfo, ScrollOrientation, ScrollPosition } from "../protocol";
 import { theme } from "../theme";
 import { container, type ViewProps } from "./layout";
 

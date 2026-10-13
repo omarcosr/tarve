@@ -1,6 +1,6 @@
-import type { Style } from "../../protocol/src/index";
+import type { Style } from "./protocol";
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
-import { Button, Column, Pressable, Row, Text, TextArea, Input, View, type ButtonProps, type IconName } from "./components";
+import { Column, Pressable, Row, Text, TextArea, Input, View, type ButtonProps } from "./components";
 import { Checkbox, RadioGroup, Slider, Switch } from "./controls";
 import { Select, type SelectOption } from "./select";
 import { theme } from "./theme";

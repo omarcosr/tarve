@@ -1,4 +1,4 @@
-import type { StateStyle, Style } from "../../protocol/src/index";
+import type { StateStyle, Style } from "./protocol";
 import type { IntrinsicStateStyle, IntrinsicStyle } from "./jsx-runtime";
 
 function canonicalizeStateStyle(style: IntrinsicStateStyle | undefined): StateStyle | undefined {

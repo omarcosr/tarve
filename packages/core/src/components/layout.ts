@@ -1,4 +1,4 @@
-import type { Style } from "../../../protocol/src/index";
+import type { Style } from "../protocol";
 import { jsx, type BaseProps, type DropTargetProps, type VNode } from "../jsx-runtime";
 
 export interface ViewProps extends BaseProps, DropTargetProps {

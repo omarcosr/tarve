@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { NativeCommand, NativeEvent, SceneDocument, Snapshot } from "../../protocol/src/index";
+import type { NativeCommand, NativeEvent, SceneDocument, Snapshot } from "./protocol";
 import { Button, Input, Text, Window } from "./components";
 import type { NativeBridge } from "./bridge";
 import { createTestRenderer, launchTestProcess, waitFor } from "./test-renderer";

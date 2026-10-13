@@ -1,4 +1,4 @@
-import type { Control } from "../../../protocol/src/index";
+import type { Control } from "../protocol";
 import type { DraggableProps, VNode } from "../jsx-runtime";
 import { theme } from "../theme";
 import { container, type ViewProps } from "./layout";

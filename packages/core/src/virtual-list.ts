@@ -1,5 +1,5 @@
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
-import type { ScrollInfo, VirtualListMeasurement } from "../../protocol/src/index";
+import type { ScrollInfo, VirtualListMeasurement } from "./protocol";
 import { Column, Row, Scroll } from "./components";
 import { currentRenderEpoch, currentRenderScope } from "./render-scope";
 

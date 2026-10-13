@@ -1,4 +1,4 @@
-import type { Control, MotionProperty, MotionValues, StateStyle, Style, SvgNode, TextHighlight } from "../../protocol/src/index";
+import type { Control, MotionProperty, MotionValues, StateStyle, Style, SvgNode, TextHighlight } from "./protocol";
 import type { ImageSource } from "./components/image";
 export type Child = VNode | string | number | boolean | null | undefined | Child[];
 /** Clipboard content delivered to the focused element when the clipboard holds no text. */

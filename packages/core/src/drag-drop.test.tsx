@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { NativeCommand, NativeEvent, SceneDocument } from "../../protocol/src/index";
+import type { NativeCommand, NativeEvent, SceneDocument } from "./protocol";
 import { createApp } from "./app";
 import type { NativeBridge } from "./bridge";
 import { Column, Pressable, Window } from "./components";

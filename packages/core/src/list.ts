@@ -1,4 +1,4 @@
-import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
+import { jsx, type Child, type VNode } from "./jsx-runtime";
 import { Column, Scroll, type ScrollProps } from "./components";
 
 export interface ListProps<T> extends ScrollProps {

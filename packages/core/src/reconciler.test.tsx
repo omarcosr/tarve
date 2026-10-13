@@ -4,7 +4,7 @@ import { compileTree, diffTreeMutations, diffTrees } from "./reconciler";
 import { createTheme, darkTheme, lightTheme, Theme, theme } from "./theme";
 import type { ComponentAdapter } from "./component-adapter";
 import type { VNode } from "./jsx-runtime";
-import { PROTOCOL_VERSION } from "../../protocol/src/index";
+import { PROTOCOL_VERSION } from "./protocol";
 import { AnimatePresence } from "./motion";
 
 describe("native TSX protocol", () => {

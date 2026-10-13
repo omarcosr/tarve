@@ -34,3 +34,24 @@ export function withRenderScope<T>(scope: object | undefined, render: () => T): 
     activeRenderDepth = previousDepth;
   }
 }
+
+const scopedStores = new WeakMap<object, Map<symbol, unknown>>();
+
+/**
+ * Module state kept per render scope (one app, one remount, one test renderer),
+ * like a DOM document keeps its elements' state. Read during render; event
+ * handlers close over the value they received at render time.
+ */
+export function scopedState<T>(key: symbol, create: () => T, scope: object = activeRenderScope): T {
+  let store = scopedStores.get(scope);
+  if (!store) scopedStores.set(scope, store = new Map());
+  let value = store.get(key) as T | undefined;
+  if (value === undefined) store.set(key, value = create());
+  return value;
+}
+
+/** Forgets every scoped state of a scope (tests). */
+export function resetScopedState(scope: object = activeRenderScope): void {
+  scopedStores.delete(scope);
+}
+

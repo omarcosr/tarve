@@ -1,4 +1,4 @@
-import type { Style } from "../../protocol/src/index";
+import type { Style } from "./protocol";
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
 import { Button, Column, Icon, Pressable, Row, Scroll, Text, Input, View, type IconName } from "./components";
 import { Checkbox, RadioGroup, type RadioOption } from "./controls";

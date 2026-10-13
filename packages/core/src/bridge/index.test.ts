@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { NATIVE_ABI_VERSION, PROTOCOL_VERSION } from "../../../protocol/src/index";
+import { NATIVE_ABI_VERSION, PROTOCOL_VERSION } from "../protocol";
 import { assertNativeAbiVersion, drainNativeEvents, pollNativeEvent } from "./index";
 
 describe("native ABI compatibility", () => {

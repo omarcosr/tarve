@@ -1,4 +1,4 @@
-import type { TextRun } from "../../protocol/src/index";
+import type { TextRun } from "./protocol";
 import { Fragment, type Child, type VNode } from "./jsx-runtime";
 import { canonicalizeIntrinsicStyle } from "./intrinsic-style";
 

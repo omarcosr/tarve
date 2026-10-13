@@ -1,4 +1,4 @@
-import type { Style } from "../../protocol/src/index";
+import type { Style } from "./protocol";
 import { Fragment, jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
 import {
   Button,

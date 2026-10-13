@@ -1,11 +1,15 @@
-import type { FileDialogOptions, NativeEvent, NativeCommand, NativeNode, NativeTrayMenuItem, NativeSystemMediaSession, Renderer, Snapshot } from "../../protocol/src/index";
+import type { FileDialogOptions, NativeEvent, NativeCommand, NativeSystemMediaSession, Renderer, Snapshot } from "./protocol";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { applyMediaEvent, type MediaController, type MediaRequest } from "./media-element";
+import { applyMediaEvent, type MediaController } from "./media-element";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
-import { compileTree, diffTreeMutations, type CompiledTree, type Handlers, invalidateMemos } from "./reconciler";
+import { compileTree, type CompiledTree, invalidateMemos } from "./reconciler";
 import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
-import type { VNode, PastePayload } from "./jsx-runtime";
+import type { VNode } from "./jsx-runtime";
+import { createElementDispatcher } from "./app/element-events";
+import { createMediaSync, mediaController } from "./app/media";
+import { createNativeRequests } from "./app/requests";
+import { editShadowNode, nativeShadow, reconciliationCommand } from "./app/shadow";
+import { createTrayController, type TrayHandle, type TrayOptions } from "./app/tray";
 import { withRenderScope } from "./render-scope";
 import type { ComponentAdapter } from "./component-adapter";
 import { DevErrorOverlay } from "./dev-overlay";
@@ -80,26 +84,7 @@ export interface SystemMediaSession extends NativeSystemMediaSession {
   onAction?: (action: "play" | "pause" | "next" | "previous" | "seek", time?: number) => void;
 }
 
-export type TrayMenuItem =
-  | { type: "separator" }
-  | { type?: "item"; id: string; label: string; checked?: boolean; disabled?: boolean; onSelect?: () => void; items?: TrayMenuItem[] };
-
-export interface TrayOptions {
-  /** PNG/JPEG/WebP/ICO path or data URL (also `import icon from "./tray.png" with { type: "file" }` in compiled apps). Defaults to the app icon (`createApp({ icon })` or package.json `tarve.icon`), then the system application icon. */
-  icon?: string;
-  tooltip?: string;
-  menu?: TrayMenuItem[];
-  onClick?: () => void;
-  onDoubleClick?: () => void;
-  /** Called with the selected item id, after the item's own onSelect. */
-  onMenu?: (id: string) => void;
-}
-
-export interface TrayHandle {
-  /** Merges and re-applies options; the shell icon is modified in place, not recreated. */
-  update(options: Partial<TrayOptions>): void;
-  remove(): void;
-}
+export type { TrayMenuItem, TrayOptions, TrayHandle } from "./app/tray";
 
 export interface NotifyOptions { title: string; body?: string; onClick?: () => void }
 
@@ -153,72 +138,6 @@ export interface AppHandle {
 
 function asError(value: unknown): Error {
   return value instanceof Error ? value : new Error(String(value));
-}
-
-function validateFileDialogOptions(options: FileDialogOptions): void {
-  if ((options.title?.length ?? 0) > 4096 || (options.fileName?.length ?? 0) > 4096 || (options.directory?.length ?? 0) > 32_768) {
-    throw new RangeError("File dialog text exceeds length limit");
-  }
-  const filters = options.filters ?? [];
-  if (filters.length > 64) throw new RangeError("File dialog filter limit exceeded");
-  for (const filter of filters) {
-    if (!filter.name || filter.name.length > 256 || filter.extensions.length === 0 || filter.extensions.length > 64) {
-      throw new TypeError("File dialog filters require a name and 1-64 extensions");
-    }
-    if (filter.extensions.some(extension => {
-      const value = extension.trim().replace(/^\./, "");
-      return !value || value.length > 32 || /[\\/*?]/.test(value);
-    })) throw new TypeError("Invalid file dialog extension");
-  }
-}
-
-/**
- * The tree native is known to hold. Nodes are copied shallowly: the shadow only
- * ever replaces a node's own `value`/`control` fields (optimistic edits), so
- * styles and other nested values are shared with the compiled tree instead of
- * deep-cloned, which kept a second copy of every style object alive.
- */
-/** The compiled node each shadow node copies; a memoized subtree keeps its shadow. */
-const shadowSources = new WeakMap<NativeNode, NativeNode>();
-/** Set when a native edit mutates a shadow node, so the next shadow copies every node. */
-let shadowEdited = false;
-
-function nativeShadow(tree: CompiledTree, previous?: CompiledTree): CompiledTree {
-  const nodes = new Map<string, NativeNode>();
-  // A native edit (typing, a slider drag) changed a shadow node in place: copy everything once.
-  const reuse = !shadowEdited;
-  shadowEdited = false;
-  const keep = (node: NativeNode): void => {
-    nodes.set(node.id, node);
-    for (const child of node.children) keep(child);
-  };
-  const copy = (source: NativeNode): NativeNode => {
-    const kept = previous?.nodes.get(source.id);
-    if (reuse && kept && shadowSources.get(kept) === source) {
-      keep(kept);
-      return kept;
-    }
-    const node: NativeNode = { ...source, children: source.children.map(copy) };
-    shadowSources.set(node, source);
-    const old = previous?.nodes.get(node.id);
-    if ((node.kind === "input" || node.kind === "textarea") && node.value === undefined && old?.kind === node.kind) {
-      node.value = old.value;
-    }
-    nodes.set(node.id, node);
-    return node;
-  };
-  const document = { ...tree.document, root: copy(tree.document.root) };
-  return { document, handlers: tree.handlers, nodes };
-}
-
-function reconciliationCommand(previous: CompiledTree, next: CompiledTree): NativeCommand | undefined {
-  const mutations = diffTreeMutations(previous, next, (old, node) => shadowSources.get(old) === node);
-  if (mutations === null) return { type: "update", root: next.document.root };
-  if (mutations.length === 0) return undefined;
-  if (mutations.every(mutation => mutation.type === "patch")) {
-    return { type: "patch", nodes: mutations.map(mutation => mutation.node) };
-  }
-  return { type: "mutate", mutations };
 }
 
 export function createApp(view: () => VNode, options: AppOptions = {}): AppHandle {
@@ -300,13 +219,6 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   let terminalError: Error | undefined;
   const listeners = new Set<(event: NativeEvent) => void>();
   const hotkeys = new Map<string, Set<HotkeyHandler>>();
-  const pending = new Map<string, {
-    resolve: (event: NativeEvent) => void;
-    reject: (error: Error) => void;
-    source: "request" | "file-dialog";
-    command: NativeCommand["type"];
-    timer?: ReturnType<typeof setTimeout>;
-  }>();
   let resolveReady!: () => void;
   let rejectReady!: (error: Error) => void;
   let resolveClosed!: () => void;
@@ -363,14 +275,6 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     resolveClosed();
   }
 
-  function rejectPending(error: Error): void {
-    for (const item of pending.values()) {
-      if (item.timer) clearTimeout(item.timer);
-      item.reject(error);
-    }
-    pending.clear();
-  }
-
   function sendInternal(command: NativeCommand, context: Omit<AppErrorEvent, "error">): boolean {
     if (ended) return false;
     try {
@@ -389,6 +293,15 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       throw reportError(error, { source: "bridge", event: command.type });
     }
   }
+
+  const requests = createNativeRequests({
+    send: command => bridge.send(command),
+    reportError,
+    closedError: () => (ended ? terminalError ?? new Error("Native window is closed") : undefined),
+  });
+  const trays = createTrayController(appIcon, command => { if (!ended) sendPublic(command); });
+  const syncLoadedMedia = createMediaSync((command, event, targetId) => sendInternal(command, { source: "bridge", event, targetId }));
+  const dispatchElementEvent = createElementDispatcher(invokeHandler, id => committed?.handlers.get(id));
 
   function restoreCommitted(): void {
     if (ended || closing || !committed || !observed) return;
@@ -491,44 +404,6 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
   }
 
-  function request(
-    command: NativeCommand & { requestId: string },
-    timeoutMs: number | undefined = 10_000,
-    source: "request" | "file-dialog" = "request",
-  ): Promise<NativeEvent> {
-    if (ended) return Promise.reject(terminalError ?? new Error("Native window is closed"));
-    return new Promise((resolve, reject) => {
-      const timer = timeoutMs === undefined ? undefined : setTimeout(() => {
-        pending.delete(command.requestId);
-        const error = reportError(new Error(`Native request timed out: ${command.type}`), { source, event: command.type });
-        reject(error);
-      }, timeoutMs);
-      pending.set(command.requestId, { resolve, reject, source, command: command.type, timer });
-      try {
-        bridge.send(command);
-      } catch (value) {
-        if (timer) clearTimeout(timer);
-        pending.delete(command.requestId);
-        const error = reportError(value, { source, event: command.type });
-        reject(error);
-      }
-    });
-  }
-
-  async function fileDialog(mode: "openFile" | "openFiles" | "openFolder" | "saveFile", dialogOptions: FileDialogOptions = {}): Promise<string[]> {
-    validateFileDialogOptions(dialogOptions);
-    const event = await request({ type: "fileDialog", mode, options: dialogOptions, requestId: crypto.randomUUID() }, undefined, "file-dialog");
-    if (event.type !== "fileDialog") {
-      const error = reportError(new Error("Unexpected native file dialog response"), { source: "file-dialog", event: mode });
-      throw error;
-    }
-    if (event.error) {
-      const error = reportError(new Error(event.error), { source: "file-dialog", event: mode });
-      throw error;
-    }
-    return event.paths;
-  }
-
   function finishClosed(): void {
     if (ended) return;
     ended = true;
@@ -539,7 +414,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       reportError(closeError, { source: "native", event: "closed-before-ready" });
       settleReadyFailure(closeError);
     }
-    rejectPending(closeError);
+    requests.rejectAll(closeError);
     settleClosed();
     // Keep native teardown outside the event-dispatch stack. This also preserves deterministic
     // ordering if the close event was drained together with other queued native events.
@@ -550,47 +425,6 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         reportError(error, { source: "bridge", event: "join" });
       }
     });
-  }
-
-  /** Last known pointer position and drop target per in-flight drag source. */
-  const drags = new Map<string, { x: number; y: number; over: string | null }>();
-
-  function dispatchDrag(
-    event: Extract<NativeEvent, { type: "dragStart" | "dragMove" | "drop" | "dragCancel" }>,
-    handlers: Handlers | undefined,
-  ): { handled: boolean; succeeded: boolean } {
-    let handled = false;
-    let succeeded = true;
-    const call = (name: string, id: string, handler: ((...args: never[]) => void) | undefined, arg?: unknown) => {
-      if (!handler) return;
-      handled = true;
-      succeeded = invokeHandler(name, id, handler, arg as never) && succeeded;
-    };
-    const target = (id: string) => committed?.handlers.get(id);
-    const source = event.id;
-    if (event.type === "dragStart") {
-      drags.set(source, { x: event.x, y: event.y, over: null });
-      call("dragStart", source, handlers?.onDragStart as never, { x: event.x, y: event.y });
-      return { handled, succeeded };
-    }
-    const state = drags.get(source) ?? { x: 0, y: 0, over: null };
-    if (event.type === "dragMove") {
-      drags.set(source, { x: event.x, y: event.y, over: event.over });
-      if (state.over !== event.over) {
-        if (state.over) call("dragLeave", state.over, target(state.over)?.onDragLeave as never, source);
-        if (event.over) call("dragEnter", event.over, target(event.over)?.onDragEnter as never, source);
-      }
-      call("dragMove", source, handlers?.onDragMove as never, { x: event.x, y: event.y, over: event.over });
-      return { handled, succeeded };
-    }
-    drags.delete(source);
-    const dropped = event.type === "drop" ? event.target : null;
-    const x = event.type === "drop" ? event.x : state.x;
-    const y = event.type === "drop" ? event.y : state.y;
-    if (state.over && state.over !== dropped) call("dragLeave", state.over, target(state.over)?.onDragLeave as never, source);
-    if (dropped) call("drop", dropped, target(dropped)?.onDrop as never, { source, x, y });
-    call("dragEnd", source, handlers?.onDragEnd as never, { target: dropped, x, y, cancelled: event.type === "dragCancel" });
-    return { handled, succeeded };
   }
 
   function dispatchNativeEvent(event: NativeEvent): void {
@@ -645,10 +479,11 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         try { handler(); return true; } catch (error) { reportError(error, { source: "event-handler", event: name }); return false; }
       };
       let ran = false;
-      if (event.type === "tray") ran = run(event.action === "click" ? "trayClick" : "trayDoubleClick", event.action === "click" ? trayOptions?.onClick : trayOptions?.onDoubleClick);
+      const tray = trays.options();
+      if (event.type === "tray") ran = run(event.action === "click" ? "trayClick" : "trayDoubleClick", event.action === "click" ? tray?.onClick : tray?.onDoubleClick);
       else if (event.type === "trayMenu") {
-        ran = run("trayMenu", trayItemHandlers.get(event.id));
-        const onMenu = trayOptions?.onMenu;
+        ran = run("trayMenu", trays.menuHandler(event.id));
+        const onMenu = tray?.onMenu;
         if (onMenu) ran = run("trayMenu", () => onMenu(event.id)) || ran;
       } else ran = run("notificationClick", notificationClick);
       if (ran) update();
@@ -659,7 +494,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
 
     if (!ended && event.type === "media") {
-      const handler = applyMediaEvent(event, committed?.media?.get(event.id));
+      const handler = applyMediaEvent(event, committed?.media?.get(event.id), renderScope);
       if (handler) {
         try { handler(); } catch (error) { reportError(error, { source: "event-handler", event: `media:${event.event}`, targetId: event.id }); }
       }
@@ -682,14 +517,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       }
     }
 
-    if ("requestId" in event) {
-      const item = pending.get(event.requestId);
-      if (item) {
-        if (item.timer) clearTimeout(item.timer);
-        pending.delete(event.requestId);
-        item.resolve(event);
-      }
-    }
+    requests.settle(event);
 
     if (!ended && committed && observed && "id" in event) {
       const handlers = committed.handlers.get(event.id);
@@ -699,8 +527,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         const node = observed.nodes.get(event.id);
         if (node && (node.kind === "input" || node.kind === "textarea")) {
           node.value = event.value;
-          shadowSources.delete(node);
-            shadowEdited = true;
+          editShadowNode(node);
           optimisticEdit = true;
         }
       }
@@ -708,89 +535,12 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         const node = observed.nodes.get(event.id);
         if (node?.control) {
           node.control = { ...node.control, value: event.value };
-          shadowSources.delete(node);
-            shadowEdited = true;
+          editShadowNode(node);
           optimisticEdit = true;
         }
       }
 
-      let handled = false;
-      let succeeded = true;
-      if (event.type === "click" && handlers?.onClick) { handled = true; succeeded = invokeHandler("click", event.id, handlers.onClick); }
-      if (event.type === "markdownLink" && handlers?.onMarkdownLink) { handled = true; succeeded = invokeHandler("markdownLink", event.id, handlers.onMarkdownLink as (...args: never[]) => void, event.href as never); }
-      if (event.type === "diffToggleFile" && handlers?.onDiffToggleFile) { handled = true; succeeded = invokeHandler("diffToggleFile", event.id, handlers.onDiffToggleFile as (...args: never[]) => void, event.path as never); }
-      if (event.type === "diffShowMore" && handlers?.onDiffShowMore) { handled = true; succeeded = invokeHandler("diffShowMore", event.id, handlers.onDiffShowMore as (...args: never[]) => void, event.hidden as never, (event.path ?? undefined) as never); }
-      if (event.type === "diffLineClick" && handlers?.onDiffLineClick) { handled = true; succeeded = invokeHandler("diffLineClick", event.id, handlers.onDiffLineClick as (...args: never[]) => void, { text: event.text, path: event.path ?? undefined, oldLine: event.oldLine ?? undefined, newLine: event.newLine ?? undefined } as never); }
-      if (event.type === "highlight" && handlers?.onHighlight) { handled = true; succeeded = invokeHandler("highlight", event.id, handlers.onHighlight as (...args: never[]) => void, { matchCount: event.matchCount, query: event.query, caseSensitive: event.caseSensitive, wholeWord: event.wholeWord } as never); }
-      if (event.type === "context" && handlers?.onContextMenu) { handled = true; succeeded = invokeHandler("context", event.id, handlers.onContextMenu as (...args: never[]) => void, { x: event.x, y: event.y } as never); }
-      if (event.type === "outside" && handlers?.onOutsideClick) { handled = true; succeeded = invokeHandler("outside", event.id, handlers.onOutsideClick); }
-      if (event.type === "submit" && handlers?.onSubmit) { handled = true; succeeded = invokeHandler("submit", event.id, handlers.onSubmit as (...args: never[]) => void, event.value as never); }
-      if (event.type === "paste" && handlers?.onPaste) {
-        const payload = pastePayload(event);
-        if (payload) { handled = true; succeeded = invokeHandler("paste", event.id, handlers.onPaste as (...args: never[]) => void, payload as never); }
-      }
-      if (event.type === "change" && handlers?.onChange) { handled = true; succeeded = invokeHandler("change", event.id, handlers.onChange as (...args: never[]) => void, event.value as never); }
-      if (event.type === "valueChange" && handlers?.onValueChange) { handled = true; succeeded = invokeHandler("valueChange", event.id, handlers.onValueChange as (...args: never[]) => void, event.value as never); }
-      if (event.type === "scroll" && handlers?.onScroll) { handled = true; succeeded = invokeHandler("scroll", event.id, handlers.onScroll as (...args: never[]) => void, event.offset as never, event.max as never, { source: event.source ?? "user" } as never); }
-      if (event.type === "scroll" && handlers?.onScrollPosition) {
-        handled = true;
-        const position = {
-          x: event.offsetX ?? 0,
-          y: event.offsetY ?? event.offset,
-          maxX: event.maxX ?? 0,
-          maxY: event.maxY ?? event.max,
-          source: event.source ?? "user",
-        };
-        succeeded = invokeHandler("scrollPosition", event.id, handlers.onScrollPosition as (...args: never[]) => void, position as never) && succeeded;
-      }
-      if (event.type === "virtualListLayout" && handlers?.onVirtualListLayout) {
-        handled = true;
-        succeeded = invokeHandler("virtualListLayout", event.id, handlers.onVirtualListLayout as (...args: never[]) => void, event.items as never) && succeeded;
-      }
-      if (event.type === "size" && handlers?.onSize) {
-        handled = true;
-        succeeded = invokeHandler("size", event.id, handlers.onSize as (...args: never[]) => void, { width: event.width, height: event.height } as never) && succeeded;
-      }
-      if (event.type === "pointerMove" && handlers?.onPointerMove) {
-        handled = true;
-        succeeded = invokeHandler("pointerMove", event.id, handlers.onPointerMove as (...args: never[]) => void, { x: event.x, y: event.y } as never) && succeeded;
-      }
-      if (event.type === "pointerLeave" && handlers?.onPointerLeave) {
-        handled = true;
-        succeeded = invokeHandler("pointerLeave", event.id, handlers.onPointerLeave as (...args: never[]) => void) && succeeded;
-      }
-      if (event.type === "virtualListScrollToItem" && handlers?.onVirtualListScrollToItem) {
-        handled = true;
-        succeeded = invokeHandler(
-          "virtualListScrollToItem",
-          event.id,
-          handlers.onVirtualListScrollToItem as (...args: never[]) => void,
-          event.index as never,
-          event.offset as never,
-          (event.smooth === true) as never,
-        ) && succeeded;
-      }
-      if (event.type === "virtualListFocus" && handlers?.onVirtualListFocus) {
-        handled = true;
-        succeeded = invokeHandler("virtualListFocus", event.id, handlers.onVirtualListFocus as (...args: never[]) => void, event.key as never) && succeeded;
-      }
-      if (event.type === "dragStart" || event.type === "dragMove" || event.type === "drop" || event.type === "dragCancel") {
-        const result = dispatchDrag(event, handlers);
-        handled = result.handled;
-        succeeded = result.succeeded && succeeded;
-      }
-      if (event.type === "hover" && handlers?.onHover) { handled = true; succeeded = invokeHandler("hover", event.id, handlers.onHover as (...args: never[]) => void, event.entered as never); }
-      if (event.type === "key" && handlers?.onKeyDown) { handled = true; succeeded = invokeHandler("key", event.id, handlers.onKeyDown as (...args: never[]) => void, event.key as never); }
-      if (event.type === "blur" && handlers?.onBlur) { handled = true; succeeded = invokeHandler("blur", event.id, handlers.onBlur); }
-      if (event.type === "motionComplete" && handlers?.onTransitionEnd) {
-        handled = true;
-        succeeded = invokeHandler(
-          "motionComplete",
-          event.id,
-          handlers.onTransitionEnd as (...args: never[]) => void,
-          { property: event.property } as never,
-        );
-      }
+      const { handled, succeeded } = dispatchElementEvent(event, handlers);
 
       if (!succeeded) {
         // Motion completion is a notification, not an optimistic native edit.
@@ -804,69 +554,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   }
 
   let systemMediaAction: SystemMediaSession["onAction"];
-  let trayOwner: object | undefined;
-  let trayOptions: TrayOptions | undefined;
   let notificationClick: (() => void) | undefined;
-  let trayIconPath: string | undefined;
-  let trayIconData: string | undefined;
-  let trayIconSent = false;
-  const trayItemHandlers = new Map<string, () => void>();
 
-  function applyTray(): void {
-    if (!trayOptions) return;
-    trayItemHandlers.clear();
-    const seen = new Set<string>();
-    const convert = (items: readonly TrayMenuItem[]): NativeTrayMenuItem[] => items.map(item => {
-      if (item.type === "separator") return { separator: true };
-      if (!item.id) throw new TypeError("tray menu items need an id");
-      if (item.items?.length) return { label: item.label, ...(item.disabled ? { disabled: true } : {}), items: convert(item.items) };
-      if (seen.has(item.id)) throw new TypeError(`duplicate tray menu id "${item.id}"`);
-      seen.add(item.id);
-      if (item.onSelect) trayItemHandlers.set(item.id, item.onSelect);
-      return { id: item.id, label: item.label, ...(item.checked !== undefined ? { checked: item.checked } : {}), ...(item.disabled ? { disabled: true } : {}) };
-    });
-    const menu = convert(trayOptions.menu ?? []);
-    // Read here, not natively: `$bunfs` paths of compiled executables and imported
-    // assets (`import icon from "./tray.png" with { type: "file" }`) only exist in JS.
-    const trayIcon = trayOptions.icon ?? appIcon();
-    if (trayIcon !== trayIconPath) {
-      trayIconData = trayIcon ? Buffer.from(iconBytes(trayIcon)).toString("base64") : undefined;
-      trayIconPath = trayIcon;
-      trayIconSent = false;
-    }
-    const iconData = trayIconSent ? undefined : trayIconData;
-    trayIconSent = true;
-    if (!ended) sendPublic({ type: "tray", tray: { ...(iconData ? { iconData } : {}), ...(trayOptions.tooltip ? { tooltip: trayOptions.tooltip } : {}), menu } });
-  }
-
-  // Loaded media per element id; reconciled with each committed render.
-  const loadedMedia = new Map<string, MediaRequest>();
   function syncMedia(): void {
-    if (ended || !committed) return;
-    const wanted = committed.media ?? new Map<string, MediaRequest>();
-    for (const id of [...loadedMedia.keys()]) {
-      if (!wanted.has(id) || !wanted.get(id)!.src) {
-        loadedMedia.delete(id);
-        sendInternal({ type: "media", id, action: "unload" }, { source: "bridge", event: "media:unload", targetId: id });
-      }
-    }
-    for (const [id, request] of wanted) {
-      if (!request.src) continue;
-      const previous = loadedMedia.get(id);
-      const src = resolveMediaPath(request.src);
-      if (!previous || resolveMediaPath(previous.src!) !== src) {
-        sendInternal({ type: "media", id, action: "load", src, loop: request.loop, muted: request.muted, volume: request.volume },
-          { source: "bridge", event: "media:load", targetId: id });
-        if (request.autoPlay) sendInternal({ type: "media", id, action: "play" }, { source: "bridge", event: "media:play", targetId: id });
-      } else if (previous.loop !== request.loop || previous.muted !== request.muted || previous.volume !== request.volume) {
-        sendInternal({ type: "media", id, action: "set", loop: request.loop, muted: request.muted, volume: request.volume },
-          { source: "bridge", event: "media:set", targetId: id });
-      }
-      loadedMedia.set(id, request);
-    }
-  }
-  function resolveMediaPath(src: string): string {
-    return src.startsWith("file://") ? new URL(src).pathname.replace(/^\/([A-Za-z]:)/, "$1") : src;
+    if (!ended && committed) syncLoadedMedia(committed);
   }
 
   function onNativeEvent(event: NativeEvent): void {
@@ -913,27 +604,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (!ended) sendPublic({ type: "window", action: "minimize" });
     },
     tray(initial: TrayOptions): TrayHandle {
-      const token = {};
-      trayOwner = token;
-      trayOptions = { ...initial };
-      trayIconSent = false;
-      applyTray();
-      return {
-        update(next: Partial<TrayOptions>): void {
-          if (trayOwner !== token) return;
-          trayOptions = { ...trayOptions, ...next };
-          applyTray();
-        },
-        remove(): void {
-          if (trayOwner !== token) return;
-          trayOwner = undefined;
-          trayOptions = undefined;
-          trayIconPath = undefined;
-          trayIconData = undefined;
-          trayItemHandlers.clear();
-          if (!ended) sendPublic({ type: "tray", tray: null });
-        },
-      };
+      return trays.tray(initial);
     },
     systemMedia(session: SystemMediaSession | null): void {
       if (session) {
@@ -951,16 +622,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (!ended) sendPublic({ type: "notify", title, body });
     },
     media(id: string): MediaController {
-      const send = (command: Omit<Extract<NativeCommand, { type: "media" }>, "type" | "id">) => {
-        if (!ended) sendPublic({ type: "media", id, ...command });
-      };
-      return {
-        play: () => send({ action: "play" }),
-        pause: () => send({ action: "pause" }),
-        seek: seconds => send({ action: "seek", time: Math.max(0, seconds) }),
-        setVolume: volume => send({ action: "set", volume: Math.min(1, Math.max(0, volume)) }),
-        setMuted: muted => send({ action: "set", muted }),
-      };
+      return mediaController(id, command => { if (!ended) sendPublic(command); });
     },
     registerHotkey(shortcut: string, handler: HotkeyHandler): () => void {
       const canonical = normalizeHotkey(shortcut);
@@ -973,16 +635,16 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       };
     },
     async openFileDialog(dialogOptions?: FileDialogOptions): Promise<string | undefined> {
-      return (await fileDialog("openFile", dialogOptions))[0];
+      return (await requests.fileDialog("openFile", dialogOptions))[0];
     },
     async openFilesDialog(dialogOptions?: FileDialogOptions): Promise<string[]> {
-      return fileDialog("openFiles", dialogOptions);
+      return requests.fileDialog("openFiles", dialogOptions);
     },
     async openFolderDialog(dialogOptions?: FileDialogOptions): Promise<string | undefined> {
-      return (await fileDialog("openFolder", dialogOptions))[0];
+      return (await requests.fileDialog("openFolder", dialogOptions))[0];
     },
     async saveFileDialog(dialogOptions?: FileDialogOptions): Promise<string | undefined> {
-      return (await fileDialog("saveFile", dialogOptions))[0];
+      return (await requests.fileDialog("saveFile", dialogOptions))[0];
     },
     onEvent(listener: (event: NativeEvent) => void): () => void {
       listeners.add(listener);
@@ -990,7 +652,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     },
     async inspect(): Promise<Snapshot> {
       if (queued) await flushQueuedUpdate();
-      const event = await request({ type: "inspect", requestId: crypto.randomUUID() });
+      const event = await requests.request({ type: "inspect", requestId: crypto.randomUUID() });
       if (event.type !== "inspect") {
         const error = reportError(new Error("Unexpected native response"), { source: "request", event: "inspect" });
         throw error;
@@ -1000,7 +662,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     async capture(path: string): Promise<void> {
       if (!options.debug) throw new Error("Enable debug to capture the rendered scene");
       if (queued) await flushQueuedUpdate();
-      const event = await request({ type: "capture", path, requestId: crypto.randomUUID() });
+      const event = await requests.request({ type: "capture", path, requestId: crypto.randomUUID() });
       if (event.type !== "captured") {
         const error = reportError(new Error("Unexpected native capture response"), { source: "request", event: "capture" });
         throw error;
@@ -1016,7 +678,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         throw new RangeError("advanceMotion milliseconds must be finite and between 0 and 60000");
       }
       if (queued) await flushQueuedUpdate();
-      const event = await request({ type: "motionAdvance", milliseconds, requestId: crypto.randomUUID() });
+      const event = await requests.request({ type: "motionAdvance", milliseconds, requestId: crypto.randomUUID() });
       if (event.type !== "motionAdvanced") {
         const error = reportError(new Error("Unexpected native motion response"), { source: "request", event: "motionAdvance" });
         throw error;
@@ -1068,7 +730,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     terminalError = startupError;
     ended = true;
     settleReadyFailure(startupError);
-    rejectPending(startupError);
+    requests.rejectAll(startupError);
     settleClosed();
   }
 
@@ -1105,12 +767,4 @@ export async function render(view: () => VNode, options?: AppOptions): Promise<v
         throw error;
       }
       if (!hot) await app.closed;
-}
-function pastePayload(event: Extract<NativeEvent, { type: "paste" }>): PastePayload | undefined {
-  if (event.files?.length) return { kind: "files", files: [...event.files] };
-  if (event.image) {
-    const bytes = Buffer.from(event.image.rgba, "base64");
-    return { kind: "image", width: event.image.width, height: event.image.height, rgba: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) };
-  }
-  return undefined;
 }

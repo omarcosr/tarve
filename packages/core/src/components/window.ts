@@ -1,4 +1,4 @@
-import type { WindowPosition } from "../../../protocol/src/index";
+import type { WindowPosition } from "../protocol";
 import type { VNode } from "../jsx-runtime";
 import { theme, type ThemeDefinition } from "../theme";
 import { container, type ViewProps } from "./layout";

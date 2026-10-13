@@ -7,7 +7,7 @@ import { nativePath } from "#tarve/runtime";
 import { fileImportAttributes } from "./esbuild-file-imports";
 import { hostBuildTarget, targetConfig } from "./targets";
 import { metadataOverrides, type BuildOptions } from "./build";
-import { buildMetadata, writeLinuxDesktopEntry } from "./app-metadata";
+import { buildMetadata, writeLinuxDesktopEntry } from "./package-metadata";
 import { NATIVE_COMPATIBILITY_MANIFEST_NAME, assertNativeRuntimeCompatible, readNativeCompatibilityManifest, createNativeCompatibilityManifest } from "./native-runtime";
 import { assertNodeVersion, targetNodeExecutable } from "./node-target";
 

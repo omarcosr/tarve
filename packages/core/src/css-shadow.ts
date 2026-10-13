@@ -1,4 +1,4 @@
-import type { BoxShadow, ConicGradient, ConicGradientStop, Gradient, GradientCentre, GradientLength, GradientSide, GradientStop, RadialExtent, TextShadow, Transform } from "../../protocol/src/index";
+import type { BoxShadow, ConicGradient, ConicGradientStop, Gradient, GradientCentre, GradientLength, GradientSide, GradientStop, RadialExtent, TextShadow, Transform } from "./protocol";
 
 /** Every CSS named colour, packed as "name hex …" and expanded once. */
 const NAMED: Record<string, string> = Object.fromEntries(

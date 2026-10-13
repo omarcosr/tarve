@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { resolveAppMetadata, runtimeMetadata } from "./app-metadata";
+import { resolveAppMetadata, runtimeMetadata } from "./package-metadata";
 import { build } from "./build";
 import { devNode, runNode } from "./node-dev";
 import { selectRuntime } from "./runtime-select";

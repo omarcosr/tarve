@@ -1,4 +1,4 @@
-import type { Style } from "../../protocol/src/index";
+import type { Style } from "./protocol";
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
 import { Column, Icon, Pressable, Row, Text, View, type ViewProps } from "./components";
 import { theme } from "./theme";

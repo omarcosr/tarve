@@ -1,4 +1,4 @@
-import type { ScrollInfo } from "../../protocol/src/index";
+import type { ScrollInfo } from "./protocol";
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
 import { Button, Column, Row, Scroll, Text, View } from "./components";
 import { Avatar } from "./extra-controls";

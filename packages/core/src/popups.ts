@@ -1,7 +1,8 @@
-import type { Control, Style } from "../../protocol/src/index";
+import type { Control, Style } from "./protocol";
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
 import { Button, Column, Icon, Pressable, Row, Scroll, Text, Input, View, type IconName } from "./components";
 import { theme } from "./theme";
+import { scopedState } from "./render-scope";
 
 const c = theme.colors;
 const POPUP_Z_INDEX = 1000;
@@ -143,7 +144,7 @@ export interface TooltipProps extends BaseProps {
 
 const TOOLTIP_MAX_WIDTH = 320;
 /** The uncontrolled tooltip under the pointer; like a browser, only one shows at a time. */
-let hoveredTooltip: string | null = null;
+const HOVERED_TOOLTIP = Symbol("tarve.hoveredTooltip");
 
 /**
  * An absolute box takes its wrapping width from its containing block, which for a tooltip is the
@@ -178,7 +179,8 @@ export function Tooltip({
   contentStyle,
   style,
 }: TooltipProps): VNode {
-  const open = controlledOpen ?? hoveredTooltip === id;
+  const hover = scopedState(HOVERED_TOOLTIP, () => ({ id: null as string | null }));
+  const open = controlledOpen ?? hover.id === id;
   const tooltipContent = typeof content === "string" || typeof content === "number"
     ? jsx(Text, { size: 12, color: c.background, children: content })
     : content;
@@ -191,7 +193,7 @@ export function Tooltip({
         focusable: false,
         fallbackControl: { role: "button", label: triggerLabel(label, trigger) },
         onHover: (hovered: boolean) => {
-          if (controlledOpen === undefined) hoveredTooltip = hovered ? id : hoveredTooltip === id ? null : hoveredTooltip;
+          if (controlledOpen === undefined) hover.id = hovered ? id : hover.id === id ? null : hover.id;
           onOpenChange?.(hovered);
         },
       }),

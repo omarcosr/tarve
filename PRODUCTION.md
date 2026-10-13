@@ -1,14 +1,14 @@
 # Production readiness
 
-Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript with a Rust Taffy + Parley + Vello backend. The supported production target is currently **Windows x64**.
+Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript with a Rust Taffy + Parley + Vello backend. The supported production targets are **Windows x64** and **Linux x64**, under Bun 1.4+ or Node.js 26.10+.
 
 ## Current verified baseline
 
 - TypeScript package checking: `bun run check` passes.
 - Rust lint gate: `cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings` passes.
-- Core/UI suite: **192 Bun tests** pass.
-- Native suite: **207 Rust tests** pass on Windows (203 on Linux), including deterministic AccessKit tree/action/TextPattern/scroll-alignment, horizontal/bidirectional scroll, bounded grid-track coverage and independent ABI/protocol mismatch handling.
-- JSON protocol is currently **v45** on both TypeScript and Rust sides; the native C ABI is independently versioned at **v5** and checked before startup.
+- Core/UI suite: **336 Bun tests** pass (`bun test packages/core`).
+- Native suite: **298 Rust `#[test]` functions** (some Windows-only), including deterministic AccessKit tree/action/TextPattern/scroll-alignment, horizontal/bidirectional scroll, bounded grid-track coverage and independent ABI/protocol mismatch handling.
+- JSON protocol is currently **v59** on both TypeScript and Rust sides (`PROTOCOL_VERSION` in `packages/protocol/src/index.ts` and `native/src/protocol.rs`); the native C ABI is independently versioned at **v5** (`ABI_VERSION` in `native/src/bridge.rs`) and checked before startup.
 - The npm package `@tarve/core` includes JS, JSX runtime, declarations, the CLI and both the Windows x64 and Linux x64 native runtimes.
 - External-consumer and standalone-EXE smoke tests are part of `bun run verify`.
 - Real GPU visual regression is a mandatory release gate: `bun run verify` runs `test:visual` after package/EXE smoke validation, and `bun run release:check` is the CI/release entry point for the same gate.

@@ -1,4 +1,4 @@
-import type { SvgAttributes, SvgNode } from "../../../protocol/src/index";
+import type { SvgAttributes, SvgNode } from "../protocol";
 import { Fragment, _nativeJsx, jsx, type BaseProps, type Child, type VNode } from "../jsx-runtime";
 import { theme } from "../theme";
 

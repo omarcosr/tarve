@@ -1,6 +1,7 @@
 import { jsx, type BaseProps, type VNode } from "./jsx-runtime";
 import { Column, Icon, Pressable, Row, Scroll, Text } from "./components";
 import { theme } from "./theme";
+import { scopedState } from "./render-scope";
 
 export interface SelectOption { value: string; label: string; disabled?: boolean }
 export interface SelectProps extends BaseProps {
@@ -14,13 +15,14 @@ export interface SelectProps extends BaseProps {
   onValueChange?: (value: string) => void;
 }
 
-const openSelects = new Set<string>();
+const OPEN_SELECTS = Symbol("tarve.openSelects");
 
 export function Select({ id, value, options, placeholder = "Select an option", disabled = false,
   open, onOpenChange, onValueChange, style }: SelectProps): VNode {
   if (new Set(options.map(option => option.value)).size !== options.length) {
     throw new TypeError("Select option values must be unique");
   }
+  const openSelects = scopedState(OPEN_SELECTS, () => new Set<string>());
   const expanded = open ?? openSelects.has(id);
   const enabled = options.filter(option => !option.disabled);
   const selected = options.find(option => option.value === value);

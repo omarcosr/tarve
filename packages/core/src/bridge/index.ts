@@ -1,4 +1,4 @@
-import { NATIVE_ABI_VERSION, type SceneDocument, type NativeCommand, type NativeEvent } from "../../../protocol/src/index";
+import { NATIVE_ABI_VERSION, type SceneDocument, type NativeCommand, type NativeEvent } from "../protocol";
 import { openLibrary } from "./binding";
 import { nativePath } from "#tarve/runtime";
 import { createConnection, type Socket } from "node:net";

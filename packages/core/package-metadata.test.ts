@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
-import { appIconImages, buildMetadata, resolveAppMetadata, writeLinuxDesktopEntry } from "./app-metadata";
+import { appIconImages, buildMetadata, resolveAppMetadata, writeLinuxDesktopEntry } from "./package-metadata";
 import { decodePng, encodePng, isIco, largestIcoPng, pngSize } from "./src/png";
 
 const root = mkdtempSync(join(tmpdir(), "tarve-metadata-"));

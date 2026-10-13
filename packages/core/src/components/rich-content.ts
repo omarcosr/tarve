@@ -1,7 +1,7 @@
 import { jsx, type BaseProps, type VNode } from "../jsx-runtime";
 import { theme } from "../theme";
 import { openExternal } from "../bridge";
-import type { SyntaxTheme } from "../../../protocol/src/index";
+import type { SyntaxTheme } from "../protocol";
 
 interface RichProps extends Omit<BaseProps, "children"> {
   /** Overrides syntax colours without changing parsing or layout. */

@@ -1,4 +1,4 @@
-import type { Control, NodeSnapshot, Renderer, Snapshot } from "../../protocol/src/index";
+import type { Control, NodeSnapshot, Renderer, Snapshot } from "./protocol";
 import { createApp, type AppHandle, type AppOptions } from "./app";
 import type { VNode } from "./jsx-runtime";
 import { spawn } from "node:child_process";

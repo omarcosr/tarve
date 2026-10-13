@@ -2,10 +2,10 @@ import type { BunPlugin } from "bun";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nativePath } from "#tarve/runtime";
-import { buildMetadata, writeLinuxDesktopEntry } from "./app-metadata";
+import { buildMetadata, writeLinuxDesktopEntry } from "./package-metadata";
 import { BUILD_TARGETS, hostBuildTarget, isBuildTarget, targetConfig, type BuildTarget } from "./targets";
 import {
   NATIVE_COMPATIBILITY_MANIFEST_NAME,

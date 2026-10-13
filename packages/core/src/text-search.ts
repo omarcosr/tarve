@@ -1,4 +1,4 @@
-import type { TextHighlight } from "../../protocol/src/index";
+import type { TextHighlight } from "./protocol";
 
 export interface FindRangesOptions {
   text: string;

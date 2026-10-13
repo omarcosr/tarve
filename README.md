@@ -6,7 +6,7 @@ Tarve turns a TSX tree into a retained native interface. It does not use a brows
 
 > **Current supported targets:** Windows x64 and Linux x64
 >
-> **Runtime:** Bun 1.4+
+> **Runtime:** Bun 1.4+ or Node.js 26.10+
 >
 > **Package:** [`@tarve/core`](https://www.npmjs.com/package/@tarve/core) (CLI: `tarve`)
 >

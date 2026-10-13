@@ -5,9 +5,12 @@ All notable changes to `@tarve/core`, `@tarve/react-icons` and `@tarve/headless`
 ## Unreleased
 
 ### Added
+- `TrayOptions`, `TrayHandle`, `TrayMenuItem`, `NotifyOptions` and `SystemMediaSession` are exported from `@tarve/core`; they were the types of `app.tray()`, `app.notify()` and `app.systemMedia()` but could not be named.
 - `onScroll` (Scroll, ScrollArea, VirtualList, DataGrid, MessageScroller) gets a third argument, `{ source }`: `"user"` for the wheel, scrollbar, keyboard and assistive technology, `"program"` for `scrollToItem` and every step of a smooth one, `"layout"` when rows around the anchor change height. `onScrollPosition` carries the same `source`. A view that follows something (lyrics, a log, a "fly to" animation) can now step aside when the user scrolls, without guessing from timing. Runtimes that predate it report `"user"`.
 
 ### Fixed
+- `app.openFileDialog`/`openFilesDialog`/`openFolderDialog`/`saveFileDialog` rejected with `Native request timed out: fileDialog` when the dialog stayed open for more than 10 s: the request meant to wait forever fell back to the default timeout. A dialog now waits for the user.
+- Uncontrolled state (`<input type="checkbox">` without `checked`, `<details>`, an open `<Select>`, a hovered `Tooltip`, `<audio>` playback) belongs to the app that rendered it: `app.remount()` and a second `createApp` in the same process (tests) start clean instead of inheriting it.
 - A hotkey made of a typing key (`Space`, a letter, `Enter`, an arrow…, alone or with Shift) no longer fires while a text field has focus: typing a space in a search box also toggled playback in the player and YouTube Music examples. Chords (`Ctrl+K`), F-keys and `Escape` still fire.
 - `app.focus` and `app.scrollToItem` called right after `app.update()` (or a state change in an event handler) reach the nodes that render adds: they used to go out before the queued render and miss a field or list it was about to create.
 - `app.scrollToItem` on a list that is not mounted (another page, a hidden panel) does nothing, like `scrollIntoView` on a detached element, instead of reporting an error. A mounted node that is not a variable `VirtualList` still errors.

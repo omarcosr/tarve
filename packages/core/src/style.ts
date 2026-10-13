@@ -1,4 +1,4 @@
-import type { Style as ProtocolStyle } from "../../protocol/src/index";
+import type { Style as ProtocolStyle } from "./protocol";
 
 export type Style = ProtocolStyle;
 

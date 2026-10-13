@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { NativeImageSource } from "../../../protocol/src/index";
+import type { NativeImageSource } from "../protocol";
 import { jsx, type BaseProps, type VNode } from "../jsx-runtime";
 import { theme } from "../theme";
 

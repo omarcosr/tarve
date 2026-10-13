@@ -1,4 +1,4 @@
-import type { Control, Gradient, Style } from "../../../protocol/src/index";
+import type { Control, Gradient, Style } from "../protocol";
 import { GRADIENT, parseGradient } from "../css-shadow";
 import { _nativeJsx, jsx, type BaseProps, type Child, type VNode } from "../jsx-runtime";
 import { buttonVariants, theme, type ButtonVariant } from "../theme";

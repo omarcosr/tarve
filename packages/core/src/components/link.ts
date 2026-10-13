@@ -1,4 +1,4 @@
-import type { Style } from "../../../protocol/src/index";
+import type { Style } from "../protocol";
 import type { Child, IntrinsicStyle, VNode } from "../jsx-runtime";
 import { openExternal } from "../bridge";
 import { canonicalizeIntrinsicStyle } from "../intrinsic-style";

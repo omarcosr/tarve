@@ -1,4 +1,4 @@
-import type { BoxShadow, StateStyle, Style, SyntaxTheme } from "../../protocol/src/index";
+import type { BoxShadow, StateStyle, Style, SyntaxTheme } from "./protocol";
 import { cssColor, GRADIENT, normalizeGradient, parseBoxShadow, parseGradient, parseTextShadow, parseTransform } from "./css-shadow";
 
 export interface ThemeColors {

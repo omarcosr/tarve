@@ -1,4 +1,4 @@
-import type { ScrollInfo, Style } from "../../protocol/src/index";
+import type { ScrollInfo, Style } from "./protocol";
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
 import { Icon, Pressable, Row, Text, View, Column, type IconName } from "./components";
 import { VirtualList } from "./virtual-list";

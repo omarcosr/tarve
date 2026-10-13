@@ -327,3 +327,36 @@ jobs:
           if-no-files-found: ignore
           path: packages/headless/__snapshots__/*.actual.png
           retention-days: 14
+
+  # Known vulnerabilities in the locked dependency graphs. Unmaintained/yanked
+  # advisories only warn; cargo audit fails on a vulnerability.
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Audit Rust dependencies
+        run: cargo audit --file native/Cargo.lock
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Audit JS dependencies
+        run: bun audit
