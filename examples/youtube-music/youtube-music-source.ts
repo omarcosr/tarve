@@ -262,21 +262,38 @@ export async function library(): Promise<Collection[]> {
   return [{ kind: "playlist", id: "VLLM", title: "Liked music", subtitle: "Auto playlist", thumbnail: null }, ...unique];
 }
 
+// ---- lyrics ----
+
+/** The plain-text lyrics YouTube Music shows for a song, or null when it has none. */
+export async function songLyrics(id: string, signal?: AbortSignal): Promise<{ text: string; source: string } | null> {
+  const next = await call("next", { videoId: id }, "", signal);
+  const browseId = findAll(next, "browseId").find(value => String(value).startsWith("MPLY"));
+  if (!browseId) return null;
+  const shelf = first(await call("browse", { browseId }, "", signal), "musicDescriptionShelfRenderer");
+  const text = plain(shelf?.description).trim();
+  return text ? { text, source: plain(shelf?.footer).replace(/^Source:\s*/i, "") || "YouTube Music" } : null;
+}
+
 // ---- audio ----------------------------------------------------------------
 
-// YouTube's visionOS client gets plain audio URLs: no signature to decipher, no
-// proof-of-origin token, so no JavaScript runtime or yt-dlp is needed.
+// Two InnerTube player clients hand out plain audio URLs: no signature to
+// decipher, no JavaScript runtime or yt-dlp. visionOS gives whole files; the
+// Quest (Android VR) client is the fallback, and some of its URLs only serve a
+// preview, which the tail check below catches.
+interface PlayerClient { name: string; id: string; context: Record<string, unknown> }
 const VISION_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
-const VISION_CLIENT = {
-  clientName: "VISIONOS", clientVersion: "1.02", userAgent: VISION_UA, hl: "en", gl: "US", utcOffsetMinutes: 0,
-  deviceMake: "Apple", deviceModel: "RealityDevice17,1", osName: "visionOS", osVersion: "26.5.23O471",
-};
+const VR_UA = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
+const CLIENTS: PlayerClient[] = [
+  {
+    name: "visionOS", id: "101",
+    context: { clientName: "VISIONOS", clientVersion: "1.02", userAgent: VISION_UA, hl: "en", gl: "US", utcOffsetMinutes: 0, deviceMake: "Apple", deviceModel: "RealityDevice17,1", osName: "visionOS", osVersion: "26.5.23O471" },
+  },
+  {
+    name: "Android VR", id: "28",
+    context: { clientName: "ANDROID_VR", clientVersion: "1.65.10", userAgent: VR_UA, hl: "en", gl: "US", utcOffsetMinutes: 0, deviceMake: "Oculus", deviceModel: "Quest 3", androidSdkVersion: 32, osName: "Android", osVersion: "12L" },
+  },
+];
 
-/**
- * A visitor id, as a browser keeps in a cookie: the player answers "are you a bot?" without one.
- * It goes stale after a while (a session left open for hours), so it is renewed every half hour
- * and whenever the player refuses a song with it.
- */
 const VISITOR_TTL = 30 * 60_000;
 let visitor: { id: Promise<string>; at: number } | null = null;
 function visitorData(fresh = false): Promise<string> {
@@ -289,10 +306,14 @@ function visitorData(fresh = false): Promise<string> {
   return visitor!.id;
 }
 
-interface Resolved { url: string; expires: number }
+/** A resolved URL and how long it stays usable, on the monotonic clock (immune to wall-clock changes). */
+interface Resolved { url: string; usableUntil: number }
+/** Least recently used first; a long session plays hundreds of songs, their URLs die within hours. */
 const resolved = new Map<string, Promise<Resolved>>();
+const MAX_RESOLVED = 64;
+/** A URL is re-opened at every seek and dropped connection: hand it out only while a song's length remains. */
+const EXPIRY_MARGIN = 10 * 60_000;
 
-/** A direct, range-requestable AAC (M4A) URL for a song, cached until it expires. */
 /** Starts the visitor-id request early, so the first play waits only for its own URL. */
 export function warmUp(): void {
   void visitorData().catch(() => undefined);
@@ -303,29 +324,40 @@ export function forgetStreamUrl(id: string): void {
   resolved.delete(id);
 }
 
+/** A direct, range-requestable AAC (M4A) URL for a song, cached until shortly before it expires. */
 export function streamUrl(id: string): Promise<string> {
   const cached = resolved.get(id);
   if (cached) {
-    return cached.then(entry => entry.expires - Date.now() > 10 * 60_000 ? entry.url : (resolved.delete(id), streamUrl(id)));
+    resolved.delete(id);
+    resolved.set(id, cached);
+    return cached.then(entry => performance.now() < entry.usableUntil ? entry.url : (forget(id, cached), streamUrl(id)));
   }
   const job = (async (): Promise<Resolved> => {
+    const [main, fallback] = CLIENTS;
     try {
-      return await resolve(id, await visitorData());
+      return await resolve(id, main!, await visitorData());
     } catch (error) {
-      // A stale visitor id is the usual reason a song that played an hour ago is refused now.
-      return resolve(id, await visitorData(true)).catch(() => { throw error; });
+      // A stale visitor id is the usual reason a song that played an hour ago is refused now;
+      // then the other client, which some songs only play on.
+      const visitorId = await visitorData(true).catch(() => { throw error; });
+      return resolve(id, main!, visitorId).catch(() => resolve(id, fallback!, visitorId)).catch(() => { throw error; });
     }
   })();
   resolved.set(id, job);
-  job.catch(() => resolved.delete(id));
+  while (resolved.size > MAX_RESOLVED) resolved.delete(resolved.keys().next().value!);
+  job.catch(() => forget(id, job));
   return job.then(entry => entry.url);
 }
+function forget(id: string, job: Promise<Resolved>): void {
+  if (resolved.get(id) === job) resolved.delete(id);
+}
 
-async function resolve(id: string, visitorId: string): Promise<Resolved> {
+async function resolve(id: string, client: PlayerClient, visitorId: string): Promise<Resolved> {
+  const userAgent = String(client.context.userAgent);
   const response = await fetch("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
     method: "POST",
-    headers: { "content-type": "application/json", "user-agent": VISION_UA, "x-youtube-client-name": "101", "x-youtube-client-version": VISION_CLIENT.clientVersion, "x-goog-visitor-id": visitorId },
-    body: JSON.stringify({ context: { client: { ...VISION_CLIENT, visitorData: visitorId } }, videoId: id, contentCheckOk: true, racyCheckOk: true }),
+    headers: { "content-type": "application/json", "user-agent": userAgent, "x-youtube-client-name": client.id, "x-youtube-client-version": String(client.context.clientVersion), "x-goog-visitor-id": visitorId },
+    body: JSON.stringify({ context: { client: { ...client.context, visitorData: visitorId } }, videoId: id, contentCheckOk: true, racyCheckOk: true }),
   });
   if (!response.ok) throw new Error(`YouTube player answered HTTP ${response.status}`);
   const json: any = await response.json();
@@ -335,6 +367,19 @@ async function resolve(id: string, visitorId: string): Promise<Resolved> {
   // AAC in MP4, the codec Tarve's <audio> decodes; 256 kbps (141) when offered.
   const format = formats.find(f => f.itag === 141) ?? formats.find(f => f.itag === 140) ?? formats.sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
   if (!format) throw new Error("no AAC audio for this song");
+  await servesWholeFile(format.url, Number(format.contentLength), client.name);
   const expire = Number(new URL(format.url).searchParams.get("expire"));
-  return { url: format.url, expires: Number.isFinite(expire) && expire > 0 ? expire * 1000 : Date.now() + 3_600_000 };
+  const lifetime = Number.isFinite(expire) && expire > 0 ? expire * 1000 - Date.now() : 3_600_000;
+  return { url: format.url, usableUntil: performance.now() + lifetime - Math.min(EXPIRY_MARGIN, lifetime / 10) };
+}
+
+/**
+ * Asks for the file's last byte. A URL gated to a preview opens and plays, then
+ * answers 403 once playback passes the first minute; this catches it before.
+ */
+export async function servesWholeFile(url: string, length: number, client = "player"): Promise<void> {
+  if (!Number.isFinite(length) || length <= 0) return;
+  const response = await fetch(url, { headers: { range: `bytes=${length - 1}-` }, signal: AbortSignal.timeout(8000) });
+  await response.body?.cancel();
+  if (response.status !== 206) throw new Error(`the ${client} stream serves only part of this song (HTTP ${response.status})`);
 }

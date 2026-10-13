@@ -1,4 +1,5 @@
-import { Column, darkTheme, DropdownMenu, Image, Input, memo, Modal, Path, Pressable, Row, Scroll, Slider, Svg, Text, Theme, TitleBar, Tooltip, View, VirtualList, Window, type Child, type MediaController } from "@tarve/core";
+import { Column, darkTheme, DropdownMenu, Image, Input, memo, Modal, Path, Pressable, Row, Scroll, Slider, Svg, Text, Theme, TitleBar, Tooltip, View, VirtualList, Window, type Child, type MediaController, type ScrollInfo } from "@tarve/core";
+import { lineAt, type Lyrics } from "./youtube-music-lyrics";
 import type { Collection, Item, Shelf, Song } from "./youtube-music-source";
 
 export const AUDIO_ID = "ytm-audio";
@@ -41,6 +42,10 @@ export const state = {
   muted: false,
   shuffle: false,
   repeat: "off" as Repeat,
+  /** Lyrics of the song playing, loaded while the now-playing page is open. */
+  lyrics: null as { id: string; status: "loading" | "ready" | "none" | "error"; data?: Lyrics; error?: string } | null,
+  /** Scroll offset of the synced lyrics. */
+  lyricsOffset: 0,
   
   accountOpen: false,
   /** Size of the now-playing area, so the artwork fits it. */
@@ -61,6 +66,10 @@ export const state = {
   mediaFailed: (_message: string) => { },
   /** A song started playing: resets the skip-unplayable counter. */
   played: () => { },
+  /** The lyrics list was scrolled: by the user, or by following the song. */
+  lyricsScrolled: (_offset: number, _info: ScrollInfo) => { },
+  /** Playback moved: the synced lyrics follow the line being sung. */
+  followLyrics: () => { },
   hide: () => { },
 };
 
@@ -370,30 +379,87 @@ function Scrolling({ id, children, onScroll, onSize }: { id: string; children: C
   );
 }
 
-/** The song playing, large: opened from the player bar. */
-function NowPlaying() {
+/** The song playing, large: opened from the player bar. Lyrics sit beside it when the window is wide. */
+function NowPlaying({ lyricLine }: { lyricLine: number }) {
   const song = state.queue[state.index];
   if (!song) return <Scrolling id="main-playing"><Message>Nothing playing. Pick a song to start.</Message></Scrolling>;
   // The artwork takes what the area leaves after the text below it, so a short
   // window shrinks it instead of pushing it over the title bar.
   const stage = state.stage;
-  const art = stage ? Math.max(96, Math.min(420, stage.width - 48, stage.height - 150)) : 320;
+  const side = lyricsShown();
+  const width = stage ? (side ? stage.width * 0.46 : stage.width) : 520;
+  const art = stage ? Math.max(96, Math.min(420, width - 48, stage.height - 150)) : 320;
+  const text = Math.min(520, Math.max(160, width - 48));
   return (
-    <Column id="main-playing" flex={1} align="center" justify="center" gap={18} style={{ minHeight: 0, minWidth: 0, padding: PAD, overflow: "hidden" }}
+    <Row id="main-playing" flex={1} align="stretch" gap={32} style={{ minHeight: 0, minWidth: 0, padding: PAD, overflow: "hidden" }}
       onSize={size => { if (size.width !== state.stage?.width || size.height !== state.stage?.height) state.stage = size; }}>
-      <Art url={song.thumbnail} size={Math.round(art)} radius={10} />
-      <Column gap={6} align="center" style={{ maxWidth: 520, minWidth: 0 }}>
-        <Text size={26} weight={800} style={{ ...ellipsis, maxWidth: 520 }}>{song.title}</Text>
-        <Text size={15} color={c.muted} style={{ ...ellipsis, maxWidth: 520 }}>{[song.artist, song.album].filter(Boolean).join(" • ")}</Text>
-        {state.source ? <Text size={12} color={c.muted} style={{ ...ellipsis, maxWidth: 520 }}>Playing from {state.source}</Text> : null}
+      <Column flex={1} align="center" justify="center" gap={18} style={{ minWidth: 0, minHeight: 0 }}>
+        <Art url={song.thumbnail} size={Math.round(art)} radius={10} />
+        <Column gap={6} align="center" style={{ maxWidth: text, minWidth: 0 }}>
+          <Text size={26} weight={800} style={{ ...ellipsis, maxWidth: text }}>{song.title}</Text>
+          <Text size={15} color={c.muted} style={{ ...ellipsis, maxWidth: text }}>{[song.artist, song.album].filter(Boolean).join(" • ")}</Text>
+          {state.source ? <Text size={12} color={c.muted} style={{ ...ellipsis, maxWidth: text }}>Playing from {state.source}</Text> : null}
+        </Column>
       </Column>
+      {side ? <LyricsPanel song={song} line={lyricLine} /> : null}
+    </Row>
+  );
+}
+
+export const LYRICS_LIST = "lyrics-synced";
+/** The now-playing page shows lyrics beside the artwork when it is at least this wide. */
+const LYRICS_MIN_WIDTH = 760;
+export const lyricsShown = () => state.page.kind === "playing" && (state.stage?.width ?? 0) >= LYRICS_MIN_WIDTH;
+
+/** Synced lyrics highlight the line being sung; a click on a line seeks to it. */
+function LyricsPanel({ song, line }: { song: Song; line: number }) {
+  const entry = state.lyrics?.id === song.id ? state.lyrics : null;
+  const note = (label: string) => <Column flex={1} justify="center" style={{ minWidth: 0 }}><Text size={15} color={c.muted}>{label}</Text></Column>;
+  if (!entry || entry.status === "loading") return note("Loading lyrics…");
+  if (entry.status === "none") return note("No lyrics for this song.");
+  if (entry.status === "error" || !entry.data) return note(`Lyrics unavailable: ${entry.error ?? "unknown error"}`);
+  const { lines, plain, source } = entry.data;
+  const credit = <Text size={11} color={c.muted} style={{ shrink: 0 }}>Lyrics from {source}</Text>;
+  if (!lines) {
+    return (
+      <Column flex={1} gap={10} style={{ minWidth: 0, minHeight: 0 }}>
+        <Scroll id="lyrics-plain" flex={1} style={{ minHeight: 0 }}>
+          <Column gap={4} style={{ padding: { right: 12 } }}>
+            {(plain ?? "").split(/\r?\n/).map((text, i) => text.trim()
+              ? <Text key={`p${i}`} size={17} color={c.text} style={{ lineHeight: 1.6 }}>{text}</Text>
+              : <View key={`p${i}`} style={{ height: 14 }} />)}
+          </Column>
+        </Scroll>
+        {credit}
+      </Column>
+    );
+  }
+  // Every line scrolls; the one being sung is kept in view until the user scrolls away.
+  return (
+    <Column flex={1} gap={10} style={{ minWidth: 0, minHeight: 0 }}>
+      <VirtualList id={LYRICS_LIST} items={lines} estimatedItemHeight={40} overscan={12} offset={state.lyricsOffset}
+        keyForItem={(_lyric, index) => index}
+        onScroll={(offset, _max, info) => state.lyricsScrolled(offset, info)}
+        renderItem={(lyric, at) => {
+          const current = at === line;
+          // A stanza break: a little air, or a note while the music plays through it.
+          if (!lyric.text && !current) return <View style={{ height: 16 }} />;
+          return (
+            <Pressable id={`lyric-${at}`} control={{ role: "button", label: `Go to “${lyric.text || "instrumental break"}”` }}
+              onClick={() => { state.media()?.seek(lyric.time); state.time = lyric.time; state.followLyrics(); state.refresh(); }}
+              style={{ padding: { top: 6, bottom: 6, right: 12 }, cursor: "pointer", opacity: at < line ? 0.45 : 1 }}>
+              <Text size={current ? 24 : 19} weight={current ? 800 : 600} color={current ? c.text : c.muted}>{lyric.text || "♪"}</Text>
+            </Pressable>
+          );
+        }} />
+      {credit}
     </Column>
   );
 }
 
-function Content() {
+function Content({ lyricLine }: { lyricLine: number }) {
   const page = state.page;
-  if (page.kind === "playing") return <NowPlaying />;
+  if (page.kind === "playing") return <NowPlaying lyricLine={lyricLine} />;
   if (state.pageError) return <Scrolling id="main-error"><Message>{state.pageError}</Message></Scrolling>;
   if (page.kind === "home") {
     if (!state.shelves) return <Scrolling id="main-home"><Message>Loading…</Message></Scrolling>;
@@ -427,10 +493,11 @@ function Content() {
 // Each region renders again only when what it shows changes: the clock ticking
 // four times a second re-renders the player bar, not the song list.
 const SidebarRegion = memo((_: { page: Page; library: Collection[] | null; signedIn: boolean; source: string; playing: boolean; current: string | undefined }) => <Sidebar />);
-const ContentRegion = memo((_: {
+const ContentRegion = memo((props: {
   page: Page; shelves: Shelf[] | null; results: Song[] | null; opened: unknown; library: Collection[] | null; signedIn: boolean;
-  pageError: string | null; listOffset: number; current: string | undefined; playing: boolean; source: string; stage: unknown
-}) => <Content />);
+  pageError: string | null; listOffset: number; current: string | undefined; playing: boolean; source: string; stage: unknown;
+  lyrics: unknown; lyricLine: number;
+}) => <Content lyricLine={props.lyricLine} />);
 const QueueRegion = memo((_: { queue: Song[]; index: number; source: string }) => <QueuePanel />);
 
 function QueueRow({ song, index, dim = false }: { song: Song; index: number; dim?: boolean }) {
@@ -567,14 +634,17 @@ function SignInDialog() {
 
 export function YouTubeMusicView() {
   const song = state.queue[state.index];
+  // Only the line index reaches the content region, so the clock ticking re-renders it once per line.
+  const synced = state.page.kind === "playing" && state.lyrics?.id === song?.id ? state.lyrics?.data?.lines : null;
+  const lyricLine = synced ? lineAt(synced, state.time) : -1;
   return (
     <Window onCloseRequest={event => { event.preventDefault(); state.hide(); }} title={state.playing && song ? `${song.title} • ${song.artist}` : "Music"} width={1320} height={820} minWidth={960} minHeight={580}
       position="center" theme={ytmTheme} style={{ background: c.window, foreground: c.text, fontFamily: "Inter", borderColor: c.border }}>
       <audio id={AUDIO_ID} src={state.path} autoPlay volume={state.volume} muted={state.muted} loop={state.repeat === "one"}
         onPlay={() => { state.playing = true; state.played(); }}
         onPause={() => { state.playing = false; }}
-        onTimeUpdate={info => { state.time = info.currentTime; }}
-        onSeeked={info => { state.time = info.currentTime; }}
+        onTimeUpdate={info => { state.time = info.currentTime; state.followLyrics(); }}
+        onSeeked={info => { state.time = info.currentTime; state.followLyrics(); }}
         onLoadedMetadata={info => {
           if (info.duration !== null) state.duration = info.duration;
           if (state.resumeAt > 0) { state.media()?.seek(state.resumeAt); state.time = state.resumeAt; state.resumeAt = 0; }
@@ -587,7 +657,8 @@ export function YouTubeMusicView() {
           <SidebarRegion page={state.page} library={state.library} signedIn={state.signedIn} source={state.source} playing={state.playing} current={song?.id} />
           <Column flex={1} style={{ minHeight: 0, minWidth: 0 }}>
             <ContentRegion page={state.page} shelves={state.shelves} results={state.results} opened={state.opened} library={state.library} signedIn={state.signedIn}
-              pageError={state.pageError} listOffset={state.listOffset} current={song?.id} playing={state.playing} source={state.source} stage={state.stage} />
+              pageError={state.pageError} listOffset={state.listOffset} current={song?.id} playing={state.playing} source={state.source} stage={state.stage}
+              lyrics={state.lyrics} lyricLine={lyricLine} />
           </Column>
           {state.showQueue ? <QueueRegion queue={state.queue} index={state.index} source={state.source} /> : null}
         </Row>

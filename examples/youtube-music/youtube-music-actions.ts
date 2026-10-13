@@ -1,8 +1,9 @@
 // Connects the YouTube Music view to the data source, the sign-in window and the app.
 import type { createApp } from "@tarve/core";
 import { signInWithBrowser } from "./youtube-music-login";
+import { lineAt, lyricsFor, type Lyrics } from "./youtube-music-lyrics";
 import * as source from "./youtube-music-source";
-import { AUDIO_ID, state, type Page } from "./youtube-music-view";
+import { AUDIO_ID, LYRICS_LIST, lyricsShown, state, type Page } from "./youtube-music-view";
 
 export function connect(app: ReturnType<typeof createApp>): void {
   // One system-media sync per burst of state changes; app.update() batches the render itself.
@@ -50,6 +51,58 @@ export function connect(app: ReturnType<typeof createApp>): void {
   const prefetch = (song: { id: string } | undefined) => { if (song) void source.streamUrl(song.id).catch(() => undefined); };
   source.warmUp();
 
+  // The synced lyrics follow the song, unless the user scrolled them in the last few seconds.
+  let followed = -2;
+  let userScrolledAt = -Infinity;
+  state.lyricsScrolled = (offset, info) => {
+    state.lyricsOffset = offset;
+    if (info.source === "user") userScrolledAt = performance.now();
+  };
+  state.followLyrics = () => {
+    const song = state.queue[state.index];
+    const lines = state.lyrics?.id === song?.id ? state.lyrics?.data?.lines : null;
+    // Hidden (another page, a narrow window): the first update once shown jumps to the line.
+    if (!lines || !lyricsShown()) { followed = -2; return; }
+    const line = lineAt(lines, state.time);
+    if (line === followed || performance.now() - userScrolledAt < 4000) return;
+    // A jump (first show, a seek) lands at once; the next line eases in.
+    const smooth = followed >= 0 && line === followed + 1;
+    followed = line;
+    app.scrollToItem(LYRICS_LIST, Math.max(0, line), -Math.round((state.stage?.height ?? 600) * 0.3), { smooth });
+  };
+
+  // Lyrics load for the song playing while the now-playing page is open. A song
+  // without lyrics is remembered; one whose lookup failed is tried again later.
+  const lyricsCache = new Map<string, Lyrics | null>();
+  const LYRICS_CACHED = 100;
+  let lyricsAbort: AbortController | null = null;
+  function loadLyrics(): void {
+    const song = state.queue[state.index];
+    if (!song || state.page.kind !== "playing") return;
+    if (state.lyrics?.id === song.id && state.lyrics.status !== "error") return;
+    state.lyricsOffset = 0;
+    followed = -2;
+    lyricsAbort?.abort();
+    if (lyricsCache.has(song.id)) {
+      const data = lyricsCache.get(song.id);
+      state.lyrics = data ? { id: song.id, status: "ready", data } : { id: song.id, status: "none" };
+      return;
+    }
+    const abort = lyricsAbort = new AbortController();
+    state.lyrics = { id: song.id, status: "loading" };
+    lyricsFor(song, abort.signal).then(data => {
+      lyricsCache.set(song.id, data);
+      while (lyricsCache.size > LYRICS_CACHED) lyricsCache.delete(lyricsCache.keys().next().value!);
+      if (abort.signal.aborted) return;
+      state.lyrics = data ? { id: song.id, status: "ready", data } : { id: song.id, status: "none" };
+      refresh();
+    }, error => {
+      if (abort.signal.aborted) return;
+      state.lyrics = { id: song.id, status: "error", error: message(error) };
+      refresh();
+    });
+  }
+
   let pageToken = 0;
   let pageAbort: AbortController | null = null;
   async function load<T>(token: number, task: Promise<T>, apply: (value: T) => void): Promise<void> {
@@ -86,7 +139,7 @@ export function connect(app: ReturnType<typeof createApp>): void {
         state.opened = opened;
         refresh();
       }, abort.signal), opened => { state.opened = opened; prefetch(opened.songs[0]); });
-    }
+    } else if (page.kind === "playing") loadLyrics();
     refresh();
   }
   state.open = page => {
@@ -177,6 +230,7 @@ export function connect(app: ReturnType<typeof createApp>): void {
       return;
     }
     loadedId = null;
+    loadLyrics();
     const token = ++playToken;
     state.path = undefined;
     state.playing = false;
