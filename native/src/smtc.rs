@@ -398,7 +398,7 @@ mod tests {
 
     #[test]
     fn app_ids_reject_shell_unsafe_characters() {
-        assert!(valid_app_id("Tarve.YouTubeMusic"));
+        assert!(valid_app_id("Company.Product.App"));
         assert!(!valid_app_id(""));
         assert!(!valid_app_id("Tarve Music"));
         assert!(!valid_app_id("Tarve\\Music"));

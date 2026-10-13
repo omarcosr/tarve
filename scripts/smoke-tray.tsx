@@ -41,12 +41,23 @@ if (process.platform === "win32") {
   const { dlopen, FFIType } = await import("bun:ffi");
   const user32 = dlopen("user32.dll", {
     FindWindowW: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+    FindWindowExW: { args: [FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.ptr], returns: FFIType.ptr },
+    GetWindowThreadProcessId: { args: [FFIType.ptr, FFIType.ptr], returns: FFIType.u32 },
     PostMessageW: { args: [FFIType.ptr, FFIType.u32, FFIType.u64, FFIType.i64], returns: FFIType.i32 },
     keybd_event: { args: [FFIType.u8, FFIType.u8, FFIType.u32, FFIType.u64], returns: FFIType.void },
   });
   const wide = (text: string) => Buffer.from(text + "\0", "utf16le");
   let hwnd = null as ReturnType<typeof user32.symbols.FindWindowW>;
-  await until("tray window", () => (hwnd = user32.symbols.FindWindowW(wide("TarveTrayWindow"), null)) !== null);
+  // This process's own tray window: another Tarve app in the tray has one too.
+  const ownTrayWindow = () => {
+    const pid = new Uint32Array(1);
+    for (let at = user32.symbols.FindWindowExW(null, null, wide("TarveTrayWindow"), null); at; at = user32.symbols.FindWindowExW(null, at, wide("TarveTrayWindow"), null)) {
+      user32.symbols.GetWindowThreadProcessId(at, pid);
+      if (pid[0] === process.pid) return at;
+    }
+    return null;
+  };
+  await until("tray window", () => (hwnd = ownTrayWindow()) !== null);
   const CALLBACK = 0x8000 + 0x7a1;
   const post = (message: number) => assert.ok(user32.symbols.PostMessageW(hwnd, CALLBACK, 0, message));
   post(0x0202);

@@ -8,14 +8,14 @@
 //! chunk arrives, the rest downloads behind it with HTTP range requests, and a
 //! seek fetches the chunk it lands in first.
 
-use rodio::mixer::Mixer;
+use rodio::mixer::{Mixer, MixerSource};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 /// HTMLMediaElement fires timeupdate every 15–250 ms; Tarve uses 250 ms.
@@ -30,16 +30,15 @@ mod remote {
 
     /// Download granularity: a seek waits for at most one chunk.
     pub(super) const CHUNK: usize = 256 * 1024;
-    /// Chunks one range request asks for.
-    const RUN: usize = 4;
-    /// Parallel range requests. Hosts pace each connection (YouTube's CDN to
-    /// ~1.5 MB/s), and an MP4 opens only after its fragment index is read from
-    /// across the file, so several connections bring the first sound sooner.
-    const CONNECTIONS: usize = 4;
+    /// Chunks one range request asks for (4 MB: a whole song in one or two).
+    const RUN: usize = 16;
+    /// How far ahead of the download (in chunks, 8 MB) a seek starts a new pass there.
+    const JUMP: usize = 2 * RUN;
     /// A read gives up after the network has delivered nothing for this long.
     const STALL: Duration = Duration::from_secs(30);
-    /// Consecutive failed requests before the stream reports an error.
-    const ATTEMPTS: u32 = 4;
+    /// Consecutive failed requests before the stream reports an error: with the
+    /// backoff below, about 15 s of retrying.
+    const ATTEMPTS: u32 = 5;
 
     use super::failure;
 
@@ -61,8 +60,6 @@ mod remote {
 
     struct State {
         chunks: Vec<Option<Arc<[u8]>>>,
-        /// Chunks a connection is already fetching.
-        claimed: Vec<bool>,
         /// The chunk the decoder is reading or waiting for.
         want: usize,
         error: Option<String>,
@@ -89,11 +86,24 @@ mod remote {
         /// Requests the first chunk, which also tells the size and whether the
         /// server serves ranges, then downloads the rest in the background.
         pub(super) fn open(url: &str) -> Result<Arc<Self>, String> {
-            let response = agent()
-                .get(url)
-                .header("Range", format!("bytes=0-{}", CHUNK - 1))
-                .call()
-                .map_err(|error| failure(url, error))?;
+            let mut attempt = 0;
+            let response = loop {
+                match agent()
+                    .get(url)
+                    .header("Range", format!("bytes=0-{}", CHUNK - 1))
+                    .call()
+                {
+                    Ok(response) => break response,
+                    Err(error) => {
+                        attempt += 1;
+                        // Fewer tries than mid-song: a refused start is often an expired URL.
+                        if attempt >= ATTEMPTS - 1 || !transient(&error) {
+                            return Err(failure(url, error));
+                        }
+                        std::thread::sleep(backoff(attempt));
+                    }
+                }
+            };
             let total = header(&response, "content-range")
                 .and_then(|range| range.rsplit('/').next()?.parse::<u64>().ok());
             let ranged = response.status().as_u16() == 206 && total.is_some();
@@ -117,7 +127,6 @@ mod remote {
                 mime,
                 state: Mutex::new(State {
                     chunks: vec![None; count],
-                    claimed: vec![false; count],
                     want: 0,
                     error: None,
                 }),
@@ -128,7 +137,7 @@ mod remote {
                 stream
                     .fill(&mut body, 0, 1)
                     .map_err(|error| failure(url, error))?;
-                for _ in 0..CONNECTIONS.min(count - 1) {
+                if count > 1 {
                     let downloader = Arc::downgrade(&stream);
                     std::thread::Builder::new()
                         .name("tarve-media-download".into())
@@ -170,63 +179,80 @@ mod remote {
             self.lock().error.clone()
         }
 
-        /// Reads chunks `from..to` off `body` in order. Stops early when the
-        /// decoder waits for a chunk no connection is fetching (a seek), so it is served next.
+        /// Reads chunks `from..to` off `body` in order.
         fn fill(&self, body: &mut impl Read, from: usize, to: usize) -> io::Result<()> {
             for index in from..to {
                 let mut chunk = vec![0; self.chunk_len(index)];
                 body.read_exact(&mut chunk)?;
-                let mut state = self.lock();
-                state.chunks[index] = Some(chunk.into());
-                let want = state.want;
-                // Nobody is fetching what the decoder waits for: drop this run for it.
-                let elsewhere = state.chunks[want].is_none() && !state.claimed[want];
-                drop(state);
+                self.lock().chunks[index] = Some(chunk.into());
                 self.ready.notify_all();
-                if elsewhere {
-                    break;
-                }
             }
             Ok(())
         }
 
-        /// Claims the next run to fetch: unclaimed missing chunks from the one
-        /// being read, then any.
-        fn claim_run(&self) -> Option<(usize, usize)> {
-            let mut state = self.lock();
-            let count = state.chunks.len();
-            let open = |state: &State, index: usize| {
-                state.chunks[index].is_none() && !state.claimed[index]
+        /// A stream of `count` chunks with the first one downloaded and the
+        /// decoder waiting at `want`, for testing which run comes next.
+        #[cfg(test)]
+        pub(super) fn next_run_for(count: usize, want: usize) -> Option<(usize, usize)> {
+            let stream = Self {
+                url: String::new(),
+                len: (count * CHUNK) as u64,
+                mime: None,
+                state: Mutex::new(State {
+                    chunks: (0..count)
+                        .map(|index| (index == 0).then(|| Arc::from(vec![0u8; CHUNK])))
+                        .collect(),
+                    want,
+                    error: None,
+                }),
+                ready: Condvar::new(),
             };
-            let start = (state.want..count)
-                .find(|&index| open(&state, index))
-                .or_else(|| (0..state.want).find(|&index| open(&state, index)))?;
+            stream.next_run()
+        }
+
+        /// The next run to fetch: from the first missing chunk, in file order; or
+        /// from where playback waits, when a seek lands far beyond the download
+        /// (a long podcast), and the gap after that. Files the size of a song are
+        /// read in one forward pass, which every range-capable server handles.
+        fn next_run(&self) -> Option<(usize, usize)> {
+            let state = self.lock();
+            let count = state.chunks.len();
+            let first = (0..count).find(|&index| state.chunks[index].is_none())?;
+            let want = state.want.min(count - 1);
+            let start = if state.chunks[want].is_none() && want > first + JUMP {
+                want
+            } else {
+                first
+            };
             let mut end = start + 1;
-            while end < count.min(start + RUN) && open(&state, end) {
+            while end < count.min(start + RUN) && state.chunks[end].is_none() {
                 end += 1;
             }
-            state.claimed[start..end].fill(true);
             Some((start, end))
         }
 
-        fn release(&self, start: usize, end: usize) {
-            self.lock().claimed[start..end].fill(false);
-        }
-
-        /// One connection's loop. It holds the stream weakly, so it stops once
-        /// every reader (and the track) is gone.
+        /// The download, one connection, start to end. Some media CDNs
+        /// refuse a second request to a file while one is in flight, or a range
+        /// behind what they already served, with 403; one forward pass is what every
+        /// server handles, and it is fast (a song in well under a second). A seek ahead
+        /// waits for the pass to get there. It holds the stream weakly, so it stops
+        /// once every reader (and the track) is gone.
         fn download(stream: &Weak<Self>) {
             let mut failures = 0;
             while let Some(stream) = stream.upgrade() {
-                let Some((start, end)) = stream.claim_run() else {
+                let Some((start, end)) = stream.next_run() else {
                     return;
                 };
                 let last = ((end * CHUNK) as u64).min(stream.len) - 1;
+                let mut lasting = false;
                 let result = agent()
                     .get(&stream.url)
                     .header("Range", format!("bytes={}-{last}", start * CHUNK))
                     .call()
-                    .map_err(|error| error.to_string())
+                    .map_err(|error| {
+                        lasting = !transient(&error);
+                        error.to_string()
+                    })
                     .and_then(|response| {
                         if response.status().as_u16() != 206 {
                             return Err(format!("range request answered {}", response.status()));
@@ -236,20 +262,35 @@ mod remote {
                             .fill(&mut body, start, end)
                             .map_err(|error| error.to_string())
                     });
-                stream.release(start, end);
                 match result {
                     Ok(()) => failures = 0,
                     Err(error) => {
+                        // A run cut short keeps the chunks it delivered; the next
+                        // request continues after them.
                         failures += 1;
-                        if failures >= ATTEMPTS {
+                        if failures >= ATTEMPTS || lasting {
                             stream.fail(failure(&stream.url, error));
                             return;
                         }
-                        std::thread::sleep(Duration::from_millis(250 << failures));
+                        std::thread::sleep(backoff(failures));
                     }
                 }
             }
         }
+    }
+
+    /// Worth retrying: the network, a busy or throttling server (a CDN's
+    /// rate-limit 403 often lifts after a second or two). A 404 or 410 will not change.
+    fn transient(error: &ureq::Error) -> bool {
+        match error {
+            ureq::Error::StatusCode(code) => matches!(code, 403 | 408 | 429) || *code >= 500,
+            _ => true,
+        }
+    }
+
+    /// 0.5 s, 1 s, 2 s, 4 s…: enough for a throttling server to let go.
+    fn backoff(attempt: u32) -> Duration {
+        Duration::from_millis(250 << attempt.min(6))
     }
 
     /// A seekable reader over a [`Stream`]; reads block until their chunk arrives.
@@ -293,10 +334,13 @@ mod remote {
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 state = next;
                 if wait.timed_out() && state.chunks[index].is_none() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "media stream stalled",
-                    ));
+                    // Recorded on the stream, so the track reports an error (the
+                    // page can reload it) instead of ending as if it were over.
+                    let message = super::failure(&self.stream.url, "the network stalled");
+                    state.error.get_or_insert(message.clone());
+                    drop(state);
+                    self.stream.ready.notify_all();
+                    return Err(io::Error::new(io::ErrorKind::TimedOut, message));
                 }
             }
         }
@@ -332,8 +376,18 @@ struct Rebuild {
     target: f64,
 }
 
+/// A seek the audio thread has yet to perform, and the one asked for meanwhile.
+struct PendingSeek {
+    done: mpsc::Receiver<Result<(), String>>,
+    next: Option<f64>,
+}
+
 struct Track {
-    player: Player,
+    /// Shared with the thread waiting for a seek: rodio performs a seek on the
+    /// audio thread and `try_seek` blocks until it has, so it never runs on the
+    /// event loop (a stalled or lost device would freeze the window).
+    player: Arc<Player>,
+    seeking: Option<PendingSeek>,
     src: String,
     origin: Origin,
     /// Remote MP4s start unseekable: a seekable one first reads every fragment
@@ -358,29 +412,76 @@ struct Pending {
     muted: bool,
 }
 
-/// Where sound goes: the default device, or (no device, or TARVE_AUDIO=silent)
+/// The mix format without a device; with one, the mix takes the first device's
+/// own format, so samples are converted once (later devices convert from it).
+const MIX_RATE: u32 = 48_000;
+const MIX_CHANNELS: u16 = 2;
+
+/// The app's own mix of every track. It outlives output streams: when the
+/// device changes, a new stream plays this same source on from where the old
+/// one stopped, so no track is reopened, reloaded or moved.
+#[derive(Clone)]
+struct Mix {
+    source: Arc<Mutex<MixerSource>>,
+    channels: rodio::ChannelCount,
+    rate: rodio::SampleRate,
+}
+
+impl Mix {
+    fn new(channels: rodio::ChannelCount, rate: rodio::SampleRate) -> (Mixer, Self) {
+        let (mixer, source) = rodio::mixer::mixer(channels, rate);
+        (
+            mixer,
+            Self {
+                source: Arc::new(Mutex::new(source)),
+                channels,
+                rate,
+            },
+        )
+    }
+}
+
+impl Iterator for Mix {
+    type Item = rodio::Sample;
+    fn next(&mut self) -> Option<Self::Item> {
+        // Never ends: rodio's mixer source ends once its last track is gone
+        // (between two songs), and a device sink drops a source that ended,
+        // which left every later track playing to nothing at 0:00.
+        Some(
+            self.source
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .next()
+                .unwrap_or(0.0),
+        )
+    }
+}
+
+impl Source for Mix {
+    fn current_span_len(&self) -> Option<usize> {
+        None
+    }
+    fn channels(&self) -> rodio::ChannelCount {
+        self.channels
+    }
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.rate
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        None
+    }
+}
+
+/// Where the mix goes: the default device, or (no device, or TARVE_AUDIO=silent)
 /// a clock that consumes samples in real time, as a browser plays muted media
 /// when no output exists, so playback, time and ended still behave.
 enum Output {
-    Device(MixerDeviceSink),
-    Silent(Mixer, Arc<AtomicBool>),
+    Device(#[allow(dead_code)] MixerDeviceSink),
+    Silent(Arc<AtomicBool>),
 }
 
 impl Output {
-    fn mixer(&self) -> &Mixer {
-        match self {
-            Self::Device(sink) => sink.mixer(),
-            Self::Silent(mixer, _) => mixer,
-        }
-    }
-
-    fn silent() -> Self {
-        const RATE: u32 = 48_000;
-        const CHANNELS: u16 = 2;
-        let (mixer, mut source) = rodio::mixer::mixer(
-            std::num::NonZero::new(CHANNELS).unwrap(),
-            std::num::NonZero::new(RATE).unwrap(),
-        );
+    fn silent(mut mix: Mix) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let stopped = stop.clone();
         let _ = std::thread::Builder::new()
@@ -390,30 +491,56 @@ impl Output {
                 let mut consumed: u64 = 0;
                 while !stopped.load(Ordering::Relaxed) {
                     let due = (started.elapsed().as_secs_f64()
-                        * f64::from(RATE)
-                        * f64::from(CHANNELS)) as u64;
+                        * f64::from(mix.rate.get())
+                        * f64::from(mix.channels.get())) as u64;
                     while consumed < due {
-                        let _ = source.next();
+                        let _ = mix.next();
                         consumed += 1;
                     }
                     std::thread::sleep(Duration::from_millis(10));
                 }
             });
-        Self::Silent(mixer, stop)
+        Self::Silent(stop)
     }
 }
 
 impl Drop for Output {
     fn drop(&mut self) {
-        if let Self::Silent(_, stop) = self {
+        if let Self::Silent(stop) = self {
             stop.store(true, Ordering::Relaxed);
         }
     }
 }
 
+/** How often the default output device is compared with the one in use while playing. */
+const DEVICE_CHECK: Duration = Duration::from_secs(2);
+
+/// The default output device's id, to follow it when the user switches outputs.
+fn default_output_id() -> Option<String> {
+    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    rodio::cpal::default_host()
+        .default_output_device()?
+        .id()
+        .ok()
+        .map(|id| id.to_string())
+}
+
 #[derive(Default)]
 pub struct Media {
+    mix: Option<(Mixer, Mix)>,
     sink: Option<Output>,
+    /// Set by the output stream's error callback: the device went away (unplugged,
+    /// sleep, a driver restart) and nothing plays until a new stream is opened.
+    output_lost: Arc<AtomicBool>,
+    /// The device the open stream plays to, and when to compare it with the default again.
+    device_id: Option<String>,
+    next_device_check: Option<Instant>,
+    /// Never open a device (tests): reopening the output gives a silent one again.
+    #[cfg(test)]
+    silent: bool,
+    /// Nothing consumes the mix (tests): what a stalled or lost device looks like.
+    #[cfg(test)]
+    unconsumed: bool,
     tracks: HashMap<String, Track>,
     pending: HashMap<String, Pending>,
     next_update: Option<Instant>,
@@ -504,6 +631,41 @@ fn open_remote(src: &str) -> Loaded {
     Ok((sound, duration, stream))
 }
 
+/// Gives the track a new player with `sound`, paused, at its volume. The old
+/// player is dropped, which stops its sound; `Player::clear` would instead
+/// block until the audio thread acknowledges, freezing the event loop while
+/// the output is stalled.
+fn replace_player(track: &mut Track, mixer: &Mixer, sound: Sound) {
+    let player = Arc::new(Player::connect_new(mixer));
+    player.pause();
+    player.append(sound);
+    track.player = player;
+    track.seeking = None;
+    Media::apply_volume(track);
+}
+
+/// Asks the audio thread to seek, from a helper thread that waits for it; a
+/// seek asked for while one is in flight runs after it (the last one wins).
+fn begin_seek(track: &mut Track, target: f64) -> Result<(), String> {
+    if let Some(seek) = &mut track.seeking {
+        seek.next = Some(target);
+        return Ok(());
+    }
+    let (sender, done) = mpsc::channel();
+    let player = track.player.clone();
+    std::thread::Builder::new()
+        .name("tarve-media-seek".into())
+        .spawn(move || {
+            let result = player
+                .try_seek(Duration::from_secs_f64(target))
+                .map_err(|error| format!("seek: {error}"));
+            let _ = sender.send(result);
+        })
+        .map_err(|error| error.to_string())?;
+    track.seeking = Some(PendingSeek { done, next: None });
+    Ok(())
+}
+
 /// The track's sound from the start again, for loop and replay after ended.
 fn reopen(track: &mut Track) -> Result<Sound, String> {
     match &track.origin {
@@ -517,24 +679,64 @@ fn reopen(track: &mut Track) -> Result<Sound, String> {
 }
 
 impl Media {
-    fn mixer(&mut self) -> Result<&Output, String> {
+    /// The app's mixer, with an output stream playing it.
+    fn mixer(&mut self) -> Result<Mixer, String> {
         if self.sink.is_none() {
-            let silent = std::env::var_os("TARVE_AUDIO").is_some_and(|value| value == "silent");
+            #[cfg(test)]
+            let forced = self.silent;
+            #[cfg(not(test))]
+            let forced = false;
+            let silent =
+                forced || std::env::var_os("TARVE_AUDIO").is_some_and(|value| value == "silent");
+            self.output_lost.store(false, Ordering::Relaxed);
+            let lost = self.output_lost.clone();
             let device = if silent {
                 None
             } else {
-                DeviceSinkBuilder::open_default_sink().ok()
+                DeviceSinkBuilder::from_default_device()
+                    .ok()
+                    .and_then(|builder| {
+                        builder
+                            .with_error_callback(move |error| {
+                                // Glitches are not a lost device; anything else needs a new stream.
+                                if !matches!(error, rodio::cpal::StreamError::BufferUnderrun) {
+                                    lost.store(true, Ordering::Relaxed);
+                                }
+                            })
+                            .open_sink_or_fallback()
+                            .ok()
+                    })
             };
+            self.device_id = if device.is_some() {
+                default_output_id()
+            } else {
+                None
+            };
+            let (channels, rate) = device.as_ref().map_or(
+                (
+                    std::num::NonZero::new(MIX_CHANNELS).unwrap(),
+                    std::num::NonZero::new(MIX_RATE).unwrap(),
+                ),
+                |sink| (sink.config().channel_count(), sink.config().sample_rate()),
+            );
+            let mix = self
+                .mix
+                .get_or_insert_with(|| Mix::new(channels, rate))
+                .1
+                .clone();
             let output = match device {
                 Some(mut sink) => {
                     sink.log_on_drop(false);
+                    sink.mixer().add(mix);
                     Output::Device(sink)
                 }
-                None => Output::silent(),
+                #[cfg(test)]
+                None if self.unconsumed => Output::Silent(Arc::new(AtomicBool::new(true))),
+                None => Output::silent(mix),
             };
             self.sink = Some(output);
         }
-        Ok(self.sink.as_ref().unwrap())
+        Ok(self.mix.as_ref().unwrap().0.clone())
     }
 
     fn apply_volume(track: &Track) {
@@ -553,9 +755,9 @@ impl Media {
         volume: f32,
         muted: bool,
     ) -> Result<(), String> {
-        let mixer = self.mixer()?.mixer().clone();
+        let mixer = self.mixer()?;
         let (sound, duration, origin) = loaded;
-        let player = Player::connect_new(&mixer);
+        let player = Arc::new(Player::connect_new(&mixer));
         player.pause();
         player.append(sound);
         let seekable = matches!(origin, Origin::File);
@@ -565,6 +767,7 @@ impl Media {
             origin,
             seekable,
             rebuild: None,
+            seeking: None,
             duration,
             looped,
             volume,
@@ -669,6 +872,7 @@ impl Media {
                     pending.muted = muted.unwrap_or(pending.muted);
                     return vec![];
                 }
+                let mixer = self.mix.as_ref().map(|(mixer, _)| mixer.clone());
                 let Some(track) = self.tracks.get_mut(id) else {
                     return vec![];
                 };
@@ -687,8 +891,9 @@ impl Media {
                         if track.ended {
                             match reopen(track) {
                                 Ok(sound) => {
-                                    track.player.clear();
-                                    track.player.append(sound);
+                                    if let Some(mixer) = &mixer {
+                                        replace_player(track, mixer, sound);
+                                    }
                                     track.ended = false;
                                 }
                                 Err(message) => return vec![error(id, message)],
@@ -733,13 +938,10 @@ impl Media {
                         }
                     }
                     "seek" => {
-                        let target = Duration::from_secs_f64(time.unwrap_or(0.0).max(0.0));
-                        match track.player.try_seek(target) {
-                            Ok(()) => {
-                                track.ended = false;
-                                vec![event(id, "seeked", self.tracks.get(id))]
-                            }
-                            Err(message) => vec![error(id, format!("seek: {message}"))],
+                        track.ended = false;
+                        match begin_seek(track, time.unwrap_or(0.0).max(0.0)) {
+                            Ok(()) => vec![],
+                            Err(message) => vec![error(id, message)],
                         }
                     }
                     _ => vec![],
@@ -751,7 +953,12 @@ impl Media {
     /// When the next timeupdate is due, if any track is playing, or the next
     /// check on a remote load still connecting.
     pub fn deadline(&self) -> Option<Instant> {
-        if self.pending.is_empty() && self.tracks.values().all(|track| track.rebuild.is_none()) {
+        if self.pending.is_empty()
+            && self
+                .tracks
+                .values()
+                .all(|track| track.rebuild.is_none() && track.seeking.is_none())
+        {
             return self.next_update;
         }
         let poll = Instant::now() + LOAD_POLL;
@@ -801,6 +1008,7 @@ impl Media {
     /// that asked for them, keeping play or pause as it was.
     fn finish_rebuilds(&mut self) -> Vec<Value> {
         let mut events = vec![];
+        let mixer = self.mix.as_ref().map(|(mixer, _)| mixer.clone());
         for (id, track) in &mut self.tracks {
             let Some(rebuild) = &track.rebuild else {
                 continue;
@@ -820,13 +1028,14 @@ impl Media {
                 }
             };
             let playing = !track.player.is_paused() && !track.ended;
-            track.player.clear();
-            track.player.append(sound);
+            let Some(mixer) = &mixer else {
+                continue;
+            };
+            replace_player(track, mixer, sound);
             track.seekable = true;
             track.ended = false;
-            match track.player.try_seek(Duration::from_secs_f64(target)) {
-                Ok(()) => events.push(event(id, "seeked", Some(track))),
-                Err(message) => events.push(error(id, format!("seek: {message}"))),
+            if let Err(message) = begin_seek(track, target) {
+                events.push(error(id, message));
             }
             if playing {
                 track.player.play();
@@ -835,9 +1044,73 @@ impl Media {
         events
     }
 
+    /// Reports seeks the audio thread performed, starting the one asked for meanwhile.
+    fn finish_seeks(&mut self) -> Vec<Value> {
+        let mut events = vec![];
+        for (id, track) in &mut self.tracks {
+            let Some(seek) = &track.seeking else {
+                continue;
+            };
+            let result = match seek.done.try_recv() {
+                Ok(result) => result,
+                Err(mpsc::TryRecvError::Empty) => continue,
+                Err(mpsc::TryRecvError::Disconnected) => Err("seek: stopped".to_string()),
+            };
+            let next = track.seeking.take().and_then(|seek| seek.next);
+            if let Some(target) = next {
+                if let Err(message) = begin_seek(track, target) {
+                    events.push(error(id, message));
+                }
+                continue;
+            }
+            match result {
+                Ok(()) => events.push(event(id, "seeked", Some(track))),
+                Err(message) => events.push(error(id, message)),
+            }
+        }
+        events
+    }
+
+    /// Whether the output must be reopened: its device failed, or the default
+    /// output changed (headphones plugged in), which a browser follows too.
+    fn output_stale(&mut self, now: Instant) -> bool {
+        if self.sink.is_none() {
+            return false;
+        }
+        if self.output_lost.load(Ordering::Relaxed) {
+            return true;
+        }
+        let playing = self
+            .tracks
+            .values()
+            .any(|track| !track.player.is_paused() && !track.ended);
+        if !playing || self.device_id.is_none() || self.next_device_check.is_some_and(|at| at > now)
+        {
+            return false;
+        }
+        self.next_device_check = Some(now + DEVICE_CHECK);
+        default_output_id().is_some_and(|id| Some(&id) != self.device_id.as_ref())
+    }
+
+    /// Opens a new output stream on the current default device. The old one is
+    /// closed first, so the mix has one listener and every track goes on from
+    /// the sample it was at.
+    fn reopen_output(&mut self) -> Vec<Value> {
+        self.sink = None;
+        match self.mixer() {
+            Ok(_) => vec![],
+            Err(message) => vec![error("", message)],
+        }
+    }
+
     /// timeupdate for playing tracks, and ended (or a restart, with loop).
     pub fn tick(&mut self, now: Instant) -> Vec<Value> {
-        let mut events = self.finish_loads();
+        let mut events = vec![];
+        if self.output_stale(now) {
+            events.extend(self.reopen_output());
+        }
+        events.extend(self.finish_loads());
+        events.extend(self.finish_seeks());
         events.extend(self.finish_rebuilds());
         if self.next_update.is_none_or(|due| due > now) {
             return events;
@@ -888,7 +1161,7 @@ impl Media {
 #[cfg(test)]
 mod tests {
     use super::remote::{CHUNK, Reader, Stream};
-    use super::{Media, Output, decode, open_remote};
+    use super::{Media, decode, open_remote};
     use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
     use std::net::TcpListener;
     use std::sync::Arc;
@@ -914,6 +1187,156 @@ mod tests {
             out.extend_from_slice(&(((i * 37) % 2000) as i16 - 1000).to_le_bytes());
         }
         out
+    }
+
+    /// Like `serve`, but answers 403 to a request while another one is in flight,
+    /// as some media CDNs do. Returns the URL and how many requests were refused.
+    fn serve_one_at_a_time(body: Vec<u8>) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let body = Arc::new(body);
+        let busy = Arc::new(AtomicUsize::new(0));
+        let refused = Arc::new(AtomicUsize::new(0));
+        let refused_out = refused.clone();
+        std::thread::spawn(move || {
+            for connection in listener.incoming() {
+                let Ok(mut connection) = connection else {
+                    continue;
+                };
+                let (body, busy, refused) = (body.clone(), busy.clone(), refused.clone());
+                std::thread::spawn(move || {
+                    let mut reader = BufReader::new(connection.try_clone().unwrap());
+                    loop {
+                        let mut range = None;
+                        loop {
+                            let mut line = String::new();
+                            if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                                return;
+                            }
+                            if line == "\r\n" {
+                                break;
+                            }
+                            if let Some(value) =
+                                line.to_ascii_lowercase().strip_prefix("range: bytes=")
+                            {
+                                let (start, end) = value.trim().split_once('-').unwrap();
+                                let start: usize = start.parse().unwrap();
+                                let end = end
+                                    .parse::<usize>()
+                                    .map_or(body.len() - 1, |end| end.min(body.len() - 1));
+                                range = Some((start, end));
+                            }
+                        }
+                        if busy.fetch_add(1, Ordering::SeqCst) > 0 {
+                            busy.fetch_sub(1, Ordering::SeqCst);
+                            refused.fetch_add(1, Ordering::SeqCst);
+                            let _ = connection
+                                .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n");
+                            continue;
+                        }
+                        let (start, end) = range.unwrap_or((0, body.len() - 1));
+                        let head = format!(
+                            "HTTP/1.1 206 Partial Content\r\nContent-Type: audio/wav\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{end}/{}\r\n\r\n",
+                            end + 1 - start,
+                            body.len()
+                        );
+                        let _ = connection.write_all(head.as_bytes());
+                        // Slow enough that the other connections arrive meanwhile.
+                        for piece in body[start..=end].chunks(64 * 1024) {
+                            let _ = connection.write_all(piece);
+                            std::thread::sleep(Duration::from_millis(2));
+                        }
+                        busy.fetch_sub(1, Ordering::SeqCst);
+                    }
+                });
+            }
+        });
+        (format!("http://{address}/song.wav"), refused_out)
+    }
+
+    #[test]
+    fn media_commands_never_wait_for_the_audio_thread() {
+        // A stalled or lost device stops pulling the mix; rodio's seek and clear
+        // wait for the audio thread, which froze the window. Nothing pulls here.
+        let mut media = Media {
+            silent: true,
+            unconsumed: true,
+            ..Default::default()
+        };
+        let url = serve(wav(40), true);
+        media.command("a", "load", Some(&url), None, None, None, None);
+        let started = Instant::now();
+        while !media.tracks.contains_key("a") && started.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(10));
+            media.tick(Instant::now());
+        }
+        assert!(media.tracks.contains_key("a"), "the track loaded");
+        let started = Instant::now();
+        media.command("a", "play", None, None, None, None, None);
+        media.command("a", "seek", None, Some(10.0), None, None, None);
+        media.command("a", "seek", None, Some(20.0), None, None, None);
+        for _ in 0..20 {
+            media.tick(Instant::now() + Duration::from_secs(1));
+        }
+        // Replay after ended swaps in a new player instead of clearing the old one.
+        media.tracks.get_mut("a").unwrap().ended = true;
+        media.command("a", "play", None, None, None, None, None);
+        media.command("a", "unload", None, None, None, None, None);
+        assert!(
+            started.elapsed() < Duration::from_millis(500),
+            "took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn the_mix_never_ends_between_tracks() {
+        // A device sink drops a source that ends; between two songs the mix has
+        // no track, and that must not end it.
+        let (mixer, mut mix) = super::Mix::new(
+            std::num::NonZero::new(2).unwrap(),
+            std::num::NonZero::new(48_000).unwrap(),
+        );
+        for _ in 0..1000 {
+            assert_eq!(mix.next(), Some(0.0), "silence with no track");
+        }
+        mixer.add(rodio::Source::take_duration(
+            rodio::source::SineWave::new(440.0),
+            Duration::from_millis(10),
+        ));
+        let heard = (0..48_000)
+            .filter_map(|_| mix.next())
+            .filter(|sample| *sample != 0.0)
+            .count();
+        assert!(heard > 0, "a track added later is heard");
+        assert!(
+            (0..1000).all(|_| mix.next().is_some()),
+            "and the mix goes on after it ended"
+        );
+    }
+
+    #[test]
+    fn the_download_goes_forward_and_jumps_only_for_a_far_seek() {
+        // A song-sized seek waits for the forward pass…
+        assert_eq!(Stream::next_run_for(100, 20), Some((1, 17)));
+        // …a seek far beyond it (a long podcast) starts a pass where playback waits.
+        assert_eq!(Stream::next_run_for(100, 60), Some((60, 76)));
+        assert_eq!(Stream::next_run_for(100, 99), Some((99, 100)));
+    }
+
+    #[test]
+    fn a_host_that_allows_one_connection_streams_the_whole_file() {
+        let data = wav(80);
+        assert!(data.len() > 4 * CHUNK);
+        // A request racing the end of the previous response may still be refused
+        // (403); the download retries it, and every byte arrives.
+        let (url, _refused) = serve_one_at_a_time(data.clone());
+        let stream = Stream::open(&url).unwrap();
+        let mut all = vec![];
+        Reader::new(stream.clone()).read_to_end(&mut all).unwrap();
+        assert!(all == data, "every byte arrives over the one connection");
+        assert!(stream.error().is_none(), "{:?}", stream.error());
     }
 
     /// Serves `body` over HTTP; with `ranges`, honours Range like a CDN.
@@ -968,12 +1391,12 @@ mod tests {
     #[test]
     fn a_read_failure_names_its_reason_not_rodios_generic_text() {
         let error = super::decoder_failure(
-            "https://rr1.googlevideo.com/videoplayback?sig=x",
+            "https://cdn.example.com/audio?sig=x",
             rodio::decoder::DecoderError::IoError("range request answered 403 Forbidden".into()),
         );
         assert_eq!(
             error,
-            "range request answered 403 Forbidden (rr1.googlevideo.com)"
+            "range request answered 403 Forbidden (cdn.example.com)"
         );
     }
 
@@ -1042,9 +1465,58 @@ mod tests {
     /// Drives a Media through load, play and a seek past what an unseekable
     /// stream can do, as the event loop would.
     #[test]
+    fn a_lost_output_device_plays_on_from_the_same_sample_on_a_new_stream() {
+        let mut media = Media {
+            silent: true,
+            ..Default::default()
+        };
+        let url = serve(wav(40), true);
+        media.command("a", "load", Some(&url), None, None, None, None);
+        media.command("a", "play", None, None, None, None, None);
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(20));
+            media.tick(Instant::now() + Duration::from_secs(1));
+            if media
+                .tracks
+                .get("a")
+                .is_some_and(|track| track.player.get_pos() > Duration::from_millis(400))
+            {
+                break;
+            }
+        }
+        let before = media.tracks["a"].player.get_pos().as_secs_f64();
+        assert!(before > 0.3, "it played on the first stream: {before}");
+        // What the stream's error callback does when the device goes away.
+        media
+            .output_lost
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let events = media.tick(Instant::now() + Duration::from_secs(1));
+        assert!(
+            events
+                .iter()
+                .all(|event| event["event"] != "error" && event["event"] != "seeked"),
+            "the track is neither reloaded nor sought: {events:?}"
+        );
+        assert!(!media.output_lost.load(std::sync::atomic::Ordering::Relaxed));
+        let after = media.tracks["a"].player.get_pos().as_secs_f64();
+        assert!(
+            after >= before,
+            "it did not restart: {after} after {before}"
+        );
+        std::thread::sleep(Duration::from_millis(300));
+        media.tick(Instant::now() + Duration::from_secs(1));
+        assert!(!media.tracks["a"].player.is_paused(), "still playing");
+        assert!(
+            media.tracks["a"].player.get_pos().as_secs_f64() > after + 0.1,
+            "and moving on the new stream"
+        );
+    }
+
+    #[test]
     fn a_remote_track_plays_and_seeks() {
         let mut media = Media {
-            sink: Some(Output::silent()),
+            silent: true,
             ..Default::default()
         };
         let url = serve(wav(40), true);

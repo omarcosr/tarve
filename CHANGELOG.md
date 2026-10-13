@@ -4,6 +4,15 @@ All notable changes to `@tarve/core`, `@tarve/react-icons` and `@tarve/headless`
 
 ## Unreleased
 
+### Fixed
+- `<audio src="https://…">` from googlevideo (YouTube) failed on many songs: the CDN answers 403 to a second request to a file while one is in flight, and to a range behind what it already served, and the stream used four parallel connections plus jumps for seeks. A remote file now downloads in one forward pass (4 MB ranges, one connection; a seek more than 8 MB ahead, as in a long podcast, starts a pass there), retrying 403, 429, 5xx and network errors with backoff (not 404). A 40-song soak went from 32 errors to none, in a third of the time; first sound ~0.6 s.
+- `<audio>` follows the output device: when it goes away (unplugged, sleep, a driver restart) or the default output changes, a new output stream plays on from the same sample. Tracks are mixed (in the first device's own format, so samples are converted once) into one mix that outlives output streams, so nothing is reopened, reloaded or sought (a switch used to restart the song, and failing to seek could skip it).
+- `<audio>` never blocks the window on the audio thread: rodio's `try_seek` and `clear` wait for the audio thread to acknowledge, so a stalled network read or a lost device froze the whole app on the next seek or song change. Seeks now run on a helper thread (`seeked` fires once done) and a replay swaps in a new player.
+- A remote `<audio>` whose network stalls for 30 s reports an error (the page can reload it) instead of ending as if the track were over.
+
+### Performance
+- A window hidden with `app.hide()` (close to tray) drops its GPU device, swap chain and textures, stops animation ticks and layout, and trims its working set; `app.show()` builds them again and paints before the window appears. Measured on Windows with an animated window: GPU memory 29 MB → 0, CPU 3–10% → 0, threads 48 → 25, working set 39 → 20 MB; showing again takes ~80–130 ms. Minimized windows also stop animation ticks. `capture()` of a hidden window still works: it builds a renderer for that frame and gives it back.
+
 ## 0.5.0 — 2026-10-12
 
 ### Performance

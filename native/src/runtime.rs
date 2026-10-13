@@ -695,6 +695,7 @@ pub fn run(
         ..document.root.clone()
     });
     let mut app = App {
+        parked: false,
         document,
         events,
         tree,
@@ -736,6 +737,9 @@ pub fn run(
 }
 
 struct App {
+    /// Hidden by the app (`app.hide()`, close-to-tray): no GPU device, no
+    /// frames, no motion ticks until it is shown again.
+    parked: bool,
     /// Frames were painted since free memory was last released.
     memory_dirty: std::cell::Cell<bool>,
     trim_at: std::cell::Cell<Option<Instant>>,
@@ -1209,6 +1213,10 @@ impl App {
     /// so its layout, and the `size` and virtual-list events layout sends,
     /// would wait for the next capture. Lay it out as soon as the tree changes.
     fn layout_hidden_window(&mut self) {
+        // A parked window is laid out once it is shown again.
+        if self.parked {
+            return;
+        }
         let Some(window) = self.window.as_ref() else {
             return;
         };
@@ -1254,12 +1262,106 @@ impl App {
         self.tree.advance_clock(now_ms);
     }
     fn motion_deadline(&self, now: Instant) -> Option<Instant> {
-        if self.motion_test_clock {
+        // Like a hidden browser tab: nothing on screen, no animation frames.
+        // Motion is clock-based, so it is where it should be once shown.
+        if self.motion_test_clock || self.parked || self.minimized() {
             return None;
         }
         let next_ms = self.tree.next_clock_tick_ms()?;
         let delta_ms = (next_ms - self.tree.motion_time_ms()).max(0.0);
         Some(now + Duration::from_secs_f64(delta_ms / 1000.0))
+    }
+    fn minimized(&self) -> bool {
+        self.window.as_ref().is_some_and(|window| {
+            let size = window.inner_size();
+            size.width == 0 || size.height == 0
+        })
+    }
+    /// Hides the window and gives its GPU device, swap chain and textures back,
+    /// with the working set: an app in the tray costs memory and CPU for its
+    /// state only. `unpark` builds them again from the retained tree.
+    fn park(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(window) = &self.window {
+            window.set_visible(false);
+        }
+        if self.parked {
+            return;
+        }
+        self.parked = true;
+        self.release_graphics();
+        self.trim_at.set(None);
+        crate::release_free_memory();
+        crate::trim_working_set();
+        self.memory_dirty.set(false);
+        self.last_memory_release.set(Instant::now());
+        self.sync_control_flow(event_loop);
+    }
+    /// Gives the GPU device, swap chain, textures and scene back.
+    fn release_graphics(&mut self) {
+        let state = std::mem::replace(&mut self.graphics, GraphicsState::Fatal);
+        self.graphics = match state {
+            GraphicsState::Ready(graphics) => {
+                GraphicsState::Suspended(GraphicsCheckpoint::from_graphics(&graphics))
+            }
+            GraphicsState::Recovering(recovery) => GraphicsState::Suspended(recovery.checkpoint),
+            other => other,
+        };
+        self.scene = vello::Scene::new();
+        self.presentation_retry_at = None;
+    }
+    /// Builds a released renderer again for the same window and backend.
+    fn restore_graphics(&mut self) {
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+        if let GraphicsState::Suspended(checkpoint) =
+            std::mem::replace(&mut self.graphics, GraphicsState::Fatal)
+        {
+            let result = match checkpoint.backend {
+                Some(backend) => Graphics::recover(window, backend, self.document.renderer),
+                None => Graphics::new(window, self.document.renderer),
+            };
+            self.graphics = match result {
+                Ok(mut graphics) => {
+                    graphics.restore_counters(
+                        checkpoint.frames,
+                        checkpoint.generation.saturating_add(1).max(1),
+                    );
+                    GraphicsState::Ready(Box::new(graphics))
+                }
+                Err(error) => GraphicsState::Recovering(GraphicsRecovery {
+                    checkpoint,
+                    attempts: 1,
+                    next_attempt: Instant::now() + graphics_recovery_delay(1),
+                    cause: "GPU recreation after the window was shown failed".into(),
+                    last_error: Some(error),
+                }),
+            };
+        }
+        self.tree.dirty.layout = true;
+        self.tree.dirty.paint = true;
+    }
+    /// Shows a parked window: a new device, then the first frame painted before
+    /// the window appears, as at startup.
+    fn unpark(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(window) = self.window.clone() else {
+            return;
+        };
+        if self.parked {
+            self.parked = false;
+            self.restore_graphics();
+            self.advance_live_motion();
+            if matches!(self.graphics, GraphicsState::Ready(_))
+                && let Err(error) = self.prepare()
+            {
+                self.handle_render_error(event_loop, error);
+            }
+        }
+        window.set_visible(true);
+        window.set_minimized(false);
+        window.focus_window();
+        self.redraw_frame(event_loop);
+        self.sync_control_flow(event_loop);
     }
     fn request_present_now(&mut self) {
         self.presentation_retry_at = None;
@@ -1576,7 +1678,8 @@ impl App {
                         .map_err(RenderError::Fatal)?;
                 }
             }
-            if !retained_prepared {
+            // Parked: nothing to show, and no scene to keep in memory.
+            if !retained_prepared && !self.parked {
                 self.scene = self.tree.scene(scale);
             }
         }
@@ -1604,6 +1707,9 @@ impl App {
         event_loop.exit();
     }
     fn redraw_frame(&mut self, event_loop: &ActiveEventLoop) {
+        if self.parked {
+            return;
+        }
         if self
             .window
             .as_ref()
@@ -2036,13 +2142,8 @@ impl ApplicationHandler<Command> for App {
             Command::Window { action } => {
                 if let Some(window) = &self.window {
                     match action.as_str() {
-                        "show" => {
-                            window.set_visible(true);
-                            window.set_minimized(false);
-                            window.focus_window();
-                            window.request_redraw();
-                        }
-                        "hide" => window.set_visible(false),
+                        "show" => self.unpark(event_loop),
+                        "hide" => self.park(event_loop),
                         "minimize" => window.set_minimized(true),
                         "focus" => window.focus_window(),
                         other => self.events.push(error(format!("unknown window action {other}"))),
@@ -2213,6 +2314,13 @@ impl ApplicationHandler<Command> for App {
                 }
             }
             Command::Capture { path, request_id } if self.document.window.debug => {
+                // A parked window still captures, as it did hidden: a renderer
+                // for this one frame, given back afterwards.
+                let parked = self.parked;
+                if parked {
+                    self.parked = false;
+                    self.restore_graphics();
+                }
                 let background = self.root_color("background", &self.document.window.background);
                 let result = match self.prepare() {
                     Err(RenderError::RecoverDevice(message)) => {
@@ -2226,6 +2334,10 @@ impl ApplicationHandler<Command> for App {
                         _ => Err(CaptureError::Request("Window renderer is not ready".into())),
                     },
                 };
+                if parked {
+                    self.release_graphics();
+                    self.parked = true;
+                }
                 match result {
                     Ok(()) => self
                         .events
@@ -2370,6 +2482,7 @@ impl ApplicationHandler<Command> for App {
             GraphicsState::Recovering(recovery) if recovery.next_attempt <= now
         );
         let motion_due = !self.motion_test_clock
+            && !self.parked
             && self.tree.next_clock_tick_ms().is_some_and(|deadline| {
                 deadline <= self.motion_epoch.elapsed().as_secs_f64() * 1000.0 + 0.001
             });

@@ -21,6 +21,7 @@ const allSteps = [
   "smoke:steady-frames",
   "smoke:devtools",
   "smoke:tray",
+  "smoke:hidden",
   "smoke:studio",
   "test:css-layout",
   "test:canvas",
