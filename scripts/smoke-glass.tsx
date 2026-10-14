@@ -8,6 +8,9 @@ import { resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 const errors: string[] = [];
+// A motion runs during the capture, so the captured frame is one prepared fresh (the
+// fused glass once showed only on a frame's second draw).
+let moving = false;
 const app = createApp(() => (
   <Window title="Glass smoke" width={400} height={300} style={{ background: "#ffffff" }}>
     <View id="stage" style={{ position: "relative", flex: 1 }}>
@@ -17,6 +20,7 @@ const app = createApp(() => (
       <Glass id="glass" tint="#ffffff10" radius={20} shadow={false} material={{ blur: 16, refraction: 12, highlight: 1 }}
         style={{ position: "absolute", left: 20, top: 40, width: 160, height: 100 }} />
       <View id="plain" style={{ position: "absolute", left: 220, top: 40, width: 160, height: 100, radius: 20, background: "#ffffff10" }} />
+      <View id="mover" style={{ position: "absolute", left: moving ? 360 : 0, top: 280, width: 20, height: 20, radius: 10, background: "#00ff00", transition: { left: { duration: 20000, easing: "linear" } } }} />
       {/* Two drops 20 px apart that share a merge key bridge; the same two without one keep the gap. */}
       {(["joined", "apart"] as const).map((kind, row) => [0, 1].map(column => (
         <Glass key={kind + column} id={`${kind}-${column}`} variant="clear" tint="#ffffffcc" radius={20} shadow={false}
@@ -29,7 +33,10 @@ const app = createApp(() => (
 
 try {
   await app.ready;
-  await sleep(600);
+  await sleep(300);
+  moving = true;
+  app.update();
+  await sleep(400);
   mkdirSync(resolve("work"), { recursive: true });
   const path = resolve("work/smoke-glass.png");
   await app.capture(path);
@@ -71,6 +78,7 @@ try {
   } else {
     console.log(`[smoke-glass] PASS (no backdrop on this renderer: tint only, roughness ${glass.toFixed(1)})`);
   }
+  assert.ok((await app.inspect()).activeMotions > 0, "the capture happened during the motion");
   assert.deepEqual(errors, []);
 } finally {
   app.close();

@@ -539,6 +539,8 @@ impl D3d11Graphics {
             opacity: 1.0,
         };
         paint(&mut target);
+        // Before the vertices go to the GPU: a draw of this frame must see the fused quads.
+        self.merge_glass();
         let images = self.images.len();
         self.images
             .retain(|key, _| self.used_images.contains(key) || self.pinned_images.contains(key));
@@ -654,7 +656,6 @@ impl D3d11Graphics {
                 Some(&[Some(self.glass_params.clone()), Some(self.glass_shapes.clone())]),
             );
         }
-        self.merge_glass();
         let has_glass = self
             .commands
             .iter()
@@ -1186,7 +1187,8 @@ impl D3d11Graphics {
     /// Fuses the glass commands that share a `merge` key into the first of them: its
     /// shape list grows, its quad and blur passes widen to the union, the others are
     /// dropped. Later members therefore paint where the first one does, under what
-    /// was painted between them.
+    /// was painted between them. Runs once per prepared frame, before the vertex
+    /// upload (every draw of the frame, presented or captured, replays the result).
     fn merge_glass(&mut self) {
         let mut index = 0;
         while index < self.commands.len() {

@@ -37,5 +37,8 @@ describe("Glass", () => {
     );
     expect(tree.nodes.get("dock")!.style.glass).toMatchObject({ merge: "dock", blend: 32 });
     expect(tree.nodes.get("drop")!.style.glass).toMatchObject({ merge: "dock", blend: 12 });
+    // No outline of its own: the fused surface is lit by the shader.
+    expect(tree.nodes.get("drop")!.style.borderWidth).toBe(0);
+    expect(tree.nodes.get("drop")!.style.boxShadow).toEqual([]);
   });
 });

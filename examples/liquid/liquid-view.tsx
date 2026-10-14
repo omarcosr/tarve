@@ -141,7 +141,8 @@ function DockItem({ index, label }: { index: number; label: string }): VNode {
 
 function Dock(): VNode {
   return (
-    <Glass id="dock" variant="clear" tint="#9bd4ff38" radius={46} merge="dock" blend={48} material={{ blur: 3, refraction: 30, magnify: 0.08 }}
+    // The dock is the surface the drops join: its material and tint are theirs too.
+    <Glass id="dock" variant="clear" tint="#bfe3ff4d" radius={46} merge="dock" blend={56} material={{ blur: 6, refraction: 44, magnify: 0.12, highlight: 1, saturate: 1.4 }}
       style={{ position: "absolute", ...DOCK, direction: "row", padding: 14, gap: 4 }}>
       <DockItem index={0} label="Home" />
       <DockItem index={1} label="Search" />
@@ -155,20 +156,18 @@ function Drops(): VNode {
   return (
     <>
       {scene.falling.map(drop => (
-        <Glass key={drop.id} id={drop.id} variant="clear" tint="#ffffff1a" radius={drop.size / 2} shadow={false} merge="dock" blend={48}
-          material={{ blur: 2, refraction: drop.size / 2, magnify: 0.3 }}
+        <Glass key={drop.id} id={drop.id} variant="clear" radius={drop.size / 2} merge="dock" blend={56}
           style={{
             position: "absolute", left: drop.x, top: drop.y, width: drop.size, height: drop.size, opacity: drop.opacity,
-            transition: {
+            ...(drop.duration > 0 ? { transition: {
               left: { duration: drop.duration, easing: drop.easing },
               top: { duration: drop.duration, easing: drop.easing },
               opacity: { duration: Math.min(drop.duration, 400), easing: "easeOut" },
-            },
+            } } : {}),
           }} />
       ))}
       {scene.pointer && (
-        <Glass id="drop-pointer" variant="clear" tint="#ffffff1a" radius={30} shadow={false} merge="dock" blend={48}
-          material={{ blur: 2, refraction: 30, magnify: 0.3 }}
+        <Glass id="drop-pointer" variant="clear" radius={30} merge="dock" blend={56}
           style={{ position: "absolute", left: scene.pointer.x - 30, top: scene.pointer.y - 30, width: 60, height: 60, transition: { left: { duration: 120, easing: "easeOut" }, top: { duration: 120, easing: "easeOut" } } }} />
       )}
     </>

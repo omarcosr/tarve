@@ -69,7 +69,10 @@ export function glassSurface(variant: GlassVariant, appearance: "light" | "dark"
       ...(options.merge ? { merge: options.merge, blend: options.blend ?? 32 } : {}),
       ...options.material,
     },
-    ...glassChrome(appearance, options.shadow ?? true),
+    // A merged box has no outline of its own: its silhouette is the fused surface's,
+    // which the shader lights (rim and reflections); a border or shadow would trace the
+    // box through the bridge.
+    ...(options.merge ? { borderWidth: 0, boxShadow: [] } : glassChrome(appearance, options.shadow ?? true)),
   };
 }
 
