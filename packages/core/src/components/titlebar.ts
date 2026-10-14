@@ -6,6 +6,7 @@ import type { SvgNode } from "./svg";
 import { container, Row, type ViewProps } from "./layout";
 import { Pressable } from "./pressable";
 import { Text } from "./text";
+import { glassSurface, type GlassVariant } from "./glass";
 
 export interface TitleBarProps extends ViewProps {
   title?: string;
@@ -15,6 +16,14 @@ export interface TitleBarProps extends ViewProps {
   showClose?: boolean;
   /** Style merged into each window control (minimize, maximize, close): size, radius, colours. */
   buttonStyle?: Style;
+  /**
+   * Liquid Glass bar: `true` for the `regular` material, or a variant. The bar keeps no
+   * bottom border and its controls go round; lay it over content (`position: "absolute"`)
+   * for the backdrop to show through, as the window background alone is only the veil.
+   */
+  glass?: boolean | GlassVariant;
+  /** Light or dark glass; sets the ink of the title and controls. Default `light`. */
+  appearance?: "light" | "dark";
 }
 
 /** `#rgb`/`#rrggbb` at `alpha` (0–255); other colors are returned unchanged. */
@@ -54,13 +63,19 @@ export function TitleBar({
   showMaximize = true,
   showClose = true,
   buttonStyle,
+  glass,
+  appearance = "light",
   children,
   style,
   ...props
 }: TitleBarProps): VNode {
+  const surface: Style | undefined = glass
+    ? { ...glassSurface(glass === true ? "regular" : glass, appearance, { radius: 0, shadow: false }), borderWidth: { bottom: 1 }, foreground: appearance === "dark" ? "#ffffff" : "#1c1c1e" }
+    : undefined;
+  const controlStyle: Style | undefined = glass ? { width: 36, height: 36, radius: 18, ...buttonStyle } : buttonStyle;
   // The controls draw in the bar's foreground, so a dark bar on a light theme
   // (or the reverse) still shows them.
-  const ink = typeof style?.foreground === "string" ? style.foreground : theme.colors.foreground;
+  const ink = typeof style?.foreground === "string" ? style.foreground : typeof surface?.foreground === "string" ? surface.foreground : theme.colors.foreground;
   // Stroked glyphs (one logical pixel at 12px), so all three get the same
   // antialiased weight at any scale; a 1px View border lands between device
   // pixels at 125% and draws two edges faint and two solid.
@@ -71,12 +86,12 @@ export function TitleBar({
   const controls = jsx(Row, {
     style: { height: "100%", shrink: 0 },
     children: [
-      showMinimize ? titleBarButton("minimize", minimizeIcon, ink, buttonStyle) : null,
-      showMaximize ? titleBarButton("toggleMaximize", maximizeIcon, ink, buttonStyle) : null,
-      showClose ? titleBarButton("close", closeIcon, ink, buttonStyle) : null,
+      showMinimize ? titleBarButton("minimize", minimizeIcon, ink, controlStyle) : null,
+      showMaximize ? titleBarButton("toggleMaximize", maximizeIcon, ink, controlStyle) : null,
+      showClose ? titleBarButton("close", closeIcon, ink, controlStyle) : null,
     ],
   });
-  const content = children ?? (title ? jsx(Text, { size: 13, weight: 500, children: title }) : null);
+  const content = children ?? (title ? jsx(Text, { size: 13, weight: glass ? 600 : 500, color: glass ? ink : undefined, children: title }) : null);
   return container("titlebar", {
     ...props,
     dragRegion: true,
@@ -91,6 +106,8 @@ export function TitleBar({
       justify: "between",
       align: "center",
       pointerEvents: "block",
+      ...(glass ? { gap: 4, padding: { left: 14, right: 4 } } : {}),
+      ...surface,
       ...style,
     },
     children: [content, controls],

@@ -39,6 +39,8 @@ let dark = false;
 let variant: GlassVariant = "regular";
 /** Window controls, as any TitleBar takes them. */
 const chrome = { title: "Music", showMinimize: true, showMaximize: false, showClose: true };
+/** One full-width glass `<TitleBar>` instead of the three capsules. */
+let fullBar = false;
 let pointer = { x: 0.5, y: 0.5 };
 
 const WIDTH = 430;
@@ -161,6 +163,23 @@ function ToolButton({ id, icon, label, onClick, active }: { id: string; icon: Ic
 function TopBar() {
   const appearance = dark ? "dark" : "light";
   const ink = dark ? "#ffffff" : "#1c1c1e";
+  if (fullBar) {
+    // The ordinary TitleBar, made of glass: title, toolbar and controls in one bar over the wallpaper.
+    return (
+      <TitleBar id="chrome" glass={variant} appearance={appearance} height={52} title={chrome.title}
+        showMinimize={chrome.showMinimize} showMaximize={chrome.showMaximize} showClose={chrome.showClose}
+        style={{ position: "absolute", top: 0, left: 0, width: WIDTH }}>
+        <Row flex={1} align="center" justify="between" gap={8}>
+          <Text size={15} weight={700} color={ink}>{chrome.title} · {["Home", "New", "Library", "You"][tab]}</Text>
+          <Row gap={2}>
+            <ToolButton id="tool-like" icon="heart" label="Like" active={liked} onClick={() => { liked = !liked; }} />
+            <ToolButton id="tool-bell" icon="bell" label="Notifications" onClick={() => {}} />
+            <ToolButton id="tool-settings" icon="settings" label="Settings" onClick={() => { sheet = !sheet; }} />
+          </Row>
+        </Row>
+      </TitleBar>
+    );
+  }
   const veil = variant === "clear" ? (dark ? "#00000014" : "#ffffff14") : variant === "tinted" ? (dark ? "#1c1c1e4d" : "#ffffff33") : (dark ? "#1c1c1e8c" : "#ffffff59");
   return (
     <Row id="top-bar" style={{ position: "absolute", left: 16, right: 16, top: 14, justify: "between", align: "center", gap: 10 }}>
@@ -269,6 +288,7 @@ function SettingsSheet() {
         </Row>
         <Row gap={8}>{chip("regular")}{chip("clear")}{chip("tinted")}</Row>
         <Switch id="dark-switch" label="Dark appearance" checked={dark} onCheckedChange={next => { dark = next; }} style={{ foreground: fg } as Style} />
+        <Switch id="bar-switch" label="Full-width glass title bar" checked={fullBar} onCheckedChange={next => { fullBar = next; }} style={{ foreground: fg } as Style} />
         <Column gap={6}>
           <Text size={13} color={dark ? "#ffffffa0" : "#1c1c1ea0"}>Volume</Text>
           <Slider id="volume" label="Volume" value={volume} min={0} max={1} step={0.01} onValueChange={next => { volume = next; }}

@@ -50,21 +50,24 @@ export function glassChrome(appearance: "light" | "dark", shadow: boolean): Styl
   };
 }
 
+/** The complete style of a glass surface: veil, material, radius and chrome. */
+export function glassSurface(variant: GlassVariant, appearance: "light" | "dark", options: { tint?: string; radius?: number; material?: Partial<GlassMaterial>; shadow?: boolean } = {}): Style {
+  return {
+    background: options.tint ?? VEIL[appearance][variant],
+    radius: options.radius ?? 26,
+    glass: { ...MATERIAL[variant], ...options.material },
+    ...glassChrome(appearance, options.shadow ?? true),
+  };
+}
+
 /**
  * A container made of Liquid Glass: what scrolls behind it shows through blurred,
  * bent at the rounded edge, under a light veil, with a bright rim. Compose like a
  * `View`; controls inside keep their own look.
  */
 export function Glass({ variant = "regular", tint, appearance = "light", radius = 26, material, shadow = true, style, ...props }: GlassProps): VNode {
-  const glass: GlassMaterial = { ...MATERIAL[variant], ...material };
   return container("view", {
     ...props,
-    style: {
-      background: tint ?? VEIL[appearance][variant],
-      radius,
-      glass,
-      ...glassChrome(appearance, shadow),
-      ...style,
-    },
+    style: { ...glassSurface(variant, appearance, { tint, radius, material, shadow }), ...style },
   });
 }

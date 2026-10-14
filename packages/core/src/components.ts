@@ -6,7 +6,7 @@
  */
 export { View, Row, Column, Portal } from "./components/layout";
 export type { ViewProps, PortalProps } from "./components/layout";
-export { Glass, glassChrome } from "./components/glass";
+export { Glass, glassChrome, glassSurface } from "./components/glass";
 export type { GlassProps, GlassVariant } from "./components/glass";
 export { Window } from "./components/window";
 export type { WindowProps, WindowCloseRequestEvent } from "./components/window";
