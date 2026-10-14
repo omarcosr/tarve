@@ -15,6 +15,17 @@ import type { MediaRequest } from "./media-element";
 import type { FormContext } from "./html-elements";
 import { DIV_SHORTHANDS, expandIntrinsic, textContent } from "./reconciler/intrinsics";
 import { sameValue } from "./reconciler/diff";
+import { Style } from "./style";
+
+const isPrimitive = (child: Child): child is string | number => typeof child === "string" || typeof child === "number";
+
+/** Folds `style.dark` into the style under a dark theme and drops the key otherwise: the native tree never sees it. */
+function foldDarkVariant(style: Record<string, unknown>, selected: ThemeDefinition): Record<string, unknown> {
+  const { dark, ...base } = style;
+  if (!dark || typeof dark !== "object") return base;
+  const themed = luminance(selected.colors.background);
+  return themed !== null && themed < 0.5 ? Style.merge(base, dark as Style) as Record<string, unknown> : base;
+}
 
 /** The handler name the app dispatches each `on*` prop under. Most nodes have none: no object is made for them. */
 const HANDLER_BY_PROP = new Map<string, keyof Handlers>([
@@ -198,7 +209,7 @@ export function compileTree(
     return {
       base,
       linkColor: resolveStyleString("foreground", theme.colors.primary, selectedTheme),
-      resolve: style => resolveThemeStyle(style as never, selectedTheme) as Record<string, unknown>,
+      resolve: style => resolveThemeStyle(foldDarkVariant(style, selectedTheme) as never, selectedTheme) as Record<string, unknown>,
       register(id, onClick) {
         const runId = id ?? `${textId}/run:${runs++}`;
         if (ids.has(runId)) throw new Error(`Duplicate node id: ${runId}`);
@@ -212,8 +223,18 @@ export function compileTree(
   function visit(child: Child, path: string, group?: string, adapterNative = false): NativeNode[] {
     if (child == null || typeof child === "boolean") return [];
     if (Array.isArray(child)) return child.flatMap((item, index) => {
+      const primitive = typeof item === "string" || typeof item === "number";
+      // CSS: a contiguous run of text children (`Mark {count} as read`) is one
+      // anonymous box, not one per JSX expression; later pieces joined the first.
+      if (primitive && index > 0 && isPrimitive(child[index - 1])) return [];
       const key = typeof item === "object" && item && !Array.isArray(item) ? item.key : undefined;
-      return visit(item, `${path}/${key != null ? `k:${key}` : index}`, group);
+      let piece: Child = item;
+      if (primitive) {
+        let text = String(item);
+        for (let next = index + 1; next < child.length && isPrimitive(child[next]); next++) text += String(child[next]);
+        piece = text;
+      }
+      return visit(piece, `${path}/${key != null ? `k:${key}` : index}`, group);
     });
     if (typeof child === "string" || typeof child === "number") {
       if (ids.has(path)) throw new Error(`Duplicate node id: ${path}`);
@@ -261,9 +282,13 @@ export function compileTree(
       }
     }
     const isIntrinsicDiv = child.type === "div";
-    const nativeType = isIntrinsicDiv ? "view" : child.type;
+    const p = isIntrinsicDiv && child.props.onClick && child.props.focusable === undefined
+      // HTML: a div with a click handler is clickable but not in the tab order.
+      ? { ...child.props, focusable: false }
+      : child.props;
+    // Only buttons and pressables receive native clicks: a div with `onClick` is one.
+    const nativeType = isIntrinsicDiv ? (p.onClick ? "pressable" : "view") : child.type;
     if (!kinds.has(nativeType)) throw new Error(`Unknown native component: ${child.type}`);
-    const p = child.props;
     const id = p.id ?? path;
     if (ids.has(id)) throw new Error(`Duplicate node id: ${id}`);
     ids.add(id); idLog.push(id);
@@ -316,7 +341,7 @@ export function compileTree(
       // active slot at all.
       if (control?.role === "otpSlot") rawStyle.focus = { ...rawStyle.focusVisible, ...p.style?.focus };
     }
-    const style = resolveThemeStyle(rawStyle, selectedTheme);
+    const style = resolveThemeStyle(foldDarkVariant(rawStyle, selectedTheme), selectedTheme);
     for (const key of ["padding", "margin"] as const) {
       if (style[key] && typeof style[key] === "object") style[key] = { ...style[key] };
     }

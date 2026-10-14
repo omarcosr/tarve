@@ -18,7 +18,8 @@ export function canonicalizeIntrinsicStyle(style: IntrinsicStyle | undefined): S
   if (result.foreground === undefined && result.color !== undefined) result.foreground = result.color;
   if (result.radius === undefined && result.borderRadius !== undefined) result.radius = result.borderRadius;
   delete result.borderRadius;
-  const edge = (value: unknown) => value === "flex-start" ? "start" : value === "flex-end" ? "end" : value === "space-between" ? "between" : value;
+  const edge = (value: unknown) => value === "flex-start" ? "start" : value === "flex-end" ? "end"
+    : value === "space-between" ? "between" : value === "space-around" ? "around" : value === "space-evenly" ? "evenly" : value;
   if (result.align === undefined && result.alignItems !== undefined) result.align = edge(result.alignItems) as Style["align"];
   if (result.justify === undefined && result.justifyContent !== undefined) result.justify = edge(result.justifyContent) as Style["justify"];
   delete result.alignItems;
@@ -31,5 +32,6 @@ export function canonicalizeIntrinsicStyle(style: IntrinsicStyle | undefined): S
     const canonical = canonicalizeStateStyle(style?.[state]);
     if (canonical) result[state] = canonical;
   }
+  if (style?.dark) result.dark = canonicalizeIntrinsicStyle(style.dark as IntrinsicStyle);
   return result as Style;
 }

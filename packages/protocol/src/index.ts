@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 5;
-export const PROTOCOL_VERSION = 58;
+export const PROTOCOL_VERSION = 59;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
@@ -25,6 +25,8 @@ export type SvgNode =
   | readonly [SvgElementName, SvgAttributes]
   | readonly [SvgElementName, SvgAttributes, readonly SvgNode[]];
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
+/** Corner radii: a number rounds every corner; an object names each (missing corners are square). */
+export type CornerRadius = number | { topLeft?: number; topRight?: number; bottomRight?: number; bottomLeft?: number };
 export type OutlineStyle = "dotted" | "dashed" | "solid" | "double" | "groove" | "ridge" | "inset" | "outset" | "none" | "hidden";
 /** Same values as OutlineStyle. Non-solid styles apply when all four border widths are equal. */
 export type BorderStyle = OutlineStyle;
@@ -120,7 +122,7 @@ export interface StateStyle {
   /** Liquid-glass material behind the box; `background` is its tint. */
   glass?: GlassMaterial;
   /** Colour, gradient object, or CSS `linear-gradient(…)` / `radial-gradient(…)` string. */
-  background?: string | Gradient; foreground?: string | Gradient; borderColor?: string | Gradient; borderStyle?: BorderStyle; radius?: number;
+  background?: string | Gradient; foreground?: string | Gradient; borderColor?: string | Gradient; borderStyle?: BorderStyle; radius?: CornerRadius;
   opacity?: number;
   outlineWidth?: number; outlineColor?: string; outlineOffset?: number; outlineRadius?: number; outlineStyle?: OutlineStyle;
   placeholderColor?: string; selectionColor?: string; caretColor?: string;
@@ -145,8 +147,11 @@ export interface Style extends StateStyle {
   flex?: number | string; grow?: number; basis?: Length | "auto"; shrink?: number; aspectRatio?: number;
   position?: "relative" | "absolute"; top?: Length; right?: Length; bottom?: Length; left?: Length;
   direction?: "row" | "row-reverse" | "column" | "column-reverse"; wrap?: boolean; gap?: number;
+  /** CSS `row-gap` / `column-gap`; each falls back to `gap`. */
+  rowGap?: number; columnGap?: number;
   padding?: Insets; margin?: Insets; align?: "start" | "center" | "end" | "stretch";
-  justify?: "start" | "center" | "end" | "between";
+  /** CSS `justify-content`: `around` and `evenly` are `space-around` / `space-evenly`. */
+  justify?: "start" | "center" | "end" | "between" | "around" | "evenly";
   /** `block` stacks children and collapses adjacent vertical margins, as CSS block flow does. */
   display?: "flex" | "grid" | "block" | "none";
   /** Grid tracks: a count of equal columns, or a CSS track list such as `"repeat(auto-fill, minmax(176px, 1fr))"`. */
@@ -159,7 +164,7 @@ export interface Style extends StateStyle {
   rows?: number | string;
   zIndex?: number;
   borderWidth?: Insets;
-  radius?: number; fontSize?: number; fontWeight?: number; fontFamily?: string;
+  radius?: CornerRadius; fontSize?: number; fontWeight?: number; fontFamily?: string;
   /** Native retained transitions. Bun sends the target once; Rust owns interpolation. */
   transition?: MotionTransitions;
   /** Continuous rotation about the centre, one turn per `spin` milliseconds. Rust drives the frames. */
@@ -198,6 +203,11 @@ export interface Style extends StateStyle {
   /** Line-number gutter colour, for `diff` and for `code`. */
   diffGutterColor?: string; gutterColor?: string;
   hover?: StateStyle; focus?: StateStyle; focusVisible?: StateStyle; active?: StateStyle; disabled?: StateStyle;
+  /**
+   * Overrides applied when the window theme is dark (its background luminance below 0.5),
+   * like Tailwind's `dark:`. The reconciler folds them in; the native tree never sees the key.
+   */
+  dark?: Omit<Style, "dark">;
   strokeWidth?: number; pointerEvents?: "auto" | "block" | "delegate"; userSelect?: UserSelect;
 }
 export interface Control {

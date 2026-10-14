@@ -204,6 +204,19 @@ pub(crate) struct GlassParams {
     pub blend: f32,
 }
 
+/// The padding-box corner radii: CSS shrinks each corner by the adjacent border
+/// widths (`[top, right, bottom, left]`), never below zero, so a thick border on
+/// one side flattens only the corners it touches.
+pub(crate) fn inner_corner_radii(radii: [f64; 4], border: [f64; 4]) -> (f64, f64, f64, f64) {
+    let [top, right, bottom, left] = border;
+    (
+        (radii[0] - top.max(left)).max(0.0),
+        (radii[1] - top.max(right)).max(0.0),
+        (radii[2] - bottom.max(right)).max(0.0),
+        (radii[3] - bottom.max(left)).max(0.0),
+    )
+}
+
 pub(crate) trait PaintTarget {
     fn fill<S: Shape>(&mut self, fill: Fill, transform: Affine, color: Color, shape: &S);
     /// Fills `shape` with a gradient. Targets without gradient support paint
@@ -214,6 +227,32 @@ pub(crate) trait PaintTarget {
         }
     }
     fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S);
+    /// A border whose sides differ: the ring between `outer` and `outer` inset by
+    /// `widths` (top, right, bottom, left), each inner corner shrunk by its
+    /// adjacent widths as CSS does. Painted as one even-odd path by default.
+    fn fill_ring(&mut self, transform: Affine, outer: &RoundedRect, widths: [f64; 4], color: Color) {
+        let rect = outer.rect();
+        let [top, right, bottom, left] = widths;
+        let inner = Rect::new(
+            rect.x0 + left,
+            rect.y0 + top,
+            (rect.x1 - right).max(rect.x0 + left),
+            (rect.y1 - bottom).max(rect.y0 + top),
+        );
+        let radii = outer.radii();
+        let mut ring = outer.to_path(0.1);
+        ring.extend(
+            RoundedRect::from_rect(
+                inner,
+                inner_corner_radii(
+                    [radii.top_left, radii.top_right, radii.bottom_right, radii.bottom_left],
+                    widths,
+                ),
+            )
+            .path_elements(0.1),
+        );
+        self.fill(Fill::EvenOdd, transform, color, &ring);
+    }
     fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S);
     fn push_opacity<S: Shape>(&mut self, alpha: f32, transform: Affine, shape: &S);
     fn pop_layer(&mut self);
@@ -288,6 +327,10 @@ impl<P: PaintTarget> PaintTarget for TransformTarget<'_, P> {
 
     fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S) {
         self.inner.stroke(stroke, self.map(transform), color, shape);
+    }
+
+    fn fill_ring(&mut self, transform: Affine, outer: &RoundedRect, widths: [f64; 4], color: Color) {
+        self.inner.fill_ring(self.map(transform), outer, widths, color);
     }
 
     fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S) {

@@ -124,7 +124,10 @@ describe("native TSX protocol", () => {
       </Window>,
     );
     const div = tree.nodes.get("intrinsic-div")!;
-    expect(div.kind).toBe("view");
+    // A div with onClick is a native pressable (the only kinds that receive clicks), out of the tab order as in HTML.
+    expect(div.kind).toBe("pressable");
+    expect(div.focusable).toBe(false);
+    expect(compileTree(<Window><div id="plain" /></Window>).nodes.get("plain")!.kind).toBe("view");
     expect(div.style.direction).toBe("row");
     expect(div.style.background).toBe("#123456");
     expect(div.style.foreground).toBe("#abcdef");

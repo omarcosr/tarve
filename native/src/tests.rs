@@ -453,6 +453,49 @@ fn flex_items_keep_an_explicit_min_width_like_css() {
 }
 
 #[test]
+fn row_and_column_gap_and_space_around_evenly_follow_css() {
+    let items = (0..3)
+        .map(|i| node(&format!("g{i}"), "view", json!({"width": 50, "height": 20}), vec![]))
+        .collect();
+    let wrapped = node(
+        "wrapped",
+        "row",
+        json!({"width": 130, "wrap": true, "gap": 4, "columnGap": 10, "rowGap": 16}),
+        items,
+    );
+    let around = node(
+        "around",
+        "row",
+        json!({"width": 300, "justify": "around"}),
+        (0..2)
+            .map(|i| node(&format!("a{i}"), "view", json!({"width": 50, "height": 20}), vec![]))
+            .collect(),
+    );
+    let evenly = node(
+        "evenly",
+        "row",
+        json!({"width": 300, "justify": "evenly"}),
+        (0..2)
+            .map(|i| node(&format!("e{i}"), "view", json!({"width": 50, "height": 20}), vec![]))
+            .collect(),
+    );
+    let mut tree = Tree::new(root(vec![wrapped, around, evenly]));
+    tree.compute(400.0, 400.0).unwrap();
+    let rect = |id: &str| tree.entries[id].rect;
+    // `columnGap` separates items on a line; `rowGap` separates the wrapped line. Both beat `gap`.
+    assert!((rect("g1").x0 - (rect("g0").x1 + 10.0)).abs() < 0.1, "g1 = {:?}", rect("g1"));
+    assert!((rect("g2").y0 - (rect("g0").y1 + 16.0)).abs() < 0.1, "g2 = {:?}", rect("g2"));
+    // space-around: 200px free → 50px per side of each item (25px at the edges).
+    assert!((rect("a0").x0 - rect("around").x0 - 50.0).abs() < 0.1, "a0 = {:?}", rect("a0"));
+    assert!((rect("a1").x0 - rect("a0").x1 - 100.0).abs() < 0.1, "a1 = {:?}", rect("a1"));
+    // space-evenly: three equal 66.67px gaps.
+    let third = 200.0 / 3.0;
+    // Rects snap to whole pixels, so a 66.67px gap lands within 1px.
+    assert!((rect("e0").x0 - rect("evenly").x0 - third).abs() < 1.0, "e0 = {:?}", rect("e0"));
+    assert!((rect("e1").x0 - rect("e0").x1 - third).abs() < 1.0, "e1 = {:?}", rect("e1"));
+}
+
+#[test]
 fn text_ellipsis_line_clamp_and_clickable_runs() {
     let quick = "The quick brown fox jumps over the lazy dog";
     let mut line = node(
@@ -6500,6 +6543,85 @@ fn transform_is_applied_to_every_paint_call_in_the_subtree() {
             "device pixels"
         );
     }
+}
+
+#[test]
+fn per_side_border_on_a_rounded_box_paints_one_ring_that_keeps_the_corner_arcs() {
+    // A tab: rounded top corners, no bottom border. Painting the sides as clipped
+    // rectangles left the arc unpainted; the border is the ring between the
+    // border box and the padding box instead.
+    let tab = node(
+        "tab",
+        "view",
+        json!({"width": 80, "height": 32, "background": "#ffffff", "borderColor": "#ff0000",
+            "borderWidth": {"top": 1, "right": 1, "bottom": 0, "left": 1},
+            "radius": {"topLeft": 8, "topRight": 8}}),
+        vec![],
+    );
+    let recorder = painted(vec![tab]);
+    let red = vello::peniko::Color::from_rgb8(255, 0, 0);
+    let borders: Vec<_> = recorder
+        .fills
+        .iter()
+        .filter(|(color, _)| *color == red)
+        .collect();
+    assert_eq!(borders.len(), 1, "one even-odd ring, not one rectangle per side");
+    let (_, bounds) = borders[0];
+    assert!((bounds.width() - 80.0).abs() < 0.5 && (bounds.height() - 32.0).abs() < 0.5, "{bounds:?}");
+    assert!(recorder.strokes.is_empty(), "per-side widths never stroke a centreline");
+}
+
+#[test]
+fn per_corner_radius_parses_shrinks_inside_borders_and_animates_four_values() {
+    use crate::tree::corner_radii;
+    assert_eq!(corner_radii(&json!(8)), Some([8.0; 4]));
+    assert_eq!(
+        corner_radii(&json!({"topLeft": 12, "topRight": 4, "bottomLeft": 2})),
+        Some([12.0, 4.0, 0.0, 2.0])
+    );
+    assert_eq!(corner_radii(&json!({"topLeft": -3})), Some([0.0; 4]));
+    assert_eq!(corner_radii(&json!("8px")), None);
+    assert_eq!(corner_radii(&json!(f64::NAN)), None);
+
+    // A uniform radius still transitions; so does a per-corner one, corner by corner.
+    let card = node(
+        "card",
+        "view",
+        json!({"width": 80, "height": 40, "background": "#ff0000", "radius": 4,
+            "hover": {"radius": {"topLeft": 20, "topRight": 4, "bottomRight": 4, "bottomLeft": 12}},
+            "transition": {"radius": {"duration": 100, "easing": "linear"}}}),
+        vec![],
+    );
+    let mut tree = Tree::new(root(vec![card]));
+    tree.compute(400.0, 300.0).unwrap();
+    tree.advance_motion(0.0);
+    tree.pointer_move(20.0, 20.0);
+    tree.advance_motion(0.0);
+    tree.advance_motion(50.0);
+    assert_eq!(
+        tree.motion_values("card", "radius"),
+        Some(vec![12.0, 4.0, 4.0, 8.0])
+    );
+
+    // `motionFrom.radius` is a single number that fans out to every corner.
+    let entering = protocol::Node {
+        motion_from: json!({"radius": 0}),
+        ..node(
+            "entering",
+            "view",
+            json!({"width": 80, "height": 40, "radius": {"topLeft": 10, "topRight": 10},
+                "transition": {"radius": {"duration": 100, "easing": "linear"}}}),
+            vec![],
+        )
+    };
+    let mut tree = Tree::new(root(vec![entering]));
+    tree.compute(400.0, 300.0).unwrap();
+    tree.advance_motion(0.0);
+    tree.advance_motion(50.0);
+    assert_eq!(
+        tree.motion_values("entering", "radius"),
+        Some(vec![5.0, 5.0, 0.0, 0.0])
+    );
 }
 
 #[test]

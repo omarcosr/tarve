@@ -1,5 +1,7 @@
 import type { Control, MotionProperty, MotionValues, StateStyle, Style, SvgNode, TextHighlight } from "./protocol";
 import type { ImageSource } from "./components/image";
+import { styleWithClassName } from "./tailwind";
+
 export type Child = VNode | string | number | boolean | null | undefined | Child[];
 /** Clipboard content delivered to the focused element when the clipboard holds no text. */
 export type PastePayload =
@@ -32,6 +34,10 @@ export interface BaseProps {
   key?: string | number;
   children?: Child;
   style?: Style;
+  /** Tailwind utility classes, compiled to `style` at the call site; an explicit `style` wins. */
+  className?: string;
+  /** Same as `className`, HTML spelling. Both may be given; `className` comes last. */
+  class?: string;
   rovingGroup?: boolean;
   highlight?: TextHighlight;
   onHighlight?: (event: { matchCount: number }) => void;
@@ -51,7 +57,9 @@ export type IntrinsicStateStyle = StateStyle & {
   backgroundColor?: string;
   color?: string;
 };
-export type IntrinsicStyle = Omit<Style, "hover" | "focus" | "focusVisible" | "active" | "disabled" | "overflow"> & {
+export type IntrinsicStyle = Omit<Style, "hover" | "focus" | "focusVisible" | "active" | "disabled" | "overflow" | "dark"> & {
+  /** Overrides under a dark window theme (Tailwind's `dark:`). */
+  dark?: Omit<IntrinsicStyle, "dark">;
   /** CSS `overflow`; on a `<div>`, `auto` or `scroll` makes it a scroll container. */
   overflow?: Style["overflow"] | "auto" | "scroll";
   overflowX?: Style["overflow"] | "auto" | "scroll";
@@ -63,10 +71,10 @@ export type IntrinsicStyle = Omit<Style, "hover" | "focus" | "focusVisible" | "a
   /** CSS-like alias for Tarve's native `foreground`. */
   color?: string;
   /** CSS-like alias for Tarve's native `radius`. */
-  borderRadius?: number;
+  borderRadius?: Style["radius"];
   /** CSS `align-items` and `justify-content` (Tarve's `align` and `justify`). */
   alignItems?: "flex-start" | "start" | "center" | "flex-end" | "end" | "stretch";
-  justifyContent?: "flex-start" | "start" | "center" | "flex-end" | "end" | "space-between";
+  justifyContent?: "flex-start" | "start" | "center" | "flex-end" | "end" | "space-between" | "space-around" | "space-evenly";
   /** CSS `object-fit` on an `<img>` (its `fit` prop). */
   objectFit?: "fill" | "contain" | "cover" | "none" | "scale-down";
   hover?: IntrinsicStateStyle;
@@ -266,6 +274,11 @@ export type Component<P = any> = (props: P) => VNode;
 export interface VNode { type: Component | string; props: Record<string, any>; key?: string | number }
 const NATIVE_VNODE = Symbol("tarve.native-vnode");
 export function jsx(type: VNode["type"], props: Record<string, any> | null, key?: string | number): VNode {
+  if (props !== null && (typeof props.className === "string" || typeof props.class === "string")) {
+    const { className, class: plain, ...rest } = props;
+    rest.style = styleWithClassName([plain, className].filter(value => typeof value === "string").join(" "), rest.style);
+    props = rest;
+  }
   return { type, props: props ?? {}, key };
 }
 export function _nativeJsx(type: string, props: Record<string, any> | null, key?: string | number): VNode {

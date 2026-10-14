@@ -18,7 +18,7 @@ use swash::{
     zeno::{Format as SwashFormat, Vector as SwashVector},
 };
 use vello::{
-    kurbo::{Affine, BezPath, Cap, Join, PathEl, Point, Shape, Stroke, dash},
+    kurbo::{Affine, BezPath, Cap, Join, PathEl, Point, Rect, RoundedRect, Shape, Stroke, dash},
     peniko::{Color, Fill, FontData, ImageAlphaType, ImageData, ImageFormat},
 };
 use windows::{
@@ -100,6 +100,12 @@ struct Vertex {
     /// as (a, b, c, d) and (e, f, pixels per clip unit, 0). Rotated clips stay exact.
     clip_m0: [f32; 4],
     clip_m1: [f32; 4],
+    /// Rounded-rect modes (5, 9): corner radii top-left, top-right, bottom-right,
+    /// bottom-left in device pixels.
+    shape: [f32; 4],
+    /// Ring mode (9): border widths top, right, bottom, left in device pixels;
+    /// the ring is the box minus the box inset by them.
+    inner: [f32; 4],
 }
 
 /// A clip the pixel shader applies: rectangle and radii in its own space, and
@@ -1463,7 +1469,33 @@ impl D3d11Graphics {
         &mut self,
         center: [f32; 2],
         half: [f32; 2],
-        radius: f32,
+        radii: [f32; 4],
+        color: Color,
+    ) {
+        self.append_sdf_quad(center, half, radii, [0.0; 4], 5.0, color);
+    }
+
+    /// The ring between a rounded box and the same box inset by `widths` (top,
+    /// right, bottom, left): a border whose sides differ, from its distance
+    /// fields, so the corner arcs stay exact.
+    fn append_round_rect_ring(
+        &mut self,
+        center: [f32; 2],
+        half: [f32; 2],
+        radii: [f32; 4],
+        widths: [f32; 4],
+        color: Color,
+    ) {
+        self.append_sdf_quad(center, half, radii, widths, 9.0, color);
+    }
+
+    fn append_sdf_quad(
+        &mut self,
+        center: [f32; 2],
+        half: [f32; 2],
+        radii: [f32; 4],
+        widths: [f32; 4],
+        mode: f32,
         color: Color,
     ) {
         let first = self.indices.len() as u32;
@@ -1480,8 +1512,10 @@ impl D3d11Graphics {
                 pos: self.ndc(x, y),
                 uv: [x - center[0], y - center[1]],
                 color: rgba,
-                mode: 5.0,
-                params: [half[0], half[1], radius, 0.0],
+                mode,
+                params: [half[0], half[1], radii[0], 0.0],
+                shape: radii,
+                inner: widths,
                 ..Default::default()
             });
         }
@@ -1558,6 +1592,7 @@ impl D3d11Graphics {
                 color: rgba,
                 mode: 8.0,
                 params: [half[0], half[1], radius, opacity],
+                shape: [radius; 4],
                 ..Default::default()
             });
         }
@@ -2214,11 +2249,11 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             return;
         }
         if self.graphics.analytic_aa {
-            if let Some((center, half, radius)) = sdf_round_rect(shape, transform) {
+            if let Some((center, half, radii)) = sdf_round_rect(shape, transform) {
                 self.graphics.append_round_rect_quad(
                     center,
                     half,
-                    radius,
+                    radii,
                     color.multiply_alpha(self.opacity),
                 );
                 return;
@@ -2479,6 +2514,46 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         self.pop_layer();
     }
 
+    fn fill_ring(&mut self, transform: Affine, outer: &RoundedRect, widths: [f64; 4], color: Color) {
+        if self.suppressed_clips > 0 {
+            return;
+        }
+        if self.graphics.analytic_aa
+            && let Some(scale) = uniform_scale(transform)
+            && let Some((center, half, radii)) = sdf_round_rect(outer, transform)
+        {
+            self.graphics.append_round_rect_ring(
+                center,
+                half,
+                radii,
+                widths.map(|width| (width.max(0.0) * scale) as f32),
+                color.multiply_alpha(self.opacity),
+            );
+            return;
+        }
+        let rect = outer.rect();
+        let [top, right, bottom, left] = widths;
+        let inner = Rect::new(
+            rect.x0 + left,
+            rect.y0 + top,
+            (rect.x1 - right).max(rect.x0 + left),
+            (rect.y1 - bottom).max(rect.y0 + top),
+        );
+        let radii = outer.radii();
+        let mut ring = outer.to_path(0.1);
+        ring.extend(
+            RoundedRect::from_rect(
+                inner,
+                crate::paint::inner_corner_radii(
+                    [radii.top_left, radii.top_right, radii.bottom_right, radii.bottom_left],
+                    widths,
+                ),
+            )
+            .path_elements(0.1),
+        );
+        self.fill(Fill::EvenOdd, transform, color, &ring);
+    }
+
     fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S) {
         if self.suppressed_clips > 0 {
             return;
@@ -2499,7 +2574,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                     self.graphics.append_round_rect_quad(
                         [p.x as f32, p.y as f32],
                         [radius, radius],
-                        radius,
+                        [radius; 4],
                         color,
                     );
                 }
@@ -3297,6 +3372,24 @@ fn create_shaders(
             InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
             InstanceDataStepRate: 0,
         },
+        D3D11_INPUT_ELEMENT_DESC {
+            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
+            SemanticIndex: 8,
+            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+            InputSlot: 0,
+            AlignedByteOffset: 124,
+            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+            InstanceDataStepRate: 0,
+        },
+        D3D11_INPUT_ELEMENT_DESC {
+            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
+            SemanticIndex: 9,
+            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+            InputSlot: 0,
+            AlignedByteOffset: 140,
+            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+            InstanceDataStepRate: 0,
+        },
     ];
     let mut layout = None;
     unsafe { device.CreateInputLayout(&elements, vs_bytes, Some(&mut layout)) }
@@ -3648,28 +3741,26 @@ fn uniform_scale(transform: Affine) -> Option<f64> {
     (b == 0.0 && c == 0.0 && a > 0.0 && (a - d).abs() <= a * 1e-6).then_some(a)
 }
 
-/// Centre, half size and corner radius in device pixels of a circle or a
-/// rounded rectangle with one radius, under a transform that keeps it one.
-fn sdf_round_rect<S: Shape>(shape: &S, transform: Affine) -> Option<([f32; 2], [f32; 2], f32)> {
+/// Centre, half size and corner radii (top-left, top-right, bottom-right,
+/// bottom-left) in device pixels of a circle or a rounded rectangle, under a
+/// transform that keeps it one.
+fn sdf_round_rect<S: Shape>(shape: &S, transform: Affine) -> Option<([f32; 2], [f32; 2], [f32; 4])> {
     let scale = uniform_scale(transform)?;
-    let (rect, radius) = if let Some(circle) = shape.as_circle() {
+    let (rect, radii) = if let Some(circle) = shape.as_circle() {
         (
             vello::kurbo::Rect::from_center_size(
                 circle.center,
                 (circle.radius * 2.0, circle.radius * 2.0),
             ),
-            circle.radius,
+            [circle.radius; 4],
         )
     } else {
         let rounded = shape.as_rounded_rect()?;
         let radii = rounded.radii();
-        if radii.top_left != radii.top_right
-            || radii.top_left != radii.bottom_right
-            || radii.top_left != radii.bottom_left
-        {
-            return None;
-        }
-        (rounded.rect(), radii.top_left)
+        (
+            rounded.rect(),
+            [radii.top_left, radii.top_right, radii.bottom_right, radii.bottom_left],
+        )
     };
     let center = transform * rect.center();
     let half = [
@@ -3682,7 +3773,7 @@ fn sdf_round_rect<S: Shape>(shape: &S, transform: Affine) -> Option<([f32; 2], [
     Some((
         [center.x as f32, center.y as f32],
         half,
-        ((radius * scale) as f32).clamp(0.0, half[0].min(half[1])),
+        radii.map(|radius| ((radius * scale) as f32).clamp(0.0, half[0].min(half[1]))),
     ))
 }
 
@@ -3807,19 +3898,19 @@ mod tests {
         assert_eq!(uniform_scale(Affine::rotate(0.3)), None);
         assert_eq!(
             sdf_round_rect(&RoundedRect::new(0.0, 0.0, 20.0, 10.0, 4.0), at),
-            Some(([25.0, 17.0], [20.0, 10.0], 8.0))
+            Some(([25.0, 17.0], [20.0, 10.0], [8.0; 4]))
         );
         assert_eq!(
             sdf_round_rect(&Circle::new((1.0, 1.0), 3.0), Affine::IDENTITY),
-            Some(([1.0, 1.0], [3.0, 3.0], 3.0))
+            Some(([1.0, 1.0], [3.0, 3.0], [3.0; 4]))
         );
         assert_eq!(
             sdf_round_rect(
-                &RoundedRect::new(0.0, 0.0, 20.0, 10.0, (4.0, 0.0, 4.0, 0.0)),
+                &RoundedRect::new(0.0, 0.0, 20.0, 10.0, (4.0, 0.0, 12.0, 0.0)),
                 Affine::IDENTITY
             ),
-            None,
-            "mixed corner radii keep the tessellated path"
+            Some(([10.0, 5.0], [10.0, 5.0], [4.0, 0.0, 5.0, 0.0])),
+            "mixed corner radii take the quad too, each clamped to the half size"
         );
         assert_eq!(
             sdf_round_rect(&Rect::new(0.0, 0.0, 4.0, 4.0), Affine::IDENTITY),

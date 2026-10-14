@@ -126,7 +126,7 @@ function collect(child: Child, style: RunStyle, id: string | undefined, ctx: Inl
   }
   if (node.type === "text") {
     // A nested Text component: its explicit style applies to the run.
-    collect(props.children, computeStyle(style, pick(props.style)), id, ctx, out);
+    collect(props.children, computeStyle(style, pick(ctx.resolve(props.style ?? {}))), id, ctx, out);
     return;
   }
   if (typeof node.type !== "string" || !(node.type in INLINE_TAGS) || (node.type === "code" && props.code !== undefined)) {
@@ -136,7 +136,8 @@ function collect(child: Child, style: RunStyle, id: string | undefined, ctx: Inl
   // Chromium: abbr[title] { text-decoration: underline dotted }.
   if (node.type === "abbr" && props.title) { own.textDecoration = "underline"; own.textDecorationStyle = "dotted"; }
   if (node.type === "a") own.foreground = ctx.linkColor;
-  Object.assign(own, pick(canonicalizeIntrinsicStyle(props.style) as Record<string, unknown>));
+  // Resolved before picking so a `dark:` override (folded by `resolve`) reaches the run.
+  Object.assign(own, pick(ctx.resolve(canonicalizeIntrinsicStyle(props.style) as Record<string, unknown>)));
   if (props.size !== undefined) own.fontSize = props.size;
   if (props.weight !== undefined) own.fontWeight = props.weight;
   if (props.color !== undefined) own.foreground = props.color;

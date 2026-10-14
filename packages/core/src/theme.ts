@@ -210,9 +210,20 @@ export const theme = {
   font: { family: "system-ui", size: 14, lineHeight: 1.5 },
 } as const;
 
+/** A theme token with an opacity, as Tailwind's `bg-primary/50`: `var(--primary)/50`. */
+const TOKEN_ALPHA = /^(var\(--[\w-]+\))\/(\d{1,3})$/;
+
 export function resolveThemeColor(value: string, selected: ThemeDefinition): string {
   const key = keyByRef.get(value);
-  return key ? selected.colors[key] : value;
+  if (key) return selected.colors[key];
+  const alpha = TOKEN_ALPHA.exec(value);
+  if (!alpha) return value;
+  const base = keyByRef.get(alpha[1]!);
+  if (!base) return value;
+  const color = cssColor(selected.colors[base]);
+  const percent = Math.max(0, Math.min(100, Number(alpha[2])));
+  const channel = Math.round((percent / 100) * 255).toString(16).padStart(2, "0");
+  return /^#[0-9a-f]{6}$/i.test(color) ? `${color}${channel}` : /^#[0-9a-f]{8}$/i.test(color) ? `${color.slice(0, 7)}${channel}` : color;
 }
 
 /** Normalizes CSS shadow strings and CSS colours (rgba(), hsl(), names) and resolves theme tokens. */

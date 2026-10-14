@@ -1,5 +1,5 @@
 use crate::{
-    paint::{GradientGeometry, PaintGradient, PaintTarget},
+    paint::{GradientGeometry, PaintGradient, PaintTarget, inner_corner_radii},
     protocol::{ImageSource, Node, TreeMutation},
     rich::{self, DiffRow, DiffRowKind, RichContent},
     text::{
@@ -51,6 +51,8 @@ const LAYOUT_KEYS: &[&str] = &[
     "direction",
     "wrap",
     "gap",
+    "rowGap",
+    "columnGap",
     "padding",
     "margin",
     "align",
@@ -745,9 +747,29 @@ fn hex_of(colour: Color) -> String {
     format!("#{:02x}{:02x}{:02x}{:02x}", rgba.r, rgba.g, rgba.b, rgba.a)
 }
 
+/// Corner radii in CSS order (top-left, top-right, bottom-right, bottom-left):
+/// a number rounds every corner, an object names each corner.
+pub(crate) fn corner_radii(value: &Value) -> Option<[f32; 4]> {
+    if let Some(radius) = value.as_f64() {
+        return radius.is_finite().then(|| [radius.max(0.0) as f32; 4]);
+    }
+    let object = value.as_object()?;
+    Some(
+        ["topLeft", "topRight", "bottomRight", "bottomLeft"].map(|corner| {
+            object
+                .get(corner)
+                .and_then(Value::as_f64)
+                .filter(|radius| radius.is_finite())
+                .unwrap_or(0.0)
+                .max(0.0) as f32
+        }),
+    )
+}
+
 /// The value a property resolves to for `state`, as a motion vector.
 fn motion_value(node: &Node, property: &str, state: VisualState) -> Option<Vec<f32>> {
     match property {
+        "radius" => corner_radii(visual_value(node, "radius", state)).map(|radii| radii.to_vec()),
         "background" => Some(background_vector(visual_value(node, "background", state))),
         "borderColor" => Some(paint_vector(
             visual_value(node, "borderColor", state),
@@ -1420,6 +1442,19 @@ fn visual_optional_number(node: &Node, key: &str, state: VisualState) -> Option<
     visual_value(node, key, state).as_f64()
 }
 
+/// The box's four corner radii for `state`, following a running `radius` transition.
+fn visual_corner_radii(entry: &Entry, state: VisualState) -> [f64; 4] {
+    let animated = entry
+        .motions
+        .get("radius")
+        .filter(|track| track.state_driven || !visual_state_overrides(&entry.node, "radius", state))
+        .and_then(|track| <[f32; 4]>::try_from(track.current.as_slice()).ok());
+    animated
+        .or_else(|| corner_radii(visual_value(&entry.node, "radius", state)))
+        .unwrap_or([0.0; 4])
+        .map(f64::from)
+}
+
 fn input_display_index(node: &Node, value: &str, actual_index: usize) -> usize {
     if node.kind == "input" && node.input_type == "password" {
         let actual_index = floor_boundary(value, actual_index.min(value.len()));
@@ -1532,7 +1567,7 @@ fn motion_tracks_for_node(
                         Some(vec![previous.rect.height() as f32])
                     }
                     "opacity" => Some(vec![1.0]),
-                    "radius" => Some(vec![0.0]),
+                    "radius" => Some(vec![0.0; 4]),
                     _ => None,
                 });
             motions.remove(*property);
@@ -1551,7 +1586,7 @@ fn motion_tracks_for_node(
                 .and_then(Value::as_f64)
                 .map(|value| value as f32)
                 .filter(|value| value.is_finite())
-                .map(|value| vec![value]);
+                .map(|value| if *property == "radius" { vec![value; 4] } else { vec![value] });
             let (Some(from), Some(to), Some(config)) =
                 (from, target, motion_transition(node, property))
             else {
@@ -4240,12 +4275,15 @@ impl Tree {
             .map(|(key, track)| (key.clone(), track.current.clone()))
             .collect();
         let suppress_root_chrome = self.window_chrome_suppressed && id == self.root;
-        let radius = if suppress_root_chrome {
-            0.0
+        let radii = if suppress_root_chrome {
+            [0.0; 4]
         } else {
-            visual_motion_number(entry, "radius", 0.0, state) as f64
+            visual_corner_radii(entry, state)
         };
-        let shape = RoundedRect::from_rect(rect, radius);
+        // Shadows, glass and outlines take one radius; the largest corner stands in
+        // for them until they go per-corner. The box itself is exact.
+        let radius = radii.iter().copied().fold(0.0, f64::max);
+        let shape = RoundedRect::from_rect(rect, (radii[0], radii[1], radii[2], radii[3]));
         let opacity = visual_motion_number(entry, "opacity", 1.0, state).clamp(0.0, 1.0);
         if opacity <= 0.0001 {
             return;
@@ -4304,7 +4342,7 @@ impl Tree {
             target.push_clip(
                 Fill::NonZero,
                 transform,
-                &RoundedRect::from_rect(padding_box, inner_radius),
+                &RoundedRect::from_rect(padding_box, inner_corner_radii(radii, border)),
             );
             for shadow in shadows.iter().rev().filter(|shadow| shadow.inset) {
                 paint_inset_shadow(target, transform, padding_box, inner_radius, shadow);
@@ -4334,10 +4372,9 @@ impl Tree {
                     (rect.x1 - border[1]).max(rect.x0 + border[3]),
                     (rect.y1 - border[2]).max(rect.y0 + border[0]),
                 );
-                let inner_radius = (radius - border.iter().copied().fold(0.0, f64::max)).max(0.0);
                 let mut ring = vello::kurbo::Shape::to_path(&shape, 0.1);
                 ring.extend(vello::kurbo::Shape::path_elements(
-                    &RoundedRect::from_rect(inner, inner_radius),
+                    &RoundedRect::from_rect(inner, inner_corner_radii(radii, border)),
                     0.1,
                 ));
                 target.push_clip(Fill::EvenOdd, transform, &ring);
@@ -4379,64 +4416,14 @@ impl Tree {
                     border_color,
                     &RoundedRect::from_rect(
                         rect.inset(-width / 2.0),
-                        (radius - width / 2.0).max(0.0),
+                        inner_corner_radii(radii, [width / 2.0; 4]),
                     ),
                 );
             } else {
-                target.push_clip(Fill::NonZero, transform, &shape);
-                if border[0] > 0.0 {
-                    target.fill(
-                        Fill::NonZero,
-                        transform,
-                        border_color,
-                        &BoxRect::new(
-                            rect.x0,
-                            rect.y0,
-                            rect.x1,
-                            (rect.y0 + border[0]).min(rect.y1),
-                        ),
-                    );
-                }
-                if border[1] > 0.0 {
-                    target.fill(
-                        Fill::NonZero,
-                        transform,
-                        border_color,
-                        &BoxRect::new(
-                            (rect.x1 - border[1]).max(rect.x0),
-                            rect.y0,
-                            rect.x1,
-                            rect.y1,
-                        ),
-                    );
-                }
-                if border[2] > 0.0 {
-                    target.fill(
-                        Fill::NonZero,
-                        transform,
-                        border_color,
-                        &BoxRect::new(
-                            rect.x0,
-                            (rect.y1 - border[2]).max(rect.y0),
-                            rect.x1,
-                            rect.y1,
-                        ),
-                    );
-                }
-                if border[3] > 0.0 {
-                    target.fill(
-                        Fill::NonZero,
-                        transform,
-                        border_color,
-                        &BoxRect::new(
-                            rect.x0,
-                            rect.y0,
-                            (rect.x0 + border[3]).min(rect.x1),
-                            rect.y1,
-                        ),
-                    );
-                }
-                target.pop_layer();
+                // Per-side widths: the border is the ring between the border box and
+                // the padding box, so a rounded corner keeps its arc even when the
+                // adjacent sides differ (or one of them is 0), as CSS paints it.
+                target.fill_ring(transform, &shape, border, border_color);
             }
         }
         let outline_width = visual_number(&node, "outlineWidth", 0.0, state).max(0.0) as f64;
@@ -9035,9 +9022,10 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
             bottom: length(border[2]),
             left: length(border[3]),
         },
+        // CSS `column-gap` is the horizontal gap and `row-gap` the vertical; both fall back to `gap`.
         gap: Size {
-            width: length(node.number("gap", 0.0)),
-            height: length(node.number("gap", 0.0)),
+            width: length(node.number("columnGap", node.number("gap", 0.0))),
+            height: length(node.number("rowGap", node.number("gap", 0.0))),
         },
         flex_grow: node.number("flex", 0.0),
         // CSS: every flex item may shrink (`flex-shrink: 1`), never below its content.
@@ -9052,6 +9040,8 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
             "center" => JustifyContent::CENTER,
             "end" => JustifyContent::END,
             "between" => JustifyContent::SPACE_BETWEEN,
+            "around" => JustifyContent::SPACE_AROUND,
+            "evenly" => JustifyContent::SPACE_EVENLY,
             _ => JustifyContent::START,
         }),
         ..Default::default()

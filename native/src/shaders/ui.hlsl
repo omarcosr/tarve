@@ -1,8 +1,12 @@
 struct VSIn { float2 pos : POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; float4 params : TEXCOORD2;
-    float2 dev : TEXCOORD3; float4 clip : TEXCOORD4; float4 clipRadii : TEXCOORD5; float4 clipM0 : TEXCOORD6; float4 clipM1 : TEXCOORD7; };
+    float2 dev : TEXCOORD3; float4 clip : TEXCOORD4; float4 clipRadii : TEXCOORD5; float4 clipM0 : TEXCOORD6; float4 clipM1 : TEXCOORD7;
+    float4 shape : TEXCOORD8; float4 inner : TEXCOORD9; };
 struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; float4 params : TEXCOORD2;
     float2 dev : TEXCOORD3; nointerpolation float4 clip : TEXCOORD4; nointerpolation float4 clipRadii : TEXCOORD5;
-    nointerpolation float4 clipM0 : TEXCOORD6; nointerpolation float4 clipM1 : TEXCOORD7; };
+    nointerpolation float4 clipM0 : TEXCOORD6; nointerpolation float4 clipM1 : TEXCOORD7;
+    // Rounded-rect modes: per-corner radii (top-left, top-right, bottom-right, bottom-left);
+    // ring mode: border widths (top, right, bottom, left). Device pixels.
+    nointerpolation float4 shape : TEXCOORD8; nointerpolation float4 inner : TEXCOORD9; };
 // Window NDC -> render-target NDC: identity, or one tile of a tiled MSAA frame.
 cbuffer Target : register(b0) { float4 target; };
 // Liquid glass: sigma, saturate, refraction, highlight | backdrop width, height, 1 when a blurred backdrop is bound, 0.
@@ -11,7 +15,7 @@ cbuffer Glass : register(b1) { float4 glassA; float4 glassB; float4 glassRegion;
 // centre, half size | corner radius, opacity. Shape 0 is the quad's own box.
 cbuffer GlassShapes : register(b2) { float4 glassShapeInfo; float4 glassShapes[16]; };
 PSIn vs_main(VSIn i) { PSIn o; o.pos=float4(i.pos*target.xy+target.zw,0,1); o.uv=i.uv; o.color=i.color; o.mode=i.mode; o.params=i.params;
-    o.dev=i.dev; o.clip=i.clip; o.clipRadii=i.clipRadii; o.clipM0=i.clipM0; o.clipM1=i.clipM1; return o; }
+    o.dev=i.dev; o.clip=i.clip; o.clipRadii=i.clipRadii; o.clipM0=i.clipM0; o.clipM1=i.clipM1; o.shape=i.shape; o.inner=i.inner; return o; }
 // Signed distance to a rounded rectangle (x0,y0,x1,y1) with per-corner radii
 // (top-left, top-right, bottom-right, bottom-left); negative inside.
 float sdRoundRect(float2 p, float4 rect, float4 radii) {
@@ -82,7 +86,7 @@ float sdGlass(float2 p, float4 box, float4 radii) {
 // a Fresnel glow all round, a bright line at the edge and a window-like sheen top-left.
 float4 glassShade(PSIn i) {
     float2 half_size = i.params.xy; float corner = i.params.z; float opacity = i.params.w;
-    float4 box = float4(-half_size, half_size); float4 radii = corner.xxxx;
+    float4 box = float4(-half_size, half_size); float4 radii = i.shape;
     float sd = sdGlass(i.uv, box, radii);
     float coverage = saturate(0.5 - sd);
     float2 n = float2(sdGlass(i.uv+float2(1,0), box, radii) - sdGlass(i.uv-float2(1,0), box, radii),
@@ -116,14 +120,28 @@ float4 glassShade(PSIn i) {
     col += reflect + rim - farFace + glassA.w * 0.10 * sheen * sheen;
     return float4(col, alpha * opacity * coverage);
 }
+// A border whose sides differ: the rounded box minus the box inset by the border
+// widths, each inner corner shrunk by its adjacent widths as CSS does. Coverage
+// of the ring is the outer coverage less the inner one, exact at every edge.
+float ringCoverage(PSIn i) {
+    float4 box = float4(-i.params.xy, i.params.xy);
+    float outer = saturate(0.5 - sdRoundRect(i.uv, box, i.shape));
+    float4 w = i.inner; // top, right, bottom, left
+    float4 hole = float4(box.x + w.w, box.y + w.x, box.z - w.y, box.w - w.z);
+    if (hole.z <= hole.x || hole.w <= hole.y) return outer;
+    float4 radii = max(i.shape - float4(max(w.x, w.w), max(w.x, w.y), max(w.z, w.y), max(w.z, w.w)), 0.0);
+    float innerCoverage = saturate(0.5 - sdRoundRect(i.uv, hole, radii));
+    return max(outer - innerCoverage, 0.0);
+}
 float4 shade(PSIn i) {
     if (i.mode < 0.5) return i.color;
+    if (i.mode > 8.5) return float4(i.color.rgb, i.color.a*ringCoverage(i));
     if (i.mode > 7.5) return glassShade(i);
     if (i.mode > 6.5) return blurPass(i.pos.xy, float2(0,1), glassA.x);
     if (i.mode > 5.5) return blurPass(i.pos.xy, float2(1,0), glassA.x);
     // A solid rounded rectangle (circle, pill) from its distance field: uv is the
-    // offset from its centre in pixels; params = half size, corner radius.
-    if (i.mode > 4.5) return float4(i.color.rgb, i.color.a*saturate(0.5-sdRoundRect(i.uv, float4(-i.params.xy, i.params.xy), i.params.zzzz)));
+    // offset from its centre in pixels; params = half size, shape = corner radii.
+    if (i.mode > 4.5) return float4(i.color.rgb, i.color.a*saturate(0.5-sdRoundRect(i.uv, float4(-i.params.xy, i.params.xy), i.shape)));
     if (i.mode > 2.5) {
         float coverage=saturate(rounded_box_shadow(i.uv,i.params));
         if (i.mode > 3.5) coverage=1.0-coverage;

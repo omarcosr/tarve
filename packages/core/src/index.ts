@@ -43,3 +43,4 @@ export { BunFfiBridge, openExternal } from "./bridge";
 export type { NativeBridge, BunFfiBridgeOptions } from "./bridge";
 export { CanvasRenderingContext2D, CanvasGradient, parseCanvasFont } from "./canvas";
 export type { MediaController, MediaElementProps, MediaEventInfo } from "./media-element";
+export { tw } from "./tailwind";

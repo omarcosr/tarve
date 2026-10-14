@@ -71,7 +71,8 @@ export function TitleBar({
   style,
   ...props
 }: TitleBarProps): VNode {
-  const radius = typeof style?.radius === "number" ? style.radius : 0;
+  const radius = typeof style?.radius === "number" ? style.radius
+    : typeof style?.radius === "object" ? Math.max(style.radius.topLeft ?? 0, style.radius.topRight ?? 0) : 0;
   const surface: Style | undefined = glass
     ? {
         ...glassSurface(glass === true ? "regular" : glass, appearance, { radius, shadow: radius > 0 }),
