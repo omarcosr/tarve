@@ -17,6 +17,8 @@ import {
  * key are one surface: when a drop comes close to the dock their shapes bridge and
  * flow together, and when it leaves they neck and part. Move the pointer over the
  * scene to carry a drop of your own.
+ *
+ * After the Liquid Glass study by @v1vendi: https://x.com/v1vendi/status/2109652346481312087
  */
 
 export const WIDTH = 1168;
