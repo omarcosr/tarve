@@ -22,15 +22,17 @@ export interface GlassProps extends ViewProps {
   shadow?: boolean;
 }
 
+// Little blur: what makes it glass is the lens, not the frost. The edge bends the
+// backdrop over the corner radius, the flat part enlarges it slightly.
 const MATERIAL: Record<GlassVariant, GlassMaterial> = {
-  regular: { blur: 24, saturate: 1.7, refraction: 10, highlight: 0.9 },
-  clear: { blur: 10, saturate: 1.3, refraction: 14, highlight: 0.7 },
-  tinted: { blur: 20, saturate: 1.5, refraction: 8, highlight: 0.6 },
+  regular: { blur: 8, saturate: 1.6, refraction: 22, highlight: 1, magnify: 0.06 },
+  clear: { blur: 2, saturate: 1.25, refraction: 28, highlight: 1, magnify: 0.1 },
+  tinted: { blur: 6, saturate: 1.5, refraction: 18, highlight: 0.9, magnify: 0.06 },
 };
 
 const VEIL: Record<"light" | "dark", Record<GlassVariant, string>> = {
-  light: { regular: "#ffffff8c", clear: "#ffffff26", tinted: "#ffffff40" },
-  dark: { regular: "#1c1c1ea6", clear: "#00000026", tinted: "#1c1c1e59" },
+  light: { regular: "#ffffff59", clear: "#ffffff14", tinted: "#ffffff33" },
+  dark: { regular: "#1c1c1e8c", clear: "#00000014", tinted: "#1c1c1e4d" },
 };
 
 /** The rim, inner light and drop shadow of iOS 26 glass, for a given radius and appearance. */
@@ -38,11 +40,11 @@ export function glassChrome(appearance: "light" | "dark", shadow: boolean): Styl
   const light = appearance === "light";
   return {
     borderWidth: 1,
-    borderColor: light ? "#ffffff73" : "#ffffff2e",
+    borderColor: light ? "#ffffff59" : "#ffffff26",
     boxShadow: [
       // The bright line along the top inside edge and the darker one along the bottom.
-      { inset: true, y: 1, blur: 1, color: light ? "#ffffffb3" : "#ffffff40" },
-      { inset: true, y: -1, blur: 1, color: light ? "#0000001a" : "#00000066" },
+      { inset: true, y: 1, blur: 1, color: light ? "#ffffff80" : "#ffffff33" },
+      { inset: true, y: -1, blur: 1, color: light ? "#00000014" : "#00000059" },
       ...(shadow ? [{ y: 10, blur: 30, color: light ? "#00000033" : "#00000080" }, { y: 2, blur: 6, color: "#0000001f" }] : []),
     ],
   };

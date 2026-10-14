@@ -6,8 +6,8 @@ describe("Glass", () => {
   test("declares the material with the veil as its tint and the rim as chrome", () => {
     const tree = compileTree(<Window><Glass id="bar" /></Window>);
     const style = tree.nodes.get("bar")!.style;
-    expect(style.glass).toEqual({ blur: 24, saturate: 1.7, refraction: 10, highlight: 0.9 });
-    expect(style.background).toBe("#ffffff8c");
+    expect(style.glass).toEqual({ blur: 8, saturate: 1.6, refraction: 22, highlight: 1, magnify: 0.06 });
+    expect(style.background).toBe("#ffffff59");
     expect(style.radius).toBe(26);
     expect(style.borderWidth).toBe(1);
     expect(Array.isArray(style.boxShadow) && style.boxShadow.length).toBe(4);
@@ -20,11 +20,11 @@ describe("Glass", () => {
       </Window>,
     );
     const style = tree.nodes.get("clear")!.style;
-    expect(style.glass).toEqual({ blur: 4, saturate: 1.3, refraction: 14, highlight: 0.7 });
+    expect(style.glass).toEqual({ blur: 4, saturate: 1.25, refraction: 28, highlight: 1, magnify: 0.1 });
     expect(style.background).toBe("#ff000040");
     expect(style.radius).toBe(12);
     expect(style.width).toBe(10);
     expect(Array.isArray(style.boxShadow) && style.boxShadow.length).toBe(2);
-    expect(style.borderColor).toBe("#ffffff2e");
+    expect(style.borderColor).toBe("#ffffff26");
   });
 });

@@ -237,6 +237,7 @@ fn glass_params(value: &Value) -> Option<crate::paint::GlassParams> {
         saturate: number("saturate", 1.0).min(4.0),
         refraction: number("refraction", 0.0).min(48.0),
         highlight: number("highlight", 0.0).min(1.0),
+        magnify: number("magnify", 0.0).min(0.3),
     })
 }
 

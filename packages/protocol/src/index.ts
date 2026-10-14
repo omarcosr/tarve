@@ -104,8 +104,10 @@ export interface GlassMaterial {
   saturate?: number;
   /** How far in px the backdrop bends along the rounded edge (the lens), 0 for none. */
   refraction?: number;
-  /** Brightness 0–1 of the light rim on the top edge. */
+  /** Brightness 0–1 of the rim, the edge reflections and the sheen. */
   highlight?: number;
+  /** How much the flat part enlarges the backdrop, as a thick lens does: 0–0.3 (0.06 is iOS-like). */
+  magnify?: number;
 }
 export interface StateStyle {
   /** Liquid-glass material behind the box; `background` is its tint. */

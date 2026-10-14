@@ -193,8 +193,10 @@ pub(crate) struct GlassParams {
     pub saturate: f32,
     /// How far in CSS px the backdrop bends along the rounded edge.
     pub refraction: f32,
-    /// Brightness 0..1 of the light rim on the top edge.
+    /// Brightness 0..1 of the rim, edge reflections and sheen.
     pub highlight: f32,
+    /// How much the flat part enlarges the backdrop (0..0.3).
+    pub magnify: f32,
 }
 
 pub(crate) trait PaintTarget {

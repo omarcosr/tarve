@@ -54,8 +54,12 @@ float4 blurPass(float2 p, float2 dir, float sigma) {
     }
     return float4((sum/wsum).rgb, 1.0);
 }
-// Liquid glass: the blurred backdrop bent outward along the rounded edge (a lens, with a
-// trace of chromatic aberration), saturated, under the tint, with a light rim on top.
+// The blurred backdrop at a window pixel.
+float3 backdropAt(float2 q) { return tex0.Load(int3(clamp(q, 0.0, glassB.xy - 1.0), 0)).rgb; }
+// Liquid glass: a thick slab whose edge is a quarter-round. The flat part shows the
+// backdrop slightly enlarged; over the curved edge the ray bends outward, pulling what
+// lies past the edge into the rim, with a trace of dispersion. The curve also reflects:
+// a Fresnel glow all round, a bright line at the edge and a window-like sheen top-left.
 float4 glassShade(PSIn i) {
     float2 half_size = i.params.xy; float corner = i.params.z; float opacity = i.params.w;
     float4 box = float4(-half_size, half_size); float4 radii = corner.xxxx;
@@ -64,25 +68,32 @@ float4 glassShade(PSIn i) {
     float2 n = float2(sdRoundRect(i.uv+float2(1,0), box, radii) - sdRoundRect(i.uv-float2(1,0), box, radii),
                       sdRoundRect(i.uv+float2(0,1), box, radii) - sdRoundRect(i.uv-float2(0,1), box, radii));
     n = n / max(length(n), 1e-4);
-    float band = max(corner, 14.0);
-    float t = saturate((sd + band) / band);
-    float lens = glassA.z * t * t;
+    // Width of the curved edge: the corner radius, at least 10 px, at most half the box.
+    float band = clamp(max(corner, 10.0), 10.0, min(half_size.x, half_size.y));
+    float t = saturate(1.0 + sd / band);                 // 0 on the flat part, 1 at the edge
+    float curve = 1.0 - sqrt(max(0.0, 1.0 - t*t));       // height lost over a quarter-round
     float3 col; float alpha;
     if (glassB.z > 0.5) {
-        float2 p = i.pos.xy; float2 last = glassB.xy - 1.0;
+        float2 centre = i.pos.xy - i.uv;
+        float2 q = centre + i.uv * (1.0 - glassB.w);
+        float2 bend = n * glassA.z * curve;
         float3 c;
-        c.r = tex0.Load(int3(clamp(p + n*lens*1.06, 0.0, last), 0)).r;
-        c.g = tex0.Load(int3(clamp(p + n*lens, 0.0, last), 0)).g;
-        c.b = tex0.Load(int3(clamp(p + n*lens*0.94, 0.0, last), 0)).b;
+        c.r = backdropAt(q + bend * (1.0 + 0.10 * curve)).r;
+        c.g = backdropAt(q + bend).g;
+        c.b = backdropAt(q + bend * (1.0 - 0.10 * curve)).b;
         float luma = dot(c, float3(0.2126, 0.7152, 0.0722));
         c = lerp(luma.xxx, c, glassA.y);
         col = lerp(c, i.color.rgb, i.color.a); alpha = 1.0;
     } else { col = i.color.rgb; alpha = i.color.a; }
-    // The rim: a one-pixel light along the edge, brightest where the edge faces up.
-    float rim = saturate(1.0 - abs(sd + 1.0) / 1.5) * glassA.w * saturate(0.3 - 0.7*n.y);
-    // A soft sheen a few pixels inside the top edge, as light grazes the surface.
-    float sheen = saturate(1.0 - (sd + 12.0) / 12.0) * glassA.w * 0.18 * saturate(-n.y);
-    col += rim + sheen;
+    float2 light = float2(-0.55, -0.83);
+    float facing = saturate(dot(n, light));
+    float fresnel = pow(curve, 2.5);
+    float reflect = glassA.w * fresnel * (0.10 + 0.55 * facing * facing);
+    float rim = saturate(1.0 - abs(sd + 1.0) / 1.25) * glassA.w * (0.30 + 0.70 * facing);
+    float farFace = saturate(1.0 - abs(sd + 3.0) / 1.5) * glassA.w * 0.08;
+    float2 u = i.uv / half_size;
+    float sheen = saturate(1.0 - length(u - float2(-0.35, -0.75)) / 1.1);
+    col += reflect + rim - farFace + glassA.w * 0.10 * sheen * sheen;
     return float4(col, alpha * opacity * coverage);
 }
 float4 shade(PSIn i) {

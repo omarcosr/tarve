@@ -60,9 +60,16 @@ function Wallpaper(): VNode {
         <View key={i} style={{ position: "absolute", left: b.x, top: b.y, width: b.s, height: b.s, radius: b.s / 2,
           background: `radial-gradient(circle at 35% 30%, #ffffffb0, ${b.c} 45%, ${b.c}00 72%)`, opacity: b.o }} />
       ))}
-      {Array.from({ length: 7 }, (_, i) => (
-        <View key={`l${i}`} style={{ position: "absolute", left: 0, top: 120 + i * 110, width: WIDTH, height: 2, background: dark ? "#ffffff22" : "#00000018" }} />
+      {/* Hard edges for the lens to bend: a grid and big type. */}
+      {Array.from({ length: 8 }, (_, i) => (
+        <View key={`h${i}`} style={{ position: "absolute", left: 0, top: 90 + i * 100, width: WIDTH, height: 2, background: dark ? "#ffffff30" : "#1c1c1e26" }} />
       ))}
+      {Array.from({ length: 6 }, (_, i) => (
+        <View key={`v${i}`} style={{ position: "absolute", left: 40 + i * 70, top: 0, width: 2, height: HEIGHT, background: dark ? "#ffffff24" : "#1c1c1e1f" }} />
+      ))}
+      <Text id="clock" size={96} weight={800} color={dark ? "#ffffffd9" : "#1c1c1ee6"} style={{ position: "absolute", left: 24, top: 262, letterSpacing: -4 }}>09:41</Text>
+      <Text id="date" size={22} weight={600} color={dark ? "#ffffffb3" : "#1c1c1eb3"} style={{ position: "absolute", left: 28, top: 372 }}>Tuesday, June 9</Text>
+      <Text id="tagline" size={44} weight={800} color={dark ? "#ffffffcc" : "#1c1c1ecc"} style={{ position: "absolute", left: 24, top: 745, letterSpacing: -1 }}>Liquid Glass</Text>
     </View>
   );
 }
@@ -196,7 +203,7 @@ function Card({ index }: { index: number }) {
 function Content() {
   return (
     <Scroll id="content" style={{ position: "absolute", top: 0, left: 0, width: WIDTH, height: HEIGHT }}>
-      <Column padding={{ top: 280, left: 16, right: 16, bottom: 140 }} gap={28}>
+      <Column padding={{ top: 420, left: 16, right: 16, bottom: 140 }} gap={28}>
         {Array.from({ length: 5 }, (_, section) => (
           <Column key={section} gap={12}>
             <Text size={22} weight={700} color={dark ? "#ffffff" : "#1c1c1e"}>{["Made for you", "Recently played", "New releases", "Top charts", "Moods"][section]}</Text>

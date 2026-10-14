@@ -169,8 +169,8 @@ enum DrawCommand {
         quad: (u32, u32),
         /// Window pixels the blur reads and writes (the quad plus three sigmas).
         region: [u32; 4],
-        /// sigma, saturate, refraction, highlight, in device pixels.
-        params: [f32; 4],
+        /// sigma, saturate, refraction, highlight, magnify (sigma and refraction in device pixels).
+        params: [f32; 5],
     },
 }
 
@@ -1043,7 +1043,7 @@ impl D3d11Graphics {
         blur_h: (u32, u32),
         blur_v: (u32, u32),
         region: [u32; 4],
-        params: [f32; 4],
+        params: [f32; 5],
     ) -> bool {
         let (Some(backdrop), Some(render_target), Some(depth_view), None) =
             (&self.backdrop, &self.render_target, &self.depth_view, &self.tile)
@@ -1101,7 +1101,7 @@ impl D3d11Graphics {
         true
     }
 
-    fn upload_glass_params(&self, params: [f32; 4], available: f32) -> Result<(), String> {
+    fn upload_glass_params(&self, params: [f32; 5], available: f32) -> Result<(), String> {
         upload_dynamic(
             &self.context,
             &self.glass_params,
@@ -1113,7 +1113,7 @@ impl D3d11Graphics {
                 self.width as f32,
                 self.height as f32,
                 available,
-                0.0,
+                params[4],
             ]),
         )
     }
@@ -1353,7 +1353,7 @@ impl D3d11Graphics {
         radius: f32,
         tint: Color,
         opacity: f32,
-        params: [f32; 4],
+        params: [f32; 5],
     ) {
         let reach = (params[0] * 3.0).ceil() + 2.0;
         let (width, height) = (self.width.max(1) as f32, self.height.max(1) as f32);
@@ -2504,6 +2504,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                 glass.saturate.clamp(0.0, 4.0),
                 (glass.refraction * scale as f32).clamp(0.0, 48.0),
                 glass.highlight.clamp(0.0, 1.0),
+                glass.magnify.clamp(0.0, 0.3),
             ],
         );
     }
