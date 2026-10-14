@@ -21,11 +21,11 @@ const app = createApp(() => (
         style={{ position: "absolute", left: 20, top: 40, width: 160, height: 100 }} />
       <View id="plain" style={{ position: "absolute", left: 220, top: 40, width: 160, height: 100, radius: 20, background: "#ffffff10" }} />
       <View id="mover" style={{ position: "absolute", left: moving ? 360 : 0, top: 280, width: 20, height: 20, radius: 10, background: "#00ff00", transition: { left: { duration: 20000, easing: "linear" } } }} />
-      {/* Two drops 20 px apart that share a merge key bridge; the same two without one keep the gap. */}
+      {/* Two drops 12 px apart that share a merge key (bridging within blend / 2) fuse; the same two without one keep the gap. */}
       {(["joined", "apart"] as const).map((kind, row) => [0, 1].map(column => (
         <Glass key={kind + column} id={`${kind}-${column}`} variant="clear" tint="#ffffffcc" radius={20} shadow={false}
           merge={kind === "joined" ? "drops" : undefined} blend={40} material={{ blur: 2, refraction: 10, highlight: 0 }}
-          style={{ position: "absolute", left: 40 + row * 180 + column * 60, top: 200, width: 40, height: 40 }} />
+          style={{ position: "absolute", left: 44 + row * 180 + column * 52, top: 200, width: 40, height: 40 }} />
       )))}
     </View>
   </Window>
@@ -70,6 +70,7 @@ try {
   };
   const joined = whiteness(90, 220);
   const apart = whiteness(270, 220);
+  // The fused pair is one surface, so no edge light crosses the midpoint between them.
   assert.ok(apart < 40, `unmerged drops leave the gap between them bare (${apart})`);
   if (backdrop) {
     assert.ok(glass < 4, `the glass box blurs the stripes (${glass.toFixed(1)})`);

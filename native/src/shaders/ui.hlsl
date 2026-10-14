@@ -60,9 +60,10 @@ float4 blurPass(float2 p, float2 dir, float sigma) {
 // The copied backdrop at a window pixel; reads stay inside the copied region (the
 // rest of the scratch texture is stale).
 float3 backdropAt(float2 q) { return tex0.Load(int3(clamp(q, glassRegion.xy, glassRegion.zw - 1.0), 0)).rgb; }
-// Distance to the glass surface: the quad's own box joined smoothly (a polynomial
-// smooth minimum) with the other shapes of a merged surface, so two boxes that come
-// within `blend` px of each other bridge like drops of liquid.
+// Distance to the glass surface: the quad's own box joined with the other shapes of a
+// merged surface by the polynomial smooth minimum (C1, so the join is a fillet, never
+// a crease): where two shapes are both within `blend` px of a point the union bulges by
+// up to blend/4 there, so boxes bridge once within blend/2 of each other.
 float sdGlass(float2 p, float4 box, float4 radii) {
     float d = sdRoundRect(p, box, radii);
     int n = (int)glassShapeInfo.x; float k = max(glassShapeInfo.y, 1e-3);
@@ -71,7 +72,7 @@ float sdGlass(float2 p, float4 box, float4 radii) {
         // A fading shape shrinks away: its distance grows by what opacity it lost.
         float ds = sdRoundRect(p - a.xy, float4(-a.zw, a.zw), b.xxxx) + (1.0 - b.y) * (max(a.z, a.w) + k) * 1.05;
         float h = max(k - abs(d - ds), 0.0) / k;
-        d = min(d, ds) - h*h*k*0.5;
+        d = min(d, ds) - h*h*k*0.25;
     }
     return d;
 }

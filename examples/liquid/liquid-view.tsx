@@ -142,7 +142,7 @@ function DockItem({ index, label }: { index: number; label: string }): VNode {
 function Dock(): VNode {
   return (
     // The dock is the surface the drops join: its material and tint are theirs too.
-    <Glass id="dock" variant="clear" tint="#bfe3ff4d" radius={46} merge="dock" blend={56} material={{ blur: 6, refraction: 44, magnify: 0.12, highlight: 1, saturate: 1.4 }}
+    <Glass id="dock" variant="clear" tint="#bfe3ff4d" radius={46} merge="dock" blend={36} material={{ blur: 6, refraction: 44, magnify: 0.12, highlight: 1, saturate: 1.4 }}
       style={{ position: "absolute", ...DOCK, direction: "row", padding: 14, gap: 4 }}>
       <DockItem index={0} label="Home" />
       <DockItem index={1} label="Search" />
@@ -156,7 +156,7 @@ function Drops(): VNode {
   return (
     <>
       {scene.falling.map(drop => (
-        <Glass key={drop.id} id={drop.id} variant="clear" radius={drop.size / 2} merge="dock" blend={56}
+        <Glass key={drop.id} id={drop.id} variant="clear" radius={drop.size / 2} merge="dock" blend={36}
           style={{
             position: "absolute", left: drop.x, top: drop.y, width: drop.size, height: drop.size, opacity: drop.opacity,
             ...(drop.duration > 0 ? { transition: {
@@ -167,7 +167,7 @@ function Drops(): VNode {
           }} />
       ))}
       {scene.pointer && (
-        <Glass id="drop-pointer" variant="clear" radius={30} merge="dock" blend={56}
+        <Glass id="drop-pointer" variant="clear" radius={30} merge="dock" blend={36}
           style={{ position: "absolute", left: scene.pointer.x - 30, top: scene.pointer.y - 30, width: 60, height: 60, transition: { left: { duration: 120, easing: "easeOut" }, top: { duration: 120, easing: "easeOut" } } }} />
       )}
     </>
