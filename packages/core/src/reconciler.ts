@@ -357,7 +357,7 @@ export function compileTree(
     }
     const style = resolveThemeStyle(foldDarkVariant(rawStyle, selectedTheme), selectedTheme);
     for (const key of ["padding", "margin"] as const) {
-      if (style[key] && typeof style[key] === "object") style[key] = { ...style[key] };
+      if (style[key] && typeof style[key] === "object") (style as Record<string, unknown>)[key] = { ...style[key] };
     }
     const imageSource = nativeType === "image" && p.src !== undefined
       ? serializeImageSource(p.src)

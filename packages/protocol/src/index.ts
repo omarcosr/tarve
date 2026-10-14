@@ -25,6 +25,9 @@ export type SvgNode =
   | readonly [SvgElementName, SvgAttributes]
   | readonly [SvgElementName, SvgAttributes, readonly SvgNode[]];
 export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
+/** A margin side: px, a percentage of the container, or `"auto"` (CSS auto margins centre a box or push it aside). */
+export type MarginSide = number | `${number}%` | "auto";
+export type Margins = MarginSide | { top?: MarginSide; right?: MarginSide; bottom?: MarginSide; left?: MarginSide };
 /** Corner radii: a number rounds every corner; an object names each (missing corners are square). */
 export type CornerRadius = number | { topLeft?: number; topRight?: number; bottomRight?: number; bottomLeft?: number };
 export type OutlineStyle = "dotted" | "dashed" | "solid" | "double" | "groove" | "ridge" | "inset" | "outset" | "none" | "hidden";
@@ -149,7 +152,7 @@ export interface Style extends StateStyle {
   direction?: "row" | "row-reverse" | "column" | "column-reverse"; wrap?: boolean; gap?: number;
   /** CSS `row-gap` / `column-gap`; each falls back to `gap`. */
   rowGap?: number; columnGap?: number;
-  padding?: Insets; margin?: Insets; align?: "start" | "center" | "end" | "stretch";
+  padding?: Insets; margin?: Margins; align?: "start" | "center" | "end" | "stretch";
   /** CSS `justify-content`: `around` and `evenly` are `space-around` / `space-evenly`. */
   justify?: "start" | "center" | "end" | "between" | "around" | "evenly";
   /** `block` stacks children and collapses adjacent vertical margins, as CSS block flow does. */

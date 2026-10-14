@@ -8927,6 +8927,14 @@ fn dimension(v: &Value) -> Dimension {
     }
     auto()
 }
+/// One side of a `margin`: a number for every side, or an object naming sides; a missing side is 0.
+fn margin_side(margin: &Value, side: &str) -> LengthPercentageAuto {
+    let value = if margin.is_object() { &margin[side] } else { margin };
+    if value.is_null() {
+        return length(0.0);
+    }
+    limit(value)
+}
 fn limit(v: &Value) -> LengthPercentageAuto {
     if let Some(n) = v.as_f64() {
         return length(n as f32);
@@ -8955,7 +8963,7 @@ fn motion_limit(entry: &Entry, key: &str) -> LengthPercentageAuto {
 fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
     let node = &entry.node;
     let pad = node.insets("padding");
-    let margin = node.insets("margin");
+    let margin = &node.style["margin"];
     let border = if suppress_border {
         [0.0; 4]
     } else {
@@ -9015,11 +9023,12 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
             bottom: length(pad[2]),
             left: length(pad[3]),
         },
+        // Margins take `"auto"` (and percentages) per side, as CSS does: `mx-auto` centres.
         margin: Rect {
-            top: length(margin[0]),
-            right: length(margin[1]),
-            bottom: length(margin[2]),
-            left: length(margin[3]),
+            top: margin_side(margin, "top"),
+            right: margin_side(margin, "right"),
+            bottom: margin_side(margin, "bottom"),
+            left: margin_side(margin, "left"),
         },
         border: Rect {
             top: length(border[0]),

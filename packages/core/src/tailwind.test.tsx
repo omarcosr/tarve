@@ -23,7 +23,7 @@ describe("tailwind classes", () => {
 
   test("colours: palette, opacity modifier, theme tokens and arbitrary values", () => {
     expect(tw("bg-zinc-900 text-white border-red-500/50 bg-[#123456]")).toEqual({
-      background: "#123456", foreground: "#ffffff", borderColor: "#ef444480",
+      background: "#123456", foreground: "#ffffff", borderColor: "#fb2c3680",
     });
     expect(tw("bg-primary text-muted-foreground border-border")).toEqual({
       background: theme.colors.primary, foreground: theme.colors.mutedForeground, borderColor: theme.colors.border,
@@ -50,7 +50,7 @@ describe("tailwind classes", () => {
     });
     expect(tw("border-2 border-dashed rounded-full ring-2 ring-blue-500 ring-offset-2")).toEqual({
       borderWidth: 2, borderStyle: "dashed", radius: 9999, outlineWidth: 2, outlineStyle: "solid",
-      outlineColor: "#3b82f6", outlineOffset: 2,
+      outlineColor: "#2b7fff", outlineOffset: 2,
     });
     expect(tw("scale-105 -translate-y-1 transition duration-300 ease-out aspect-video")).toEqual({
       transform: { scale: 1.05, y: -4 }, transition: { all: { duration: 300, easing: "easeOut" } }, aspectRatio: 16 / 9,
@@ -70,12 +70,18 @@ describe("tailwind classes", () => {
 
   test("gradients compile to a linear gradient object, order-independent", () => {
     expect(tw("from-blue-500 bg-gradient-to-r to-purple-500")).toEqual({
-      background: { type: "linear", to: "right", stops: [{ color: "#3b82f6", offset: 0 }, { color: "#a855f7", offset: 1 }] },
+      background: { type: "linear", to: "right", stops: [{ color: "#2b7fff", offset: 0 }, { color: "#ad46ff", offset: 1 }] },
     });
-    // Tailwind's implicit end stop is the start colour at alpha 0 (a theme token keeps its opacity modifier).
+    // Tailwind 4's implicit end stop is transparent.
     expect(tw("bg-linear-to-br from-primary via-white hover:from-black")).toEqual({
-      background: { type: "linear", to: "bottom right", stops: [{ color: theme.colors.primary, offset: 0 }, { color: "#ffffff", offset: 0.5 }, { color: `${theme.colors.primary}/0`, offset: 1 }] },
-      hover: { background: { type: "linear", to: "bottom", stops: [{ color: "#000000", offset: 0 }, { color: "#00000000", offset: 1 }] } },
+      background: { type: "linear", to: "bottom right", stops: [{ color: theme.colors.primary, offset: 0 }, { color: "#ffffff", offset: 0.5 }, { color: "transparent", offset: 1 }] },
+      hover: { background: { type: "linear", to: "bottom", stops: [{ color: "#000000", offset: 0 }, { color: "transparent", offset: 1 }] } },
+    });
+    expect(tw("bg-radial from-white to-black")).toEqual({ background: { type: "radial", stops: [{ color: "#ffffff", offset: 0 }, { color: "#000000", offset: 1 }] } });
+    expect(tw("bg-conic-90 from-white via-20% via-black")).toEqual({ background: { type: "conic", from: 90, stops: [{ color: "#ffffff", offset: 0 }, { color: "#000000", offset: 0.2 }, { color: "transparent", offset: 1 }] } });
+    expect(tw("mx-auto mt-2")).toEqual({ margin: { left: "auto", right: "auto", top: 8 } });
+    expect(tw("shadow-md shadow-red-500/50 backdrop-blur-sm backdrop-saturate-150 animate-spin")).toEqual({
+      boxShadow: "0 4px 6px -1px #fb2c3680, 0 2px 4px -2px #fb2c3680", glass: { blur: 8, saturate: 1.5 }, spin: 1000,
     });
     expect(tw("bg-gradient-to-r")).toEqual({});
   });
@@ -174,7 +180,7 @@ describe("tailwind classes", () => {
   test("className on intrinsics compiles into style at the JSX call site; inline style wins", () => {
     const node = jsx("div", { className: "p-4 bg-red-500 hover:bg-red-600", style: { background: "blue", hover: { opacity: 0.5 } } });
     expect(node.props.className).toBeUndefined();
-    expect(node.props.style).toEqual({ padding: 16, background: "blue", hover: { background: "#dc2626", opacity: 0.5 } });
+    expect(node.props.style).toEqual({ padding: 16, background: "blue", hover: { background: "#e7000b", opacity: 0.5 } });
     const aliased = jsx("div", { className: "bg-red-500 flex-col", style: { backgroundColor: "blue" } });
     expect(aliased.props.style).toEqual({ direction: "column", backgroundColor: "blue" });
     const plain = jsx("div", { class: "p-2 bg-white", className: "p-4" });

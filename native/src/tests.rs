@@ -491,6 +491,29 @@ fn flex_items_keep_an_explicit_min_width_like_css() {
 }
 
 #[test]
+fn auto_margins_centre_a_box_as_css_does() {
+    let centred = node(
+        "centred",
+        "view",
+        json!({"width": 100, "height": 20, "margin": {"left": "auto", "right": "auto"}}),
+        vec![],
+    );
+    let pushed = node(
+        "pushed",
+        "view",
+        json!({"width": 100, "height": 20, "margin": {"left": "auto", "top": 4}}),
+        vec![],
+    );
+    let column = node("column", "column", json!({"width": 300}), vec![centred, pushed]);
+    let mut tree = Tree::new(root(vec![column]));
+    tree.compute(400.0, 300.0).unwrap();
+    let rect = |id: &str| tree.entries[id].rect;
+    assert!((rect("centred").x0 - rect("column").x0 - 100.0).abs() < 0.5, "{:?}", rect("centred"));
+    assert!((rect("pushed").x0 - rect("column").x0 - 200.0).abs() < 0.5, "{:?}", rect("pushed"));
+    assert!((rect("pushed").y0 - rect("centred").y1 - 4.0).abs() < 0.5, "{:?}", rect("pushed"));
+}
+
+#[test]
 fn row_and_column_gap_and_space_around_evenly_follow_css() {
     let items = (0..3)
         .map(|i| node(&format!("g{i}"), "view", json!({"width": 50, "height": 20}), vec![]))

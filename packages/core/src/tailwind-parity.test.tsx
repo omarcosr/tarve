@@ -1,14 +1,15 @@
 /**
- * Parity with the real Tailwind CSS compiler (v3.4): every class below is compiled by
+ * Parity with the real Tailwind CSS 4 compiler: every class below is compiled by
  * `tailwindcss` itself and its declarations are compared, one by one, with what
  * `tw()` produces, after both sides are reduced to the same CSS vocabulary
- * (rem → px at 16px, Tailwind's `rgb(r g b / a)` → hex, Tarve's `justify: "between"`
- * → `justify-content: space-between`, …). Known, intentional differences are listed
+ * (theme variables and `calc()` resolved, rem → px at 16px, `oklch()` and
+ * `color-mix()` → hex, Tarve's `justify: "between"` → `justify-content: space-between`, …). Known, intentional differences are listed
  * in `DIVERGENCES` and asserted too, so a change on either side shows up.
  */
 import { describe, expect, test } from "bun:test";
 import postcss from "postcss";
-import tailwindcss from "tailwindcss";
+import { compile } from "@tailwindcss/node";
+import { oklchToHex } from "../../../scripts/tailwind-palette";
 import { tw } from "./tailwind";
 import { theme } from "./theme";
 import type { Style, StateStyle } from "./protocol";
@@ -23,9 +24,9 @@ const REM = 16;
 
 const CLASSES = [
   // spacing
-  "p-4", "px-2", "py-0.5", "pt-px", "pb-8", "m-0", "-mt-2", "mx-3", "ml-1.5",
+  "p-4", "px-2", "py-0.5", "pt-px", "pb-8", "m-0", "-mt-2", "mx-3", "ml-1.5", "mx-auto", "m-auto", "ms-2", "me-4", "space-x-4", "space-y-2",
   // sizing
-  "w-full", "w-1/2", "w-3/4", "w-64", "h-10", "h-screen", "min-w-0", "max-w-md", "max-w-none", "size-12", "min-h-40",
+  "w-full", "w-1/2", "w-3/4", "w-64", "w-xs", "w-lg", "h-10", "h-screen", "min-w-0", "min-w-sm", "max-w-md", "max-w-3xs", "max-w-none", "size-12", "min-h-40",
   // flex
   "flex", "inline-flex", "block", "hidden", "flex-col", "flex-row-reverse", "flex-wrap", "flex-nowrap",
   "flex-1", "flex-auto", "flex-initial", "flex-none", "grow", "grow-0", "shrink", "shrink-0", "basis-1/2",
@@ -35,7 +36,7 @@ const CLASSES = [
   // grid
   "grid", "grid-cols-4", "col-span-2", "col-span-full", "row-span-3",
   // position
-  "relative", "absolute", "inset-0", "inset-x-0", "inset-y-2", "top-1/2", "-left-2", "right-4", "bottom-0", "z-10", "-z-10", "z-50",
+  "relative", "absolute", "static", "inset-0", "inset-x-0", "inset-y-2", "top-1/2", "-left-2", "right-4", "bottom-0", "start-2", "end-0", "z-10", "-z-10", "z-50", "sr-only",
   // typography
   "text-xs", "text-sm", "text-base", "text-lg", "text-xl", "text-2xl", "text-4xl",
   "font-thin", "font-light", "font-normal", "font-medium", "font-semibold", "font-bold", "font-black",
@@ -50,17 +51,19 @@ const CLASSES = [
   // borders and radii
   "border", "border-0", "border-2", "border-4", "border-t", "border-b-0", "border-x-4", "border-l-2",
   "border-solid", "border-dashed", "border-dotted", "border-double", "border-none",
-  "rounded", "rounded-none", "rounded-sm", "rounded-md", "rounded-lg", "rounded-xl", "rounded-2xl", "rounded-3xl", "rounded-full",
+  "rounded", "rounded-none", "rounded-xs", "rounded-sm", "rounded-md", "rounded-lg", "rounded-xl", "rounded-2xl", "rounded-3xl", "rounded-4xl", "rounded-full",
   "rounded-t-lg", "rounded-b-2xl", "rounded-l-md", "rounded-r-full", "rounded-tl-xl", "rounded-br-sm",
   // effects
-  "shadow-sm", "shadow", "shadow-md", "shadow-lg", "shadow-xl", "shadow-2xl", "shadow-inner", "shadow-none",
-  "opacity-0", "opacity-50", "opacity-100", "ring-2", "ring-4", "ring-offset-2", "ring-blue-500",
+  "shadow-2xs", "shadow-xs", "shadow-sm", "shadow", "shadow-md", "shadow-lg", "shadow-xl", "shadow-2xl", "shadow-none",
+  "inset-shadow-2xs", "inset-shadow-xs", "inset-shadow-sm", "outline-hidden",
+  "opacity-0", "opacity-50", "opacity-100", "ring", "ring-2", "ring-4", "ring-offset-2", "ring-blue-500", "outline", "outline-2", "outline-red-500",
+  "text-shadow-2xs", "text-shadow-xs", "backdrop-blur", "backdrop-blur-sm", "backdrop-blur-xl", "backdrop-saturate-150", "animate-spin", "object-cover", "object-contain",
   // transforms and transitions
   "scale-95", "scale-110", "scale-x-50", "-translate-y-1", "translate-x-2",
   "transition", "transition-colors", "duration-300", "duration-75", "delay-150", "ease-linear", "ease-in", "ease-out", "ease-in-out",
   // interactivity and misc
   "cursor-pointer", "cursor-not-allowed", "cursor-grab", "select-none", "select-text", "select-all",
-  "overflow-hidden", "overflow-visible", "overflow-auto", "overflow-x-scroll", "aspect-video", "aspect-square",
+  "overflow-hidden", "overflow-visible", "overflow-auto", "overflow-x-scroll", "aspect-video", "aspect-square", "aspect-3/2", "pointer-events-auto",
   // arbitrary values
   "p-[10px]", "w-[200px]", "w-[50%]", "h-[2rem]", "bg-[#123456]", "text-[13px]", "text-[#fff]", "rounded-[6px]", "z-[100]", "gap-[3px]",
   "opacity-[0.3]", "tracking-[0.2em]", "leading-[1.2]", "scale-[1.02]",
@@ -72,9 +75,18 @@ const CLASSES = [
 
 /** Combinations whose effect only exists together (Tailwind composes them through custom properties). */
 const COMPOSITES: string[][] = [
-  ["bg-gradient-to-r", "from-violet-500", "to-amber-400"],
+  ["bg-linear-to-r", "from-violet-500", "to-amber-400"],
   ["bg-gradient-to-br", "from-sky-400", "via-fuchsia-500", "to-blue-700"],
-  ["bg-gradient-to-t", "from-black"],
+  ["bg-linear-to-t", "from-black"],
+  ["bg-linear-45", "from-red-500", "to-blue-500"],
+  ["bg-linear-to-r", "from-red-500", "from-10%", "via-green-500", "via-30%", "to-blue-500", "to-90%"],
+];
+/** Colour modifiers that only read with the shadow they recolour. */
+const SHADOW_COMPOSITES: string[][] = [
+  ["shadow-lg", "shadow-red-500"],
+  ["shadow-md", "shadow-blue-500/50"],
+  ["inset-shadow-sm", "inset-shadow-black/20"],
+  ["text-shadow-xs", "text-shadow-white"],
 ];
 
 /**
@@ -86,6 +98,10 @@ const DIVERGENCES: Record<string, string[]> = {
   "transition-colors": ["transition-property"],
   "h-screen": ["height"],                        // No viewport unit on a native window; the class is ignored.
   "inline-flex": ["display"],                    // No inline formatting context; an inline-flex box is a flex box.
+  "static": ["position"],                        // Taffy has no static; relative without offsets is the same box.
+  // `space-*` puts a margin on every child but the first; a flex gap is that spacing without touching the children.
+  "space-x-4": ["margin-left", "margin-right", "--tw-space-x-reverse", "column-gap"],
+  "space-y-2": ["margin-top", "margin-bottom", "--tw-space-y-reverse", "row-gap"],
   "font-sans": ["font-family"],                  // Tarve names one generic family that appears in Tailwind's stack (checked below).
   "font-serif": ["font-family"],
   "font-mono": ["font-family"],
@@ -97,19 +113,52 @@ const DIVERGENCES: Record<string, string[]> = {
   "ease-in-out": ["transition-timing-function"],
 };
 
+/** Theme variables (`--color-red-500`, `--spacing`, …) and the `--tw-*` defaults of the compiled sheet. */
+let variables = new Map<string, string>();
+
 async function compileTailwind(classes: string[]): Promise<Map<string, Compiled>> {
-  const result = await postcss([
-    tailwindcss({ content: [{ raw: classes.join(" "), extension: "html" }], darkMode: "class", corePlugins: { preflight: false } }),
-  ]).process("@tailwind utilities;", { from: undefined });
+  const compiler = await compile(
+    `@import "tailwindcss/theme.css" layer(theme);\n@import "tailwindcss/utilities.css" layer(utilities);\n@custom-variant dark (&:where(.dark, .dark *));`,
+    { base: process.cwd(), onDependency() {} },
+  );
+  const root = postcss.parse(compiler.build(classes));
+  variables = new Map();
+  root.walkRules(rule => {
+    if (!/^(:root, :host|\*, ::before, ::after, ::backdrop)$/.test(rule.selector)) return;
+    rule.walkDecls(decl => { if (decl.prop.startsWith("--")) variables.set(decl.prop, decl.value.replace(/\s+/g, " ")); });
+  });
   const out = new Map<string, Compiled>();
-  result.root.walkRules(rule => {
-    for (const selector of rule.selectors) {
+  root.walkRules(rule => {
+    // `.space-x-4 { :where(& > :not(:last-child)) { … } }`: the nested rule belongs to its class.
+    let owner: postcss.Rule | undefined = rule.selector.startsWith(".") || rule.selector.startsWith(":where(.") ? rule : undefined;
+    if (!owner && rule.selector.includes("&")) {
+      for (let node = rule.parent as postcss.Node | undefined; node; node = node.parent as postcss.Node | undefined) {
+        if (node.type === "rule" && (node as postcss.Rule).selector.startsWith(".")) { owner = node as postcss.Rule; break; }
+      }
+    }
+    if (!owner) return;
+    // Nested rules: a utility inside `@media (hover: hover)`; `@supports` blocks carry the modern value, their siblings the fallback.
+    let modern = false, forcedColors = false;
+    for (let node = rule.parent as postcss.Node | undefined; node; node = node.parent as postcss.Node | undefined) {
+      if (node.type === "atrule") {
+        const at = node as postcss.AtRule;
+        if (at.name === "supports") modern = true;
+        if (at.name === "media" && at.params.includes("forced-colors")) forcedColors = true;
+      }
+    }
+    if (forcedColors) return;
+    for (const selector of owner.selectors) {
       const parsed = parseSelector(selector);
       if (!parsed) continue;
       const decls: Decls = {};
-      rule.walkDecls(decl => { decls[decl.prop] = decl.value; });
+      rule.each(node => {
+        if (node.type === "decl") decls[node.prop] = node.value;
+        else if (node.type === "atrule" && node.name === "supports") {
+          node.walkDecls(decl => { decls[decl.prop] = decl.value; }); // the modern value wins
+        }
+      });
       const entry = out.get(parsed.className) ?? {};
-      entry[parsed.variant] = { ...entry[parsed.variant], ...decls };
+      entry[parsed.variant] = modern ? { ...entry[parsed.variant], ...decls } : { ...decls, ...entry[parsed.variant] };
       out.set(parsed.className, entry);
     }
   });
@@ -117,8 +166,8 @@ async function compileTailwind(classes: string[]): Promise<Map<string, Compiled>
 }
 
 function parseSelector(selector: string): { className: string; variant: Variant } | undefined {
-  // `.hover\:bg-red-600:hover`, `.dark\:text-white:is(.dark *)`, `.dark\:hover\:bg-zinc-800:hover:is(.dark *)`
-  const match = /^\.((?:\\.|[^\s:.])+)(.*)$/.exec(selector);
+  // `.hover\:bg-red-600:hover`, `.dark\:text-white:where(.dark, .dark *)`
+  const match = /^(?::where\()?\.((?:\\.|[^\s:.>)])+)(.*)$/.exec(selector);
   if (!match) return undefined;
   const className = match[1]!.replace(/\\(.)/g, "$1");
   const rest = match[2]!;
@@ -128,33 +177,71 @@ function parseSelector(selector: string): { className: string; variant: Variant 
   else if (rest.includes(":focus")) variant = "focus";
   else if (rest.includes(":active")) variant = "active";
   else if (rest.includes(":disabled")) variant = "disabled";
-  if (rest.includes(":is(.dark *)")) variant = variant === "base" ? "dark" : variant; // dark:hover: → hover inside dark
+  if (rest.includes(":where(.dark, .dark *)")) variant = variant === "base" ? "dark" : variant; // dark:hover: → hover inside dark
   return { className, variant };
 }
 
 const hex2 = (n: number) => Math.round(n).toString(16).padStart(2, "0");
 
+/** `var(--x, fallback)` → the sheet's value, recursively; unknown variables keep their fallback. */
+function substitute(value: string, depth = 0): string {
+  if (depth > 10) return value;
+  const next = value.replace(/var\((--[\w-]+)(?:,\s*([^()]*(?:\([^()]*\)[^()]*)*))?\)/g, (_, name: string, fallback?: string) => {
+    const known = variables.get(name);
+    if (known !== undefined && known !== "initial") return known;
+    return fallback ?? "";
+  });
+  return next === value ? next : substitute(next, depth + 1);
+}
+
+/** Tailwind 4 arithmetic: `calc(var(--spacing) * 4)`, `calc(1 / 2 * 100%)`, `calc(1.25 / 0.875)`, `calc(2px + 0px)`. */
+function evaluateCalc(value: string): string {
+  return value.replace(/calc\(([^()]*)\)/g, (_, body: string) => {
+    const expr = body.trim();
+    const percent = expr.includes("%");
+    const numeric = expr.replace(/(-?\d*\.?\d+)rem/g, (_, n) => String(Number(n) * REM)).replace(/(-?\d*\.?\d+)(px|%|ms)/g, "$1");
+    if (!/^[\d.\s*+\/-]+$/.test(numeric)) return `calc(${body})`;
+    const result = Function(`"use strict"; return (${numeric});`)() as number;
+    const rounded = Math.round(result * 10000) / 10000;
+    return percent ? `${rounded}%` : String(rounded);
+  });
+}
+
 /** One CSS vocabulary for both sides: px numbers, hex colours, Tailwind keywords. */
 function normalize(prop: string, raw: string): string {
-  let value = raw.trim();
+  let value = evaluateCalc(substitute(raw.trim()));
   value = value.replace(/\s*var\(--tw-gradient-(?:from|via|to)-position\)/g, "");
+  value = value.replace(/oklch\([^()]*\)/g, m => oklchToHex(m));
   value = value.replace(/rgb\((\d+) (\d+) (\d+)(?: \/ ([\d.]+|var\([^)]*\)))?\)/g, (_, r, g, b, a) => {
     const alpha = a === undefined || String(a).startsWith("var(") ? 1 : Number(a);
     return `#${hex2(+r)}${hex2(+g)}${hex2(+b)}${alpha === 1 ? "" : hex2(alpha * 255)}`;
   });
+  value = value.replace(/\btransparent\b/g, "#00000000");
+  // `color-mix(in oklab, <colour> 50%, transparent)` → the colour at that alpha; shadows nest one inside another.
+  for (let previous = ""; previous !== value;) {
+    previous = value;
+    value = value.replace(/color-mix\(in (?:oklab|srgb), ([^,()]+?) ([\d.]+)%, (?:transparent|#00000000)\)/g, (_, color: string, pct: string) => {
+      const base = normalize("color", color);
+      if (!base.startsWith("#")) return base;
+      const own = base.length === 9 ? parseInt(base.slice(7), 16) / 255 : 1;
+      const alpha = own * (Number(pct) / 100);
+      return alpha >= 0.999 ? base.slice(0, 7) : `${base.slice(0, 7)}${hex2(alpha * 255)}`;
+    });
+  }
   value = value.replace(/#([0-9a-f]{3,4})\b/gi, (_, d: string) => "#" + [...d].map(c => c + c).join(""));
   value = value.replace(/#[0-9a-f]{8}\b/gi, m => m.endsWith("ff") ? m.slice(0, 7) : m);
   value = value.replace(/(-?\d*\.?\d+)rem/g, (_, n) => `${Number(n) * REM}`);
   value = value.replace(/(-?\d*\.?\d+)em/g, (_, n) => `${Math.round(Number(n) * FONT * 100) / 100}`);
   value = value.replace(/(-?\d*\.?\d+)px/g, "$1");
+  if (prop === "opacity" || prop.startsWith("--tw-scale")) value = value.replace(/^(-?\d*\.?\d+)%$/, (_, n) => String(Number(n) / 100));
   if (prop === "text-align") value = value === "left" ? "start" : value === "right" ? "end" : value;
-  if (prop === "flex" && /^\d+$/.test(value)) value = `${value} 1 0`;
-  if (prop === "flex") value = value.replace(/\b0%$/, "0");
+  if (prop === "flex") value = expandFlex(value);
+  if (/radius$/.test(prop)) value = value.replace(/^calc\(infinity \* 1\)$/, "9999");
   if (prop === "grid-column" || prop === "grid-row") value = value.replace(/^span (\d+) \/ span \1$/, "span $1");
   if (prop === "aspect-ratio") { const [a, b] = value.split("/").map(Number); value = String(b ? a! / b : a); }
   if (prop === "--tw-shadow" && value === "0 0 #00000000") value = "none";
   if (prop === "--tw-ring-shadow") {
-    const width = /calc\((\d+) \+ var\(--tw-ring-offset-width\)\)/.exec(value);
+    const width = /0 0 0 (\d+(?:\.\d+)?) /.exec(value);
     value = width ? width[1]! : value;
   }
   if (prop === "transition-timing-function") {
@@ -164,11 +251,38 @@ function normalize(prop: string, raw: string): string {
   return value.replace(/\s+/g, " ").replace(/\.(\d*?)0+(?=\D|$)/g, (_, d) => d ? `.${d}` : "").replace(/^(-?)\./, "$10.");
 }
 
+/** CSS `flex` shorthand → `grow shrink basis`, so `auto`, `1`, `0 auto` and `1 1 0%` compare as what they mean. */
+function expandFlex(value: string): string {
+  if (value === "none") return "0 0 auto";
+  if (value === "auto") return "1 1 auto";
+  if (value === "initial") return "0 1 auto";
+  const parts = value.split(" ");
+  if (parts.length === 1) return /^\d*\.?\d+$/.test(value) ? `${value} 1 0` : `1 1 ${value}`;
+  if (parts.length === 2) return /^\d*\.?\d+$/.test(parts[1]!) ? `${parts[0]} ${parts[1]} 0` : `${parts[0]} 1 ${parts[1]}`;
+  return value.replace(/\b0%$/, "0");
+}
+
+/** Tailwind 4 writes logical shorthands; Tarve has physical sides. */
+const LOGICAL: Record<string, string[]> = {
+  "padding-inline": ["padding-left", "padding-right"], "padding-block": ["padding-top", "padding-bottom"],
+  "margin-inline": ["margin-left", "margin-right"], "margin-block": ["margin-top", "margin-bottom"],
+  "inset-inline": ["left", "right"], "inset-block": ["top", "bottom"],
+  "border-inline-width": ["border-left-width", "border-right-width"], "border-block-width": ["border-top-width", "border-bottom-width"],
+  "padding-inline-start": ["padding-left"], "padding-inline-end": ["padding-right"],
+  "margin-inline-start": ["margin-left"], "margin-inline-end": ["margin-right"],
+  "margin-block-start": ["margin-top"], "margin-block-end": ["margin-bottom"],
+  "inset-inline-start": ["left"], "inset-inline-end": ["right"],
+};
+
 /** Properties Tailwind emits for bookkeeping; the compared value lives elsewhere. */
 const IGNORED = new Set([
   "--tw-bg-opacity", "--tw-text-opacity", "--tw-border-opacity", "--tw-ring-opacity", "--tw-shadow-colored",
-  "--tw-ring-offset-shadow", "--tw-gradient-stops", "transform", "box-shadow", "display:-webkit-box", "-webkit-box-orient",
-  "-webkit-user-select", "--tw-ring-inset", "background-image",
+  "--tw-ring-offset-shadow", "--tw-gradient-stops", "--tw-gradient-position", "transform", "translate", "scale", "box-shadow",
+  "-webkit-box-orient", "-webkit-user-select", "--tw-ring-inset", "background-image", "--tw-border-style",
+  "--tw-leading", "--tw-font-weight", "--tw-tracking", "--tw-duration", "--tw-ease", "--tw-scale-z", "--tw-outline-style",
+  "border-top-style", "border-right-style", "border-bottom-style", "border-left-style", "border-inline-style", "border-block-style",
+  "-webkit-backdrop-filter", "backdrop-filter", "--tw-text-shadow-color", "--tw-shadow-color", "--tw-inset-shadow-color",
+  "clip", "border-width", "clip-path",
 ]);
 
 function expected(compiled: Decls): Decls {
@@ -176,9 +290,10 @@ function expected(compiled: Decls): Decls {
   for (const [prop, value] of Object.entries(compiled)) {
     if (IGNORED.has(prop)) continue;
     if (prop === "display" && value === "-webkit-box") continue;
-    if (prop === "--tw-gradient-to" && value.startsWith("rgb(") && / \/ 0\)/.test(value)) continue; // implicit transparent end
+    if (prop === "border-style" && value === "var(--tw-border-style)") continue; // `border` sets the width; the style is the default
     if (prop === "max-width" && value === "none") continue; // Tarve: no maxWidth at all
     if (prop === "inset") { for (const side of SIDES) out[side] = normalize(side, value); continue; } // Tarve has no shorthand
+    if (LOGICAL[prop]) { for (const side of LOGICAL[prop]) out[side] = normalize(side, value); continue; }
     out[prop] = normalize(prop, value);
   }
   // Tailwind writes line-height in px next to the font size; Tarve keeps a multiple of it.
@@ -190,19 +305,27 @@ function expected(compiled: Decls): Decls {
 }
 
 const SIDES = ["top", "right", "bottom", "left"] as const;
+type Side = (typeof SIDES)[number];
 const CORNERS: Record<string, string> = { topLeft: "top-left", topRight: "top-right", bottomRight: "bottom-right", bottomLeft: "bottom-left" };
 
-function insets(prop: string, value: Style["padding"], out: Decls, suffix = ""): void {
-  if (typeof value === "number") { out[prop + suffix] = String(value); return; }
+function insets(prop: string, value: Style["padding"] | Style["margin"], out: Decls, suffix = ""): void {
+  if (typeof value === "number" || typeof value === "string") { out[prop + suffix] = String(value); return; }
   if (!value) return;
-  for (const side of SIDES) if (value[side] !== undefined) out[`${prop.replace(/^border$/, "border")}-${side}${suffix}`] = String(value[side]);
+  const sides = value as Partial<Record<Side, number | string>>;
+  for (const side of SIDES) if (sides[side] !== undefined) out[`${prop}-${side}${suffix}`] = String(sides[side]);
 }
 
 function paint(value: StateStyle["background"]): string | undefined {
   if (typeof value === "string") return value;
   if (value && value.type === "linear") {
-    const stops = value.stops.map(stop => typeof stop === "string" ? stop : stop.color);
-    return `linear-gradient(to ${value.to}, ${stops.join(", ")})`;
+    // Positions print only when they differ from the defaults (0%, 50%, 100%), as Tailwind's variables do.
+    const defaults = value.stops.length === 3 ? [0, 0.5, 1] : [0, 1];
+    const stops = value.stops.map((stop, index) => {
+      if (typeof stop === "string") return stop;
+      const offset = typeof stop.offset === "number" ? stop.offset : undefined;
+      return offset !== undefined && offset !== defaults[index] ? `${stop.color} ${offset * 100}%` : stop.color;
+    });
+    return `linear-gradient(${value.angle !== undefined ? `${value.angle}deg` : `to ${value.to}`}, ${stops.join(", ")})`;
   }
   return undefined;
 }
@@ -271,7 +394,16 @@ function toCss(style: Style | StateStyle): Decls {
   if (s.cursor !== undefined) out.cursor = s.cursor;
   if (s.userSelect !== undefined) out["user-select"] = s.userSelect;
   if (s.aspectRatio !== undefined) out["aspect-ratio"] = String(s.aspectRatio);
-  if (typeof s.boxShadow === "string") out["--tw-shadow"] = s.boxShadow;
+  if (typeof s.boxShadow === "string") out[s.boxShadow.startsWith("inset") ? "--tw-inset-shadow" : "--tw-shadow"] = s.boxShadow;
+  if (typeof s.textShadow === "string") out["text-shadow"] = s.textShadow;
+  if (s.objectFit !== undefined) out["object-fit"] = String(s.objectFit);
+  if (s.pointerEvents !== undefined) out["pointer-events"] = s.pointerEvents;
+  if (typeof s.spin === "number") out.animation = `spin ${s.spin / 1000}s linear infinite`;
+  if (s.glass && typeof s.glass === "object") {
+    if (s.glass.blur) out["--tw-backdrop-blur"] = `blur(${s.glass.blur})`;
+    if (s.glass.saturate !== undefined) out["--tw-backdrop-saturate"] = `saturate(${s.glass.saturate * 100}%)`;
+  }
+  if (s.outlineStyle !== undefined) out["outline-style"] = s.outlineStyle;
   if (s.transform && typeof s.transform === "object") {
     const t = s.transform;
     if (t.scale !== undefined) { out["--tw-scale-x"] = String(t.scale); out["--tw-scale-y"] = String(t.scale); }
@@ -302,7 +434,15 @@ function actual(className: string): Compiled {
     const nested = sub.hover ? toCss(sub.hover) : toCss(sub);
     out[variant === "dark" && sub.hover ? "hover" : variant] = nested;
   }
-  if (out.base!["--tw-ring-shadow"]) delete out.base!["outline-style"];
+  // Rings and outlines are both Tarve outlines: `ring-*` reads as Tailwind's `--tw-ring-*`, `outline-*` as CSS outline.
+  const isOutline = /(^|\s|:)outline/.test(className);
+  for (const decls of Object.values(out)) {
+    if (!decls["--tw-ring-shadow"] && !decls["--tw-ring-color"]) continue;
+    if (isOutline) {
+      if (decls["--tw-ring-shadow"]) { decls["outline-width"] = decls["--tw-ring-shadow"]; delete decls["--tw-ring-shadow"]; }
+      if (decls["--tw-ring-color"]) { decls["outline-color"] = decls["--tw-ring-color"]; delete decls["--tw-ring-color"]; }
+    } else delete decls["outline-style"];
+  }
   return out;
 }
 
@@ -327,7 +467,7 @@ function compare(className: string, want: Decls, got: Decls): string[] {
   return problems;
 }
 
-describe("tw() matches Tailwind CSS 3.4 class by class", () => {
+describe("tw() matches Tailwind CSS 4 class by class", () => {
   test("single utilities, variants and arbitrary values", async () => {
     const compiled = await compileTailwind(CLASSES);
     const problems: string[] = [];
@@ -339,8 +479,6 @@ describe("tw() matches Tailwind CSS 3.4 class by class", () => {
         const wantDecls = expected(want[variant]!);
         const gotDecls = got[variant] ?? {};
         if (Object.keys(wantDecls).length === 0) continue;
-        // `ring-*` only: Tailwind sets the ring width through `--tw-ring-shadow`, Tarve an outline.
-        if (gotDecls["outline-style"]) delete gotDecls["outline-style"];
         problems.push(...compare(className, wantDecls, gotDecls));
       }
     }
@@ -355,36 +493,44 @@ describe("tw() matches Tailwind CSS 3.4 class by class", () => {
       for (const prop of props) {
         expect(want[prop] === got[prop]).toBe(false);
         if (prop === "font-family") {
-          // Tarve names one generic family; it must be in Tailwind's stack.
-          expect(want[prop]!.split(",").map(f => f.trim().replace(/"/g, ""))).toContain(got[prop]!);
+          // Tarve names one family: a generic one from Tailwind's stack, or `system-ui`, the platform UI font
+          // that Tailwind's sans stack reaches through -apple-system / Segoe UI / Roboto.
+          const stack = want[prop]!.split(",").map(f => f.trim().replace(/["']/g, ""));
+          expect(stack.includes(got[prop]!) || (got[prop] === "system-ui" && stack.includes("sans-serif"))).toBe(true);
         }
       }
+    }
+  });
+
+  test("coloured shadows recolour the size's layers", async () => {
+    const compiled = await compileTailwind(SHADOW_COMPOSITES.flat());
+    for (const [size, colour] of SHADOW_COMPOSITES) {
+      const text = size!.startsWith("text-"), inset = size!.startsWith("inset-");
+      const prop = text ? "text-shadow" : inset ? "--tw-inset-shadow" : "--tw-shadow";
+      const colourProp = text ? "--tw-text-shadow-color" : inset ? "--tw-inset-shadow-color" : "--tw-shadow-color";
+      variables.set(colourProp, compiled.get(colour!)!.base![colourProp]!);
+      const want = normalize(prop, compiled.get(size!)!.base![prop]!);
+      variables.delete(colourProp);
+      expect(actual(`${size} ${colour}`).base![prop]).toBe(want);
     }
   });
 
   test("gradient composites: direction and stops", async () => {
     const compiled = await compileTailwind(COMPOSITES.flat());
     for (const classes of COMPOSITES) {
-      const direction = compiled.get(classes[0]!)!.base!["background-image"]!;
-      const to = /linear-gradient\(to ([a-z ]+),/.exec(direction)![1]!;
-      const stops: string[] = [];
-      let end: string | undefined;
-      let implicitEnd = "transparent";
-      for (const name of classes.slice(1)) {
-        const decls = compiled.get(name)!.base!;
-        if (name.startsWith("from-")) {
-          stops.push(normalize("x", decls["--tw-gradient-from"]!));
-          implicitEnd = normalize("x", decls["--tw-gradient-to"]!); // the start colour at alpha 0
-        }
-        if (name.startsWith("via-")) {
-          // `--tw-gradient-stops: var(--tw-gradient-from), <via colour> var(--tw-gradient-via-position), var(--tw-gradient-to)`
-          const middle = decls["--tw-gradient-stops"]!.split(",")[1]!;
-          stops.push(normalize("x", middle));
-        }
-        if (name.startsWith("to-")) end = normalize("x", decls["--tw-gradient-to"]!);
-      }
-      stops.push(end ?? implicitEnd);
-      const want = `linear-gradient(to ${to}, ${stops.join(", ")})`;
+      const position = compiled.get(classes[0]!)!.base!["--tw-gradient-position"]!.replace(/ in oklab$/, "");
+      const stopOf = (kind: string) => {
+        const colourClass = classes.find(name => name.startsWith(`${kind}-`) && !/%$/.test(name));
+        const positionClass = classes.find(name => name.startsWith(`${kind}-`) && /%$/.test(name));
+        if (!colourClass) return undefined;
+        const decls = compiled.get(colourClass)!.base!;
+        const colour = normalize("color", decls[`--tw-gradient-${kind}`]!);
+        const at = positionClass ? normalize("x", compiled.get(positionClass)!.base![`--tw-gradient-${kind}-position`]!) : undefined;
+        return at === undefined ? colour : `${colour} ${at}`;
+      };
+      // Tailwind 4's implicit end stop is transparent (`--tw-gradient-to: #0000`), interpolated in OKLab.
+      const stops = [stopOf("from"), stopOf("via"), stopOf("to") ?? "#00000000"].filter((stop): stop is string => stop !== undefined);
+      const want = `linear-gradient(${position}, ${stops.join(", ")})`;
       expect(actual(classes.join(" ")).base!.gradient).toBe(normalize("gradient", want));
     }
   });

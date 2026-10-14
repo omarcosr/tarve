@@ -1,5 +1,6 @@
 import type { Insets, Length, MotionEasing, Style, Transform, GradientSide, LinearGradient } from "./protocol";
 import { theme } from "./theme";
+import { PALETTE } from "./tailwind-palette";
 
 /**
  * Tailwind utility classes compiled to Tarve styles, with no CSS and no DOM.
@@ -20,30 +21,6 @@ const SIDES: Record<string, readonly Side[] | "all"> = {
   s: ["left"], e: ["right"],
 };
 
-const PALETTE: Record<string, string> = {
-  slate: "f8fafc f1f5f9 e2e8f0 cbd5e1 94a3b8 64748b 475569 334155 1e293b 0f172a 020617",
-  gray: "f9fafb f3f4f6 e5e7eb d1d5db 9ca3af 6b7280 4b5563 374151 1f2937 111827 030712",
-  zinc: "fafafa f4f4f5 e4e4e7 d4d4d8 a1a1aa 71717a 52525b 3f3f46 27272a 18181b 09090b",
-  neutral: "fafafa f5f5f5 e5e5e5 d4d4d4 a3a3a3 737373 525252 404040 262626 171717 0a0a0a",
-  stone: "fafaf9 f5f5f4 e7e5e4 d6d3d1 a8a29e 78716c 57534e 44403c 292524 1c1917 0c0a09",
-  red: "fef2f2 fee2e2 fecaca fca5a5 f87171 ef4444 dc2626 b91c1c 991b1b 7f1d1d 450a0a",
-  orange: "fff7ed ffedd5 fed7aa fdba74 fb923c f97316 ea580c c2410c 9a3412 7c2d12 431407",
-  amber: "fffbeb fef3c7 fde68a fcd34d fbbf24 f59e0b d97706 b45309 92400e 78350f 451a03",
-  yellow: "fefce8 fef9c3 fef08a fde047 facc15 eab308 ca8a04 a16207 854d0e 713f12 422006",
-  lime: "f7fee7 ecfccb d9f99d bef264 a3e635 84cc16 65a30d 4d7c0f 3f6212 365314 1a2e05",
-  green: "f0fdf4 dcfce7 bbf7d0 86efac 4ade80 22c55e 16a34a 15803d 166534 14532d 052e16",
-  emerald: "ecfdf5 d1fae5 a7f3d0 6ee7b7 34d399 10b981 059669 047857 065f46 064e3b 022c22",
-  teal: "f0fdfa ccfbf1 99f6e4 5eead4 2dd4bf 14b8a6 0d9488 0f766e 115e59 134e4a 042f2e",
-  cyan: "ecfeff cffafe a5f3fc 67e8f9 22d3ee 06b6d4 0891b2 0e7490 155e75 164e63 083344",
-  sky: "f0f9ff e0f2fe bae6fd 7dd3fc 38bdf8 0ea5e9 0284c7 0369a1 075985 0c4a6e 082f49",
-  blue: "eff6ff dbeafe bfdbfe 93c5fd 60a5fa 3b82f6 2563eb 1d4ed8 1e40af 1e3a8a 172554",
-  indigo: "eef2ff e0e7ff c7d2fe a5b4fc 818cf8 6366f1 4f46e5 4338ca 3730a3 312e81 1e1b4b",
-  violet: "f5f3ff ede9fe ddd6fe c4b5fd a78bfa 8b5cf6 7c3aed 6d28d9 5b21b6 4c1d95 2e1065",
-  purple: "faf5ff f3e8ff e9d5ff d8b4fe c084fc a855f7 9333ea 7e22ce 6b21a8 581c87 3b0764",
-  fuchsia: "fdf4ff fae8ff f5d0fe f0abfc e879f9 d946ef c026d3 a21caf 86198f 701a75 4a044e",
-  pink: "fdf2f8 fce7f3 fbcfe8 f9a8d4 f472b6 ec4899 db2777 be185d 9d174d 831843 500724",
-  rose: "fff1f2 ffe4e6 fecdd3 fda4af fb7185 f43f5e e11d48 be123c 9f1239 881337 4c0519",
-};
 const SHADES = ["50", "100", "200", "300", "400", "500", "600", "700", "800", "900", "950"];
 const NAMED_COLORS: Record<string, string> = { white: "#ffffff", black: "#000000", transparent: "transparent" };
 
@@ -57,18 +34,32 @@ const FONT_WEIGHTS: Record<string, number> = {
 const FONT_FAMILIES: Record<string, string> = { sans: "system-ui", serif: "serif", mono: "monospace" };
 const LEADING: Record<string, number> = { none: 1, tight: 1.25, snug: 1.375, normal: 1.5, relaxed: 1.625, loose: 2 };
 const TRACKING: Record<string, number> = { tighter: -0.05, tight: -0.025, normal: 0, wide: 0.025, wider: 0.05, widest: 0.1 };
-const RADII: Record<string, number> = { none: 0, sm: 2, "": 4, md: 6, lg: 8, xl: 12, "2xl": 16, "3xl": 24, full: 9999 };
-const MAX_WIDTHS: Record<string, number> = {
-  xs: 320, sm: 384, md: 448, lg: 512, xl: 576, "2xl": 672, "3xl": 768, "4xl": 896, "5xl": 1024, "6xl": 1152, "7xl": 1280,
+const RADII: Record<string, number> = { none: 0, xs: 2, sm: 4, "": 4, md: 6, lg: 8, xl: 12, "2xl": 16, "3xl": 24, "4xl": 32, full: 9999 };
+/** Tailwind 4's container scale (`--container-*`): `max-w-md`, `w-xs`, `min-w-sm`… */
+const CONTAINERS: Record<string, number> = {
+  "3xs": 256, "2xs": 288, xs: 320, sm: 384, md: 448, lg: 512, xl: 576, "2xl": 672, "3xl": 768, "4xl": 896, "5xl": 1024, "6xl": 1152, "7xl": 1280,
 };
 const SHADOWS: Record<string, string> = {
-  sm: "0 1px 2px 0 #0000000d",
+  "2xs": "0 1px #0000000d",
+  xs: "0 1px 2px 0 #0000000d",
+  sm: "0 1px 3px 0 #0000001a, 0 1px 2px -1px #0000001a",
   "": "0 1px 3px 0 #0000001a, 0 1px 2px -1px #0000001a",
   md: "0 4px 6px -1px #0000001a, 0 2px 4px -2px #0000001a",
   lg: "0 10px 15px -3px #0000001a, 0 4px 6px -4px #0000001a",
   xl: "0 20px 25px -5px #0000001a, 0 8px 10px -6px #0000001a",
   "2xl": "0 25px 50px -12px #00000040",
-  inner: "inset 0 2px 4px 0 #0000000d",
+  none: "none",
+};
+/** Tailwind 4 text shadows; the protocol paints one layer, so the multi-layer sizes keep their widest layer. */
+const TEXT_SHADOWS: Record<string, string> = {
+  "2xs": "0 1px 0 #00000026", xs: "0 1px 1px #00000033", sm: "0 2px 2px #00000013", md: "0 2px 4px #00000013", lg: "0 3px 6px #00000013", none: "none",
+};
+const BLURS: Record<string, number> = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, "2xl": 40, "3xl": 64, none: 0 };
+const OBJECT_FITS = new Set(["fill", "contain", "cover", "none", "scale-down"]);
+const INSET_SHADOWS: Record<string, string> = {
+  "2xs": "inset 0 1px #0000000d",
+  xs: "inset 0 1px 1px #0000000d",
+  sm: "inset 0 2px 4px #0000000d",
   none: "none",
 };
 const EASINGS: Record<string, MotionEasing> = { linear: "linear", in: "easeIn", out: "easeOut", "in-out": "easeInOut" };
@@ -92,7 +83,10 @@ const STATIC: Record<string, Out> = {
   "items-start": { align: "start" }, "items-center": { align: "center" }, "items-end": { align: "end" }, "items-stretch": { align: "stretch" },
   "justify-start": { justify: "start" }, "justify-center": { justify: "center" }, "justify-end": { justify: "end" }, "justify-between": { justify: "between" },
   "justify-around": { justify: "around" }, "justify-evenly": { justify: "evenly" },
-  relative: { position: "relative" }, absolute: { position: "absolute" },
+  relative: { position: "relative" }, absolute: { position: "absolute" }, static: { position: "relative" },
+  // Visually hidden, still in the tree for assistive technology, as Tailwind's `sr-only`.
+  "sr-only": { position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", whiteSpace: "nowrap" },
+  "pointer-events-auto": { pointerEvents: "auto" }, "transition-none": { transition: undefined },
   italic: { fontStyle: "italic" }, "not-italic": { fontStyle: "normal" },
   "text-left": { textAlign: "start" }, "text-start": { textAlign: "start" }, "text-center": { textAlign: "center" },
   "text-right": { textAlign: "end" }, "text-end": { textAlign: "end" },
@@ -109,9 +103,8 @@ const STATIC: Record<string, Out> = {
   "select-none": { userSelect: "none" }, "select-text": { userSelect: "text" }, "select-all": { userSelect: "all" }, "select-auto": { userSelect: "auto" },
   "aspect-square": { aspectRatio: 1 }, "aspect-video": { aspectRatio: 16 / 9 },
   "col-span-full": { gridColumn: "1 / -1" }, "row-span-full": { gridRow: "1 / -1" },
-  "outline-none": { outlineStyle: "none" }, "outline-solid": { outlineStyle: "solid" }, "outline-dashed": { outlineStyle: "dashed" }, "outline-dotted": { outlineStyle: "dotted" },
+  "outline-none": { outlineStyle: "none" }, "outline-hidden": { outlineStyle: "none" }, "outline-solid": { outlineStyle: "solid" }, "outline-dashed": { outlineStyle: "dashed" }, "outline-dotted": { outlineStyle: "dotted" },
   "line-clamp-none": { lineClamp: undefined },
-  "transition-none": { transition: undefined },
   "shadow-none": { boxShadow: "none" },
 };
 
@@ -179,10 +172,12 @@ function color(value: string): string | undefined {
   return resolved.startsWith("#") ? alpha(resolved, opacity / 100) : resolved;
 }
 
-function setInsets(out: Out, key: "padding" | "margin" | "borderWidth", sides: readonly Side[] | "all", value: number): void {
+function setInsets(out: Out, key: "padding" | "margin" | "borderWidth", sides: readonly Side[] | "all", value: number | "auto"): void {
   if (sides === "all") { out[key] = value; return; }
-  const current = out[key] as Insets | undefined;
-  const next = typeof current === "number" ? { top: current, right: current, bottom: current, left: current } : { ...(current ?? {}) };
+  const current = out[key] as Insets | "auto" | undefined;
+  const next: Record<string, number | "auto"> = typeof current === "number" || current === "auto"
+    ? { top: current, right: current, bottom: current, left: current }
+    : { ...(current ?? {}) };
   for (const side of sides) next[side] = value;
   out[key] = next;
 }
@@ -216,8 +211,19 @@ type Handler = (out: Out, value: string, negative: boolean) => void;
 
 function insetHandler(key: "padding" | "margin", sides: readonly Side[] | "all"): Handler {
   return (out, value, negative) => {
+    // CSS auto margins (`mx-auto` centres a box); padding has no auto.
+    if (value === "auto" && key === "margin") { setInsets(out, key, sides, "auto"); return; }
     const resolved = length(value, false);
     if (typeof resolved === "number") setInsets(out, key, sides, negative ? -resolved : resolved);
+  };
+}
+
+/** Widths also take the container scale (`w-xs` = 20rem). */
+function containerHandler(key: string, allowAuto = true): Handler {
+  const plain = lengthHandler(key, allowAuto);
+  return (out, value, negative) => {
+    const named = CONTAINERS[value];
+    if (named !== undefined) out[key] = named; else plain(out, value, negative);
   };
 }
 
@@ -245,14 +251,30 @@ function borderSideHandler(sides: readonly Side[]): Handler {
 
 const HANDLERS: Record<string, Handler> = {
   p: insetHandler("padding", "all"), m: insetHandler("margin", "all"),
-  w: lengthHandler("width"), h: lengthHandler("height"),
-  "min-w": lengthHandler("minWidth", false), "min-h": lengthHandler("minHeight", false),
+  w: containerHandler("width"), h: lengthHandler("height"),
+  "min-w": containerHandler("minWidth", false), "min-h": lengthHandler("minHeight", false),
   "max-h": lengthHandler("maxHeight", false),
   "max-w": (out, value) => {
     if (value === "none") { out.maxWidth = undefined; return; }
-    const named = MAX_WIDTHS[value];
-    const resolved = named ?? length(value, false);
+    const resolved = CONTAINERS[value] ?? length(value, false);
     if (resolved !== undefined) out.maxWidth = resolved;
+  },
+  // Logical offsets, read left-to-right.
+  start: offsetHandler(["left"]), end: offsetHandler(["right"]),
+  // `space-x-*`/`space-y-*` put margins between siblings; a flex gap is the same spacing.
+  "space-x": lengthHandler("columnGap", false), "space-y": lengthHandler("rowGap", false),
+  object: (out, value) => { if (OBJECT_FITS.has(value)) out.objectFit = value; },
+  animate: (out, value) => { if (value === "spin") out.spin = 1000; else if (value === "none") out.spin = undefined; },
+  "backdrop-blur": (out, value) => {
+    const blur = value === "" ? 8 : BLURS[value] ?? px(arbitrary(value) ?? "");
+    if (blur !== undefined) setGlass(out, { blur });
+  },
+  "backdrop-saturate": (out, value) => { const n = number(value); if (n !== undefined) setGlass(out, { saturate: n / 100 }); },
+  "text-shadow": (out, value) => {
+    const named = TEXT_SHADOWS[value];
+    if (named !== undefined) { out.textShadow = named; return; }
+    const c = color(value);
+    if (c !== undefined) pendingShadow(out).text = c;
   },
   size: (out, value) => {
     const resolved = length(value);
@@ -338,12 +360,17 @@ const HANDLERS: Record<string, Handler> = {
   bg: (out, value) => {
     const direction = /^(?:gradient|linear)-to-(t|tr|r|br|b|bl|l|tl)$/.exec(value);
     if (direction) { gradientOf(out).to = GRADIENT_SIDES[direction[1]!]; return; }
+    const angle = /^linear-(\d+)$/.exec(value);
+    if (angle) { gradientOf(out).angle = Number(angle[1]); return; }
+    if (value === "radial") { gradientOf(out).shape = "radial"; return; }
+    const conic = /^conic(?:-(\d+))?$/.exec(value);
+    if (conic) { gradientOf(out).shape = "conic"; gradientOf(out).angle = conic[1] ? Number(conic[1]) : 0; return; }
     const resolved = color(value);
     if (resolved !== undefined) out.background = resolved;
   },
-  from: (out, value) => { const c = color(value); if (c !== undefined) gradientOf(out).from = c; },
-  via: (out, value) => { const c = color(value); if (c !== undefined) gradientOf(out).via = c; },
-  to: (out, value) => { const c = color(value); if (c !== undefined) gradientOf(out).stop = c; },
+  from: (out, value) => gradientStop(out, "from", value),
+  via: (out, value) => gradientStop(out, "via", value),
+  to: (out, value) => gradientStop(out, "stop", value),
   border: (out, value) => {
     if (value === "") { setInsets(out, "borderWidth", "all", 1); return; }
     if (BORDER_STYLES.has(value)) { out.borderStyle = value; return; }
@@ -382,7 +409,15 @@ const HANDLERS: Record<string, Handler> = {
   },
   shadow: (out, value) => {
     const named = SHADOWS[value] ?? arbitrary(value);
-    if (named !== undefined) out.boxShadow = named;
+    if (named !== undefined) { out.boxShadow = named; return; }
+    const c = color(value);
+    if (c !== undefined) pendingShadow(out).box = c;
+  },
+  "inset-shadow": (out, value) => {
+    const named = INSET_SHADOWS[value] ?? arbitrary(value);
+    if (named !== undefined) { out.boxShadow = named; return; }
+    const c = color(value);
+    if (c !== undefined) pendingShadow(out).box = c;
   },
   cursor: (out, value) => { if (CURSORS.has(value)) out.cursor = value; },
   overflow: (out, value) => { if (OVERFLOWS.has(value)) out.overflow = value; },
@@ -407,13 +442,14 @@ const HANDLERS: Record<string, Handler> = {
   delay: (out, value) => { const n = number(value); if (n !== undefined) setTransition(out, { delay: n }); },
   ease: (out, value) => { const easing = EASINGS[value]; if (easing) setTransition(out, { easing }); },
   aspect: (out, value) => {
-    const raw = arbitrary(value);
-    if (raw === undefined) { if (value === "auto") out.aspectRatio = undefined; return; }
+    const raw = arbitrary(value) ?? value;
+    if (raw === "auto") { out.aspectRatio = undefined; return; }
     const ratio = /^(\d*\.?\d+)\s*\/\s*(\d*\.?\d+)$/.exec(raw);
-    out.aspectRatio = ratio ? Number(ratio[1]) / Number(ratio[2]) : number(raw);
+    const resolved = ratio ? Number(ratio[1]) / Number(ratio[2]) : number(raw);
+    if (resolved !== undefined) out.aspectRatio = resolved;
   },
   ring: (out, value) => {
-    if (value === "") { out.outlineWidth = 3; out.outlineStyle = "solid"; return; }
+    if (value === "") { out.outlineWidth = 1; out.outlineStyle = "solid"; return; }
     const width = px(arbitrary(value) ?? value);
     if (width !== undefined) { out.outlineWidth = width; out.outlineStyle = "solid"; return; }
     const resolved = color(value);
@@ -421,8 +457,9 @@ const HANDLERS: Record<string, Handler> = {
   },
   "ring-offset": (out, value) => { const n = px(arbitrary(value) ?? value); if (n !== undefined) out.outlineOffset = n; },
   outline: (out, value) => {
+    if (value === "") { out.outlineWidth = 1; out.outlineStyle = "solid"; return; }
     const width = px(arbitrary(value) ?? value);
-    if (width !== undefined) { out.outlineWidth = width; return; }
+    if (width !== undefined) { out.outlineWidth = width; out.outlineStyle = "solid"; return; }
     const resolved = color(value);
     if (resolved !== undefined) out.outlineColor = resolved;
   },
@@ -531,7 +568,39 @@ const TRANSITION = "\0transition";
 const GRADIENT_SIDES: Record<string, GradientSide> = {
   t: "top", tr: "top right", r: "right", br: "bottom right", b: "bottom", bl: "bottom left", l: "left", tl: "top left",
 };
-interface PendingGradient { to?: GradientSide; from?: string; via?: string; stop?: string }
+interface PendingGradient {
+  to?: GradientSide; angle?: number; shape?: "radial" | "conic";
+  from?: string; via?: string; stop?: string;
+  fromAt?: number; viaAt?: number; stopAt?: number;
+}
+
+/** `from-red-500` sets a stop's colour, `from-10%` its position. */
+function gradientStop(out: Out, stop: "from" | "via" | "stop", value: string): void {
+  const position = /^(\d*\.?\d+)%$/.exec(value);
+  if (position) { gradientOf(out)[`${stop}At`] = Number(position[1]) / 100; return; }
+  const c = color(value);
+  if (c !== undefined) gradientOf(out)[stop] = c;
+}
+
+const SHADOW = "\0shadow";
+interface PendingShadow { box?: string; text?: string }
+function pendingShadow(out: Out): PendingShadow {
+  return (out[SHADOW] as PendingShadow | undefined) ?? (out[SHADOW] = {});
+}
+
+/** `shadow-red-500` recolours the shadow layers (Tailwind's `--tw-shadow-color` replaces the default black). */
+function finishShadow(out: Out): void {
+  const pending = out[SHADOW] as PendingShadow | undefined;
+  if (!pending) return;
+  delete out[SHADOW];
+  const recolour = (shadow: string, colour: string) => shadow.replace(/#[0-9a-f]{6,8}\b/gi, colour);
+  if (pending.box !== undefined && typeof out.boxShadow === "string" && out.boxShadow !== "none") out.boxShadow = recolour(out.boxShadow, pending.box);
+  if (pending.text !== undefined && typeof out.textShadow === "string") out.textShadow = recolour(out.textShadow, pending.text);
+}
+
+function setGlass(out: Out, patch: { blur?: number; saturate?: number }): void {
+  out.glass = { blur: 0, ...(typeof out.glass === "object" && out.glass ? out.glass as object : {}), ...patch };
+}
 
 function gradientOf(out: Out): PendingGradient {
   return (out[GRADIENT] as PendingGradient | undefined) ?? (out[GRADIENT] = {});
@@ -543,26 +612,25 @@ function finishGradient(out: Out): void {
   delete out[GRADIENT];
   if (pending.from === undefined && pending.via === undefined && pending.stop === undefined) return;
   const from = pending.from ?? "transparent";
-  const stops = [{ color: from, offset: 0 }];
-  if (pending.via !== undefined) stops.push({ color: pending.via, offset: 0.5 });
-  // Tailwind's implicit end stop is the start colour at alpha 0, not transparent black.
-  stops.push({ color: pending.stop ?? fade(from), offset: 1 });
-  out.background = { type: "linear", to: pending.to ?? "bottom", stops } satisfies LinearGradient;
-}
-
-function fade(color: string): string {
-  if (color.startsWith("#")) return alpha(color.slice(0, 7), 0);
-  if (color.startsWith("var(")) return `${color.replace(/\/\d+$/, "")}/0`;
-  return "transparent";
+  const stops = [{ color: from, offset: pending.fromAt ?? 0 }];
+  if (pending.via !== undefined) stops.push({ color: pending.via, offset: pending.viaAt ?? 0.5 });
+  // Tailwind 4's implicit end stop is transparent (`--tw-gradient-to: #0000`).
+  stops.push({ color: pending.stop ?? "transparent", offset: pending.stopAt ?? 1 });
+  if (pending.shape === "radial") out.background = { type: "radial", stops };
+  else if (pending.shape === "conic") out.background = { type: "conic", from: pending.angle ?? 0, stops };
+  else if (pending.angle !== undefined) out.background = { type: "linear", angle: pending.angle, stops } satisfies LinearGradient;
+  else out.background = { type: "linear", to: pending.to ?? "bottom", stops } satisfies LinearGradient;
 }
 
 function finishGradients(out: Out): void {
   finishGradient(out);
   finishTransition(out);
+  finishShadow(out);
   for (const state of Object.values(STATE_VARIANTS)) {
     if (!out[state]) continue;
     finishGradient(out[state] as Out);
     finishTransition(out[state] as Out);
+    finishShadow(out[state] as Out);
   }
 }
 type Corner = "topLeft" | "topRight" | "bottomRight" | "bottomLeft";
