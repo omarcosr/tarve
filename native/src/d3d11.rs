@@ -68,7 +68,7 @@ use winit::{
     window::Window,
 };
 
-use crate::paint::{GradientGeometry, PaintGlyph, PaintGradient, PaintTarget};
+use crate::paint::{GlassParams, GradientGeometry, PaintGlyph, PaintGradient, PaintTarget};
 
 const GLYPH_ATLAS_SIZE: u32 = 1024;
 const MAX_GLYPH_ATLASES: usize = 4;
@@ -162,6 +162,24 @@ enum DrawCommand {
         first: u32,
         count: u32,
     },
+    /// Liquid glass: two blur passes over the backdrop copy, then the glass quad.
+    Glass {
+        blur_h: (u32, u32),
+        blur_v: (u32, u32),
+        quad: (u32, u32),
+        /// Window pixels the blur reads and writes (the quad plus three sigmas).
+        region: [u32; 4],
+        /// sigma, saturate, refraction, highlight, in device pixels.
+        params: [f32; 4],
+    },
+}
+
+/// Two window-sized textures the glass passes ping-pong through: the backdrop
+/// copy, blurred horizontally into the second and back vertically into the first.
+struct Backdrop {
+    textures: [ID3D11Texture2D; 2],
+    views: [ID3D11ShaderResourceView; 2],
+    targets: [ID3D11RenderTargetView; 2],
 }
 
 struct CachedImage {
@@ -256,6 +274,8 @@ pub(crate) struct D3d11Graphics {
     tile_hashes: Vec<u64>,
     /// Window-sized stencil, single-sample path only.
     depth_view: Option<ID3D11DepthStencilView>,
+    /// Scratch for liquid glass; created on the first glass frame, dropped after one without.
+    backdrop: Option<Backdrop>,
     vertex_shader: ID3D11VertexShader,
     pixel_shader: ID3D11PixelShader,
     input_layout: ID3D11InputLayout,
@@ -270,6 +290,8 @@ pub(crate) struct D3d11Graphics {
     /// Vertex-shader `scale.xy, offset.zw` that maps window NDC into the
     /// current render target (identity, or one MSAA tile).
     target_transform: ID3D11Buffer,
+    /// Pixel-shader glass parameters (`cbuffer Glass`), uploaded before each glass draw.
+    glass_params: ID3D11Buffer,
     vertex_buffer: ID3D11Buffer,
     vertex_capacity: usize,
     index_buffer: ID3D11Buffer,
@@ -377,6 +399,11 @@ impl D3d11Graphics {
             16,
             windows::Win32::Graphics::Direct3D11::D3D11_BIND_CONSTANT_BUFFER,
         )?;
+        let glass_params = create_dynamic_buffer(
+            &device,
+            32,
+            windows::Win32::Graphics::Direct3D11::D3D11_BIND_CONSTANT_BUFFER,
+        )?;
         let vertex_capacity = 4096;
         let index_capacity = 8192;
         let vertex_buffer = create_dynamic_buffer(
@@ -403,6 +430,7 @@ impl D3d11Graphics {
             frame_cache: None,
             tile_hashes: Vec::new(),
             depth_view,
+            backdrop: None,
             vertex_shader,
             pixel_shader,
             input_layout,
@@ -415,6 +443,7 @@ impl D3d11Graphics {
             stencil_push,
             stencil_pop,
             target_transform,
+            glass_params,
             vertex_buffer,
             vertex_capacity,
             index_buffer,
@@ -529,6 +558,7 @@ impl D3d11Graphics {
         self.render_target.take();
         self.depth_view.take();
         self.frame_cache.take();
+        self.backdrop.take();
         self.tile_hashes.clear();
         unsafe {
             self.swap_chain.ResizeBuffers(
@@ -592,6 +622,19 @@ impl D3d11Graphics {
             self.context
                 .VSSetConstantBuffers(0, Some(&[Some(self.target_transform.clone())]));
             self.context.PSSetShader(&self.pixel_shader, None);
+            self.context
+                .PSSetConstantBuffers(1, Some(&[Some(self.glass_params.clone())]));
+        }
+        let has_glass = self
+            .commands
+            .iter()
+            .any(|command| matches!(command, DrawCommand::Glass { .. }));
+        if has_glass && self.tile.is_none() {
+            if self.backdrop.is_none() {
+                self.backdrop = Some(create_backdrop(&self.device, self.width, self.height)?);
+            }
+        } else {
+            self.backdrop = None;
         }
         let clear_stencil = windows::Win32::Graphics::Direct3D11::D3D11_CLEAR_STENCIL.0;
         if self.tile.is_none() {
@@ -737,6 +780,13 @@ impl D3d11Graphics {
                     ),
                     DrawCommand::PushClip { first, count } => (1, *first, *count, 0),
                     DrawCommand::PopClip { first, count } => (2, *first, *count, 0),
+                    DrawCommand::Glass { quad, params, .. } => {
+                        let mut seed = 0;
+                        for value in params {
+                            seed = mix_hash(seed, u64::from(value.to_bits()));
+                        }
+                        (3, quad.0, quad.1, seed)
+                    }
                 };
                 let mut hash = mix_hash(mix_hash(mix_hash(0, tag), texture), u64::from(count));
                 for &vertex in &self.indices[first as usize..(first + count) as usize] {
@@ -774,7 +824,7 @@ impl D3d11Graphics {
             match command {
                 DrawCommand::PushClip { .. } => clip_depth += 1,
                 DrawCommand::PopClip { .. } => clip_depth = clip_depth.saturating_sub(1),
-                DrawCommand::Draw { .. } => {}
+                DrawCommand::Draw { .. } | DrawCommand::Glass { .. } => {}
             }
         }
         hash.max(1)
@@ -802,9 +852,12 @@ impl D3d11Graphics {
         self.commands
             .iter()
             .map(|command| {
-                let (DrawCommand::Draw { first, count, .. }
-                | DrawCommand::PushClip { first, count }
-                | DrawCommand::PopClip { first, count }) = command;
+                let (first, count) = match command {
+                    DrawCommand::Draw { first, count, .. }
+                    | DrawCommand::PushClip { first, count }
+                    | DrawCommand::PopClip { first, count } => (first, count),
+                    DrawCommand::Glass { quad, .. } => (&quad.0, &quad.1),
+                };
                 let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
                 for &index in &self.indices[*first as usize..(*first + *count) as usize] {
                     let [nx, ny] = self.vertices[index as usize].pos;
@@ -836,7 +889,7 @@ impl D3d11Graphics {
                     DrawCommand::PopClip { .. } => {
                         clips.pop();
                     }
-                    DrawCommand::Draw { .. } => {}
+                    DrawCommand::Draw { .. } | DrawCommand::Glass { .. } => {}
                 }
                 bounds
             })
@@ -957,9 +1010,112 @@ impl D3d11Graphics {
                     }
                     clip_depth = clip_depth.saturating_sub(1);
                 }
+                DrawCommand::Glass {
+                    blur_h,
+                    blur_v,
+                    quad,
+                    region,
+                    params,
+                } => {
+                    flush(&mut batch);
+                    if !visible(index) {
+                        continue;
+                    }
+                    let blurred = self.blur_backdrop(*blur_h, *blur_v, *region, *params);
+                    // The blur passes changed the render target and pipeline state.
+                    state = None;
+                    bound_texture = None;
+                    set_state(State::Draw(clip_depth), &mut state);
+                    unsafe { self.context.DrawIndexed(quad.1, quad.0, 0) };
+                    if blurred {
+                        unsafe { self.context.PSSetShaderResources(0, Some(&[None])) };
+                    }
+                }
             }
         }
         flush(&mut batch);
+    }
+
+    /// Copies the backdrop under a glass box, blurs it in place and leaves it bound
+    /// as `tex0` for the glass quad. False (tint only) without a usable backdrop.
+    fn blur_backdrop(
+        &self,
+        blur_h: (u32, u32),
+        blur_v: (u32, u32),
+        region: [u32; 4],
+        params: [f32; 4],
+    ) -> bool {
+        let (Some(backdrop), Some(render_target), Some(depth_view), None) =
+            (&self.backdrop, &self.render_target, &self.depth_view, &self.tile)
+        else {
+            let _ = self.upload_glass_params(params, 0.0);
+            return false;
+        };
+        let Ok(backbuffer) = (unsafe { self.swap_chain.GetBuffer::<ID3D11Texture2D>(0) }) else {
+            let _ = self.upload_glass_params(params, 0.0);
+            return false;
+        };
+        if self.upload_glass_params(params, 1.0).is_err() {
+            return false;
+        }
+        let area = windows::Win32::Graphics::Direct3D11::D3D11_BOX {
+            left: region[0],
+            top: region[1],
+            front: 0,
+            right: region[2],
+            bottom: region[3],
+            back: 1,
+        };
+        unsafe {
+            self.context.OMSetRenderTargets(None, None);
+            self.context.CopySubresourceRegion(
+                &backdrop.textures[0],
+                0,
+                region[0],
+                region[1],
+                0,
+                &backbuffer,
+                0,
+                Some(&area),
+            );
+            self.context
+                .OMSetBlendState(Some(&self.blend), Some(&[0.0, 0.0, 0.0, 0.0]), u32::MAX);
+            self.context.OMSetDepthStencilState(None, 0);
+            self.context
+                .OMSetRenderTargets(Some(&[Some(backdrop.targets[1].clone())]), None);
+            self.context
+                .PSSetShaderResources(0, Some(&[Some(backdrop.views[0].clone())]));
+            self.context.DrawIndexed(blur_h.1, blur_h.0, 0);
+            self.context.PSSetShaderResources(0, Some(&[None]));
+            self.context
+                .OMSetRenderTargets(Some(&[Some(backdrop.targets[0].clone())]), None);
+            self.context
+                .PSSetShaderResources(0, Some(&[Some(backdrop.views[1].clone())]));
+            self.context.DrawIndexed(blur_v.1, blur_v.0, 0);
+            self.context.PSSetShaderResources(0, Some(&[None]));
+            self.context
+                .OMSetRenderTargets(Some(&[Some(render_target.clone())]), Some(depth_view));
+            self.context
+                .PSSetShaderResources(0, Some(&[Some(backdrop.views[0].clone())]));
+        }
+        true
+    }
+
+    fn upload_glass_params(&self, params: [f32; 4], available: f32) -> Result<(), String> {
+        upload_dynamic(
+            &self.context,
+            &self.glass_params,
+            bytemuck::cast_slice(&[
+                params[0],
+                params[1],
+                params[2],
+                params[3],
+                self.width as f32,
+                self.height as f32,
+                available,
+                0.0,
+            ]),
+        )
     }
 
     pub(crate) fn capture(&mut self, background: Color, path: &str) -> Result<(), D3d11Error> {
@@ -1185,6 +1341,78 @@ impl D3d11Graphics {
             first,
             count: 6,
             texture: TextureRef::Solid,
+        });
+    }
+
+    /// Liquid glass over a rounded box: `center`/`half`/`radius` in device pixels,
+    /// `params` = sigma, saturate, refraction, highlight (sigma and refraction in pixels).
+    fn append_glass(
+        &mut self,
+        center: [f32; 2],
+        half: [f32; 2],
+        radius: f32,
+        tint: Color,
+        opacity: f32,
+        params: [f32; 4],
+    ) {
+        let reach = (params[0] * 3.0).ceil() + 2.0;
+        let (width, height) = (self.width.max(1) as f32, self.height.max(1) as f32);
+        let x0 = (center[0] - half[0] - reach).floor().clamp(0.0, width);
+        let y0 = (center[1] - half[1] - reach).floor().clamp(0.0, height);
+        let x1 = (center[0] + half[0] + reach).ceil().clamp(0.0, width);
+        let y1 = (center[1] + half[1] + reach).ceil().clamp(0.0, height);
+        if x1 <= x0 || y1 <= y0 {
+            return;
+        }
+        // The blur passes cover the region unclipped: the glass quad applies the clip.
+        let clip = std::mem::replace(&mut self.clip, NO_CLIP);
+        let mut pass = |mode: f32| {
+            let first = self.indices.len() as u32;
+            let base = self.vertices.len() as u32;
+            for [x, y] in [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] {
+                self.push_vertex(Vertex {
+                    pos: self.ndc(x, y),
+                    uv: [0.0, 0.0],
+                    color: [1.0; 4],
+                    mode,
+                    params: [0.0; 4],
+                    ..Default::default()
+                });
+            }
+            self.indices
+                .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            (first, 6)
+        };
+        let blur_h = pass(6.0);
+        let blur_v = pass(7.0);
+        self.clip = clip;
+        let first = self.indices.len() as u32;
+        let base = self.vertices.len() as u32;
+        let rgba = rgba(tint);
+        let (qx0, qy0, qx1, qy1) = (
+            center[0] - half[0] - 1.0,
+            center[1] - half[1] - 1.0,
+            center[0] + half[0] + 1.0,
+            center[1] + half[1] + 1.0,
+        );
+        for [x, y] in [[qx0, qy0], [qx1, qy0], [qx1, qy1], [qx0, qy1]] {
+            self.push_vertex(Vertex {
+                pos: self.ndc(x, y),
+                uv: [x - center[0], y - center[1]],
+                color: rgba,
+                mode: 8.0,
+                params: [half[0], half[1], radius, opacity],
+                ..Default::default()
+            });
+        }
+        self.indices
+            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        self.commands.push(DrawCommand::Glass {
+            blur_h,
+            blur_v,
+            quad: (first, 6),
+            region: [x0 as u32, y0 as u32, x1 as u32, y1 as u32],
+            params,
         });
     }
 
@@ -2250,6 +2478,36 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         );
     }
 
+    fn glass(&mut self, transform: Affine, rect: vello::kurbo::Rect, radius: f64, tint: Color, glass: &GlassParams) {
+        if self.suppressed_clips > 0 {
+            return;
+        }
+        let coeffs = transform.as_coeffs();
+        let (scale_x, scale_y) = (coeffs[0].abs(), coeffs[3].abs());
+        let scale = (scale_x * scale_y).sqrt();
+        let center = transform * rect.center();
+        let half = [
+            (rect.width() * scale_x / 2.0) as f32,
+            (rect.height() * scale_y / 2.0) as f32,
+        ];
+        if half[0] <= 0.0 || half[1] <= 0.0 {
+            return;
+        }
+        self.graphics.append_glass(
+            [center.x as f32, center.y as f32],
+            half,
+            ((radius * scale) as f32).min(half[0].min(half[1])).max(0.0),
+            tint,
+            self.opacity,
+            [
+                (glass.blur * scale as f32 / 2.0).clamp(0.0, 32.0).max(0.01),
+                glass.saturate.clamp(0.0, 4.0),
+                (glass.refraction * scale as f32).clamp(0.0, 48.0),
+                glass.highlight.clamp(0.0, 1.0),
+            ],
+        );
+    }
+
     fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S) {
         if self.suppressed_clips > 0 || self.layers.len() >= u8::MAX as usize {
             self.layers.push(D3d11PaintLayer::Clip(None));
@@ -3018,6 +3276,48 @@ fn create_stencil(
     let mut state = None;
     unsafe { device.CreateDepthStencilState(&desc, Some(&mut state)) }.map_err(win_error)?;
     state.ok_or_else(|| "D3D11 stencil state was not created".into())
+}
+
+fn create_backdrop(device: &ID3D11Device, width: u32, height: u32) -> Result<Backdrop, String> {
+    let desc = D3D11_TEXTURE2D_DESC {
+        Width: width.max(1),
+        Height: height.max(1),
+        MipLevels: 1,
+        ArraySize: 1,
+        Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+        SampleDesc: DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
+        Usage: D3D11_USAGE_DEFAULT,
+        BindFlags: (D3D11_BIND_SHADER_RESOURCE.0
+            | windows::Win32::Graphics::Direct3D11::D3D11_BIND_RENDER_TARGET.0) as u32,
+        CPUAccessFlags: 0,
+        MiscFlags: 0,
+    };
+    let make = || -> Result<(ID3D11Texture2D, ID3D11ShaderResourceView, ID3D11RenderTargetView), String> {
+        let mut texture = None;
+        unsafe { device.CreateTexture2D(&desc, None, Some(&mut texture)) }.map_err(win_error)?;
+        let texture = texture.ok_or("D3D11 backdrop texture was not created")?;
+        let mut view = None;
+        unsafe { device.CreateShaderResourceView(&texture, None, Some(&mut view)) }
+            .map_err(win_error)?;
+        let mut target = None;
+        unsafe { device.CreateRenderTargetView(&texture, None, Some(&mut target)) }
+            .map_err(win_error)?;
+        Ok((
+            texture,
+            view.ok_or("D3D11 backdrop view was not created")?,
+            target.ok_or("D3D11 backdrop target was not created")?,
+        ))
+    };
+    let (texture_a, view_a, target_a) = make()?;
+    let (texture_b, view_b, target_b) = make()?;
+    Ok(Backdrop {
+        textures: [texture_a, texture_b],
+        views: [view_a, view_b],
+        targets: [target_a, target_b],
+    })
 }
 
 fn create_glyph_atlas(device: &ID3D11Device) -> Result<GlyphAtlas, String> {

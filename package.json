@@ -130,6 +130,7 @@
     "smoke:devtools": "bun run build:native && bun scripts/smoke-devtools.ts",
     "smoke:tray": "bun run build:native && bun scripts/smoke-tray.tsx",
     "smoke:hidden": "bun run build:native && bun scripts/smoke-hidden.tsx",
+    "smoke:glass": "bun run build:native && bun scripts/smoke-glass.tsx",
     "test:css-layout": "bun run build:native && bun run setup:examples && bun scripts/css-layout-parity.ts check",
     "smoke:text": "bun run build:native && bun run setup:examples && bun scripts/smoke-text.tsx",
     "smoke:html": "bun run build:native && bun run setup:examples && bun scripts/smoke-html.tsx",

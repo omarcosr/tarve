@@ -92,7 +92,24 @@ export interface TextHighlight {
   color?: string;
   activeColor?: string;
 }
+/**
+ * Liquid-glass material: what is behind the box shows through blurred and bent at the
+ * edges, under the box's `background` colour as a tint. The D3D11 renderer paints it;
+ * other renderers paint the tint alone.
+ */
+export interface GlassMaterial {
+  /** Blur radius in px of what is behind the box (CSS `backdrop-filter: blur()`), 0–64. */
+  blur: number;
+  /** Colour saturation of the blurred backdrop; 1 leaves it, iOS uses about 1.6. */
+  saturate?: number;
+  /** How far in px the backdrop bends along the rounded edge (the lens), 0 for none. */
+  refraction?: number;
+  /** Brightness 0–1 of the light rim on the top edge. */
+  highlight?: number;
+}
 export interface StateStyle {
+  /** Liquid-glass material behind the box; `background` is its tint. */
+  glass?: GlassMaterial;
   /** Colour, gradient object, or CSS `linear-gradient(…)` / `radial-gradient(…)` string. */
   background?: string | Gradient; foreground?: string | Gradient; borderColor?: string | Gradient; borderStyle?: BorderStyle; radius?: number;
   opacity?: number;

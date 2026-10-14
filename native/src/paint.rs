@@ -6,7 +6,7 @@ use std::{
 use vello::kurbo::Point;
 use vello::{
     Glyph, Scene,
-    kurbo::{Affine, Rect, Shape, Stroke},
+    kurbo::{Affine, Rect, RoundedRect, Shape, Stroke},
     peniko::{
         BlendMode, Blob, Color, ColorStop, Compose, Extend, Fill, FontData, Gradient,
         ImageAlphaType, ImageBrush, ImageData, ImageFormat, Mix, color::DynamicColor,
@@ -184,6 +184,19 @@ pub(crate) struct PaintGlyph {
     pub y: f32,
 }
 
+/// Liquid glass: how the pixels already painted under a box show through it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) struct GlassParams {
+    /// Gaussian blur radius in CSS px (sigma = blur / 2).
+    pub blur: f32,
+    /// Colour saturation of the blurred backdrop; 1 leaves it.
+    pub saturate: f32,
+    /// How far in CSS px the backdrop bends along the rounded edge.
+    pub refraction: f32,
+    /// Brightness 0..1 of the light rim on the top edge.
+    pub highlight: f32,
+}
+
 pub(crate) trait PaintTarget {
     fn fill<S: Shape>(&mut self, fill: Fill, transform: Affine, color: Color, shape: &S);
     /// Fills `shape` with a gradient. Targets without gradient support paint
@@ -215,6 +228,13 @@ pub(crate) trait PaintTarget {
         invert: bool,
     );
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine);
+    /// Liquid glass over `rect`: what was painted under it shows through blurred and
+    /// bent at the rounded edge, under `tint`. Targets without a backdrop paint the tint.
+    fn glass(&mut self, transform: Affine, rect: Rect, radius: f64, tint: Color, _glass: &GlassParams) {
+        if tint.components[3] > 0.0 {
+            self.fill(Fill::NonZero, transform, tint, &RoundedRect::from_rect(rect, radius));
+        }
+    }
     fn draw_glyphs(
         &mut self,
         font: &FontData,
@@ -307,6 +327,10 @@ impl<P: PaintTarget> PaintTarget for TransformTarget<'_, P> {
 
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine) {
         self.inner.draw_image(key, image, self.map(transform));
+    }
+
+    fn glass(&mut self, transform: Affine, rect: Rect, radius: f64, tint: Color, glass: &GlassParams) {
+        self.inner.glass(self.map(transform), rect, radius, tint, glass);
     }
 
     fn draw_glyphs(

@@ -218,6 +218,28 @@ fn rgba_of(colour: Color) -> [f32; 4] {
     colour.components
 }
 
+/// `style.glass`: `{ blur, saturate?, refraction?, highlight? }`; absent or invalid means no glass.
+fn glass_params(value: &Value) -> Option<crate::paint::GlassParams> {
+    let object = value.as_object()?;
+    let number = |key: &str, fallback: f32| {
+        object
+            .get(key)
+            .and_then(Value::as_f64)
+            .map_or(fallback, |value| value as f32)
+            .max(0.0)
+    };
+    let blur = number("blur", f32::NAN);
+    if !blur.is_finite() {
+        return None;
+    }
+    Some(crate::paint::GlassParams {
+        blur: blur.min(64.0),
+        saturate: number("saturate", 1.0).min(4.0),
+        refraction: number("refraction", 0.0).min(48.0),
+        highlight: number("highlight", 0.0).min(1.0),
+    })
+}
+
 fn colour_from(values: &[f32]) -> Color {
     let channel = |index: usize| values.get(index).copied().unwrap_or(0.0).clamp(0.0, 1.0);
     Color::new([channel(0), channel(1), channel(2), channel(3)])
@@ -4235,11 +4257,21 @@ impl Tree {
             || background_vector(visual_value(&node, "background", state)),
             |values| values.to_vec(),
         );
+        let glass = if suppress_root_chrome {
+            None
+        } else {
+            glass_params(visual_value(&node, "glass", state))
+        };
         if let Some(gradient) = paint_gradient(&background, rect) {
+            if let Some(glass) = glass {
+                target.glass(transform, rect, radius, Color::TRANSPARENT, &glass);
+            }
             target.fill_gradient(transform, &gradient, &shape);
         } else {
             let bg = colour_from(&background);
-            if bg.components[3] > 0.0 {
+            if let Some(glass) = glass {
+                target.glass(transform, rect, radius, bg, &glass);
+            } else if bg.components[3] > 0.0 {
                 target.fill(Fill::NonZero, transform, bg, &shape);
             }
         }

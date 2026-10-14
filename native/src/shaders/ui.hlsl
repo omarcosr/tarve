@@ -5,6 +5,8 @@ struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 color : CO
     nointerpolation float4 clipM0 : TEXCOORD6; nointerpolation float4 clipM1 : TEXCOORD7; };
 // Window NDC -> render-target NDC: identity, or one tile of a tiled MSAA frame.
 cbuffer Target : register(b0) { float4 target; };
+// Liquid glass: sigma, saturate, refraction, highlight | backdrop width, height, 1 when a blurred backdrop is bound, 0.
+cbuffer Glass : register(b1) { float4 glassA; float4 glassB; };
 PSIn vs_main(VSIn i) { PSIn o; o.pos=float4(i.pos*target.xy+target.zw,0,1); o.uv=i.uv; o.color=i.color; o.mode=i.mode; o.params=i.params;
     o.dev=i.dev; o.clip=i.clip; o.clipRadii=i.clipRadii; o.clipM0=i.clipM0; o.clipM1=i.clipM1; return o; }
 // Signed distance to a rounded rectangle (x0,y0,x1,y1) with per-corner radii
@@ -41,8 +43,53 @@ float rounded_box_shadow(float2 p, float4 params) {
     [unroll] for (int k=0;k<4;k++) { value+=shadow_x(p.x,p.y-y,sigma,corner,half_size)*gauss(y,sigma)*step; y+=step; }
     return value;
 }
+// One pass of a separable gaussian over the bound backdrop copy, read at this pixel.
+float4 blurPass(float2 p, float2 dir, float sigma) {
+    int r = (int)min(ceil(sigma*3.0), 96.0); float4 sum = 0; float wsum = 0;
+    int2 last = int2(glassB.xy) - 1;
+    for (int k = -r; k <= r; k++) {
+        float w = exp(-(k*k)/(2.0*sigma*sigma));
+        int2 q = clamp(int2(p + dir*k), int2(0,0), last);
+        sum += tex0.Load(int3(q,0))*w; wsum += w;
+    }
+    return float4((sum/wsum).rgb, 1.0);
+}
+// Liquid glass: the blurred backdrop bent outward along the rounded edge (a lens, with a
+// trace of chromatic aberration), saturated, under the tint, with a light rim on top.
+float4 glassShade(PSIn i) {
+    float2 half_size = i.params.xy; float corner = i.params.z; float opacity = i.params.w;
+    float4 box = float4(-half_size, half_size); float4 radii = corner.xxxx;
+    float sd = sdRoundRect(i.uv, box, radii);
+    float coverage = saturate(0.5 - sd);
+    float2 n = float2(sdRoundRect(i.uv+float2(1,0), box, radii) - sdRoundRect(i.uv-float2(1,0), box, radii),
+                      sdRoundRect(i.uv+float2(0,1), box, radii) - sdRoundRect(i.uv-float2(0,1), box, radii));
+    n = n / max(length(n), 1e-4);
+    float band = max(corner, 14.0);
+    float t = saturate((sd + band) / band);
+    float lens = glassA.z * t * t;
+    float3 col; float alpha;
+    if (glassB.z > 0.5) {
+        float2 p = i.pos.xy; float2 last = glassB.xy - 1.0;
+        float3 c;
+        c.r = tex0.Load(int3(clamp(p + n*lens*1.06, 0.0, last), 0)).r;
+        c.g = tex0.Load(int3(clamp(p + n*lens, 0.0, last), 0)).g;
+        c.b = tex0.Load(int3(clamp(p + n*lens*0.94, 0.0, last), 0)).b;
+        float luma = dot(c, float3(0.2126, 0.7152, 0.0722));
+        c = lerp(luma.xxx, c, glassA.y);
+        col = lerp(c, i.color.rgb, i.color.a); alpha = 1.0;
+    } else { col = i.color.rgb; alpha = i.color.a; }
+    // The rim: a one-pixel light along the edge, brightest where the edge faces up.
+    float rim = saturate(1.0 - abs(sd + 1.0) / 1.5) * glassA.w * saturate(0.3 - 0.7*n.y);
+    // A soft sheen a few pixels inside the top edge, as light grazes the surface.
+    float sheen = saturate(1.0 - (sd + 12.0) / 12.0) * glassA.w * 0.18 * saturate(-n.y);
+    col += rim + sheen;
+    return float4(col, alpha * opacity * coverage);
+}
 float4 shade(PSIn i) {
     if (i.mode < 0.5) return i.color;
+    if (i.mode > 7.5) return glassShade(i);
+    if (i.mode > 6.5) return blurPass(i.pos.xy, float2(0,1), glassA.x);
+    if (i.mode > 5.5) return blurPass(i.pos.xy, float2(1,0), glassA.x);
     // A solid rounded rectangle (circle, pill) from its distance field: uv is the
     // offset from its centre in pixels; params = half size, corner radius.
     if (i.mode > 4.5) return float4(i.color.rgb, i.color.a*saturate(0.5-sdRoundRect(i.uv, float4(-i.params.xy, i.params.xy), i.params.zzzz)));
