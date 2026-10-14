@@ -401,7 +401,7 @@ impl D3d11Graphics {
         )?;
         let glass_params = create_dynamic_buffer(
             &device,
-            32,
+            48,
             windows::Win32::Graphics::Direct3D11::D3D11_BIND_CONSTANT_BUFFER,
         )?;
         let vertex_capacity = 4096;
@@ -1048,14 +1048,14 @@ impl D3d11Graphics {
         let (Some(backdrop), Some(render_target), Some(depth_view), None) =
             (&self.backdrop, &self.render_target, &self.depth_view, &self.tile)
         else {
-            let _ = self.upload_glass_params(params, 0.0);
+            let _ = self.upload_glass_params(params, region, 0.0);
             return false;
         };
         let Ok(backbuffer) = (unsafe { self.swap_chain.GetBuffer::<ID3D11Texture2D>(0) }) else {
-            let _ = self.upload_glass_params(params, 0.0);
+            let _ = self.upload_glass_params(params, region, 0.0);
             return false;
         };
-        if self.upload_glass_params(params, 1.0).is_err() {
+        if self.upload_glass_params(params, region, 1.0).is_err() {
             return false;
         }
         let area = windows::Win32::Graphics::Direct3D11::D3D11_BOX {
@@ -1101,7 +1101,7 @@ impl D3d11Graphics {
         true
     }
 
-    fn upload_glass_params(&self, params: [f32; 5], available: f32) -> Result<(), String> {
+    fn upload_glass_params(&self, params: [f32; 5], region: [u32; 4], available: f32) -> Result<(), String> {
         upload_dynamic(
             &self.context,
             &self.glass_params,
@@ -1114,6 +1114,10 @@ impl D3d11Graphics {
                 self.height as f32,
                 available,
                 params[4],
+                region[0] as f32,
+                region[1] as f32,
+                region[2] as f32,
+                region[3] as f32,
             ]),
         )
     }
@@ -1355,7 +1359,8 @@ impl D3d11Graphics {
         opacity: f32,
         params: [f32; 5],
     ) {
-        let reach = (params[0] * 3.0).ceil() + 2.0;
+        // The copy must hold what the lens reaches past the edge, plus the blur taps around that.
+        let reach = params[2].ceil() + (params[0] * 6.0).ceil() + 2.0;
         let (width, height) = (self.width.max(1) as f32, self.height.max(1) as f32);
         let x0 = (center[0] - half[0] - reach).floor().clamp(0.0, width);
         let y0 = (center[1] - half[1] - reach).floor().clamp(0.0, height);

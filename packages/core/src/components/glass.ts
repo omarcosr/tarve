@@ -55,7 +55,8 @@ export function glassSurface(variant: GlassVariant, appearance: "light" | "dark"
   return {
     background: options.tint ?? VEIL[appearance][variant],
     radius: options.radius ?? 26,
-    glass: { ...MATERIAL[variant], ...options.material },
+    // Dark glass reflects less: the same highlight reads harsh on a dark veil.
+    glass: { ...MATERIAL[variant], ...(appearance === "dark" ? { highlight: 0.55 } : {}), ...options.material },
     ...glassChrome(appearance, options.shadow ?? true),
   };
 }

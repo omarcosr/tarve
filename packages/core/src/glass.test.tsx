@@ -20,7 +20,7 @@ describe("Glass", () => {
       </Window>,
     );
     const style = tree.nodes.get("clear")!.style;
-    expect(style.glass).toEqual({ blur: 4, saturate: 1.25, refraction: 28, highlight: 1, magnify: 0.1 });
+    expect(style.glass).toEqual({ blur: 4, saturate: 1.25, refraction: 28, highlight: 0.55, magnify: 0.1 });
     expect(style.background).toBe("#ff000040");
     expect(style.radius).toBe(12);
     expect(style.width).toBe(10);

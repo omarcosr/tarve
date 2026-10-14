@@ -6,7 +6,7 @@ struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 color : CO
 // Window NDC -> render-target NDC: identity, or one tile of a tiled MSAA frame.
 cbuffer Target : register(b0) { float4 target; };
 // Liquid glass: sigma, saturate, refraction, highlight | backdrop width, height, 1 when a blurred backdrop is bound, 0.
-cbuffer Glass : register(b1) { float4 glassA; float4 glassB; };
+cbuffer Glass : register(b1) { float4 glassA; float4 glassB; float4 glassRegion; };
 PSIn vs_main(VSIn i) { PSIn o; o.pos=float4(i.pos*target.xy+target.zw,0,1); o.uv=i.uv; o.color=i.color; o.mode=i.mode; o.params=i.params;
     o.dev=i.dev; o.clip=i.clip; o.clipRadii=i.clipRadii; o.clipM0=i.clipM0; o.clipM1=i.clipM1; return o; }
 // Signed distance to a rounded rectangle (x0,y0,x1,y1) with per-corner radii
@@ -46,16 +46,17 @@ float rounded_box_shadow(float2 p, float4 params) {
 // One pass of a separable gaussian over the bound backdrop copy, read at this pixel.
 float4 blurPass(float2 p, float2 dir, float sigma) {
     int r = (int)min(ceil(sigma*3.0), 96.0); float4 sum = 0; float wsum = 0;
-    int2 last = int2(glassB.xy) - 1;
+    int2 first = int2(glassRegion.xy); int2 last = int2(glassRegion.zw) - 1;
     for (int k = -r; k <= r; k++) {
         float w = exp(-(k*k)/(2.0*sigma*sigma));
-        int2 q = clamp(int2(p + dir*k), int2(0,0), last);
+        int2 q = clamp(int2(p + dir*k), first, last);
         sum += tex0.Load(int3(q,0))*w; wsum += w;
     }
     return float4((sum/wsum).rgb, 1.0);
 }
-// The blurred backdrop at a window pixel.
-float3 backdropAt(float2 q) { return tex0.Load(int3(clamp(q, 0.0, glassB.xy - 1.0), 0)).rgb; }
+// The copied backdrop at a window pixel; reads stay inside the copied region (the
+// rest of the scratch texture is stale).
+float3 backdropAt(float2 q) { return tex0.Load(int3(clamp(q, glassRegion.xy, glassRegion.zw - 1.0), 0)).rgb; }
 // Liquid glass: a thick slab whose edge is a quarter-round. The flat part shows the
 // backdrop slightly enlarged; over the curved edge the ray bends outward, pulling what
 // lies past the edge into the rim, with a trace of dispersion. The curve also reflects:
@@ -78,9 +79,9 @@ float4 glassShade(PSIn i) {
         float2 q = centre + i.uv * (1.0 - glassB.w);
         float2 bend = n * glassA.z * curve;
         float3 c;
-        c.r = backdropAt(q + bend * (1.0 + 0.10 * curve)).r;
+        c.r = backdropAt(q + bend * (1.0 + 0.05 * curve)).r;
         c.g = backdropAt(q + bend).g;
-        c.b = backdropAt(q + bend * (1.0 - 0.10 * curve)).b;
+        c.b = backdropAt(q + bend * (1.0 - 0.05 * curve)).b;
         float luma = dot(c, float3(0.2126, 0.7152, 0.0722));
         c = lerp(luma.xxx, c, glassA.y);
         col = lerp(c, i.color.rgb, i.color.a); alpha = 1.0;

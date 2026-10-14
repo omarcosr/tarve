@@ -21,7 +21,7 @@ export function Checkbox({ checked, label, disabled, onCheckedChange, style, ...
         borderColor: checked ? c.primary : c.border, background: checked ? c.primary : c.input,
         justify: "center", align: "center" },
         children: jsx(Icon, { name: "check", size: 14, color: checked ? c.primaryForeground : "#00000000" }) }),
-      jsx(Text, { color: disabled ? c.disabledForeground : c.foreground, children: label }),
+      jsx(Text, { color: disabled ? c.disabledForeground : typeof style?.foreground === "string" ? style.foreground : c.foreground, children: label }),
     ],
   });
 }
@@ -42,7 +42,7 @@ export function Switch({ checked, label, disabled, onCheckedChange, style, ...pr
         background: disabled ? c.disabled : checked ? c.primary : c.border },
         children: jsx(View, { style: { position: "absolute", top: 2, left: checked ? 18 : 2,
           width: 16, height: 16, radius: 8, background: c.sliderThumb } }) }),
-      jsx(Text, { color: disabled ? c.disabledForeground : c.foreground, children: label }),
+      jsx(Text, { color: disabled ? c.disabledForeground : typeof style?.foreground === "string" ? style.foreground : c.foreground, children: label }),
     ],
   });
 }

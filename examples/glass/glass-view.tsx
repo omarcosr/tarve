@@ -305,7 +305,7 @@ function SettingsSheet() {
 export function App() {
   return (
     <Window title="Liquid Glass" width={WIDTH} height={HEIGHT} minWidth={WIDTH} minHeight={600} resizable={false}
-      style={{ background: dark ? "#0b1020" : "#cde6ff" }}>
+      style={{ background: dark ? "#0b1020" : "#cde6ff", radius: 0, borderWidth: 0 }}>
       <View id="phone" style={{ position: "relative", flex: 1, overflow: "hidden" }}>
         <Wallpaper />
         <Content />
