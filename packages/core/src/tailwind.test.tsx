@@ -72,9 +72,10 @@ describe("tailwind classes", () => {
     expect(tw("from-blue-500 bg-gradient-to-r to-purple-500")).toEqual({
       background: { type: "linear", to: "right", stops: [{ color: "#3b82f6", offset: 0 }, { color: "#a855f7", offset: 1 }] },
     });
+    // Tailwind's implicit end stop is the start colour at alpha 0 (a theme token keeps its opacity modifier).
     expect(tw("bg-linear-to-br from-primary via-white hover:from-black")).toEqual({
-      background: { type: "linear", to: "bottom right", stops: [{ color: theme.colors.primary, offset: 0 }, { color: "#ffffff", offset: 0.5 }, { color: "transparent", offset: 1 }] },
-      hover: { background: { type: "linear", to: "bottom", stops: [{ color: "#000000", offset: 0 }, { color: "transparent", offset: 1 }] } },
+      background: { type: "linear", to: "bottom right", stops: [{ color: theme.colors.primary, offset: 0 }, { color: "#ffffff", offset: 0.5 }, { color: `${theme.colors.primary}/0`, offset: 1 }] },
+      hover: { background: { type: "linear", to: "bottom", stops: [{ color: "#000000", offset: 0 }, { color: "#00000000", offset: 1 }] } },
     });
     expect(tw("bg-gradient-to-r")).toEqual({});
   });

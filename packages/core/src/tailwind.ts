@@ -191,9 +191,21 @@ function setTransform(out: Out, patch: Transform): void {
   out.transform = { ...(typeof out.transform === "object" && out.transform ? out.transform as Transform : {}), ...patch };
 }
 
+/**
+ * Transition pieces collect until the class list is compiled: as in CSS, `duration-*`,
+ * `delay-*` and `ease-*` only animate once there is a duration (`transition` brings
+ * Tailwind's 150ms ease-in-out; `duration-*` alone animates everything, CSS's default).
+ */
 function setTransition(out: Out, patch: { duration?: number; delay?: number; easing?: MotionEasing }): void {
-  const current = (out.transition as { all?: Record<string, unknown> } | undefined)?.all ?? { duration: 150, easing: "easeInOut" };
-  out.transition = { all: { ...current, ...patch } };
+  out[TRANSITION] = { ...(out[TRANSITION] as object | undefined), ...patch };
+}
+
+function finishTransition(out: Out): void {
+  const pending = out[TRANSITION] as { duration?: number; delay?: number; easing?: MotionEasing } | undefined;
+  if (!pending) return;
+  delete out[TRANSITION];
+  if (pending.duration === undefined || pending.duration <= 0) return;
+  out.transition = { all: pending };
 }
 
 function fontSizeOf(out: Out): number {
@@ -313,7 +325,9 @@ const HANDLERS: Record<string, Handler> = {
   tracking: (out, value, negative) => {
     const em = TRACKING[value];
     if (em !== undefined) { out.letterSpacing = Math.round(em * fontSizeOf(out) * 100) / 100; return; }
-    const resolved = px(arbitrary(value) ?? "");
+    const raw = arbitrary(value) ?? "";
+    const ems = /^(-?\d*\.?\d+)em$/.exec(raw);
+    const resolved = ems ? Math.round(Number(ems[1]) * fontSizeOf(out) * 100) / 100 : px(raw);
     if (resolved !== undefined) out.letterSpacing = negative ? -resolved : resolved;
   },
   "line-clamp": (out, value) => {
@@ -388,7 +402,7 @@ const HANDLERS: Record<string, Handler> = {
     const resolved = length(value, false);
     if (typeof resolved === "number") setTransform(out, { y: negative ? -resolved : resolved });
   },
-  transition: (out) => setTransition(out, {}),
+  transition: (out) => setTransition(out, { duration: 150, easing: "easeInOut" }),
   duration: (out, value) => { const n = number(value); if (n !== undefined) setTransition(out, { duration: n }); },
   delay: (out, value) => { const n = number(value); if (n !== undefined) setTransition(out, { delay: n }); },
   ease: (out, value) => { const easing = EASINGS[value]; if (easing) setTransition(out, { easing }); },
@@ -513,6 +527,7 @@ export function styleWithClassName(className: string, style: Record<string, unkn
   return merged;
 }
 const GRADIENT = "\0gradient";
+const TRANSITION = "\0transition";
 const GRADIENT_SIDES: Record<string, GradientSide> = {
   t: "top", tr: "top right", r: "right", br: "bottom right", b: "bottom", bl: "bottom left", l: "left", tl: "top left",
 };
@@ -527,15 +542,28 @@ function finishGradient(out: Out): void {
   if (!pending) return;
   delete out[GRADIENT];
   if (pending.from === undefined && pending.via === undefined && pending.stop === undefined) return;
-  const stops = [{ color: pending.from ?? "transparent", offset: 0 }];
+  const from = pending.from ?? "transparent";
+  const stops = [{ color: from, offset: 0 }];
   if (pending.via !== undefined) stops.push({ color: pending.via, offset: 0.5 });
-  stops.push({ color: pending.stop ?? "transparent", offset: 1 });
+  // Tailwind's implicit end stop is the start colour at alpha 0, not transparent black.
+  stops.push({ color: pending.stop ?? fade(from), offset: 1 });
   out.background = { type: "linear", to: pending.to ?? "bottom", stops } satisfies LinearGradient;
+}
+
+function fade(color: string): string {
+  if (color.startsWith("#")) return alpha(color.slice(0, 7), 0);
+  if (color.startsWith("var(")) return `${color.replace(/\/\d+$/, "")}/0`;
+  return "transparent";
 }
 
 function finishGradients(out: Out): void {
   finishGradient(out);
-  for (const state of Object.values(STATE_VARIANTS)) if (out[state]) finishGradient(out[state] as Out);
+  finishTransition(out);
+  for (const state of Object.values(STATE_VARIANTS)) {
+    if (!out[state]) continue;
+    finishGradient(out[state] as Out);
+    finishTransition(out[state] as Out);
+  }
 }
 type Corner = "topLeft" | "topRight" | "bottomRight" | "bottomLeft";
 const CORNERS: Record<string, readonly Corner[]> = {
