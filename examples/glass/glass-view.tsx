@@ -10,6 +10,7 @@ import {
   Slider,
   Switch,
   Text,
+  TitleBar,
   View,
   Window,
   type GlassVariant,
@@ -50,15 +51,19 @@ const album = (i: number) => `linear-gradient(135deg, ${palette[i % palette.leng
 function Wallpaper(): VNode {
   // Sharp, saturated shapes: what the glass blurs and bends.
   return (
-    <View id="wallpaper" style={{ position: "absolute", top: 0, left: 0, width: WIDTH, height: HEIGHT, overflow: "hidden",
-      background: dark ? "linear-gradient(180deg, #0b1020, #1d1240 60%, #2a0f2f)" : "linear-gradient(180deg, #cde6ff, #f6d2ff 55%, #ffe3c2)" }}>
+    <View id="wallpaper" style={{
+      position: "absolute", top: 0, left: 0, width: WIDTH, height: HEIGHT, overflow: "hidden",
+      background: dark ? "linear-gradient(180deg, #0b1020, #1d1240 60%, #2a0f2f)" : "linear-gradient(180deg, #cde6ff, #f6d2ff 55%, #ffe3c2)"
+    }}>
       {[
         { x: -80, y: 60, s: 320, c: "#ff2d55", o: 0.85 }, { x: 240, y: 180, s: 260, c: "#007aff", o: 0.8 },
         { x: 60, y: 420, s: 300, c: "#ffcc00", o: 0.8 }, { x: 260, y: 560, s: 240, c: "#34c759", o: 0.85 },
         { x: -40, y: 700, s: 220, c: "#af52de", o: 0.8 },
       ].map((b, i) => (
-        <View key={i} style={{ position: "absolute", left: b.x, top: b.y, width: b.s, height: b.s, radius: b.s / 2,
-          background: `radial-gradient(circle at 35% 30%, #ffffffb0, ${b.c} 45%, ${b.c}00 72%)`, opacity: b.o }} />
+        <View key={i} style={{
+          position: "absolute", left: b.x, top: b.y, width: b.s, height: b.s, radius: b.s / 2,
+          background: `radial-gradient(circle at 35% 30%, #ffffffb0, ${b.c} 45%, ${b.c}00 72%)`, opacity: b.o
+        }} />
       ))}
       {/* Hard edges for the lens to bend: a grid and big type. */}
       {Array.from({ length: 8 }, (_, i) => (
@@ -67,8 +72,8 @@ function Wallpaper(): VNode {
       {Array.from({ length: 6 }, (_, i) => (
         <View key={`v${i}`} style={{ position: "absolute", left: 40 + i * 70, top: 0, width: 2, height: HEIGHT, background: dark ? "#ffffff24" : "#1c1c1e1f" }} />
       ))}
-      <Text id="clock" size={96} weight={800} color={dark ? "#ffffffd9" : "#1c1c1ee6"} style={{ position: "absolute", left: 24, top: 262, letterSpacing: -4 }}>09:41</Text>
-      <Text id="date" size={22} weight={600} color={dark ? "#ffffffb3" : "#1c1c1eb3"} style={{ position: "absolute", left: 28, top: 372 }}>Tuesday, June 9</Text>
+      <Text id="clock" size={96} weight={800} color={dark ? "#ffffffd9" : "#1c1c1ee6"} style={{ position: "absolute", left: 24, top: 296, letterSpacing: -4 }}>09:41</Text>
+      <Text id="date" size={22} weight={600} color={dark ? "#ffffffb3" : "#1c1c1eb3"} style={{ position: "absolute", left: 28, top: 406 }}>Tuesday, June 9</Text>
       <Text id="tagline" size={44} weight={800} color={dark ? "#ffffffcc" : "#1c1c1ecc"} style={{ position: "absolute", left: 24, top: 745, letterSpacing: -1 }}>Liquid Glass</Text>
     </View>
   );
@@ -78,10 +83,12 @@ function TabItem({ index, icon, label }: { index: number; icon: IconName; label:
   const active = tab === index;
   return (
     <Pressable id={`tab-${index}`} control={{ role: "tab", label, selected: active } as never} onClick={() => { tab = index; }}
-      style={{ flex: 1, height: 48, radius: 24, align: "center", justify: "center", gap: 2, direction: "column",
+      style={{
+        flex: 1, height: 48, radius: 24, align: "center", justify: "center", gap: 2, direction: "column",
         background: active ? (dark ? "#ffffff2e" : "#ffffffcc") : "#00000000",
         transition: { background: { duration: 220, easing: "easeOut" } },
-        hover: { background: active ? (dark ? "#ffffff38" : "#ffffffdd") : (dark ? "#ffffff14" : "#ffffff55") } }}>
+        hover: { background: active ? (dark ? "#ffffff38" : "#ffffffdd") : (dark ? "#ffffff14" : "#ffffff55") }
+      }}>
       <Icon name={icon} size={20} color={active ? "#007aff" : dark ? "#ffffffcc" : "#1c1c1ecc"} />
       <Text size={10} weight={600} color={active ? "#007aff" : dark ? "#ffffffcc" : "#1c1c1ecc"}>{label}</Text>
     </Pressable>
@@ -133,24 +140,34 @@ function SearchSheet() {
 function ToolButton({ id, icon, label, onClick, active }: { id: string; icon: IconName; label: string; onClick: () => void; active?: boolean }) {
   return (
     <Pressable id={id} control={{ role: "button", label } as never} onClick={onClick}
-      style={{ width: 44, height: 44, radius: 22, align: "center", justify: "center",
+      style={{
+        width: 44, height: 44, radius: 22, align: "center", justify: "center",
         background: active ? "#ff2d55" : "#00000000", transition: { background: { duration: 200 } },
-        hover: { background: active ? "#ff375f" : dark ? "#ffffff1a" : "#ffffff66" }, active: { background: active ? "#e0264c" : dark ? "#ffffff2e" : "#ffffff99" } }}>
+        hover: { background: active ? "#ff375f" : dark ? "#ffffff1a" : "#ffffff66" }, active: { background: active ? "#e0264c" : dark ? "#ffffff2e" : "#ffffff99" }
+      }}>
       <Icon name={icon} size={20} color={active ? "#ffffff" : dark ? "#ffffffdd" : "#1c1c1edd"} />
     </Pressable>
+  );
+}
+
+/** The window's own bar, laid over the wallpaper: no surface, only the controls, in the current ink. */
+function Chrome() {
+  return (
+    <TitleBar id="chrome" height={36} showMaximize={false}
+      style={{ position: "absolute", top: 0, left: 0, width: WIDTH, background: "#00000000", borderWidth: 0, foreground: dark ? "#ffffffcc" : "#1c1c1ecc", padding: { left: 0 } }} />
   );
 }
 
 function TopBar() {
   const appearance = dark ? "dark" : "light";
   return (
-    <Row id="top-bar" style={{ position: "absolute", left: 16, right: 16, top: 18, justify: "between", align: "center" }}>
+    <Row id="top-bar" style={{ position: "absolute", left: 16, right: 16, top: 52, justify: "between", align: "center" }}>
       <Glass id="title-pill" variant={variant} appearance={appearance} radius={22} style={{ height: 44, padding: { left: 18, right: 18 }, justify: "center" }}>
         <Text size={17} weight={700} color={dark ? "#ffffff" : "#1c1c1e"}>{["Home", "New", "Library", "You"][tab]}</Text>
       </Glass>
       <Glass id="toolbar" variant={variant} appearance={appearance} radius={26} style={{ height: 52, padding: 4, direction: "row", gap: 2 }}>
         <ToolButton id="tool-like" icon="heart" label="Like" active={liked} onClick={() => { liked = !liked; }} />
-        <ToolButton id="tool-bell" icon="bell" label="Notifications" onClick={() => {}} />
+        <ToolButton id="tool-bell" icon="bell" label="Notifications" onClick={() => { }} />
         <ToolButton id="tool-settings" icon="settings" label="Settings" onClick={() => { sheet = !sheet; }} />
       </Glass>
     </Row>
@@ -164,10 +181,12 @@ function NowPlaying() {
   return (
     <Glass id="now-playing" variant={variant} appearance={appearance} radius={28}
       onPointerMove={({ x, y }: { x: number; y: number }) => { pointer = { x: x / 398, y: y / 176 }; }}
-      style={{ position: "absolute", left: 16, right: 16, top: 84, height: 176, padding: 16, gap: 12, overflow: "hidden" }}>
-      <View id="sheen" style={{ position: "absolute", top: -120 + pointer.y * 80, left: -120 + pointer.x * 240, width: 300, height: 300, radius: 150,
+      style={{ position: "absolute", left: 16, right: 16, top: 118, height: 176, padding: 16, gap: 12, overflow: "hidden" }}>
+      <View id="sheen" style={{
+        position: "absolute", top: -120 + pointer.y * 80, left: -120 + pointer.x * 240, width: 300, height: 300, radius: 150,
         background: "radial-gradient(circle, #ffffff66, #ffffff00 60%)", opacity: dark ? 0.35 : 0.7,
-        transition: { left: { duration: 120 }, top: { duration: 120 } } }} />
+        transition: { left: { duration: 120 }, top: { duration: 120 } }
+      }} />
       <Row gap={14} align="center">
         <View id="art" style={{ width: 64, height: 64, radius: 14, background: album(tab * 2 + 1), boxShadow: { y: 4, blur: 12, color: "#00000040" } }} />
         <Column flex={1} gap={2}>
@@ -203,7 +222,7 @@ function Card({ index }: { index: number }) {
 function Content() {
   return (
     <Scroll id="content" style={{ position: "absolute", top: 0, left: 0, width: WIDTH, height: HEIGHT }}>
-      <Column padding={{ top: 420, left: 16, right: 16, bottom: 140 }} gap={28}>
+      <Column padding={{ top: 450, left: 16, right: 16, bottom: 140 }} gap={28}>
         {Array.from({ length: 5 }, (_, section) => (
           <Column key={section} gap={12}>
             <Text size={22} weight={700} color={dark ? "#ffffff" : "#1c1c1e"}>{["Made for you", "Recently played", "New releases", "Top charts", "Moods"][section]}</Text>
@@ -223,16 +242,18 @@ function SettingsSheet() {
   const fg = dark ? "#ffffff" : "#1c1c1e";
   const chip = (value: GlassVariant) => (
     <Pressable id={`variant-${value}`} control={{ role: "radio", label: value, checked: variant === value } as never} onClick={() => { variant = value; }}
-      style={{ height: 34, radius: 17, padding: { left: 14, right: 14 }, align: "center", justify: "center",
-        background: variant === value ? fg : dark ? "#ffffff1f" : "#ffffff99", transition: { background: { duration: 180 } } }}>
+      style={{
+        height: 34, radius: 17, padding: { left: 14, right: 14 }, align: "center", justify: "center",
+        background: variant === value ? fg : dark ? "#ffffff1f" : "#ffffff99", transition: { background: { duration: 180 } }
+      }}>
       <Text size={13} weight={600} color={variant === value ? (dark ? "#1c1c1e" : "#ffffff") : fg}>{value}</Text>
     </Pressable>
   );
   return (
-    <AnimatePresence id="sheet-presence" present={sheet} exit={{ opacity: 0, top: 110 }} enter={{ opacity: 0, top: 110 }}
+    <AnimatePresence id="sheet-presence" present={sheet} exit={{ opacity: 0, top: 144 }} enter={{ opacity: 0, top: 144 }}
       transition={{ opacity: { duration: 220 }, top: { duration: 320, easing: "easeOut" } }}>
       <Glass id="sheet" variant="regular" appearance={appearance} radius={30} dismissOnOutside onOutsideClick={() => { sheet = false; }}
-        style={{ position: "absolute", left: 16, right: 16, top: 84, padding: 20, gap: 18 }}>
+        style={{ position: "absolute", left: 16, right: 16, top: 118, padding: 20, gap: 18 }}>
         <Row justify="between" align="center">
           <Text size={20} weight={700} color={fg}>Glass</Text>
           <Pressable id="sheet-close" control={{ role: "button", label: "Close" } as never} onClick={() => { sheet = false; }}
@@ -267,6 +288,7 @@ export function App() {
         <SettingsSheet />
         <SearchSheet />
         <TabBar />
+        <Chrome />
       </View>
     </Window>
   );
