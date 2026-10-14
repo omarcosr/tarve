@@ -805,6 +805,7 @@ fn alignment_for_node(node: &Node) -> parley::Alignment {
     match node.string("textAlign", "start") {
         "center" => parley::Alignment::Center,
         "end" => parley::Alignment::End,
+        "justify" => parley::Alignment::Justify,
         _ => parley::Alignment::Start,
     }
 }

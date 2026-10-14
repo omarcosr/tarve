@@ -67,9 +67,12 @@ const CURSORS = new Set(["auto", "default", "pointer", "text", "vertical-text", 
 const BORDER_STYLES = new Set(["solid", "dashed", "dotted", "double", "none", "hidden"]);
 const OVERFLOWS = new Set(["visible", "hidden", "clip", "auto", "scroll"]);
 const WHITESPACE = new Set(["normal", "nowrap", "pre", "pre-wrap", "pre-line"]);
-const STATE_VARIANTS: Record<string, "hover" | "focus" | "focusVisible" | "active" | "disabled"> = {
+const STATE_VARIANTS: Record<string, "hover" | "focus" | "focusVisible" | "active" | "disabled" | "groupHover" | "focusWithin"> = {
   hover: "hover", focus: "focus", "focus-visible": "focusVisible", active: "active", disabled: "disabled",
+  "group-hover": "groupHover", "focus-within": "focusWithin",
 };
+/** Variants the reconciler folds (theme, position among siblings, window width): each nests a full style. */
+const WRAPPER_VARIANTS = new Set(["dark", "first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl"]);
 
 const STATIC: Record<string, Out> = {
   flex: { display: "flex" }, "inline-flex": { display: "flex" }, grid: { display: "grid" }, "inline-grid": { display: "grid" },
@@ -80,7 +83,21 @@ const STATIC: Record<string, Out> = {
   "flex-1": { flex: 1 }, "flex-auto": { flex: "1 1 auto" }, "flex-initial": { flex: "0 1 auto" }, "flex-none": { flex: "none" },
   grow: { grow: 1 }, "grow-0": { grow: 0 }, shrink: { shrink: 1 }, "shrink-0": { shrink: 0 },
   "flex-grow": { grow: 1 }, "flex-grow-0": { grow: 0 }, "flex-shrink": { shrink: 1 }, "flex-shrink-0": { shrink: 0 },
-  "items-start": { align: "start" }, "items-center": { align: "center" }, "items-end": { align: "end" }, "items-stretch": { align: "stretch" },
+  "items-start": { align: "start" }, "items-center": { align: "center" }, "items-end": { align: "end" }, "items-stretch": { align: "stretch" }, "items-baseline": { align: "baseline" },
+  "self-auto": { alignSelf: undefined }, "self-start": { alignSelf: "start" }, "self-center": { alignSelf: "center" }, "self-end": { alignSelf: "end" }, "self-stretch": { alignSelf: "stretch" }, "self-baseline": { alignSelf: "baseline" },
+  "content-start": { alignContent: "start" }, "content-center": { alignContent: "center" }, "content-end": { alignContent: "end" }, "content-stretch": { alignContent: "stretch" },
+  "content-between": { alignContent: "between" }, "content-around": { alignContent: "around" }, "content-evenly": { alignContent: "evenly" },
+  "justify-items-start": { justifyItems: "start" }, "justify-items-center": { justifyItems: "center" }, "justify-items-end": { justifyItems: "end" }, "justify-items-stretch": { justifyItems: "stretch" },
+  "justify-self-auto": { justifySelf: undefined }, "justify-self-start": { justifySelf: "start" }, "justify-self-center": { justifySelf: "center" }, "justify-self-end": { justifySelf: "end" }, "justify-self-stretch": { justifySelf: "stretch" },
+  "place-items-start": { align: "start", justifyItems: "start" }, "place-items-center": { align: "center", justifyItems: "center" }, "place-items-end": { align: "end", justifyItems: "end" }, "place-items-stretch": { align: "stretch", justifyItems: "stretch" },
+  "place-content-start": { alignContent: "start", justify: "start" }, "place-content-center": { alignContent: "center", justify: "center" }, "place-content-end": { alignContent: "end", justify: "end" },
+  "place-content-between": { alignContent: "between", justify: "between" }, "place-content-around": { alignContent: "around", justify: "around" }, "place-content-evenly": { alignContent: "evenly", justify: "evenly" }, "place-content-stretch": { alignContent: "stretch", justify: "stretch" },
+  "place-self-auto": { alignSelf: undefined, justifySelf: undefined }, "place-self-start": { alignSelf: "start", justifySelf: "start" }, "place-self-center": { alignSelf: "center", justifySelf: "center" }, "place-self-end": { alignSelf: "end", justifySelf: "end" }, "place-self-stretch": { alignSelf: "stretch", justifySelf: "stretch" },
+  "justify-stretch": { justify: "stretch" }, "text-justify": { textAlign: "justify" },
+  group: { group: true }, "pointer-events-none": { pointerEvents: "none" },
+  "origin-center": { transform: { originX: 0.5, originY: 0.5 } }, "origin-top": { transform: { originX: 0.5, originY: 0 } }, "origin-top-right": { transform: { originX: 1, originY: 0 } },
+  "origin-right": { transform: { originX: 1, originY: 0.5 } }, "origin-bottom-right": { transform: { originX: 1, originY: 1 } }, "origin-bottom": { transform: { originX: 0.5, originY: 1 } },
+  "origin-bottom-left": { transform: { originX: 0, originY: 1 } }, "origin-left": { transform: { originX: 0, originY: 0.5 } }, "origin-top-left": { transform: { originX: 0, originY: 0 } },
   "justify-start": { justify: "start" }, "justify-center": { justify: "center" }, "justify-end": { justify: "end" }, "justify-between": { justify: "between" },
   "justify-around": { justify: "around" }, "justify-evenly": { justify: "evenly" },
   relative: { position: "relative" }, absolute: { position: "absolute" }, static: { position: "relative" },
@@ -427,6 +444,14 @@ const HANDLERS: Record<string, Handler> = {
     const n = number(value);
     if (n !== undefined) setTransform(out, { scale: (negative ? -n : n) / (arbitrary(value) !== undefined ? 1 : 100) });
   },
+  rotate: (out, value, negative) => {
+    const raw = arbitrary(value) ?? value;
+    const n = /^(-?\d*\.?\d+)(deg)?$/.exec(raw);
+    if (n) setTransform(out, { rotate: negative ? -Number(n[1]) : Number(n[1]) });
+  },
+  "skew-x": (out, value, negative) => { const n = number(value); if (n !== undefined) setTransform(out, { skewX: negative ? -n : n }); },
+  "skew-y": (out, value, negative) => { const n = number(value); if (n !== undefined) setTransform(out, { skewY: negative ? -n : n }); },
+  skew: (out, value, negative) => { const n = number(value); if (n !== undefined) setTransform(out, { skewX: negative ? -n : n, skewY: negative ? -n : n }); },
   "scale-x": (out, value) => { const n = number(value); if (n !== undefined) setTransform(out, { scaleX: n / 100 }); },
   "scale-y": (out, value) => { const n = number(value); if (n !== undefined) setTransform(out, { scaleY: n / 100 }); },
   "translate-x": (out, value, negative) => {
@@ -497,7 +522,12 @@ function applyUtility(out: Out, utility: string): void {
   const negative = utility.startsWith("-");
   const token = negative ? utility.slice(1) : utility;
   const fixed = STATIC[token];
-  if (fixed && !negative) { Object.assign(out, fixed); return; }
+  if (fixed && !negative) {
+    // `origin-*` joins the transform instead of replacing it.
+    if (fixed.transform) { setTransform(out, fixed.transform as Transform); return; }
+    Object.assign(out, fixed);
+    return;
+  }
   for (const prefix of PREFIXES) {
     if (token === prefix) { HANDLERS[prefix](out, "", negative); return; }
     if (token.startsWith(prefix + "-")) { HANDLERS[prefix](out, token.slice(prefix.length + 1), negative); return; }
@@ -506,26 +536,29 @@ function applyUtility(out: Out, utility: string): void {
 
 function compile(classes: string): Out {
   const out: Out = {};
+  const wrappers: Out[] = [out];
   for (const token of classes.split(/\s+/)) {
     if (!token) continue;
     const parts = splitVariants(token);
     const utility = parts.pop()!;
-    // Variants the native tree has no notion of (breakpoints, group-hover:) drop the class.
-    let dark = false;
+    // Wrapper variants (`dark:`, `md:`, `first:`) nest in order; a state variant (`hover:`) goes last,
+    // inside them. Variants the native tree has no notion of (`print:`, `peer-*`) drop the class.
+    let target = out;
     let state: (typeof STATE_VARIANTS)[string] | undefined;
     let supported = true;
     for (const variant of parts) {
-      if (variant === "dark") dark = true;
-      else if (STATE_VARIANTS[variant]) state = STATE_VARIANTS[variant];
+      if (WRAPPER_VARIANTS.has(variant)) {
+        const next = (target[variant] as Out | undefined) ?? (target[variant] = {});
+        if (!wrappers.includes(next)) wrappers.push(next);
+        target = next;
+      } else if (STATE_VARIANTS[variant]) state = STATE_VARIANTS[variant];
       else supported = false;
     }
     if (!supported) continue;
-    let target = dark ? (out.dark as Out | undefined) ?? (out.dark = {}) : out;
     if (state) target = (target[state] as Out | undefined) ?? (target[state] = {});
     applyUtility(target, utility);
   }
-  finishGradients(out);
-  if (out.dark) finishGradients(out.dark as Out);
+  for (const wrapper of wrappers) finishGradients(wrapper);
   return out;
 }
 
@@ -558,7 +591,7 @@ export function styleWithClassName(className: string, style: Record<string, unkn
   if (!style) return compiled;
   for (const alias of Object.keys(ALIASES)) if (style[alias] !== undefined) delete compiled[ALIASES[alias]];
   const merged: Out = { ...compiled, ...style };
-  for (const state of ["hover", "focus", "focusVisible", "active", "disabled", "dark"] as const) {
+  for (const state of ["hover", "focus", "focusVisible", "active", "disabled", "groupHover", "focusWithin", "dark", "first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl"] as const) {
     if (compiled[state] && style[state]) merged[state] = { ...(compiled[state] as Out), ...(style[state] as Out) };
   }
   return merged;

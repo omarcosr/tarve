@@ -197,7 +197,7 @@ function App() {
 
 Every colour property (`background`, `foreground`, `borderColor`, `outlineColor`, rich-content and diff colours, state styles and the window background) accepts hex (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`), `rgb()`/`rgba()`, `hsl()`/`hsla()`, common names such as `transparent` or `white`, and theme tokens. Unsupported colour strings throw when the view is compiled instead of rendering black.
 
-`transform` translates and scales a node and its subtree about the box centre: `{ x, y, scale, scaleX, scaleY }` or CSS syntax such as `"translateY(-2px) scale(1.02)"`. It is paint-only (layout does not move) but hit testing and hover follow the transformed box, and it transitions like other paint properties. Rotation is not supported yet.
+`transform` translates, scales, rotates and skews a node and its subtree: `{ x, y, scale, scaleX, scaleY, rotate, skewX, skewY, originX, originY }` (angles in degrees; the origin is a fraction of the box, the centre by default) or CSS syntax such as `"translateY(-2px) scale(1.02)"`. It is paint-only (layout does not move) but hit testing and hover follow the transformed box, and it transitions like other paint properties. `radius` takes a number or per-corner `{ topLeft, topRight, bottomRight, bottomLeft }`; `margin` sides take `"auto"` to centre a box or push it aside, as CSS auto margins do.
 
 Borders accept `borderStyle` with the same values as `outlineStyle` (`dashed`, `dotted`, `double`, `groove`, `ridge`, `inset`, `outset`, `none`); non-solid styles apply when all four border widths are equal. Text, button labels, `Input` and `TextArea` accept `textShadow: { x, y, blur, color }`, an offset copy of the glyphs (`blur` is the CSS blur radius; 0 is a solid copy, larger values blur it identically on every renderer); it also works inside state styles such as `hover`.
 
@@ -219,6 +219,36 @@ Borders accept `borderStyle` with the same values as `outlineStyle` (`dashed`, `
 Both shadows also accept CSS syntax: `boxShadow: "inset 0 1px 2px rgba(0,0,0,.2), 0 8px 24px -4px #0003"` and `textShadow: "1px 2px #0006"` (or `"none"`). Lengths are `px` or unitless `0`; colours may be hex, `rgb()`/`rgba()`, `hsl()`/`hsla()`, a few names or theme tokens. Invalid strings throw when the view is compiled. Shadow lists of different lengths interpolate against transparent layers. `motionFrom` and AnimatePresence `enter`/`exit` accept numeric properties only.
 
 Create derived themes with `createTheme` or `Theme.create`. Theme tokens cover surfaces, foregrounds, borders, focus outlines, selection, caret, scrollbars, modal overlays, rich-content colors, and control states.
+
+Besides `hover`, `focus`, `focusVisible`, `active` and `disabled`, a style can carry `groupHover` (applied while an ancestor with `group: true` is hovered), `focusWithin` (while the box or a descendant has focus), `dark` (under a dark window theme), `first`/`last`/`odd`/`even` (by position among the parent's element children) and `sm`/`md`/`lg`/`xl`/`2xl` (window at least 640/768/1024/1280/1536 px wide; the app re-renders when the width crosses a breakpoint). The last three groups are folded by the reconciler, so the native tree never sees them.
+
+## Tailwind classes
+
+Tailwind CSS utility classes work on every element, with no CSS and no DOM: `class` (or `className`) compiles to the element's native `style` at the JSX call site, and `tw("…")` returns the same `Style` for component `style` props. Later classes win and an inline `style` wins over classes, as in CSS.
+
+```tsx
+import { Column, Text, Window, tw } from "@tarve/core";
+
+function Card({ active }: { active: boolean }) {
+  return (
+    <Window>
+      <div class="group flex flex-col gap-2 p-4 rounded-xl bg-card border border-border shadow-md hover:shadow-lg dark:bg-zinc-900 md:flex-row">
+        <span class="text-sm font-semibold text-foreground group-hover:text-primary">Title</span>
+        <div class={`px-3 py-1.5 rounded-md text-sm transition active:scale-95 ${active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`} onClick={() => {}}>
+          Action
+        </div>
+      </div>
+      <Column style={tw("gap-1 p-3 rounded-lg border border-border", active && "bg-primary/10")}>
+        <Text style={tw("text-xs text-muted-foreground")}>tw() composes like clsx</Text>
+      </Column>
+    </Window>
+  );
+}
+```
+
+The vocabulary follows Tailwind CSS 4 and is checked class by class against the real compiler (`packages/core/src/tailwind-parity.test.tsx`): layout (`flex`, `grid`, `items-*`, `self-*`, `content-*`, `justify-*`, `place-*`, `gap-*`, `gap-x/y-*`, `space-x/y-*`, `inset-*`, `start-*`/`end-*`, `z-*`), spacing and sizing (the 4 px scale, fractions, `full`, the container scale on `w-*`/`min-w-*`/`max-w-*`, `mx-auto`, arbitrary `[12px]`/`[50%]`), the full colour palette (Tailwind 4's OKLCH colours mapped into sRGB) with `/opacity` modifiers, theme tokens (`bg-primary`, `text-muted-foreground`, `border-border`, also with `/opacity`), typography (`text-sm/6`, `font-*`, `leading-*`, `tracking-*`, `text-justify`, `truncate`, `line-clamp-*`, decorations), borders and radii per side and corner, `shadow-*` and `inset-shadow-*` with colours, `text-shadow-*`, `ring-*`, `outline-*`, `opacity-*`, `cursor-*`, `select-*`, `pointer-events-*`, `overflow-*`, `object-*`, `aspect-*`, transforms (`scale-*`, `translate-*`, `rotate-*`, `skew-*`, `origin-*`), transitions (`transition`, `duration-*`, `delay-*`, `ease-*`), `animate-spin`, gradients (`bg-linear-to-r`, `bg-linear-45`, `bg-radial`, `bg-conic`, `from-*`/`via-*`/`to-*` with positions), `backdrop-blur-*`/`backdrop-saturate-*` (as the Liquid Glass material) and the variants `hover:`, `focus:`, `focus-visible:`, `focus-within:`, `active:`, `disabled:`, `group-hover:` (with `group`), `dark:`, `first:`/`last:`/`odd:`/`even:` and `sm:`…`2xl:`.
+
+What has no native counterpart is dropped rather than approximated: `inline`/`table`/`float` layouts, `fixed`/`sticky`, min/max-content widths, viewport units, CSS filters (`blur`, `grayscale`, `drop-shadow`), blend modes, lists, columns, pseudo-elements (`before:`, `placeholder:`, `selection:`), `print:`/`motion-*:`/`rtl:`, `peer-*`, `has-[]`, arbitrary properties (`[mask-type:luminance]`) and `calc()` lengths. A few classes map to the closest native notion: `inline-flex` is `flex`, `static` is `relative`, `space-x/y-*` is a flex gap, `ring-*`/`outline-*` are both the outline, `backdrop-*` needs the D3D11 renderer (others paint the tint), and `ease-*`/`delay-*` animate nothing without a duration, as CSS does. The `tailwind` example is a live playground.
 
 ## Native motion
 
@@ -585,6 +615,7 @@ bun run diff
 bun run motion
 bun run studio
 bun run performance
+bun run tailwind
 ```
 
 From the repository root, `bun run dev --entry examples/<name>/<name>.tsx` runs an example with hot reload and the development tools enabled.

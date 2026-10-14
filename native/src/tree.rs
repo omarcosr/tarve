@@ -57,6 +57,10 @@ const LAYOUT_KEYS: &[&str] = &[
     "margin",
     "align",
     "justify",
+    "alignSelf",
+    "alignContent",
+    "justifyItems",
+    "justifySelf",
     "display",
     "columns",
     "rows",
@@ -798,6 +802,7 @@ fn motion_value(node: &Node, property: &str, state: VisualState) -> Option<Vec<f
                 })
                 .collect(),
         ),
+        // x, y, scaleX, scaleY, rotate (deg), skewX (deg), skewY (deg), originX, originY (fractions of the box).
         "transform" => {
             let transform = visual_value(node, "transform", state).as_object();
             let number = |key: &str| {
@@ -811,6 +816,11 @@ fn motion_value(node: &Node, property: &str, state: VisualState) -> Option<Vec<f
                 number("y").unwrap_or(0.0) as f32,
                 number("scaleX").unwrap_or(scale) as f32,
                 number("scaleY").unwrap_or(scale) as f32,
+                number("rotate").unwrap_or(0.0) as f32,
+                number("skewX").unwrap_or(0.0) as f32,
+                number("skewY").unwrap_or(0.0) as f32,
+                number("originX").unwrap_or(0.5) as f32,
+                number("originY").unwrap_or(0.5) as f32,
             ])
         }
         "textShadow" => Some(
@@ -1225,12 +1235,16 @@ impl Dirty {
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-struct VisualState {
+pub(crate) struct VisualState {
     hovered: bool,
     active: bool,
     focused: bool,
     focus_visible: bool,
     disabled: bool,
+    /// An ancestor marked `group` is hovered (Tailwind's `group-hover:`).
+    group_hovered: bool,
+    /// The focused node is this one or a descendant (CSS `:focus-within`).
+    pub(crate) focus_within: bool,
 }
 
 /// A press on a `draggable` node. It stays pending until the pointer travels
@@ -1339,9 +1353,24 @@ pub(crate) enum AccessibilityScrollAlignment {
 fn visual_value<'a>(node: &'a Node, key: &str, state: VisualState) -> &'a Value {
     let mut value = &node.style[key];
 
+    if state.group_hovered
+        && !state.disabled
+        && let Some(candidate) = node.style.get("groupHover").and_then(|style| style.get(key))
+        && !candidate.is_null()
+    {
+        value = candidate;
+    }
+
     if state.hovered
         && !state.disabled
         && let Some(candidate) = node.style.get("hover").and_then(|style| style.get(key))
+        && !candidate.is_null()
+    {
+        value = candidate;
+    }
+
+    if state.focus_within
+        && let Some(candidate) = node.style.get("focusWithin").and_then(|style| style.get(key))
         && !candidate.is_null()
     {
         value = candidate;
@@ -1402,6 +1431,19 @@ fn visual_state_overrides(node: &Node, key: &str, state: VisualState) -> bool {
             .get("hover")
             .and_then(|style| style.get(key))
             .is_some_and(|value| !value.is_null()))
+        || (state.group_hovered
+            && !state.disabled
+            && node
+                .style
+                .get("groupHover")
+                .and_then(|style| style.get(key))
+                .is_some_and(|value| !value.is_null()))
+        || (state.focus_within
+            && node
+                .style
+                .get("focusWithin")
+                .and_then(|style| style.get(key))
+                .is_some_and(|value| !value.is_null()))
         || (state.active
             && !state.disabled
             && node
@@ -1694,6 +1736,8 @@ pub struct Tree {
     /// Every node under the pointer that has a `hover` style, ancestors
     /// included, as CSS `:hover` does. `hovered` stays the interactive target.
     hover_styled: Vec<String>,
+    /// Nodes with a `groupHover` style under a hovered ancestor marked `group`.
+    group_hovered: Vec<String>,
     /// Ids holding hover/active/focus at the last state-transition sync.
     visual_snapshot_ids: Vec<String>,
     /// Extra ids to re-check at the next sync (e.g. `disabled` changed).
@@ -1743,7 +1787,7 @@ fn stacking_inputs(node: &Node) -> (u32, bool, bool) {
     let transformed = node.style.get("transform").is_some()
         || node.style.get("transformMatrix").is_some()
         || spin_period(node).is_some()
-        || ["hover", "active", "focus", "focusVisible", "disabled"]
+        || ["hover", "active", "focus", "focusVisible", "disabled", "groupHover", "focusWithin"]
             .iter()
             .any(|state| {
                 node.style
@@ -1807,7 +1851,7 @@ impl Tree {
                 entry.node.style.get("transform").is_some()
                     || entry.node.style.get("transformMatrix").is_some()
                     || spin_period(&entry.node).is_some()
-                    || ["hover", "active", "focus", "focusVisible", "disabled"]
+                    || ["hover", "active", "focus", "focusVisible", "disabled", "groupHover", "focusWithin"]
                         .iter()
                         .any(|state| {
                             entry
@@ -1963,6 +2007,7 @@ impl Tree {
             dirty: Dirty::all(),
             hovered: None,
             hover_styled: Vec::new(),
+            group_hovered: Vec::new(),
             visual_snapshot_ids: Vec::new(),
             state_candidates: Vec::new(),
             vertical_goal: None,
@@ -4016,7 +4061,7 @@ impl Tree {
             &BoxRect::new(x0, budget_y, x0 + WIDTH, budget_y + 1.0),
         );
     }
-    fn visual_state_for(&self, id: &str, node: &Node) -> VisualState {
+    pub(crate) fn visual_state_for(&self, id: &str, node: &Node) -> VisualState {
         let otp_slot_focused = node.control.as_ref().is_some_and(|control| {
             if control.role != "otpSlot" || control.group.is_empty() {
                 return false;
@@ -4042,7 +4087,14 @@ impl Tree {
             control.value.max(0.0) as usize == caret_slot.min(max_slot)
         });
         let delegate_focused = self.delegate_focused(id);
+        let focus_within = node.style.get("focusWithin").is_some_and(Value::is_object)
+            && self
+                .focused
+                .as_deref()
+                .is_some_and(|focused| focused == id || self.is_descendant_of(focused, id));
         VisualState {
+            group_hovered: self.group_hovered.iter().any(|hovered| hovered == id),
+            focus_within,
             hovered: self.hovered.as_deref() == Some(id)
                 || self.hover_styled.iter().any(|hovered| hovered == id),
             active: self.pressed.as_deref() == Some(id) && self.hovered.as_deref() == Some(id),
@@ -4170,7 +4222,7 @@ impl Tree {
     }
 
     /// The node's transform in layout space, if it is not the identity.
-    fn node_transform(&self, id: &str, offset: Vec2) -> Option<Affine> {
+    pub(crate) fn node_transform(&self, id: &str, offset: Vec2) -> Option<Affine> {
         if self.animating.is_empty() && !self.transformed.contains(id) {
             return None;
         }
@@ -4187,11 +4239,15 @@ impl Tree {
             })
             .map(|track| track.current.clone())
             .or_else(|| motion_value(&entry.node, "transform", state))
-            .unwrap_or_else(|| vec![0.0, 0.0, 1.0, 1.0]);
-        let [x, y, scale_x, scale_y] = [0, 1, 2, 3].map(|index| f64::from(values[index]));
-        let angle = spin_period(&entry.node).map_or(0.0, |period| {
-            std::f64::consts::TAU * (self.motion_time_ms.rem_euclid(period) / period)
-        });
+            .unwrap_or_else(|| vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.5, 0.5]);
+        let at = |index: usize, fallback: f64| values.get(index).map_or(fallback, |v| f64::from(*v));
+        let (x, y, scale_x, scale_y) = (at(0, 0.0), at(1, 0.0), at(2, 1.0), at(3, 1.0));
+        let (rotate, skew_x, skew_y) = (at(4, 0.0), at(5, 0.0), at(6, 0.0));
+        let (origin_x, origin_y) = (at(7, 0.5), at(8, 0.5));
+        let angle = rotate.to_radians()
+            + spin_period(&entry.node).map_or(0.0, |period| {
+                std::f64::consts::TAU * (self.motion_time_ms.rem_euclid(period) / period)
+            });
         // `transformMatrix`: CSS `transform: matrix(a, b, c, d, e, f)` with
         // `transform-origin: 0 0`, applied inside the box's other transforms.
         let matrix = entry.node.style["transformMatrix"]
@@ -4209,14 +4265,22 @@ impl Tree {
             && scale_x == 1.0
             && scale_y == 1.0
             && angle == 0.0
+            && skew_x == 0.0
+            && skew_y == 0.0
             && matrix.is_none()
         {
             return None;
         }
         let rect = entry.rect + Vec2::new(-offset.x, -offset.y);
-        let centre = rect.center();
+        // CSS `transform-origin`: the pivot of rotate, scale and skew; the centre by default.
+        let centre = vello::kurbo::Point::new(
+            rect.x0 + rect.width() * origin_x,
+            rect.y0 + rect.height() * origin_y,
+        );
+        let skew = Affine::new([1.0, skew_y.to_radians().tan(), skew_x.to_radians().tan(), 1.0, 0.0, 0.0]);
         let base = Affine::translate((centre.x + x, centre.y + y))
             * Affine::rotate(angle)
+            * skew
             * Affine::scale_non_uniform(scale_x, scale_y)
             * Affine::translate((-centre.x, -centre.y));
         Some(match matrix {
@@ -4974,6 +5038,25 @@ impl Tree {
             self.hover_styled = next;
             self.dirty.paint = true;
         }
+        // `group-hover:`: every `groupHover`-styled node inside a hovered `group` ancestor.
+        let mut groups: Vec<String> = Vec::new();
+        for id in self.hover_path() {
+            if self.entries.get(&id).is_some_and(|entry| entry.node.style["group"].as_bool() == Some(true)) {
+                let mut stack = vec![id];
+                while let Some(current) = stack.pop() {
+                    if let Some(entry) = self.entries.get(&current) {
+                        if entry.node.style.get("groupHover").is_some_and(Value::is_object) {
+                            groups.push(current.clone());
+                        }
+                        stack.extend(entry.children.iter().cloned());
+                    }
+                }
+            }
+        }
+        if groups != self.group_hovered {
+            self.group_hovered = groups;
+            self.dirty.paint = true;
+        }
     }
 
     /// Root-to-leaf ids of the deepest node under the pointer, whatever its kind.
@@ -5014,6 +5097,7 @@ impl Tree {
         };
         if !(entry.bounds + Vec2::new(-offset.x, -offset.y)).contains(mouse)
             || entry.node.string("display", "flex") == "none"
+            || entry.node.string("pointerEvents", "auto") == "none"
         {
             return None;
         }
@@ -5156,7 +5240,10 @@ impl Tree {
         if !(entry.bounds + Vec2::new(-offset.x, -offset.y)).contains(mouse) {
             return None;
         }
-        if entry.node.disabled || entry.node.string("display", "flex") == "none" {
+        if entry.node.disabled
+            || entry.node.string("display", "flex") == "none"
+            || entry.node.string("pointerEvents", "auto") == "none"
+        {
             return None;
         }
         let rect = entry.rect + Vec2::new(-offset.x, -offset.y);
@@ -8914,6 +9001,30 @@ fn shade_hex(hex: &str, amount: f64) -> String {
         a
     )
 }
+fn align_keyword(value: &str) -> Option<AlignItems> {
+    Some(match value {
+        "start" => AlignItems::START,
+        "center" => AlignItems::CENTER,
+        "end" => AlignItems::END,
+        "stretch" => AlignItems::STRETCH,
+        "baseline" => AlignItems::BASELINE,
+        _ => return None,
+    })
+}
+
+fn content_keyword(value: &str) -> Option<AlignContent> {
+    Some(match value {
+        "start" => AlignContent::START,
+        "center" => AlignContent::CENTER,
+        "end" => AlignContent::END,
+        "stretch" => AlignContent::STRETCH,
+        "between" => AlignContent::SPACE_BETWEEN,
+        "around" => AlignContent::SPACE_AROUND,
+        "evenly" => AlignContent::SPACE_EVENLY,
+        _ => return None,
+    })
+}
+
 fn dimension(v: &Value) -> Dimension {
     if let Some(n) = v.as_f64() {
         return length(n as f32);
@@ -9048,6 +9159,7 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
             "start" => AlignItems::START,
             "center" => AlignItems::CENTER,
             "end" => AlignItems::END,
+            "baseline" => AlignItems::BASELINE,
             _ => AlignItems::STRETCH,
         }),
         justify_content: Some(match node.string("justify", "start") {
@@ -9056,8 +9168,14 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
             "between" => JustifyContent::SPACE_BETWEEN,
             "around" => JustifyContent::SPACE_AROUND,
             "evenly" => JustifyContent::SPACE_EVENLY,
+            "stretch" => JustifyContent::STRETCH,
             _ => JustifyContent::START,
         }),
+        // CSS `align-self`, `align-content`, `justify-items`, `justify-self`: unset means the container decides.
+        align_self: align_keyword(node.string("alignSelf", "")),
+        align_content: content_keyword(node.string("alignContent", "")),
+        justify_items: align_keyword(node.string("justifyItems", "")),
+        justify_self: align_keyword(node.string("justifySelf", "")),
         ..Default::default()
     };
     apply_css_flex(node, &mut style);

@@ -58,7 +58,7 @@ describe("tailwind classes", () => {
   });
 
   test("state variants map to hover/focus/active/disabled; unsupported variants are dropped", () => {
-    expect(tw("bg-white hover:bg-zinc-100 focus-visible:ring-2 active:scale-95 disabled:opacity-50 md:p-8 group-hover:p-8 dark:bg-black")).toEqual({
+    expect(tw("bg-white hover:bg-zinc-100 focus-visible:ring-2 active:scale-95 disabled:opacity-50 print:p-8 peer-checked:p-8 dark:bg-black")).toEqual({
       background: "#ffffff",
       dark: { background: "#000000" },
       hover: { background: "#f4f4f5" },
@@ -169,6 +169,41 @@ describe("tailwind classes", () => {
     const texts = (id: string) => [...tree.nodes.values()].filter(node => node.id.startsWith(`${id}/`) && node.kind === "text").map(node => node.text);
     expect(texts("label")).toEqual(["Mark 0 as read"]);
     expect(texts("mixed")).toEqual(["Hello", "world", "again 2!"]);
+  });
+
+  test("alignment, transforms, group-hover, focus-within and pointer-events", () => {
+    expect(tw("items-baseline self-end content-between justify-items-center justify-self-start place-self-center justify-stretch text-justify")).toEqual({
+      align: "baseline", alignSelf: "center", alignContent: "between", justifyItems: "center", justifySelf: "center", justify: "stretch", textAlign: "justify",
+    });
+    expect(tw("rotate-45 -rotate-12 skew-x-6 origin-top-left scale-110")).toEqual({ transform: { rotate: -12, skewX: 6, originX: 0, originY: 0, scale: 1.1 } });
+    expect(tw("group pointer-events-none group-hover:bg-red-500 focus-within:ring-2")).toEqual({
+      group: true, pointerEvents: "none", groupHover: { background: "#fb2c36" }, focusWithin: { outlineWidth: 2, outlineStyle: "solid" },
+    });
+  });
+
+  test("positional and responsive variants nest as wrapper styles the reconciler folds", () => {
+    expect(tw("first:mt-0 last:mb-0 odd:bg-muted even:bg-card md:p-6 lg:hover:bg-white dark:md:bg-black")).toEqual({
+      first: { margin: { top: 0 } }, last: { margin: { bottom: 0 } }, odd: { background: theme.colors.muted }, even: { background: theme.colors.card },
+      md: { padding: 24 }, lg: { hover: { background: "#ffffff" } }, dark: { md: { background: "#000000" } },
+    });
+    const rows = (width: number) => compileTree(
+      <Window theme={lightTheme} width={width}>
+        <div id="list">
+          {["a", "b", "c"].map(item => <div key={item} id={item} class="p-2 first:pt-0 last:pb-0 odd:bg-muted md:p-4 lg:p-6" />)}
+        </div>
+      </Window>,
+    );
+    const narrow = rows(600);
+    const style = (tree: ReturnType<typeof compileTree>, id: string) => tree.nodes.get(id)!.style as Record<string, unknown>;
+    expect(style(narrow, "a")).toMatchObject({ padding: { top: 0, right: 8, bottom: 8, left: 8 }, background: lightTheme.colors.muted });
+    expect(style(narrow, "b").padding).toBe(8);
+    expect(style(narrow, "b").background).toBeUndefined();
+    expect(style(narrow, "c")).toMatchObject({ padding: { top: 8, right: 8, bottom: 0, left: 8 }, background: lightTheme.colors.muted });
+    expect(narrow.usesViewport).toBe(true);
+    expect(narrow.document.root.reportSize).toBe(true);
+    expect(style(rows(800), "b").padding).toBe(16);
+    expect(style(rows(1100), "b").padding).toBe(24);
+    for (const key of ["first", "last", "odd", "even", "md", "lg"]) expect(key in style(narrow, "b")).toBe(false);
   });
 
   test("composes like clsx and later classes win", () => {

@@ -194,7 +194,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
     (globalThis as Record<symbol, unknown>)[ACTIVE_APP_KEY] = app;
     const tree = withRenderScope(scope, () => compileTree(
-      currentView(), options.debug, renderer, options.componentAdapters, scope, !options.headless,
+      currentView(), options.debug, renderer, options.componentAdapters, scope, !options.headless, viewport,
     ));
     appWindow = tree.document.window;
     if (options.closeBehavior === "hide") tree.document.root.closeIntercept = true;
@@ -210,6 +210,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   }
   let committed: CompiledTree | undefined;
   let observed: CompiledTree | undefined;
+  /** The window's content size, from the root's size reports; breakpoint styles read it. */
+  let viewport: { width: number; height: number } | undefined;
   let queued = false;
   let ended = false;
   let closing = false;
@@ -523,6 +525,11 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
     requests.settle(event);
 
+    if (!ended && committed && event.type === "size" && event.id === committed.document.root.id) {
+      const crossed = committed.usesViewport && viewport?.width !== event.width;
+      viewport = { width: event.width, height: event.height };
+      if (crossed) update();
+    }
     if (!ended && committed && observed && "id" in event) {
       const handlers = committed.handlers.get(event.id);
       if (handlers) invalidateMemos(renderScope, event.id);

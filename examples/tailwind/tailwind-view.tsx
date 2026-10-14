@@ -194,6 +194,24 @@ export function App() {
           </div>
         </Section>
 
+        <Section title="Variants: group-hover, focus-within, first/last/odd/even, md: (resize the window)">
+          <div class="flex flex-col gap-2 md:flex-row">
+            {["Alpha", "Beta", "Gamma", "Delta"].map(name => (
+              <div
+                key={name}
+                class="group flex flex-1 items-center gap-3 p-3 rounded-lg border border-border bg-card odd:bg-muted first:border-primary last:border-dashed hover:shadow-md transition"
+              >
+                <div class={`size-8 rounded-full bg-${family}-${shade} group-hover:rotate-45 group-hover:scale-110 transition`} />
+                <span class="text-sm text-muted-foreground group-hover:text-foreground">{name}</span>
+              </div>
+            ))}
+          </div>
+          <div class="flex flex-col gap-1 p-3 rounded-lg border-2 border-border focus-within:border-primary focus-within:bg-primary/5 transition">
+            <span class="text-xs text-muted-foreground">focus-within: click into the field</span>
+            <Input placeholder="Type here…" style={tw("w-full")} />
+          </div>
+        </Section>
+
         <Section title="Typography">
           <p class="font-light text-foreground text-lg italic">Light italic, text-lg</p>
           <p class="font-semibold text-foreground text-base tracking-tight">Semibold, tracking-tight</p>

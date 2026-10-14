@@ -37,7 +37,14 @@ export type BorderStyle = OutlineStyle;
 export interface TextShadow { x?: number; y?: number; blur?: number; color: string }
 /** CSS-like box shadow. `blur` is the CSS blur radius (sigma = blur / 2); `inset` paints inside the padding box. */
 /** Paint-time translate/scale about the box centre. Hit testing follows it; layout does not. */
-export interface Transform { x?: number; y?: number; scale?: number; scaleX?: number; scaleY?: number }
+/**
+ * Paint-time transform about the box's origin (its centre unless `originX`/`originY`, fractions
+ * of the box, say otherwise): translate, scale, `rotate` and `skewX`/`skewY` in degrees.
+ */
+export interface Transform {
+  x?: number; y?: number; scale?: number; scaleX?: number; scaleY?: number;
+  rotate?: number; skewX?: number; skewY?: number; originX?: number; originY?: number;
+}
 export interface BoxShadow { x?: number; y?: number; blur?: number; spread?: number; color: string; inset?: boolean }
 /** Gradient length: a number is px; strings take `px` or `%`. */
 export type GradientLength = number | `${number}px` | `${number}%`;
@@ -152,9 +159,14 @@ export interface Style extends StateStyle {
   direction?: "row" | "row-reverse" | "column" | "column-reverse"; wrap?: boolean; gap?: number;
   /** CSS `row-gap` / `column-gap`; each falls back to `gap`. */
   rowGap?: number; columnGap?: number;
-  padding?: Insets; margin?: Margins; align?: "start" | "center" | "end" | "stretch";
+  padding?: Insets; margin?: Margins; align?: "start" | "center" | "end" | "stretch" | "baseline";
   /** CSS `justify-content`: `around` and `evenly` are `space-around` / `space-evenly`. */
-  justify?: "start" | "center" | "end" | "between" | "around" | "evenly";
+  justify?: "start" | "center" | "end" | "between" | "around" | "evenly" | "stretch";
+  /** CSS `align-self`, `align-content`, `justify-items`, `justify-self`. */
+  alignSelf?: "start" | "center" | "end" | "stretch" | "baseline";
+  alignContent?: "start" | "center" | "end" | "stretch" | "between" | "around" | "evenly";
+  justifyItems?: "start" | "center" | "end" | "stretch";
+  justifySelf?: "start" | "center" | "end" | "stretch";
   /** `block` stacks children and collapses adjacent vertical margins, as CSS block flow does. */
   display?: "flex" | "grid" | "block" | "none";
   /** Grid tracks: a count of equal columns, or a CSS track list such as `"repeat(auto-fill, minmax(176px, 1fr))"`. */
@@ -190,7 +202,7 @@ export interface Style extends StateStyle {
   /** CSS `overflow`: `hidden`/`clip` clip children to the box and let it shrink below its content. */
   overflow?: "visible" | "hidden" | "clip";
   /** Line height as a multiple of the font size (CSS unitless `line-height`), not px. */
-  lineHeight?: number; textAlign?: "start" | "center" | "end";
+  lineHeight?: number; textAlign?: "start" | "center" | "end" | "justify";
   taskMarkerColor?: string; taskMarkerCheckColor?: string;
   markdownCodeBackground?: string; markdownQuoteBackground?: string; markdownQuoteAccent?: string;
   markdownTableHeaderBackground?: string; markdownTableRule?: string;
@@ -206,12 +218,29 @@ export interface Style extends StateStyle {
   /** Line-number gutter colour, for `diff` and for `code`. */
   diffGutterColor?: string; gutterColor?: string;
   hover?: StateStyle; focus?: StateStyle; focusVisible?: StateStyle; active?: StateStyle; disabled?: StateStyle;
+  /** Marks a `group`: descendants' `groupHover` applies while this box is hovered (Tailwind's `group`). */
+  group?: boolean;
+  /** Applied while an ancestor marked `group` is hovered (`group-hover:`). */
+  groupHover?: StateStyle;
+  /** Applied while this box or a descendant has focus (CSS `:focus-within`). */
+  focusWithin?: StateStyle;
+  /**
+   * Position among the parent's element children: `first`, `last`, `odd`, `even` (1-based, as CSS
+   * `:nth-child`). Folded by the reconciler; the native tree never sees these keys.
+   */
+  first?: Omit<Style, "dark">; last?: Omit<Style, "dark">; odd?: Omit<Style, "dark">; even?: Omit<Style, "dark">;
+  /**
+   * Window-width breakpoints (Tailwind's: 640, 768, 1024, 1280, 1536 CSS px, min-width), folded by the
+   * reconciler against the window's current size; the app re-renders when the width crosses one.
+   */
+  sm?: Omit<Style, "dark">; md?: Omit<Style, "dark">; lg?: Omit<Style, "dark">; xl?: Omit<Style, "dark">; "2xl"?: Omit<Style, "dark">;
   /**
    * Overrides applied when the window theme is dark (its background luminance below 0.5),
    * like Tailwind's `dark:`. The reconciler folds them in; the native tree never sees the key.
    */
   dark?: Omit<Style, "dark">;
-  strokeWidth?: number; pointerEvents?: "auto" | "block" | "delegate"; userSelect?: UserSelect;
+  /** `none` lets the pointer fall through this box and its children, as CSS `pointer-events: none`. */
+  strokeWidth?: number; pointerEvents?: "auto" | "block" | "delegate" | "none"; userSelect?: UserSelect;
 }
 export interface Control {
   role: "button" | "link" | "checkbox" | "switch" | "radio" | "radiogroup" | "tab" | "tablist" | "navigation" | "menuitem" | "tree" | "treeitem" | "grid" | "row" | "toggle" | "togglegroup" | "slider" | "progress" | "virtualList" | "select" | "group" | "field" | "alert" | "status" | "label" | "option" | "otpSlot";

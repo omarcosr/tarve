@@ -491,6 +491,107 @@ fn flex_items_keep_an_explicit_min_width_like_css() {
 }
 
 #[test]
+fn group_hover_focus_within_and_pointer_events_none_follow_css() {
+    // A hovered `group` ancestor applies `groupHover` to its descendants.
+    let label = node(
+        "label",
+        "view",
+        json!({"width": 40, "height": 20, "background": "#000000", "groupHover": {"background": "#ff0000"}}),
+        vec![],
+    );
+    let card = node(
+        "card",
+        "view",
+        json!({"width": 200, "height": 100, "group": true}),
+        vec![label],
+    );
+    // `pointerEvents: "none"` lets the pointer fall through to what is below.
+    let veil = node(
+        "veil",
+        "pressable",
+        json!({"position": "absolute", "top": 0, "left": 0, "width": 200, "height": 100, "pointerEvents": "none"}),
+        vec![],
+    );
+    let under = node(
+        "under",
+        "pressable",
+        json!({"position": "absolute", "top": 0, "left": 0, "width": 200, "height": 100}),
+        vec![],
+    );
+    let stack = node(
+        "stack",
+        "view",
+        json!({"position": "relative", "width": 200, "height": 100}),
+        vec![under, veil],
+    );
+    // `focusWithin` styles an ancestor while a descendant has focus.
+    let field = node("field", "input", json!({"width": 100, "height": 30}), vec![]);
+    let form = node(
+        "form",
+        "view",
+        json!({"width": 200, "height": 60, "borderColor": "#000000", "focusWithin": {"borderColor": "#00ff00"}}),
+        vec![field],
+    );
+    let mut tree = Tree::new(root(vec![card, stack, form]));
+    tree.compute(400.0, 400.0).unwrap();
+    let colour = |tree: &mut Tree, id: &str| {
+        let mut recorder = PaintRecorder::default();
+        tree.paint(1.0, &mut recorder);
+        recorder.fills.iter().find(|(_, rect)| {
+            let own = tree.entries[id].rect;
+            (rect.x0 - own.x0).abs() < 0.5 && (rect.y0 - own.y0).abs() < 0.5 && (rect.width() - own.width()).abs() < 0.5
+        }).map(|(colour, _)| *colour)
+    };
+    assert_eq!(colour(&mut tree, "label"), Some(vello::peniko::Color::from_rgb8(0, 0, 0)));
+    tree.pointer_move(150.0, 80.0); // over the card, not over the label
+    assert_eq!(colour(&mut tree, "label"), Some(vello::peniko::Color::from_rgb8(255, 0, 0)));
+    tree.pointer_move(390.0, 390.0);
+    assert_eq!(colour(&mut tree, "label"), Some(vello::peniko::Color::from_rgb8(0, 0, 0)));
+
+    let stack_rect = tree.entries["stack"].rect;
+    tree.pointer_move(stack_rect.x0 + 20.0, stack_rect.y0 + 20.0);
+    assert_eq!(tree.hovered.as_deref(), Some("under"), "the veil does not take the pointer");
+
+    assert!(tree.focus("field").is_none());
+    let state = tree.visual_state_for("form", &tree.entries["form"].node.clone());
+    assert!(state.focus_within);
+    let state = tree.visual_state_for("card", &tree.entries["card"].node.clone());
+    assert!(!state.focus_within);
+}
+
+#[test]
+fn rotate_skew_and_origin_join_the_transform_and_align_self_reaches_taffy() {
+    let rotated = node(
+        "rotated",
+        "view",
+        json!({"width": 100, "height": 50, "transform": {"rotate": 90, "originX": 0, "originY": 0}}),
+        vec![],
+    );
+    let selfed = node(
+        "selfed",
+        "view",
+        json!({"width": 50, "height": 20, "alignSelf": "end"}),
+        vec![],
+    );
+    let column = node("column", "column", json!({"width": 300, "align": "start"}), vec![rotated, selfed]);
+    let mut tree = Tree::new(root(vec![column]));
+    tree.compute(400.0, 400.0).unwrap();
+    // Rotated 90° about its top-left corner, the box's bottom-right lands at (-50, 100) from that corner.
+    let transform = tree.node_transform("rotated", vello::kurbo::Vec2::ZERO).unwrap();
+    let rect = tree.entries["rotated"].rect;
+    let corner = transform * vello::kurbo::Point::new(rect.x1, rect.y1);
+    assert!((corner.x - (rect.x0 - 50.0)).abs() < 0.5 && (corner.y - (rect.y0 + 100.0)).abs() < 0.5, "{corner:?}");
+    assert_eq!(
+        tree.motion_values("rotated", "transform").map(|values| values.len()),
+        None,
+        "no transition, no track"
+    );
+    let selfed_rect = tree.entries["selfed"].rect;
+    let column_rect = tree.entries["column"].rect;
+    assert!((selfed_rect.x1 - column_rect.x1).abs() < 0.5, "alignSelf: end puts it at the right edge: {selfed_rect:?}");
+}
+
+#[test]
 fn auto_margins_centre_a_box_as_css_does() {
     let centred = node(
         "centred",
@@ -6721,11 +6822,11 @@ fn hover_transform_transitions_and_invalid_transforms_are_rejected() {
     tree.advance_motion(50.0);
     assert_eq!(
         tree.motion_values("card", "transform"),
-        Some(vec![0.0, -2.0, 1.25, 1.25])
+        Some(vec![0.0, -2.0, 1.25, 1.25, 0.0, 0.0, 0.0, 0.5, 0.5])
     );
 
     for transform in [
-        json!({"rotate": 45}),
+        json!({"perspective": 45}),
         json!({"scale": 0}),
         json!({"x": "2px"}),
         json!(3),

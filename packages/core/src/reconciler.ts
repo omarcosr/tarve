@@ -20,12 +20,63 @@ import { Style } from "./style";
 const isPrimitive = (child: Child): child is string | number => typeof child === "string" || typeof child === "number";
 
 
-/** Folds `style.dark` into the style under a dark theme and drops the key otherwise: the native tree never sees it. */
-function foldDarkVariant(style: Record<string, unknown>, selected: ThemeDefinition): Record<string, unknown> {
-  const { dark, ...base } = style;
-  if (!dark || typeof dark !== "object") return base;
-  const themed = luminance(selected.colors.background);
-  return themed !== null && themed < 0.5 ? Style.merge(base, dark as Style) as Record<string, unknown> : base;
+/**
+ * A variant's `padding: { top: 0 }` overrides one side of the base's padding, as `first:pt-0`
+ * over `p-2` does in CSS; a plain merge would drop the other three sides.
+ */
+function combineSides(base: Style, variant: Style): Partial<Style> {
+  const out: Record<string, unknown> = {};
+  for (const key of ["padding", "margin", "borderWidth"] as const) {
+    const a = base[key], b = variant[key];
+    if (a === undefined || b === undefined || typeof b !== "object") continue;
+    const expanded = typeof a === "object" ? { ...a } : { top: a, right: a, bottom: a, left: a };
+    out[key] = { ...expanded, ...b };
+  }
+  const a = base.radius, b = variant.radius;
+  if (a !== undefined && b !== undefined && typeof b === "object") {
+    const expanded = typeof a === "object" ? { ...a } : { topLeft: a, topRight: a, bottomRight: a, bottomLeft: a };
+    out.radius = { ...expanded, ...b };
+  }
+  return out as Partial<Style>;
+}
+
+/** Where a node sits among its parent's element children, for `first`/`last`/`odd`/`even`. */
+interface Position { index: number; count: number }
+
+/** Tailwind's breakpoints: the window must be at least this wide (CSS px) for the variant to apply. */
+const BREAKPOINTS: readonly [keyof Style, number][] = [["sm", 640], ["md", 768], ["lg", 1024], ["xl", 1280], ["2xl", 1536]];
+
+interface VariantContext { position?: Position; viewportWidth: number; usedViewport: () => void }
+
+/**
+ * Folds the reconciler-side variants into the style and drops their keys, so the native
+ * tree never sees them: `first`/`last`/`odd`/`even` by position, `sm`…`2xl` by window
+ * width (ascending, so a wider breakpoint wins), then `dark` by theme, whose own
+ * variants fold the same way.
+ */
+function foldVariants(style: Record<string, unknown>, selected: ThemeDefinition, context: VariantContext): Record<string, unknown> {
+  const { first, last, odd, even, sm, md, lg, xl, "2xl": xxl, dark, ...base } = style;
+  let out = base as Style;
+  const merge = (variant: unknown) => {
+    if (!variant || typeof variant !== "object") return;
+    const sides = combineSides(out, variant as Style);
+    out = { ...Style.merge(out, variant as Style), ...sides };
+  };
+  const { position } = context;
+  if (position) {
+    const nth = position.index + 1;
+    if (nth === 1) merge(first);
+    if (nth === position.count) merge(last);
+    merge(nth % 2 === 1 ? odd : even);
+  }
+  const responsive: Record<string, unknown> = { sm, md, lg, xl, "2xl": xxl };
+  if (Object.values(responsive).some(Boolean)) context.usedViewport();
+  for (const [name, minWidth] of BREAKPOINTS) if (context.viewportWidth >= minWidth) merge(responsive[name]);
+  if (dark && typeof dark === "object") {
+    const themed = luminance(selected.colors.background);
+    if (themed !== null && themed < 0.5) out = foldVariants(Style.merge(out, dark as Style) as Record<string, unknown>, selected, context) as Style;
+  }
+  return out as Record<string, unknown>;
 }
 
 
@@ -67,7 +118,11 @@ function windowBorder(background: string, selected: ThemeDefinition): string {
   return own < 0.5 ? "#ffffff1f" : "#0000001f";
 }
 
-export interface CompiledTree { document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode>; media?: Map<string, MediaRequest> }
+export interface CompiledTree {
+  document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode>; media?: Map<string, MediaRequest>;
+  /** Some style carried a window-width breakpoint: the app re-renders when the width changes. */
+  usesViewport?: boolean;
+}
 const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "markdown", "code", "diff", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter"]);
 const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
 
@@ -136,7 +191,9 @@ export function compileTree(
   componentAdapters: readonly ComponentAdapter[] = [],
   renderScope?: object,
   visible = true,
+  viewport?: { width: number; height: number },
 ): CompiledTree {
+  let usesViewport = false;
   const handlers = new Map<string, Handlers>();
   const ids = new Set<string>();
   /** Every id in the order it was claimed: memo entries slice their own span. */
@@ -211,7 +268,7 @@ export function compileTree(
     return {
       base,
       linkColor: resolveStyleString("foreground", theme.colors.primary, selectedTheme),
-      resolve: style => resolveThemeStyle(foldDarkVariant(style, selectedTheme) as never, selectedTheme) as Record<string, unknown>,
+      resolve: style => resolveThemeStyle(foldVariants(style, selectedTheme, { viewportWidth: viewport?.width ?? windowOptions?.width ?? 1120, usedViewport: () => { usesViewport = true; } }) as never, selectedTheme) as Record<string, unknown>,
       register(id, onClick) {
         const runId = id ?? `${textId}/run:${runs++}`;
         if (ids.has(runId)) throw new Error(`Duplicate node id: ${runId}`);
@@ -222,9 +279,13 @@ export function compileTree(
       openExternal,
     };
   }
-  function visit(child: Child, path: string, group?: string, adapterNative = false): NativeNode[] {
+  function visit(child: Child, path: string, group?: string, adapterNative = false, position?: Position): NativeNode[] {
     if (child == null || typeof child === "boolean") return [];
-    if (Array.isArray(child)) return child.flatMap((item, index) => {
+    if (Array.isArray(child)) {
+      // CSS `:first-child`/`:nth-child` count element children; text runs are not elements.
+      const elements = child.filter(item => typeof item === "object" && item !== null && !Array.isArray(item));
+      let seen = 0;
+      return child.flatMap((item, index) => {
       const primitive = typeof item === "string" || typeof item === "number";
       // CSS: a contiguous run of text children (`Mark {count} as read`) is one
       // anonymous box, not one per JSX expression; later pieces joined the first.
@@ -236,8 +297,11 @@ export function compileTree(
         for (let next = index + 1; next < child.length && isPrimitive(child[next]); next++) text += String(child[next]);
         piece = text;
       }
-      return visit(piece, `${path}/${key != null ? `k:${key}` : index}`, group);
-    });
+      const element = typeof item === "object" && item !== null && !Array.isArray(item);
+      const at = element ? { index: seen++, count: elements.length } : undefined;
+      return visit(piece, `${path}/${key != null ? `k:${key}` : index}`, group, false, at);
+      });
+    }
     if (typeof child === "string" || typeof child === "number") {
       if (ids.has(path)) throw new Error(`Duplicate node id: ${path}`);
       ids.add(path); idLog.push(path);
@@ -355,7 +419,8 @@ export function compileTree(
       // active slot at all.
       if (control?.role === "otpSlot") rawStyle.focus = { ...rawStyle.focusVisible, ...p.style?.focus };
     }
-    const style = resolveThemeStyle(foldDarkVariant(rawStyle, selectedTheme), selectedTheme);
+    const variants: VariantContext = { position, viewportWidth: viewport?.width ?? windowOptions?.width ?? 1120, usedViewport: () => { usesViewport = true; } };
+    const style = resolveThemeStyle(foldVariants(rawStyle, selectedTheme, variants), selectedTheme);
     for (const key of ["padding", "margin"] as const) {
       if (style[key] && typeof style[key] === "object") (style as Record<string, unknown>)[key] = { ...style[key] };
     }
@@ -466,5 +531,7 @@ export function compileTree(
     // draws, in a colour that suits the window instead of the light default.
     roots[0].style.borderColor ??= windowBorder(String(roots[0].style.background ?? ""), selectedTheme);
   }
-  return { document: { version: PROTOCOL_VERSION, renderer, window: windowOptions, root: roots[0] }, handlers, nodes, media };
+  // The root reports its size so the app can re-render when the window crosses a breakpoint.
+  if (usesViewport) roots[0].reportSize = true;
+  return { document: { version: PROTOCOL_VERSION, renderer, window: windowOptions, root: roots[0] }, handlers, nodes, media, usesViewport };
 }

@@ -1037,7 +1037,7 @@ fn validate_control(node: &Node) -> Result<(), String> {
     {
         return Err(format!("Unsupported input type: {}", node.input_type));
     }
-    let state_styles = ["hover", "active", "focus", "focusVisible", "disabled"]
+    let state_styles = ["hover", "active", "focus", "focusVisible", "disabled", "groupHover", "focusWithin"]
         .iter()
         .filter_map(|state| node.style.get(*state));
     let styles: Vec<&Value> = std::iter::once(&node.style).chain(state_styles).collect();
@@ -1046,15 +1046,16 @@ fn validate_control(node: &Node) -> Result<(), String> {
             transform.iter().all(|(key, value)| {
                 let number = value.as_f64().filter(|value| value.is_finite());
                 match key.as_str() {
-                    "x" | "y" => number.is_some(),
+                    "x" | "y" | "rotate" | "skewX" | "skewY" => number.is_some(),
                     "scale" | "scaleX" | "scaleY" => number.is_some_and(|value| value != 0.0),
+                    "originX" | "originY" => number.is_some(),
                     _ => false,
                 }
             })
         });
         if !valid {
             return Err(format!(
-                "Invalid transform on {}: expected {{ x?, y?, scale?, scaleX?, scaleY? }} with non-zero scales (rotation is not supported)",
+                "Invalid transform on {}: expected {{ x?, y?, scale?, scaleX?, scaleY?, rotate?, skewX?, skewY?, originX?, originY? }} with non-zero scales",
                 node.id
             ));
         }

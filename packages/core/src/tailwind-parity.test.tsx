@@ -15,7 +15,12 @@ import { theme } from "./theme";
 import type { Style, StateStyle } from "./protocol";
 
 type Decls = Record<string, string>;
-type Variant = "base" | "hover" | "focus" | "focusVisible" | "active" | "disabled" | "dark";
+type Variant = "base" | "hover" | "focus" | "focusVisible" | "active" | "disabled" | "groupHover" | "focusWithin" | "dark"
+  | "first" | "last" | "odd" | "even" | "sm" | "md" | "lg" | "xl" | "2xl";
+const WRAPPERS = ["dark", "first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl"] as const;
+const STATES = ["hover", "focus", "focusVisible", "active", "disabled", "groupHover", "focusWithin"] as const;
+/** Tailwind 4's breakpoints by their `@media (width >= Nrem)` query. */
+const BREAKPOINT_REMS: Record<string, Variant> = { "40rem": "sm", "48rem": "md", "64rem": "lg", "80rem": "xl", "96rem": "2xl" };
 type Compiled = Partial<Record<Variant, Decls>>;
 
 /** Tarve lays text out at the theme's font size; Tailwind's `em` values are read against it. */
@@ -63,7 +68,10 @@ const CLASSES = [
   "transition", "transition-colors", "duration-300", "duration-75", "delay-150", "ease-linear", "ease-in", "ease-out", "ease-in-out",
   // interactivity and misc
   "cursor-pointer", "cursor-not-allowed", "cursor-grab", "select-none", "select-text", "select-all",
-  "overflow-hidden", "overflow-visible", "overflow-auto", "overflow-x-scroll", "aspect-video", "aspect-square", "aspect-3/2", "pointer-events-auto",
+  "overflow-hidden", "overflow-visible", "overflow-auto", "overflow-x-scroll", "aspect-video", "aspect-square", "aspect-3/2", "pointer-events-auto", "pointer-events-none",
+  "items-baseline", "self-start", "self-center", "self-end", "self-stretch", "content-center", "content-between", "justify-items-center", "justify-self-end",
+  "place-items-center", "place-content-between", "place-self-center", "justify-stretch", "text-justify",
+  "rotate-45", "-rotate-12", "rotate-[17deg]", "skew-x-6", "-skew-y-3", "origin-top-left", "origin-bottom",
   // arbitrary values
   "p-[10px]", "w-[200px]", "w-[50%]", "h-[2rem]", "bg-[#123456]", "text-[13px]", "text-[#fff]", "rounded-[6px]", "z-[100]", "gap-[3px]",
   "opacity-[0.3]", "tracking-[0.2em]", "leading-[1.2]", "scale-[1.02]",
@@ -71,6 +79,8 @@ const CLASSES = [
   "hover:bg-red-600", "hover:text-white", "hover:-translate-y-1", "hover:shadow-lg", "focus:ring-2", "focus-visible:ring-4",
   "active:scale-95", "active:opacity-80", "disabled:opacity-50", "disabled:cursor-not-allowed",
   "dark:text-white", "dark:bg-zinc-900", "dark:border-zinc-700", "dark:hover:bg-zinc-800",
+  "group-hover:bg-red-500", "group-hover:opacity-100", "focus-within:ring-2", "focus-within:border-blue-500",
+  "first:mt-0", "last:mb-0", "odd:bg-slate-50", "even:bg-white", "sm:p-4", "md:flex", "lg:grid-cols-3", "xl:text-lg", "2xl:max-w-md", "md:hover:bg-red-500",
 ];
 
 /** Combinations whose effect only exists together (Tailwind composes them through custom properties). */
@@ -139,17 +149,21 @@ async function compileTailwind(classes: string[]): Promise<Map<string, Compiled>
     if (!owner) return;
     // Nested rules: a utility inside `@media (hover: hover)`; `@supports` blocks carry the modern value, their siblings the fallback.
     let modern = false, forcedColors = false;
+    let breakpoint: Variant | undefined;
     for (let node = rule.parent as postcss.Node | undefined; node; node = node.parent as postcss.Node | undefined) {
       if (node.type === "atrule") {
         const at = node as postcss.AtRule;
         if (at.name === "supports") modern = true;
         if (at.name === "media" && at.params.includes("forced-colors")) forcedColors = true;
+        const width = /\(width >= (\d+rem)\)/.exec(at.params);
+        if (at.name === "media" && width) breakpoint = BREAKPOINT_REMS[width[1]!];
       }
     }
     if (forcedColors) return;
     for (const selector of owner.selectors) {
       const parsed = parseSelector(selector);
       if (!parsed) continue;
+      if (breakpoint && parsed.variant === "base") parsed.variant = breakpoint;
       const decls: Decls = {};
       rule.each(node => {
         if (node.type === "decl") decls[node.prop] = node.value;
@@ -165,18 +179,28 @@ async function compileTailwind(classes: string[]): Promise<Map<string, Compiled>
   return out;
 }
 
-function parseSelector(selector: string): { className: string; variant: Variant } | undefined {
+function parseSelector(raw: string): { className: string; variant: Variant } | undefined {
+  // `.\32 xl\:max-w-md`: a leading digit is a hex escape (with its terminating space).
+  const selector = raw.replace(/\\([0-9a-f]{1,6}) ?/gi, (_, hex: string) => String.fromCodePoint(parseInt(hex, 16)));
   // `.hover\:bg-red-600:hover`, `.dark\:text-white:where(.dark, .dark *)`
   const match = /^(?::where\()?\.((?:\\.|[^\s:.>)])+)(.*)$/.exec(selector);
   if (!match) return undefined;
+  // `.\32xl\:max-w-md`: a leading digit is a hex escape; other escapes are the character itself.
   const className = match[1]!.replace(/\\(.)/g, "$1");
-  const rest = match[2]!;
+  // `:not(:last-child)` (space-*) is not a variant.
+  const rest = match[2]!.replace(/:not\([^)]*\)/g, "");
   let variant: Variant = "base";
-  if (rest.includes(":hover")) variant = "hover";
+  if (rest.includes(":is(:where(.group):hover *)")) variant = "groupHover";
+  else if (rest.includes(":hover")) variant = "hover";
   else if (rest.includes(":focus-visible")) variant = "focusVisible";
+  else if (rest.includes(":focus-within")) variant = "focusWithin";
   else if (rest.includes(":focus")) variant = "focus";
   else if (rest.includes(":active")) variant = "active";
   else if (rest.includes(":disabled")) variant = "disabled";
+  else if (rest.includes(":first-child")) variant = "first";
+  else if (rest.includes(":last-child")) variant = "last";
+  else if (rest.includes(":nth-child(odd)")) variant = "odd";
+  else if (rest.includes(":nth-child(even)")) variant = "even";
   if (rest.includes(":where(.dark, .dark *)")) variant = variant === "base" ? "dark" : variant; // dark:hover: → hover inside dark
   return { className, variant };
 }
@@ -197,13 +221,14 @@ function substitute(value: string, depth = 0): string {
 /** Tailwind 4 arithmetic: `calc(var(--spacing) * 4)`, `calc(1 / 2 * 100%)`, `calc(1.25 / 0.875)`, `calc(2px + 0px)`. */
 function evaluateCalc(value: string): string {
   return value.replace(/calc\(([^()]*)\)/g, (_, body: string) => {
-    const expr = body.trim();
+    const expr = body.trim().replace(/(-?\d*\.?\d+)deg/g, "$1");
+    const degrees = body.includes("deg");
     const percent = expr.includes("%");
     const numeric = expr.replace(/(-?\d*\.?\d+)rem/g, (_, n) => String(Number(n) * REM)).replace(/(-?\d*\.?\d+)(px|%|ms)/g, "$1");
     if (!/^[\d.\s*+\/-]+$/.test(numeric)) return `calc(${body})`;
     const result = Function(`"use strict"; return (${numeric});`)() as number;
     const rounded = Math.round(result * 10000) / 10000;
-    return percent ? `${rounded}%` : String(rounded);
+    return percent ? `${rounded}%` : degrees ? `${rounded}deg` : String(rounded);
   });
 }
 
@@ -235,6 +260,11 @@ function normalize(prop: string, raw: string): string {
   value = value.replace(/(-?\d*\.?\d+)px/g, "$1");
   if (prop === "opacity" || prop.startsWith("--tw-scale")) value = value.replace(/^(-?\d*\.?\d+)%$/, (_, n) => String(Number(n) / 100));
   if (prop === "text-align") value = value === "left" ? "start" : value === "right" ? "end" : value;
+  if (prop === "justify-self" || prop === "justify-items") value = value.replace(/^flex-/, "");
+  if (prop === "transform-origin") {
+    const keywords: Record<string, string> = { center: "50% 50%", top: "50% 0%", bottom: "50% 100%", left: "0% 50%", right: "100% 50%", "top left": "0% 0%", "top right": "100% 0%", "bottom left": "0% 100%", "bottom right": "100% 100%" };
+    value = keywords[value] ?? value.split(" ").map(part => (part === "0" ? "0%" : part)).join(" ");
+  }
   if (prop === "flex") value = expandFlex(value);
   if (/radius$/.test(prop)) value = value.replace(/^calc\(infinity \* 1\)$/, "9999");
   if (prop === "grid-column" || prop === "grid-row") value = value.replace(/^span (\d+) \/ span \1$/, "span $1");
@@ -294,6 +324,8 @@ function expected(compiled: Decls): Decls {
     if (prop === "max-width" && value === "none") continue; // Tarve: no maxWidth at all
     if (prop === "inset") { for (const side of SIDES) out[side] = normalize(side, value); continue; } // Tarve has no shorthand
     if (LOGICAL[prop]) { for (const side of LOGICAL[prop]) out[side] = normalize(side, value); continue; }
+    const place = /^place-(items|content|self)$/.exec(prop);
+    if (place) { out[`align-${place[1]}`] = normalize(`align-${place[1]}`, value); out[`justify-${place[1]}`] = normalize(`justify-${place[1]}`, value); continue; }
     out[prop] = normalize(prop, value);
   }
   // Tailwind writes line-height in px next to the font size; Tarve keeps a multiple of it.
@@ -358,7 +390,13 @@ function toCss(style: Style | StateStyle): Decls {
   if (s.direction !== undefined) out["flex-direction"] = s.direction;
   if (s.wrap !== undefined) out["flex-wrap"] = s.wrap ? "wrap" : "nowrap";
   if (s.align !== undefined) out["align-items"] = s.align === "start" || s.align === "end" ? `flex-${s.align}` : s.align;
-  if (s.justify !== undefined) out["justify-content"] = { start: "flex-start", end: "flex-end", center: "center", between: "space-between", around: "space-around", evenly: "space-evenly" }[s.justify];
+  if (s.group) out["--tw-group"] = "true";
+  if (s.justify !== undefined) out["justify-content"] = { start: "flex-start", end: "flex-end", center: "center", between: "space-between", around: "space-around", evenly: "space-evenly", stretch: "stretch" }[s.justify];
+  const edges = (value: string) => value === "start" || value === "end" ? `flex-${value}` : value;
+  if (s.alignSelf !== undefined) out["align-self"] = edges(s.alignSelf);
+  if (s.alignContent !== undefined) out["align-content"] = { start: "flex-start", end: "flex-end", center: "center", stretch: "stretch", between: "space-between", around: "space-around", evenly: "space-evenly" }[s.alignContent];
+  if (s.justifyItems !== undefined) out["justify-items"] = s.justifyItems;
+  if (s.justifySelf !== undefined) out["justify-self"] = s.justifySelf;
   if (s.flex !== undefined) out.flex = typeof s.flex === "number" ? `${s.flex} 1 0` : s.flex;
   if (s.grow !== undefined) out["flex-grow"] = String(s.grow);
   if (s.shrink !== undefined) out["flex-shrink"] = String(s.shrink);
@@ -411,6 +449,10 @@ function toCss(style: Style | StateStyle): Decls {
     if (t.scaleY !== undefined) out["--tw-scale-y"] = String(t.scaleY);
     if (t.x !== undefined) out["--tw-translate-x"] = String(t.x);
     if (t.y !== undefined) out["--tw-translate-y"] = String(t.y);
+    if (t.rotate !== undefined) out.rotate = `${t.rotate}deg`;
+    if (t.skewX !== undefined) out["--tw-skew-x"] = `skewX(${t.skewX}deg)`;
+    if (t.skewY !== undefined) out["--tw-skew-y"] = `skewY(${t.skewY}deg)`;
+    if (t.originX !== undefined && t.originY !== undefined) out["transform-origin"] = `${t.originX * 100}% ${t.originY * 100}%`;
   }
   if (s.transition?.all) {
     const all = s.transition.all;
@@ -428,11 +470,12 @@ function toCss(style: Style | StateStyle): Decls {
 function actual(className: string): Compiled {
   const style = tw(className);
   const out: Compiled = { base: toCss(style) };
-  for (const variant of ["hover", "focus", "focusVisible", "active", "disabled", "dark"] as const) {
+  for (const variant of [...STATES, ...WRAPPERS]) {
     const sub = (style as Record<string, unknown>)[variant] as Style | undefined;
     if (!sub) continue;
+    // `dark:hover:` nests the state inside the wrapper; Tailwind's selector reads as the state.
     const nested = sub.hover ? toCss(sub.hover) : toCss(sub);
-    out[variant === "dark" && sub.hover ? "hover" : variant] = nested;
+    out[WRAPPERS.includes(variant as never) && sub.hover ? "hover" : variant] = nested;
   }
   // Rings and outlines are both Tarve outlines: `ring-*` reads as Tailwind's `--tw-ring-*`, `outline-*` as CSS outline.
   const isOutline = /(^|\s|:)outline/.test(className);
@@ -488,10 +531,10 @@ describe("tw() matches Tailwind CSS 4 class by class", () => {
   test("intentional divergences stay exactly where documented", async () => {
     const compiled = await compileTailwind(Object.keys(DIVERGENCES));
     for (const [className, props] of Object.entries(DIVERGENCES)) {
-      const want = expected(compiled.get(className)!.base!);
+      const want = expected(compiled.get(className)?.base ?? {});
       const got = actual(className).base!;
       for (const prop of props) {
-        expect(want[prop] === got[prop]).toBe(false);
+        expect({ className, prop, want: want[prop], got: got[prop], same: want[prop] === got[prop] }).toMatchObject({ same: false });
         if (prop === "font-family") {
           // Tarve names one family: a generic one from Tailwind's stack, or `system-ui`, the platform UI font
           // that Tailwind's sans stack reaches through -apple-system / Segoe UI / Roboto.
