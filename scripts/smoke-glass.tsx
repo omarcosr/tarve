@@ -17,6 +17,12 @@ const app = createApp(() => (
       <Glass id="glass" tint="#ffffff10" radius={20} shadow={false} material={{ blur: 16, refraction: 12, highlight: 1 }}
         style={{ position: "absolute", left: 20, top: 40, width: 160, height: 100 }} />
       <View id="plain" style={{ position: "absolute", left: 220, top: 40, width: 160, height: 100, radius: 20, background: "#ffffff10" }} />
+      {/* Two drops 20 px apart that share a merge key bridge; the same two without one keep the gap. */}
+      {(["joined", "apart"] as const).map((kind, row) => [0, 1].map(column => (
+        <Glass key={kind + column} id={`${kind}-${column}`} variant="clear" tint="#ffffffcc" radius={20} shadow={false}
+          merge={kind === "joined" ? "drops" : undefined} blend={40} material={{ blur: 2, refraction: 10, highlight: 0 }}
+          style={{ position: "absolute", left: 40 + row * 180 + column * 60, top: 200, width: 40, height: 40 }} />
+      )))}
     </View>
   </Window>
 ), { debug: true, onError: event => errors.push(event.error.message) });
@@ -43,14 +49,25 @@ try {
   };
   const glass = roughness(50, 60, 150, 120);
   const plain = roughness(250, 60, 350, 120);
-  const stripes = roughness(50, 200, 150, 260);
+  const stripes = roughness(50, 160, 150, 190);
   assert.ok(stripes > 30, `stripes are sharp outside both boxes (${stripes.toFixed(1)})`);
   assert.ok(plain > 30, `a plain translucent box keeps the stripes sharp (${plain.toFixed(1)})`);
   // D3D11 (Windows GPU) has a glyph atlas and the backdrop; wgpu and the CPU renderer paint the tint only.
   const backdrop = process.platform === "win32" && typeof (await app.inspect()).glyphRasterizations === "number" && process.env.TARVE_RENDERER !== "cpu";
+  // The darkest channel around the midpoint of each pair's gap: a bare stripe is saturated
+  // (one channel near 0), under the merged pair's veil it is whitened.
+  const whiteness = (x: number, y: number) => {
+    let darkest = 255;
+    for (let dx = -4; dx <= 4; dx++) { const i = (Math.round(y * scale) * image.width + Math.round((x + dx) * scale)) * 4; darkest = Math.min(darkest, image.rgba[i]!, image.rgba[i + 1]!, image.rgba[i + 2]!); }
+    return darkest;
+  };
+  const joined = whiteness(90, 220);
+  const apart = whiteness(270, 220);
+  assert.ok(apart < 40, `unmerged drops leave the gap between them bare (${apart})`);
   if (backdrop) {
     assert.ok(glass < 4, `the glass box blurs the stripes (${glass.toFixed(1)})`);
-    console.log(`[smoke-glass] PASS: blurred backdrop ${glass.toFixed(1)} vs sharp ${plain.toFixed(1)}`);
+    assert.ok(joined > 120, `merged drops bridge the gap between them (${joined})`);
+    console.log(`[smoke-glass] PASS: blurred backdrop ${glass.toFixed(1)} vs sharp ${plain.toFixed(1)}; merged gap ${joined} vs ${apart}`);
   } else {
     console.log(`[smoke-glass] PASS (no backdrop on this renderer: tint only, roughness ${glass.toFixed(1)})`);
   }

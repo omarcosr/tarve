@@ -19,6 +19,7 @@
     "youtube-music": "tarve run youtube-music/youtube-music.tsx",
     "pulse": "tarve run pulse/pulse.tsx",
     "glass": "tarve run glass/glass.tsx",
+    "liquid": "tarve run liquid/liquid.tsx",
     "check": "bun node_modules/typescript/bin/tsc --noEmit && bun node_modules/typescript/bin/tsc --noEmit -p studio/studio-samples && bun studio/studio-samples/generate.ts --check",
     "build:basic": "tarve build basic/basic.tsx --outfile dist/Basic.exe",
     "build:counter": "tarve build counter/counter.tsx --outfile dist/Counter.exe",

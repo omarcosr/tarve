@@ -197,6 +197,11 @@ pub(crate) struct GlassParams {
     pub highlight: f32,
     /// How much the flat part enlarges the backdrop (0..0.3).
     pub magnify: f32,
+    /// Boxes painted in one frame with the same non-zero key fuse like drops of
+    /// liquid: one surface whose shapes join smoothly. 0 keeps the box alone.
+    pub merge: u64,
+    /// How far apart in CSS px two merged boxes start bridging.
+    pub blend: f32,
 }
 
 pub(crate) trait PaintTarget {

@@ -171,7 +171,26 @@ enum DrawCommand {
         region: [u32; 4],
         /// sigma, saturate, refraction, highlight, magnify (sigma and refraction in device pixels).
         params: [f32; 5],
+        /// Glass commands of one frame with the same non-zero key are drawn as one
+        /// surface whose shapes join smoothly (`merge_glass`).
+        merge: u64,
+        /// Device pixels over which two merged shapes bridge.
+        blend: f32,
+        /// The shapes of the surface: centre x, y, half width, height, corner radius (device
+        /// pixels), opacity. The first is the box this command was appended for.
+        shapes: Vec<[f32; 6]>,
     },
+}
+
+/// Shapes one glass surface can fuse (the pixel shader's `glassShapes`).
+const MAX_GLASS_SHAPES: usize = 8;
+
+/// What one glass draw uploads: the material, the backdrop region and the shapes.
+struct GlassSurface<'a> {
+    params: [f32; 5],
+    region: [u32; 4],
+    blend: f32,
+    shapes: &'a [[f32; 6]],
 }
 
 /// Two window-sized textures the glass passes ping-pong through: the backdrop
@@ -292,6 +311,8 @@ pub(crate) struct D3d11Graphics {
     target_transform: ID3D11Buffer,
     /// Pixel-shader glass parameters (`cbuffer Glass`), uploaded before each glass draw.
     glass_params: ID3D11Buffer,
+    /// The shapes of a merged glass surface (`cbuffer GlassShapes`).
+    glass_shapes: ID3D11Buffer,
     vertex_buffer: ID3D11Buffer,
     vertex_capacity: usize,
     index_buffer: ID3D11Buffer,
@@ -404,6 +425,11 @@ impl D3d11Graphics {
             48,
             windows::Win32::Graphics::Direct3D11::D3D11_BIND_CONSTANT_BUFFER,
         )?;
+        let glass_shapes = create_dynamic_buffer(
+            &device,
+            16 * (1 + 2 * MAX_GLASS_SHAPES),
+            windows::Win32::Graphics::Direct3D11::D3D11_BIND_CONSTANT_BUFFER,
+        )?;
         let vertex_capacity = 4096;
         let index_capacity = 8192;
         let vertex_buffer = create_dynamic_buffer(
@@ -444,6 +470,7 @@ impl D3d11Graphics {
             stencil_pop,
             target_transform,
             glass_params,
+            glass_shapes,
             vertex_buffer,
             vertex_capacity,
             index_buffer,
@@ -622,9 +649,12 @@ impl D3d11Graphics {
             self.context
                 .VSSetConstantBuffers(0, Some(&[Some(self.target_transform.clone())]));
             self.context.PSSetShader(&self.pixel_shader, None);
-            self.context
-                .PSSetConstantBuffers(1, Some(&[Some(self.glass_params.clone())]));
+            self.context.PSSetConstantBuffers(
+                1,
+                Some(&[Some(self.glass_params.clone()), Some(self.glass_shapes.clone())]),
+            );
         }
+        self.merge_glass();
         let has_glass = self
             .commands
             .iter()
@@ -780,9 +810,15 @@ impl D3d11Graphics {
                     ),
                     DrawCommand::PushClip { first, count } => (1, *first, *count, 0),
                     DrawCommand::PopClip { first, count } => (2, *first, *count, 0),
-                    DrawCommand::Glass { quad, params, .. } => {
-                        let mut seed = 0;
-                        for value in params {
+                    DrawCommand::Glass {
+                        quad,
+                        params,
+                        blend,
+                        shapes,
+                        ..
+                    } => {
+                        let mut seed = mix_hash(0, u64::from(blend.to_bits()));
+                        for value in params.iter().chain(shapes.iter().flatten()) {
                             seed = mix_hash(seed, u64::from(value.to_bits()));
                         }
                         (3, quad.0, quad.1, seed)
@@ -1016,12 +1052,21 @@ impl D3d11Graphics {
                     quad,
                     region,
                     params,
+                    blend,
+                    shapes,
+                    ..
                 } => {
                     flush(&mut batch);
                     if !visible(index) {
                         continue;
                     }
-                    let blurred = self.blur_backdrop(*blur_h, *blur_v, *region, *params);
+                    let surface = GlassSurface {
+                        params: *params,
+                        region: *region,
+                        blend: *blend,
+                        shapes,
+                    };
+                    let blurred = self.blur_backdrop(*blur_h, *blur_v, &surface);
                     // The blur passes changed the render target and pipeline state.
                     state = None;
                     bound_texture = None;
@@ -1038,24 +1083,19 @@ impl D3d11Graphics {
 
     /// Copies the backdrop under a glass box, blurs it in place and leaves it bound
     /// as `tex0` for the glass quad. False (tint only) without a usable backdrop.
-    fn blur_backdrop(
-        &self,
-        blur_h: (u32, u32),
-        blur_v: (u32, u32),
-        region: [u32; 4],
-        params: [f32; 5],
-    ) -> bool {
+    fn blur_backdrop(&self, blur_h: (u32, u32), blur_v: (u32, u32), surface: &GlassSurface) -> bool {
+        let region = surface.region;
         let (Some(backdrop), Some(render_target), Some(depth_view), None) =
             (&self.backdrop, &self.render_target, &self.depth_view, &self.tile)
         else {
-            let _ = self.upload_glass_params(params, region, 0.0);
+            let _ = self.upload_glass_params(surface, 0.0);
             return false;
         };
         let Ok(backbuffer) = (unsafe { self.swap_chain.GetBuffer::<ID3D11Texture2D>(0) }) else {
-            let _ = self.upload_glass_params(params, region, 0.0);
+            let _ = self.upload_glass_params(surface, 0.0);
             return false;
         };
-        if self.upload_glass_params(params, region, 1.0).is_err() {
+        if self.upload_glass_params(surface, 1.0).is_err() {
             return false;
         }
         let area = windows::Win32::Graphics::Direct3D11::D3D11_BOX {
@@ -1101,7 +1141,8 @@ impl D3d11Graphics {
         true
     }
 
-    fn upload_glass_params(&self, params: [f32; 5], region: [u32; 4], available: f32) -> Result<(), String> {
+    fn upload_glass_params(&self, surface: &GlassSurface, available: f32) -> Result<(), String> {
+        let (params, region) = (surface.params, surface.region);
         upload_dynamic(
             &self.context,
             &self.glass_params,
@@ -1119,7 +1160,110 @@ impl D3d11Graphics {
                 region[2] as f32,
                 region[3] as f32,
             ]),
-        )
+        )?;
+        // The shapes relative to the first one's centre, which the quad's uv is measured from.
+        let count = surface.shapes.len().min(MAX_GLASS_SHAPES);
+        let mut data = vec![0.0_f32; 4 * (1 + 2 * MAX_GLASS_SHAPES)];
+        data[0] = count as f32;
+        data[1] = surface.blend;
+        let origin = surface.shapes.first().map_or([0.0, 0.0], |shape| [shape[0], shape[1]]);
+        for (index, shape) in surface.shapes.iter().take(count).enumerate() {
+            let at = 4 + index * 8;
+            data[at..at + 8].copy_from_slice(&[
+                shape[0] - origin[0],
+                shape[1] - origin[1],
+                shape[2],
+                shape[3],
+                shape[4],
+                shape[5],
+                0.0,
+                0.0,
+            ]);
+        }
+        upload_dynamic(&self.context, &self.glass_shapes, bytemuck::cast_slice(&data))
+    }
+
+    /// Fuses the glass commands that share a `merge` key into the first of them: its
+    /// shape list grows, its quad and blur passes widen to the union, the others are
+    /// dropped. Later members therefore paint where the first one does, under what
+    /// was painted between them.
+    fn merge_glass(&mut self) {
+        let mut index = 0;
+        while index < self.commands.len() {
+            let key = match &self.commands[index] {
+                DrawCommand::Glass { merge, .. } if *merge != 0 => *merge,
+                _ => {
+                    index += 1;
+                    continue;
+                }
+            };
+            let mut absorbed = Vec::new();
+            for (later, command) in self.commands.iter().enumerate().skip(index + 1) {
+                if let DrawCommand::Glass {
+                    merge,
+                    shapes,
+                    region,
+                    ..
+                } = command
+                    && *merge == key
+                    && absorbed.len() + 1 < MAX_GLASS_SHAPES
+                {
+                    absorbed.push((later, shapes[0], *region));
+                }
+            }
+            if absorbed.is_empty() {
+                index += 1;
+                continue;
+            }
+            let (width, height) = (self.width, self.height);
+            let DrawCommand::Glass {
+                blur_h,
+                blur_v,
+                quad,
+                region,
+                blend,
+                shapes,
+                ..
+            } = &mut self.commands[index]
+            else {
+                unreachable!()
+            };
+            for (_, shape, more) in &absorbed {
+                shapes.push(*shape);
+                region[0] = region[0].min(more[0]);
+                region[1] = region[1].min(more[1]);
+                region[2] = region[2].max(more[2]);
+                region[3] = region[3].max(more[3]);
+            }
+            let origin = shapes[0];
+            let reach = *blend + 1.0;
+            let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+            for shape in shapes.iter() {
+                bounds[0] = bounds[0].min(shape[0] - shape[2] - reach);
+                bounds[1] = bounds[1].min(shape[1] - shape[3] - reach);
+                bounds[2] = bounds[2].max(shape[0] + shape[2] + reach);
+                bounds[3] = bounds[3].max(shape[1] + shape[3] + reach);
+            }
+            let area = [region[0] as f32, region[1] as f32, region[2] as f32, region[3] as f32];
+            let passes = [(blur_h.0, area, false), (blur_v.0, area, false), (quad.0, bounds, true)];
+            for (first, b, own_uv) in passes {
+                let base = self.indices[first as usize] as usize;
+                let corners = [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]];
+                for (vertex, [x, y]) in self.vertices[base..base + 4].iter_mut().zip(corners) {
+                    vertex.pos = [
+                        x * 2.0 / width.max(1) as f32 - 1.0,
+                        1.0 - y * 2.0 / height.max(1) as f32,
+                    ];
+                    if own_uv {
+                        vertex.uv = [x - origin[0], y - origin[1]];
+                    }
+                }
+            }
+            for (later, _, _) in absorbed.iter().rev() {
+                self.commands.remove(*later);
+            }
+            index += 1;
+        }
     }
 
     pub(crate) fn capture(&mut self, background: Color, path: &str) -> Result<(), D3d11Error> {
@@ -1349,7 +1493,9 @@ impl D3d11Graphics {
     }
 
     /// Liquid glass over a rounded box: `center`/`half`/`radius` in device pixels,
-    /// `params` = sigma, saturate, refraction, highlight (sigma and refraction in pixels).
+    /// `params` = sigma, saturate, refraction, highlight, magnify (sigma and refraction in
+    /// pixels); `merge`/`blend` fuse it with the other boxes of the same key.
+    #[allow(clippy::too_many_arguments)]
     fn append_glass(
         &mut self,
         center: [f32; 2],
@@ -1358,9 +1504,12 @@ impl D3d11Graphics {
         tint: Color,
         opacity: f32,
         params: [f32; 5],
+        merge: u64,
+        blend: f32,
     ) {
-        // The copy must hold what the lens reaches past the edge, plus the blur taps around that.
-        let reach = params[2].ceil() + (params[0] * 6.0).ceil() + 2.0;
+        // The copy must hold what the lens reaches past the edge, plus the blur taps around
+        // that, plus the bridge to a merged neighbour.
+        let reach = params[2].ceil() + (params[0] * 6.0).ceil() + 2.0 + if merge == 0 { 0.0 } else { blend.ceil() };
         let (width, height) = (self.width.max(1) as f32, self.height.max(1) as f32);
         let x0 = (center[0] - half[0] - reach).floor().clamp(0.0, width);
         let y0 = (center[1] - half[1] - reach).floor().clamp(0.0, height);
@@ -1418,6 +1567,9 @@ impl D3d11Graphics {
             quad: (first, 6),
             region: [x0 as u32, y0 as u32, x1 as u32, y1 as u32],
             params,
+            merge,
+            blend,
+            shapes: vec![[center[0], center[1], half[0], half[1], radius, opacity]],
         });
     }
 
@@ -2511,6 +2663,8 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                 glass.highlight.clamp(0.0, 1.0),
                 glass.magnify.clamp(0.0, 0.3),
             ],
+            glass.merge,
+            (glass.blend * scale as f32).clamp(0.0, 256.0),
         );
     }
 

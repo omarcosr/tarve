@@ -108,6 +108,13 @@ export interface GlassMaterial {
   highlight?: number;
   /** How much the flat part enlarges the backdrop, as a thick lens does: 0–0.3 (0.06 is iOS-like). */
   magnify?: number;
+  /**
+   * Boxes painted in one frame with the same key fuse like drops of liquid: their
+   * shapes join smoothly where they come within `blend` px of each other.
+   */
+  merge?: string;
+  /** How far apart in px two merged boxes start bridging. Default 0 (touching). */
+  blend?: number;
 }
 export interface StateStyle {
   /** Liquid-glass material behind the box; `background` is its tint. */

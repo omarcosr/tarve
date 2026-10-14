@@ -20,6 +20,13 @@ export interface GlassProps extends ViewProps {
   material?: Partial<GlassMaterial>;
   /** Outer shadow under the glass. Default on. */
   shadow?: boolean;
+  /**
+   * Glass boxes with the same key fuse like drops of liquid: where two come within
+   * `blend` px of each other their shapes bridge smoothly, as one surface.
+   */
+  merge?: string;
+  /** How far apart in px two merged boxes start bridging. Default 32. */
+  blend?: number;
 }
 
 // Little blur: what makes it glass is the lens, not the frost. The edge bends the
@@ -51,12 +58,17 @@ export function glassChrome(appearance: "light" | "dark", shadow: boolean): Styl
 }
 
 /** The complete style of a glass surface: veil, material, radius and chrome. */
-export function glassSurface(variant: GlassVariant, appearance: "light" | "dark", options: { tint?: string; radius?: number; material?: Partial<GlassMaterial>; shadow?: boolean } = {}): Style {
+export function glassSurface(variant: GlassVariant, appearance: "light" | "dark", options: { tint?: string; radius?: number; material?: Partial<GlassMaterial>; shadow?: boolean; merge?: string; blend?: number } = {}): Style {
   return {
     background: options.tint ?? VEIL[appearance][variant],
     radius: options.radius ?? 26,
     // Dark glass reflects less: the same highlight reads harsh on a dark veil.
-    glass: { ...MATERIAL[variant], ...(appearance === "dark" ? { highlight: 0.55 } : {}), ...options.material },
+    glass: {
+      ...MATERIAL[variant],
+      ...(appearance === "dark" ? { highlight: 0.55 } : {}),
+      ...(options.merge ? { merge: options.merge, blend: options.blend ?? 32 } : {}),
+      ...options.material,
+    },
     ...glassChrome(appearance, options.shadow ?? true),
   };
 }
@@ -66,9 +78,9 @@ export function glassSurface(variant: GlassVariant, appearance: "light" | "dark"
  * bent at the rounded edge, under a light veil, with a bright rim. Compose like a
  * `View`; controls inside keep their own look.
  */
-export function Glass({ variant = "regular", tint, appearance = "light", radius = 26, material, shadow = true, style, ...props }: GlassProps): VNode {
+export function Glass({ variant = "regular", tint, appearance = "light", radius = 26, material, shadow = true, merge, blend, style, ...props }: GlassProps): VNode {
   return container("view", {
     ...props,
-    style: { ...glassSurface(variant, appearance, { tint, radius, material, shadow }), ...style },
+    style: { ...glassSurface(variant, appearance, { tint, radius, material, shadow, merge, blend }), ...style },
   });
 }

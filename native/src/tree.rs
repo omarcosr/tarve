@@ -218,8 +218,9 @@ fn rgba_of(colour: Color) -> [f32; 4] {
     colour.components
 }
 
-/// `style.glass`: `{ blur, saturate?, refraction?, highlight? }`; absent or invalid means no glass.
-fn glass_params(value: &Value) -> Option<crate::paint::GlassParams> {
+/// `style.glass`: `{ blur, saturate?, refraction?, highlight?, magnify?, merge?, blend? }`;
+/// absent or invalid means no glass.
+pub(crate) fn glass_params(value: &Value) -> Option<crate::paint::GlassParams> {
     let object = value.as_object()?;
     let number = |key: &str, fallback: f32| {
         object
@@ -228,16 +229,26 @@ fn glass_params(value: &Value) -> Option<crate::paint::GlassParams> {
             .map_or(fallback, |value| value as f32)
             .max(0.0)
     };
-    let blur = number("blur", f32::NAN);
-    if !blur.is_finite() {
-        return None;
-    }
+    // `max` drops a NaN fallback, so the key's presence is checked on its own.
+    let blur = object.get("blur").and_then(Value::as_f64).filter(|blur| blur.is_finite())? as f32;
+    let blur = blur.max(0.0);
     Some(crate::paint::GlassParams {
         blur: blur.min(64.0),
         saturate: number("saturate", 1.0).min(4.0),
         refraction: number("refraction", 0.0).min(48.0),
         highlight: number("highlight", 0.0).min(1.0),
         magnify: number("magnify", 0.0).min(0.3),
+        merge: object
+            .get("merge")
+            .and_then(Value::as_str)
+            .filter(|key| !key.is_empty())
+            .map_or(0, |key| {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                key.hash(&mut hasher);
+                hasher.finish().max(1)
+            }),
+        blend: number("blend", 0.0).min(128.0),
     })
 }
 

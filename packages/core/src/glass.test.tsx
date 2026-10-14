@@ -27,4 +27,15 @@ describe("Glass", () => {
     expect(Array.isArray(style.boxShadow) && style.boxShadow.length).toBe(2);
     expect(style.borderColor).toBe("#ffffff26");
   });
+
+  test("merge names the surface the box fuses with and blend how far it bridges", () => {
+    const tree = compileTree(
+      <Window>
+        <Glass id="dock" merge="dock" />
+        <Glass id="drop" merge="dock" blend={48} material={{ blend: 12 }} />
+      </Window>,
+    );
+    expect(tree.nodes.get("dock")!.style.glass).toMatchObject({ merge: "dock", blend: 32 });
+    expect(tree.nodes.get("drop")!.style.glass).toMatchObject({ merge: "dock", blend: 12 });
+  });
 });

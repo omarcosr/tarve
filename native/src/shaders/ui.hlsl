@@ -7,6 +7,9 @@ struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 color : CO
 cbuffer Target : register(b0) { float4 target; };
 // Liquid glass: sigma, saturate, refraction, highlight | backdrop width, height, 1 when a blurred backdrop is bound, 0.
 cbuffer Glass : register(b1) { float4 glassA; float4 glassB; float4 glassRegion; };
+// Merged glass: shape count, bridge width | per shape: offset from the first one's
+// centre, half size | corner radius, opacity. Shape 0 is the quad's own box.
+cbuffer GlassShapes : register(b2) { float4 glassShapeInfo; float4 glassShapes[16]; };
 PSIn vs_main(VSIn i) { PSIn o; o.pos=float4(i.pos*target.xy+target.zw,0,1); o.uv=i.uv; o.color=i.color; o.mode=i.mode; o.params=i.params;
     o.dev=i.dev; o.clip=i.clip; o.clipRadii=i.clipRadii; o.clipM0=i.clipM0; o.clipM1=i.clipM1; return o; }
 // Signed distance to a rounded rectangle (x0,y0,x1,y1) with per-corner radii
@@ -57,6 +60,21 @@ float4 blurPass(float2 p, float2 dir, float sigma) {
 // The copied backdrop at a window pixel; reads stay inside the copied region (the
 // rest of the scratch texture is stale).
 float3 backdropAt(float2 q) { return tex0.Load(int3(clamp(q, glassRegion.xy, glassRegion.zw - 1.0), 0)).rgb; }
+// Distance to the glass surface: the quad's own box joined smoothly (a polynomial
+// smooth minimum over `blend` px) with the other shapes of a merged surface, so two
+// boxes that come close bridge like drops of liquid.
+float sdGlass(float2 p, float4 box, float4 radii) {
+    float d = sdRoundRect(p, box, radii);
+    int n = (int)glassShapeInfo.x; float k = max(glassShapeInfo.y, 1e-3);
+    for (int s = 1; s < n; s++) {
+        float4 a = glassShapes[s*2]; float2 b = glassShapes[s*2+1].xy;
+        // A fading shape shrinks away: its distance grows by what opacity it lost.
+        float ds = sdRoundRect(p - a.xy, float4(-a.zw, a.zw), b.xxxx) + (1.0 - b.y) * max(a.z, a.w) * 1.05;
+        float h = max(k - abs(d - ds), 0.0) / k;
+        d = min(d, ds) - h*h*k*0.25;
+    }
+    return d;
+}
 // Liquid glass: a thick slab whose edge is a quarter-round. The flat part shows the
 // backdrop slightly enlarged; over the curved edge the ray bends outward, pulling what
 // lies past the edge into the rim, with a trace of dispersion. The curve also reflects:
@@ -64,10 +82,10 @@ float3 backdropAt(float2 q) { return tex0.Load(int3(clamp(q, glassRegion.xy, gla
 float4 glassShade(PSIn i) {
     float2 half_size = i.params.xy; float corner = i.params.z; float opacity = i.params.w;
     float4 box = float4(-half_size, half_size); float4 radii = corner.xxxx;
-    float sd = sdRoundRect(i.uv, box, radii);
+    float sd = sdGlass(i.uv, box, radii);
     float coverage = saturate(0.5 - sd);
-    float2 n = float2(sdRoundRect(i.uv+float2(1,0), box, radii) - sdRoundRect(i.uv-float2(1,0), box, radii),
-                      sdRoundRect(i.uv+float2(0,1), box, radii) - sdRoundRect(i.uv-float2(0,1), box, radii));
+    float2 n = float2(sdGlass(i.uv+float2(1,0), box, radii) - sdGlass(i.uv-float2(1,0), box, radii),
+                      sdGlass(i.uv+float2(0,1), box, radii) - sdGlass(i.uv-float2(0,1), box, radii));
     n = n / max(length(n), 1e-4);
     // Width of the curved edge: the corner radius, at least 10 px, at most half the box.
     float band = clamp(max(corner, 10.0), 10.0, min(half_size.x, half_size.y));

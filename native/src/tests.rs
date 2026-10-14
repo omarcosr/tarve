@@ -7325,3 +7325,19 @@ fn pointer_move_reports_local_position_to_the_innermost_listener() {
         "{left:?}"
     );
 }
+
+#[test]
+fn glass_params_hash_the_merge_key_and_clamp_the_blend() {
+    let plain = crate::tree::glass_params(&serde_json::json!({ "blur": 8 })).unwrap();
+    assert_eq!((plain.merge, plain.blend), (0, 0.0));
+    let dock = crate::tree::glass_params(&serde_json::json!({ "blur": 8, "merge": "dock", "blend": 48 })).unwrap();
+    let same = crate::tree::glass_params(&serde_json::json!({ "blur": 2, "merge": "dock" })).unwrap();
+    let other = crate::tree::glass_params(&serde_json::json!({ "blur": 2, "merge": "tray" })).unwrap();
+    assert_ne!(dock.merge, 0);
+    assert_eq!(dock.merge, same.merge);
+    assert_ne!(dock.merge, other.merge);
+    assert_eq!(dock.blend, 48.0);
+    let empty = crate::tree::glass_params(&serde_json::json!({ "blur": 2, "merge": "", "blend": 1000 })).unwrap();
+    assert_eq!((empty.merge, empty.blend), (0, 128.0));
+    assert!(crate::tree::glass_params(&serde_json::json!({ "merge": "dock" })).is_none());
+}
