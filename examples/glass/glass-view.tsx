@@ -2,6 +2,7 @@ import {
   AnimatePresence,
   Column,
   Glass,
+  glassChrome,
   Icon,
   Input,
   Pressable,
@@ -36,6 +37,8 @@ let volume = 0.6;
 let sheet = false;
 let dark = false;
 let variant: GlassVariant = "regular";
+/** Window controls, as any TitleBar takes them. */
+const chrome = { title: "Music", showMinimize: true, showMaximize: false, showClose: true };
 let pointer = { x: 0.5, y: 0.5 };
 
 const WIDTH = 430;
@@ -141,35 +144,38 @@ function ToolButton({ id, icon, label, onClick, active }: { id: string; icon: Ic
   return (
     <Pressable id={id} control={{ role: "button", label } as never} onClick={onClick}
       style={{
-        width: 44, height: 44, radius: 22, align: "center", justify: "center",
+        width: 36, height: 36, radius: 18, align: "center", justify: "center",
         background: active ? "#ff2d55" : "#00000000", transition: { background: { duration: 200 } },
         hover: { background: active ? "#ff375f" : dark ? "#ffffff1a" : "#ffffff66" }, active: { background: active ? "#e0264c" : dark ? "#ffffff2e" : "#ffffff99" }
       }}>
-      <Icon name={icon} size={20} color={active ? "#ffffff" : dark ? "#ffffffdd" : "#1c1c1edd"} />
+      <Icon name={icon} size={18} color={active ? "#ffffff" : dark ? "#ffffffdd" : "#1c1c1edd"} />
     </Pressable>
   );
 }
 
-/** The window's own bar, laid over the wallpaper: no surface, only the controls, in the current ink. */
-function Chrome() {
-  return (
-    <TitleBar id="chrome" height={36} showMaximize={false}
-      style={{ position: "absolute", top: 0, left: 0, width: WIDTH, background: "#00000000", borderWidth: 0, foreground: dark ? "#ffffffcc" : "#1c1c1ecc", padding: { left: 0 } }} />
-  );
-}
-
+/**
+ * The window's title bar as glass, like the macOS 26 chrome: the title capsule drags the
+ * window, the window controls sit in their own capsule. `TitleBar` keeps its usual props
+ * (title, showMinimize/showMaximize/showClose); the glass is only its style.
+ */
 function TopBar() {
   const appearance = dark ? "dark" : "light";
+  const ink = dark ? "#ffffff" : "#1c1c1e";
+  const veil = variant === "clear" ? (dark ? "#00000014" : "#ffffff14") : variant === "tinted" ? (dark ? "#1c1c1e4d" : "#ffffff33") : (dark ? "#1c1c1e8c" : "#ffffff59");
   return (
-    <Row id="top-bar" style={{ position: "absolute", left: 16, right: 16, top: 52, justify: "between", align: "center" }}>
-      <Glass id="title-pill" variant={variant} appearance={appearance} radius={22} style={{ height: 44, padding: { left: 18, right: 18 }, justify: "center" }}>
-        <Text size={17} weight={700} color={dark ? "#ffffff" : "#1c1c1e"}>{["Home", "New", "Library", "You"][tab]}</Text>
+    <Row id="top-bar" style={{ position: "absolute", left: 16, right: 16, top: 14, justify: "between", align: "center", gap: 10 }}>
+      <Glass id="title-pill" variant={variant} appearance={appearance} radius={22} dragRegion style={{ height: 44, padding: { left: 18, right: 18 }, justify: "center", flex: 1 }}>
+        <Text size={15} weight={700} color={ink}>{chrome.title} · {["Home", "New", "Library", "You"][tab]}</Text>
       </Glass>
-      <Glass id="toolbar" variant={variant} appearance={appearance} radius={26} style={{ height: 52, padding: 4, direction: "row", gap: 2 }}>
+      <Glass id="toolbar" variant={variant} appearance={appearance} radius={22} style={{ height: 44, padding: 4, direction: "row", gap: 2 }}>
         <ToolButton id="tool-like" icon="heart" label="Like" active={liked} onClick={() => { liked = !liked; }} />
-        <ToolButton id="tool-bell" icon="bell" label="Notifications" onClick={() => { }} />
+        <ToolButton id="tool-bell" icon="bell" label="Notifications" onClick={() => {}} />
         <ToolButton id="tool-settings" icon="settings" label="Settings" onClick={() => { sheet = !sheet; }} />
       </Glass>
+      <TitleBar id="chrome" height={44} showMinimize={chrome.showMinimize} showMaximize={chrome.showMaximize} showClose={chrome.showClose}
+        buttonStyle={{ width: 36, height: 36, radius: 18 }}
+        style={{ ...glassChrome(appearance, true), background: veil, glass: { blur: 8, saturate: 1.6, refraction: 22, highlight: 1, magnify: 0.06 },
+          radius: 22, padding: { left: 4, right: 4 }, gap: 2, overflow: "hidden", foreground: ink }} />
     </Row>
   );
 }
@@ -181,7 +187,7 @@ function NowPlaying() {
   return (
     <Glass id="now-playing" variant={variant} appearance={appearance} radius={28}
       onPointerMove={({ x, y }: { x: number; y: number }) => { pointer = { x: x / 398, y: y / 176 }; }}
-      style={{ position: "absolute", left: 16, right: 16, top: 118, height: 176, padding: 16, gap: 12, overflow: "hidden" }}>
+      style={{ position: "absolute", left: 16, right: 16, top: 76, height: 176, padding: 16, gap: 12, overflow: "hidden" }}>
       <View id="sheen" style={{
         position: "absolute", top: -120 + pointer.y * 80, left: -120 + pointer.x * 240, width: 300, height: 300, radius: 150,
         background: "radial-gradient(circle, #ffffff66, #ffffff00 60%)", opacity: dark ? 0.35 : 0.7,
@@ -250,10 +256,10 @@ function SettingsSheet() {
     </Pressable>
   );
   return (
-    <AnimatePresence id="sheet-presence" present={sheet} exit={{ opacity: 0, top: 144 }} enter={{ opacity: 0, top: 144 }}
+    <AnimatePresence id="sheet-presence" present={sheet} exit={{ opacity: 0, top: 102 }} enter={{ opacity: 0, top: 102 }}
       transition={{ opacity: { duration: 220 }, top: { duration: 320, easing: "easeOut" } }}>
       <Glass id="sheet" variant={variant} appearance={appearance} radius={30} dismissOnOutside onOutsideClick={() => { sheet = false; }}
-        style={{ position: "absolute", left: 16, right: 16, top: 118, padding: 20, gap: 18 }}>
+        style={{ position: "absolute", left: 16, right: 16, top: 76, padding: 20, gap: 18 }}>
         <Row justify="between" align="center">
           <Text size={20} weight={700} color={fg}>Glass</Text>
           <Pressable id="sheet-close" control={{ role: "button", label: "Close" } as never} onClick={() => { sheet = false; }}
@@ -288,7 +294,6 @@ export function App() {
         <SettingsSheet />
         <SearchSheet />
         <TabBar />
-        <Chrome />
       </View>
     </Window>
   );

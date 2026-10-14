@@ -1,3 +1,4 @@
+import type { Style } from "../protocol";
 import { jsx, type Child, type VNode } from "../jsx-runtime";
 import { theme } from "../theme";
 import { Icon } from "./icon";
@@ -12,6 +13,8 @@ export interface TitleBarProps extends ViewProps {
   showMinimize?: boolean;
   showMaximize?: boolean;
   showClose?: boolean;
+  /** Style merged into each window control (minimize, maximize, close): size, radius, colours. */
+  buttonStyle?: Style;
 }
 
 /** `#rgb`/`#rrggbb` at `alpha` (0–255); other colors are returned unchanged. */
@@ -21,7 +24,7 @@ function translucent(color: string, alpha: number): string {
   return /^[0-9a-f]{6}$/i.test(full) ? `#${full}${Math.round(alpha).toString(16).padStart(2, "0")}` : color;
 }
 
-function titleBarButton(action: "minimize" | "toggleMaximize" | "close", child: Child, ink: string): VNode {
+function titleBarButton(action: "minimize" | "toggleMaximize" | "close", child: Child, ink: string, buttonStyle: Style | undefined): VNode {
   const close = action === "close";
   const label = action === "minimize" ? "Minimize window" : action === "toggleMaximize" ? "Maximize or restore window" : "Close window";
   return jsx(Pressable, {
@@ -38,6 +41,7 @@ function titleBarButton(action: "minimize" | "toggleMaximize" | "close", child: 
       // Over whatever the bar is painted with: a wash of its own ink, not a theme surface.
       hover: { background: close ? theme.colors.windowCloseHover : translucent(ink, 0x1f) },
       active: { background: close ? theme.colors.windowCloseActive : translucent(ink, 0x33) },
+      ...buttonStyle,
     },
     children: child,
   });
@@ -49,6 +53,7 @@ export function TitleBar({
   showMinimize = true,
   showMaximize = true,
   showClose = true,
+  buttonStyle,
   children,
   style,
   ...props
@@ -66,9 +71,9 @@ export function TitleBar({
   const controls = jsx(Row, {
     style: { height: "100%", shrink: 0 },
     children: [
-      showMinimize ? titleBarButton("minimize", minimizeIcon, ink) : null,
-      showMaximize ? titleBarButton("toggleMaximize", maximizeIcon, ink) : null,
-      showClose ? titleBarButton("close", closeIcon, ink) : null,
+      showMinimize ? titleBarButton("minimize", minimizeIcon, ink, buttonStyle) : null,
+      showMaximize ? titleBarButton("toggleMaximize", maximizeIcon, ink, buttonStyle) : null,
+      showClose ? titleBarButton("close", closeIcon, ink, buttonStyle) : null,
     ],
   });
   const content = children ?? (title ? jsx(Text, { size: 13, weight: 500, children: title }) : null);
