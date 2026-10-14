@@ -252,7 +252,7 @@ function SettingsSheet() {
   return (
     <AnimatePresence id="sheet-presence" present={sheet} exit={{ opacity: 0, top: 144 }} enter={{ opacity: 0, top: 144 }}
       transition={{ opacity: { duration: 220 }, top: { duration: 320, easing: "easeOut" } }}>
-      <Glass id="sheet" variant="regular" appearance={appearance} radius={30} dismissOnOutside onOutsideClick={() => { sheet = false; }}
+      <Glass id="sheet" variant={variant} appearance={appearance} radius={30} dismissOnOutside onOutsideClick={() => { sheet = false; }}
         style={{ position: "absolute", left: 16, right: 16, top: 118, padding: 20, gap: 18 }}>
         <Row justify="between" align="center">
           <Text size={20} weight={700} color={fg}>Glass</Text>
