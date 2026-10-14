@@ -297,7 +297,15 @@ export interface WindowOptions {
   background: string; decorations: boolean; resizable: boolean; position?: WindowPosition; debug?: boolean;
   /** Test/runtime option: keep the native desktop window hidden. */
   visible?: boolean;
+  level?: WindowLevel;
+  /** No taskbar button or task switcher entry (Windows; Linux on X11). */
+  skipTaskbar?: boolean;
+  /** A desktop widget `columns` × `rows` cells (the icon grid on Windows; 80 × 100 cells on Linux). */
+  desktopWidget?: DesktopWidget;
 }
+export interface DesktopWidget { columns: number; rows: number }
+/** Stacking: `alwaysOnBottom` keeps the window under every other one, like a desktop widget. */
+export type WindowLevel = "normal" | "alwaysOnTop" | "alwaysOnBottom";
 export interface SceneDocument {
   version: number; renderer: Renderer; window: WindowOptions; root: NativeNode;
   /** D3D11 MSAA samples: 0 (default) uses a coverage fringe instead; 2, 4 or 8. */
@@ -336,6 +344,7 @@ export type NativeCommand =
   | { type: "close" }
   | { type: "cancelCloseRequest" }
   | { type: "window"; action: WindowAction }
+  | { type: "windowLevel"; level: WindowLevel }
   | { type: "tray"; tray: NativeTrayOptions | null }
   | { type: "systemMedia"; session: NativeSystemMediaSession | null }
   | { type: "notify"; title: string; body: string }

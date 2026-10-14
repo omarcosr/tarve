@@ -495,6 +495,11 @@ pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
         {
             return Err("Invalid window dimensions".into());
         }
+        if let Some(widget) = w.desktop_widget
+            && ![widget.columns, widget.rows].iter().all(|cells| (1..=16).contains(cells))
+        {
+            return Err("Invalid desktop widget size".into());
+        }
         if let Some(protocol::WindowPosition::Coordinates { x, y }) = &w.position
             && (!x.is_finite()
                 || !y.is_finite()
@@ -582,14 +587,12 @@ pub unsafe extern "C" fn tarve_send(ptr: *const u8, len: u32) -> i32 {
         if let Command::FileDialog { mode, options, .. } = &command {
             protocol::validate_file_dialog(mode, options)?;
         }
-        host()
-            .lock()
-            .map_err(|e| e.to_string())?
-            .as_ref()
-            .ok_or("App not started")?
-            .proxy
-            .send_event(command)
-            .map_err(|e| e.to_string())?;
+        let state = host().lock().map_err(|e| e.to_string())?;
+        let proxy = &state.as_ref().ok_or("App not started")?.proxy;
+        // The only failure is a closed event loop: the window closed while the
+        // command was on its way. The "closed" event is already queued, so the
+        // command is dropped, like a message posted to a destroyed window.
+        let _ = proxy.send_event(command);
         Ok(0)
     })
 }

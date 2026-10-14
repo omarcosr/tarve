@@ -19,6 +19,7 @@ import { Style } from "./style";
 
 const isPrimitive = (child: Child): child is string | number => typeof child === "string" || typeof child === "number";
 
+
 /** Folds `style.dark` into the style under a dark theme and drops the key otherwise: the native tree never sees it. */
 function foldDarkVariant(style: Record<string, unknown>, selected: ThemeDefinition): Record<string, unknown> {
   const { dark, ...base } = style;
@@ -26,6 +27,7 @@ function foldDarkVariant(style: Record<string, unknown>, selected: ThemeDefiniti
   const themed = luminance(selected.colors.background);
   return themed !== null && themed < 0.5 ? Style.merge(base, dark as Style) as Record<string, unknown> : base;
 }
+
 
 /** The handler name the app dispatches each `on*` prop under. Most nodes have none: no object is made for them. */
 const HANDLER_BY_PROP = new Map<string, keyof Handlers>([
@@ -295,10 +297,22 @@ export function compileTree(
     if (nativeType === "window") {
       if (windowOptions) throw new Error("This bootstrap supports one Window per app.");
       selectedTheme = p.theme ?? lightTheme;
-      windowOptions = { title: p.title ?? "Tarve", width: p.width ?? 1120, height: p.height ?? 820,
-        minWidth: p.minWidth ?? 780, minHeight: p.minHeight ?? 580,
+      const width = p.width ?? 1120, height = p.height ?? 820;
+      // The default minimum never exceeds the requested size (a small widget stays small).
+      windowOptions = { title: p.title ?? "Tarve", width, height,
+        minWidth: p.minWidth ?? Math.min(780, width), minHeight: p.minHeight ?? Math.min(580, height),
         background: resolveStyleString("background", p.style?.background ?? theme.colors.background, selectedTheme),
-        decorations: true, resizable: p.resizable ?? true, position: p.position ?? "center", debug, visible };
+        decorations: !p.frameless, resizable: p.resizable ?? true, position: p.position ?? "center", debug, visible };
+      if (p.level && p.level !== "normal") windowOptions.level = p.level;
+      if (p.skipTaskbar) windowOptions.skipTaskbar = true;
+      if (p.desktopWidget) {
+        const { columns, rows } = p.desktopWidget;
+        if (![columns, rows].every(n => Number.isInteger(n) && n >= 1 && n <= 16)) {
+          throw new RangeError("desktopWidget columns and rows must be integers from 1 to 16");
+        }
+        Object.assign(windowOptions, { desktopWidget: { columns, rows }, decorations: false, resizable: false,
+          level: p.level ?? "alwaysOnBottom", skipTaskbar: true });
+      }
     }
     const hoverHandler = isIntrinsicDiv && (p.onMouseEnter || p.onMouseLeave)
       ? (entered: boolean) => {
@@ -447,6 +461,10 @@ export function compileTree(
     // default light theme) gets a hairline that reads on its own background.
     roots[0].style.borderColor ??= windowBorder(String(roots[0].style.background ?? ""), selectedTheme);
     roots[0].style.radius ??= theme.radius.md;
+  } else if (!windowOptions.decorations) {
+    // Frameless without a TitleBar (a desktop widget): the system edge still
+    // draws, in a colour that suits the window instead of the light default.
+    roots[0].style.borderColor ??= windowBorder(String(roots[0].style.background ?? ""), selectedTheme);
   }
   return { document: { version: PROTOCOL_VERSION, renderer, window: windowOptions, root: roots[0] }, handlers, nodes, media };
 }

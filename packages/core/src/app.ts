@@ -369,6 +369,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         }
       }
 
+      const level = next.document.window.level ?? "normal";
+      if ((committed.document.window.level ?? "normal") !== level) {
+        sendInternal({ type: "windowLevel", level }, { source: "bridge", event: "windowLevel" });
+      }
       committed = next;
       observed = nextObserved;
       syncMedia();

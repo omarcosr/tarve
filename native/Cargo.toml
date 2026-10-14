@@ -57,7 +57,7 @@ accesskit = "=0.25.0"
 accesskit_winit = { version = "=0.34.0", default-features = false, features = ["rwh_06"] }
 lyon_tessellation = "=1.0.22"
 rfd = { version = "=0.17.2", default-features = false, features = ["common-controls-v6"] }
-windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Foundation", "Media", "Storage_Streams", "Win32_System_WinRT", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_Storage_EnhancedStorage"] }
+windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Foundation", "Media", "Storage_Streams", "Win32_System_WinRT", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging", "Win32_System_Ole", "Win32_Storage_EnhancedStorage"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Pipes", "Win32_System_Registry", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -68,6 +68,8 @@ rfd = { version = "=0.17.2", default-features = false, features = ["xdg-portal",
 # System tray (StatusNotifierItem + dbusmenu) and notifications over the same zbus/async-io stack.
 ksni = { version = "=0.3.6", default-features = false, features = ["blocking", "async-io"] }
 notify-rust = { version = "=4.18.1", default-features = false, features = ["z"] }
+# EWMH window state (below, skip taskbar, sticky) for desktop widgets; winit already links it.
+x11rb = { version = "0.13.2", default-features = false }
 
 # Upstream accesskit_windows 0.35.0 does not expose AccessKit Invalid through
 # UIA_IsDataValidForFormPropertyId, so keep the Windows provider patch local.

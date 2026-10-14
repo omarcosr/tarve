@@ -4,6 +4,8 @@
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 mod accessibility;
+#[cfg(target_os = "windows")]
+mod desktop_widget;
 #[cfg(not(target_arch = "wasm32"))]
 mod bridge;
 mod controls;
@@ -34,6 +36,8 @@ mod tree;
 // Browser build: the same tree, layout, text and CPU paint, driven from JavaScript.
 #[cfg(target_arch = "wasm32")]
 mod web;
+#[cfg(target_os = "linux")]
+mod x11_state;
 
 #[cfg(all(test, not(feature = "mimalloc")))]
 pub(crate) mod counting_alloc {

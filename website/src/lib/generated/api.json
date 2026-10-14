@@ -5986,7 +5986,7 @@
     {
       "name": "Window",
       "source": "packages/core/src/components/window.ts",
-      "line": 23,
+      "line": 43,
       "generic": false,
       "propsType": "WindowProps",
       "props": [
@@ -5995,6 +5995,12 @@
           "type": "Style[\"align\"]",
           "optional": true,
           "from": "ViewProps"
+        },
+        {
+          "name": "desktopWidget",
+          "type": "DesktopWidget",
+          "optional": true,
+          "doc": "Make the window a desktop widget, `columns` × `rows` cells: frameless, below\nevery window (unless `level` says otherwise) and off the taskbar.\nWindows: sized to the desktop icon grid; when dragged (give it a\n`dragRegion`) it drops into the nearest cells free of icons, and icons that\nland under it are moved out.\nLinux (X11; XWayland on a Wayland session): cells of a typical icon,\n80 × 100, on every workspace; no icon grid to follow.\n`width`/`height` are ignored; `position` is where it first looks for room."
         },
         {
           "name": "dismissOnOutside",
@@ -6022,6 +6028,12 @@
           "from": "ViewProps"
         },
         {
+          "name": "frameless",
+          "type": "boolean",
+          "optional": true,
+          "doc": "No native frame or title bar, without needing a `TitleBar`. Pair with a `dragRegion` to move it."
+        },
+        {
           "name": "gap",
           "type": "number",
           "optional": true,
@@ -6037,6 +6049,12 @@
           "type": "Style[\"justify\"]",
           "optional": true,
           "from": "ViewProps"
+        },
+        {
+          "name": "level",
+          "type": "WindowLevel",
+          "optional": true,
+          "doc": "Stacking order; `alwaysOnBottom` keeps the window under every other one, even\nwhen clicked or shown. Can change while the app runs."
         },
         {
           "name": "minHeight",
@@ -6082,6 +6100,12 @@
           "optional": true
         },
         {
+          "name": "skipTaskbar",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Keep the window off the taskbar and out of Alt+Tab (Windows) or the task switcher and pager (Linux, X11)."
+        },
+        {
           "name": "theme",
           "type": "ThemeDefinition",
           "optional": true
@@ -6123,7 +6147,9 @@
         "style"
       ],
       "types": [
+        "DesktopWidget",
         "WindowCloseRequestEvent",
+        "WindowLevel",
         "WindowPosition"
       ]
     }
@@ -6279,6 +6305,7 @@
     "DataGridKey": "type DataGridKey = string | number;",
     "DataGridSort": "interface DataGridSort {\n  column: string;\n  direction: DataGridSortDirection;\n}",
     "DataGridSortDirection": "type DataGridSortDirection = \"asc\" | \"desc\";",
+    "DesktopWidget": "interface DesktopWidget { columns: number; rows: number }",
     "DropdownMenuItem": "interface DropdownMenuItem {\n  value: string;\n  label: string;\n  icon?: IconName;\n  shortcut?: string;\n  disabled?: boolean;\n  checked?: boolean;\n}",
     "HoverCardSide": "type HoverCardSide = \"top\" | \"right\" | \"bottom\" | \"left\";",
     "IconName": "type IconName =\n  | \"check\" | \"x\" | \"plus\" | \"minus\"\n  | \"chevron-down\" | \"chevron-up\" | \"chevron-right\" | \"chevron-left\"\n  | \"search\" | \"info\"\n  | \"house\" | \"settings\" | \"user\" | \"bell\" | \"heart\" | \"star\"\n  | \"download\" | \"trash-2\" | \"folder\" | \"mail\";",
@@ -6318,6 +6345,7 @@
     "TreeNode": "interface TreeNode<T = unknown> {\n  id: string;\n  label: string;\n  children?: readonly TreeNode<T>[];\n  disabled?: boolean;\n  icon?: IconName;\n  data?: T;\n}",
     "TypographyVariant": "type TypographyVariant = \"h1\" | \"h2\" | \"h3\" | \"h4\" | \"p\" | \"lead\" | \"large\" | \"small\" | \"muted\" | \"code\" | \"blockquote\";",
     "WindowCloseRequestEvent": "interface WindowCloseRequestEvent {\n  readonly defaultPrevented: boolean;\n  preventDefault(): void;\n}",
+    "WindowLevel": "type WindowLevel = \"normal\" | \"alwaysOnTop\" | \"alwaysOnBottom\";",
     "WindowPosition": "type WindowPosition = WindowPositionPreset | { x: number; y: number };",
     "WindowPositionPreset": "type WindowPositionPreset =\n  | \"top-left\" | \"top\" | \"top-right\"\n  | \"left\" | \"center\" | \"right\"\n  | \"bottom-left\" | \"bottom\" | \"bottom-right\";"
   }

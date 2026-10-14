@@ -18,6 +18,7 @@
     "performance": "tarve run performance/performance.tsx",
     "youtube-music": "tarve run youtube-music/youtube-music.tsx",
     "pulse": "tarve run pulse/pulse.tsx",
+    "widget": "tarve run widget/widget.tsx",
     "glass": "tarve run glass/glass.tsx",
     "liquid": "tarve run liquid/liquid.tsx",
     "tailwind": "tarve run tailwind/tailwind.tsx",
@@ -39,7 +40,9 @@
     "build:fps": "tarve build fps/fps.tsx --outfile dist/Fps.exe",
     "build:youtube-music": "tarve build youtube-music/youtube-music.tsx --outfile dist/YouTubeMusic.exe",
     "build:pulse": "tarve build pulse/pulse.tsx --outfile dist/Pulse.exe",
+    "build:widget": "tarve build widget/widget.tsx --outfile dist/Widget.exe",
     "build:glass": "tarve build glass/glass.tsx --outfile dist/LiquidGlass.exe",
+    "build:liquid": "tarve build liquid/liquid.tsx --outfile dist/Liquid.exe",
     "build:tailwind": "tarve build tailwind/tailwind.tsx --outfile dist/Tailwind.exe"
   },
   "dependencies": {
@@ -61,6 +64,12 @@
         "description": "System monitor built with Tarve",
         "icon": "pulse/icon.png",
         "appId": "Tarve.Examples.Pulse"
+      },
+      "widget/widget.tsx": {
+        "name": "Desktop widget",
+        "description": "Desktop widget built with Tarve",
+        "icon": "widget/icon.png",
+        "appId": "Tarve.Examples.Widget"
       },
       "youtube-music/youtube-music.tsx": {
         "name": "YouTube Music (Tarve)",

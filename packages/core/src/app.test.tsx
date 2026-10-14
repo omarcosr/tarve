@@ -46,6 +46,21 @@ class FakeBridge implements NativeBridge {
 }
 
 describe("controlled native reconciliation", () => {
+  test("a Window level change reaches the running window", async () => {
+    const bridge = new FakeBridge();
+    let behind = true;
+    const app = createApp(() => <Window level={behind ? "alwaysOnBottom" : "normal"}><Text>x</Text></Window>, { bridge });
+    await app.ready;
+    expect(bridge.document?.window.level).toBe("alwaysOnBottom");
+    behind = false;
+    app.update();
+    await Promise.resolve();
+    app.update();
+    await Promise.resolve();
+    expect(bridge.commands.filter(command => command.type === "windowLevel")).toEqual([{ type: "windowLevel", level: "normal" }]);
+    app.close();
+  });
+
   test("native motion completion reaches the node handler", async () => {
     const bridge = new FakeBridge();
     const completed: string[] = [];

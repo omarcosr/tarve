@@ -630,6 +630,22 @@ describe("native TSX protocol", () => {
     expect(tree.document.root.style.borderWidth).toBeUndefined();
     expect(tree.document.root.style.radius).toBeUndefined();
   });
+  test("Window can be a frameless desktop widget below other windows and off the taskbar", () => {
+    const widget = compileTree(<Window frameless resizable={false} level="alwaysOnBottom" skipTaskbar><Text>12:00</Text></Window>);
+    expect(widget.document.window).toMatchObject({ decorations: false, resizable: false, level: "alwaysOnBottom", skipTaskbar: true });
+    const grid = compileTree(<Window desktopWidget={{ columns: 3, rows: 2 }}><Text>12:00</Text></Window>);
+    expect(grid.document.window).toMatchObject({ desktopWidget: { columns: 3, rows: 2 }, decorations: false, resizable: false, level: "alwaysOnBottom", skipTaskbar: true });
+    expect(() => compileTree(<Window desktopWidget={{ columns: 0, rows: 2 }}><Text>x</Text></Window>)).toThrow(RangeError);
+    // The system edge of a frameless window follows its background, like a TitleBar window's.
+    const dark = compileTree(<Window frameless style={{ background: "#111111" }}><Text>x</Text></Window>).document.root.style;
+    expect(dark.borderColor).toBeDefined();
+    expect(dark.borderColor).not.toBe("#e4e4e7");
+    expect(dark.borderWidth).toBeUndefined();
+    const small = compileTree(<Window width={280} height={190}><Text>Small</Text></Window>).document.window;
+    expect([small.minWidth, small.minHeight]).toEqual([280, 190]);
+    const plain = compileTree(<Window><Text>App</Text></Window>).document.window;
+    expect("level" in plain || "skipTaskbar" in plain || "desktopWidget" in plain).toBe(false);
+  });
   test("Window close requests stay in JS handlers while native receives an intercept flag", () => {
     let requested = false;
     const tree = compileTree(<Window onCloseRequest={() => { requested = true; }}><Text>Hello</Text></Window>);

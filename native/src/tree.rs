@@ -5197,7 +5197,12 @@ impl Tree {
                 || blocks_pointer
                 || entry.node.modal
         } else {
-            entry.node.interactive() || entry.node.kind == "markdown" || blocks_pointer
+            // A drag region is a target on its own (a widget body, a custom title
+            // bar), so a press on it or its plain text can move the window.
+            entry.node.interactive()
+                || entry.node.kind == "markdown"
+                || blocks_pointer
+                || entry.node.drag_region
         };
         (eligible && rect.contains(mouse)).then(|| id.to_string())
     }

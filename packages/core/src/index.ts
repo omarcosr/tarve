@@ -37,10 +37,11 @@ export type { ComponentAdapter, ComponentAdapterInput } from "./component-adapte
 export { theme, Theme, lightTheme, darkTheme, createTheme, buttonVariants } from "./theme";
 export type { ThemeColors, ThemeFocusOutline, ThemeDefinition, ThemeOverrides, ButtonVariant } from "./theme";
 export { Style } from "./style";
-export type { StateStyle, OutlineStyle, BorderStyle, TextShadow, BoxShadow, Transform, Gradient, GradientStop, GradientSide, GradientLength, GradientCentre, RadialExtent, LinearGradient, RadialGradient, ConicGradient, ConicGradientStop, UserSelect, TextDecoration, GlassMaterial, Renderer, WindowPosition, WindowPositionPreset, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition, ScrollSource, ScrollInfo, MotionProperty, NumericMotionProperty, MotionEasing, MotionTransition, MotionTransitions, MotionValues } from "./protocol";
+export type { StateStyle, OutlineStyle, BorderStyle, TextShadow, BoxShadow, Transform, Gradient, GradientStop, GradientSide, GradientLength, GradientCentre, RadialExtent, LinearGradient, RadialGradient, ConicGradient, ConicGradientStop, UserSelect, TextDecoration, GlassMaterial, Renderer, WindowPosition, WindowPositionPreset, WindowLevel, DesktopWidget, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition, ScrollSource, ScrollInfo, MotionProperty, NumericMotionProperty, MotionEasing, MotionTransition, MotionTransitions, MotionValues } from "./protocol";
 export type { VNode, Child, PastePayload, DragPosition, DragMoveEvent, DragEndEvent, DropEvent, DraggableProps, DropTargetProps } from "./jsx-runtime";
 export { BunFfiBridge, openExternal } from "./bridge";
 export type { NativeBridge, BunFfiBridgeOptions } from "./bridge";
 export { CanvasRenderingContext2D, CanvasGradient, parseCanvasFont } from "./canvas";
 export type { MediaController, MediaElementProps, MediaEventInfo } from "./media-element";
 export { tw } from "./tailwind";
+

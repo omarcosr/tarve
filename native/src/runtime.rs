@@ -436,6 +436,38 @@ fn configure_custom_window_chrome(
     Ok(())
 }
 
+/// Tool-window extended style: no taskbar button and no Alt+Tab entry.
+#[cfg(target_os = "windows")]
+fn tool_window_style(style: u32) -> u32 {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{WS_EX_APPWINDOW, WS_EX_TOOLWINDOW};
+    (style | WS_EX_TOOLWINDOW) & !WS_EX_APPWINDOW
+}
+
+/// Makes the window a tool window so Alt+Tab skips it too (winit's skip-taskbar
+/// only drops the taskbar button). winit rewrites the extended style whenever
+/// its own window state changes (shown, hidden, level), so the subclass keeps
+/// the style through those rewrites (see `SKIP_TASK_SWITCHER`).
+#[cfg(target_os = "windows")]
+fn hide_from_task_switcher(window: &Window) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, GetWindowLongPtrW, SetWindowLongPtrW};
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    SKIP_TASK_SWITCHER.with(|skip| skip.set(true));
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = handle.hwnd.get() as windows_sys::Win32::Foundation::HWND;
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, tool_window_style(style) as isize);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn hide_from_task_switcher(_: &Window) {}
+
 /// Logical client size of the window, owned by the event-loop thread: set from
 /// resizes, frozen while the user moves the window so DPI changes on the way
 /// can't feed back into it.
@@ -447,6 +479,25 @@ struct WindowLogicalSize {
 
 thread_local! {
     static WINDOW_LOGICAL_SIZE: WindowLogicalSize = WindowLogicalSize::default();
+    /// `alwaysOnBottom`: Windows only places the window at the bottom once, and
+    /// activating it (a click, a drag, being shown) raises it again, so every
+    /// z-order change is redirected to the bottom while this is set.
+    static KEEP_AT_BOTTOM: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// `skipTaskbar`: keep the tool-window style through winit's style rewrites.
+    static SKIP_TASK_SWITCHER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn keep_at_bottom(enabled: bool) {
+    KEEP_AT_BOTTOM.with(|keep| keep.set(enabled));
+}
+
+fn winit_window_level(level: crate::protocol::WindowLevel) -> winit::window::WindowLevel {
+    use crate::protocol::WindowLevel::*;
+    match level {
+        Normal => winit::window::WindowLevel::Normal,
+        AlwaysOnTop => winit::window::WindowLevel::AlwaysOnTop,
+        AlwaysOnBottom => winit::window::WindowLevel::AlwaysOnBottom,
+    }
 }
 
 /// Tracks the user's move loop so DPI changes during a drag between monitors
@@ -460,7 +511,8 @@ fn install_dpi_scaled_size(window: &Window) {
     use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetMenu, GetWindowLongPtrW, GetWindowRect,
-        WM_EXITSIZEMOVE, WM_MOVING,
+        HWND_BOTTOM, STYLESTRUCT, SWP_NOZORDER, WINDOWPOS, WM_EXITSIZEMOVE, WM_MOVING,
+        WM_STYLECHANGING, WM_WINDOWPOSCHANGING,
     };
 
     const WM_GETDPISCALEDSIZE: u32 = 0x02E4;
@@ -476,6 +528,19 @@ fn install_dpi_scaled_size(window: &Window) {
     ) -> LRESULT {
         match message {
             WM_MOVING => WINDOW_LOGICAL_SIZE.with(|state| state.moving.set(true)),
+            WM_STYLECHANGING
+                if wparam as i32 == GWL_EXSTYLE && SKIP_TASK_SWITCHER.with(|skip| skip.get()) =>
+            {
+                let styles = lparam as *mut STYLESTRUCT;
+                unsafe { (*styles).styleNew = tool_window_style((*styles).styleNew) };
+            }
+            WM_WINDOWPOSCHANGING if KEEP_AT_BOTTOM.with(|keep| keep.get()) => {
+                let position = lparam as *mut WINDOWPOS;
+                unsafe {
+                    (*position).hwndInsertAfter = HWND_BOTTOM;
+                    (*position).flags &= !SWP_NOZORDER;
+                }
+            }
             WM_EXITSIZEMOVE => WINDOW_LOGICAL_SIZE.with(|state| state.moving.set(false)),
             // Scale the client area exactly by the DPI ratio; Windows' default
             // scales the outer rect, which drifts with the frame and compounds.
@@ -607,6 +672,12 @@ fn configure_custom_window_chrome(_: &Window, _: u32, _: bool) -> Result<(), Str
     Ok(())
 }
 
+/// Logical size of a desktop widget before (or without) the icon grid: cells
+/// of a typical desktop icon (80 × 100), less a 4 px margin on each side.
+pub(crate) fn nominal_widget_size(widget: crate::protocol::DesktopWidget) -> (f64, f64) {
+    (widget.columns as f64 * 80.0 - 8.0, widget.rows as f64 * 100.0 - 8.0)
+}
+
 #[cfg(target_os = "linux")]
 fn should_force_x11_on_wsl(kernel_release: &str, display: Option<&str>) -> bool {
     display.is_some_and(|value| !value.is_empty())
@@ -690,7 +761,14 @@ pub fn run(
         // terminate winit's event loop with EPIPE for larger retained trees.
         // Prefer the stable X11 transport only on WSL; native Linux keeps
         // winit's normal backend auto-selection.
-        if prefer_x11_on_wsl() {
+        // Below/skip-taskbar/sticky are X11 (EWMH) hints with no Wayland
+        // equivalent for ordinary windows, so windows that ask for them run
+        // through X11 (XWayland on a Wayland session) when it is there.
+        let window = &document.window;
+        let wants_x11_hints = window.desktop_widget.is_some()
+            || window.skip_taskbar
+            || window.level != crate::protocol::WindowLevel::Normal;
+        if prefer_x11_on_wsl() || (wants_x11_hints && std::env::var_os("DISPLAY").is_some()) {
             builder.with_x11();
         }
     }
@@ -703,6 +781,13 @@ pub fn run(
         }
     };
     event_loop.set_control_flow(ControlFlow::Wait);
+    // A desktop widget starts at cells of a typical icon size. Windows then
+    // fits it to the desktop icon grid; elsewhere there is no grid to read.
+    if let Some(widget) = document.window.desktop_widget {
+        let (width, height) = nominal_widget_size(widget);
+        let window = &mut document.window;
+        (window.width, window.height, window.min_width, window.min_height) = (width, height, width, height);
+    }
     let event_proxy = event_loop.create_proxy();
     let remote_images = crate::remote_image::RemoteImages::new(event_proxy.clone());
     ready
@@ -1106,6 +1191,52 @@ impl App {
             self.events
                 .push(error(format!("Custom window chrome: {chrome_error}")));
         }
+    }
+    /// Where a desktop widget first looks for room: the work-area point its
+    /// `position` names, and which point of the widget goes there.
+    #[cfg(target_os = "windows")]
+    fn desktop_widget_aim(&self, window: &Window) -> ((f64, f64), (i32, i32)) {
+        use crate::protocol::WindowPositionPreset::*;
+        let anchor = match self.document.window.position.as_ref() {
+            Some(WindowPosition::Coordinates { x, y }) => {
+                let scale = window.scale_factor();
+                return ((0.0, 0.0), ((x * scale).round() as i32, (y * scale).round() as i32));
+            }
+            Some(WindowPosition::Preset(preset)) => match preset {
+                TopLeft => (0.0, 0.0),
+                Top => (0.5, 0.0),
+                TopRight => (1.0, 0.0),
+                Left => (0.0, 0.5),
+                Center => (0.5, 0.5),
+                Right => (1.0, 0.5),
+                BottomLeft => (0.0, 1.0),
+                Bottom => (0.5, 1.0),
+                BottomRight => (1.0, 1.0),
+            },
+            None => (0.5, 0.5),
+        };
+        let aim = window_work_area(window).map_or((0, 0), |(position, size)| {
+            (
+                position.x + (size.width as f64 * anchor.0).round() as i32,
+                position.y + (size.height as f64 * anchor.1).round() as i32,
+            )
+        });
+        (anchor, aim)
+    }
+    /// Puts a desktop widget on the desktop icon grid (Windows).
+    fn attach_desktop_widget(&mut self, window: &Window) {
+        let Some(widget) = self.document.window.desktop_widget else {
+            return;
+        };
+        #[cfg(target_os = "windows")]
+        {
+            let (anchor, aim) = self.desktop_widget_aim(window);
+            if let Err(message) = crate::desktop_widget::attach(window, widget.columns, widget.rows, anchor, aim) {
+                self.events.push(error(format!("desktop widget: {message}")));
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        let _ = (widget, window);
     }
     fn sync_custom_window_chrome(&mut self) {
         if self.document.window.decorations {
@@ -1951,7 +2082,9 @@ impl App {
                 && (position.1 - previous.1).abs() <= 4.0
         });
         if double_click {
-            window.set_maximized(!window.is_maximized());
+            if self.document.window.resizable {
+                window.set_maximized(!window.is_maximized());
+            }
             self.last_titlebar_click = None;
         } else {
             self.last_titlebar_click = Some((now, position));
@@ -2045,6 +2178,7 @@ impl ApplicationHandler<Command> for App {
         }
         let options = &self.document.window;
         let visible = options.visible;
+        keep_at_bottom(options.level == crate::protocol::WindowLevel::AlwaysOnBottom);
         let icon = self.document.window_icon.as_deref().map(window_icons);
         if let Some(Err(message)) = &icon {
             self.events.push(error(format!("window icon: {message}")));
@@ -2056,6 +2190,7 @@ impl ApplicationHandler<Command> for App {
             .with_min_inner_size(LogicalSize::new(options.min_width, options.min_height))
             .with_resizable(options.resizable)
             .with_decorations(options.decorations)
+            .with_window_level(winit_window_level(options.level))
             .with_visible(false);
         // Windows: a small title-bar icon and a large taskbar one. Elsewhere the
         // one window icon (X11 _NET_WM_ICON) serves every size, so it is the large one.
@@ -2064,7 +2199,8 @@ impl ApplicationHandler<Command> for App {
             use winit::platform::windows::WindowAttributesExtWindows;
             attributes = attributes
                 .with_window_icon(icon.as_ref().map(|icons| icons.small.clone()))
-                .with_taskbar_icon(icon.map(|icons| icons.large));
+                .with_taskbar_icon(icon.map(|icons| icons.large))
+                .with_skip_taskbar(options.skip_taskbar);
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -2099,21 +2235,34 @@ impl ApplicationHandler<Command> for App {
                         self.window = Some(window.clone());
                         self.motion_epoch = Instant::now();
                         self.apply_initial_window_position(event_loop, &window, false);
+                        self.attach_desktop_widget(&window);
                         self.sync_custom_window_chrome();
                         if let Err(error) = self.prepare() {
                             self.handle_render_error(event_loop, error);
                             return;
                         }
                         self.initialize_accessibility(event_loop, window.as_ref());
+                        #[cfg(target_os = "linux")]
+                        if let Err(message) = crate::x11_state::add_window_states(
+                            &window,
+                            &crate::x11_state::states_for(&self.document.window),
+                        ) {
+                            self.events.push(error(format!("window state: {message}")));
+                        }
                         // Keep the HWND hidden while WGPU, layout, text and the first scene are
                         // prepared. Making it visible immediately before the synchronous present
                         // prevents Windows from compositing an empty client area on startup.
                         if visible {
                             window.set_visible(true);
                         }
+                        if self.document.window.skip_taskbar {
+                            hide_from_task_switcher(&window);
+                        }
                         // Once visible, native decorations have their final outer dimensions.
                         // Re-apply the anchor to make native-chrome windows exact as well.
-                        self.apply_initial_window_position(event_loop, &window, true);
+                        if self.document.window.desktop_widget.is_none() {
+                            self.apply_initial_window_position(event_loop, &window, true);
+                        }
                         self.redraw_frame(event_loop);
                     }
                     Err(error) => self.fail(event_loop, error),
@@ -2168,6 +2317,13 @@ impl ApplicationHandler<Command> for App {
             }
             Command::Close => event_loop.exit(),
             Command::CancelCloseRequest => self.close_request_pending = false,
+            Command::WindowLevel { level } => {
+                self.document.window.level = level;
+                keep_at_bottom(level == crate::protocol::WindowLevel::AlwaysOnBottom);
+                if let Some(window) = &self.window {
+                    window.set_window_level(winit_window_level(level));
+                }
+            }
             Command::Window { action } => {
                 if let Some(window) = &self.window {
                     match action.as_str() {

@@ -341,6 +341,29 @@ pub struct WindowOptions {
     pub debug: bool,
     #[serde(default = "default_true")]
     pub visible: bool,
+    #[serde(default)]
+    pub level: WindowLevel,
+    /// Windows: no taskbar button and no Alt+Tab entry (a tool window).
+    #[serde(default)]
+    pub skip_taskbar: bool,
+    /// Windows: live on the desktop icon grid (see `desktop_widget`).
+    pub desktop_widget: Option<DesktopWidget>,
+}
+
+/// Size of a desktop widget in desktop icon cells.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+pub struct DesktopWidget {
+    pub columns: u32,
+    pub rows: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WindowLevel {
+    #[default]
+    Normal,
+    AlwaysOnTop,
+    AlwaysOnBottom,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub struct Document {
@@ -471,6 +494,9 @@ pub enum Command {
     CancelCloseRequest,
     Window {
         action: String,
+    },
+    WindowLevel {
+        level: WindowLevel,
     },
     Tray {
         tray: Option<TrayOptions>,
