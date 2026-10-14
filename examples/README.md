@@ -41,6 +41,8 @@ The examples cover:
 - `rich-content`: GFM Markdown, syntax-highlighted TypeScript, native code line numbers, and generated diffs.
 - `studio`: the Tarve Studio app from the launch film. A searchable, sortable `DataGrid`, an **Actions** `DropdownMenu` (open a source file into the `Code` tab, a **Build executable…** `Dialog` that compiles the example with `tarve/build`, a runtime dark/light theme switch), a `Sidebar`, a `Resizable` inspector with `Switch`, `Slider` and `Progress`, and `Tabs` holding `Code`, `Markdown` and `Diff`.
 - `performance`: the performance sequence from the launch film. A 100,000-row `VirtualList` whose **Fly to row** button animates the controlled offset to any row, and a card grid that reflows live as you resize the window.
+- `glass`: Liquid Glass as in iOS 26. `<Glass>` tab bar, toolbar, search field and settings sheet over a scrolling wallpaper, the `regular`/`clear`/`tinted` variants, dark appearance, and `<TitleBar glass>` as a full bar or a capsule. Windows (D3D11) only; other renderers paint the tints.
+- `liquid`: glass that flows. `<Glass merge>` drops fall onto a dock and fuse with it, a lens and an orbiting bead bend the wallpaper, and the pointer carries a drop of its own. Windows (D3D11) only.
 - `diff`: an interactive patch review with file sections, search, word-level changes, selectable text, collapsible files, and visible-line limits. **Open .patch / .diff** accepts Git patches and unified diffs up to 8 MB.
 
 Build any example as a standalone Windows executable with the package CLI:

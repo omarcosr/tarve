@@ -20,7 +20,18 @@ describe("TitleBar", () => {
     expect(bar.foreground).toBe("#ffffff");
     const close = [...tree.nodes.values()].find(node => node.windowAction === "close")!;
     expect([close.style.width, close.style.radius]).toEqual([36, 18]);
+    expect(bar.borderWidth).toEqual({ bottom: 1 });
+    expect(bar.boxShadow).toHaveLength(2);
     // `glass` alone is the regular material.
     expect(compileTree(<Window><TitleBar id="bar" glass /></Window>).nodes.get("bar")!.style.glass).toMatchObject({ blur: 8 });
+  });
+
+  test("a glass bar with a radius is a floating capsule: full rim, shadow, clipped corners", () => {
+    const tree = compileTree(<Window><TitleBar id="bar" glass style={{ radius: 22 }} /></Window>);
+    const bar = tree.nodes.get("bar")!.style;
+    expect(bar.radius).toBe(22);
+    expect(bar.borderWidth).toBe(1);
+    expect(bar.boxShadow).toHaveLength(4);
+    expect(bar.overflow).toBe("hidden");
   });
 });

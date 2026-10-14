@@ -1,11 +1,13 @@
 import {
   Glass,
+  memo,
   Pressable,
   Svg,
   Text,
   TitleBar,
   View,
   Window,
+  type MotionEasing,
   type VNode,
 } from "@tarve/core";
 
@@ -23,7 +25,7 @@ export const HEIGHT = 720;
 const DOCK = { left: 284, top: 580, width: 600, height: 92 };
 const RINGS = { x: 440, y: 380 };
 
-export interface Drop { id: string; size: number; x: number; y: number; opacity: number; duration: number; easing: "easeIn" | "easeOut" | "easeInOut" | "linear"; phase: number }
+export interface Drop { id: string; size: number; x: number; y: number; opacity: number; duration: number; easing: MotionEasing; phase: number }
 
 export const scene = {
   tab: 0,
@@ -85,7 +87,8 @@ export function step(): void {
   }
 }
 
-export function Wallpaper(): VNode {
+// Static, so a pointer move does not rebuild and re-serialize the hundreds of circles.
+export const Wallpaper = memo(function Wallpaper(): VNode {
   const dots: { x: number; y: number }[] = [];
   for (let y = 24; y < HEIGHT; y += 40) for (let x = 24; x < WIDTH; x += 40) dots.push({ x, y });
   return (
@@ -101,13 +104,13 @@ export function Wallpaper(): VNode {
       </Svg>
     </View>
   );
-}
+});
 
 function WeatherCard(): VNode {
   return (
     <Glass id="weather" variant="clear" tint="#ff3fa64d" radius={30} material={{ blur: 1, refraction: 44, magnify: 0.14, saturate: 1.3 }}
       style={{ position: "absolute", left: 60, top: 76, width: 420, height: 228, padding: 36, justify: "center", gap: 6 }}>
-      <Text size={64} weight={700} color="#ffffff" style={{ letterSpacing: -2, lineHeight: 64 }}>18°</Text>
+      <Text size={64} weight={700} color="#ffffff" style={{ letterSpacing: -2, lineHeight: 1 }}>18°</Text>
       <Text size={19} color="#ffffffd9">Lisbon · clear, light wind</Text>
     </Glass>
   );
@@ -132,7 +135,7 @@ function Orbiter(): VNode {
 function DockItem({ index, label }: { index: number; label: string }): VNode {
   const active = scene.tab === index;
   return (
-    <Pressable id={`dock-${index}`} control={{ role: "tab", label, selected: active } as never} onClick={() => { scene.tab = index; }}
+    <Pressable id={`dock-${index}`} control={{ role: "tab", label, selected: active }} onClick={() => { scene.tab = index; }}
       style={{ flex: 1, height: 64, radius: 32, align: "center", justify: "center", background: "#00000000", hover: { background: "#ffffff1f" }, transition: { background: { duration: 200, easing: "easeOut" } } }}>
       <Text size={20} weight={600} color={active ? "#ffd166" : "#ffffff"} style={{ transition: { foreground: { duration: 300, easing: "easeOut" } } }}>{label}</Text>
     </Pressable>
@@ -141,7 +144,7 @@ function DockItem({ index, label }: { index: number; label: string }): VNode {
 
 function Dock(): VNode {
   return (
-    // The dock is the surface the drops join: its material and tint are theirs too.
+    // Painted first, the dock is the surface the drops join: its tint, material and blend are the whole surface's.
     <Glass id="dock" variant="clear" tint="#bfe3ff4d" radius={46} merge="dock" blend={36} material={{ blur: 6, refraction: 44, magnify: 0.12, highlight: 1, saturate: 1.4 }}
       style={{ position: "absolute", ...DOCK, direction: "row", padding: 14, gap: 4 }}>
       <DockItem index={0} label="Home" />
@@ -156,7 +159,7 @@ function Drops(): VNode {
   return (
     <>
       {scene.falling.map(drop => (
-        <Glass key={drop.id} id={drop.id} variant="clear" radius={drop.size / 2} merge="dock" blend={36}
+        <Glass key={drop.id} id={drop.id} variant="clear" radius={drop.size / 2} merge="dock"
           style={{
             position: "absolute", left: drop.x, top: drop.y, width: drop.size, height: drop.size, opacity: drop.opacity,
             ...(drop.duration > 0 ? { transition: {
@@ -167,7 +170,7 @@ function Drops(): VNode {
           }} />
       ))}
       {scene.pointer && (
-        <Glass id="drop-pointer" variant="clear" radius={30} merge="dock" blend={36}
+        <Glass id="drop-pointer" variant="clear" radius={30} merge="dock"
           style={{ position: "absolute", left: scene.pointer.x - 30, top: scene.pointer.y - 30, width: 60, height: 60, transition: { left: { duration: 120, easing: "easeOut" }, top: { duration: 120, easing: "easeOut" } } }} />
       )}
     </>
@@ -188,7 +191,7 @@ export function App(): VNode {
   return (
     <Window title="Liquid" width={WIDTH} height={HEIGHT} resizable={false} style={{ background: "#2a0f52", radius: 0, borderWidth: 0 }}>
       <View id="stage" style={{ position: "relative", flex: 1, overflow: "hidden" }}
-        onPointerMove={({ x, y }: { x: number; y: number }) => { scene.pointer = { x, y }; }}
+        onPointerMove={({ x, y }) => { scene.pointer = { x, y }; }}
         onPointerLeave={() => { scene.pointer = null; }}>
         <Wallpaper />
         <WeatherCard />

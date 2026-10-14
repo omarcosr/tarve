@@ -181,6 +181,7 @@ export interface Style extends StateStyle {
   textDecorationStyle?: "solid" | "double" | "dotted" | "dashed" | "wavy";
   /** CSS `overflow`: `hidden`/`clip` clip children to the box and let it shrink below its content. */
   overflow?: "visible" | "hidden" | "clip";
+  /** Line height as a multiple of the font size (CSS unitless `line-height`), not px. */
   lineHeight?: number; textAlign?: "start" | "center" | "end";
   taskMarkerColor?: string; taskMarkerCheckColor?: string;
   markdownCodeBackground?: string; markdownQuoteBackground?: string; markdownQuoteAccent?: string;

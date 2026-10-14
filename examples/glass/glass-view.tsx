@@ -2,7 +2,6 @@ import {
   AnimatePresence,
   Column,
   Glass,
-  glassChrome,
   Icon,
   Input,
   Pressable,
@@ -16,7 +15,6 @@ import {
   Window,
   type GlassVariant,
   type IconName,
-  type Style,
   type VNode,
 } from "@tarve/core";
 
@@ -79,7 +77,6 @@ function Wallpaper(): VNode {
       ))}
       <Text id="clock" size={96} weight={800} color={dark ? "#ffffffd9" : "#1c1c1ee6"} style={{ position: "absolute", left: 24, top: 296, letterSpacing: -4 }}>09:41</Text>
       <Text id="date" size={22} weight={600} color={dark ? "#ffffffb3" : "#1c1c1eb3"} style={{ position: "absolute", left: 28, top: 406 }}>Tuesday, June 9</Text>
-      <Text id="tagline" size={44} weight={800} color={dark ? "#ffffffcc" : "#1c1c1ecc"} style={{ position: "absolute", left: 24, top: 745, letterSpacing: -1 }}>Liquid Glass</Text>
     </View>
   );
 }
@@ -87,7 +84,7 @@ function Wallpaper(): VNode {
 function TabItem({ index, icon, label }: { index: number; icon: IconName; label: string }) {
   const active = tab === index;
   return (
-    <Pressable id={`tab-${index}`} control={{ role: "tab", label, selected: active } as never} onClick={() => { tab = index; }}
+    <Pressable id={`tab-${index}`} control={{ role: "tab", label, selected: active }} onClick={() => { tab = index; }}
       style={{
         flex: 1, height: 48, radius: 24, align: "center", justify: "center", gap: 2, direction: "column",
         background: active ? (dark ? "#ffffff2e" : "#ffffffcc") : "#00000000",
@@ -113,7 +110,7 @@ function TabBar() {
       <AnimatePresence id="search-presence" present={!searching} exit={{ opacity: 0, width: 0 }} enter={{ opacity: 0 }}
         transition={{ opacity: { duration: 180 }, width: { duration: 260, easing: "easeInOut" } }}>
         <Glass id="search-button" variant={variant} appearance={appearance} radius={30} style={{ width: 60, height: 60, align: "center", justify: "center", overflow: "hidden" }}>
-          <Pressable id="search-open" control={{ role: "button", label: "Search" } as never} onClick={() => { searching = true; }}
+          <Pressable id="search-open" control={{ role: "button", label: "Search" }} onClick={() => { searching = true; }}
             style={{ width: 60, height: 60, radius: 30, align: "center", justify: "center", hover: { background: dark ? "#ffffff14" : "#ffffff55" } }}>
             <Icon name="search" size={22} color={dark ? "#ffffffdd" : "#1c1c1edd"} />
           </Pressable>
@@ -133,7 +130,7 @@ function SearchSheet() {
         <Icon name="search" size={20} color={dark ? "#ffffffaa" : "#1c1c1e99"} />
         <Input id="search-input" value={query} placeholder="Search Music" onChange={next => { query = next; }} onSubmit={() => { searching = false; }}
           style={{ flex: 1, background: "#00000000", borderWidth: 0, fontSize: 17, foreground: dark ? "#ffffff" : "#1c1c1e", placeholderColor: dark ? "#ffffff80" : "#1c1c1e80" }} />
-        <Pressable id="search-close" control={{ role: "button", label: "Close search" } as never} onClick={() => { searching = false; query = ""; }}
+        <Pressable id="search-close" control={{ role: "button", label: "Close search" }} onClick={() => { searching = false; query = ""; }}
           style={{ width: 44, height: 44, radius: 22, align: "center", justify: "center", background: dark ? "#ffffff1f" : "#ffffffaa" }}>
           <Icon name="x" size={18} color={dark ? "#ffffffdd" : "#1c1c1edd"} />
         </Pressable>
@@ -144,7 +141,7 @@ function SearchSheet() {
 
 function ToolButton({ id, icon, label, onClick, active }: { id: string; icon: IconName; label: string; onClick: () => void; active?: boolean }) {
   return (
-    <Pressable id={id} control={{ role: "button", label } as never} onClick={onClick}
+    <Pressable id={id} control={{ role: "button", label }} onClick={onClick}
       style={{
         width: 36, height: 36, radius: 18, align: "center", justify: "center",
         background: active ? "#ff2d55" : "#00000000", transition: { background: { duration: 200 } },
@@ -180,8 +177,7 @@ function TopBar() {
       </TitleBar>
     );
   }
-  const veil = variant === "clear" ? (dark ? "#00000014" : "#ffffff14") : variant === "tinted" ? (dark ? "#1c1c1e4d" : "#ffffff33") : (dark ? "#1c1c1e8c" : "#ffffff59");
-  return (
+    return (
     <Row id="top-bar" style={{ position: "absolute", left: 16, right: 16, top: 14, justify: "between", align: "center", gap: 10 }}>
       <Glass id="title-pill" variant={variant} appearance={appearance} radius={22} dragRegion style={{ height: 44, padding: { left: 18, right: 18 }, justify: "center", flex: 1 }}>
         <Text size={15} weight={700} color={ink}>{chrome.title} · {["Home", "New", "Library", "You"][tab]}</Text>
@@ -191,10 +187,9 @@ function TopBar() {
         <ToolButton id="tool-bell" icon="bell" label="Notifications" onClick={() => {}} />
         <ToolButton id="tool-settings" icon="settings" label="Settings" onClick={() => { sheet = !sheet; }} />
       </Glass>
-      <TitleBar id="chrome" height={44} showMinimize={chrome.showMinimize} showMaximize={chrome.showMaximize} showClose={chrome.showClose}
-        buttonStyle={{ width: 36, height: 36, radius: 18 }}
-        style={{ ...glassChrome(appearance, true), background: veil, glass: { blur: 8, saturate: 1.6, refraction: 22, highlight: 1, magnify: 0.06 },
-          radius: 22, padding: { left: 4, right: 4 }, gap: 2, overflow: "hidden", foreground: ink }} />
+      {/* A glass TitleBar with a radius is a capsule: full rim and shadow, round controls. */}
+      <TitleBar id="chrome" glass={variant} appearance={appearance} height={44} showMinimize={chrome.showMinimize} showMaximize={chrome.showMaximize} showClose={chrome.showClose}
+        style={{ radius: 22, padding: { left: 4, right: 4 }, gap: 2 }} />
     </Row>
   );
 }
@@ -205,7 +200,7 @@ function NowPlaying() {
   const muted = dark ? "#ffffffa0" : "#1c1c1ea0";
   return (
     <Glass id="now-playing" variant={variant} appearance={appearance} radius={28}
-      onPointerMove={({ x, y }: { x: number; y: number }) => { pointer = { x: x / 398, y: y / 176 }; }}
+      onPointerMove={({ x, y }) => { pointer = { x: x / 398, y: y / 176 }; }}
       style={{ position: "absolute", left: 16, right: 16, top: 76, height: 176, padding: 16, gap: 12, overflow: "hidden" }}>
       <View id="sheen" style={{
         position: "absolute", top: -120 + pointer.y * 80, left: -120 + pointer.x * 240, width: 300, height: 300, radius: 150,
@@ -223,12 +218,12 @@ function NowPlaying() {
       <Slider id="np-progress" label="Position" value={progress} min={0} max={1} step={0.001} onValueChange={next => { progress = next; }}
         style={{ height: 6, radius: 3, background: dark ? "#ffffff33" : "#1c1c1e22", foreground: fg }} />
       <Row gap={6} align="center" justify="center">
-        <ToolButton id="np-prev" icon="chevron-left" label="Previous" onClick={() => { progress = 0; }} />
-        <Pressable id="np-play" control={{ role: "button", label: playing ? "Pause" : "Play" } as never} onClick={() => { playing = !playing; }}
+        <ToolButton id="np-prev" icon="skip-back" label="Previous" onClick={() => { progress = 0; }} />
+        <Pressable id="np-play" control={{ role: "button", label: playing ? "Pause" : "Play" }} onClick={() => { playing = !playing; }}
           style={{ width: 52, height: 52, radius: 26, align: "center", justify: "center", background: fg, hover: { opacity: 0.9 } }}>
-          <Icon name={playing ? "minus" : "chevron-right"} size={22} color={dark ? "#1c1c1e" : "#ffffff"} />
+          <Icon name={playing ? "pause" : "play"} size={22} color={dark ? "#1c1c1e" : "#ffffff"} />
         </Pressable>
-        <ToolButton id="np-next" icon="chevron-right" label="Next" onClick={() => { progress = Math.min(1, progress + 0.1); }} />
+        <ToolButton id="np-next" icon="skip-forward" label="Next" onClick={() => { progress = Math.min(1, progress + 0.1); }} />
       </Row>
     </Glass>
   );
@@ -266,7 +261,7 @@ function SettingsSheet() {
   const appearance = dark ? "dark" : "light";
   const fg = dark ? "#ffffff" : "#1c1c1e";
   const chip = (value: GlassVariant) => (
-    <Pressable id={`variant-${value}`} control={{ role: "radio", label: value, checked: variant === value } as never} onClick={() => { variant = value; }}
+    <Pressable id={`variant-${value}`} control={{ role: "radio", label: value, checked: variant === value }} onClick={() => { variant = value; }}
       style={{
         height: 34, radius: 17, padding: { left: 14, right: 14 }, align: "center", justify: "center",
         background: variant === value ? fg : dark ? "#ffffff1f" : "#ffffff99", transition: { background: { duration: 180 } }
@@ -281,14 +276,14 @@ function SettingsSheet() {
         style={{ position: "absolute", left: 16, right: 16, top: 76, padding: 20, gap: 18 }}>
         <Row justify="between" align="center">
           <Text size={20} weight={700} color={fg}>Glass</Text>
-          <Pressable id="sheet-close" control={{ role: "button", label: "Close" } as never} onClick={() => { sheet = false; }}
+          <Pressable id="sheet-close" control={{ role: "button", label: "Close" }} onClick={() => { sheet = false; }}
             style={{ width: 32, height: 32, radius: 16, align: "center", justify: "center", background: dark ? "#ffffff1f" : "#ffffff99" }}>
             <Icon name="x" size={16} color={fg} />
           </Pressable>
         </Row>
         <Row gap={8}>{chip("regular")}{chip("clear")}{chip("tinted")}</Row>
-        <Switch id="dark-switch" label="Dark appearance" checked={dark} onCheckedChange={next => { dark = next; }} style={{ foreground: fg } as Style} />
-        <Switch id="bar-switch" label="Full-width glass title bar" checked={fullBar} onCheckedChange={next => { fullBar = next; }} style={{ foreground: fg } as Style} />
+        <Switch id="dark-switch" label="Dark appearance" checked={dark} onCheckedChange={next => { dark = next; }} style={{ foreground: fg }} />
+        <Switch id="bar-switch" label="Full-width glass title bar" checked={fullBar} onCheckedChange={next => { fullBar = next; }} style={{ foreground: fg }} />
         <Column gap={6}>
           <Text size={13} color={dark ? "#ffffffa0" : "#1c1c1ea0"}>Volume</Text>
           <Slider id="volume" label="Volume" value={volume} min={0} max={1} step={0.01} onValueChange={next => { volume = next; }}

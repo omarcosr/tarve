@@ -7,7 +7,8 @@ export type IconName =
   | "chevron-down" | "chevron-up" | "chevron-right" | "chevron-left"
   | "search" | "info"
   | "house" | "settings" | "user" | "bell" | "heart" | "star"
-  | "download" | "trash-2" | "folder" | "mail";
+  | "download" | "trash-2" | "folder" | "mail"
+  | "play" | "pause" | "skip-back" | "skip-forward";
 
 export interface IconProps extends BaseProps {
   name?: IconName;
@@ -41,6 +42,10 @@ const icons: Record<IconName, readonly SvgNode[]> = {
   "trash-2": [["path", { d: "M3 6h18M8 6V4h8v2m-9 0 1 15h8l1-15M10 10v7M14 10v7" }]],
   folder: [["path", { d: "M3 5h6l2 2h10v12H3z" }]],
   mail: [["rect", { x: 3, y: 5, width: 18, height: 14, rx: 2 }], ["path", { d: "m3 7 9 6 9-6" }]],
+  play: [["polygon", { points: "6 3 20 12 6 21 6 3" }]],
+  pause: [["rect", { x: 14, y: 4, width: 4, height: 16, rx: 1 }], ["rect", { x: 6, y: 4, width: 4, height: 16, rx: 1 }]],
+  "skip-back": [["polygon", { points: "19 20 9 12 19 4 19 20" }], ["line", { x1: 5, x2: 5, y1: 19, y2: 5 }]],
+  "skip-forward": [["polygon", { points: "5 4 15 12 5 20 5 4" }], ["line", { x1: 19, x2: 19, y1: 5, y2: 19 }]],
 };
 
 export function Icon({ name, iconNode, size = 16, color = theme.colors.foreground, strokeWidth = 1.75, style, ...props }: IconProps): VNode {

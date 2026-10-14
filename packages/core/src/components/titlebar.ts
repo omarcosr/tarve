@@ -17,9 +17,11 @@ export interface TitleBarProps extends ViewProps {
   /** Style merged into each window control (minimize, maximize, close): size, radius, colours. */
   buttonStyle?: Style;
   /**
-   * Liquid Glass bar: `true` for the `regular` material, or a variant. The bar keeps no
-   * bottom border and its controls go round; lay it over content (`position: "absolute"`)
-   * for the backdrop to show through, as the window background alone is only the veil.
+   * Liquid Glass bar: `true` for the `regular` material, or a variant. Its controls go
+   * round. Edge to edge (no `radius` in `style`) it keeps only a hairline along its bottom;
+   * with a `radius` it is a floating capsule with the full rim and shadow. Lay it over
+   * content (`position: "absolute"`) for the backdrop to show through, as the window
+   * background alone is only the veil.
    */
   glass?: boolean | GlassVariant;
   /** Light or dark glass; sets the ink of the title and controls. Default `light`. */
@@ -69,8 +71,13 @@ export function TitleBar({
   style,
   ...props
 }: TitleBarProps): VNode {
+  const radius = typeof style?.radius === "number" ? style.radius : 0;
   const surface: Style | undefined = glass
-    ? { ...glassSurface(glass === true ? "regular" : glass, appearance, { radius: 0, shadow: false }), borderWidth: { bottom: 1 }, foreground: appearance === "dark" ? "#ffffff" : "#1c1c1e" }
+    ? {
+        ...glassSurface(glass === true ? "regular" : glass, appearance, { radius, shadow: radius > 0 }),
+        ...(radius > 0 ? { overflow: "hidden" } : { borderWidth: { bottom: 1 } }),
+        foreground: appearance === "dark" ? "#ffffff" : "#1c1c1e",
+      }
     : undefined;
   const controlStyle: Style | undefined = glass ? { width: 36, height: 36, radius: 18, ...buttonStyle } : buttonStyle;
   // The controls draw in the bar's foreground, so a dark bar on a light theme

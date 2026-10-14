@@ -1,6 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { Glass, Window } from "./components";
+import { Glass, over, Window } from "./components";
 import { compileTree } from "./reconciler";
+
+describe("over", () => {
+  test("composites a hex colour over another, source-over", () => {
+    expect(over("#ff0000", "#0000ff")).toBe("#ff0000ff");
+    expect(over("#ff000080", "#0000ff")).toBe("#80007fff");
+    expect(over("#fff", "#00000000")).toBe("#ffffffff");
+    expect(over("#00000000", "#00000000")).toBe("#00000000");
+  });
+
+  test("leaves anything that is not a hex colour alone", () => {
+    expect(over("linear-gradient(90deg, #fff, #000)", "#ffffff59")).toBe("linear-gradient(90deg, #fff, #000)");
+    expect(over("#ff0000", "red")).toBe("#ff0000");
+  });
+});
 
 describe("Glass", () => {
   test("declares the material with the veil as its tint and the rim as chrome", () => {
@@ -21,7 +35,9 @@ describe("Glass", () => {
     );
     const style = tree.nodes.get("clear")!.style;
     expect(style.glass).toEqual({ blur: 4, saturate: 1.25, refraction: 28, highlight: 0.55, magnify: 0.1 });
-    expect(style.background).toBe("#ff000040");
+    // The tint over the dark clear veil `#00000014`.
+    expect(style.background).toBe(over("#ff000040", "#00000014"));
+    expect(style.background).toBe("#cf00004f");
     expect(style.radius).toBe(12);
     expect(style.width).toBe(10);
     expect(Array.isArray(style.boxShadow) && style.boxShadow.length).toBe(2);
