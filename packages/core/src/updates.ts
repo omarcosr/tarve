@@ -68,7 +68,8 @@ export interface InstallUpdateOptions {
   args?: string[];
 }
 
-const SPKI_ED25519 = Buffer.from("302a300506032b6570032100", "hex");
+/** DER prefix of an Ed25519 SubjectPublicKeyInfo; the raw 32-byte key follows. */
+const SPKI_ED25519 = "302a300506032b6570032100";
 const MAX_MANIFEST_BYTES = 1 << 20;
 const VERSION = /^v?\d+(\.\d+){0,3}(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/;
 const PLATFORM = /^[a-z0-9]+-[a-z0-9]+$/;
@@ -135,7 +136,7 @@ export function verifyUpdateManifest(signed: SignedUpdateManifest, publicKey: st
   const raw = Buffer.from(publicKey.trim(), "base64");
   if (raw.length !== 32) throw new TypeError("Update public key must be 32 bytes of base64 (tarve keygen)");
   const signature = Buffer.from(signed.signature, "base64");
-  const key = createPublicKey({ key: Buffer.concat([SPKI_ED25519, raw]), format: "der", type: "spki" });
+  const key = createPublicKey({ key: Buffer.concat([Buffer.from(SPKI_ED25519, "hex"), raw]), format: "der", type: "spki" });
   if (signature.length !== 64 || !verify(null, Buffer.from(signed.payload, "utf8"), key, signature)) {
     throw new Error("Update manifest signature is invalid");
   }
