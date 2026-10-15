@@ -61,6 +61,21 @@ describe("controlled native reconciliation", () => {
     app.close();
   });
 
+  test("a Window title change reaches the running window", async () => {
+    const bridge = new FakeBridge();
+    let title = "First";
+    const app = createApp(() => <Window title={title}><Text>x</Text></Window>, { bridge });
+    await app.ready;
+    expect(bridge.document?.window.title).toBe("First");
+    title = "Second";
+    app.update();
+    await Promise.resolve();
+    app.update();
+    await Promise.resolve();
+    expect(bridge.commands.filter(command => command.type === "windowTitle")).toEqual([{ type: "windowTitle", title: "Second" }]);
+    app.close();
+  });
+
   test("native motion completion reaches the node handler", async () => {
     const bridge = new FakeBridge();
     const completed: string[] = [];

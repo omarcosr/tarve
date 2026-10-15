@@ -49,6 +49,8 @@ function nodePropertiesChanged(old: NativeNode, node: NativeNode): boolean {
     || old.showLineNumbers !== node.showLineNumbers || (old.syntaxTheme !== node.syntaxTheme && !sameValue(old.syntaxTheme, node.syntaxTheme))
     || old.wordDiff !== node.wordDiff || (old.collapsedPaths !== node.collapsedPaths && !sameValue(old.collapsedPaths, node.collapsedPaths)) || old.maxLines !== node.maxLines
     || old.oldText !== node.oldText || old.newText !== node.newText
+    // Styled runs: the same text bolded, or a rich text area's formatting.
+    || (old.runs !== node.runs && !sameValue(old.runs, node.runs))
     || old.src !== node.src || old.fit !== node.fit || (old.svg !== node.svg && !sameValue(old.svg, node.svg))
     // Image bytes: the serialized string is shared per source object, so equal sources compare by identity.
     || old.image?.key !== node.image?.key || old.image?.kind !== node.image?.kind || old.image?.data !== node.image?.data

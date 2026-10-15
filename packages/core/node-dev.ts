@@ -6,6 +6,7 @@ import { context, build } from "esbuild";
 import { nativePath } from "#tarve/runtime";
 import type { Plugin } from "esbuild";
 import { fileImportAttributes } from "./esbuild-file-imports";
+import { frameworkPlugins } from "./framework-plugins";
 
 /**
  * The app bundle lives in a temp directory, so modules that locate files next to
@@ -42,6 +43,7 @@ process.on("message", message => {
 });
 process.on("disconnect", () => process.exit(0));
 `);
+  const frameworks = await frameworkPlugins(entrypoint);
   let child: ChildProcess | undefined;
   let readyToReload = false;
   // The first build and the watcher's own initial build both precede any edit.
@@ -51,7 +53,7 @@ process.on("disconnect", () => process.exit(0));
     bundle: true, platform: "node", format: "esm", target: "node26",
     jsx: "automatic", jsxImportSource: "@tarve/core",
     loader: { ".png": "file", ".jpg": "file", ".jpeg": "file", ".webp": "file", ".gif": "file", ".svg": "file" },
-    plugins: [installedBuildApi, fileImportAttributes, {
+    plugins: [installedBuildApi, fileImportAttributes, ...frameworks, {
       name: "tarve-node-hot",
       setup(build) {
         build.onEnd(result => {
@@ -109,12 +111,13 @@ export async function runNode(entrypoint: string): Promise<number> {
   const directory = mkdtempSync(join(tmpdir(), "tarve-node-run-"));
   try {
     const app = join(directory, "app.mjs");
+    const frameworks = await frameworkPlugins(entrypoint);
     await build({
       entryPoints: [resolve(entrypoint)], outfile: app,
       bundle: true, platform: "node", format: "esm", target: "node26",
       jsx: "automatic", jsxImportSource: "@tarve/core",
       loader: { ".png": "file", ".jpg": "file", ".jpeg": "file", ".webp": "file", ".gif": "file", ".svg": "file" },
-      plugins: [installedBuildApi, fileImportAttributes],
+      plugins: [installedBuildApi, fileImportAttributes, ...frameworks],
     });
     const result = spawnSync(nodeExecutable(), ["--disable-warning=ExperimentalWarning", app], {
       stdio: "inherit",

@@ -182,6 +182,65 @@ fn wheel_lines_per_notch() -> f64 {
     3.0
 }
 
+/// A DOM `KeyboardEvent` for a winit key: `key` and `code` use the DOM names
+/// (winit's named keys and key codes are spelled the same way).
+pub(crate) fn dom_keyboard_event(
+    event: &winit::event::KeyEvent,
+    modifiers: ModifiersState,
+    focused: Option<&str>,
+) -> serde_json::Value {
+    let key = match &event.logical_key {
+        Key::Character(text) => text.to_string(),
+        Key::Named(NamedKey::Space) => " ".to_string(),
+        Key::Named(named) => format!("{named:?}"),
+        // Text injected as Unicode (VK_PACKET: on-screen keyboards, password managers,
+        // SendInput) has no key of its own: like a browser, the key is the character.
+        _ => event
+            .text
+            .as_deref()
+            .filter(|text| !text.is_empty() && !text.chars().any(char::is_control))
+            .unwrap_or("Unidentified")
+            .to_string(),
+    };
+    let code = match event.physical_key {
+        winit::keyboard::PhysicalKey::Code(code) => format!("{code:?}"),
+        _ => "Unidentified".to_string(),
+    };
+    json!({
+        "type": "keyboard",
+        "phase": if event.state == ElementState::Pressed { "down" } else { "up" },
+        "id": focused,
+        "key": key,
+        "code": code,
+        "repeat": event.repeat,
+        "ctrlKey": modifiers.control_key(),
+        "altKey": modifiers.alt_key(),
+        "shiftKey": modifiers.shift_key(),
+        "metaKey": modifiers.super_key(),
+    })
+}
+
+impl App {
+    /// A DOM-style `pointer` event at the pointer, on the deepest node under it.
+    fn dom_pointer_event(&self, phase: &str, extra: serde_json::Value) -> serde_json::Value {
+        let mut event = json!({
+            "type": "pointer",
+            "phase": phase,
+            "id": self.tree.hover_path().last(),
+            "x": self.tree.mouse.0,
+            "y": self.tree.mouse.1,
+            "ctrlKey": self.modifiers.control_key(),
+            "altKey": self.modifiers.alt_key(),
+            "shiftKey": self.modifiers.shift_key(),
+            "metaKey": self.modifiers.super_key(),
+        });
+        if let (Some(event), serde_json::Value::Object(extra)) = (event.as_object_mut(), extra) {
+            event.extend(extra);
+        }
+        event
+    }
+}
+
 pub(crate) fn word_modifier(modifiers: ModifiersState) -> bool {
     if cfg!(target_os = "macos") {
         modifiers.alt_key()
@@ -2428,6 +2487,12 @@ impl ApplicationHandler<Command> for App {
             }
             Command::Close => event_loop.exit(),
             Command::CancelCloseRequest => self.close_request_pending = false,
+            Command::WindowTitle { title } => {
+                if let Some(window) = &self.window {
+                    window.set_title(&title);
+                }
+                self.document.window.title = title;
+            }
             Command::WindowLevel { level } => {
                 self.document.window.level = level;
                 keep_at_bottom(level == crate::protocol::WindowLevel::AlwaysOnBottom);
@@ -2566,6 +2631,38 @@ impl ApplicationHandler<Command> for App {
                     Ok(events) => self.emit(events),
                     Err(message) => self.events.push(error(message)),
                 }
+            }
+            Command::Selection { request_id } => {
+                let focused = self.tree.focused.clone();
+                let selection = focused
+                    .as_deref()
+                    .and_then(|id| self.tree.accessibility_text_selection(id));
+                let (anchor, focus) = selection.unwrap_or((0, 0));
+                let id = focused.filter(|_| selection.is_some());
+                self.events.push(json!({"type":"selection", "requestId":request_id, "target":id, "anchor":anchor, "focus":focus}));
+            }
+            Command::Layout { ids, request_id } => {
+                let size = self
+                    .window
+                    .as_ref()
+                    .map(|window| window.inner_size().to_logical::<f32>(window.scale_factor()))
+                    .filter(|size| size.width > 0.0 && size.height > 0.0)
+                    .map(|size| (size.width, size.height))
+                    // Before the window exists (or while minimized) the requested size stands in.
+                    .unwrap_or((self.document.window.width as f32, self.document.window.height as f32));
+                match self.tree.compute(size.0, size.1) {
+                    Ok(()) => {
+                        let events = self.tree.take_layout_events();
+                        self.emit(events);
+                    }
+                    Err(message) => self.events.push(error(message)),
+                }
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+                let boxes = self.tree.layout_boxes(&ids);
+                self.events
+                    .push(json!({"type":"layout", "requestId":request_id, "boxes":boxes}));
             }
             Command::Inspect { request_id } => {
                 if let Err(e) = self.prepare() {
@@ -2813,7 +2910,34 @@ impl ApplicationHandler<Command> for App {
             self.sync_input_clock();
         }
         let mut events = vec![];
+        // DOM-style input events go first; the match below may replace `events`.
+        let mut dom_events = vec![];
         let mut accessibility_changed = false;
+        // Apps that listen to every key (a DOM `keydown`) get both phases first,
+        // whatever is focused; Tarve's own key handling still follows.
+        if self.document.keyboard_events
+            && let WindowEvent::KeyboardInput { event: key_event, .. } = &event
+        {
+            dom_events.push(dom_keyboard_event(
+                key_event,
+                self.modifiers,
+                self.tree.focused.as_deref(),
+            ));
+        }
+        if self.document.pointer_events
+            && let WindowEvent::MouseInput { state, button, .. } = &event
+        {
+            let button = match button {
+                MouseButton::Left => 0,
+                MouseButton::Middle => 1,
+                MouseButton::Right => 2,
+                MouseButton::Back => 3,
+                MouseButton::Forward => 4,
+                MouseButton::Other(other) => 5 + i64::from(*other),
+            };
+            let phase = if *state == ElementState::Pressed { "down" } else { "up" };
+            dom_events.push(self.dom_pointer_event(phase, json!({ "button": button })));
+        }
         match event {
             WindowEvent::CloseRequested => self.request_close(event_loop),
             WindowEvent::Resized(size) => {
@@ -2927,6 +3051,11 @@ impl ApplicationHandler<Command> for App {
                 if self.modifiers.shift_key() && dx.abs() <= f64::EPSILON {
                     dx = dy;
                     dy = 0.0;
+                }
+                if self.document.pointer_events {
+                    dom_events.push(
+                        self.dom_pointer_event("wheel", json!({ "deltaX": dx, "deltaY": dy })),
+                    );
                 }
                 events = if notch {
                     self.tree.wheel_notch(dx, dy)
@@ -3093,6 +3222,10 @@ impl ApplicationHandler<Command> for App {
             _ => {}
         }
         events.extend(self.tree.take_interaction_events());
+        if !dom_events.is_empty() {
+            dom_events.append(&mut events);
+            events = dom_events;
+        }
         self.emit(events);
         if accessibility_changed {
             self.sync_accessibility();

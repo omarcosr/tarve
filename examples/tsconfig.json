@@ -8,7 +8,9 @@
     "skipLibCheck": true,
     "jsx": "react-jsx",
     "jsxImportSource": "@tarve/core",
-    "types": ["bun", "@tarve/core/assets"]
+    "types": ["bun", "@tarve/core/assets"],
+    // Linked packages (@tarve/svelte, @tarve/react-icons) resolve their imports from here, not from their source folder.
+    "preserveSymlinks": true
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules", "**/dist", "studio/studio-samples"]

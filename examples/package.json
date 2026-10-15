@@ -22,6 +22,7 @@
     "glass": "tarve run glass/glass.tsx",
     "liquid": "tarve run liquid/liquid.tsx",
     "tailwind": "tarve run tailwind/tailwind.tsx",
+    "svelte": "tarve run svelte/main.ts",
     "check": "bun node_modules/typescript/bin/tsc --noEmit && bun node_modules/typescript/bin/tsc --noEmit -p studio/studio-samples && bun studio/studio-samples/generate.ts --check",
     "build:basic": "tarve build basic/basic.tsx --outfile dist/Basic.exe",
     "build:counter": "tarve build counter/counter.tsx --outfile dist/Counter.exe",
@@ -43,13 +44,15 @@
     "build:widget": "tarve build widget/widget.tsx --outfile dist/Widget.exe",
     "build:glass": "tarve build glass/glass.tsx --outfile dist/LiquidGlass.exe",
     "build:liquid": "tarve build liquid/liquid.tsx --outfile dist/Liquid.exe",
-    "build:tailwind": "tarve build tailwind/tailwind.tsx --outfile dist/Tailwind.exe"
+    "build:tailwind": "tarve build tailwind/tailwind.tsx --outfile dist/Tailwind.exe",
+    "build:svelte": "tarve build svelte/main.ts --outfile dist/Svelte.exe"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
     "@phosphor-icons/react": "^2.1.10",
     "@tabler/icons-react": "^3.48.0",
     "@tarve/react-icons": "file:../packages/react-icons",
+    "@tarve/svelte": "file:../packages/svelte",
     "lucide-react": "^1.47.0"
   },
   "devDependencies": {

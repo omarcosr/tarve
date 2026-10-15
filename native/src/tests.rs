@@ -3973,6 +3973,51 @@ fn report_size_sends_the_inner_size_once_per_change() {
 }
 
 #[test]
+fn shift_runs_keeps_rich_text_styles_on_their_text_across_edits() {
+    let runs = |pairs: &[(usize, usize)]| json!(pairs.iter().map(|(s, e)| json!({"start":s, "end":e, "style":{}})).collect::<Vec<_>>());
+    let spans = |value: &serde_json::Value| -> Vec<(u64, u64)> {
+        value.as_array().unwrap().iter().map(|run| (run["start"].as_u64().unwrap(), run["end"].as_u64().unwrap())).collect()
+    };
+    // Typing at the end of a bold run extends it.
+    let mut value = runs(&[(2, 4)]);
+    crate::tree::shift_runs(&mut value, "abCDef", "abCDxef");
+    assert_eq!(spans(&value), vec![(2, 5)]);
+    // Typing before a run shifts it; typing at the very start keeps the first run's start.
+    let mut value = runs(&[(2, 4)]);
+    crate::tree::shift_runs(&mut value, "abCDef", "xabCDef");
+    assert_eq!(spans(&value), vec![(3, 5)]);
+    let mut value = runs(&[(0, 2)]);
+    crate::tree::shift_runs(&mut value, "ABcd", "xABcd");
+    assert_eq!(spans(&value), vec![(0, 3)]);
+    // Deleting across a run's start trims it; deleting all of it drops it.
+    let mut value = runs(&[(2, 4)]);
+    crate::tree::shift_runs(&mut value, "abCDef", "aDef");
+    assert_eq!(spans(&value), vec![(1, 2)]);
+    let mut value = runs(&[(2, 4)]);
+    crate::tree::shift_runs(&mut value, "abCDef", "abef");
+    assert!(spans(&value).is_empty());
+    // Multi-byte text keeps offsets on character boundaries.
+    let mut value = runs(&[(0, 3)]);
+    crate::tree::shift_runs(&mut value, "çaX", "çaéX");
+    assert_eq!(spans(&value), vec![(0, 5)]);
+}
+
+#[test]
+fn layout_boxes_answer_a_synchronous_layout_read() {
+    let card = node("card", "view", json!({"width":120,"height":40,"padding":5,"margin":{"left":10,"top":7}}), vec![]);
+    let mut tree = Tree::new(root(vec![card]));
+    tree.compute(300.0, 200.0).unwrap();
+    let boxes = tree.layout_boxes(&["card".to_string(), "missing".to_string()]);
+    assert_eq!(boxes.len(), 1, "unknown ids are skipped");
+    let card = &boxes["card"];
+    assert_eq!(card["borderWidth"], 120.0);
+    assert_eq!(card["borderHeight"], 40.0);
+    assert_eq!(card["width"], 110.0);
+    assert_eq!(card["height"], 30.0);
+    assert_eq!(card["x"].as_f64(), Some(tree.entries["card"].rect.x0));
+}
+
+#[test]
 fn released_image_pixels_come_back_when_a_texture_needs_them() {
     let path = std::env::temp_dir().join(format!("tarve-image-release-{}.png", std::process::id()));
     image::RgbaImage::from_pixel(4, 4, image::Rgba([10, 20, 30, 255]))

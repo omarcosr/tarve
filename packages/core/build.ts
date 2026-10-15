@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nativePath } from "#tarve/runtime";
 import { buildMetadata, writeLinuxDesktopEntry } from "./package-metadata";
+import { frameworkPlugins } from "./framework-plugins";
 import { BUILD_TARGETS, hostBuildTarget, isBuildTarget, targetConfig, type BuildTarget } from "./targets";
 import {
   NATIVE_COMPATIBILITY_MANIFEST_NAME,
@@ -148,7 +149,7 @@ export async function build(options: BuildOptions): Promise<string> {
     const result = await Bun.build({
       entrypoints: [entrypoint],
       target: "bun",
-      plugins: [runtime],
+      plugins: [runtime, ...await frameworkPlugins<BunPlugin>(entrypoint)],
       define: { "process.env.NODE_ENV": JSON.stringify("production"), ...define },
       minify: true,
       compile: {

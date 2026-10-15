@@ -1,4 +1,4 @@
-import type { FileDialogOptions, NativeEvent, NativeCommand, NativeStats, NativeSystemMediaSession, PhaseSummary, Renderer, Snapshot } from "./protocol";
+import type { FileDialogOptions, LayoutBox, NativeEvent, NativeCommand, NativeStats, NativeSystemMediaSession, PhaseSummary, Renderer, Snapshot } from "./protocol";
 import { readFileSync } from "node:fs";
 import { applyMediaEvent, type MediaController } from "./media-element";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
@@ -63,6 +63,10 @@ export interface AppOptions {
    * many samples, smoother clip edges (rounded `overflow: hidden`, gradients). `TARVE_MSAA` overrides it.
    */
   msaa?: 0 | 2 | 4 | 8;
+  /** Report every key press and release to `onEvent` as `keyboard` events (DOM `key`/`code`), whatever is focused. */
+  keyboardEvents?: boolean;
+  /** Report every mouse button press/release and wheel turn to `onEvent` as `pointer` events, on the deepest node under the pointer. */
+  pointerEvents?: boolean;
   /**
    * Windows: after this many ms without a new frame (default 3000), return the pages only
    * startup touched to the OS, so Task Manager shows what the app really uses. `false` never
@@ -119,6 +123,20 @@ export interface AppHandle {
   ready: Promise<void>;
   closed: Promise<void>;
   update(): void;
+  /** Renders a queued `update()` now instead of at the end of the task. */
+  flush(): void;
+  /**
+   * Lays the window out now and returns these nodes' boxes: a synchronous layout
+   * read (`getBoundingClientRect` right after a change). Renders a queued update
+   * first and blocks until native answers. `undefined` when the bridge cannot
+   * answer synchronously or native did not answer in time.
+   */
+  layout(ids: string[]): Record<string, LayoutBox> | undefined;
+  /**
+   * The focused text field and its selection (UTF-8 offsets into its value), read
+   * synchronously. `undefined` when nothing editable has focus or the bridge cannot answer.
+   */
+  textSelection(): { id: string; anchor: number; focus: number } | undefined;
   close(): void;
   focus(id: string): void;
   /** Scrolls a variable VirtualList to an item; `smooth` eases there like CSS `scroll-behavior: smooth`. */
@@ -222,6 +240,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     if (options.closeBehavior === "hide") tree.document.root.closeIntercept = true;
     Object.assign(tree.document, appIdentityDocument());
     if (options.msaa !== undefined) tree.document.msaa = options.msaa;
+    if (options.keyboardEvents) tree.document.keyboardEvents = true;
+    if (options.pointerEvents) tree.document.pointerEvents = true;
     if (options.memoryTrimDelay !== undefined) tree.document.memoryTrimDelay = options.memoryTrimDelay === false ? -1 : options.memoryTrimDelay;
     return tree;
   }
@@ -353,60 +373,68 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   function update(): void {
     if (queued || ended || closing || !committed || !observed) return;
     queued = true;
-    queueMicrotask(() => {
-      queued = false;
-      if (ended || closing || !committed || !observed) return;
-      const updateStarted = performance.now();
+    queueMicrotask(() => { if (queued) renderQueued(); });
+  }
 
-      let next: CompiledTree;
-      try {
-        next = jsStats.render.time(compileView);
-        if (committed.document.window.decorations !== next.document.window.decorations) {
-          throw new Error("Adding or removing TitleBar after the native window has been created is not supported. Recreate the Window instead.");
-        }
-      } catch (error) {
-        reportError(error, { source: "render", event: "update" });
+  /** Renders the queued update and sends its patch. */
+  function renderQueued(): void {
+    queued = false;
+    if (ended || closing || !committed || !observed) return;
+    const updateStarted = performance.now();
+
+    let next: CompiledTree;
+    try {
+      next = jsStats.render.time(compileView);
+      if (committed.document.window.decorations !== next.document.window.decorations) {
+        throw new Error("Adding or removing TitleBar after the native window has been created is not supported. Recreate the Window instead.");
+      }
+    } catch (error) {
+      reportError(error, { source: "render", event: "update" });
+      restoreCommitted();
+      return;
+    }
+
+    let command: NativeCommand | undefined;
+    try {
+      const current = observed;
+      command = jsStats.diff.time(() => reconciliationCommand(current, next));
+    } catch (error) {
+      reportError(error, { source: "render", event: "diff" });
+      restoreCommitted();
+      return;
+    }
+
+    let nextObserved: CompiledTree;
+    try {
+      const current = observed;
+      nextObserved = jsStats.shadow.time(() => nativeShadow(next, current));
+    } catch (error) {
+      reportError(error, { source: "render", event: "shadow" });
+      restoreCommitted();
+      return;
+    }
+
+    if (command) {
+      const patch = command;
+      if (!jsStats.send.time(() => sendInternal(patch, { source: "bridge", event: patch.type }))) {
         restoreCommitted();
         return;
       }
+    }
 
-      let command: NativeCommand | undefined;
-      try {
-        const current = observed;
-        command = jsStats.diff.time(() => reconciliationCommand(current, next));
-      } catch (error) {
-        reportError(error, { source: "render", event: "diff" });
-        restoreCommitted();
-        return;
-      }
-
-      let nextObserved: CompiledTree;
-      try {
-        const current = observed;
-        nextObserved = jsStats.shadow.time(() => nativeShadow(next, current));
-      } catch (error) {
-        reportError(error, { source: "render", event: "shadow" });
-        restoreCommitted();
-        return;
-      }
-
-      if (command) {
-        const patch = command;
-        if (!jsStats.send.time(() => sendInternal(patch, { source: "bridge", event: patch.type }))) {
-          restoreCommitted();
-          return;
-        }
-      }
-
-      const level = next.document.window.level ?? "normal";
-      if ((committed.document.window.level ?? "normal") !== level) {
-        sendInternal({ type: "windowLevel", level }, { source: "bridge", event: "windowLevel" });
-      }
-      committed = next;
-      observed = nextObserved;
-      syncMedia();
-      jsStats.update.push(performance.now() - updateStarted);
-    });
+    const level = next.document.window.level ?? "normal";
+    if ((committed.document.window.level ?? "normal") !== level) {
+      sendInternal({ type: "windowLevel", level }, { source: "bridge", event: "windowLevel" });
+    }
+    // The title is a window option: native sets it at creation, later renders send it.
+    const title = next.document.window.title;
+    if (committed.document.window.title !== title) {
+      sendInternal({ type: "windowTitle", title }, { source: "bridge", event: "windowTitle" });
+    }
+    committed = next;
+    observed = nextObserved;
+    syncMedia();
+    jsStats.update.push(performance.now() - updateStarted);
   }
 
   /**
@@ -558,7 +586,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       viewport = { width: event.width, height: event.height };
       if (crossed) update();
     }
-    if (!ended && committed && observed && "id" in event) {
+    // `keyboard` and `pointer` events go to `onEvent` listeners only: they name the focused node, not a handler.
+    if (!ended && committed && observed && event.type !== "keyboard" && event.type !== "pointer" && "id" in event) {
       const handlers = committed.handlers.get(event.id);
       if (handlers) invalidateMemos(renderScope, event.id);
       let optimisticEdit = false;
@@ -608,7 +637,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       try {
         listener(event);
       } catch (error) {
-        reportError(error, { source: "listener", event: event.type, ...( "id" in event ? { targetId: event.id } : {}) });
+        reportError(error, { source: "listener", event: event.type, ...("id" in event && event.id !== null ? { targetId: event.id } : {}) });
       }
     }
   }
@@ -617,6 +646,31 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     ready,
     closed,
     update,
+    flush(): void {
+      if (queued) renderQueued();
+    },
+    layout(ids: string[]): Record<string, LayoutBox> | undefined {
+      if (ended || closing || !bridge.requestSync) return undefined;
+      if (queued) renderQueued();
+      try {
+        // Startup can wait for the window and graphics device to come up.
+        const event = bridge.requestSync({ type: "layout", ids, requestId: crypto.randomUUID() }, started ? 1000 : 5000);
+        return event?.type === "layout" ? event.boxes : undefined;
+      } catch (error) {
+        reportError(error, { source: "bridge", event: "layout" });
+        return undefined;
+      }
+    },
+    textSelection(): { id: string; anchor: number; focus: number } | undefined {
+      if (ended || closing || !bridge.requestSync) return undefined;
+      try {
+        const event = bridge.requestSync({ type: "selection", requestId: crypto.randomUUID() }, 1000);
+        return event?.type === "selection" && event.target !== null ? { id: event.target, anchor: event.anchor, focus: event.focus } : undefined;
+      } catch (error) {
+        reportError(error, { source: "bridge", event: "selection" });
+        return undefined;
+      }
+    },
     close(): void {
       if (ended || closing) return;
       sendPublic({ type: "close" });

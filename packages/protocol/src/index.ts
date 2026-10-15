@@ -350,6 +350,10 @@ export interface SceneDocument {
   appIdentity?: { id: string; name: string; icon?: string };
   /** Window and taskbar icon: base64 PNG, ICO, JPEG or WebP bytes. */
   windowIcon?: string;
+  /** Report every key press and release as a `keyboard` event (DOM `key`/`code` names), before Tarve's own key handling. */
+  keyboardEvents?: boolean;
+  /** Report every mouse button press/release and wheel turn as a `pointer` event on the deepest node under the pointer. */
+  pointerEvents?: boolean;
 }
 export type TreeMutation =
   | { type: "create"; node: NativeNode }
@@ -377,6 +381,7 @@ export type NativeCommand =
   | { type: "cancelCloseRequest" }
   | { type: "window"; action: WindowAction }
   | { type: "windowLevel"; level: WindowLevel }
+  | { type: "windowTitle"; title: string }
   | { type: "tray"; tray: NativeTrayOptions | null }
   | { type: "systemMedia"; session: NativeSystemMediaSession | null }
   | { type: "notify"; title: string; body: string }
@@ -386,12 +391,18 @@ export type NativeCommand =
   | { type: "focus"; id: string }
   | { type: "scrollToItem"; id: string; index: number; offset?: number; smooth?: boolean }
   | { type: "inspect"; requestId: string }
+  /** The focused text field and its selection, as UTF-8 offsets (answered synchronously). */
+  | { type: "selection"; requestId: string }
+  /** Lay the window out now and answer with these nodes' boxes (a synchronous layout read). */
+  | { type: "layout"; requestId: string; ids: string[] }
   | { type: "stats"; requestId: string; reset?: boolean }
   | { type: "resize"; width: number; height: number }
   | { type: "capture"; path: string; requestId: string }
   | { type: "motionAdvance"; milliseconds: number; requestId: string }
   | { type: "fileDialog"; mode: FileDialogMode; options: FileDialogOptions; requestId: string }
   | { type: "input"; action: "move" | "down" | "up" | "wheel" | "text" | "key"; x?: number; y?: number; delta?: number; deltaX?: number; deltaY?: number; text?: string };
+/** A node's laid-out box, like its `size` event: the content size, and the border box in the window. */
+export interface LayoutBox { width: number; height: number; x: number; y: number; borderWidth: number; borderHeight: number }
 export interface NodeSnapshot {
   id: string; kind: NodeKind; x: number; y: number; width: number; height: number;
   scroll: number; scrollMax: number; text: string;
@@ -443,7 +454,7 @@ export type NativeEvent =
   | { type: "valueChange"; id: string; value: number }
   | { type: "scroll"; id: string; offset: number; max: number; offsetX?: number; offsetY?: number; maxX?: number; maxY?: number; source?: ScrollSource }
   | { type: "virtualListLayout"; id: string; items: VirtualListMeasurement[] }
-  | { type: "size"; id: string; width: number; height: number }
+  | { type: "size"; id: string; width: number; height: number; x?: number; y?: number; borderWidth?: number; borderHeight?: number }
   | { type: "pointerMove"; id: string; x: number; y: number }
   | { type: "pointerLeave"; id: string }
   | { type: "virtualListScrollToItem"; id: string; index: number; offset: number; smooth?: boolean }
@@ -459,10 +470,14 @@ export type NativeEvent =
   | { type: "drop"; id: string; target: string | null; x: number; y: number }
   | { type: "dragCancel"; id: string }
   | { type: "key"; id: string; key: string }
+  | { type: "pointer"; phase: "down" | "up" | "wheel"; id: string | null; x: number; y: number; button?: number; deltaX?: number; deltaY?: number; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }
+  | { type: "keyboard"; phase: "down" | "up"; id: string | null; key: string; code: string; repeat: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }
   | { type: "blur"; id: string }
   | { type: "shortcut"; shortcut: string }
   | { type: "error"; message: string }
   | { type: "inspect"; requestId: string; snapshot: Snapshot }
+  | { type: "layout"; requestId: string; boxes: Record<string, LayoutBox> }
+  | { type: "selection"; requestId: string; target: string | null; anchor: number; focus: number }
   | { type: "stats"; requestId: string; stats: NativeStats }
   | { type: "captured"; requestId: string; path: string; error?: string }
   | { type: "motionComplete"; id: string; property: MotionProperty }

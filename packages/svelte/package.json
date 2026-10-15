@@ -1,0 +1,50 @@
+{
+  "name": "@tarve/svelte",
+  "version": "0.6.0",
+  "description": "Svelte 5 components in native Tarve windows",
+  "license": "Apache-2.0",
+  "type": "module",
+  "keywords": [
+    "tarve",
+    "svelte",
+    "gui",
+    "desktop",
+    "native"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/omarcosr/tarve.git",
+    "directory": "packages/svelte"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./compiler": "./src/compiler.ts",
+    "./plugin": "./src/plugin.ts",
+    "./bun": "./src/bun.ts",
+    "./css": "./src/css.ts",
+    "./dom": "./src/dom.ts",
+    "./install": "./src/install.ts",
+    "./bun-preload": "./src/bun-preload.ts",
+    "./elements": {
+      "types": "./src/elements.d.ts"
+    }
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "dependencies": {
+    "svelte": "^5.57.2"
+  },
+  "peerDependencies": {
+    "@tarve/core": "^0.6.0"
+  },
+  "engines": {
+    "bun": ">=1.4.0",
+    "node": ">=26.10.0"
+  }
+}

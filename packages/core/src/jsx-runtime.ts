@@ -171,6 +171,11 @@ export interface IntrinsicTextareaProps extends Omit<BaseProps, "style" | "child
   placeholder?: string;
   disabled?: boolean;
   submitOnEnter?: boolean;
+  /**
+   * Styles the value like rich text: phrasing children (`<strong>`, `<em>`, `<span style>`…)
+   * whose text is exactly `value`. Edits keep each style on its text.
+   */
+  richText?: Child;
   onChange?: (value: string) => void;
   onSubmit?: (value: string) => void;
 }

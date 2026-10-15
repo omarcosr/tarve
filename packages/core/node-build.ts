@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { nativePath } from "#tarve/runtime";
 import { fileImportAttributes } from "./esbuild-file-imports";
+import { frameworkPlugins } from "./framework-plugins";
 import { hostBuildTarget, targetConfig } from "./targets";
 import { metadataOverrides, type BuildOptions } from "./build";
 import { buildMetadata, writeLinuxDesktopEntry } from "./package-metadata";
@@ -69,7 +70,7 @@ export async function buildNode(options: NodeBuildOptions): Promise<string> {
       metafile: true,
       define,
       external: ["esbuild"],
-      plugins: [fileImportAttributes, {
+      plugins: [fileImportAttributes, ...await frameworkPlugins(options.entrypoint), {
         name: "tarve-node-runtime",
         setup(build) {
           if (options.compileJsx) {

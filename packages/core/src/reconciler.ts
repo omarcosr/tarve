@@ -575,6 +575,11 @@ export function compileTree(
       node.text = inline.text;
       if (inline.runs.length) node.runs = inline.runs;
     } else if (isText) node.text = textContent(p.children);
+    if (nativeType === "textarea" && p.richText !== undefined) {
+      // A rich text area: its value styled by phrasing children, as runs over the value's text.
+      const inline = compileInline(p.richText, "pre-wrap", style as Record<string, unknown>, () => inlineContext(id, style as Record<string, unknown>));
+      if (inline.runs.length) node.runs = inline.runs;
+    }
     if (nativeType === "code") node.text = p.code;
     if (nativeType === "markdown" || nativeType === "diff") node.source = p.source;
     if (p.language !== undefined) node.language = p.language;

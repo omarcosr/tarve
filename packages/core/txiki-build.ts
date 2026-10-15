@@ -9,6 +9,7 @@ import { gzipSync } from "node:zlib";
 import type { Plugin } from "esbuild";
 import { nativePath } from "#tarve/runtime";
 import { metadataOverrides, type BuildOptions } from "./build";
+import { frameworkPlugins } from "./framework-plugins";
 import { buildMetadata, writeLinuxDesktopEntry } from "./package-metadata";
 import { hostBuildTarget, targetConfig } from "./targets";
 
@@ -141,6 +142,7 @@ export async function buildTxiki(options: TxikiBuildOptions): Promise<string> {
     ].join("\n"));
     const bundle = join(temporary, "app.js");
     const { build: esbuild } = await import("esbuild");
+    const frameworks = await frameworkPlugins(options.entrypoint);
     const bundleApp = () => esbuild({
       entryPoints: [entry],
       outfile: bundle,
@@ -160,7 +162,7 @@ export async function buildTxiki(options: TxikiBuildOptions): Promise<string> {
         TARVE_TXIKI_PLATFORM: JSON.stringify(config.platform),
         TARVE_TXIKI_NATIVE_NAME: JSON.stringify(config.nativeName),
       },
-      plugins: [runtime],
+      plugins: [runtime, ...frameworks],
       metafile: !!process.env.TARVE_TXIKI_DEBUG,
     });
     // A name a shim lacks is a build error; record it, then bundle again with a placeholder for it.

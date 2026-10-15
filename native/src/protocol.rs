@@ -518,6 +518,14 @@ pub struct Document {
     /// Window and taskbar icon: base64 PNG, ICO, JPEG or WebP bytes.
     #[serde(default, rename = "windowIcon")]
     pub window_icon: Option<String>,
+    /// Report every key press and release as a DOM-style `keyboard` event
+    /// (`key`, `code`, modifiers), before Tarve's own key handling.
+    #[serde(default, rename = "keyboardEvents")]
+    pub keyboard_events: bool,
+    /// Report every mouse button press/release and wheel turn as a DOM-style
+    /// `pointer` event on the deepest node under the pointer.
+    #[serde(default, rename = "pointerEvents")]
+    pub pointer_events: bool,
     pub window: WindowOptions,
     pub root: Node,
 }
@@ -627,6 +635,9 @@ pub enum Command {
     WindowLevel {
         level: WindowLevel,
     },
+    WindowTitle {
+        title: String,
+    },
     Tray {
         tray: Option<TrayOptions>,
     },
@@ -682,6 +693,17 @@ pub enum Command {
         smooth: bool,
     },
     Inspect {
+        #[serde(rename = "requestId")]
+        request_id: String,
+    },
+    /// The focused text field and its selection (UTF-8 offsets), answered synchronously.
+    Selection {
+        #[serde(rename = "requestId")]
+        request_id: String,
+    },
+    /// Lay the window out now and answer with these nodes' boxes (a synchronous layout read).
+    Layout {
+        ids: Vec<String>,
         #[serde(rename = "requestId")]
         request_id: String,
     },

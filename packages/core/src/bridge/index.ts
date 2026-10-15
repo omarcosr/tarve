@@ -7,6 +7,12 @@ export interface NativeBridge {
   start(document: SceneDocument, onEvent: (event: NativeEvent) => void): void;
   send(command: NativeCommand): void;
   join(): void;
+  /**
+   * Sends a request and blocks until native answers it, or `timeoutMs` passes
+   * (`undefined`). Events that arrive meanwhile are delivered afterwards, in order.
+   * Optional: bridges without it cannot answer synchronous layout reads.
+   */
+  requestSync?(command: NativeCommand & { requestId: string }, timeoutMs: number): NativeEvent | undefined;
 }
 
 export interface BunFfiBridgeOptions {
@@ -87,6 +93,14 @@ export function drainNativeEvents(
   }
 }
 
+const pauseCell = typeof SharedArrayBuffer === "function" ? new Int32Array(new SharedArrayBuffer(4)) : undefined;
+let canPause = !!pauseCell;
+/** Sleeps ~0.2 ms between polls of a synchronous request; spins where Atomics.wait is unavailable. */
+function pause(): void {
+  if (!canPause) return;
+  try { Atomics.wait(pauseCell!, 0, 0, 0.2); } catch { canPause = false; }
+}
+
 export class BunFfiBridge implements NativeBridge {
   private library?: ReturnType<typeof openLibrary>;
   private eventSocket?: Socket;
@@ -94,6 +108,10 @@ export class BunFfiBridge implements NativeBridge {
   private readonly decoder = new TextDecoder();
   private closed = false;
   private eventTransportFailed = false;
+  /** Events polled while a synchronous request waited: delivered before newer ones. */
+  private backlog: NativeEvent[] = [];
+  private onEvent?: (event: NativeEvent) => void;
+  private backlogScheduled = false;
 
   constructor(private readonly options: BunFfiBridgeOptions = {}) {}
 
@@ -101,21 +119,70 @@ export class BunFfiBridge implements NativeBridge {
     return nativeLibraryError(this.library!);
   }
 
-  private drainEventQueue(onEvent: (event: NativeEvent) => void): void {
-    if (!this.library) return;
-    this.eventBuffer = drainNativeEvents(
+  private pollOne(): NativeEvent | undefined {
+    const result = pollNativeEvent(
       this.eventBuffer,
       (buffer, capacity) => this.library!.symbols.tarve_poll_event(buffer, capacity),
       () => this.error(),
-      (event) => {
-        if (event.type === "closed") {
-          this.closed = true;
-          this.closeEventSocket();
-        }
-        onEvent(event);
-      },
       this.decoder,
     );
+    this.eventBuffer = result.buffer;
+    return result.event;
+  }
+
+  private drainEventQueue(onEvent: (event: NativeEvent) => void): void {
+    if (!this.library) return;
+    for (;;) {
+      // A handler may block on requestSync, which moves newer events to the backlog: those come first.
+      const event = this.backlog.shift() ?? this.pollOne();
+      if (!event) return;
+      if (event.type === "closed") {
+        this.closed = true;
+        this.closeEventSocket();
+      }
+      onEvent(event);
+      if (this.closed && event.type === "closed") return;
+    }
+  }
+
+  private scheduleBacklog(): void {
+    if (!this.backlog.length || this.backlogScheduled) return;
+    this.backlogScheduled = true;
+    setTimeout(() => {
+      this.backlogScheduled = false;
+      const onEvent = this.onEvent;
+      if (!onEvent || !this.backlog.length) return;
+      if (this.closed) {
+        // The window closed while a request waited: its remaining events still go out.
+        for (const event of this.backlog.splice(0)) onEvent(event);
+        return;
+      }
+      this.pollEvents(onEvent);
+    }, 0);
+  }
+
+  requestSync(command: NativeCommand & { requestId: string }, timeoutMs: number): NativeEvent | undefined {
+    if (!this.library || this.closed) return undefined;
+    this.send(command);
+    const started = performance.now();
+    const deadline = started + timeoutMs;
+    try {
+      for (;;) {
+        const event = this.pollOne();
+        if (event) {
+          if ("requestId" in event && event.requestId === command.requestId) return event;
+          this.backlog.push(event);
+          if (event.type === "closed") return undefined;
+          continue;
+        }
+        const now = performance.now();
+        if (now >= deadline) return undefined;
+        // A layout answers within a few milliseconds: spin first, as a sleep can last a whole timer tick.
+        if (now - started > 4) pause();
+      }
+    } finally {
+      this.scheduleBacklog();
+    }
   }
 
   private eventPipeName(): string {
@@ -198,6 +265,7 @@ export class BunFfiBridge implements NativeBridge {
 
   start(document: SceneDocument, onEvent: (event: NativeEvent) => void): void {
     if (this.library) throw new Error("Bridge already started");
+    this.onEvent = onEvent;
     const path = this.options.libraryPath ?? nativePath();
     this.library = openLibrary(path);
     assertNativeAbiVersion(this.library.symbols.tarve_abi_version());

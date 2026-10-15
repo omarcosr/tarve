@@ -6,6 +6,7 @@ import { resolveAppMetadata, runtimeMetadata } from "./package-metadata";
 import { build } from "./build";
 import { devNode, runNode } from "./node-dev";
 import { selectRuntime } from "./runtime-select";
+import { frameworkPreloads } from "./framework-plugins";
 import { generateUpdateKeys, release } from "./updates-build";
 import { BUILD_TARGETS, hostBuildTarget, isBuildTarget, targetConfig, type BuildTarget } from "./targets";
 import { existsSync, writeFileSync } from "node:fs";
@@ -140,8 +141,8 @@ async function main(): Promise<number> {
   }
   const app = resolve(entrypoint);
   return command === "dev"
-    ? forward(process.execPath, ["--hot", app], { ...process.env, TARVE_DEV: process.env.TARVE_DEV ?? "1" })
-    : forward(process.execPath, [app]);
+    ? forward(process.execPath, [...frameworkPreloads(app), "--hot", app], { ...process.env, TARVE_DEV: process.env.TARVE_DEV ?? "1" })
+    : forward(process.execPath, [...frameworkPreloads(app), app]);
 }
 
 try {

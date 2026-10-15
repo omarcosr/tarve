@@ -1730,7 +1730,7 @@ pub struct Tree {
     virtual_measurements: HashMap<String, HashMap<String, f64>>,
     pending_layout_events: Vec<Value>,
     /// Last inner size sent for each node with `reportSize`.
-    reported_sizes: HashMap<String, (f64, f64)>,
+    reported_sizes: HashMap<String, (f64, f64, f64, f64)>,
     /// Last `pointerMove` sent: node and position.
     last_pointer_report: Option<(String, f64, f64)>,
     pending_interaction_events: Vec<Value>,
@@ -2415,6 +2415,16 @@ impl Tree {
         }
     }
     fn reconcile_node(&mut self, mut node: Node, child_ids: Vec<String>, previous: Option<Entry>) {
+        // A node that starts asking for its size (a ResizeObserver, a layout read)
+        // is answered on the next layout, even if nothing else moved.
+        if node.report_size
+            && previous
+                .as_ref()
+                .is_some_and(|entry| !entry.node.report_size)
+        {
+            self.reported_sizes.remove(&node.id);
+            self.dirty.layout = true;
+        }
         // Any external value change invalidates undo history immediately, so a
         // controlled value that later returns to an old string (A -> B -> A)
         // cannot resurrect stale steps. User edits already updated the retained
@@ -3565,6 +3575,32 @@ impl Tree {
         self.dirty.paint = true;
         Ok(())
     }
+    /// The boxes of these nodes as of the last layout, shaped like their `size`
+    /// events: the content box and where the border box sits in the window.
+    pub fn layout_boxes(&self, ids: &[String]) -> serde_json::Map<String, Value> {
+        let round = |value: f64| (value * 100.0).round() / 100.0;
+        let mut boxes = serde_json::Map::new();
+        for id in ids {
+            let Some(entry) = self.entries.get(id) else {
+                continue;
+            };
+            let pad = entry.node.insets("padding");
+            let border = entry.node.insets("borderWidth");
+            let width =
+                (entry.rect.width() - f64::from(pad[1] + pad[3] + border[1] + border[3])).max(0.0);
+            let height =
+                (entry.rect.height() - f64::from(pad[0] + pad[2] + border[0] + border[2])).max(0.0);
+            boxes.insert(
+                id.clone(),
+                json!({
+                    "width":round(width), "height":round(height),
+                    "x":round(entry.rect.x0), "y":round(entry.rect.y0),
+                    "borderWidth":round(entry.rect.width()), "borderHeight":round(entry.rect.height())
+                }),
+            );
+        }
+        boxes
+    }
     /// `size` events for nodes that asked for their size, like a ResizeObserver
     /// on the content box: sent on first layout and whenever it changes.
     fn report_sizes(&mut self) {
@@ -3580,16 +3616,22 @@ impl Tree {
                 (entry.rect.width() - f64::from(pad[1] + pad[3] + border[1] + border[3])).max(0.0);
             let height =
                 (entry.rect.height() - f64::from(pad[0] + pad[2] + border[0] + border[2])).max(0.0);
+            let round = |value: f64| (value * 100.0).round() / 100.0;
+            // The content box (ResizeObserver) and where the border box sits in the window.
             let size = (
-                (width * 100.0).round() / 100.0,
-                (height * 100.0).round() / 100.0,
+                round(width),
+                round(height),
+                round(entry.rect.x0),
+                round(entry.rect.y0),
             );
             if self.reported_sizes.get(id) == Some(&size) {
                 continue;
             }
             self.reported_sizes.insert(id.clone(), size);
             self.pending_layout_events.push(json!({
-                "type":"size", "id":id, "width":size.0, "height":size.1
+                "type":"size", "id":id, "width":size.0, "height":size.1,
+                "x":size.2, "y":size.3,
+                "borderWidth":round(entry.rect.width()), "borderHeight":round(entry.rect.height())
             }));
         }
         self.reported_sizes.retain(|id, _| seen.contains(id));
@@ -5125,7 +5167,7 @@ impl Tree {
     }
 
     /// Root-to-leaf ids of the deepest node under the pointer, whatever its kind.
-    fn hover_path(&self) -> Vec<String> {
+    pub(crate) fn hover_path(&self) -> Vec<String> {
         if !self.entries.contains_key(&self.root) {
             return Vec::new();
         }
@@ -7471,6 +7513,9 @@ impl Tree {
     }
     fn set_input(&mut self, id: String, value: String) -> Vec<Value> {
         let entry = self.entries.get_mut(&id).unwrap();
+        // Styled runs (a rich text area) stay on the text they styled until the app answers.
+        let previous = entry.node.value.as_deref().unwrap_or("");
+        shift_runs(&mut entry.node.runs, previous, &value);
         entry.node.value = Some(value.clone());
         entry.measure_dirty = true;
         self.text.layouts.remove(&id);
@@ -9517,4 +9562,62 @@ pub(crate) fn css_track_list(text: &str) -> Option<Vec<GridTemplateComponent<Str
     }
     push(&text[start..])?;
     (!tracks.is_empty()).then_some(tracks)
+}
+
+/// Moves styled runs across an edit from `old` to `new` (UTF-8 offsets), as a
+/// rich editor does: text typed at a run's end joins that run, a replaced
+/// selection takes the style of its first character, later runs shift.
+pub(crate) fn shift_runs(runs: &mut Value, old: &str, new: &str) {
+    let Some(items) = runs.as_array_mut() else {
+        return;
+    };
+    if items.is_empty() || old == new {
+        return;
+    }
+    let mut prefix = old
+        .bytes()
+        .zip(new.bytes())
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(prefix) || !new.is_char_boundary(prefix) {
+        prefix -= 1;
+    }
+    let room = old.len().min(new.len()) - prefix;
+    let mut suffix = old
+        .bytes()
+        .rev()
+        .zip(new.bytes().rev())
+        .take(room)
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(old.len() - suffix) || !new.is_char_boundary(new.len() - suffix) {
+        suffix -= 1;
+    }
+    let old_end = old.len() - suffix;
+    let new_end = new.len() - suffix;
+    let inserted_only = old_end == prefix;
+    let shift = |p: usize| p + new_end - old_end;
+    items.retain_mut(|run| {
+        let (Some(start), Some(end)) = (run["start"].as_u64(), run["end"].as_u64()) else {
+            return true;
+        };
+        let (start, end) = (start as usize, end as usize);
+        let start = if start < prefix || (start == prefix && (!inserted_only || start == 0)) {
+            start
+        } else if start < old_end {
+            new_end
+        } else {
+            shift(start)
+        };
+        let end = if end < prefix || (end == prefix && !(inserted_only && end > 0)) {
+            end
+        } else if end < old_end {
+            new_end
+        } else {
+            shift(end)
+        };
+        run["start"] = json!(start);
+        run["end"] = json!(end);
+        start < end
+    });
 }
