@@ -13,7 +13,7 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 - External-consumer and standalone-EXE smoke tests are part of `bun run verify`.
 - Real GPU visual regression is a mandatory release gate: `bun run verify` runs `test:visual` after package/EXE smoke validation, and `bun run release:check` is the CI/release entry point for the same gate.
 - Latest full validation on this tree: `bun run verify` **PASS**, including release-policy checks, synchronized product-version policy, independent ABI/protocol tests, the integrated `test:visual` gate against the freshly packed/installed artifact, Windows x64 `smoke:accessibility`, package/standalone-EXE smoke and stale-package-output coverage.
-- Tarve does not Authenticode-sign its runtimes; applications built with `tarve build` are signed by their authors. The npm tarball carries npm provenance and SHA-256 release metadata.
+- Tarve does not Authenticode-sign its runtimes; applications built with `tarve build` are signed by their authors, for example through `tarve release --sign`. The npm tarball carries npm provenance and SHA-256 release metadata.
 
 ## Production foundations already implemented
 

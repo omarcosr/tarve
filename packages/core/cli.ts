@@ -6,18 +6,25 @@ import { resolveAppMetadata, runtimeMetadata } from "./package-metadata";
 import { build } from "./build";
 import { devNode, runNode } from "./node-dev";
 import { selectRuntime } from "./runtime-select";
+import { generateUpdateKeys, release } from "./updates-build";
 import { BUILD_TARGETS, hostBuildTarget, isBuildTarget, targetConfig, type BuildTarget } from "./targets";
+import { existsSync, writeFileSync } from "node:fs";
 
 const COMMANDS = ["run", "dev", "build"] as const;
+const KEY_FILE = "tarve-update.key";
 
 function usage(target?: BuildTarget): string {
   const output = `dist/App${target ? targetConfig(target).executableSuffix : ""}`;
   return [
     "Usage: tarve <run|dev|build> <app.tsx> [options]",
+    "       tarve keygen",
+    "       tarve release --version 1.2.0 --artifact win32-x64=dist/App.exe [...]",
     "",
-    "  run    run the app",
-    "  dev    run with hot reload into the same window",
-    "  build  compile a standalone executable",
+    "  run      run the app",
+    "  dev      run with hot reload into the same window",
+    "  build    compile a standalone executable",
+    `  keygen   create an update signing key pair (writes ${KEY_FILE}, prints the public key)`,
+    "  release  copy built executables to --out and write the signed latest.json",
     "",
     "Options:",
     "  --runtime bun|node|txiki        defaults to the runtime that launched tarve; txiki: build only",
@@ -30,6 +37,14 @@ function usage(target?: BuildTarget): string {
     "  --description, --publisher, --copyright  build: executable details",
     "                                  each defaults to the \"tarve\" field of package.json",
     "  --target-executable path        build (node): target OS Node binary for offline cross-builds",
+    "  --artifact platform=path        release: repeatable, platform is <os>-<arch> (win32-x64, linux-x64)",
+    `  --key ${KEY_FILE}          release: private key file or base64 (default: TARVE_UPDATE_PRIVATE_KEY, then ./${KEY_FILE})`,
+    "  --public-key base64             release: verify the signed manifest before writing it",
+    "  --out dist/updates              release: output directory; keygen: where the key goes",
+    "  --base-url https://host/path/   release: artifact URL prefix (default: relative to latest.json)",
+    "  --notes text                    release: release notes",
+    "  --sign \"signtool sign … {file}\"  release: Authenticode command per Windows artifact, before hashing",
+    "                                  (default: TARVE_SIGN_COMMAND)",
   ].join("\n");
 }
 
@@ -65,12 +80,26 @@ async function main(): Promise<number> {
       publisher: { type: "string" }, copyright: { type: "string" },
       target: { type: "string" }, runtime: { type: "string" }, "compile-jsx": { type: "boolean" },
       "target-executable": { type: "string" },
+      artifact: { type: "string", multiple: true }, key: { type: "string" }, "public-key": { type: "string" },
+      out: { type: "string" }, "base-url": { type: "string" }, notes: { type: "string" }, sign: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
   });
   const [command, entrypoint] = positionals;
   if (values.help || positionals.length === 0) {
     console.log(usage(values.target && isBuildTarget(values.target) ? values.target : hostBuildTarget()));
+    return 0;
+  }
+  if (command === "keygen") return keygen(values.out);
+  if (command === "release") {
+    if (!values.version) throw new Error("tarve release needs --version.");
+    const privateKey = values.key ?? process.env.TARVE_UPDATE_PRIVATE_KEY ?? (existsSync(KEY_FILE) ? KEY_FILE : undefined);
+    if (!privateKey) throw new Error(`tarve release needs --key, TARVE_UPDATE_PRIVATE_KEY or ./${KEY_FILE} (tarve keygen).`);
+    console.log(release({
+      version: values.version, artifacts: values.artifact ?? [], privateKey, publicKey: values["public-key"],
+      outDir: values.out, baseUrl: values["base-url"], name: values.name, notes: values.notes,
+      sign: values.sign ?? process.env.TARVE_SIGN_COMMAND,
+    }));
     return 0;
   }
   if (!COMMANDS.includes(command as typeof COMMANDS[number]) || !entrypoint || positionals.length !== 2) {
@@ -120,4 +149,13 @@ try {
 } catch (error) {
   console.error(`error: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
+}
+function keygen(outDir = "."): number {
+  const path = resolve(outDir, KEY_FILE);
+  if (existsSync(path)) throw new Error(`${path} already exists; delete it to replace the key (installed apps reject updates signed with a new one).`);
+  const keys = generateUpdateKeys();
+  writeFileSync(path, keys.privateKey + "\n", { mode: 0o600 });
+  console.log(`private key: ${path} (keep it secret and out of git)`);
+  console.log(`public key:  ${keys.publicKey}`);
+  return 0;
 }

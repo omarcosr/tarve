@@ -144,6 +144,7 @@
     "smoke:studio": "bun run build:native && bun run setup:examples && bun scripts/smoke-studio.tsx",
     "smoke:accessibility": "bun run build:native && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-accessibility.ps1",
     "smoke:exe": "bun scripts/smoke-exe.ts",
+    "smoke:update": "bun scripts/smoke-update.ts",
     "smoke:exe:txiki": "bun scripts/smoke-exe.ts --runtime txiki",
     "smoke:txiki-shims": "bun scripts/smoke-txiki-shims.ts",
     "smoke:txiki-apps": "bun run build:native && bun run setup:examples && bun scripts/smoke-txiki-apps.ts",

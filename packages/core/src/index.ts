@@ -28,6 +28,8 @@ export { createTextSearchController, findRanges } from "./text-search";
 export type { FindRangesOptions, TextSearchOptions, TextSearchController, TextSearchSnapshot } from "./text-search";
 export type { HotkeyHandler } from "./hotkeys";
 export { createApp, render } from "./app";
+export { checkForUpdate, downloadUpdate, installUpdate, canInstallUpdate, cleanupUpdate, compareVersions, verifyUpdateManifest, validateUpdateManifest, isValidVersion, assertUpdateUrl, updatePlatform } from "./updates";
+export type { Update, UpdateArtifact, UpdateManifest, SignedUpdateManifest, CheckForUpdateOptions, DownloadUpdateOptions, InstallUpdateOptions } from "./updates";
 export type { AppErrorEvent, AppErrorSource, AppHandle, AppJsStats, AppOptions, AppStats, NotifyOptions, SystemMediaSession, TrayHandle, TrayMenuItem, TrayOptions } from "./app";
 export { TestRenderer, Locator, createTestRenderer, launchTestProcess, waitFor } from "./test-renderer";
 export type { Point, RoleLocatorOptions, TestProcess, TestProcessOptions, TestRendererOptions, TextLocatorOptions, WaitForOptions, WheelOptions } from "./test-renderer";

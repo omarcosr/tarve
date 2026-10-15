@@ -9,6 +9,8 @@ import { encodeIco, isIco, pngSize } from "./png";
 export interface RuntimeAppMetadata {
   name?: string;
   appId?: string;
+  /** App version (package.json or --version); checkForUpdate compares against it. */
+  version?: string;
   /** Path (run/dev) or data URL (built executables) of the app icon. */
   icon?: string;
 }

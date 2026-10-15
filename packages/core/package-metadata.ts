@@ -148,6 +148,7 @@ export function buildMetadata(entrypoint: string, overrides: AppMetadataOverride
 export function runtimeMetadata(metadata: AppMetadata, icon: string | undefined): string {
   return JSON.stringify({
     name: metadata.name,
+    ...(metadata.version ? { version: metadata.version } : {}),
     ...(metadata.appId ? { appId: metadata.appId } : {}),
     ...(icon ? { icon } : {}),
   });

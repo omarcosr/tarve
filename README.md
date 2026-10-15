@@ -120,6 +120,27 @@ await build({
 });
 ```
 
+## Auto-updates
+
+Built apps can update themselves from signed releases hosted on any HTTPS server (GitHub Releases, S3/R2, a CDN). The full guide is at [tarve.dev/docs/updates](https://tarve.dev/docs/updates).
+
+```bash
+bunx tarve keygen                                   # once: ./tarve-update.key (secret) + the public key
+bunx tarve build app.tsx --version 1.2.0 --outfile dist/App.exe
+bunx tarve release --version 1.2.0 --artifact win32-x64=dist/App.exe --out dist/updates \
+  --sign "signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a {file}"   # optional Authenticode
+# upload dist/updates: the executables first, latest.json last
+```
+
+```ts
+import { canInstallUpdate, checkForUpdate, downloadUpdate, installUpdate } from "@tarve/core";
+
+const update = await checkForUpdate({ url: "https://example.com/app/latest.json", publicKey: "…" });
+if (update && canInstallUpdate()) installUpdate(await downloadUpdate(update, { onProgress: (n, total) => {} }));
+```
+
+`latest.json` is signed with Ed25519 and lists the size and SHA-256 of each platform's executable; the app checks the signature, only accepts newer versions, HTTPS URLs and a matching app name, and verifies the download before `installUpdate` swaps the executable and restarts. `--sign` (or `TARVE_SIGN_COMMAND`) runs your Authenticode tool on each Windows executable before it is hashed. Self-updating needs a writable install folder (per-user or portable); `canInstallUpdate()` is false under `Program Files` or a package manager. txiki.js builds are not supported yet.
+
 ## Node.js runtime
 
 The same TSX components, desktop APIs, renderer modes and native bridge run on Node.js 26.10+ with the same `tarve run|dev|build` commands; a Node-only project needs neither Bun nor Rust:
