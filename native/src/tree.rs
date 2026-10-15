@@ -1066,9 +1066,16 @@ fn looks_like_svg(bytes: &[u8]) -> bool {
 struct ScrollAnimation {
     from: f64,
     to: f64,
+    /// NaN until the first frame that advances it (a wheel notch arrives between frames).
     start_ms: f64,
     duration_ms: f64,
+    /// A wheel notch: decelerates from the first frame (`ease-out`), and is the
+    /// user's own scroll, not a programmatic one.
+    wheel: bool,
 }
+
+/// How long a wheel notch takes to ease to its offset.
+const WHEEL_EASE_MS: f64 = 140.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RemoteImageState {
@@ -2124,14 +2131,21 @@ impl Tree {
             .iter()
             .map(|(id, animation)| (id.clone(), *animation))
             .collect();
-        for (id, animation) in animations {
+        for (id, mut animation) in animations {
             if !self.entries.contains_key(&id) {
                 self.scroll_animations.remove(&id);
                 continue;
             }
+            if animation.start_ms.is_nan() {
+                // Started a frame ago: the first frame after the notch already moves.
+                animation.start_ms = now - 1000.0 / 60.0;
+                self.scroll_animations.insert(id.clone(), animation);
+            }
             let t = ((now - animation.start_ms) / animation.duration_ms).clamp(0.0, 1.0);
-            // CSS `ease-in-out`-like cubic.
-            let eased = if t < 0.5 {
+            let eased = if animation.wheel {
+                1.0 - (1.0 - t).powi(3)
+            } else if t < 0.5 {
+                // CSS `ease-in-out`-like cubic.
                 4.0 * t * t * t
             } else {
                 1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
@@ -2140,8 +2154,10 @@ impl Tree {
                 &id,
                 animation.from + (animation.to - animation.from) * eased,
             );
-            for event in &mut events {
-                event["source"] = json!("program");
+            if !animation.wheel {
+                for event in &mut events {
+                    event["source"] = json!("program");
+                }
             }
             self.pending_layout_events.extend(events);
             if t >= 1.0 {
@@ -3329,6 +3345,7 @@ impl Tree {
                             to: next,
                             start_ms: self.motion_time_ms,
                             duration_ms,
+                            wheel: false,
                         },
                     );
                     continue;
@@ -6231,6 +6248,48 @@ impl Tree {
     #[cfg(test)]
     pub fn wheel(&mut self, delta: f64) -> Vec<Value> {
         self.wheel_2d(0.0, delta)
+    }
+    /// A mouse wheel notch (a line delta, not a touchpad's pixels): the vertical
+    /// scroll area under the pointer eases to its new offset over a few frames
+    /// instead of jumping, and notches that follow extend the trip from where
+    /// the last one was headed. Everything else scrolls as `wheel_2d`.
+    pub fn wheel_notch(&mut self, delta_x: f64, delta_y: f64) -> Vec<Value> {
+        let over_markdown = self
+            .hit_root(false)
+            .and_then(|id| self.entries.get(&id))
+            .is_some_and(|entry| entry.node.kind == "markdown");
+        if delta_x.abs() <= f64::EPSILON
+            && delta_y.abs() > f64::EPSILON
+            && !over_markdown
+            && let Some(id) = self.hit_root(true)
+            && let Some(entry) = self.entries.get(&id)
+            && entry.node.kind == "scroll"
+            && entry.node.scroll_orientation != "horizontal"
+        {
+            let base = self
+                .scroll_animations
+                .get(&id)
+                .filter(|animation| animation.wheel)
+                .map_or(entry.scroll, |animation| animation.to);
+            let to = (base + delta_y * entry.node.scroll_speed).clamp(0.0, entry.scroll_max.max(0.0));
+            let from = entry.scroll;
+            self.scroll_animations.clear();
+            if (to - from).abs() > 1e-6 {
+                self.scroll_animations.insert(
+                    id,
+                    ScrollAnimation {
+                        from,
+                        to,
+                        start_ms: f64::NAN,
+                        duration_ms: WHEEL_EASE_MS,
+                        wheel: true,
+                    },
+                );
+                self.dirty.paint = true;
+            }
+            return vec![];
+        }
+        self.wheel_2d(delta_x, delta_y)
     }
     pub fn wheel_2d(&mut self, delta_x: f64, delta_y: f64) -> Vec<Value> {
         // The user's own scrolling takes over from a smooth scrollToItem.

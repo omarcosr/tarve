@@ -156,6 +156,25 @@ pub(crate) fn background_windows() -> bool {
     static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *FLAG.get_or_init(|| std::env::var_os("TARVE_BACKGROUND").is_some_and(|v| v != "0" && !v.is_empty()))
 }
+/// Lines one wheel notch scrolls (Windows: the Mouse settings' value; 3 elsewhere).
+fn wheel_lines_per_notch() -> f64 {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            SPI_GETWHEELSCROLLLINES, SystemParametersInfoW,
+        };
+        let mut lines: u32 = 3;
+        let ok = unsafe {
+            SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, (&mut lines as *mut u32).cast(), 0)
+        };
+        // WHEEL_PAGESCROLL (u32::MAX) asks for a page: a generous step stands in.
+        if ok != 0 && lines > 0 {
+            return f64::from(lines.min(30));
+        }
+    }
+    3.0
+}
+
 pub(crate) fn word_modifier(modifiers: ModifiersState) -> bool {
     if cfg!(target_os = "macos") {
         modifiers.alt_key()
@@ -2869,8 +2888,14 @@ impl ApplicationHandler<Command> for App {
                 events = self.tree.pointer_context();
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                // A notch moves the system's lines per notch (3 by default) of ~33 px,
+                // 100 px as browsers do, eased; touchpads send pixels, already smooth.
+                let notch = matches!(delta, MouseScrollDelta::LineDelta(..));
                 let (mut dx, mut dy) = match delta {
-                    MouseScrollDelta::LineDelta(x, y) => (-x as f64 * 36.0, -y as f64 * 36.0),
+                    MouseScrollDelta::LineDelta(x, y) => {
+                        let step = wheel_lines_per_notch() * 100.0 / 3.0;
+                        (-x as f64 * step, -y as f64 * step)
+                    }
                     MouseScrollDelta::PixelDelta(p) => {
                         let scale = self.window.as_ref().unwrap().scale_factor();
                         (-p.x / scale, -p.y / scale)
@@ -2880,7 +2905,11 @@ impl ApplicationHandler<Command> for App {
                     dx = dy;
                     dy = 0.0;
                 }
-                events = self.tree.wheel_2d(dx, dy);
+                events = if notch {
+                    self.tree.wheel_notch(dx, dy)
+                } else {
+                    self.tree.wheel_2d(dx, dy)
+                };
                 accessibility_changed = !events.is_empty();
             }
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),

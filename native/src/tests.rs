@@ -7643,3 +7643,55 @@ fn glass_params_hash_the_merge_key_and_clamp_the_blend() {
     assert_eq!((empty.merge, empty.blend), (0, 128.0));
     assert!(crate::tree::glass_params(&serde_json::json!({ "merge": "dock" })).is_none());
 }
+
+#[test]
+fn a_wheel_notch_eases_to_its_offset_and_notches_that_follow_extend_the_trip() {
+    let root: Node = serde_json::from_value(json!({
+        "id":"root","kind":"window","children":[
+            {"id":"scroll","kind":"scroll","style":{"width":200,"height":100},"children":[
+                {"id":"content","kind":"view","style":{"width":200,"height":2000,"shrink":0},"children":[]}
+            ]}
+        ]
+    }))
+    .unwrap();
+    let mut tree = Tree::new(root);
+    tree.compute(240.0, 120.0).unwrap();
+    tree.pointer_move(20.0, 20.0);
+    let offset = |tree: &Tree| tree.entries["scroll"].scroll;
+    tree.advance_motion(1000.0);
+    assert!(tree.wheel_notch(0.0, 100.0).is_empty(), "the notch scrolls on the next frames");
+    assert_eq!(offset(&tree), 0.0);
+    assert!(tree.next_motion_tick_ms().is_some(), "an eased notch schedules frames");
+    let mut last = 0.0;
+    let mut frames = 0;
+    for frame in 1..=20 {
+        tree.advance_motion(1000.0 + frame as f64 * 1000.0 / 60.0);
+        let now = offset(&tree);
+        assert!(now >= last, "eases forward only: {last} -> {now}");
+        if frame == 1 {
+            assert!(now > 20.0, "the first frame already moves: {now}");
+        }
+        if now < 100.0 {
+            frames += 1;
+        }
+        last = now;
+    }
+    assert_eq!(last, 100.0);
+    assert!(frames >= 4, "eased over several frames, not one jump ({frames})");
+    assert!(tree.next_motion_tick_ms().is_none());
+
+    // A second notch mid-trip continues from where the first was headed.
+    tree.wheel_notch(0.0, 100.0);
+    tree.advance_motion(2000.0);
+    tree.wheel_notch(0.0, 100.0);
+    for frame in 1..=20 {
+        tree.advance_motion(2000.0 + frame as f64 * 1000.0 / 60.0);
+    }
+    assert_eq!(offset(&tree), 300.0);
+    // Past the end it stops at the end.
+    tree.wheel_notch(0.0, 5000.0);
+    for frame in 1..=20 {
+        tree.advance_motion(3000.0 + frame as f64 * 1000.0 / 60.0);
+    }
+    assert_eq!(offset(&tree), 1900.0);
+}
