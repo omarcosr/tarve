@@ -11,7 +11,6 @@
  */
 import type * as Ast from "typescript/unstable/ast";
 import type * as Is from "typescript/unstable/ast/is";
-import type { API, Snapshot } from "typescript/unstable/sync";
 
 type Node = Ast.Node;
 type Expression = Ast.Expression;
@@ -20,26 +19,29 @@ type SourceFile = Ast.SourceFile;
 interface Parser {
   ast: typeof Ast;
   is: typeof Is;
-  api: API;
   files: Map<string, string>;
+  /** Parses what `files` holds under FILE. */
+  parse(): Promise<SourceFile | undefined>;
+  close(): Promise<void>;
 }
 
 const ROOT = "/tarve-jsx";
 const FILE = ROOT + "/app.tsx";
 const CONFIG = ROOT + "/tsconfig.json";
 let parser: Promise<Parser> | undefined;
+let queue: Promise<unknown> = Promise.resolve();
 
 async function loadParser(): Promise<Parser> {
-  let modules: [typeof Ast, typeof Is, typeof import("typescript/unstable/sync")];
+  let modules: [typeof Ast, typeof Is];
   try {
-    modules = await Promise.all([import("typescript/unstable/ast"), import("typescript/unstable/ast/is"), import("typescript/unstable/sync")]);
+    modules = await Promise.all([import("typescript/unstable/ast"), import("typescript/unstable/ast/is")]);
   } catch (error) {
     throw new Error(`compileJsx needs TypeScript 7 (npm install -D typescript@7): ${error instanceof Error ? error.message : String(error)}`);
   }
-  const [ast, is, sync] = modules;
+  const [ast, is] = modules;
   const files = new Map<string, string>([[CONFIG, JSON.stringify({ compilerOptions: { jsx: "preserve", noLib: true, noResolve: true, types: [] }, files: ["app.tsx"] })]]);
   const normalize = (path: string) => path.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "");
-  const api = new sync.API({
+  const options = {
     cwd: ROOT,
     fs: {
       readFile: (path: string) => files.get(normalize(path)),
@@ -48,15 +50,51 @@ async function loadParser(): Promise<Parser> {
       getAccessibleEntries: (path: string) => normalize(path).replace(/\/$/, "") === ROOT ? { files: ["app.tsx", "tsconfig.json"], directories: [] } : { files: [], directories: [] },
       realpath: (path: string) => path,
     } as never,
-  });
-  return { ast, is, api, files };
+  };
+  const request = { openProject: CONFIG, fileChanges: { invalidateAll: true } } as never;
+  // The synchronous API reads the compiler's pipe by file descriptor, which only
+  // Node (and Bun on Windows, through a named pipe) exposes; elsewhere the
+  // asynchronous one talks JSON-RPC over the child's streams.
+  // TARVE_TSGO_ASYNC=1 picks the asynchronous API anywhere (tests).
+  if ((process.platform === "win32" || typeof Bun === "undefined") && process.env.TARVE_TSGO_ASYNC !== "1") {
+    const sync = await import("typescript/unstable/sync");
+    const api = new sync.API(options);
+    return {
+      ast, is, files,
+      parse: async () => {
+        api.clearSourceFileCache();
+        const snapshot = api.updateSnapshot(request);
+        try {
+          return snapshot.getProjects()[0]!.program.getSourceFile(FILE) as SourceFile | undefined;
+        } finally {
+          snapshot.dispose();
+        }
+      },
+      close: async () => api.close(),
+    };
+  }
+  const asyncApi = await import("typescript/unstable/async");
+  const api = new asyncApi.API(options);
+  return {
+    ast, is, files,
+    parse: async () => {
+      api.clearSourceFileCache();
+      const snapshot = await api.updateSnapshot(request);
+      try {
+        return await snapshot.getProjects()[0]!.program.getSourceFile(FILE) as SourceFile | undefined;
+      } finally {
+        await snapshot.dispose();
+      }
+    },
+    close: () => api.close(),
+  };
 }
 
 /** Stops the TypeScript process a build started; the next compileJsx starts a new one. */
 export async function closeJsxCompiler(): Promise<void> {
   const current = parser;
   parser = undefined;
-  if (current) (await current).api.close();
+  if (current) await (await current).close();
 }
 
 const CORE = /^(?:@tarve\/core|tarve)(?:\/.*)?$/;
@@ -89,18 +127,17 @@ export async function compileJsx(source: string): Promise<JsxCompileResult> {
   // Plain JS/TS without JSX: nothing to compile, no TypeScript process.
   if (!/<[A-Za-z>]/.test(source)) return { code: source, templates: 0 };
   const loaded = await (parser ??= loadParser());
-  loaded.files.set(FILE, source);
-  // Every call parses new text under the same name: drop all cached state first.
-  loaded.api.clearSourceFileCache();
-  const snapshot: Snapshot = loaded.api.updateSnapshot({ openProject: CONFIG, fileChanges: { invalidateAll: true } } as never);
-  try {
-    const file = snapshot.getProjects()[0]!.program.getSourceFile(FILE);
+  // One file name serves every call: parses run one at a time.
+  const turn = queue.then(async () => {
+    loaded.files.set(FILE, source);
+    // Every call parses new text under the same name: drop all cached state first.
+    const file = await loaded.parse();
     // Positions index this text: a stale parse would splice the wrong ranges.
     if (!file || file.text !== source) throw new Error("compileJsx: TypeScript returned a different parse of the file");
     return compileFile(source, file, loaded.ast, loaded.is);
-  } finally {
-    snapshot.dispose();
-  }
+  });
+  queue = turn.catch(() => undefined);
+  return turn;
 }
 
 function compileFile(source: string, file: SourceFile, ast: typeof Ast, ts: typeof Is): JsxCompileResult {
