@@ -184,12 +184,28 @@ jobs:
       - name: Rust formatting
         run: cargo fmt --manifest-path native/Cargo.toml -- --check
 
+      # txiki.js builds the --runtime txiki executables the txiki and runtime-parity
+      # smokes run (a single tjs.exe; the build reads TARVE_TXIKI).
+      - name: Install txiki.js
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest https://github.com/saghul/txiki.js/releases/download/v26.6.0/txiki-windows-x86_64.zip -OutFile "$env:RUNNER_TEMP\txiki.zip"
+          Expand-Archive "$env:RUNNER_TEMP\txiki.zip" -DestinationPath "$env:RUNNER_TEMP\txiki"
+          $tjs = "$env:RUNNER_TEMP\txiki\txiki-windows-x86_64\tjs.exe"
+          & $tjs --version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          "TARVE_TXIKI=$tjs" >> $env:GITHUB_ENV
+
       # Packaging needs the Linux runtime; it runs in windows-x64-package so this
       # gate does not wait for the Linux build.
       - name: Full release gate
         env:
           TARVE_SMOKE_FORCED_WGPU: "0"
           TARVE_VERIFY_SKIP: pack,smoke:package,smoke:exe
+          # No one works on the runner: windows may take the foreground, so the
+          # accessibility smoke (keyboard focus) runs too.
+          TARVE_BACKGROUND: "0"
         run: bun run release:check
 
       - name: Node runtime and hot-reload smoke
