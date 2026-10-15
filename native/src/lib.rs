@@ -4,8 +4,6 @@
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 mod accessibility;
-#[cfg(target_os = "windows")]
-mod desktop_widget;
 #[cfg(not(target_arch = "wasm32"))]
 mod bridge;
 mod controls;
@@ -13,6 +11,8 @@ mod controls;
 mod cpu_display;
 #[cfg(target_os = "windows")]
 mod d3d11;
+#[cfg(target_os = "windows")]
+mod desktop_widget;
 #[cfg(target_os = "windows")]
 mod gpu_timer;
 #[cfg(not(target_arch = "wasm32"))]
@@ -27,10 +27,10 @@ mod rich;
 #[cfg(not(target_arch = "wasm32"))]
 mod runtime;
 mod shadow;
-#[cfg(not(target_arch = "wasm32"))]
-mod stats;
 #[cfg(target_os = "windows")]
 mod smtc;
+#[cfg(not(target_arch = "wasm32"))]
+mod stats;
 mod svg;
 mod syntax;
 #[cfg(test)]

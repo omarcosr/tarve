@@ -102,7 +102,8 @@ impl GpuTimer {
                 if disjoint.Frequency == 0 {
                     break;
                 }
-                let _ = context.GetData(&slot.start, Some((&mut start as *mut u64).cast()), 8, flags);
+                let _ =
+                    context.GetData(&slot.start, Some((&mut start as *mut u64).cast()), 8, flags);
                 let _ = context.GetData(&slot.end, Some((&mut end as *mut u64).cast()), 8, flags);
             }
             if start == u64::MAX || end == u64::MAX {

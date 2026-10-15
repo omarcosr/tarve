@@ -154,7 +154,9 @@ fn shortcut_key_name(key: &Key) -> Option<String> {
 /// keyboard. Rendering and keyboard focus inside the app are unaffected.
 pub(crate) fn background_windows() -> bool {
     static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *FLAG.get_or_init(|| std::env::var_os("TARVE_BACKGROUND").is_some_and(|v| v != "0" && !v.is_empty()))
+    *FLAG.get_or_init(|| {
+        std::env::var_os("TARVE_BACKGROUND").is_some_and(|v| v != "0" && !v.is_empty())
+    })
 }
 /// Lines one wheel notch scrolls (Windows: the Mouse settings' value; 3 elsewhere).
 fn wheel_lines_per_notch() -> f64 {
@@ -165,7 +167,12 @@ fn wheel_lines_per_notch() -> f64 {
         };
         let mut lines: u32 = 3;
         let ok = unsafe {
-            SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, (&mut lines as *mut u32).cast(), 0)
+            SystemParametersInfoW(
+                SPI_GETWHEELSCROLLLINES,
+                0,
+                (&mut lines as *mut u32).cast(),
+                0,
+            )
         };
         // WHEEL_PAGESCROLL (u32::MAX) asks for a page: a generous step stands in.
         if ok != 0 && lines > 0 {
@@ -476,7 +483,9 @@ fn tool_window_style(style: u32) -> u32 {
 /// the style through those rewrites (see `SKIP_TASK_SWITCHER`).
 #[cfg(target_os = "windows")]
 fn hide_from_task_switcher(window: &Window) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, GetWindowLongPtrW, SetWindowLongPtrW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetWindowLongPtrW, SetWindowLongPtrW,
+    };
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     SKIP_TASK_SWITCHER.with(|skip| skip.set(true));
     let Ok(handle) = window.window_handle() else {
@@ -702,7 +711,10 @@ fn configure_custom_window_chrome(_: &Window, _: u32, _: bool) -> Result<(), Str
 /// Logical size of a desktop widget before (or without) the icon grid: cells
 /// of a typical desktop icon (80 × 100), less a 4 px margin on each side.
 pub(crate) fn nominal_widget_size(widget: crate::protocol::DesktopWidget) -> (f64, f64) {
-    (widget.columns as f64 * 80.0 - 8.0, widget.rows as f64 * 100.0 - 8.0)
+    (
+        widget.columns as f64 * 80.0 - 8.0,
+        widget.rows as f64 * 100.0 - 8.0,
+    )
 }
 
 #[cfg(target_os = "linux")]
@@ -815,7 +827,12 @@ pub fn run(
     if let Some(widget) = document.window.desktop_widget {
         let (width, height) = nominal_widget_size(widget);
         let window = &mut document.window;
-        (window.width, window.height, window.min_width, window.min_height) = (width, height, width, height);
+        (
+            window.width,
+            window.height,
+            window.min_width,
+            window.min_height,
+        ) = (width, height, width, height);
     }
     let event_proxy = event_loop.create_proxy();
     let remote_images = crate::remote_image::RemoteImages::new(event_proxy.clone());
@@ -1236,7 +1253,10 @@ impl App {
         let anchor = match self.document.window.position.as_ref() {
             Some(WindowPosition::Coordinates { x, y }) => {
                 let scale = window.scale_factor();
-                return ((0.0, 0.0), ((x * scale).round() as i32, (y * scale).round() as i32));
+                return (
+                    (0.0, 0.0),
+                    ((x * scale).round() as i32, (y * scale).round() as i32),
+                );
             }
             Some(WindowPosition::Preset(preset)) => match preset {
                 TopLeft => (0.0, 0.0),
@@ -1267,8 +1287,11 @@ impl App {
         #[cfg(target_os = "windows")]
         {
             let (anchor, aim) = self.desktop_widget_aim(window);
-            if let Err(message) = crate::desktop_widget::attach(window, widget.columns, widget.rows, anchor, aim) {
-                self.events.push(error(format!("desktop widget: {message}")));
+            if let Err(message) =
+                crate::desktop_widget::attach(window, widget.columns, widget.rows, anchor, aim)
+            {
+                self.events
+                    .push(error(format!("desktop widget: {message}")));
             }
         }
         #[cfg(not(target_os = "windows"))]

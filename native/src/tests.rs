@@ -36,7 +36,10 @@ fn start_rejects_a_desktop_widget_without_cells() {
         "root": { "id": "root", "kind": "window", "style": {}, "children": [] }
     })
     .to_string();
-    assert_eq!(unsafe { bridge::tarve_start(document.as_ptr(), document.len() as u32) }, -1);
+    assert_eq!(
+        unsafe { bridge::tarve_start(document.as_ptr(), document.len() as u32) },
+        -1
+    );
     let mut message = [0u8; 256];
     let length = unsafe { bridge::tarve_last_error(message.as_mut_ptr(), message.len() as u32) };
     assert_eq!(&message[..length as usize], b"Invalid desktop widget size");
@@ -44,7 +47,10 @@ fn start_rejects_a_desktop_widget_without_cells() {
 
 #[test]
 fn desktop_widgets_without_an_icon_grid_get_typical_icon_cells() {
-    let size = crate::runtime::nominal_widget_size(protocol::DesktopWidget { columns: 3, rows: 2 });
+    let size = crate::runtime::nominal_widget_size(protocol::DesktopWidget {
+        columns: 3,
+        rows: 2,
+    });
     assert_eq!(size, (232.0, 192.0));
 }
 
@@ -52,7 +58,10 @@ fn desktop_widgets_without_an_icon_grid_get_typical_icon_cells() {
 fn window_options_read_widget_placement_and_default_to_a_normal_window() {
     let base = json!({ "title": "W", "width": 300.0, "height": 600.0, "minWidth": 300.0, "minHeight": 600.0, "background": "#000" });
     let plain: protocol::WindowOptions = serde_json::from_value(base.clone()).unwrap();
-    assert_eq!((plain.level, plain.skip_taskbar, plain.desktop_widget), (protocol::WindowLevel::Normal, false, None));
+    assert_eq!(
+        (plain.level, plain.skip_taskbar, plain.desktop_widget),
+        (protocol::WindowLevel::Normal, false, None)
+    );
     let mut widget = base;
     widget["level"] = json!("alwaysOnBottom");
     widget["skipTaskbar"] = json!(true);
@@ -60,7 +69,14 @@ fn window_options_read_widget_placement_and_default_to_a_normal_window() {
     let widget: protocol::WindowOptions = serde_json::from_value(widget).unwrap();
     assert_eq!(
         (widget.level, widget.skip_taskbar, widget.desktop_widget),
-        (protocol::WindowLevel::AlwaysOnBottom, true, Some(protocol::DesktopWidget { columns: 3, rows: 2 }))
+        (
+            protocol::WindowLevel::AlwaysOnBottom,
+            true,
+            Some(protocol::DesktopWidget {
+                columns: 3,
+                rows: 2
+            })
+        )
     );
 }
 use winit::dpi::{PhysicalPosition, PhysicalSize};
@@ -525,7 +541,12 @@ fn group_hover_focus_within_and_pointer_events_none_follow_css() {
         vec![under, veil],
     );
     // `focusWithin` styles an ancestor while a descendant has focus.
-    let field = node("field", "input", json!({"width": 100, "height": 30}), vec![]);
+    let field = node(
+        "field",
+        "input",
+        json!({"width": 100, "height": 30}),
+        vec![],
+    );
     let form = node(
         "form",
         "view",
@@ -537,20 +558,39 @@ fn group_hover_focus_within_and_pointer_events_none_follow_css() {
     let colour = |tree: &mut Tree, id: &str| {
         let mut recorder = PaintRecorder::default();
         tree.paint(1.0, &mut recorder);
-        recorder.fills.iter().find(|(_, rect)| {
-            let own = tree.entries[id].rect;
-            (rect.x0 - own.x0).abs() < 0.5 && (rect.y0 - own.y0).abs() < 0.5 && (rect.width() - own.width()).abs() < 0.5
-        }).map(|(colour, _)| *colour)
+        recorder
+            .fills
+            .iter()
+            .find(|(_, rect)| {
+                let own = tree.entries[id].rect;
+                (rect.x0 - own.x0).abs() < 0.5
+                    && (rect.y0 - own.y0).abs() < 0.5
+                    && (rect.width() - own.width()).abs() < 0.5
+            })
+            .map(|(colour, _)| *colour)
     };
-    assert_eq!(colour(&mut tree, "label"), Some(vello::peniko::Color::from_rgb8(0, 0, 0)));
+    assert_eq!(
+        colour(&mut tree, "label"),
+        Some(vello::peniko::Color::from_rgb8(0, 0, 0))
+    );
     tree.pointer_move(150.0, 80.0); // over the card, not over the label
-    assert_eq!(colour(&mut tree, "label"), Some(vello::peniko::Color::from_rgb8(255, 0, 0)));
+    assert_eq!(
+        colour(&mut tree, "label"),
+        Some(vello::peniko::Color::from_rgb8(255, 0, 0))
+    );
     tree.pointer_move(390.0, 390.0);
-    assert_eq!(colour(&mut tree, "label"), Some(vello::peniko::Color::from_rgb8(0, 0, 0)));
+    assert_eq!(
+        colour(&mut tree, "label"),
+        Some(vello::peniko::Color::from_rgb8(0, 0, 0))
+    );
 
     let stack_rect = tree.entries["stack"].rect;
     tree.pointer_move(stack_rect.x0 + 20.0, stack_rect.y0 + 20.0);
-    assert_eq!(tree.hovered.as_deref(), Some("under"), "the veil does not take the pointer");
+    assert_eq!(
+        tree.hovered.as_deref(),
+        Some("under"),
+        "the veil does not take the pointer"
+    );
 
     assert!(tree.focus("field").is_none());
     let state = tree.visual_state_for("form", &tree.entries["form"].node.clone());
@@ -573,22 +613,36 @@ fn rotate_skew_and_origin_join_the_transform_and_align_self_reaches_taffy() {
         json!({"width": 50, "height": 20, "alignSelf": "end"}),
         vec![],
     );
-    let column = node("column", "column", json!({"width": 300, "align": "start"}), vec![rotated, selfed]);
+    let column = node(
+        "column",
+        "column",
+        json!({"width": 300, "align": "start"}),
+        vec![rotated, selfed],
+    );
     let mut tree = Tree::new(root(vec![column]));
     tree.compute(400.0, 400.0).unwrap();
     // Rotated 90° about its top-left corner, the box's bottom-right lands at (-50, 100) from that corner.
-    let transform = tree.node_transform("rotated", vello::kurbo::Vec2::ZERO).unwrap();
+    let transform = tree
+        .node_transform("rotated", vello::kurbo::Vec2::ZERO)
+        .unwrap();
     let rect = tree.entries["rotated"].rect;
     let corner = transform * vello::kurbo::Point::new(rect.x1, rect.y1);
-    assert!((corner.x - (rect.x0 - 50.0)).abs() < 0.5 && (corner.y - (rect.y0 + 100.0)).abs() < 0.5, "{corner:?}");
+    assert!(
+        (corner.x - (rect.x0 - 50.0)).abs() < 0.5 && (corner.y - (rect.y0 + 100.0)).abs() < 0.5,
+        "{corner:?}"
+    );
     assert_eq!(
-        tree.motion_values("rotated", "transform").map(|values| values.len()),
+        tree.motion_values("rotated", "transform")
+            .map(|values| values.len()),
         None,
         "no transition, no track"
     );
     let selfed_rect = tree.entries["selfed"].rect;
     let column_rect = tree.entries["column"].rect;
-    assert!((selfed_rect.x1 - column_rect.x1).abs() < 0.5, "alignSelf: end puts it at the right edge: {selfed_rect:?}");
+    assert!(
+        (selfed_rect.x1 - column_rect.x1).abs() < 0.5,
+        "alignSelf: end puts it at the right edge: {selfed_rect:?}"
+    );
 }
 
 #[test]
@@ -605,19 +659,43 @@ fn auto_margins_centre_a_box_as_css_does() {
         json!({"width": 100, "height": 20, "margin": {"left": "auto", "top": 4}}),
         vec![],
     );
-    let column = node("column", "column", json!({"width": 300}), vec![centred, pushed]);
+    let column = node(
+        "column",
+        "column",
+        json!({"width": 300}),
+        vec![centred, pushed],
+    );
     let mut tree = Tree::new(root(vec![column]));
     tree.compute(400.0, 300.0).unwrap();
     let rect = |id: &str| tree.entries[id].rect;
-    assert!((rect("centred").x0 - rect("column").x0 - 100.0).abs() < 0.5, "{:?}", rect("centred"));
-    assert!((rect("pushed").x0 - rect("column").x0 - 200.0).abs() < 0.5, "{:?}", rect("pushed"));
-    assert!((rect("pushed").y0 - rect("centred").y1 - 4.0).abs() < 0.5, "{:?}", rect("pushed"));
+    assert!(
+        (rect("centred").x0 - rect("column").x0 - 100.0).abs() < 0.5,
+        "{:?}",
+        rect("centred")
+    );
+    assert!(
+        (rect("pushed").x0 - rect("column").x0 - 200.0).abs() < 0.5,
+        "{:?}",
+        rect("pushed")
+    );
+    assert!(
+        (rect("pushed").y0 - rect("centred").y1 - 4.0).abs() < 0.5,
+        "{:?}",
+        rect("pushed")
+    );
 }
 
 #[test]
 fn row_and_column_gap_and_space_around_evenly_follow_css() {
     let items = (0..3)
-        .map(|i| node(&format!("g{i}"), "view", json!({"width": 50, "height": 20}), vec![]))
+        .map(|i| {
+            node(
+                &format!("g{i}"),
+                "view",
+                json!({"width": 50, "height": 20}),
+                vec![],
+            )
+        })
         .collect();
     let wrapped = node(
         "wrapped",
@@ -630,7 +708,14 @@ fn row_and_column_gap_and_space_around_evenly_follow_css() {
         "row",
         json!({"width": 300, "justify": "around"}),
         (0..2)
-            .map(|i| node(&format!("a{i}"), "view", json!({"width": 50, "height": 20}), vec![]))
+            .map(|i| {
+                node(
+                    &format!("a{i}"),
+                    "view",
+                    json!({"width": 50, "height": 20}),
+                    vec![],
+                )
+            })
             .collect(),
     );
     let evenly = node(
@@ -638,23 +723,54 @@ fn row_and_column_gap_and_space_around_evenly_follow_css() {
         "row",
         json!({"width": 300, "justify": "evenly"}),
         (0..2)
-            .map(|i| node(&format!("e{i}"), "view", json!({"width": 50, "height": 20}), vec![]))
+            .map(|i| {
+                node(
+                    &format!("e{i}"),
+                    "view",
+                    json!({"width": 50, "height": 20}),
+                    vec![],
+                )
+            })
             .collect(),
     );
     let mut tree = Tree::new(root(vec![wrapped, around, evenly]));
     tree.compute(400.0, 400.0).unwrap();
     let rect = |id: &str| tree.entries[id].rect;
     // `columnGap` separates items on a line; `rowGap` separates the wrapped line. Both beat `gap`.
-    assert!((rect("g1").x0 - (rect("g0").x1 + 10.0)).abs() < 0.1, "g1 = {:?}", rect("g1"));
-    assert!((rect("g2").y0 - (rect("g0").y1 + 16.0)).abs() < 0.1, "g2 = {:?}", rect("g2"));
+    assert!(
+        (rect("g1").x0 - (rect("g0").x1 + 10.0)).abs() < 0.1,
+        "g1 = {:?}",
+        rect("g1")
+    );
+    assert!(
+        (rect("g2").y0 - (rect("g0").y1 + 16.0)).abs() < 0.1,
+        "g2 = {:?}",
+        rect("g2")
+    );
     // space-around: 200px free → 50px per side of each item (25px at the edges).
-    assert!((rect("a0").x0 - rect("around").x0 - 50.0).abs() < 0.1, "a0 = {:?}", rect("a0"));
-    assert!((rect("a1").x0 - rect("a0").x1 - 100.0).abs() < 0.1, "a1 = {:?}", rect("a1"));
+    assert!(
+        (rect("a0").x0 - rect("around").x0 - 50.0).abs() < 0.1,
+        "a0 = {:?}",
+        rect("a0")
+    );
+    assert!(
+        (rect("a1").x0 - rect("a0").x1 - 100.0).abs() < 0.1,
+        "a1 = {:?}",
+        rect("a1")
+    );
     // space-evenly: three equal 66.67px gaps.
     let third = 200.0 / 3.0;
     // Rects snap to whole pixels, so a 66.67px gap lands within 1px.
-    assert!((rect("e0").x0 - rect("evenly").x0 - third).abs() < 1.0, "e0 = {:?}", rect("e0"));
-    assert!((rect("e1").x0 - rect("e0").x1 - third).abs() < 1.0, "e1 = {:?}", rect("e1"));
+    assert!(
+        (rect("e0").x0 - rect("evenly").x0 - third).abs() < 1.0,
+        "e0 = {:?}",
+        rect("e0")
+    );
+    assert!(
+        (rect("e1").x0 - rect("e0").x1 - third).abs() < 1.0,
+        "e1 = {:?}",
+        rect("e1")
+    );
 }
 
 #[test]
@@ -834,11 +950,26 @@ fn hover_and_color_update_do_not_invalidate_layout_or_text() {
 
 #[test]
 fn drag_region_is_hit_through_its_plain_text_but_not_over_its_controls() {
-    let mut label = node("label", "text", json!({ "width": 80, "height": 20 }), vec![]);
+    let mut label = node(
+        "label",
+        "text",
+        json!({ "width": 80, "height": 20 }),
+        vec![],
+    );
     label.text = "12:00".into();
-    let mut close = node("close", "button", json!({ "width": 20, "height": 20 }), vec![]);
+    let mut close = node(
+        "close",
+        "button",
+        json!({ "width": 20, "height": 20 }),
+        vec![],
+    );
     close.text = "x".into();
-    let mut body = node("body", "view", json!({ "width": 200, "height": 100, "direction": "row" }), vec![label, close]);
+    let mut body = node(
+        "body",
+        "view",
+        json!({ "width": 200, "height": 100, "direction": "row" }),
+        vec![label, close],
+    );
     body.drag_region = true;
     let mut tree = Tree::new(root(vec![body]));
     tree.compute(300.0, 200.0).unwrap();
@@ -6745,10 +6876,20 @@ fn per_side_border_on_a_rounded_box_paints_one_ring_that_keeps_the_corner_arcs()
         .iter()
         .filter(|(color, _)| *color == red)
         .collect();
-    assert_eq!(borders.len(), 1, "one even-odd ring, not one rectangle per side");
+    assert_eq!(
+        borders.len(),
+        1,
+        "one even-odd ring, not one rectangle per side"
+    );
     let (_, bounds) = borders[0];
-    assert!((bounds.width() - 80.0).abs() < 0.5 && (bounds.height() - 32.0).abs() < 0.5, "{bounds:?}");
-    assert!(recorder.strokes.is_empty(), "per-side widths never stroke a centreline");
+    assert!(
+        (bounds.width() - 80.0).abs() < 0.5 && (bounds.height() - 32.0).abs() < 0.5,
+        "{bounds:?}"
+    );
+    assert!(
+        recorder.strokes.is_empty(),
+        "per-side widths never stroke a centreline"
+    );
 }
 
 #[test]
@@ -7632,14 +7773,20 @@ fn pointer_move_reports_local_position_to_the_innermost_listener() {
 fn glass_params_hash_the_merge_key_and_clamp_the_blend() {
     let plain = crate::tree::glass_params(&serde_json::json!({ "blur": 8 })).unwrap();
     assert_eq!((plain.merge, plain.blend), (0, 0.0));
-    let dock = crate::tree::glass_params(&serde_json::json!({ "blur": 8, "merge": "dock", "blend": 48 })).unwrap();
-    let same = crate::tree::glass_params(&serde_json::json!({ "blur": 2, "merge": "dock" })).unwrap();
-    let other = crate::tree::glass_params(&serde_json::json!({ "blur": 2, "merge": "tray" })).unwrap();
+    let dock =
+        crate::tree::glass_params(&serde_json::json!({ "blur": 8, "merge": "dock", "blend": 48 }))
+            .unwrap();
+    let same =
+        crate::tree::glass_params(&serde_json::json!({ "blur": 2, "merge": "dock" })).unwrap();
+    let other =
+        crate::tree::glass_params(&serde_json::json!({ "blur": 2, "merge": "tray" })).unwrap();
     assert_ne!(dock.merge, 0);
     assert_eq!(dock.merge, same.merge);
     assert_ne!(dock.merge, other.merge);
     assert_eq!(dock.blend, 48.0);
-    let empty = crate::tree::glass_params(&serde_json::json!({ "blur": 2, "merge": "", "blend": 1000 })).unwrap();
+    let empty =
+        crate::tree::glass_params(&serde_json::json!({ "blur": 2, "merge": "", "blend": 1000 }))
+            .unwrap();
     assert_eq!((empty.merge, empty.blend), (0, 128.0));
     assert!(crate::tree::glass_params(&serde_json::json!({ "merge": "dock" })).is_none());
 }
@@ -7659,9 +7806,15 @@ fn a_wheel_notch_eases_to_its_offset_and_notches_that_follow_extend_the_trip() {
     tree.pointer_move(20.0, 20.0);
     let offset = |tree: &Tree| tree.entries["scroll"].scroll;
     tree.advance_motion(1000.0);
-    assert!(tree.wheel_notch(0.0, 100.0).is_empty(), "the notch scrolls on the next frames");
+    assert!(
+        tree.wheel_notch(0.0, 100.0).is_empty(),
+        "the notch scrolls on the next frames"
+    );
     assert_eq!(offset(&tree), 0.0);
-    assert!(tree.next_motion_tick_ms().is_some(), "an eased notch schedules frames");
+    assert!(
+        tree.next_motion_tick_ms().is_some(),
+        "an eased notch schedules frames"
+    );
     let mut last = 0.0;
     let mut frames = 0;
     for frame in 1..=20 {
@@ -7677,7 +7830,10 @@ fn a_wheel_notch_eases_to_its_offset_and_notches_that_follow_extend_the_trip() {
         last = now;
     }
     assert_eq!(last, 100.0);
-    assert!(frames >= 4, "eased over several frames, not one jump ({frames})");
+    assert!(
+        frames >= 4,
+        "eased over several frames, not one jump ({frames})"
+    );
     assert!(tree.next_motion_tick_ms().is_none());
 
     // A second notch mid-trip continues from where the first was headed.

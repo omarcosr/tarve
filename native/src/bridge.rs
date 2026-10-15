@@ -496,7 +496,9 @@ pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
             return Err("Invalid window dimensions".into());
         }
         if let Some(widget) = w.desktop_widget
-            && ![widget.columns, widget.rows].iter().all(|cells| (1..=16).contains(cells))
+            && ![widget.columns, widget.rows]
+                .iter()
+                .all(|cells| (1..=16).contains(cells))
         {
             return Err("Invalid desktop widget size".into());
         }

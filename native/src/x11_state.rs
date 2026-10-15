@@ -31,7 +31,10 @@ pub(crate) fn add_window_states(window: &Window, states: &[&str]) -> Result<(), 
             .atom)
     };
     let property = intern("_NET_WM_STATE")?;
-    let atoms = states.iter().map(|state| intern(state)).collect::<Result<Vec<_>, _>>()?;
+    let atoms = states
+        .iter()
+        .map(|state| intern(state))
+        .collect::<Result<Vec<_>, _>>()?;
     connection
         .change_property32(PropMode::APPEND, id, property, AtomEnum::ATOM, &atoms)
         .map_err(|error| error.to_string())?

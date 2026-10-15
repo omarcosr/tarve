@@ -236,7 +236,10 @@ pub(crate) fn glass_params(value: &Value) -> Option<crate::paint::GlassParams> {
             .max(0.0)
     };
     // `max` drops a NaN fallback, so the key's presence is checked on its own.
-    let blur = object.get("blur").and_then(Value::as_f64).filter(|blur| blur.is_finite())? as f32;
+    let blur = object
+        .get("blur")
+        .and_then(Value::as_f64)
+        .filter(|blur| blur.is_finite())? as f32;
     let blur = blur.max(0.0);
     Some(crate::paint::GlassParams {
         blur: blur.min(64.0),
@@ -1362,7 +1365,10 @@ fn visual_value<'a>(node: &'a Node, key: &str, state: VisualState) -> &'a Value 
 
     if state.group_hovered
         && !state.disabled
-        && let Some(candidate) = node.style.get("groupHover").and_then(|style| style.get(key))
+        && let Some(candidate) = node
+            .style
+            .get("groupHover")
+            .and_then(|style| style.get(key))
         && !candidate.is_null()
     {
         value = candidate;
@@ -1377,7 +1383,10 @@ fn visual_value<'a>(node: &'a Node, key: &str, state: VisualState) -> &'a Value 
     }
 
     if state.focus_within
-        && let Some(candidate) = node.style.get("focusWithin").and_then(|style| style.get(key))
+        && let Some(candidate) = node
+            .style
+            .get("focusWithin")
+            .and_then(|style| style.get(key))
         && !candidate.is_null()
     {
         value = candidate;
@@ -1635,7 +1644,13 @@ fn motion_tracks_for_node(
                 .and_then(Value::as_f64)
                 .map(|value| value as f32)
                 .filter(|value| value.is_finite())
-                .map(|value| if *property == "radius" { vec![value; 4] } else { vec![value] });
+                .map(|value| {
+                    if *property == "radius" {
+                        vec![value; 4]
+                    } else {
+                        vec![value]
+                    }
+                });
             let (Some(from), Some(to), Some(config)) =
                 (from, target, motion_transition(node, property))
             else {
@@ -1794,13 +1809,21 @@ fn stacking_inputs(node: &Node) -> (u32, bool, bool) {
     let transformed = node.style.get("transform").is_some()
         || node.style.get("transformMatrix").is_some()
         || spin_period(node).is_some()
-        || ["hover", "active", "focus", "focusVisible", "disabled", "groupHover", "focusWithin"]
-            .iter()
-            .any(|state| {
-                node.style
-                    .get(*state)
-                    .is_some_and(|style| style.get("transform").is_some())
-            });
+        || [
+            "hover",
+            "active",
+            "focus",
+            "focusVisible",
+            "disabled",
+            "groupHover",
+            "focusWithin",
+        ]
+        .iter()
+        .any(|state| {
+            node.style
+                .get(*state)
+                .is_some_and(|style| style.get("transform").is_some())
+        });
     (
         node.number("zIndex", 0.0).to_bits(),
         node.portal,
@@ -1858,15 +1881,23 @@ impl Tree {
                 entry.node.style.get("transform").is_some()
                     || entry.node.style.get("transformMatrix").is_some()
                     || spin_period(&entry.node).is_some()
-                    || ["hover", "active", "focus", "focusVisible", "disabled", "groupHover", "focusWithin"]
-                        .iter()
-                        .any(|state| {
-                            entry
-                                .node
-                                .style
-                                .get(*state)
-                                .is_some_and(|style| style.get("transform").is_some())
-                        })
+                    || [
+                        "hover",
+                        "active",
+                        "focus",
+                        "focusVisible",
+                        "disabled",
+                        "groupHover",
+                        "focusWithin",
+                    ]
+                    .iter()
+                    .any(|state| {
+                        entry
+                            .node
+                            .style
+                            .get(*state)
+                            .is_some_and(|style| style.get("transform").is_some())
+                    })
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -4257,7 +4288,8 @@ impl Tree {
             .map(|track| track.current.clone())
             .or_else(|| motion_value(&entry.node, "transform", state))
             .unwrap_or_else(|| vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.5, 0.5]);
-        let at = |index: usize, fallback: f64| values.get(index).map_or(fallback, |v| f64::from(*v));
+        let at =
+            |index: usize, fallback: f64| values.get(index).map_or(fallback, |v| f64::from(*v));
         let (x, y, scale_x, scale_y) = (at(0, 0.0), at(1, 0.0), at(2, 1.0), at(3, 1.0));
         let (rotate, skew_x, skew_y) = (at(4, 0.0), at(5, 0.0), at(6, 0.0));
         let (origin_x, origin_y) = (at(7, 0.5), at(8, 0.5));
@@ -4294,7 +4326,14 @@ impl Tree {
             rect.x0 + rect.width() * origin_x,
             rect.y0 + rect.height() * origin_y,
         );
-        let skew = Affine::new([1.0, skew_y.to_radians().tan(), skew_x.to_radians().tan(), 1.0, 0.0, 0.0]);
+        let skew = Affine::new([
+            1.0,
+            skew_y.to_radians().tan(),
+            skew_x.to_radians().tan(),
+            1.0,
+            0.0,
+            0.0,
+        ]);
         let base = Affine::translate((centre.x + x, centre.y + y))
             * Affine::rotate(angle)
             * skew
@@ -5058,11 +5097,20 @@ impl Tree {
         // `group-hover:`: every `groupHover`-styled node inside a hovered `group` ancestor.
         let mut groups: Vec<String> = Vec::new();
         for id in self.hover_path() {
-            if self.entries.get(&id).is_some_and(|entry| entry.node.style["group"].as_bool() == Some(true)) {
+            if self
+                .entries
+                .get(&id)
+                .is_some_and(|entry| entry.node.style["group"].as_bool() == Some(true))
+            {
                 let mut stack = vec![id];
                 while let Some(current) = stack.pop() {
                     if let Some(entry) = self.entries.get(&current) {
-                        if entry.node.style.get("groupHover").is_some_and(Value::is_object) {
+                        if entry
+                            .node
+                            .style
+                            .get("groupHover")
+                            .is_some_and(Value::is_object)
+                        {
                             groups.push(current.clone());
                         }
                         stack.extend(entry.children.iter().cloned());
@@ -6271,7 +6319,8 @@ impl Tree {
                 .get(&id)
                 .filter(|animation| animation.wheel)
                 .map_or(entry.scroll, |animation| animation.to);
-            let to = (base + delta_y * entry.node.scroll_speed).clamp(0.0, entry.scroll_max.max(0.0));
+            let to =
+                (base + delta_y * entry.node.scroll_speed).clamp(0.0, entry.scroll_max.max(0.0));
             let from = entry.scroll;
             self.scroll_animations.clear();
             if (to - from).abs() > 1e-6 {
@@ -9099,7 +9148,11 @@ fn dimension(v: &Value) -> Dimension {
 }
 /// One side of a `margin`: a number for every side, or an object naming sides; a missing side is 0.
 fn margin_side(margin: &Value, side: &str) -> LengthPercentageAuto {
-    let value = if margin.is_object() { &margin[side] } else { margin };
+    let value = if margin.is_object() {
+        &margin[side]
+    } else {
+        margin
+    };
     if value.is_null() {
         return length(0.0);
     }

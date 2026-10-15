@@ -300,7 +300,6 @@ fn paint_shape<P: PaintTarget, S: Shape>(
     opacity: f32,
     shape: &S,
 ) {
-
     match path.paint_order() {
         usvg::PaintOrder::FillAndStroke => {
             paint_fill(target, path, transform, opacity, &shape);
@@ -400,7 +399,9 @@ pub(crate) fn circle_of(path: &BezPath) -> Option<Circle> {
     let elements = path.elements();
     if !matches!(elements.first(), Some(PathEl::MoveTo(_)))
         || !matches!(elements.last(), Some(PathEl::ClosePath))
-        || elements[1..].iter().any(|element| matches!(element, PathEl::MoveTo(_)))
+        || elements[1..]
+            .iter()
+            .any(|element| matches!(element, PathEl::MoveTo(_)))
         || elements
             .iter()
             .filter(|element| matches!(element, PathEl::QuadTo(..) | PathEl::CurveTo(..)))
@@ -462,7 +463,9 @@ mod tests {
     use super::*;
 
     fn first_path(body: &str) -> BezPath {
-        let source = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">{body}</svg>"#);
+        let source = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">{body}</svg>"#
+        );
         let tree = usvg::Tree::from_str(&source, &usvg::Options::default()).unwrap();
         fn find(group: &usvg::Group) -> Option<BezPath> {
             group.children().iter().find_map(|node| match node {
@@ -477,12 +480,23 @@ mod tests {
     #[test]
     fn svg_circles_are_recognized_and_other_shapes_are_not() {
         for (cx, cy, r) in [(10.0, 20.0, 3.5), (440.0, 380.0, 326.0), (0.5, 0.5, 0.25)] {
-            let circle = circle_of(&first_path(&format!(r#"<circle cx="{cx}" cy="{cy}" r="{r}"/>"#)))
-                .expect("a <circle> is a circle");
+            let circle = circle_of(&first_path(&format!(
+                r#"<circle cx="{cx}" cy="{cy}" r="{r}"/>"#
+            )))
+            .expect("a <circle> is a circle");
             assert!((circle.center.x - cx).abs() < 1e-3 && (circle.center.y - cy).abs() < 1e-3);
-            assert!((circle.radius - r).abs() < r * 1e-3, "{} vs {r}", circle.radius);
+            assert!(
+                (circle.radius - r).abs() < r * 1e-3,
+                "{} vs {r}",
+                circle.radius
+            );
         }
-        assert!(circle_of(&first_path(r#"<path d="M0 10a10 10 0 1 0 20 0a10 10 0 1 0-20 0z"/>"#)).is_some());
+        assert!(
+            circle_of(&first_path(
+                r#"<path d="M0 10a10 10 0 1 0 20 0a10 10 0 1 0-20 0z"/>"#
+            ))
+            .is_some()
+        );
         for other in [
             r#"<ellipse cx="50" cy="50" rx="30" ry="29"/>"#,
             r#"<rect x="0" y="0" width="40" height="40" rx="12"/>"#,

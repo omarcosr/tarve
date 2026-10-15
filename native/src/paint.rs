@@ -230,7 +230,13 @@ pub(crate) trait PaintTarget {
     /// A border whose sides differ: the ring between `outer` and `outer` inset by
     /// `widths` (top, right, bottom, left), each inner corner shrunk by its
     /// adjacent widths as CSS does. Painted as one even-odd path by default.
-    fn fill_ring(&mut self, transform: Affine, outer: &RoundedRect, widths: [f64; 4], color: Color) {
+    fn fill_ring(
+        &mut self,
+        transform: Affine,
+        outer: &RoundedRect,
+        widths: [f64; 4],
+        color: Color,
+    ) {
         let rect = outer.rect();
         let [top, right, bottom, left] = widths;
         let inner = Rect::new(
@@ -245,7 +251,12 @@ pub(crate) trait PaintTarget {
             RoundedRect::from_rect(
                 inner,
                 inner_corner_radii(
-                    [radii.top_left, radii.top_right, radii.bottom_right, radii.bottom_left],
+                    [
+                        radii.top_left,
+                        radii.top_right,
+                        radii.bottom_right,
+                        radii.bottom_left,
+                    ],
                     widths,
                 ),
             )
@@ -276,9 +287,21 @@ pub(crate) trait PaintTarget {
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine);
     /// Liquid glass over `rect`: what was painted under it shows through blurred and
     /// bent at the rounded edge, under `tint`. Targets without a backdrop paint the tint.
-    fn glass(&mut self, transform: Affine, rect: Rect, radius: f64, tint: Color, _glass: &GlassParams) {
+    fn glass(
+        &mut self,
+        transform: Affine,
+        rect: Rect,
+        radius: f64,
+        tint: Color,
+        _glass: &GlassParams,
+    ) {
         if tint.components[3] > 0.0 {
-            self.fill(Fill::NonZero, transform, tint, &RoundedRect::from_rect(rect, radius));
+            self.fill(
+                Fill::NonZero,
+                transform,
+                tint,
+                &RoundedRect::from_rect(rect, radius),
+            );
         }
     }
     fn draw_glyphs(
@@ -329,8 +352,15 @@ impl<P: PaintTarget> PaintTarget for TransformTarget<'_, P> {
         self.inner.stroke(stroke, self.map(transform), color, shape);
     }
 
-    fn fill_ring(&mut self, transform: Affine, outer: &RoundedRect, widths: [f64; 4], color: Color) {
-        self.inner.fill_ring(self.map(transform), outer, widths, color);
+    fn fill_ring(
+        &mut self,
+        transform: Affine,
+        outer: &RoundedRect,
+        widths: [f64; 4],
+        color: Color,
+    ) {
+        self.inner
+            .fill_ring(self.map(transform), outer, widths, color);
     }
 
     fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S) {
@@ -379,8 +409,16 @@ impl<P: PaintTarget> PaintTarget for TransformTarget<'_, P> {
         self.inner.draw_image(key, image, self.map(transform));
     }
 
-    fn glass(&mut self, transform: Affine, rect: Rect, radius: f64, tint: Color, glass: &GlassParams) {
-        self.inner.glass(self.map(transform), rect, radius, tint, glass);
+    fn glass(
+        &mut self,
+        transform: Affine,
+        rect: Rect,
+        radius: f64,
+        tint: Color,
+        glass: &GlassParams,
+    ) {
+        self.inner
+            .glass(self.map(transform), rect, radius, tint, glass);
     }
 
     fn draw_glyphs(

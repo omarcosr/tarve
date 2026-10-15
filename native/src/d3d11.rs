@@ -586,7 +586,10 @@ impl D3d11Graphics {
 
     /// GPU milliseconds of the frames whose timings arrived since the last call.
     pub(crate) fn take_gpu_times(&mut self) -> Vec<f64> {
-        self.gpu_timer.as_mut().map(|timer| timer.take()).unwrap_or_default()
+        self.gpu_timer
+            .as_mut()
+            .map(|timer| timer.take())
+            .unwrap_or_default()
     }
 
     pub(crate) fn glyph_rasterizations(&self) -> u64 {
@@ -687,7 +690,10 @@ impl D3d11Graphics {
             self.context.PSSetShader(&self.pixel_shader, None);
             self.context.PSSetConstantBuffers(
                 1,
-                Some(&[Some(self.glass_params.clone()), Some(self.glass_shapes.clone())]),
+                Some(&[
+                    Some(self.glass_params.clone()),
+                    Some(self.glass_shapes.clone()),
+                ]),
             );
         }
         let has_glass = self
@@ -852,8 +858,10 @@ impl D3d11Graphics {
                             .ClearView(&canvas.view, &bg, Some(&[scissor]));
                         self.context
                             .ClearDepthStencilView(&depth_view, clear_stencil, 1.0, 0);
-                        self.context
-                            .OMSetRenderTargets(Some(&[Some(canvas.view.clone())]), Some(&depth_view));
+                        self.context.OMSetRenderTargets(
+                            Some(&[Some(canvas.view.clone())]),
+                            Some(&depth_view),
+                        );
                     }
                     self.replay(Some(*rect), &bounds);
                 }
@@ -974,8 +982,19 @@ impl D3d11Graphics {
         let width = self.width as usize;
         let (mut wrong, mut worst) = (0_usize, 0_i32);
         let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
-        for (index, (a, b)) in expected.as_chunks::<4>().0.iter().zip(actual.as_chunks::<4>().0).enumerate() {
-            let delta = a.iter().zip(b).map(|(a, b)| (*a as i32 - *b as i32).abs()).max().unwrap_or(0);
+        for (index, (a, b)) in expected
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(actual.as_chunks::<4>().0)
+            .enumerate()
+        {
+            let delta = a
+                .iter()
+                .zip(b)
+                .map(|(a, b)| (*a as i32 - *b as i32).abs())
+                .max()
+                .unwrap_or(0);
             if delta > 2 {
                 wrong += 1;
                 worst = worst.max(delta);
@@ -1002,13 +1021,19 @@ impl D3d11Graphics {
         desc.Usage = windows::Win32::Graphics::Direct3D11::D3D11_USAGE_STAGING;
         desc.CPUAccessFlags = windows::Win32::Graphics::Direct3D11::D3D11_CPU_ACCESS_READ.0 as u32;
         let mut staging = None;
-        unsafe { self.device.CreateTexture2D(&desc, None, Some(&mut staging)) }.map_err(win_error)?;
+        unsafe { self.device.CreateTexture2D(&desc, None, Some(&mut staging)) }
+            .map_err(win_error)?;
         let staging = staging.ok_or("D3D11 staging texture was not created")?;
         unsafe { self.context.CopyResource(&staging, texture) };
         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
         unsafe {
-            self.context
-                .Map(&staging, 0, windows::Win32::Graphics::Direct3D11::D3D11_MAP_READ, 0, Some(&mut mapped))
+            self.context.Map(
+                &staging,
+                0,
+                windows::Win32::Graphics::Direct3D11::D3D11_MAP_READ,
+                0,
+                Some(&mut mapped),
+            )
         }
         .map_err(win_error)?;
         let (width, height) = (desc.Width as usize, desc.Height as usize);
@@ -1318,11 +1343,19 @@ impl D3d11Graphics {
 
     /// Copies the backdrop under a glass box, blurs it in place and leaves it bound
     /// as `tex0` for the glass quad. False (tint only) without a usable backdrop.
-    fn blur_backdrop(&self, blur_h: (u32, u32), blur_v: (u32, u32), surface: &GlassSurface) -> bool {
+    fn blur_backdrop(
+        &self,
+        blur_h: (u32, u32),
+        blur_v: (u32, u32),
+        surface: &GlassSurface,
+    ) -> bool {
         let region = surface.region;
-        let (Some(backdrop), Some(render_target), Some(depth_view), None) =
-            (&self.backdrop, &self.render_target, &self.depth_view, &self.tile)
-        else {
+        let (Some(backdrop), Some(render_target), Some(depth_view), None) = (
+            &self.backdrop,
+            &self.render_target,
+            &self.depth_view,
+            &self.tile,
+        ) else {
             let _ = self.upload_glass_params(surface, 0.0);
             return false;
         };
@@ -1435,7 +1468,10 @@ impl D3d11Graphics {
         let mut data = vec![0.0_f32; 4 * (1 + 2 * MAX_GLASS_SHAPES)];
         data[0] = count as f32;
         data[1] = surface.blend;
-        let origin = surface.shapes.first().map_or([0.0, 0.0], |shape| [shape[0], shape[1]]);
+        let origin = surface
+            .shapes
+            .first()
+            .map_or([0.0, 0.0], |shape| [shape[0], shape[1]]);
         for (index, shape) in surface.shapes.iter().take(count).enumerate() {
             let at = 4 + index * 8;
             data[at..at + 8].copy_from_slice(&[
@@ -1449,7 +1485,11 @@ impl D3d11Graphics {
                 0.0,
             ]);
         }
-        upload_dynamic(&self.context, &self.glass_shapes, bytemuck::cast_slice(&data))
+        upload_dynamic(
+            &self.context,
+            &self.glass_shapes,
+            bytemuck::cast_slice(&data),
+        )
     }
 
     /// Fuses the glass commands that share a `merge` key into the first of them: its
@@ -1514,8 +1554,17 @@ impl D3d11Graphics {
                 bounds[2] = bounds[2].max(shape[0] + shape[2] + reach);
                 bounds[3] = bounds[3].max(shape[1] + shape[3] + reach);
             }
-            let area = [region[0] as f32, region[1] as f32, region[2] as f32, region[3] as f32];
-            let passes = [(blur_h.0, area, false), (blur_v.0, area, false), (quad.0, bounds, true)];
+            let area = [
+                region[0] as f32,
+                region[1] as f32,
+                region[2] as f32,
+                region[3] as f32,
+            ];
+            let passes = [
+                (blur_h.0, area, false),
+                (blur_v.0, area, false),
+                (quad.0, bounds, true),
+            ];
             for (first, b, own_uv) in passes {
                 let base = self.indices[first as usize] as usize;
                 let corners = [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]];
@@ -1807,7 +1856,10 @@ impl D3d11Graphics {
     ) {
         // The copy must hold what the lens reaches past the edge, plus the blur taps around
         // that, plus the bridge to a merged neighbour.
-        let reach = params[2].ceil() + (params[0] * 6.0).ceil() + 2.0 + if merge == 0 { 0.0 } else { blend.ceil() };
+        let reach = params[2].ceil()
+            + (params[0] * 6.0).ceil()
+            + 2.0
+            + if merge == 0 { 0.0 } else { blend.ceil() };
         let (width, height) = (self.width.max(1) as f32, self.height.max(1) as f32);
         let x0 = (center[0] - half[0] - reach).floor().clamp(0.0, width);
         let y0 = (center[1] - half[1] - reach).floor().clamp(0.0, height);
@@ -2776,7 +2828,13 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         self.pop_layer();
     }
 
-    fn fill_ring(&mut self, transform: Affine, outer: &RoundedRect, widths: [f64; 4], color: Color) {
+    fn fill_ring(
+        &mut self,
+        transform: Affine,
+        outer: &RoundedRect,
+        widths: [f64; 4],
+        color: Color,
+    ) {
         if self.suppressed_clips > 0 {
             return;
         }
@@ -2807,7 +2865,12 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             RoundedRect::from_rect(
                 inner,
                 crate::paint::inner_corner_radii(
-                    [radii.top_left, radii.top_right, radii.bottom_right, radii.bottom_left],
+                    [
+                        radii.top_left,
+                        radii.top_right,
+                        radii.bottom_right,
+                        radii.bottom_left,
+                    ],
                     widths,
                 ),
             )
@@ -2995,7 +3058,14 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         );
     }
 
-    fn glass(&mut self, transform: Affine, rect: vello::kurbo::Rect, radius: f64, tint: Color, glass: &GlassParams) {
+    fn glass(
+        &mut self,
+        transform: Affine,
+        rect: vello::kurbo::Rect,
+        radius: f64,
+        tint: Color,
+        glass: &GlassParams,
+    ) {
         if self.suppressed_clips > 0 {
             return;
         }
@@ -3829,7 +3899,8 @@ fn create_backdrop(device: &ID3D11Device, width: u32, height: u32) -> Result<Bac
         },
         Usage: D3D11_USAGE_DEFAULT,
         BindFlags: (D3D11_BIND_SHADER_RESOURCE.0
-            | windows::Win32::Graphics::Direct3D11::D3D11_BIND_RENDER_TARGET.0) as u32,
+            | windows::Win32::Graphics::Direct3D11::D3D11_BIND_RENDER_TARGET.0)
+            as u32,
         CPUAccessFlags: 0,
         MiscFlags: 0,
     };
@@ -4027,7 +4098,10 @@ fn uniform_scale(transform: Affine) -> Option<f64> {
 /// Centre, half size and corner radii (top-left, top-right, bottom-right,
 /// bottom-left) in device pixels of a circle or a rounded rectangle, under a
 /// transform that keeps it one.
-fn sdf_round_rect<S: Shape>(shape: &S, transform: Affine) -> Option<([f32; 2], [f32; 2], [f32; 4])> {
+fn sdf_round_rect<S: Shape>(
+    shape: &S,
+    transform: Affine,
+) -> Option<([f32; 2], [f32; 2], [f32; 4])> {
     let scale = uniform_scale(transform)?;
     let (rect, radii) = if let Some(circle) = shape.as_circle() {
         (
@@ -4042,7 +4116,12 @@ fn sdf_round_rect<S: Shape>(shape: &S, transform: Affine) -> Option<([f32; 2], [
         let radii = rounded.radii();
         (
             rounded.rect(),
-            [radii.top_left, radii.top_right, radii.bottom_right, radii.bottom_left],
+            [
+                radii.top_left,
+                radii.top_right,
+                radii.bottom_right,
+                radii.bottom_left,
+            ],
         )
     };
     let center = transform * rect.center();
@@ -4350,9 +4429,16 @@ mod shader_tests {
         ]);
         let mut merged: Vec<[i32; 4]> = merged.iter().map(|r| r.map(|v| v as i32)).collect();
         merged.sort();
-        assert_eq!(merged, vec![[0, 0, 256, 128], [512, 512, 700, 700], [900, 0, 1000, 50]]);
+        assert_eq!(
+            merged,
+            vec![[0, 0, 256, 128], [512, 512, 700, 700], [900, 0, 1000, 50]]
+        );
         // A chain merges into one box even when only its ends were listed apart.
-        let chain = merge_rects(vec![[0.0, 0.0, 10.0, 10.0], [20.0, 0.0, 30.0, 10.0], [10.0, 0.0, 20.0, 10.0]]);
+        let chain = merge_rects(vec![
+            [0.0, 0.0, 10.0, 10.0],
+            [20.0, 0.0, 30.0, 10.0],
+            [10.0, 0.0, 20.0, 10.0],
+        ]);
         assert_eq!(chain, vec![[0.0, 0.0, 30.0, 10.0]]);
     }
 
@@ -4450,13 +4536,19 @@ fn contains(outer: [f32; 4], inner: [f32; 4]) -> bool {
 }
 
 fn union(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
-    [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]
+    [
+        a[0].min(b[0]),
+        a[1].min(b[1]),
+        a[2].max(b[2]),
+        a[3].max(b[3]),
+    ]
 }
 
 /// Merges rectangles that overlap or share an edge into their bounding boxes
 /// until none do: few, disjoint scissor passes.
 pub(crate) fn merge_rects(mut rects: Vec<[f32; 4]>) -> Vec<[f32; 4]> {
-    let touches = |a: [f32; 4], b: [f32; 4]| a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3];
+    let touches =
+        |a: [f32; 4], b: [f32; 4]| a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3];
     let mut merged = true;
     while merged {
         merged = false;
@@ -4481,11 +4573,14 @@ pub(crate) fn merge_rects(mut rects: Vec<[f32; 4]>) -> Vec<[f32; 4]> {
 /// TARVE_GPU_DAMAGE_CHECK=1: compare every partial redraw with a full one.
 fn gpu_damage_check() -> bool {
     static CHECK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *CHECK.get_or_init(|| std::env::var_os("TARVE_GPU_DAMAGE_CHECK").is_some_and(|value| value == "1"))
+    *CHECK.get_or_init(|| {
+        std::env::var_os("TARVE_GPU_DAMAGE_CHECK").is_some_and(|value| value == "1")
+    })
 }
 
 /// TARVE_GPU_FULL_REDRAW=1: redraw every frame whole (for A/B measurements).
 fn partial_redraw_disabled() -> bool {
     static FULL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *FULL.get_or_init(|| std::env::var_os("TARVE_GPU_FULL_REDRAW").is_some_and(|value| value == "1"))
+    *FULL
+        .get_or_init(|| std::env::var_os("TARVE_GPU_FULL_REDRAW").is_some_and(|value| value == "1"))
 }

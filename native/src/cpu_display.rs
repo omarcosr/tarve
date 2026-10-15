@@ -12,9 +12,13 @@ use vello::{
     kurbo::{Affine, BezPath, PathEl, Rect, Shape, Stroke},
     peniko::{Color, Fill, FontData, Gradient, ImageData},
 };
-use vello_cpu::{Image as CpuImage, ImageSource as CpuImageSource, Pixmap, RenderContext, Resources};
+use vello_cpu::{
+    Image as CpuImage, ImageSource as CpuImageSource, Pixmap, RenderContext, Resources,
+};
 
-use crate::paint::{CpuCachedImage, GlassParams, PaintGlyph, PaintGradient, PaintTarget, cached_cpu_pixmap};
+use crate::paint::{
+    CpuCachedImage, GlassParams, PaintGlyph, PaintGradient, PaintTarget, cached_cpu_pixmap,
+};
 
 enum Paint {
     Solid(Color),
@@ -22,14 +26,54 @@ enum Paint {
 }
 
 enum Op {
-    Fill { rule: Fill, transform: Affine, paint: Paint, path: BezPath },
-    Stroke { stroke: Stroke, transform: Affine, color: Color, path: BezPath },
-    Shadow { transform: Affine, area: Rect, rect: Rect, color: Color, radius: f64, std_dev: f64, invert: bool },
-    PushClip { rule: Fill, transform: Affine, path: BezPath, close: usize },
-    PushOpacity { alpha: f32, transform: Affine, path: BezPath, close: usize },
+    Fill {
+        rule: Fill,
+        transform: Affine,
+        paint: Paint,
+        path: BezPath,
+    },
+    Stroke {
+        stroke: Stroke,
+        transform: Affine,
+        color: Color,
+        path: BezPath,
+    },
+    Shadow {
+        transform: Affine,
+        area: Rect,
+        rect: Rect,
+        color: Color,
+        radius: f64,
+        std_dev: f64,
+        invert: bool,
+    },
+    PushClip {
+        rule: Fill,
+        transform: Affine,
+        path: BezPath,
+        close: usize,
+    },
+    PushOpacity {
+        alpha: f32,
+        transform: Affine,
+        path: BezPath,
+        close: usize,
+    },
     Pop,
-    Image { transform: Affine, pixmap: Arc<Pixmap>, width: u32, height: u32 },
-    Glyphs { font: FontData, size: f32, coords: Vec<i16>, transform: Affine, color: Color, glyphs: Vec<PaintGlyph> },
+    Image {
+        transform: Affine,
+        pixmap: Arc<Pixmap>,
+        width: u32,
+        height: u32,
+    },
+    Glyphs {
+        font: FontData,
+        size: f32,
+        coords: Vec<i16>,
+        transform: Affine,
+        color: Color,
+        glyphs: Vec<PaintGlyph>,
+    },
 }
 
 struct Recorded {
@@ -49,7 +93,10 @@ const EVERYWHERE: Rect = Rect::new(-1e9, -1e9, 1e9, 1e9);
 
 fn device(transform: Affine, local: Rect) -> Rect {
     let rect = transform.transform_rect_bbox(local);
-    if [rect.x0, rect.y0, rect.x1, rect.y1].iter().all(|value| value.is_finite()) {
+    if [rect.x0, rect.y0, rect.x1, rect.y1]
+        .iter()
+        .all(|value| value.is_finite())
+    {
         // Antialiasing reaches one pixel past the geometry.
         rect.inflate(1.0, 1.0)
     } else {
@@ -78,15 +125,32 @@ fn hash_rect(hasher: &mut DefaultHasher, rect: Rect) {
 fn hash_path(hasher: &mut DefaultHasher, path: &BezPath) {
     for element in path.elements() {
         let points: &[vello::kurbo::Point] = match element {
-            PathEl::MoveTo(p) => { 0u8.hash(hasher); std::slice::from_ref(p) }
-            PathEl::LineTo(p) => { 1u8.hash(hasher); std::slice::from_ref(p) }
-            PathEl::QuadTo(a, b) => { 2u8.hash(hasher); a.x.to_bits().hash(hasher); a.y.to_bits().hash(hasher); std::slice::from_ref(b) }
+            PathEl::MoveTo(p) => {
+                0u8.hash(hasher);
+                std::slice::from_ref(p)
+            }
+            PathEl::LineTo(p) => {
+                1u8.hash(hasher);
+                std::slice::from_ref(p)
+            }
+            PathEl::QuadTo(a, b) => {
+                2u8.hash(hasher);
+                a.x.to_bits().hash(hasher);
+                a.y.to_bits().hash(hasher);
+                std::slice::from_ref(b)
+            }
             PathEl::CurveTo(a, b, c) => {
                 3u8.hash(hasher);
-                for p in [a, b] { p.x.to_bits().hash(hasher); p.y.to_bits().hash(hasher); }
+                for p in [a, b] {
+                    p.x.to_bits().hash(hasher);
+                    p.y.to_bits().hash(hasher);
+                }
                 std::slice::from_ref(c)
             }
-            PathEl::ClosePath => { 4u8.hash(hasher); &[] }
+            PathEl::ClosePath => {
+                4u8.hash(hasher);
+                &[]
+            }
         };
         for p in points {
             p.x.to_bits().hash(hasher);
@@ -105,11 +169,20 @@ pub(crate) struct CpuRecorder<'a> {
 
 impl<'a> CpuRecorder<'a> {
     pub(crate) fn new(images: &'a mut HashMap<String, CpuCachedImage>) -> Self {
-        Self { ops: Vec::new(), open: Vec::new(), images, used_images: HashSet::new() }
+        Self {
+            ops: Vec::new(),
+            open: Vec::new(),
+            images,
+            used_images: HashSet::new(),
+        }
     }
 
     fn push(&mut self, op: Op, hasher: DefaultHasher, bounds: Rect) {
-        self.ops.push(Recorded { op, hash: hasher.finish(), bounds });
+        self.ops.push(Recorded {
+            op,
+            hash: hasher.finish(),
+            bounds,
+        });
     }
 
     pub(crate) fn finish(mut self) -> DisplayList {
@@ -136,7 +209,16 @@ impl PaintTarget for CpuRecorder<'_> {
         hash_color(&mut hasher, color);
         hash_path(&mut hasher, &path);
         let bounds = device(transform, path.bounding_box());
-        self.push(Op::Fill { rule: fill, transform, paint: Paint::Solid(color), path }, hasher, bounds);
+        self.push(
+            Op::Fill {
+                rule: fill,
+                transform,
+                paint: Paint::Solid(color),
+                path,
+            },
+            hasher,
+            bounds,
+        );
     }
 
     fn fill_gradient<S: Shape>(&mut self, transform: Affine, gradient: &PaintGradient, shape: &S) {
@@ -148,7 +230,16 @@ impl PaintTarget for CpuRecorder<'_> {
         format!("{gradient:?}").hash(&mut hasher);
         hash_path(&mut hasher, &path);
         let bounds = device(transform, path.bounding_box());
-        self.push(Op::Fill { rule: Fill::NonZero, transform, paint: Paint::Gradient(brush, brush_transform), path }, hasher, bounds);
+        self.push(
+            Op::Fill {
+                rule: Fill::NonZero,
+                transform,
+                paint: Paint::Gradient(brush, brush_transform),
+                path,
+            },
+            hasher,
+            bounds,
+        );
     }
 
     fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S) {
@@ -162,7 +253,16 @@ impl PaintTarget for CpuRecorder<'_> {
         // Miter joins reach up to miter_limit × half the width past the path.
         let reach = stroke.width * stroke.miter_limit.max(1.0) / 2.0 + 1.0;
         let bounds = device(transform, path.bounding_box().inflate(reach, reach));
-        self.push(Op::Stroke { stroke: stroke.clone(), transform, color, path }, hasher, bounds);
+        self.push(
+            Op::Stroke {
+                stroke: stroke.clone(),
+                transform,
+                color,
+                path,
+            },
+            hasher,
+            bounds,
+        );
     }
 
     fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S) {
@@ -172,7 +272,16 @@ impl PaintTarget for CpuRecorder<'_> {
         hash_affine(&mut hasher, transform);
         hash_path(&mut hasher, &path);
         let bounds = device(transform, path.bounding_box());
-        self.push_layer(Op::PushClip { rule: fill, transform, path, close: 0 }, hasher, bounds);
+        self.push_layer(
+            Op::PushClip {
+                rule: fill,
+                transform,
+                path,
+                close: 0,
+            },
+            hasher,
+            bounds,
+        );
     }
 
     fn push_opacity<S: Shape>(&mut self, alpha: f32, transform: Affine, shape: &S) {
@@ -184,14 +293,25 @@ impl PaintTarget for CpuRecorder<'_> {
         hash_affine(&mut hasher, transform);
         hash_path(&mut hasher, &path);
         let bounds = device(transform, path.bounding_box());
-        self.push_layer(Op::PushOpacity { alpha, transform, path, close: 0 }, hasher, bounds);
+        self.push_layer(
+            Op::PushOpacity {
+                alpha,
+                transform,
+                path,
+                close: 0,
+            },
+            hasher,
+            bounds,
+        );
     }
 
     fn pop_layer(&mut self) {
         let Some(start) = self.open.pop() else { return };
         let close = self.ops.len();
         // A layer clips and fades what it holds: changing it changes all of that.
-        let extent = self.ops[start..].iter().fold(self.ops[start].bounds, |all, op| all.union(op.bounds));
+        let extent = self.ops[start..]
+            .iter()
+            .fold(self.ops[start].bounds, |all, op| all.union(op.bounds));
         let layer = &mut self.ops[start];
         layer.bounds = extent;
         match &mut layer.op {
@@ -204,7 +324,16 @@ impl PaintTarget for CpuRecorder<'_> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn box_shadow(&mut self, transform: Affine, area: Rect, rect: Rect, color: Color, radius: f64, std_dev: f64, invert: bool) {
+    fn box_shadow(
+        &mut self,
+        transform: Affine,
+        area: Rect,
+        rect: Rect,
+        color: Color,
+        radius: f64,
+        std_dev: f64,
+        invert: bool,
+    ) {
         let mut hasher = DefaultHasher::new();
         6u8.hash(&mut hasher);
         hash_affine(&mut hasher, transform);
@@ -213,27 +342,73 @@ impl PaintTarget for CpuRecorder<'_> {
         hash_color(&mut hasher, color);
         (radius.to_bits(), std_dev.to_bits(), invert).hash(&mut hasher);
         let bounds = device(transform, area);
-        self.push(Op::Shadow { transform, area, rect, color, radius, std_dev, invert }, hasher, bounds);
+        self.push(
+            Op::Shadow {
+                transform,
+                area,
+                rect,
+                color,
+                radius,
+                std_dev,
+                invert,
+            },
+            hasher,
+            bounds,
+        );
     }
 
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine) {
-        let Some(pixmap) = cached_cpu_pixmap(self.images, &mut self.used_images, key, image) else { return };
+        let Some(pixmap) = cached_cpu_pixmap(self.images, &mut self.used_images, key, image) else {
+            return;
+        };
         let mut hasher = DefaultHasher::new();
         7u8.hash(&mut hasher);
         key.hash(&mut hasher);
         (image.data.id(), image.width, image.height).hash(&mut hasher);
         hash_affine(&mut hasher, transform);
-        let bounds = device(transform, Rect::new(0.0, 0.0, f64::from(image.width), f64::from(image.height)));
-        self.push(Op::Image { transform, pixmap, width: image.width, height: image.height }, hasher, bounds);
+        let bounds = device(
+            transform,
+            Rect::new(0.0, 0.0, f64::from(image.width), f64::from(image.height)),
+        );
+        self.push(
+            Op::Image {
+                transform,
+                pixmap,
+                width: image.width,
+                height: image.height,
+            },
+            hasher,
+            bounds,
+        );
     }
 
-    fn glass(&mut self, transform: Affine, rect: Rect, radius: f64, tint: Color, _glass: &GlassParams) {
+    fn glass(
+        &mut self,
+        transform: Affine,
+        rect: Rect,
+        radius: f64,
+        tint: Color,
+        _glass: &GlassParams,
+    ) {
         if tint.components[3] > 0.0 {
-            self.fill(Fill::NonZero, transform, tint, &vello::kurbo::RoundedRect::from_rect(rect, radius));
+            self.fill(
+                Fill::NonZero,
+                transform,
+                tint,
+                &vello::kurbo::RoundedRect::from_rect(rect, radius),
+            );
         }
     }
 
-    fn draw_glyphs(&mut self, font: &FontData, font_size: f32, normalized_coords: &[i16], transform: Affine, color: Color, glyphs: &[PaintGlyph]) {
+    fn draw_glyphs(
+        &mut self,
+        font: &FontData,
+        font_size: f32,
+        normalized_coords: &[i16],
+        transform: Affine,
+        color: Color,
+        glyphs: &[PaintGlyph],
+    ) {
         if glyphs.is_empty() {
             return;
         }
@@ -243,7 +418,12 @@ impl PaintTarget for CpuRecorder<'_> {
         normalized_coords.hash(&mut hasher);
         hash_affine(&mut hasher, transform);
         hash_color(&mut hasher, color);
-        let (mut x0, mut y0, mut x1, mut y1) = (f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+        let (mut x0, mut y0, mut x1, mut y1) = (
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        );
         for glyph in glyphs {
             (glyph.id, glyph.x.to_bits(), glyph.y.to_bits()).hash(&mut hasher);
             x0 = x0.min(f64::from(glyph.x));
@@ -257,7 +437,14 @@ impl PaintTarget for CpuRecorder<'_> {
         let local = Rect::new(x0 - size, y0 - size * 1.5, x1 + size * 2.0, y1 + size);
         let bounds = device(transform, local);
         self.push(
-            Op::Glyphs { font: font.clone(), size: font_size, coords: normalized_coords.to_vec(), transform, color, glyphs: glyphs.to_vec() },
+            Op::Glyphs {
+                font: font.clone(),
+                size: font_size,
+                coords: normalized_coords.to_vec(),
+                transform,
+                color,
+                glyphs: glyphs.to_vec(),
+            },
             hasher,
             bounds,
         );
@@ -289,7 +476,13 @@ const SHADOW_MAX_SIDE: f64 = 4096.0;
 
 impl ShadowCache {
     pub(crate) fn new() -> Self {
-        Self { context: RenderContext::new(1, 1), entries: HashMap::new(), seen: HashMap::new(), frame: 0, bytes: 0 }
+        Self {
+            context: RenderContext::new(1, 1),
+            entries: HashMap::new(),
+            seen: HashMap::new(),
+            frame: 0,
+            bytes: 0,
+        }
     }
 
     /// Call once per presented frame: ages entries and forgets shadows not seen lately.
@@ -309,7 +502,18 @@ impl ShadowCache {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn get(&mut self, key: u64, resources: &mut Resources, transform: Affine, area: Rect, rect: Rect, color: Color, radius: f64, std_dev: f64, invert: bool) -> Option<(Arc<Pixmap>, f64, f64)> {
+    fn get(
+        &mut self,
+        key: u64,
+        resources: &mut Resources,
+        transform: Affine,
+        area: Rect,
+        rect: Rect,
+        color: Color,
+        radius: f64,
+        std_dev: f64,
+        invert: bool,
+    ) -> Option<(Arc<Pixmap>, f64, f64)> {
         let frame = self.frame;
         if let Some(entry) = self.entries.get_mut(&key) {
             entry.used = frame;
@@ -323,7 +527,8 @@ impl ShadowCache {
         let bounds = transform.transform_rect_bbox(area);
         let (x, y) = (bounds.x0.floor(), bounds.y0.floor());
         let (width, height) = (bounds.x1.ceil() - x, bounds.y1.ceil() - y);
-        if !(width >= 1.0 && height >= 1.0 && width <= SHADOW_MAX_SIDE && height <= SHADOW_MAX_SIDE) {
+        if !(width >= 1.0 && height >= 1.0 && width <= SHADOW_MAX_SIDE && height <= SHADOW_MAX_SIDE)
+        {
             return None;
         }
         let size = width as usize * height as usize * 4;
@@ -331,24 +536,41 @@ impl ShadowCache {
             return None;
         }
         while self.bytes + size > SHADOW_CACHE_BYTES {
-            let Some(oldest) = self.entries.iter().min_by_key(|(_, entry)| entry.used).map(|(key, _)| *key) else { break };
+            let Some(oldest) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(key, _)| *key)
+            else {
+                break;
+            };
             if let Some(entry) = self.entries.remove(&oldest) {
                 self.bytes -= entry.pixmap.width() as usize * entry.pixmap.height() as usize * 4;
             }
         }
         self.context.reset_and_resize(width as u16, height as u16);
         self.context.set_fill_rule(Fill::NonZero);
-        self.context.set_transform(Affine::translate((-x, -y)) * transform);
+        self.context
+            .set_transform(Affine::translate((-x, -y)) * transform);
         self.context.push_clip_layer(&area.to_path(0.1));
         self.context.set_paint(color);
-        self.context.fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, invert);
+        self.context
+            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, invert);
         self.context.pop_layer();
         self.context.flush();
         let mut pixmap = Pixmap::new(width as u16, height as u16);
         self.context.render(&mut pixmap, resources);
         let pixmap = Arc::new(pixmap);
         self.bytes += size;
-        self.entries.insert(key, CachedShadow { pixmap: pixmap.clone(), x, y, used: frame });
+        self.entries.insert(
+            key,
+            CachedShadow {
+                pixmap: pixmap.clone(),
+                x,
+                y,
+                used: frame,
+            },
+        );
         Some((pixmap, x, y))
     }
 }
@@ -356,28 +578,55 @@ impl ShadowCache {
 impl DisplayList {
     /// Rasterizes the part of the frame inside `region` (device pixels, integer
     /// origin) into `context`, which must already be sized to the region.
-    pub(crate) fn replay(&self, context: &mut RenderContext, resources: &mut Resources, region: Rect, mut shadows: Option<&mut ShadowCache>) {
+    pub(crate) fn replay(
+        &self,
+        context: &mut RenderContext,
+        resources: &mut Resources,
+        region: Rect,
+        mut shadows: Option<&mut ShadowCache>,
+    ) {
         let origin = Affine::translate((-region.x0, -region.y0));
         let mut index = 0;
         while index < self.ops.len() {
             let recorded = &self.ops[index];
             let visible = recorded.bounds.intersect(region).area() > 0.0;
             match &recorded.op {
-                Op::PushClip { rule, transform, path, close } => {
-                    if !visible { index = close + 1; continue; }
+                Op::PushClip {
+                    rule,
+                    transform,
+                    path,
+                    close,
+                } => {
+                    if !visible {
+                        index = close + 1;
+                        continue;
+                    }
                     context.set_fill_rule(*rule);
                     context.set_transform(origin * *transform);
                     context.push_clip_layer(path);
                 }
-                Op::PushOpacity { alpha, transform, path, close } => {
-                    if !visible { index = close + 1; continue; }
+                Op::PushOpacity {
+                    alpha,
+                    transform,
+                    path,
+                    close,
+                } => {
+                    if !visible {
+                        index = close + 1;
+                        continue;
+                    }
                     context.set_fill_rule(Fill::NonZero);
                     context.set_transform(origin * *transform);
                     context.push_layer(Some(path), None, Some(*alpha), None, None);
                 }
                 Op::Pop => context.pop_layer(),
                 _ if !visible => {}
-                Op::Fill { rule, transform, paint, path } => {
+                Op::Fill {
+                    rule,
+                    transform,
+                    paint,
+                    path,
+                } => {
                     context.set_fill_rule(*rule);
                     context.set_transform(origin * *transform);
                     match paint {
@@ -390,21 +639,48 @@ impl DisplayList {
                     context.fill_path(path);
                     context.set_paint_transform(Affine::IDENTITY);
                 }
-                Op::Stroke { stroke, transform, color, path } => {
+                Op::Stroke {
+                    stroke,
+                    transform,
+                    color,
+                    path,
+                } => {
                     context.set_stroke(stroke.clone());
                     context.set_transform(origin * *transform);
                     context.set_paint(*color);
                     context.stroke_path(path);
                 }
-                Op::Shadow { transform, area, rect, color, radius, std_dev, invert } => {
+                Op::Shadow {
+                    transform,
+                    area,
+                    rect,
+                    color,
+                    radius,
+                    std_dev,
+                    invert,
+                } => {
                     let cached = shadows.as_deref_mut().and_then(|cache| {
-                        cache.get(recorded.hash, resources, *transform, *area, *rect, *color, *radius, *std_dev, *invert)
+                        cache.get(
+                            recorded.hash,
+                            resources,
+                            *transform,
+                            *area,
+                            *rect,
+                            *color,
+                            *radius,
+                            *std_dev,
+                            *invert,
+                        )
                     });
                     if let Some((pixmap, x, y)) = cached {
                         // Whole-pixel placement: the cached pixels land unchanged.
-                        let (width, height) = (f64::from(pixmap.width()), f64::from(pixmap.height()));
+                        let (width, height) =
+                            (f64::from(pixmap.width()), f64::from(pixmap.height()));
                         context.set_transform(Affine::translate((x - region.x0, y - region.y0)));
-                        context.set_paint(CpuImage { image: CpuImageSource::Pixmap(pixmap), sampler: vello_cpu::peniko::ImageSampler::default() });
+                        context.set_paint(CpuImage {
+                            image: CpuImageSource::Pixmap(pixmap),
+                            sampler: vello_cpu::peniko::ImageSampler::default(),
+                        });
                         context.fill_rect(&Rect::new(0.0, 0.0, width, height));
                         index += 1;
                         continue;
@@ -413,22 +689,46 @@ impl DisplayList {
                     context.set_transform(origin * *transform);
                     context.push_clip_layer(&area.to_path(0.1));
                     context.set_paint(*color);
-                    context.fill_blurred_rounded_rect(rect, *radius as f32, *std_dev as f32, *invert);
+                    context.fill_blurred_rounded_rect(
+                        rect,
+                        *radius as f32,
+                        *std_dev as f32,
+                        *invert,
+                    );
                     context.pop_layer();
                 }
-                Op::Image { transform, pixmap, width, height } => {
+                Op::Image {
+                    transform,
+                    pixmap,
+                    width,
+                    height,
+                } => {
                     context.set_transform(origin * *transform);
-                    context.set_paint(CpuImage { image: CpuImageSource::Pixmap(pixmap.clone()), sampler: vello_cpu::peniko::ImageSampler::default() });
+                    context.set_paint(CpuImage {
+                        image: CpuImageSource::Pixmap(pixmap.clone()),
+                        sampler: vello_cpu::peniko::ImageSampler::default(),
+                    });
                     context.fill_rect(&Rect::new(0.0, 0.0, f64::from(*width), f64::from(*height)));
                 }
-                Op::Glyphs { font, size, coords, transform, color, glyphs } => {
+                Op::Glyphs {
+                    font,
+                    size,
+                    coords,
+                    transform,
+                    color,
+                    glyphs,
+                } => {
                     context.set_transform(origin * *transform);
                     context.set_paint(*color);
                     context
                         .glyph_run(resources, font)
                         .font_size(*size)
                         .normalized_coords(coords)
-                        .fill_glyphs(glyphs.iter().map(|glyph| vello_cpu::Glyph { id: glyph.id, x: glyph.x, y: glyph.y }));
+                        .fill_glyphs(glyphs.iter().map(|glyph| vello_cpu::Glyph {
+                            id: glyph.id,
+                            x: glyph.x,
+                            y: glyph.y,
+                        }));
                 }
             }
             index += 1;

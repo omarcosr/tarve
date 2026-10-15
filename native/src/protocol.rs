@@ -429,7 +429,7 @@ impl Node {
         }
         ["top", "right", "bottom", "left"].map(|side| value[side].as_f64().unwrap_or(0.0) as f32)
     }
-    }
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -1174,9 +1174,17 @@ fn validate_control(node: &Node) -> Result<(), String> {
     {
         return Err(format!("Unsupported input type: {}", node.input_type));
     }
-    let state_styles = ["hover", "active", "focus", "focusVisible", "disabled", "groupHover", "focusWithin"]
-        .iter()
-        .filter_map(|state| node.style.get(*state));
+    let state_styles = [
+        "hover",
+        "active",
+        "focus",
+        "focusVisible",
+        "disabled",
+        "groupHover",
+        "focusWithin",
+    ]
+    .iter()
+    .filter_map(|state| node.style.get(*state));
     let styles: Vec<&Value> = std::iter::once(&*node.style).chain(state_styles).collect();
     for transform in styles.iter().filter_map(|style| style.get("transform")) {
         let valid = transform.as_object().is_some_and(|transform| {
