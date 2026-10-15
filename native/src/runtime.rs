@@ -148,6 +148,14 @@ fn shortcut_key_name(key: &Key) -> Option<String> {
 }
 
 /// Word-wise caret motion: Ctrl on Windows/Linux, Option (Alt) on macOS.
+/// `TARVE_BACKGROUND=1`: windows open off every monitor, under other windows
+/// and without taking the foreground, so tests and
+/// benchmarks run beside someone's work without touching their screen, mouse or
+/// keyboard. Rendering and keyboard focus inside the app are unaffected.
+pub(crate) fn background_windows() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| std::env::var_os("TARVE_BACKGROUND").is_some_and(|v| v != "0" && !v.is_empty()))
+}
 pub(crate) fn word_modifier(modifiers: ModifiersState) -> bool {
     if cfg!(target_os = "macos") {
         modifiers.alt_key()
@@ -1270,6 +1278,16 @@ impl App {
         window: &Window,
         use_work_area: bool,
     ) {
+        if background_windows() {
+            // Left of every monitor: the window renders and presents but is never on screen.
+            let left = event_loop
+                .available_monitors()
+                .map(|monitor| monitor.position().x)
+                .min()
+                .unwrap_or(0);
+            window.set_outer_position(PhysicalPosition::new(left - 8000, 0));
+            return;
+        }
         match self.document.window.position.as_ref() {
             Some(WindowPosition::Coordinates { x, y }) => {
                 window.set_outer_position(LogicalPosition::new(*x, *y));
@@ -1528,7 +1546,9 @@ impl App {
         }
         window.set_visible(true);
         window.set_minimized(false);
-        window.focus_window();
+        if !background_windows() {
+            window.focus_window();
+        }
         self.redraw_frame(event_loop);
         self.sync_control_flow(event_loop);
     }
@@ -2205,7 +2225,13 @@ impl ApplicationHandler<Command> for App {
         }
         let options = &self.document.window;
         let visible = options.visible;
-        keep_at_bottom(options.level == crate::protocol::WindowLevel::AlwaysOnBottom);
+        // Background windows sit under every other window as well as not activating.
+        let level = if background_windows() {
+            crate::protocol::WindowLevel::AlwaysOnBottom
+        } else {
+            options.level
+        };
+        keep_at_bottom(level == crate::protocol::WindowLevel::AlwaysOnBottom);
         let icon = self.document.window_icon.as_deref().map(window_icons);
         if let Some(Err(message)) = &icon {
             self.events.push(error(format!("window icon: {message}")));
@@ -2217,8 +2243,9 @@ impl ApplicationHandler<Command> for App {
             .with_min_inner_size(LogicalSize::new(options.min_width, options.min_height))
             .with_resizable(options.resizable)
             .with_decorations(options.decorations)
-            .with_window_level(winit_window_level(options.level))
-            .with_visible(false);
+            .with_window_level(winit_window_level(level))
+            .with_visible(false)
+            .with_active(!background_windows());
         // Windows: a small title-bar icon and a large taskbar one. Elsewhere the
         // one window icon (X11 _NET_WM_ICON) serves every size, so it is the large one.
         #[cfg(target_os = "windows")]
@@ -2372,7 +2399,7 @@ impl ApplicationHandler<Command> for App {
                         "show" => self.unpark(event_loop),
                         "hide" => self.park(event_loop),
                         "minimize" => window.set_minimized(true),
-                        "focus" => window.focus_window(),
+                        "focus" if !background_windows() => window.focus_window(),
                         other => self.events.push(error(format!("unknown window action {other}"))),
                     }
                 }
