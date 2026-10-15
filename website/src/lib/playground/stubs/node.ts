@@ -21,7 +21,19 @@ class Fnv1a {
 export const createHash = () => new Fnv1a();
 export const randomUUID = () => crypto.randomUUID();
 
+export const createPublicKey = () => unavailable("crypto.createPublicKey");
+export const verify = () => unavailable("crypto.verify");
+export const spawn = () => unavailable("child_process.spawn");
+
+export const constants = { W_OK: 2 };
 export const existsSync = () => false;
+export const accessSync = () => unavailable("fs.accessSync");
+export const chmodSync = () => unavailable("fs.chmodSync");
+export const openSync = () => unavailable("fs.openSync");
+export const readSync = () => unavailable("fs.readSync");
+export const closeSync = () => unavailable("fs.closeSync");
+export const copyFileSync = () => unavailable("fs.copyFileSync");
+export const createWriteStream = () => unavailable("fs.createWriteStream");
 export const mkdirSync = () => unavailable("fs.mkdirSync");
 export const readFileSync = () => unavailable("fs.readFileSync");
 export const renameSync = () => unavailable("fs.renameSync");
