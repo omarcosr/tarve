@@ -267,6 +267,15 @@ function TopBar() {
   );
 }
 
+/** Plays `songs` in a random order: a random first song, then the rest shuffled. */
+function shufflePlay(songs: Song[], from: string): void {
+  if (!songs.length) return;
+  const first = Math.floor(Math.random() * songs.length);
+  state.shuffle = false;
+  state.play([songs[first]!, ...songs.filter((_, i) => i !== first)], 0, from);
+  state.toggleShuffle();
+}
+
 function openItem(item: Item, shelf: Shelf): void {
   if (item.kind === "song") {
     const songs = shelf.items.filter((x): x is Song => x.kind === "song");
@@ -362,7 +371,7 @@ function CollectionPage({ entry }: { entry: Collection }) {
           <Row gap={8} style={{ margin: { top: 8 } }}>
             <PrimaryButton id="play-all" label={playingHere ? "Pause" : "Play"} d={playingHere ? icons.pause : icons.play}
               onClick={() => { if (playingHere) state.media()?.pause(); else if (songs?.length) state.play(songs, 0, header.title); }} />
-            <IconButton id="shuffle-all" d={icons.shuffle} label="Shuffle play" onClick={() => { if (!songs?.length) return; state.shuffle = false; state.play(songs, Math.floor(Math.random() * songs.length), header.title); state.toggleShuffle(); }} />
+            <IconButton id="shuffle-all" d={icons.shuffle} label="Shuffle play" onClick={() => { if (songs) shufflePlay(songs, header.title); }} />
           </Row>
         </Column>
       </Row>
@@ -670,14 +679,19 @@ export function YouTubeMusicView() {
 }
 function HomeShelves() {
   return <Column gap={28}>
-    {state.shelves?.map((shelf, i) =>
-      <Column key={`${i}-${shelf.title}`} gap={6}>
-        <Text size={20} weight={700} style={{ padding: { left: 8 } }}>{shelf.title}</Text>
+    {state.shelves?.map((shelf, i) => {
+      const songs = shelf.items.filter((x): x is Song => x.kind === "song");
+      return <Column key={`${i}-${shelf.title}`} gap={6}>
+        <Row gap={8} align="center" style={{ padding: { left: 8 } }}>
+          <Text size={20} weight={700}>{shelf.title}</Text>
+          {songs.length > 1 ? <IconButton id={`shuffle-shelf-${i}`} d={icons.shuffle} label={`Shuffle play ${shelf.title}`} size={16} onClick={() => shufflePlay(songs, shelf.title)} /> : null}
+        </Row>
         <Scroll orientation="horizontal" style={{ shrink: 0 }}>
           <Row gap={4} style={{ padding: { bottom: 6 } }}>
             {shelf.items.map((item, j) => <Card key={`${j}-${item.id}`} slot={`${i}-${j}`} item={item} shelf={shelf} />)}
           </Row>
         </Scroll>
-      </Column>)}
+      </Column>;
+    })}
   </Column>;
 }
