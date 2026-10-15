@@ -1118,7 +1118,13 @@ impl D3d11Graphics {
             let _ = self.upload_glass_params(surface, 0.0);
             return false;
         };
-        if self.upload_glass_params(surface, 1.0).is_err() {
+        // Wide blurs run at half resolution: a quarter of the pixels, half the taps,
+        // and nothing a blur that wide would show is lost.
+        let half = surface.params[0] >= HALF_RES_BLUR_SIGMA;
+        if self
+            .upload_glass_params(surface, if half { 2.0 } else { 1.0 })
+            .is_err()
+        {
             return false;
         }
         let area = windows::Win32::Graphics::Direct3D11::D3D11_BOX {
@@ -1145,6 +1151,22 @@ impl D3d11Graphics {
                 .OMSetBlendState(Some(&self.blend), Some(&[0.0, 0.0, 0.0, 0.0]), u32::MAX);
             self.context.OMSetDepthStencilState(None, 0);
             self.context
+                .PSSetSamplers(0, Some(&[Some(self.image_sampler.clone())]));
+            // The passes write only the backdrop textures, inside the region: no
+            // scissor (a partial redraw's is in window pixels, not half ones).
+            let rasterizer = self.context.RSGetState().ok();
+            self.context.RSSetState(&self.rasterizer);
+            if half {
+                self.context.RSSetViewports(Some(&[D3D11_VIEWPORT {
+                    TopLeftX: 0.0,
+                    TopLeftY: 0.0,
+                    Width: self.width as f32 / 2.0,
+                    Height: self.height as f32 / 2.0,
+                    MinDepth: 0.0,
+                    MaxDepth: 1.0,
+                }]));
+            }
+            self.context
                 .OMSetRenderTargets(Some(&[Some(backdrop.targets[1].clone())]), None);
             self.context
                 .PSSetShaderResources(0, Some(&[Some(backdrop.views[0].clone())]));
@@ -1156,6 +1178,12 @@ impl D3d11Graphics {
                 .PSSetShaderResources(0, Some(&[Some(backdrop.views[1].clone())]));
             self.context.DrawIndexed(blur_v.1, blur_v.0, 0);
             self.context.PSSetShaderResources(0, Some(&[None]));
+            if half {
+                self.set_viewport(self.width, self.height);
+            }
+            if let Some(rasterizer) = rasterizer {
+                self.context.RSSetState(&rasterizer);
+            }
             self.context
                 .OMSetRenderTargets(Some(&[Some(render_target.clone())]), Some(depth_view));
             self.context
@@ -4125,3 +4153,6 @@ mod shader_tests {
         std::fs::write(dir.join("ui.hlsl.fnv"), format!("{}\n", source_hash())).unwrap();
     }
 }
+
+/// Gaussian sigma (device pixels) from which liquid glass blurs at half resolution.
+const HALF_RES_BLUR_SIGMA: f32 = 3.0;

@@ -9,7 +9,8 @@ struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 color : CO
     nointerpolation float4 shape : TEXCOORD8; nointerpolation float4 inner : TEXCOORD9; };
 // Window NDC -> render-target NDC: identity, or one tile of a tiled MSAA frame.
 cbuffer Target : register(b0) { float4 target; };
-// Liquid glass: sigma, saturate, refraction, highlight | backdrop width, height, 1 when a blurred backdrop is bound, 0.
+// Liquid glass: sigma, saturate, refraction, highlight | backdrop width, height, blurred backdrop bound
+// (0 none, 1 full resolution, 2 half), magnify.
 cbuffer Glass : register(b1) { float4 glassA; float4 glassB; float4 glassRegion; };
 // Merged glass: shape count, bridge width | per shape: offset from the first one's
 // centre, half size | corner radius, opacity. Shape 0 is the quad's own box.
@@ -50,20 +51,42 @@ float rounded_box_shadow(float2 p, float4 params) {
     [unroll] for (int k=0;k<4;k++) { value+=shadow_x(p.x,p.y-y,sigma,corner,half_size)*gauss(y,sigma)*step; y+=step; }
     return value;
 }
-// One pass of a separable gaussian over the bound backdrop copy, read at this pixel.
+// One pass of a separable gaussian over the bound backdrop copy (glassB.z: 1 at
+// full resolution; 2 at half, for wide blurs: the horizontal pass reads the
+// full-resolution copy and writes half-resolution pixels, the vertical one stays
+// at half). Taps go in pairs through one bilinear fetch, placed between the two
+// texels by their weights: half the reads. Reads stay inside the copied region.
 float4 blurPass(float2 p, float2 dir, float sigma) {
-    int r = (int)min(ceil(sigma*3.0), 96.0); float4 sum = 0; float wsum = 0;
-    int2 first = int2(glassRegion.xy); int2 last = int2(glassRegion.zw) - 1;
-    for (int k = -r; k <= r; k++) {
-        float w = exp(-(k*k)/(2.0*sigma*sigma));
-        int2 q = clamp(int2(p + dir*k), first, last);
-        sum += tex0.Load(int3(q,0))*w; wsum += w;
+    bool half = glassB.z > 1.5;
+    bool fromFull = !half || dir.y == 0.0;
+    float2 s = half && fromFull ? p * 2.0 : p;
+    float4 bounds = fromFull ? glassRegion : glassRegion * 0.5;
+    if (!fromFull) sigma *= 0.5;
+    float2 size; tex0.GetDimensions(size.x, size.y);
+    float2 lo = bounds.xy + 0.5; float2 hi = bounds.zw - 0.5;
+    int r = (int)min(ceil(sigma*3.0), 96.0);
+    float falloff = -1.0 / (2.0*sigma*sigma);
+    float3 sum = tex0.SampleLevel(samp0, clamp(s, lo, hi) / size, 0).rgb; float wsum = 1.0;
+    for (int k = 1; k <= r; k += 2) {
+        float w0 = exp(k*k*falloff);
+        float w1 = k + 1 <= r ? exp((k+1)*(k+1)*falloff) : 0.0;
+        float w = w0 + w1; float offset = k + w1 / w;
+        float2 a = clamp(s + dir*offset, lo, hi) / size;
+        float2 b = clamp(s - dir*offset, lo, hi) / size;
+        sum += (tex0.SampleLevel(samp0, a, 0).rgb + tex0.SampleLevel(samp0, b, 0).rgb) * w;
+        wsum += 2.0 * w;
     }
-    return float4((sum/wsum).rgb, 1.0);
+    return float4(sum / wsum, 1.0);
 }
 // The copied backdrop at a window pixel; reads stay inside the copied region (the
 // rest of the scratch texture is stale).
-float3 backdropAt(float2 q) { return tex0.Load(int3(clamp(q, glassRegion.xy, glassRegion.zw - 1.0), 0)).rgb; }
+float3 backdropAt(float2 q) {
+    if (glassB.z > 1.5) {
+        float2 size; tex0.GetDimensions(size.x, size.y);
+        return tex0.SampleLevel(samp0, clamp(q * 0.5, glassRegion.xy * 0.5 + 0.5, glassRegion.zw * 0.5 - 0.5) / size, 0).rgb;
+    }
+    return tex0.Load(int3(clamp(q, glassRegion.xy, glassRegion.zw - 1.0), 0)).rgb;
+}
 // Distance to the glass surface: the quad's own box joined with the other shapes of a
 // merged surface by the polynomial smooth minimum (C1, so the join is a fillet, never
 // a crease): where two shapes are both within `blend` px of a point the union bulges by
