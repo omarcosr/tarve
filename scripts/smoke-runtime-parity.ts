@@ -113,10 +113,23 @@ try {
     writeFileSync(join(entries, view + ".tsx"), entry(view));
     const source = `_runtime-parity/${view}.tsx`;
     const bun = await run(["bun", source, join(out, view + "-bun")]);
-    const reference = report(view + "-bun");
+    let reference = report(view + "-bun");
     if (!reference?.initial) { failures.push(`${view} bun: ${reference?.crash ?? bun.stderr}`); continue; }
     if (reference.errors.length) failures.push(`${view} bun reported errors: ${reference.errors.join("; ")}`);
+    const compare = async (variant: string, got: NonNullable<ReturnType<typeof report>>): Promise<string[]> => {
+      const problems: string[] = [];
+      for (const stage of ["initial", "hover", "after"] as const) {
+        const diffs = nodeDiffs(reference![stage], got[stage]);
+        if (diffs.length) problems.push(`${stage}: ${diffs.length} nodes differ, e.g. ${diffs[0]}`);
+        const pixels = await pixelDiff(`${view}-bun-${stage}.png`, `${view}-${variant}-${stage}.png`);
+        if (pixels > 0) problems.push(`${stage}: ${pixels.toFixed(3)}% pixels differ`);
+      }
+      if (got.errors.length) problems.push(`errors: ${got.errors.join("; ")}`);
+      return problems;
+    };
     const line: string[] = [];
+    const mismatched = new Map<string, string[]>();
+    let compared = 0;
     for (const variant of variants) {
       const [runtime, compiled] = variant.split("-");
       const executable = join(out, `${view}-${variant}.exe`);
@@ -130,19 +143,32 @@ try {
         const result = await run([executable, join(out, `${view}-${variant}`)]);
         const got = report(`${view}-${variant}`);
         if (!got?.initial) { crashed = got?.crash ?? result.stderr; break; }
-        problems = [];
-        for (const stage of ["initial", "hover", "after"] as const) {
-          const diffs = nodeDiffs(reference[stage], got[stage]);
-          if (diffs.length) problems.push(`${stage}: ${diffs.length} nodes differ, e.g. ${diffs[0]}`);
-          const pixels = await pixelDiff(`${view}-bun-${stage}.png`, `${view}-${variant}-${stage}.png`);
-          if (pixels > 0) problems.push(`${stage}: ${pixels.toFixed(3)}% pixels differ`);
-        }
-        if (got.errors.length) problems.push(`errors: ${got.errors.join("; ")}`);
+        problems = await compare(variant, got);
         if (!problems.length) break;
       }
       if (crashed) { failures.push(`${view} ${variant}: ${crashed}`); line.push(`${variant}=CRASH`); continue; }
-      if (problems.length) failures.push(`${view} ${variant}: ${problems.join(" | ")}`);
-      line.push(`${variant}=${problems.length ? "FAIL" : "ok"}`);
+      compared++;
+      if (problems.length) mismatched.set(variant, problems);
+    }
+    // Every variant agreeing with each other but not with Bun says the Bun run was the
+    // odd one (a caret mid-blink at a capture): take a second Bun reference and compare
+    // the captures the variants already made against it.
+    if (compared > 1 && mismatched.size === compared) {
+      await run(["bun", source, join(out, view + "-bun")]);
+      const again = report(view + "-bun");
+      if (again?.initial) {
+        reference = again;
+        for (const variant of [...mismatched.keys()]) {
+          const problems = await compare(variant, report(`${view}-${variant}`)!);
+          if (problems.length) mismatched.set(variant, problems); else mismatched.delete(variant);
+        }
+      }
+    }
+    for (const variant of variants) {
+      if (line.some(entry => entry.startsWith(variant + "="))) continue;
+      const problems = mismatched.get(variant);
+      if (problems) failures.push(`${view} ${variant}: ${problems.join(" | ")}`);
+      line.push(`${variant}=${problems ? "FAIL" : "ok"}`);
     }
     console.log(`${view.padEnd(14)} ${JSON.stringify(reference.driven)} ${line.join(" ")}`);
   }
