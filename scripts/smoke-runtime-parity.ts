@@ -83,7 +83,8 @@ process.exit(code);
 `;
 
 async function run(command: string[]) {
-  const child = Bun.spawn(command, { cwd: examples, stdout: "pipe", stderr: "pipe" });
+  // Every app here uses the CPU renderer: check each partial redraw against a full one.
+  const child = Bun.spawn(command, { cwd: examples, stdout: "pipe", stderr: "pipe", env: { ...process.env, TARVE_CPU_DAMAGE_CHECK: "1" } });
   const timer = setTimeout(() => child.kill(), 60_000);
   const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
   clearTimeout(timer);

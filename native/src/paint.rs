@@ -518,6 +518,8 @@ impl CpuCachedImage {
     }
 }
 
+/// Paints straight into the rasterizer (the browser build; native records a [`crate::cpu_display::DisplayList`]).
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
 pub(crate) struct CpuPaintTarget<'a> {
     context: &'a mut RenderContext,
     resources: &'a mut Resources,
@@ -525,6 +527,7 @@ pub(crate) struct CpuPaintTarget<'a> {
     used_images: HashSet<String>,
 }
 
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
 impl<'a> CpuPaintTarget<'a> {
     pub(crate) fn new(
         context: &'a mut RenderContext,
@@ -539,7 +542,7 @@ impl<'a> CpuPaintTarget<'a> {
         }
     }
 
-    fn image_pixmap(image: &ImageData) -> Option<Pixmap> {
+    pub(crate) fn image_pixmap(image: &ImageData) -> Option<Pixmap> {
         let width = u16::try_from(image.width).ok()?;
         let height = u16::try_from(image.height).ok()?;
         let source = image.data.data();
@@ -569,6 +572,35 @@ impl<'a> CpuPaintTarget<'a> {
     pub(crate) fn finish(self) {
         self.images.retain(|key, _| self.used_images.contains(key));
     }
+}
+
+/// The CPU pixmap for an image, converted once per key and data and kept while used.
+pub(crate) fn cached_cpu_pixmap(
+    images: &mut HashMap<String, CpuCachedImage>,
+    used: &mut HashSet<String>,
+    key: &str,
+    image: &ImageData,
+) -> Option<Arc<Pixmap>> {
+    let stale = images.get(key).is_none_or(|cached| !cached.matches(image));
+    if stale {
+        let Some(pixmap) = CpuPaintTarget::image_pixmap(image) else {
+            images.remove(key);
+            return None;
+        };
+        images.insert(
+            key.to_string(),
+            CpuCachedImage {
+                data: image.data.clone(),
+                width: image.width,
+                height: image.height,
+                format: image.format,
+                alpha_type: image.alpha_type,
+                pixmap: Arc::new(pixmap),
+            },
+        );
+    }
+    used.insert(key.to_string());
+    images.get(key).map(|cached| cached.pixmap.clone())
 }
 
 impl PaintTarget for CpuPaintTarget<'_> {
@@ -638,29 +670,7 @@ impl PaintTarget for CpuPaintTarget<'_> {
     }
 
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine) {
-        let stale = self
-            .images
-            .get(key)
-            .is_none_or(|cached| !cached.matches(image));
-        if stale {
-            let Some(pixmap) = Self::image_pixmap(image) else {
-                self.images.remove(key);
-                return;
-            };
-            self.images.insert(
-                key.to_string(),
-                CpuCachedImage {
-                    data: image.data.clone(),
-                    width: image.width,
-                    height: image.height,
-                    format: image.format,
-                    alpha_type: image.alpha_type,
-                    pixmap: Arc::new(pixmap),
-                },
-            );
-        }
-        self.used_images.insert(key.to_string());
-        let Some(pixmap) = self.images.get(key).map(|cached| cached.pixmap.clone()) else {
+        let Some(pixmap) = cached_cpu_pixmap(self.images, &mut self.used_images, key, image) else {
             return;
         };
         self.context.set_transform(transform);

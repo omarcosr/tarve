@@ -9,6 +9,8 @@ mod desktop_widget;
 #[cfg(not(target_arch = "wasm32"))]
 mod bridge;
 mod controls;
+#[cfg(not(target_arch = "wasm32"))]
+mod cpu_display;
 #[cfg(target_os = "windows")]
 mod d3d11;
 #[cfg(not(target_arch = "wasm32"))]

@@ -1,7 +1,8 @@
 #[cfg(target_os = "windows")]
 use crate::d3d11::{D3d11Error, D3d11Graphics, D3d11PaintTarget};
 use crate::{
-    paint::{CpuCachedImage, CpuPaintTarget},
+    cpu_display::{CpuRecorder, DisplayList, ShadowCache, damage},
+    paint::CpuCachedImage,
     protocol::RendererPreference,
 };
 use softbuffer::{Context as SoftContext, Surface as SoftSurface};
@@ -593,6 +594,158 @@ struct CpuGraphics {
     width: u32,
     height: u32,
     prepared: bool,
+    /// The recorded frame, and the region that differs from what `frame` shows.
+    list: Option<DisplayList>,
+    damage: CpuDamage,
+    /// What the retained back buffer was drawn for.
+    frame_background: Option<[u8; 4]>,
+    frame_size: (u16, u16),
+    scratch: Vec<u8>,
+    shadows: ShadowCache,
+}
+
+/// What of the retained frame must be rasterized again.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum CpuDamage {
+    None,
+    Region(vello::kurbo::Rect),
+    Full,
+}
+
+impl CpuDamage {
+    fn add(self, other: CpuDamage) -> CpuDamage {
+        match (self, other) {
+            (CpuDamage::Full, _) | (_, CpuDamage::Full) => CpuDamage::Full,
+            (CpuDamage::None, other) | (other, CpuDamage::None) => other,
+            (CpuDamage::Region(a), CpuDamage::Region(b)) => CpuDamage::Region(a.union(b)),
+        }
+    }
+}
+
+/// A damaged rectangle grown to whole 16-pixel tiles inside the frame, or the whole
+/// frame when the damage covers most of it (one pass is then cheaper than two copies).
+/// Tile-aligned origins keep the rasterizer's tiling, so pixels match a full redraw.
+fn cpu_redraw_region(damage: vello::kurbo::Rect, width: u32, height: u32) -> vello::kurbo::Rect {
+    let full = vello::kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
+    let x0 = ((damage.x0 / 16.0).floor() * 16.0).clamp(0.0, full.x1);
+    let y0 = ((damage.y0 / 16.0).floor() * 16.0).clamp(0.0, full.y1);
+    let x1 = ((damage.x1 / 16.0).ceil() * 16.0).clamp(0.0, full.x1);
+    let y1 = ((damage.y1 / 16.0).ceil() * 16.0).clamp(0.0, full.y1);
+    let region = vello::kurbo::Rect::new(x0, y0, x1, y1);
+    if region.area() >= full.area() * 0.6 { full } else { region }
+}
+
+
+/// TARVE_CPU_DAMAGE_CHECK=1: after each partial redraw, redraw the whole frame and
+/// fail if a pixel differs by more than rounding. For tests; it doubles every frame's work.
+#[allow(clippy::too_many_arguments)]
+fn check_partial_redraw(
+    context: &mut CpuRenderContext,
+    resources: &mut CpuResources,
+    list: &DisplayList,
+    frame: &[u32],
+    width: usize,
+    height: usize,
+    region: vello::kurbo::Rect,
+    background: vello::peniko::Color,
+) -> Result<(), RenderError> {
+    let mut expected = vec![0_u32; width * height];
+    rasterize_cpu_region(
+        context,
+        resources,
+        list,
+        CpuFrame { pixels: &mut expected, width, height },
+        &mut Vec::new(),
+        None,
+        vello::kurbo::Rect::new(0.0, 0.0, width as f64, height as f64),
+        background,
+    );
+    let mut wrong = 0;
+    let (mut x0, mut y0, mut x1, mut y1, mut worst) = (usize::MAX, usize::MAX, 0, 0, 0_i32);
+    for (index, (a, b)) in expected.iter().zip(frame).enumerate() {
+        // The region is rasterized in its own coordinates: f32 rounding can shift a
+        // near-tangent edge pixel by a few steps of 255. A missed damage differs by
+        // whole shapes, far more than that.
+        let delta = [0, 8, 16].iter().map(|shift| (((a >> shift) & 255) as i32 - ((b >> shift) & 255) as i32).abs()).max().unwrap_or(0);
+        if delta > 3 {
+            wrong += 1;
+            let (x, y) = (index % width, index / width);
+            (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+            worst = worst.max(delta);
+        }
+    }
+    if wrong > 0 {
+        return Err(RenderError::Fatal(format!(
+            "CPU partial redraw of {region:?} differs from a full redraw in {wrong} pixels within {x0},{y0}..{x1},{y1} (by up to {worst})"
+        )));
+    }
+    Ok(())
+}
+
+
+fn cpu_damage_check() -> bool {
+    static CHECK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CHECK.get_or_init(|| std::env::var_os("TARVE_CPU_DAMAGE_CHECK").is_some_and(|value| value == "1"))
+}
+
+/// The retained frame: composited pixels packed for softbuffer.
+struct CpuFrame<'a> {
+    pixels: &'a mut [u32],
+    width: usize,
+    height: usize,
+}
+
+/// Rasterizes `region` (tile-aligned, inside the frame) of `list` into `frame`.
+#[allow(clippy::too_many_arguments)]
+fn rasterize_cpu_region(
+    context: &mut CpuRenderContext,
+    resources: &mut CpuResources,
+    list: &DisplayList,
+    frame: CpuFrame<'_>,
+    scratch: &mut Vec<u8>,
+    shadows: Option<&mut ShadowCache>,
+    region: vello::kurbo::Rect,
+    color: vello::peniko::Color,
+) {
+    let (width, height) = (frame.width, frame.height);
+
+        let (x0, y0) = (region.x0 as usize, region.y0 as usize);
+        let (region_width, region_height) = ((region.x1 - region.x0) as usize, (region.y1 - region.y0) as usize);
+        if region_width == 0 || region_height == 0 {
+            return;
+        }
+        let full = region_width == width && region_height == height;
+        // Geometry entering from the left of the viewport accumulates its coverage
+        // differently in the first tile column (one step of rounding): rasterize a
+        // margin there and keep only the region, so pixels match a full redraw.
+        let margin = if full { 0 } else { x0.min(16) };
+        let raster = vello::kurbo::Rect::new(region.x0 - margin as f64, region.y0, region.x1, region.y1);
+        let raster_width = region_width + margin;
+        context.reset_and_resize(raster_width as u16, region_height as u16);
+        list.replay(context, resources, raster, shadows);
+        context.flush();
+        if full {
+            let bytes = bytemuck::cast_slice_mut::<u32, u8>(frame.pixels);
+            if let Some(pixmap) = PixmapMut::new(region_width as u16, region_height as u16, bytes) {
+                context.render(pixmap, resources);
+            }
+            flatten_rgba_for_softbuffer(frame.pixels, color);
+        } else {
+            scratch.clear();
+            scratch.resize(raster_width * region_height * 4, 0);
+            if let Some(pixmap) = PixmapMut::new(raster_width as u16, region_height as u16, scratch) {
+                context.render(pixmap, resources);
+            }
+            for row in 0..region_height {
+                let source = &scratch[(row * raster_width + margin) * 4..(row + 1) * raster_width * 4];
+                let start = (y0 + row) * width + x0;
+                let target = &mut frame.pixels[start..start + region_width];
+                for (pixel, rgba) in target.iter_mut().zip(source.as_chunks::<4>().0) {
+                    *pixel = u32::from_ne_bytes(*rgba);
+                }
+                flatten_rgba_for_softbuffer(target, color);
+            }
+        }
 }
 
 impl CpuGraphics {
@@ -618,6 +771,12 @@ impl CpuGraphics {
             width: u32::from(width),
             height: u32::from(height),
             prepared: false,
+            list: None,
+            damage: CpuDamage::Full,
+            frame_background: None,
+            frame_size: (0, 0),
+            scratch: Vec::new(),
+            shadows: ShadowCache::new(),
         })
     }
 
@@ -625,17 +784,23 @@ impl CpuGraphics {
         &mut self,
         width: u32,
         height: u32,
-        paint: impl FnOnce(&mut CpuPaintTarget<'_>),
+        paint: impl FnOnce(&mut CpuRecorder<'_>),
     ) -> Result<(), String> {
         let (cpu_width, cpu_height) = Self::dimensions(width, height)?;
+        let resized = self.width != u32::from(cpu_width) || self.height != u32::from(cpu_height);
         self.width = u32::from(cpu_width);
         self.height = u32::from(cpu_height);
-        self.context.reset_and_resize(cpu_width, cpu_height);
-        let mut target =
-            CpuPaintTarget::new(&mut self.context, &mut self.resources, &mut self.images);
-        paint(&mut target);
-        target.finish();
-        self.context.flush();
+        let list = {
+            let mut recorder = CpuRecorder::new(&mut self.images);
+            paint(&mut recorder);
+            recorder.finish()
+        };
+        let changed = match &self.list {
+            Some(previous) if !resized => damage(previous, &list).map_or(CpuDamage::None, CpuDamage::Region),
+            _ => CpuDamage::Full,
+        };
+        self.damage = self.damage.add(changed);
+        self.list = Some(list);
         self.prepared = true;
         Ok(())
     }
@@ -647,14 +812,13 @@ impl CpuGraphics {
         self.width = width;
         self.height = height;
         self.prepared = false;
+        self.damage = CpuDamage::Full;
         true
     }
 
-    fn render(
-        &mut self,
-        background: vello::peniko::Color,
-        content_changed: bool,
-    ) -> Result<PresentResult, RenderError> {
+    /// Redraws what the last prepare changed (nothing for a plain redraw request:
+    /// the retained frame is presented again) and presents it.
+    fn render(&mut self, background: vello::peniko::Color) -> Result<PresentResult, RenderError> {
         if !self.prepared {
             return Err(RenderError::Fatal(
                 "CPU renderer frame was not prepared before presentation".into(),
@@ -668,22 +832,56 @@ impl CpuGraphics {
                 NonZeroU32::new(u32::from(height)).unwrap(),
             )
             .map_err(|error| RenderError::Fatal(format!("Softbuffer resize failed: {error}")))?;
+        let background_bytes = background.to_rgba8().to_u8_array();
+        let full = vello::kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
         let mut buffer = self
             .surface
             .buffer_mut()
             .map_err(|error| RenderError::Fatal(format!("Softbuffer buffer failed: {error}")))?;
-        if should_rasterize_cpu_frame(content_changed, buffer.age()) {
-            {
-                let bytes = bytemuck::cast_slice_mut::<u32, u8>(&mut buffer);
-                let pixmap = PixmapMut::new(width, height, bytes)
-                    .ok_or_else(|| RenderError::Fatal("Invalid CPU framebuffer size".into()))?;
-                self.context.render(pixmap, &mut self.resources);
-            }
-            flatten_rgba_for_softbuffer(&mut buffer, background);
+        // The back buffer is the retained frame: at age 1 it holds the last presented
+        // one, so only the damage is drawn into it. Otherwise it is drawn whole.
+        let mut damage = self.damage;
+        if buffer.age() != 1 || self.frame_background != Some(background_bytes) || self.frame_size != (width, height) {
+            damage = CpuDamage::Full;
         }
-        buffer
-            .present()
-            .map_err(|error| RenderError::Fatal(format!("Softbuffer present failed: {error}")))?;
+        let region = match damage {
+            CpuDamage::None => None,
+            CpuDamage::Full => Some(full),
+            CpuDamage::Region(rect) => Some(cpu_redraw_region(rect, self.width, self.height)),
+        };
+        if let (Some(region), Some(list)) = (region, &self.list) {
+            let (frame_width, frame_height) = (usize::from(width), usize::from(height));
+            rasterize_cpu_region(
+                &mut self.context,
+                &mut self.resources,
+                list,
+                CpuFrame { pixels: &mut buffer, width: frame_width, height: frame_height },
+                &mut self.scratch,
+                Some(&mut self.shadows),
+                region,
+                background,
+            );
+            if region != full && cpu_damage_check() {
+                check_partial_redraw(&mut self.context, &mut self.resources, list, &buffer, frame_width, frame_height, region, background)?;
+            }
+        }
+        self.frame_background = Some(background_bytes);
+        self.frame_size = (width, height);
+        self.damage = CpuDamage::None;
+        self.shadows.next_frame();
+        let presented = match region {
+            Some(region) if region != full => {
+                let rect = softbuffer::Rect {
+                    x: region.x0 as u32,
+                    y: region.y0 as u32,
+                    width: NonZeroU32::new((region.x1 - region.x0) as u32).unwrap_or(NonZeroU32::MIN),
+                    height: NonZeroU32::new((region.y1 - region.y0) as u32).unwrap_or(NonZeroU32::MIN),
+                };
+                buffer.present_with_damage(&[rect])
+            }
+            _ => buffer.present(),
+        };
+        presented.map_err(|error| RenderError::Fatal(format!("Softbuffer present failed: {error}")))?;
         Ok(PresentResult::Presented)
     }
 
@@ -700,9 +898,16 @@ impl CpuGraphics {
         let (width, height) =
             Self::dimensions(self.width, self.height).map_err(CaptureError::Request)?;
         let mut pixels = vec![0_u8; usize::from(width) * usize::from(height) * 4];
-        let pixmap = PixmapMut::new(width, height, &mut pixels)
-            .ok_or_else(|| CaptureError::Request("Invalid CPU capture size".into()))?;
-        self.context.render(pixmap, &mut self.resources);
+        if let Some(list) = &self.list {
+            self.context.reset_and_resize(width, height);
+            list.replay(&mut self.context, &mut self.resources, vello::kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height)), Some(&mut self.shadows));
+            self.context.flush();
+            let pixmap = PixmapMut::new(width, height, &mut pixels)
+                .ok_or_else(|| CaptureError::Request("Invalid CPU capture size".into()))?;
+            self.context.render(pixmap, &mut self.resources);
+        }
+        // The next presented frame cannot reuse the rasterizer's state.
+        self.damage = CpuDamage::Full;
         flatten_rgba_bytes(&mut pixels, background);
         image::save_buffer(
             path,
@@ -713,15 +918,6 @@ impl CpuGraphics {
         )
         .map_err(|error| CaptureError::Request(error.to_string()))
     }
-}
-
-fn should_rasterize_cpu_frame(content_changed: bool, buffer_age: u8) -> bool {
-    // softbuffer's age is the number of presents since this exact back buffer
-    // was last shown. Only age 1 is guaranteed to contain the immediately
-    // previous frame. Older buffers may predate a repaint, and age 0 has
-    // unspecified contents, so both must be fully rasterized unless we keep a
-    // damage history for every intervening frame.
-    content_changed || buffer_age != 1
 }
 
 fn flatten_rgba_bytes(pixels: &mut [u8], background: vello::peniko::Color) {
@@ -889,7 +1085,7 @@ impl Graphics {
         &mut self,
         width: u32,
         height: u32,
-        paint: impl FnOnce(&mut CpuPaintTarget<'_>),
+        paint: impl FnOnce(&mut CpuRecorder<'_>),
     ) -> Result<bool, String> {
         let GraphicsImpl::Cpu(graphics) = &mut self.backend else {
             return Ok(false);
@@ -931,7 +1127,10 @@ impl Graphics {
                 .map(|()| PresentResult::Presented)
                 .map_err(classify_d3d11_render_error),
             GraphicsImpl::Gpu(graphics) => graphics.render(scene, background),
-            GraphicsImpl::Cpu(graphics) => graphics.render(background, content_changed),
+            GraphicsImpl::Cpu(graphics) => {
+                let _ = content_changed;
+                graphics.render(background)
+            }
         }?;
         if result == PresentResult::Presented {
             self.frames = self.frames.saturating_add(1);
@@ -1097,9 +1296,11 @@ mod tests {
     use super::{
         CpuGraphics, GraphicsFault, GraphicsFaultKind, GraphicsSignals, ResolvedRenderer,
         SurfaceIssue, flatten_rgba_bytes, flatten_rgba_for_softbuffer, resolve_renderer,
-        should_fallback_to_cpu, should_rasterize_cpu_frame, supports_vello_float16_packing,
-        surface_failure_threshold,
+        should_fallback_to_cpu, supports_vello_float16_packing, surface_failure_threshold,
+        CpuFrame, CpuRenderContext, CpuResources, DisplayList, HashMap, cpu_redraw_region, damage,
+        rasterize_cpu_region,
     };
+    use vello::kurbo::Affine;
     use crate::protocol::RendererPreference;
     use std::ffi::OsStr;
     use vello::peniko::Color;
@@ -1247,19 +1448,128 @@ mod tests {
         assert!(CpuGraphics::dimensions(u32::from(u16::MAX) + 1, 1080).is_err());
     }
 
+    use crate::cpu_display::CpuRecorder;
+    use crate::paint::{GradientGeometry, PaintGradient, PaintTarget};
+    use vello::kurbo::{Circle, Rect, RoundedRect, Stroke};
+    use vello::peniko::Fill;
+
+    fn record(paint: impl FnOnce(&mut CpuRecorder<'_>)) -> DisplayList {
+        let mut images = HashMap::new();
+        let mut recorder = CpuRecorder::new(&mut images);
+        paint(&mut recorder);
+        recorder.finish()
+    }
+
+    const W: usize = 256;
+    const H: usize = 192;
+
+    fn full_frame(list: &DisplayList) -> Vec<u32> {
+        let mut context = CpuRenderContext::new(W as u16, H as u16);
+        let mut resources = CpuResources::new();
+        let mut frame = vec![0_u32; W * H];
+        rasterize_cpu_region(&mut context, &mut resources, list, CpuFrame { pixels: &mut frame, width: W, height: H }, &mut Vec::new(), None,
+            Rect::new(0.0, 0.0, W as f64, H as f64), Color::from_rgb8(250, 250, 250));
+        frame
+    }
+
+    /// Redraws only what changed from `before` to `after` and checks the result is the full redraw.
+    fn assert_partial_matches(before: &DisplayList, after: &DisplayList) -> Option<Rect> {
+        let mut frame = full_frame(before);
+        let damage = damage(before, after);
+        if let Some(damage) = damage {
+            let region = cpu_redraw_region(damage, W as u32, H as u32);
+            let mut context = CpuRenderContext::new(W as u16, H as u16);
+            let mut resources = CpuResources::new();
+            rasterize_cpu_region(&mut context, &mut resources, after, CpuFrame { pixels: &mut frame, width: W, height: H }, &mut Vec::new(), None, region, Color::from_rgb8(250, 250, 250));
+        }
+        let expected = full_frame(after);
+        let wrong = frame.iter().zip(&expected).filter(|(a, b)| a != b).count();
+        if wrong > 0 {
+            let (mut x0, mut y0, mut x1, mut y1, mut worst) = (usize::MAX, usize::MAX, 0, 0, 0i32);
+            for (index, (a, b)) in frame.iter().zip(&expected).enumerate() {
+                if a != b {
+                    let (x, y) = (index % W, index / W);
+                    x0 = x0.min(x); y0 = y0.min(y); x1 = x1.max(x); y1 = y1.max(y);
+                    for shift in [0, 8, 16] { worst = worst.max((((a >> shift) & 255) as i32 - ((b >> shift) & 255) as i32).abs()); }
+                }
+            }
+            eprintln!("DIFF box {x0},{y0}..{x1},{y1} worst {worst}");
+        }
+        assert_eq!(wrong, 0, "partial redraw differs from a full redraw in {wrong} pixels (damage {damage:?})");
+        damage
+    }
+
+    fn scene(dot: (f64, f64), clip: bool, alpha: f32, order_swapped: bool) -> DisplayList {
+        record(|target| {
+            let gradient = PaintGradient {
+                geometry: GradientGeometry::Linear { start: (0.0, 0.0).into(), end: (256.0, 192.0).into() },
+                stops: vec![(0.0, Color::from_rgb8(40, 10, 90)), (1.0, Color::from_rgb8(230, 70, 120))],
+                repeat: false,
+            };
+            target.fill_gradient(Affine::IDENTITY, &gradient, &Rect::new(0.0, 0.0, 256.0, 192.0));
+            target.box_shadow(Affine::IDENTITY, Rect::new(10.0, 10.0, 130.0, 110.0), Rect::new(30.0, 30.0, 110.0, 90.0), Color::from_rgba8(0, 0, 0, 120), 12.0, 8.0, false);
+            target.fill(Fill::NonZero, Affine::IDENTITY, Color::from_rgb8(255, 255, 255), &RoundedRect::new(30.0, 30.0, 110.0, 90.0, 12.0));
+            if clip {
+                target.push_clip(Fill::NonZero, Affine::IDENTITY, &Rect::new(140.0, 20.0, 230.0, 100.0));
+            }
+            target.fill(Fill::NonZero, Affine::IDENTITY, Color::from_rgb8(30, 200, 120), &Circle::new((185.0, 60.0), 55.0));
+            if clip {
+                target.pop_layer();
+            }
+            target.push_opacity(alpha, Affine::IDENTITY, &Rect::new(20.0, 120.0, 240.0, 180.0));
+            let (first, second) = (Color::from_rgb8(255, 180, 0), Color::from_rgb8(0, 120, 255));
+            let (a, b) = if order_swapped { (second, first) } else { (first, second) };
+            target.fill(Fill::NonZero, Affine::IDENTITY, a, &Rect::new(30.0, 125.0, 120.0, 175.0));
+            target.fill(Fill::NonZero, Affine::IDENTITY, b, &Rect::new(90.0, 130.0, 200.0, 170.0));
+            target.pop_layer();
+            target.stroke(&Stroke::new(3.0), Affine::IDENTITY, Color::from_rgb8(20, 20, 20), &Circle::new(dot, 9.0));
+            target.fill(Fill::NonZero, Affine::translate(dot), Color::from_rgba8(255, 255, 255, 200), &Circle::new((0.0, 0.0), 6.5));
+        })
+    }
+
     #[test]
-    fn cpu_clean_redraw_reuses_retained_softbuffer_pixels() {
-        assert!(should_rasterize_cpu_frame(true, 1));
-        assert!(should_rasterize_cpu_frame(false, 0));
-        assert!(!should_rasterize_cpu_frame(false, 1));
-        assert!(
-            should_rasterize_cpu_frame(false, 2),
-            "an age-2 back buffer contains the frame before the last present and can be stale",
-        );
-        assert!(
-            should_rasterize_cpu_frame(false, 3),
-            "older back buffers must be repainted when no damage history is tracked",
-        );
+    fn cpu_unchanged_frames_have_no_damage() {
+        assert_eq!(damage(&scene((60.0, 150.0), true, 0.8, false), &scene((60.0, 150.0), true, 0.8, false)), None);
+    }
+
+    #[test]
+    fn cpu_partial_redraw_matches_a_full_redraw() {
+        let base = scene((60.0, 150.0), true, 0.8, false);
+        // A small move redraws a small region.
+        let moved = assert_partial_matches(&base, &scene((64.5, 151.25), true, 0.8, false)).expect("a move damages");
+        assert!(moved.area() < 40.0 * 40.0, "a moved dot damages only around it: {moved:?}");
+        // Removing a clip uncovers what it hid, outside its own rectangle.
+        let unclipped = assert_partial_matches(&base, &scene((60.0, 150.0), false, 0.8, false)).expect("a clip damages");
+        assert!(unclipped.x0 <= 131.0 && unclipped.y0 <= 6.0, "the whole circle is damaged: {unclipped:?}");
+        // A layer's opacity and a change of stacking order.
+        assert_partial_matches(&base, &scene((60.0, 150.0), true, 0.5, false)).expect("opacity damages");
+        assert_partial_matches(&base, &scene((60.0, 150.0), true, 0.8, true)).expect("order damages");
+    }
+
+    #[test]
+    fn cpu_cached_shadows_match_direct_ones_and_wait_for_a_second_frame() {
+        use crate::cpu_display::ShadowCache;
+        let list = scene((60.0, 150.0), true, 0.8, false);
+        let direct = full_frame(&list);
+        let mut cache = ShadowCache::new();
+        let mut context = CpuRenderContext::new(W as u16, H as u16);
+        let mut resources = CpuResources::new();
+        for frame_index in 0..3 {
+            let mut frame = vec![0_u32; W * H];
+            rasterize_cpu_region(&mut context, &mut resources, &list, CpuFrame { pixels: &mut frame, width: W, height: H }, &mut Vec::new(), Some(&mut cache),
+                Rect::new(0.0, 0.0, W as f64, H as f64), Color::from_rgb8(250, 250, 250));
+            cache.next_frame();
+            let worst = frame.iter().zip(&direct).map(|(a, b)| [0, 8, 16].iter().map(|shift| (((a >> shift) & 255) as i32 - ((b >> shift) & 255) as i32).abs()).max().unwrap_or(0)).max().unwrap_or(0);
+            assert!(worst <= 1, "frame {frame_index}: a cached shadow differs by {worst}");
+        }
+    }
+
+    #[test]
+    fn cpu_redraw_regions_are_tile_aligned_and_fall_back_to_full_frames() {
+        let region = cpu_redraw_region(Rect::new(17.5, 3.0, 40.2, 20.0), 256, 192);
+        assert_eq!(region, Rect::new(16.0, 0.0, 48.0, 32.0));
+        assert_eq!(cpu_redraw_region(Rect::new(-50.0, -50.0, 300.0, 300.0), 256, 192), Rect::new(0.0, 0.0, 256.0, 192.0));
+        assert_eq!(cpu_redraw_region(Rect::new(0.0, 0.0, 200.0, 150.0), 256, 192), Rect::new(0.0, 0.0, 256.0, 192.0), "most of the frame redraws whole");
     }
 
     #[test]
