@@ -418,9 +418,10 @@ export interface NativeStats {
   /**
    * apply: a JS update applied to the retained tree; layout: layout and text measurement;
    * paint: recording the frame; present: rasterize and present (includes vsync waits);
-   * frame: motion, layout and paint together. Null in the browser build.
+   * frame: motion, layout and paint together; gpu: GPU execution of a frame (D3D11 only,
+   * count 0 elsewhere). Null in the browser build.
    */
-  phases: Record<"apply" | "layout" | "paint" | "present" | "frame", PhaseSummary> | null;
+  phases: Record<"apply" | "layout" | "paint" | "present" | "frame" | "gpu", PhaseSummary> | null;
   /** Memory after each startup stage (start, tree, window, graphics, firstFrame) and now. */
   memory: { stages: (MemoryReading & { label: string })[]; current: MemoryReading | null } | null;
 }

@@ -13,6 +13,8 @@ mod controls;
 mod cpu_display;
 #[cfg(target_os = "windows")]
 mod d3d11;
+#[cfg(target_os = "windows")]
+mod gpu_timer;
 #[cfg(not(target_arch = "wasm32"))]
 mod media;
 mod paint;

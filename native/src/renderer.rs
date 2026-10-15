@@ -1041,6 +1041,15 @@ impl Graphics {
         }
     }
 
+    /// GPU milliseconds per frame, where the backend can time them (D3D11).
+    pub(crate) fn take_gpu_times(&mut self) -> Vec<f64> {
+        match &mut self.backend {
+            #[cfg(target_os = "windows")]
+            GraphicsImpl::D3d11(graphics) => graphics.take_gpu_times(),
+            _ => Vec::new(),
+        }
+    }
+
     pub(crate) fn backend(&self) -> RendererBackend {
         match &self.backend {
             #[cfg(target_os = "windows")]

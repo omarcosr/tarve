@@ -297,6 +297,8 @@ pub(crate) struct D3d11Graphics {
     /// are not redrawn; a hover or a caret blink repaints only its own tiles.
     frame_cache: Option<ID3D11Texture2D>,
     tile_hashes: Vec<u64>,
+    /// GPU time of presented frames (`app.stats().native.phases.gpu`).
+    gpu_timer: Option<crate::gpu_timer::GpuTimer>,
     /// Window-sized stencil, single-sample path only.
     depth_view: Option<ID3D11DepthStencilView>,
     /// Scratch for liquid glass; created on the first glass frame, dropped after one without.
@@ -450,6 +452,7 @@ impl D3d11Graphics {
         )?;
         let first_atlas = create_glyph_atlas(&device)?;
 
+        let gpu_timer = crate::gpu_timer::GpuTimer::new(&device);
         Ok(Self {
             clip: NO_CLIP,
             analytic_aa,
@@ -461,6 +464,7 @@ impl D3d11Graphics {
             tile,
             frame_cache: None,
             tile_hashes: Vec::new(),
+            gpu_timer,
             depth_view,
             backdrop: None,
             vertex_shader,
@@ -569,6 +573,11 @@ impl D3d11Graphics {
         self.pinned_images = keys.into_iter().cloned().collect();
     }
 
+    /// GPU milliseconds of the frames whose timings arrived since the last call.
+    pub(crate) fn take_gpu_times(&mut self) -> Vec<f64> {
+        self.gpu_timer.as_mut().map(|timer| timer.take()).unwrap_or_default()
+    }
+
     pub(crate) fn glyph_rasterizations(&self) -> u64 {
         self.glyph_rasterizations
     }
@@ -621,7 +630,14 @@ impl D3d11Graphics {
                 "D3D11 frame was not prepared before presentation".into(),
             ));
         }
-        if let Err(error) = self.draw_frame(background) {
+        if let Some(timer) = &mut self.gpu_timer {
+            timer.begin(&self.context);
+        }
+        let drawn = self.draw_frame(background);
+        if let Some(timer) = &mut self.gpu_timer {
+            timer.end(&self.context);
+        }
+        if let Err(error) = drawn {
             return Err(self.classify_gpu_error("D3D11 draw", error));
         }
         if let Err(error) = unsafe { self.swap_chain.Present(1, DXGI_PRESENT(0)).ok() } {

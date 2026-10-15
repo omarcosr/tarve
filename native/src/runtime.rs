@@ -1756,6 +1756,11 @@ impl App {
         self.frame_stats
             .present
             .push(present_started.elapsed().as_secs_f64() * 1000.0);
+        if let GraphicsState::Ready(graphics) = &mut self.graphics {
+            for ms in graphics.take_gpu_times() {
+                self.frame_stats.gpu.push(ms);
+            }
+        }
         if result == PresentResult::Presented
             && let Some(delay) = self.trim_delay()
         {

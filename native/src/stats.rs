@@ -56,6 +56,8 @@ pub(crate) struct FrameStats {
     pub present: Samples,
     /// Motion, layout and paint: the CPU cost of a frame before present.
     pub frame: Samples,
+    /// GPU execution of a presented frame (D3D11 timestamp queries; empty elsewhere).
+    pub gpu: Samples,
 }
 
 impl FrameStats {
@@ -66,6 +68,7 @@ impl FrameStats {
             "paint": self.paint.summary(),
             "present": self.present.summary(),
             "frame": self.frame.summary(),
+            "gpu": self.gpu.summary(),
         })
     }
 
