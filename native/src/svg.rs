@@ -6,7 +6,7 @@ use std::sync::{
 use crate::paint::PaintTarget;
 use resvg::usvg;
 use vello::{
-    kurbo::{Affine, BezPath, Cap, Join, Rect, Stroke},
+    kurbo::{Affine, BezPath, Cap, Circle, Join, ParamCurve, PathEl, Rect, Shape, Stroke},
     peniko::{Blob, Color, Fill, ImageAlphaType, ImageData, ImageFormat},
 };
 
@@ -286,6 +286,20 @@ fn paint_group<P: PaintTarget>(
 fn paint_path<P: PaintTarget>(target: &mut P, path: &usvg::Path, viewport: Affine, opacity: f32) {
     let shape = to_bez_path(path.data());
     let transform = viewport * to_affine(path.abs_transform());
+    if let Some(circle) = circle_of(&shape) {
+        paint_shape(target, path, transform, opacity, &circle);
+    } else {
+        paint_shape(target, path, transform, opacity, &shape);
+    }
+}
+
+fn paint_shape<P: PaintTarget, S: Shape>(
+    target: &mut P,
+    path: &usvg::Path,
+    transform: Affine,
+    opacity: f32,
+    shape: &S,
+) {
 
     match path.paint_order() {
         usvg::PaintOrder::FillAndStroke => {
@@ -299,12 +313,12 @@ fn paint_path<P: PaintTarget>(target: &mut P, path: &usvg::Path, viewport: Affin
     }
 }
 
-fn paint_fill<P: PaintTarget>(
+fn paint_fill<P: PaintTarget, S: Shape>(
     target: &mut P,
     path: &usvg::Path,
     transform: Affine,
     opacity: f32,
-    shape: &BezPath,
+    shape: &S,
 ) {
     let Some(fill) = path.fill() else { return };
     let Some(color) = paint_color(fill.paint(), opacity * fill.opacity().get()) else {
@@ -317,12 +331,12 @@ fn paint_fill<P: PaintTarget>(
     target.fill(rule, transform, color, shape);
 }
 
-fn paint_stroke<P: PaintTarget>(
+fn paint_stroke<P: PaintTarget, S: Shape>(
     target: &mut P,
     path: &usvg::Path,
     transform: Affine,
     opacity: f32,
-    shape: &BezPath,
+    shape: &S,
 ) {
     let Some(stroke) = path.stroke() else { return };
     let Some(color) = paint_color(stroke.paint(), opacity * stroke.opacity().get()) else {
@@ -378,6 +392,40 @@ fn to_affine(transform: usvg::Transform) -> Affine {
     ])
 }
 
+/// The circle a path traces, if it is one: usvg turns `<circle>` into curves,
+/// and a circle is drawn analytically (one quad on D3D11) where a path is
+/// tessellated. One closed contour whose points all lie on the circle that
+/// fits its bounds.
+pub(crate) fn circle_of(path: &BezPath) -> Option<Circle> {
+    let elements = path.elements();
+    if !matches!(elements.first(), Some(PathEl::MoveTo(_)))
+        || !matches!(elements.last(), Some(PathEl::ClosePath))
+        || elements[1..].iter().any(|element| matches!(element, PathEl::MoveTo(_)))
+        || elements
+            .iter()
+            .filter(|element| matches!(element, PathEl::QuadTo(..) | PathEl::CurveTo(..)))
+            .count()
+            < 4
+    {
+        return None;
+    }
+    let bounds = path.bounding_box();
+    let (width, height) = (bounds.width(), bounds.height());
+    if width.is_nan() || width <= 0.0 || (width - height).abs() > width * 1e-3 {
+        return None;
+    }
+    let (center, radius) = (bounds.center(), width / 2.0);
+    let tolerance = (radius * 0.005).max(1e-4);
+    for segment in path.segments() {
+        for t in [0.0, 0.25, 0.5, 0.75] {
+            if (segment.eval(t).distance(center) - radius).abs() > tolerance {
+                return None;
+            }
+        }
+    }
+    Some(Circle::new(center, radius))
+}
+
 fn to_bez_path(path: &usvg::tiny_skia_path::Path) -> BezPath {
     use usvg::tiny_skia_path::PathSegment;
 
@@ -412,6 +460,40 @@ fn to_bez_path(path: &usvg::tiny_skia_path::Path) -> BezPath {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn first_path(body: &str) -> BezPath {
+        let source = format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">{body}</svg>"#);
+        let tree = usvg::Tree::from_str(&source, &usvg::Options::default()).unwrap();
+        fn find(group: &usvg::Group) -> Option<BezPath> {
+            group.children().iter().find_map(|node| match node {
+                usvg::Node::Path(path) => Some(to_bez_path(path.data())),
+                usvg::Node::Group(group) => find(group),
+                _ => None,
+            })
+        }
+        find(tree.root()).unwrap()
+    }
+
+    #[test]
+    fn svg_circles_are_recognized_and_other_shapes_are_not() {
+        for (cx, cy, r) in [(10.0, 20.0, 3.5), (440.0, 380.0, 326.0), (0.5, 0.5, 0.25)] {
+            let circle = circle_of(&first_path(&format!(r#"<circle cx="{cx}" cy="{cy}" r="{r}"/>"#)))
+                .expect("a <circle> is a circle");
+            assert!((circle.center.x - cx).abs() < 1e-3 && (circle.center.y - cy).abs() < 1e-3);
+            assert!((circle.radius - r).abs() < r * 1e-3, "{} vs {r}", circle.radius);
+        }
+        assert!(circle_of(&first_path(r#"<path d="M0 10a10 10 0 1 0 20 0a10 10 0 1 0-20 0z"/>"#)).is_some());
+        for other in [
+            r#"<ellipse cx="50" cy="50" rx="30" ry="29"/>"#,
+            r#"<rect x="0" y="0" width="40" height="40" rx="12"/>"#,
+            r#"<rect x="0" y="0" width="40" height="40" rx="20" ry="19"/>"#,
+            r#"<rect x="0" y="0" width="40" height="40"/>"#,
+            r#"<path d="M0 10a10 10 0 1 0 20 0z"/>"#,
+            r#"<path d="M0 10a10 10 0 1 0 20 0a10 10 0 1 0-20 0zM40 10h5v5z"/>"#,
+        ] {
+            assert!(circle_of(&first_path(other)).is_none(), "{other}");
+        }
+    }
 
     #[test]
     fn usvg_normalizes_geometry_and_resolves_current_color_without_sentinel_collisions() {

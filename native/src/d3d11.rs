@@ -2575,6 +2575,27 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             return;
         }
         if self.graphics.analytic_aa {
+            // A circle's outline: one ring quad.
+            if stroke.dash_pattern.is_empty()
+                && let Some(circle) = shape.as_circle()
+                && stroke.width > 0.0
+                && stroke.width < circle.radius * 2.0
+                && let Some(scale) = uniform_scale(transform)
+                && let Some((center, half, radii)) = sdf_round_rect(
+                    &vello::kurbo::Circle::new(circle.center, circle.radius + stroke.width / 2.0),
+                    transform,
+                )
+            {
+                let width = (stroke.width * scale) as f32;
+                self.graphics.append_round_rect_ring(
+                    center,
+                    half,
+                    radii,
+                    [width; 4],
+                    color.multiply_alpha(self.opacity),
+                );
+                return;
+            }
             // Round dots (zero-length round-capped segments, as a dot-matrix
             // chart draws hundreds of): each one a circle quad.
             if stroke.dash_pattern.is_empty()
