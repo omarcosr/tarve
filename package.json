@@ -1,6 +1,6 @@
 {
   "name": "@tarve/core",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/omarcosr/tarve.git"
@@ -161,7 +161,9 @@
     "typescript": "^7.0.0"
   },
   "peerDependenciesMeta": {
-    "typescript": { "optional": true }
+    "typescript": {
+      "optional": true
+    }
   },
   "dependencies": {
     "esbuild": "0.25.0",

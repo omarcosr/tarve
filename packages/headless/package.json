@@ -1,6 +1,6 @@
 {
   "name": "@tarve/headless",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Render Tarve UIs to pixels without a window or GPU: tests, visual snapshots and image generation on any platform",
   "license": "Apache-2.0",
   "keywords": [
