@@ -57,6 +57,15 @@ app.get("/docs", (c) => {
   });
 });
 
+app.get("/docs/tailwind", (c) => {
+  const title = "Tailwind classes — Tarve docs";
+  return c.render("docs/tailwind", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/tailwind", title, "Tailwind CSS utility classes on native Tarve elements: class, className, tw(), variants and the supported vocabulary."),
+  });
+});
+
 app.get("/docs/updates", (c) => {
   const title = "Auto-updates — Tarve docs";
   return c.render("docs/updates", {

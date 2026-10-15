@@ -62,6 +62,10 @@
         Controls are <em>controlled</em>: pass the current value (<code>checked</code>, <code>value</code>, <code>open</code>…)
         and update it in the matching <code>on…Change</code> callback. An idle window presents zero frames.
       </p>
+      <p>
+        Style anything with the <code>style</code> prop or with <a href="/docs/tailwind">Tailwind classes</a>:
+        <code>class="flex gap-2 p-4 hover:bg-muted"</code> compiles to the same native style, with no CSS involved.
+      </p>
     </div>
   </section>
 

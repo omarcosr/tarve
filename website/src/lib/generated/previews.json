@@ -359,6 +359,16 @@
     "contentLeft": 189,
     "contentWidth": 481
   },
+  "Glass": {
+    "width": 858,
+    "height": 280,
+    "left": 0,
+    "top": 220,
+    "frameWidth": 858,
+    "frameHeight": 720,
+    "contentLeft": 179,
+    "contentWidth": 500
+  },
   "HoverCard": {
     "width": 858,
     "height": 221,

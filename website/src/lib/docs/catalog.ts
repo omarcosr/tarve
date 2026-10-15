@@ -31,6 +31,7 @@ export const catalog: CatalogCategory[] = [
       { name: "Direction", summary: "Switches a subtree between left-to-right and right-to-left flow." },
       { name: "Separator", summary: "A thin horizontal or vertical divider line." },
       { name: "AnimatePresence", summary: "Keeps a child mounted while its native exit animation runs." },
+      { name: "Glass", summary: "Liquid Glass: a refracting, blurring surface for toolbars, tab bars and floating controls." },
     ],
   },
   {

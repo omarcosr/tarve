@@ -24,6 +24,7 @@
     "node_modules",
     "dist",
     "src/lib/docs/examples",
+    "src/lib/docs/guides",
     "src/lib/playground"
   ]
 }

@@ -5,7 +5,10 @@ import { toPreviewModule } from "./example-transform";
 const root = resolve(import.meta.dirname, "../../../..");
 const core = resolve(root, "packages/core/src");
 const stubs = resolve(import.meta.dirname, "stubs");
-const NODE_BUILTINS = new Set(["node:crypto", "node:fs", "node:os", "node:path", "node:net", "node:zlib"]);
+const NODE_BUILTINS = new Set([
+  "node:crypto", "node:fs", "node:fs/promises", "node:os", "node:path", "node:net", "node:zlib",
+  "node:module", "node:child_process", "node:stream", "node:timers/promises",
+]);
 
 /**
  * Lets the browser import Tarve straight from packages/core: maps the package name and its JSX

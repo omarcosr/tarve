@@ -24,6 +24,14 @@ export const randomUUID = () => crypto.randomUUID();
 export const createPublicKey = () => unavailable("crypto.createPublicKey");
 export const verify = () => unavailable("crypto.verify");
 export const spawn = () => unavailable("child_process.spawn");
+export const createRequire = () => (id: string) => (id === "node:sea" ? { isSea: () => false } : unavailable(`require(${id})`));
+export const readFile = () => unavailable("fs.readFile");
+export const setTimeout = (ms: number) => new Promise((resolve) => globalThis.setTimeout(resolve, ms));
+export class Readable {
+  constructor() {
+    unavailable("stream.Readable");
+  }
+}
 
 export const constants = { W_OK: 2 };
 export const existsSync = () => false;

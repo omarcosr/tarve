@@ -9,7 +9,7 @@
   type ExampleModule = { preview: () => VNode; fullWindow: boolean };
   const examples = import.meta.env.SSR
     ? {}
-    : (import.meta.glob("./docs/examples/*.tsx", { query: "?playground" }) as Record<string, () => Promise<ExampleModule>>);
+    : (import.meta.glob(["./docs/examples/*.tsx", "./docs/guides/*.tsx"], { query: "?playground" }) as Record<string, () => Promise<ExampleModule>>);
 
   let canvas: HTMLCanvasElement | undefined = $state();
   let phase = $state<"idle" | "loading" | "live" | "error">("idle");
@@ -35,7 +35,7 @@
   }
 
   async function start() {
-    const load = examples[`./docs/examples/${name}.tsx`];
+    const load = examples[`./docs/examples/${name}.tsx`] ?? examples[`./docs/guides/${name}.tsx`];
     if (!canvas || !load) return;
     placeCanvas();
     const run = ++generation;
