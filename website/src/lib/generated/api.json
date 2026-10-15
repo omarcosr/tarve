@@ -25,6 +25,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -73,6 +75,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -159,6 +163,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -246,6 +252,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -309,6 +317,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -359,6 +369,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -390,6 +402,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -426,6 +440,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -471,6 +487,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -492,7 +510,7 @@
     {
       "name": "Button",
       "source": "packages/core/src/components/button.ts",
-      "line": 100,
+      "line": 102,
       "generic": false,
       "propsType": "ButtonProps",
       "props": [
@@ -531,6 +549,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -570,6 +590,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -641,6 +663,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -750,6 +774,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "dropTarget",
         "highlight",
         "id",
@@ -818,6 +844,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -879,6 +907,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -926,6 +956,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -1008,6 +1040,8 @@
         }
       ],
       "common": [
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -1059,6 +1093,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -1077,7 +1113,7 @@
     {
       "name": "Column",
       "source": "packages/core/src/components/layout.ts",
-      "line": 36,
+      "line": 40,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
@@ -1140,6 +1176,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "dropTarget",
         "highlight",
         "id",
@@ -1162,7 +1200,7 @@
     {
       "name": "Combobox",
       "source": "packages/core/src/popups.ts",
-      "line": 499,
+      "line": 501,
       "generic": false,
       "propsType": "ComboboxProps",
       "props": [
@@ -1238,6 +1276,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "key",
         "motionFrom",
@@ -1257,7 +1297,7 @@
     {
       "name": "Command",
       "source": "packages/core/src/popups.ts",
-      "line": 647,
+      "line": 649,
       "generic": false,
       "propsType": "CommandProps",
       "props": [
@@ -1316,6 +1356,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "key",
         "motionFrom",
@@ -1335,7 +1377,7 @@
     {
       "name": "CommandPalette",
       "source": "packages/core/src/popups.ts",
-      "line": 770,
+      "line": 772,
       "generic": false,
       "propsType": "CommandPaletteProps",
       "props": [
@@ -1429,6 +1471,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "key",
         "motionFrom",
@@ -1447,7 +1491,7 @@
     {
       "name": "ContextMenu",
       "source": "packages/core/src/popups.ts",
-      "line": 419,
+      "line": 421,
       "generic": false,
       "propsType": "ContextMenuProps",
       "props": [
@@ -1506,6 +1550,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "key",
         "motionFrom",
@@ -1635,6 +1681,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -1695,6 +1743,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -1790,6 +1840,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -1870,6 +1922,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -1951,6 +2005,8 @@
         }
       ],
       "common": [
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -1995,6 +2051,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -2067,6 +2125,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -2087,7 +2147,7 @@
     {
       "name": "DropdownMenu",
       "source": "packages/core/src/popups.ts",
-      "line": 349,
+      "line": 351,
       "generic": false,
       "propsType": "DropdownMenuProps",
       "props": [
@@ -2151,6 +2211,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "key",
         "motionFrom",
@@ -2232,6 +2294,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -2282,6 +2346,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -2296,6 +2362,160 @@
         "style"
       ],
       "types": []
+    },
+    {
+      "name": "Glass",
+      "summary": "A container made of Liquid Glass: what scrolls behind it shows through blurred,\nbent at the rounded edge, under a light veil, with a bright rim. Compose like a\n`View`; controls inside keep their own look.",
+      "source": "packages/core/src/components/glass.ts",
+      "line": 111,
+      "generic": false,
+      "propsType": "GlassProps",
+      "props": [
+        {
+          "name": "align",
+          "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "appearance",
+          "type": "\"light\" | \"dark\"",
+          "optional": true,
+          "doc": "Light or dark appearance of the rim and veil. Default `light`.",
+          "default": "\"light\""
+        },
+        {
+          "name": "blend",
+          "type": "number",
+          "optional": true,
+          "doc": "How far apart in px two merged boxes start bridging; read from the first box of the key. Default 32."
+        },
+        {
+          "name": "dismissOnOutside",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "dragRegion",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "flex",
+          "type": "number | string",
+          "optional": true,
+          "doc": "CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `\"1 1 176px\"`.",
+          "from": "ViewProps"
+        },
+        {
+          "name": "focusable",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "justify",
+          "type": "Style[\"justify\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "material",
+          "type": "Partial<GlassMaterial>",
+          "optional": true,
+          "doc": "Overrides of the material: blur, saturate, refraction, highlight."
+        },
+        {
+          "name": "merge",
+          "type": "string",
+          "optional": true,
+          "doc": "Glass boxes with the same key fuse like drops of liquid: where two come within\n`blend` px of each other their shapes bridge smoothly, as one surface. The first\nbox of the key in tree order paints the surface: its tint, material and `blend`\nare the surface's, the others contribute only their shape (up to 8 per key)."
+        },
+        {
+          "name": "onOutsideClick",
+          "type": "() => void",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "padding",
+          "type": "Style[\"padding\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "portal",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "radius",
+          "type": "number",
+          "optional": true,
+          "doc": "Corner radius. Default 26 (a capsule when the box is 52 px tall).",
+          "default": "26"
+        },
+        {
+          "name": "shadow",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Outer shadow under the glass. Default on.",
+          "default": "true"
+        },
+        {
+          "name": "tint",
+          "type": "string",
+          "optional": true,
+          "doc": "Tint colour laid over the variant's veil; the alpha is the strength. `regular` stays\nfrosted under it, `clear` shows it nearly alone. A gradient string passes through as is."
+        },
+        {
+          "name": "variant",
+          "type": "GlassVariant",
+          "optional": true,
+          "doc": "`regular`: frosted, legible over anything (toolbars, tab bars). `clear`: barely\ntinted, for controls over media. `tinted`: `tint` shows through strongly.",
+          "default": "\"regular\""
+        },
+        {
+          "name": "windowAction",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "optional": true,
+          "from": "ViewProps"
+        }
+      ],
+      "common": [
+        "children",
+        "class",
+        "className",
+        "dropTarget",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onDragEnter",
+        "onDragLeave",
+        "onDrop",
+        "onHighlight",
+        "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "GlassMaterial",
+        "GlassVariant"
+      ]
     },
     {
       "name": "HoverCard",
@@ -2334,6 +2554,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -2354,7 +2576,7 @@
     {
       "name": "Icon",
       "source": "packages/core/src/components/icon.ts",
-      "line": 46,
+      "line": 51,
       "generic": false,
       "propsType": "IconProps",
       "props": [
@@ -2389,6 +2611,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -2439,6 +2663,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -2498,6 +2724,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -2540,6 +2768,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -2604,6 +2834,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -2664,6 +2896,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -2688,6 +2922,8 @@
       "props": [],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -2728,6 +2964,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -2919,6 +3157,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "draggable",
         "dropTarget",
         "highlight",
@@ -3058,6 +3298,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "dropTarget",
         "highlight",
         "id",
@@ -3108,6 +3350,8 @@
         }
       ],
       "common": [
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -3138,6 +3382,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -3183,6 +3429,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -3247,6 +3495,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -3292,6 +3542,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -3368,6 +3620,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -3432,6 +3686,8 @@
         }
       ],
       "common": [
+        "class",
+        "className",
         "highlight",
         "key",
         "motionFrom",
@@ -3483,6 +3739,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -3536,6 +3794,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -3602,7 +3862,7 @@
     {
       "name": "Popover",
       "source": "packages/core/src/popups.ts",
-      "line": 241,
+      "line": 243,
       "generic": false,
       "propsType": "PopoverProps",
       "props": [
@@ -3656,6 +3916,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "key",
         "motionFrom",
@@ -3675,7 +3937,7 @@
     {
       "name": "Portal",
       "source": "packages/core/src/components/layout.ts",
-      "line": 42,
+      "line": 46,
       "generic": false,
       "propsType": "PortalProps",
       "props": [
@@ -3749,6 +4011,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "dropTarget",
         "highlight",
         "id",
@@ -3889,6 +4153,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "draggable",
         "dropTarget",
         "highlight",
@@ -3938,6 +4204,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -4011,6 +4279,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -4065,6 +4335,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -4147,6 +4419,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -4165,7 +4439,7 @@
     {
       "name": "Row",
       "source": "packages/core/src/components/layout.ts",
-      "line": 32,
+      "line": 36,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
@@ -4228,6 +4502,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "dropTarget",
         "highlight",
         "id",
@@ -4346,6 +4622,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "dropTarget",
         "highlight",
         "id",
@@ -4469,6 +4747,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "dropTarget",
         "highlight",
         "id",
@@ -4495,7 +4775,7 @@
     {
       "name": "Select",
       "source": "packages/core/src/select.ts",
-      "line": 19,
+      "line": 20,
       "generic": false,
       "propsType": "SelectProps",
       "props": [
@@ -4544,6 +4824,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "key",
         "motionFrom",
@@ -4576,6 +4858,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -4656,6 +4940,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -4731,6 +5017,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -4776,6 +5064,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -4845,6 +5135,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -4883,6 +5175,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -4970,6 +5264,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -5063,6 +5359,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -5114,6 +5412,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -5156,6 +5456,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -5207,6 +5509,8 @@
         }
       ],
       "common": [
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -5262,6 +5566,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -5280,7 +5586,7 @@
     {
       "name": "TitleBar",
       "source": "packages/core/src/components/titlebar.ts",
-      "line": 46,
+      "line": 61,
       "generic": false,
       "propsType": "TitleBarProps",
       "props": [
@@ -5289,6 +5595,19 @@
           "type": "Style[\"align\"]",
           "optional": true,
           "from": "ViewProps"
+        },
+        {
+          "name": "appearance",
+          "type": "\"light\" | \"dark\"",
+          "optional": true,
+          "doc": "Light or dark glass; sets the ink of the title and controls. Default `light`.",
+          "default": "\"light\""
+        },
+        {
+          "name": "buttonStyle",
+          "type": "Style",
+          "optional": true,
+          "doc": "Style merged into each window control (minimize, maximize, close): size, radius, colours."
         },
         {
           "name": "dismissOnOutside",
@@ -5320,6 +5639,12 @@
           "type": "number",
           "optional": true,
           "from": "ViewProps"
+        },
+        {
+          "name": "glass",
+          "type": "boolean | GlassVariant",
+          "optional": true,
+          "doc": "Liquid Glass bar: `true` for the `regular` material, or a variant. Its controls go\nround. Edge to edge (no `radius` in `style`) it keeps only a hairline along its bottom;\nwith a `radius` it is a floating capsule with the full rim and shadow. Lay it over\ncontent (`position: \"absolute\"`) for the backdrop to show through, as the window\nbackground alone is only the veil."
         },
         {
           "name": "height",
@@ -5383,6 +5708,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "dropTarget",
         "highlight",
         "id",
@@ -5400,7 +5727,9 @@
         "rovingGroup",
         "style"
       ],
-      "types": []
+      "types": [
+        "GlassVariant"
+      ]
     },
     {
       "name": "Toast",
@@ -5443,6 +5772,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "key",
         "motionFrom",
@@ -5487,6 +5818,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -5547,6 +5880,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -5600,6 +5935,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -5620,7 +5957,7 @@
     {
       "name": "Tooltip",
       "source": "packages/core/src/popups.ts",
-      "line": 170,
+      "line": 171,
       "generic": false,
       "propsType": "TooltipProps",
       "props": [
@@ -5669,6 +6006,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "key",
         "motionFrom",
@@ -5739,6 +6078,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -5772,6 +6113,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -5792,7 +6135,7 @@
     {
       "name": "View",
       "source": "packages/core/src/components/layout.ts",
-      "line": 28,
+      "line": 32,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
@@ -5855,6 +6198,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "dropTarget",
         "highlight",
         "id",
@@ -5925,7 +6270,7 @@
           "name": "height",
           "type": "number",
           "optional": true,
-          "doc": "Viewport height in px. Omit it (with an `id`) to fill the parent like\r\n`flex: 1`: the list follows its real laid-out height, window resizes included."
+          "doc": "Viewport height in px. Omit it (with an `id`) to fill the parent like\n`flex: 1`: the list follows its real laid-out height, window resizes included."
         },
         {
           "name": "id",
@@ -5966,6 +6311,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "highlight",
         "id",
         "key",
@@ -6129,6 +6476,8 @@
       ],
       "common": [
         "children",
+        "class",
+        "className",
         "dropTarget",
         "highlight",
         "id",
@@ -6159,6 +6508,20 @@
       "name": "children",
       "type": "Child",
       "optional": true,
+      "from": "BaseProps"
+    },
+    {
+      "name": "class",
+      "type": "string",
+      "optional": true,
+      "doc": "Same as `className`, HTML spelling. Both may be given; `className` comes last.",
+      "from": "BaseProps"
+    },
+    {
+      "name": "className",
+      "type": "string",
+      "optional": true,
+      "doc": "Tailwind utility classes, compiled to `style` at the call site; an explicit `style` wins.",
       "from": "BaseProps"
     },
     {
@@ -6307,8 +6670,10 @@
     "DataGridSortDirection": "type DataGridSortDirection = \"asc\" | \"desc\";",
     "DesktopWidget": "interface DesktopWidget { columns: number; rows: number }",
     "DropdownMenuItem": "interface DropdownMenuItem {\n  value: string;\n  label: string;\n  icon?: IconName;\n  shortcut?: string;\n  disabled?: boolean;\n  checked?: boolean;\n}",
+    "GlassMaterial": "interface GlassMaterial {\n  /** Blur radius in px of what is behind the box (CSS `backdrop-filter: blur()`), 0–64. */\n  blur: number;\n  /** Colour saturation of the blurred backdrop; 1 leaves it, iOS uses about 1.6. */\n  saturate?: number;\n  /** How far in px the backdrop bends along the rounded edge (the lens), 0 for none. */\n  refraction?: number;\n  /** Brightness 0–1 of the rim, the edge reflections and the sheen. */\n  highlight?: number;\n  /** How much the flat part enlarges the backdrop, as a thick lens does: 0–0.3 (0.06 is iOS-like). */\n  magnify?: number;\n  /**\n   * Boxes painted in one frame with the same key fuse like drops of liquid: their\n   * shapes join smoothly where they come within `blend` px of each other.\n   */\n  merge?: string;\n  /** How far apart in px two merged boxes start bridging. Default 0 (touching). */\n  blend?: number;\n}",
+    "GlassVariant": "type GlassVariant = \"regular\" | \"clear\" | \"tinted\";",
     "HoverCardSide": "type HoverCardSide = \"top\" | \"right\" | \"bottom\" | \"left\";",
-    "IconName": "type IconName =\n  | \"check\" | \"x\" | \"plus\" | \"minus\"\n  | \"chevron-down\" | \"chevron-up\" | \"chevron-right\" | \"chevron-left\"\n  | \"search\" | \"info\"\n  | \"house\" | \"settings\" | \"user\" | \"bell\" | \"heart\" | \"star\"\n  | \"download\" | \"trash-2\" | \"folder\" | \"mail\";",
+    "IconName": "type IconName =\n  | \"check\" | \"x\" | \"plus\" | \"minus\"\n  | \"chevron-down\" | \"chevron-up\" | \"chevron-right\" | \"chevron-left\"\n  | \"search\" | \"info\"\n  | \"house\" | \"settings\" | \"user\" | \"bell\" | \"heart\" | \"star\"\n  | \"download\" | \"trash-2\" | \"folder\" | \"mail\"\n  | \"play\" | \"pause\" | \"skip-back\" | \"skip-forward\";",
     "ImageBytesSource": "interface ImageBytesSource {\n  /** Encoded PNG, JPEG, WebP or SVG bytes. */\n  bytes: Uint8Array;\n  mediaType?: string;\n  /** Stable key can reduce GPU cache churn when pixels are updated in place. */\n  cacheKey?: string;\n}",
     "ImageRgbaSource": "interface ImageRgbaSource {\n  /** Raw RGBA8 pixels in row-major order. */\n  rgba: Uint8Array;\n  width: number;\n  height: number;\n  premultiplied?: boolean;\n  cacheKey?: string;\n}",
     "ImageSource": "type ImageSource = string | Uint8Array | ImageBytesSource | ImageRgbaSource;",

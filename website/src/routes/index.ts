@@ -57,6 +57,15 @@ app.get("/docs", (c) => {
   });
 });
 
+app.get("/docs/updates", (c) => {
+  const title = "Auto-updates — Tarve docs";
+  return c.render("docs/updates", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/updates", title, "Signed auto-updates for Tarve apps: tarve keygen, tarve release, Authenticode signing and checkForUpdate."),
+  });
+});
+
 app.get("/docs/components/:name", (c) => {
   const doc = buildComponentDoc(c.req.param("name"));
   if (!doc) return c.notFound();
