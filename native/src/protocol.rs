@@ -134,13 +134,145 @@ impl ImageSource {
     }
 }
 
+/// A node's style object, shared between nodes with equal styles.
+///
+/// Component trees repeat the same style on every row, button and label: a
+/// list of 2,000 buttons parses 2,000 identical maps of ~20 keys, several KB
+/// each. Deserializing interns the map, so equal styles keep one allocation,
+/// clones are a reference count and equal styles compare by pointer first.
+/// Writes go through `Arc::make_mut` and never touch the shared copy.
+#[derive(Clone, Debug)]
+pub struct NodeStyle(Arc<Value>);
+
+impl NodeStyle {
+    pub fn new(value: Value) -> Self {
+        Self(intern_style(value))
+    }
+}
+
+impl Default for NodeStyle {
+    fn default() -> Self {
+        static NULL: std::sync::OnceLock<Arc<Value>> = std::sync::OnceLock::new();
+        Self(NULL.get_or_init(|| Arc::new(Value::Null)).clone())
+    }
+}
+
+impl From<Value> for NodeStyle {
+    fn from(value: Value) -> Self {
+        Self::new(value)
+    }
+}
+
+impl std::ops::Deref for NodeStyle {
+    type Target = Value;
+    fn deref(&self) -> &Value {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for NodeStyle {
+    fn deref_mut(&mut self) -> &mut Value {
+        Arc::make_mut(&mut self.0)
+    }
+}
+
+impl PartialEq for NodeStyle {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) || *self.0 == *other.0
+    }
+}
+
+impl PartialEq<Value> for NodeStyle {
+    fn eq(&self, other: &Value) -> bool {
+        *self.0 == *other
+    }
+}
+
+impl Serialize for NodeStyle {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for NodeStyle {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Value::deserialize(deserializer).map(Self::new)
+    }
+}
+
+/// Live styles by content hash. Entries are weak: a style no node uses any
+/// more is freed, and its slot is swept once the table doubles.
+struct StyleInterner {
+    styles: std::collections::HashMap<u64, std::sync::Weak<Value>>,
+    sweep_at: usize,
+}
+
+fn intern_style(value: Value) -> Arc<Value> {
+    if !value.as_object().is_some_and(|map| !map.is_empty()) {
+        return Arc::new(value);
+    }
+    static STYLES: std::sync::Mutex<Option<StyleInterner>> = std::sync::Mutex::new(None);
+    let hash = {
+        let mut hasher = std::hash::DefaultHasher::new();
+        hash_value(&value, &mut hasher);
+        std::hash::Hasher::finish(&hasher)
+    };
+    let Ok(mut guard) = STYLES.lock() else {
+        return Arc::new(value);
+    };
+    let interner = guard.get_or_insert_with(|| StyleInterner {
+        styles: std::collections::HashMap::new(),
+        sweep_at: 1024,
+    });
+    if let Some(shared) = interner
+        .styles
+        .get(&hash)
+        .and_then(std::sync::Weak::upgrade)
+        && *shared == value
+    {
+        return shared;
+    }
+    let shared = Arc::new(value);
+    interner.styles.insert(hash, Arc::downgrade(&shared));
+    if interner.styles.len() >= interner.sweep_at {
+        interner.styles.retain(|_, style| style.strong_count() > 0);
+        interner.sweep_at = (interner.styles.len() * 2).max(1024);
+    }
+    shared
+}
+
+/// Feeds a JSON value to `hasher`; numbers hash by their `f64` value, so
+/// `1` and `1.0` agree, as they do for every style reader.
+pub(crate) fn hash_value(value: &Value, hasher: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+    match value {
+        Value::Null => 0u8.hash(hasher),
+        Value::Bool(value) => (1u8, value).hash(hasher),
+        Value::Number(value) => (2u8, value.as_f64().unwrap_or(f64::NAN).to_bits()).hash(hasher),
+        Value::String(value) => (3u8, value).hash(hasher),
+        Value::Array(values) => {
+            (4u8, values.len()).hash(hasher);
+            for value in values {
+                hash_value(value, hasher);
+            }
+        }
+        Value::Object(map) => {
+            (5u8, map.len()).hash(hasher);
+            for (key, value) in map {
+                key.hash(hasher);
+                hash_value(value, hasher);
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Node {
     pub id: String,
     pub kind: String,
     #[serde(default)]
-    pub style: Value,
+    pub style: NodeStyle,
     #[serde(default)]
     pub children: Vec<Node>,
     #[serde(default)]
@@ -164,7 +296,7 @@ pub struct Node {
     pub old_text: Option<String>,
     #[serde(default)]
     pub new_text: Option<String>,
-    pub highlight: Option<TextHighlight>,
+    pub highlight: Option<Box<TextHighlight>>,
     #[serde(skip)]
     pub rich: Option<Arc<crate::rich::RichContent>>,
     /// Inline styled ranges of a text node (`<strong>`, `<a>`, … inside a
@@ -173,7 +305,7 @@ pub struct Node {
     pub runs: Value,
     #[serde(default)]
     pub src: String,
-    pub image: Option<ImageSource>,
+    pub image: Option<Box<ImageSource>>,
     #[serde(default)]
     pub fit: String,
     #[serde(default)]
@@ -191,8 +323,8 @@ pub struct Node {
     pub scroll_speed: f64,
     #[serde(default = "default_scroll_orientation")]
     pub scroll_orientation: String,
-    pub virtual_list: Option<VirtualListLayout>,
-    pub control: Option<Control>,
+    pub virtual_list: Option<Box<VirtualListLayout>>,
+    pub control: Option<Box<Control>>,
     #[serde(default)]
     pub modal: bool,
     #[serde(default)]
@@ -297,10 +429,7 @@ impl Node {
         }
         ["top", "right", "bottom", "left"].map(|side| value[side].as_f64().unwrap_or(0.0) as f32)
     }
-    pub fn signature(&self, keys: &[&str]) -> Vec<Value> {
-        keys.iter().map(|k| self.style[*k].clone()).collect()
     }
-}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -556,6 +685,14 @@ pub enum Command {
         #[serde(rename = "requestId")]
         request_id: String,
     },
+    /// Frame phase percentiles and process memory (`app.stats()`).
+    Stats {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        /// Clear the frame samples after answering.
+        #[serde(default)]
+        reset: bool,
+    },
     Resize {
         width: f64,
         height: f64,
@@ -747,7 +884,7 @@ pub fn validate(root: &Node) -> Result<(), String> {
                 return Err(format!("Invalid userSelect on {}: {value}", n.id));
             }
         }
-        for (name, style) in [("style", &n.style)].into_iter().chain(
+        for (name, style) in [("style", &*n.style)].into_iter().chain(
             ["hover", "focus", "focusVisible", "active", "disabled"]
                 .into_iter()
                 .filter_map(|name| n.style.get(name).map(|style| (name, style))),
@@ -896,7 +1033,7 @@ pub fn validate_patch(nodes: &[Node]) -> Result<(), String> {
                 return Err(format!("Invalid userSelect on {}: {value}", node.id));
             }
         }
-        for (name, style) in [("style", &node.style)].into_iter().chain(
+        for (name, style) in [("style", &*node.style)].into_iter().chain(
             ["hover", "focus", "focusVisible", "active", "disabled"]
                 .into_iter()
                 .filter_map(|name| node.style.get(name).map(|style| (name, style))),
@@ -1040,7 +1177,7 @@ fn validate_control(node: &Node) -> Result<(), String> {
     let state_styles = ["hover", "active", "focus", "focusVisible", "disabled", "groupHover", "focusWithin"]
         .iter()
         .filter_map(|state| node.style.get(*state));
-    let styles: Vec<&Value> = std::iter::once(&node.style).chain(state_styles).collect();
+    let styles: Vec<&Value> = std::iter::once(&*node.style).chain(state_styles).collect();
     for transform in styles.iter().filter_map(|style| style.get("transform")) {
         let valid = transform.as_object().is_some_and(|transform| {
             transform.iter().all(|(key, value)| {

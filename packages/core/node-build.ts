@@ -72,6 +72,13 @@ export async function buildNode(options: NodeBuildOptions): Promise<string> {
       plugins: [fileImportAttributes, {
         name: "tarve-node-runtime",
         setup(build) {
+          if (options.compileJsx) {
+            build.onLoad({ filter: /\.[jt]sx$/ }, async args => {
+              if (/[\\/]node_modules[\\/]/.test(args.path) || args.path.startsWith(join(root, "src"))) return undefined;
+              const { compileJsx } = await import("./jsx-compile");
+              return { contents: (await compileJsx(readFileSync(args.path, "utf8"))).code, loader: args.path.endsWith(".jsx") ? "jsx" : "tsx", resolveDir: dirname(args.path) };
+            });
+          }
           if (source) {
             build.onResolve({ filter: /^@tarve\/core(?:\/(?:jsx-runtime|jsx-dev-runtime))?$/ }, args => {
               const entry = args.path.slice("@tarve/core".length) || "/index";
@@ -116,6 +123,7 @@ export async function buildNode(options: NodeBuildOptions): Promise<string> {
     if (config.platform === "linux" && (metadata.icon || metadata.appId)) writeLinuxDesktopEntry(outfile, metadata, images?.png);
     return outfile;
   } finally {
+    if (options.compileJsx) await (await import("./jsx-compile")).closeJsxCompiler();
     await rm(temporary, { recursive: true, force: true });
   }
 }

@@ -1080,6 +1080,40 @@ describe("controlled native reconciliation", () => {
     expect(errors.at(-1)?.source).toBe("bridge");
     expect(errors.at(-1)?.event).toBe("join");
   });
+
+  test("stats reports JS update phases with the native answer and resets both on request", async () => {
+    const bridge = new FakeBridge();
+    let label = "a";
+    const app = createApp(() => <Window><Text id="label">{label}</Text></Window>, { bridge });
+    await app.ready;
+    for (const next of ["b", "c"]) {
+      label = next;
+      app.update();
+      await Promise.resolve();
+    }
+    const reading = app.stats({ reset: true });
+    await Promise.resolve();
+    const command = bridge.commands.at(-1);
+    if (command?.type !== "stats") throw new Error("expected stats command");
+    expect(command.reset).toBe(true);
+    const native = { phases: null, memory: null };
+    bridge.emit({ type: "stats", requestId: command.requestId, stats: native });
+    const stats = await reading;
+    expect(stats.native).toEqual(native);
+    for (const phase of ["render", "diff", "shadow", "send", "update"] as const) {
+      expect(stats.js[phase].count).toBe(2);
+      expect(stats.js[phase].p50).toBeGreaterThanOrEqual(0);
+      expect(stats.js[phase].p99).toBeLessThanOrEqual(stats.js[phase].max);
+    }
+    expect(stats.js.heapUsedMb).toBeGreaterThan(0);
+    const again = app.stats();
+    await Promise.resolve();
+    const second = bridge.commands.at(-1);
+    if (second?.type !== "stats") throw new Error("expected stats command");
+    bridge.emit({ type: "stats", requestId: second.requestId, stats: native });
+    expect((await again).js.update.count).toBe(0);
+    app.close();
+  });
 });
 
 describe("development runtime tooling", () => {

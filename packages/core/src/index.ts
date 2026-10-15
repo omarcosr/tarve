@@ -3,7 +3,7 @@ export type { WindowProps, WindowCloseRequestEvent, ViewProps, GlassProps, Glass
 export { Checkbox, Switch, RadioGroup, Slider, Card, Badge, Separator, Progress, Tabs, Accordion } from "./controls";
 export type { CheckboxProps, SwitchProps, RadioOption, RadioGroupProps, SliderProps, CardProps, BadgeProps, SeparatorProps, ProgressProps, TabItem, TabsProps, AccordionItem, AccordionProps } from "./controls";
 export { VirtualList } from "./virtual-list";
-export { memo, shallowEqual } from "./memo";
+export { memo, shallowEqual, template } from "./memo";
 export type { VirtualListProps } from "./virtual-list";
 export { AnimatePresence } from "./motion";
 export type { AnimatePresenceProps } from "./motion";
@@ -28,7 +28,7 @@ export { createTextSearchController, findRanges } from "./text-search";
 export type { FindRangesOptions, TextSearchOptions, TextSearchController, TextSearchSnapshot } from "./text-search";
 export type { HotkeyHandler } from "./hotkeys";
 export { createApp, render } from "./app";
-export type { AppErrorEvent, AppErrorSource, AppHandle, AppOptions, NotifyOptions, SystemMediaSession, TrayHandle, TrayMenuItem, TrayOptions } from "./app";
+export type { AppErrorEvent, AppErrorSource, AppHandle, AppJsStats, AppOptions, AppStats, NotifyOptions, SystemMediaSession, TrayHandle, TrayMenuItem, TrayOptions } from "./app";
 export { TestRenderer, Locator, createTestRenderer, launchTestProcess, waitFor } from "./test-renderer";
 export type { Point, RoleLocatorOptions, TestProcess, TestProcessOptions, TestRendererOptions, TextLocatorOptions, WaitForOptions, WheelOptions } from "./test-renderer";
 export { assertPngMatches, comparePngCaptures, compareRgbaImages, readPngRgba } from "./visual-testing";
@@ -37,7 +37,7 @@ export type { ComponentAdapter, ComponentAdapterInput } from "./component-adapte
 export { theme, Theme, lightTheme, darkTheme, createTheme, buttonVariants } from "./theme";
 export type { ThemeColors, ThemeFocusOutline, ThemeDefinition, ThemeOverrides, ButtonVariant } from "./theme";
 export { Style } from "./style";
-export type { StateStyle, OutlineStyle, BorderStyle, TextShadow, BoxShadow, Transform, Gradient, GradientStop, GradientSide, GradientLength, GradientCentre, RadialExtent, LinearGradient, RadialGradient, ConicGradient, ConicGradientStop, UserSelect, TextDecoration, GlassMaterial, Renderer, WindowPosition, WindowPositionPreset, WindowLevel, DesktopWidget, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition, ScrollSource, ScrollInfo, MotionProperty, NumericMotionProperty, MotionEasing, MotionTransition, MotionTransitions, MotionValues } from "./protocol";
+export type { StateStyle, OutlineStyle, BorderStyle, TextShadow, BoxShadow, Transform, Gradient, GradientStop, GradientSide, GradientLength, GradientCentre, RadialExtent, LinearGradient, RadialGradient, ConicGradient, ConicGradientStop, UserSelect, TextDecoration, GlassMaterial, Renderer, WindowPosition, WindowPositionPreset, WindowLevel, DesktopWidget, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition, ScrollSource, ScrollInfo, MotionProperty, NumericMotionProperty, MotionEasing, MotionTransition, MotionTransitions, MotionValues, MemoryReading, NativeStats, PhaseSummary } from "./protocol";
 export type { VNode, Child, PastePayload, DragPosition, DragMoveEvent, DragEndEvent, DropEvent, DraggableProps, DropTargetProps } from "./jsx-runtime";
 export { BunFfiBridge, openExternal } from "./bridge";
 export type { NativeBridge, BunFfiBridgeOptions } from "./bridge";

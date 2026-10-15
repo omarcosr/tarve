@@ -1,4 +1,4 @@
-import type { FileDialogOptions, NativeEvent, NativeCommand, NativeSystemMediaSession, Renderer, Snapshot } from "./protocol";
+import type { FileDialogOptions, NativeEvent, NativeCommand, NativeStats, NativeSystemMediaSession, PhaseSummary, Renderer, Snapshot } from "./protocol";
 import { readFileSync } from "node:fs";
 import { applyMediaEvent, type MediaController } from "./media-element";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
@@ -11,6 +11,7 @@ import { createNativeRequests } from "./app/requests";
 import { editShadowNode, nativeShadow, reconciliationCommand } from "./app/shadow";
 import { createTrayController, type TrayHandle, type TrayOptions } from "./app/tray";
 import { withRenderScope } from "./render-scope";
+import { PhaseSamples } from "./app/stats";
 import type { ComponentAdapter } from "./component-adapter";
 import { DevErrorOverlay } from "./dev-overlay";
 import { iconBytes, iconFileForShell, runtimeAppMetadata } from "./app-metadata";
@@ -99,6 +100,21 @@ function envFlag(name: string): boolean {
 }
 
 export type DiagnosticInput = Extract<NativeCommand, { type: "input" | "resize" }>;
+/** JS update phases, each a summary in milliseconds. */
+export interface AppJsStats {
+  /** The view function and compileTree. */
+  render: PhaseSummary;
+  /** Building the patch against what the native tree holds. */
+  diff: PhaseSummary;
+  /** Updating the JS mirror of the native tree. */
+  shadow: PhaseSummary;
+  /** Serializing the patch and handing it to the native thread. */
+  send: PhaseSummary;
+  /** One whole update, from the queued render to the patch sent. */
+  update: PhaseSummary;
+  heapUsedMb: number;
+}
+export interface AppStats { js: AppJsStats; native: NativeStats }
 export interface AppHandle {
   ready: Promise<void>;
   closed: Promise<void>;
@@ -124,6 +140,12 @@ export interface AppHandle {
   saveFileDialog(options?: FileDialogOptions): Promise<string | undefined>;
   onEvent(listener: (event: NativeEvent) => void): () => void;
   inspect(): Promise<Snapshot>;
+  /**
+   * Where time and memory go: percentiles (ms) of the JS update phases and of the
+   * native frame phases over their recent samples, plus process memory after each
+   * startup stage. `reset` clears the samples after reading them.
+   */
+  stats(options?: { reset?: boolean }): Promise<AppStats>;
   capture(path: string): Promise<void>;
   /** Advance the native deterministic motion clock. Requires debug mode. */
   advanceMotion(milliseconds: number): Promise<void>;
@@ -210,6 +232,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   }
   let committed: CompiledTree | undefined;
   let observed: CompiledTree | undefined;
+  const jsStats = { render: new PhaseSamples(), diff: new PhaseSamples(), shadow: new PhaseSamples(), send: new PhaseSamples(), update: new PhaseSamples() };
   /** The window's content size, from the root's size reports; breakpoint styles read it. */
   let viewport: { width: number; height: number } | undefined;
   let queued = false;
@@ -333,10 +356,11 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     queueMicrotask(() => {
       queued = false;
       if (ended || closing || !committed || !observed) return;
+      const updateStarted = performance.now();
 
       let next: CompiledTree;
       try {
-        next = compileView();
+        next = jsStats.render.time(compileView);
         if (committed.document.window.decorations !== next.document.window.decorations) {
           throw new Error("Adding or removing TitleBar after the native window has been created is not supported. Recreate the Window instead.");
         }
@@ -348,7 +372,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
       let command: NativeCommand | undefined;
       try {
-        command = reconciliationCommand(observed, next);
+        const current = observed;
+        command = jsStats.diff.time(() => reconciliationCommand(current, next));
       } catch (error) {
         reportError(error, { source: "render", event: "diff" });
         restoreCommitted();
@@ -357,7 +382,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
       let nextObserved: CompiledTree;
       try {
-        nextObserved = nativeShadow(next, observed);
+        const current = observed;
+        nextObserved = jsStats.shadow.time(() => nativeShadow(next, current));
       } catch (error) {
         reportError(error, { source: "render", event: "shadow" });
         restoreCommitted();
@@ -365,7 +391,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       }
 
       if (command) {
-        if (!sendInternal(command, { source: "bridge", event: command.type })) {
+        const patch = command;
+        if (!jsStats.send.time(() => sendInternal(patch, { source: "bridge", event: patch.type }))) {
           restoreCommitted();
           return;
         }
@@ -378,6 +405,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       committed = next;
       observed = nextObserved;
       syncMedia();
+      jsStats.update.push(performance.now() - updateStarted);
     });
   }
 
@@ -667,6 +695,21 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         throw error;
       }
       return event.snapshot;
+    },
+    async stats(statsOptions: { reset?: boolean } = {}): Promise<AppStats> {
+      if (queued) await flushQueuedUpdate();
+      const reset = statsOptions.reset === true;
+      const event = await requests.request({ type: "stats", requestId: crypto.randomUUID(), reset });
+      if (event.type !== "stats") {
+        throw reportError(new Error("Unexpected native stats response"), { source: "request", event: "stats" });
+      }
+      const js: AppJsStats = {
+        render: jsStats.render.summary(), diff: jsStats.diff.summary(), shadow: jsStats.shadow.summary(),
+        send: jsStats.send.summary(), update: jsStats.update.summary(),
+        heapUsedMb: Math.round(process.memoryUsage().heapUsed / 104857.6) / 10,
+      };
+      if (reset) for (const samples of Object.values(jsStats)) samples.reset();
+      return { js, native: event.stats };
     },
     async capture(path: string): Promise<void> {
       if (!options.debug) throw new Error("Enable debug to capture the rendered scene");

@@ -118,6 +118,10 @@ impl WebTree {
             Command::Resize { width, height } => {
                 self.resize(width as f32, height as f32, self.scale)
             }
+            // No window, renderer or process to measure in the browser build.
+            Command::Stats { request_id, .. } => {
+                self.events.push(json!({"type":"stats", "requestId":request_id, "stats": {"phases": null, "memory": null}}));
+            }
             Command::Inspect { request_id } => {
                 self.tree
                     .compute(self.width, self.height)

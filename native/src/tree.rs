@@ -989,7 +989,7 @@ const MAX_IDLE_IMAGE_BYTES: usize = 32 * 1024 * 1024;
 
 fn image_cache_key(node: &Node) -> Option<&str> {
     node.image
-        .as_ref()
+        .as_deref()
         .map(ImageSource::key)
         .or_else(|| (!node.src.is_empty()).then_some(node.src.as_str()))
 }
@@ -1118,7 +1118,7 @@ fn is_remote_image(node: &Node) -> bool {
 }
 
 fn load_image_data(node: &Node) -> Result<ImageData, String> {
-    if let Some(source) = &node.image {
+    if let Some(source) = node.image.as_deref() {
         return match source {
             ImageSource::Encoded {
                 data, media_type, ..

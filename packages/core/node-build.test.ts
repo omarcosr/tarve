@@ -51,6 +51,7 @@ test.skipIf(!supported)("Node SEA runs the same native TSX app without Bun", asy
       expect(group.icons.map(entry => entry.width || 256)).toEqual([16, 20, 24, 32, 40, 48, 64]);
     }
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    // Windows may hold the just-exited executable for a moment (EBUSY): retry instead of failing the test.
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 }, 60000);

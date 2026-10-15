@@ -741,6 +741,8 @@ pub fn run(
     events: Arc<Events>,
     ready: SyncSender<Result<EventLoopProxy<Command>, String>>,
 ) -> Result<(), String> {
+    let mut memory_stages = crate::stats::MemoryStages::default();
+    memory_stages.record("start");
     #[cfg(target_os = "windows")]
     if let Some(identity) = document.app_identity.as_ref()
         && let Err(message) = crate::smtc::register_app_identity(identity)
@@ -808,6 +810,7 @@ pub fn run(
         children: std::mem::take(&mut document.root.children),
         ..document.root.clone()
     });
+    memory_stages.record("tree");
     let mut app = App {
         parked: false,
         document,
@@ -838,6 +841,8 @@ pub fn run(
         media: Default::default(),
         remote_images,
         present_times: Default::default(),
+        frame_stats: Default::default(),
+        memory_stages,
         #[cfg(target_os = "windows")]
         system_media: None,
         #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -884,6 +889,10 @@ struct App {
     remote_images: crate::remote_image::RemoteImages,
     /// When each of the last second's frames was presented, for `inspect().fps`.
     present_times: std::collections::VecDeque<Instant>,
+    /// Phase timings of recent frames, for `app.stats()`.
+    frame_stats: crate::stats::FrameStats,
+    /// Process memory after each startup stage, for `app.stats()`.
+    memory_stages: crate::stats::MemoryStages,
     #[cfg(target_os = "windows")]
     system_media: Option<crate::smtc::SystemMedia>,
     #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -1737,12 +1746,16 @@ impl App {
     }
     fn present(&mut self, content_changed: bool) -> Result<PresentResult, RenderError> {
         let background = self.root_color("background", &self.document.window.background);
+        let present_started = Instant::now();
         let result = match &mut self.graphics {
             GraphicsState::Ready(graphics) => {
                 graphics.render(&self.scene, color(&background), content_changed)
             }
             _ => Err(RenderError::Fatal("Renderer not ready".into())),
         }?;
+        self.frame_stats
+            .present
+            .push(present_started.elapsed().as_secs_f64() * 1000.0);
         if result == PresentResult::Presented
             && let Some(delay) = self.trim_delay()
         {
@@ -1802,12 +1815,16 @@ impl App {
         if !d3d11 && !self.tree.released_image_keys().is_empty() {
             self.tree.restore_all_image_pixels();
         }
-        self.tree
-            .compute(size.width, size.height)
-            .map_err(RenderError::Fatal)?;
+        let layout_started = Instant::now();
+        let computed = self.tree.compute(size.width, size.height);
+        self.frame_stats
+            .layout
+            .push(layout_started.elapsed().as_secs_f64() * 1000.0);
+        computed.map_err(RenderError::Fatal)?;
         let layout_events = self.tree.take_layout_events();
         self.emit(layout_events);
         let content_changed = self.tree.dirty.paint;
+        let paint_started = Instant::now();
         if content_changed {
             let tree = &mut self.tree;
             let mut retained_prepared = false;
@@ -1842,6 +1859,9 @@ impl App {
             if !retained_prepared && !self.parked {
                 self.scene = self.tree.scene(scale);
             }
+            self.frame_stats
+                .paint
+                .push(paint_started.elapsed().as_secs_f64() * 1000.0);
         }
         let requests = self.tree.take_remote_image_requests();
         self.remote_images.request(requests);
@@ -1898,6 +1918,7 @@ impl App {
         };
         // CPU cost only (motion, layout, paint); present can block on vsync.
         let frame_cpu_ms = frame_started.elapsed().as_secs_f64() * 1000.0;
+        self.frame_stats.frame.push(frame_cpu_ms);
         match self.present(content_changed) {
             Ok(PresentResult::Presented) => {
                 self.presentation_retry_at = None;
@@ -1918,6 +1939,7 @@ impl App {
                 }
                 if !self.ready_emitted {
                     self.ready_emitted = true;
+                    self.memory_stages.record("firstFrame");
                     self.events.push(json!({"type":"ready"}));
                 }
                 self.sync_control_flow(event_loop);
@@ -2223,6 +2245,7 @@ impl ApplicationHandler<Command> for App {
         match event_loop.create_window(attributes) {
             Ok(window) => {
                 let window = Arc::new(window);
+                self.memory_stages.record("window");
                 // Lay out and shape text while the GPU device (prewarmed on
                 // another thread since tarve_start) finishes; prepare() then
                 // finds a clean layout. Errors surface again from prepare().
@@ -2230,6 +2253,7 @@ impl ApplicationHandler<Command> for App {
                 let _ = self.tree.compute(size.width, size.height);
                 match Graphics::new(window.clone(), self.document.renderer) {
                     Ok(graphics) => {
+                        self.memory_stages.record("graphics");
                         self.graphics = GraphicsState::Ready(Box::new(graphics));
                         install_dpi_scaled_size(&window);
                         self.window = Some(window.clone());
@@ -2279,6 +2303,7 @@ impl ApplicationHandler<Command> for App {
         if !matches!(&command, Command::MotionAdvance { .. }) {
             self.advance_live_motion();
         }
+        let apply_started = Instant::now();
         match command {
             Command::Patch { nodes } => {
                 let chrome_changed = nodes.iter().any(|node| {
@@ -2292,6 +2317,7 @@ impl ApplicationHandler<Command> for App {
                         self.sync_custom_window_chrome();
                     }
                 }
+                self.frame_stats.apply.push(apply_started.elapsed().as_secs_f64() * 1000.0);
             }
             Command::Mutate { mutations } => {
                 let chrome_changed = mutations.iter().any(|mutation| match mutation {
@@ -2309,11 +2335,22 @@ impl ApplicationHandler<Command> for App {
                         self.sync_custom_window_chrome();
                     }
                 }
+                self.frame_stats.apply.push(apply_started.elapsed().as_secs_f64() * 1000.0);
             }
             Command::Update { root } => {
                 self.tree.update(*root);
                 self.sync_custom_window_chrome();
                 accessibility_changed = true;
+                self.frame_stats.apply.push(apply_started.elapsed().as_secs_f64() * 1000.0);
+            }
+            Command::Stats { request_id, reset } => {
+                self.events.push(json!({"type":"stats", "requestId":request_id, "stats": {
+                    "phases": self.frame_stats.summary(),
+                    "memory": self.memory_stages.summary(),
+                }}));
+                if reset {
+                    self.frame_stats.reset();
+                }
             }
             Command::Close => event_loop.exit(),
             Command::CancelCloseRequest => self.close_request_pending = false,

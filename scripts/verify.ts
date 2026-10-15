@@ -34,6 +34,8 @@ const allSteps = [
   "pack",
   "smoke:package",
   "smoke:exe",
+  "smoke:txiki-shims",
+  "smoke:runtime-parity",
   "test:visual",
 ];
 const unknown = [...skipped].filter(step => !allSteps.includes(step));

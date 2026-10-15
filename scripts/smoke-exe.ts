@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { parseArgs } from "node:util";
 import { mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { build } from "../packages/core/build";
@@ -7,6 +8,8 @@ import { buildNative } from "./native";
 import { encodePng } from "../packages/core/src/png";
 
 const root = resolve(import.meta.dir, "..");
+const { values } = parseArgs({ args: process.argv.slice(2), options: { runtime: { type: "string" } } });
+const runtime = values.runtime as "bun" | "node" | "txiki" | undefined;
 const hostTarget = hostBuildTarget();
 if (!hostTarget) throw new Error(`Standalone smoke is not supported for ${process.platform}-${process.arch}`);
 const hostConfig = targetConfig(hostTarget);
@@ -21,6 +24,7 @@ await writeFile(icon, encodePng(new Uint8Array(256 * 256 * 4).map((_, i) => (i %
 await build({
   entrypoint: join(root, "scripts/exe-smoke-entry.ts"), outfile: executable, nativeLibrary, name: "Tarve verification",
   version: "1.2.3", description: "Tarve smoke executable", publisher: "Tarve", copyright: "© Tarve", icon, appId: "Tarve.Verification",
+  runtime,
 });
 const expectedFiles = process.platform === "win32"
   ? [`Tarve${hostConfig.executableSuffix}`]
@@ -62,7 +66,7 @@ try {
   assert.equal(await child.exited, 0, "Standalone executable must exit successfully; inspect the runtime temp directory if it fails");
   const report = await Bun.file(reportPath).json();
   assert.equal(report.result, "PASS");
-  console.log(JSON.stringify({ ...report, standalone: true, reportPath }, null, 2));
+  console.log(JSON.stringify({ ...report, standalone: true, runtime: runtime ?? "bun", reportPath }, null, 2));
 } finally {
   clearTimeout(timeout);
 }

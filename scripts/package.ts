@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, rm } from "node:fs/promises";
+import { cp, copyFile, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { BUILD_TARGETS, hostBuildTarget, targetConfig } from "../packages/core/targets";
@@ -82,11 +82,13 @@ const results = await Promise.all(entries.map(([entry, naming]) => Bun.build({
   entrypoints: [join(root, entry)], outdir: output, naming,
   // The CLI and the Node build API must start under Node as well as Bun.
   target: entry.endsWith("/cli.ts") || entry.includes("/node-") ? "node" : "bun",
-  external: ["#tarve/runtime", "#tarve/assets", "esbuild", "resedit"],
+  external: ["#tarve/runtime", "#tarve/assets", "esbuild", "resedit", "typescript", "typescript/*"],
 })));
 for (const result of results) {
   if (!result.success) throw new AggregateError(result.logs, "Package bundle failed");
 }
+// build({ runtime: "txiki" }) bundles the app with these sources (prelude and node:* shims).
+await cp(join(root, "packages/core/txiki"), join(output, "txiki"), { recursive: true });
 await writeNativeCompatibilityManifest(
   join(output, NATIVE_COMPATIBILITY_MANIFEST_NAME),
   compatibility,

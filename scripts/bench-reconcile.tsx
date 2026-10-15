@@ -46,7 +46,7 @@ for (let i = 0; i < 40; i++) {
   compile.push(c); diff.push(d); shadow.push(sh); patchBytes = JSON.stringify(cmd).length;
   committed = next as any; observed = nextObs as any;
 }
-Bun.gc(true);
+if (typeof Bun !== "undefined") Bun.gc(true);
 const heap = process.memoryUsage();
 console.log(JSON.stringify({ rows, nodes: committed.nodes.size, memo: useMemo, patchBytes,
   medianMs: { compile: +med(compile).toFixed(2), diff: +med(diff).toFixed(2), shadow: +med(shadow).toFixed(2), total: +med(total).toFixed(2) },

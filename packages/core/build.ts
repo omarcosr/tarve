@@ -32,10 +32,16 @@ export interface BuildOptions {
   target?: BuildTarget;
   /** Override for building the repository against a freshly compiled release library. */
   nativeLibrary?: string;
-  runtime?: "bun" | "node";
-  /** Node.js binary for the target OS; required for cross-compiling a Node SEA. */
+  /** "txiki": a txiki.js (QuickJS-ng) executable, no Bun or Node.js at run time. */
+  runtime?: "bun" | "node" | "txiki";
+  /** Experimental: compile JSX into reusable templates at build time (packages/core/jsx-compile.ts). Bun and txiki.js builds. */
+  compileJsx?: boolean;
+  /** Runtime binary for the target OS (Node.js or txiki.js); required when cross-compiling a Node SEA or txiki.js app. */
   targetExecutable?: string;
 }
+
+// Level 12: within 1 MB of level 19 at a fiftieth of the compression time.
+const NATIVE_ZSTD_LEVEL = 12;
 
 function resolveNativeLibrary(target: BuildTarget, override?: string): string {
   if (override) {
@@ -65,6 +71,10 @@ function resolveNativeLibrary(target: BuildTarget, override?: string): string {
 
 /** Compile an ordinary Tarve app. No production entrypoint or app-side bridge setup is needed. */
 export async function build(options: BuildOptions): Promise<string> {
+  if (options.runtime === "txiki") {
+    const { buildTxiki } = await import("./txiki-build");
+    return buildTxiki(options);
+  }
   if (options.runtime === "node") {
     const { buildNode } = await import("./node-build");
     return buildNode(options);
@@ -98,6 +108,10 @@ export async function build(options: BuildOptions): Promise<string> {
     sha256: new Bun.CryptoHasher("sha256").update(libraryBytes).digest("hex"),
     size: libraryBytes.byteLength,
   };
+  // The DLL compresses to about a third; it is decompressed once, on first launch, into the asset cache.
+  const packDirectory = mkdtempSync(join(tmpdir(), "tarve-native-"));
+  const packedLibrary = join(packDirectory, `${config.nativeName}.zst`);
+  writeFileSync(packedLibrary, Bun.zstdCompressSync(libraryBytes, { level: NATIVE_ZSTD_LEVEL }));
   const runtime: BunPlugin = {
     name: "tarve-native-runtime",
     setup(builder) {
@@ -106,14 +120,21 @@ export async function build(options: BuildOptions): Promise<string> {
         builder.onResolve({ filter: /^tarve\/jsx-runtime$/ }, () => ({ path: join(sourceDirectory, "jsx-runtime.ts") }));
         builder.onResolve({ filter: /^tarve\/jsx-dev-runtime$/ }, () => ({ path: join(sourceDirectory, "jsx-dev-runtime.ts") }));
       }
+      if (options.compileJsx) {
+        builder.onLoad({ filter: /\.[jt]sx$/ }, async args => {
+          if (/[\\/]node_modules[\\/]/.test(args.path) || args.path.startsWith(join(import.meta.dir, "src"))) return undefined;
+          const { compileJsx } = await import("./jsx-compile");
+          return { contents: (await compileJsx(await Bun.file(args.path).text())).code, loader: args.path.endsWith(".jsx") ? "jsx" : "tsx" };
+        });
+      }
       builder.onResolve({ filter: /^#tarve\/runtime$/ }, () => ({ path: "runtime", namespace: "tarve" }));
       builder.onLoad({ filter: /^runtime$/, namespace: "tarve" }, () => ({
         loader: "ts",
         contents: [
-          `import library from ${JSON.stringify(library)} with { type: "file" };`,
+          `import library from ${JSON.stringify(packedLibrary)} with { type: "file" };`,
           `import { materializeAsset } from ${JSON.stringify(assetsModule)};`,
           `const digest = ${JSON.stringify(libraryDigest)};`,
-          `export function nativePath() { return materializeAsset(library, ${JSON.stringify(config.nativeName)}, digest); }`,
+          `export function nativePath() { return materializeAsset(library, ${JSON.stringify(config.nativeName)}, digest, "zstd"); }`,
         ].join("\n"),
       }));
     },
@@ -150,6 +171,8 @@ export async function build(options: BuildOptions): Promise<string> {
     });
     if (!result.success) throw new AggregateError(result.logs, "Could not compile the Tarve application");
   } finally {
+    if (options.compileJsx) await (await import("./jsx-compile")).closeJsxCompiler();
+    await rm(packDirectory, { recursive: true, force: true });
     if (iconDirectory) await rm(iconDirectory, { recursive: true, force: true });
   }
   if (config.platform === "linux" && (metadata.icon || metadata.appId)) writeLinuxDesktopEntry(outfile, metadata, images?.png);

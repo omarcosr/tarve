@@ -31,9 +31,10 @@ export interface AssetDigest {
  * Give native libraries a physical path for an asset embedded in a Bun executable.
  * With a build-time `digest`, a launch that finds the extracted copy at the
  * expected size reuses it without reading or hashing the embedded bytes; the
- * full hash check runs only when the copy is written.
+ * full hash check runs only when the copy is written. `digest` describes the
+ * decoded bytes; `encoding` names how the embedded copy is compressed (Bun only).
  */
-export function materializeAsset(source: string, filename: string, digest?: AssetDigest): string {
+export function materializeAsset(source: string, filename: string, digest?: AssetDigest, encoding?: "zstd"): string {
   if (!filename || filename === "." || filename === ".." || basename(filename) !== filename) {
     throw new Error("An embedded asset filename must be a simple filename");
   }
@@ -47,7 +48,7 @@ export function materializeAsset(source: string, filename: string, digest?: Asse
       return path;
     }
   }
-  const bytes = readFileSync(source);
+  const bytes = encoding === "zstd" ? zstdDecompress(readFileSync(source)) : readFileSync(source);
   const hash = createHash("sha256").update(bytes).digest("hex");
   if (digest && hash !== digest.sha256) {
     throw new Error(`Embedded asset ${filename} does not match its build-time digest; rebuild the executable.`);
@@ -70,6 +71,12 @@ export function materializeAsset(source: string, filename: string, digest?: Asse
   if (actual !== hash) throw new Error(`Embedded asset cache is corrupt. Remove this file and retry: ${path}`);
   materialized.set(key, path);
   return path;
+}
+
+/** Only Bun executables embed zstd assets (packages/core/build.ts). */
+function zstdDecompress(bytes: Uint8Array): Uint8Array {
+  if (typeof Bun === "undefined") throw new Error("A zstd-compressed embedded asset needs the Bun runtime.");
+  return Bun.zstdDecompressSync(bytes);
 }
 
 function sizeOf(path: string): number | undefined {

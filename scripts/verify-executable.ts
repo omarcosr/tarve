@@ -1,7 +1,14 @@
-import { strict as assert } from "node:assert";
+import { writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import type { AppHandle } from "@tarve/core-internal";
 import type { Snapshot } from "@tarve/protocol";
+
+// Runtime-neutral (Bun, Node.js SEA, txiki.js): no node:assert, no Bun globals.
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
+const sleep = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
+const same = (actual: unknown, expected: unknown, message: string) => assert(JSON.stringify(actual) === JSON.stringify(expected), `${message} (got ${JSON.stringify(actual)})`);
 
 /** Runs inside the actual compiled executable using its embedded native runtime. */
 export async function verifyExecutable(app: AppHandle, errors: string[]): Promise<void> {
@@ -15,7 +22,7 @@ export async function verifyExecutable(app: AppHandle, errors: string[]): Promis
   };
   let initial = await app.inspect();
   for (let i = 0; initial.frames === 0 && i < 50; i++) {
-    await Bun.sleep(100);
+    await sleep(100);
     initial = await app.inspect();
   }
   assert(initial.frames > 0, "Renderer must present a frame from the standalone executable");
@@ -25,15 +32,15 @@ export async function verifyExecutable(app: AppHandle, errors: string[]): Promis
   app.debug({ type: "input", action: "move", x: button.x + button.width / 2, y: button.y + button.height / 2 });
   app.debug({ type: "input", action: "down" });
   app.debug({ type: "input", action: "up" });
-  await Bun.sleep(200);
+  await sleep(200);
   const clicked = await app.inspect();
-  assert.equal(node(clicked, "smoke-status").text, "Clicked: 1", "FFI events must roundtrip to embedded Bun");
+  same(node(clicked, "smoke-status").text, "Clicked: 1", "FFI events must roundtrip to the embedded runtime");
   app.debug({ type: "input", action: "move", x: -1, y: -1 });
-  await Bun.sleep(150);
+  await sleep(150);
   const before = await app.inspect();
-  await Bun.sleep(350);
+  await sleep(350);
   const after = await app.inspect();
-  assert.equal(after.frames, before.frames, "Idle standalone executable must not run a frame loop");
-  assert.deepEqual(errors, [], "Native standalone runtime must not report errors");
-  await Bun.write(reportPath, JSON.stringify({ result: "PASS", executable: process.execPath, cwd: process.cwd(), frames: after.frames, nodes: initial.nodes.length, ffiEvents: true, idleFrames: after.frames - before.frames }, null, 2));
+  same(after.frames, before.frames, "Idle standalone executable must not run a frame loop");
+  same(errors, [], "Native standalone runtime must not report errors");
+  writeFileSync(reportPath, JSON.stringify({ result: "PASS", executable: process.execPath, cwd: process.cwd(), frames: after.frames, nodes: initial.nodes.length, ffiEvents: true, idleFrames: after.frames - before.frames }, null, 2));
 }

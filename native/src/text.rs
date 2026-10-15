@@ -17,6 +17,7 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use serde_json::Value;
 #[cfg(not(feature = "fxhash"))]
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 use vello::{
@@ -631,6 +632,34 @@ fn default_ui_generic_family() -> GenericFamily {
     }
 }
 
+fn hash_text(text: &str) -> u64 {
+    let mut hasher = std::hash::DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Everything besides the content that shapes a text: its text style keys,
+/// syntax theme, inline runs and the code gutter (a node field, not a style
+/// key; without it a node that turns line numbers on keeps the geometry of the
+/// unnumbered block and paints the code underneath its own numbers).
+fn text_style_hash(node: &Node) -> u64 {
+    let mut hasher = std::hash::DefaultHasher::new();
+    for key in TEXT_KEYS {
+        crate::protocol::hash_value(&node.style[*key], &mut hasher);
+    }
+    crate::protocol::hash_value(&node.syntax_theme, &mut hasher);
+    crate::protocol::hash_value(&node.runs, &mut hasher);
+    node.show_line_numbers.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// The shaped layout with exactly sized buffers. Parley grows its glyph,
+/// cluster and run vectors while shaping and keeps the slack, more than half
+/// of a retained layout; one copy right after shaping gives it back.
+fn compact(layout: Layout<TextBrush>) -> Layout<TextBrush> {
+    layout.clone()
+}
+
 /// Sizes a text measured to, by wrap width; reset when its layout is rebuilt.
 #[derive(Default)]
 struct MeasureCache {
@@ -657,7 +686,9 @@ pub struct TextEngine {
     pub shapes: u64,
     #[cfg(test)]
     pub markdown_painted_lines: usize,
-    signatures: HashMap<String, (String, Vec<serde_json::Value>)>,
+    /// Hashes of the content and of the style a layout was shaped from:
+    /// a retained copy of every text would double its memory.
+    signatures: HashMap<String, (u64, u64)>,
     alignments: HashMap<String, parley::Alignment>,
     /// Blurred text-shadow images by node id, with their signature and
     /// device-pixel offset from the recorder base.
@@ -1152,15 +1183,7 @@ impl TextEngine {
             return;
         }
         let content = node.display_text();
-        let mut style_signature = node.signature(TEXT_KEYS);
-        style_signature.push(node.syntax_theme.clone());
-        style_signature.push(node.runs.clone());
-        // The gutter is a node field, not a style key, so it has to join the
-        // signature explicitly. Without it a node that turns line numbers on
-        // keeps the geometry of the unnumbered block and paints the code
-        // underneath its own numbers.
-        style_signature.push(Value::Bool(node.show_line_numbers));
-        let signature = (content.clone(), style_signature);
+        let signature = (hash_text(&content), text_style_hash(node));
         if self.layouts.contains_key(&node.id) && self.signatures.get(&node.id) == Some(&signature)
         {
             return;
@@ -1169,7 +1192,7 @@ impl TextEngine {
             if self
                 .signatures
                 .get(&node.id)
-                .is_some_and(|(previous, _)| previous != &content)
+                .is_some_and(|(previous, _)| *previous != signature.0)
             {
                 self.markdown_scroll.retain(|(id, _), _| id != &node.id);
             }
@@ -1222,7 +1245,7 @@ impl TextEngine {
                 gutter.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
                     gutter_line_height,
                 )));
-                let mut gutter = gutter.build(&number);
+                let mut gutter = compact(gutter.build(&number));
                 gutter.break_all_lines(None);
                 gutters.push(gutter);
             }
@@ -1308,7 +1331,7 @@ impl TextEngine {
                 ),
             );
         }
-        builder.build(content)
+        compact(builder.build(content))
     }
     /// Width and line count of the ellipsized layout painted for `id`.
     #[cfg(test)]
@@ -1439,7 +1462,7 @@ impl TextEngine {
                     push_span(&mut builder, &local, node, node.number("fontSize", 14.0));
                 }
             }
-            let layout = builder.build(value);
+            let layout = compact(builder.build(value));
             lines.push(MarkdownLine {
                 range: start..end,
                 content_end,
@@ -2451,7 +2474,7 @@ impl TextEngine {
                 range.start.max(offset) - offset..range.end - offset,
             );
         }
-        let content = builder.build(row.content_text());
+        let content = compact(builder.build(row.content_text()));
         let old = row
             .old_line
             .map(|line| self.build_diff_chrome(node, &line.to_string()));
@@ -2486,7 +2509,7 @@ impl TextEngine {
         builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
             node.number("lineHeight", 1.5),
         )));
-        builder.build(value)
+        compact(builder.build(value))
     }
 
     pub fn diff_index_at(&mut self, node: &Node, x: f32, y: f32) -> Option<usize> {
@@ -3224,7 +3247,7 @@ mod rich_measure_tests {
             kind: "code".into(),
             show_line_numbers: show,
             text: "alpha\nbravo\ncharlie".into(),
-            style: serde_json::json!({ "fontFamily": "Consolas", "fontSize": 13 }),
+            style: serde_json::json!({ "fontFamily": "Consolas", "fontSize": 13 }).into(),
             ..serde_json::from_value(serde_json::json!({
                 "id":"code", "kind":"code", "text":"alpha\nbravo\ncharlie"
             }))

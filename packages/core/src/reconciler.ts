@@ -46,7 +46,7 @@ interface Position { index: number; count: number }
 /** Tailwind's breakpoints: the window must be at least this wide (CSS px) for the variant to apply. */
 const BREAKPOINTS: readonly [keyof Style, number][] = [["sm", 640], ["md", 768], ["lg", 1024], ["xl", 1280], ["2xl", 1536]];
 
-interface VariantContext { position?: Position; viewportWidth: number; usedViewport: () => void }
+interface VariantContext { position?: Position; viewportWidth: number; usedViewport: () => void; usedPosition?: () => void }
 
 /**
  * Folds the reconciler-side variants into the style and drops their keys, so the native
@@ -54,7 +54,13 @@ interface VariantContext { position?: Position; viewportWidth: number; usedViewp
  * width (ascending, so a wider breakpoint wins), then `dark` by theme, whose own
  * variants fold the same way.
  */
+const VARIANT_KEYS = new Set(["first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl", "dark"]);
+
 function foldVariants(style: Record<string, unknown>, selected: ThemeDefinition, context: VariantContext): Record<string, unknown> {
+  // Most styles have no variants: skip the rest-destructuring copy and the variant objects.
+  let variant = false;
+  for (const key in style) if (VARIANT_KEYS.has(key)) { variant = true; break; }
+  if (!variant) return style;
   const { first, last, odd, even, sm, md, lg, xl, "2xl": xxl, dark, ...base } = style;
   let out = base as Style;
   const merge = (variant: unknown) => {
@@ -63,6 +69,7 @@ function foldVariants(style: Record<string, unknown>, selected: ThemeDefinition,
     out = { ...Style.merge(out, variant as Style), ...sides };
   };
   const { position } = context;
+  if (position && (first !== undefined || last !== undefined || odd !== undefined || even !== undefined)) context.usedPosition?.();
   if (position) {
     const nth = position.index + 1;
     if (nth === 1) merge(first);
@@ -140,6 +147,9 @@ function focusOutlineOverrides(style: NonNullable<NativeNode["style"]["focus"]> 
  * monospace explicitly, like the user-agent style sheet.
  */
 const INHERITED_FONT = ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "fontVariantNumeric", "fontFeatureSettings", "fontSize", "fontWeight", "lineHeight", "foreground", "textAlign", "textTransform", "whiteSpace"] as const;
+const INHERITED_FONT_SET: ReadonlySet<string> = new Set(INHERITED_FONT);
+/** Inherited font values that controls (buttons, inputs, code) take too. */
+const CONTROL_FONT = ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "textTransform"] as const;
 /** Kinds whose text takes every inherited value; controls keep their own size, weight and colour. */
 const INHERITING_TEXT = new Set(["text", "markdown"]);
 const TEXT_KINDS = new Set(["text", "button", "input", "textarea", "markdown", "code", "diff"]);
@@ -149,6 +159,8 @@ const COPIED_PROPS = [
   "value", "placeholder", "inputType", "scrollSpeed", "scrollOrientation", "virtualList", "disabled", "modal",
   "portal", "dismissOnOutside", "focusable", "dragRegion", "draggable", "dropTarget", "windowAction",
 ] as const;
+
+const COPIED_PROP_SET: ReadonlySet<string> = new Set(COPIED_PROPS);
 
 /** One memoized subtree: what produced it and everything compiling it registered. */
 interface MemoEntry {
@@ -166,6 +178,10 @@ interface MemoEntry {
   /** Memoized components inside this one, kept alive when it is reused. */
   nested: string[];
   idSet?: Set<string>;
+  /** The breakpoint (BREAKPOINTS passed) the subtree was styled for, when it read the viewport width. */
+  breakpoint?: number;
+  /** "index/count" of the list position a template's element was styled for (first/last/odd/even). */
+  position?: string;
 }
 const memoStores = new WeakMap<object, Map<string, MemoEntry>>();
 
@@ -214,7 +230,8 @@ export function compileTree(
   const memoSeen = new Set<string>();
   /** What compiling a subtree registered: the ids claimed since `mark` and their nodes, handlers and media. */
   function claimedSince(mark: number): Pick<MemoEntry, "ids" | "nodes" | "handlers" | "media"> {
-    const own = idLog.slice(mark).filter(id => ids.has(id));
+    // Anonymous text logs its id twice (claimed, released, claimed again by its Text): keep one.
+    const own = [...new Set(idLog.slice(mark))].filter(id => ids.has(id));
     const pick = <T>(map: Map<string, T>) => {
       const out: [string, T][] = [];
       for (const id of own) { const value = map.get(id); if (value !== undefined) out.push([id, value]); }
@@ -229,20 +246,36 @@ export function compileTree(
     for (const value of set) if (index++ >= skip) out.push(value);
     return out;
   }
-  function visitMemo(store: Map<string, MemoEntry>, info: MemoInfo<object>, props: object, path: string, group?: string): NativeNode[] {
+  function restore<T>(map: Map<string, T>, entries: [string, T][]): void {
+    for (let index = 0; index < entries.length; index++) {
+      const entry = entries[index]!;
+      map.set(entry[0], entry[1]);
+    }
+  }
+  function visitMemo(store: Map<string, MemoEntry>, info: MemoInfo<object>, props: object, path: string, group?: string, position?: Position): NativeNode[] {
+    const at = position ? position.index + "/" + position.count : "";
     memoSeen.add(path);
     const previous = store.get(path);
     if (previous && previous.render === info.render && previous.group === group && previous.theme === selectedTheme
-      && previous.form === currentForm && sameValue(previous.font, inheritedFont) && info.equal(previous.props, props)) {
-      for (const id of previous.ids) {
+      && previous.form === currentForm && sameValue(previous.font, inheritedFont)
+      // A subtree with breakpoint styles is reused only at the breakpoint it was styled for.
+      && (previous.breakpoint === undefined || previous.breakpoint === currentBreakpoint())
+      && (previous.position === undefined || previous.position === at)
+      && info.equal(previous.props, props)) {
+      // It still depends on the width: the root must keep reporting resizes.
+      if (previous.breakpoint !== undefined) usesViewport = true;
+      // Indexed loops without destructuring: this is the whole cost of a reused subtree.
+      const previousIds = previous.ids;
+      for (let index = 0; index < previousIds.length; index++) {
+        const id = previousIds[index]!;
         if (ids.has(id)) throw new Error(`Duplicate node id: ${id}`);
         ids.add(id); idLog.push(id);
       }
-      for (const [id, node] of previous.nodes) nodes.set(id, node);
-      for (const [id, handler] of previous.handlers) handlers.set(id, handler);
-      for (const [id, request] of previous.media) media.set(id, request);
+      restore(nodes, previous.nodes);
+      restore(handlers, previous.handlers);
+      restore(media, previous.media);
       // Memoized components nested in a reused subtree stay cached too.
-      for (const key of previous.nested) memoSeen.add(key);
+      for (let index = 0; index < previous.nested.length; index++) memoSeen.add(previous.nested[index]!);
       previous.props = props;
       return previous.result;
     }
@@ -251,7 +284,26 @@ export function compileTree(
     const font = inheritedFont;
     const theme = selectedTheme;
     const form = currentForm;
-    const result = visit(info.render(props), path, group);
+    // Track whether this subtree reads the viewport, apart from the rest of the tree.
+    const outerViewport = usesViewport;
+    usesViewport = false;
+    let result: NativeNode[];
+    let readViewport: boolean;
+    let readPosition = false;
+    try {
+      // A template's element is the list item itself: it keeps the position (CSS :first-child).
+      const outerPosition = positionRead;
+      positionRead = false;
+      try {
+        result = visit(info.render(props), path, group, false, info.template ? position : undefined);
+      } finally {
+        readPosition = positionRead;
+        positionRead = outerPosition || positionRead;
+      }
+    } finally {
+      readViewport = usesViewport;
+      usesViewport = outerViewport || readViewport;
+    }
     // Labels and windows tie a subtree to nodes outside it; such subtrees always recompile.
     const selfContained = labelAssociations.size === before.labels && labelableTargets.size === before.labelable && windowOptions === before.window;
     if (selfContained) {
@@ -259,6 +311,8 @@ export function compileTree(
         render: info.render, props, group, theme, font, form, result,
         ...claimedSince(before.log),
         nested: added(memoSeen, seenBefore),
+        ...readViewport ? { breakpoint: currentBreakpoint() } : {},
+        ...readPosition && at ? { position: at } : {},
       });
     } else store.delete(path);
     return result;
@@ -279,28 +333,79 @@ export function compileTree(
       openExternal,
     };
   }
+  // One context per compile instead of four closures per element (expandIntrinsic reads it synchronously).
+  const intrinsicContext: Parameters<typeof expandIntrinsic>[2] = {
+    form: undefined,
+    labelable: (id, nativeId) => { labelableTargets.set(id, nativeId); },
+    label: (targetId, labelId) => {
+      const labels = labelAssociations.get(targetId) ?? [];
+      labels.push(labelId);
+      labelAssociations.set(targetId, labels);
+    },
+    media: (id, request) => { media.set(id, request); },
+  };
+  const usedViewport = () => { usesViewport = true; };
+  // Set while a template's own element compiles; true when its style read the list position.
+  let positionRead = false;
+  const usedPosition = () => { positionRead = true; };
+  /** How many responsive breakpoints the current viewport width passes. */
+  const currentBreakpoint = () => {
+    const width = viewport?.width ?? windowOptions?.width ?? 1120;
+    let passed = 0;
+    for (let index = 0; index < BREAKPOINTS.length; index++) if (width >= BREAKPOINTS[index]![1]) passed++;
+    return passed;
+  };
+  // The theme focus ring most interactive nodes use, built once per theme; resolveThemeStyle copies it.
+  let focusRingTheme: ThemeDefinition | undefined, focusRing: Record<string, unknown> = {};
+  const defaultFocusRing = () => {
+    if (focusRingTheme !== selectedTheme) {
+      focusRingTheme = selectedTheme;
+      focusRing = { outlineColor: theme.colors.ring, ...lightTheme.focusOutline, ...selectedTheme.focusOutline };
+    }
+    return focusRing;
+  };
+  // The CSS initial font values, per theme: built once instead of once per text node.
+  let initialFontTheme: ThemeDefinition | undefined, initialFontValues: Record<string, unknown> = {};
+  const initialFont = () => {
+    if (initialFontTheme !== selectedTheme) {
+      initialFontTheme = selectedTheme;
+      initialFontValues = {
+        fontFamily: theme.font.family, fontSize: theme.font.size, fontWeight: 400, lineHeight: theme.font.lineHeight,
+        foreground: resolveStyleString("foreground", theme.colors.foreground, selectedTheme),
+      };
+    }
+    return initialFontValues;
+  };
   function visit(child: Child, path: string, group?: string, adapterNative = false, position?: Position): NativeNode[] {
     if (child == null || typeof child === "boolean") return [];
     if (Array.isArray(child)) {
       // CSS `:first-child`/`:nth-child` count element children; text runs are not elements.
-      const elements = child.filter(item => typeof item === "object" && item !== null && !Array.isArray(item));
-      let seen = 0;
-      return child.flatMap((item, index) => {
-      const primitive = typeof item === "string" || typeof item === "number";
-      // CSS: a contiguous run of text children (`Mark {count} as read`) is one
-      // anonymous box, not one per JSX expression; later pieces joined the first.
-      if (primitive && index > 0 && isPrimitive(child[index - 1])) return [];
-      const key = typeof item === "object" && item && !Array.isArray(item) ? item.key : undefined;
-      let piece: Child = item;
-      if (primitive) {
-        let text = String(item);
-        for (let next = index + 1; next < child.length && isPrimitive(child[next]); next++) text += String(child[next]);
-        piece = text;
+      let elements = 0;
+      for (let index = 0; index < child.length; index++) {
+        const item = child[index];
+        if (typeof item === "object" && item !== null && !Array.isArray(item)) elements++;
       }
-      const element = typeof item === "object" && item !== null && !Array.isArray(item);
-      const at = element ? { index: seen++, count: elements.length } : undefined;
-      return visit(piece, `${path}/${key != null ? `k:${key}` : index}`, group, false, at);
-      });
+      let seen = 0;
+      const out: NativeNode[] = [];
+      for (let index = 0; index < child.length; index++) {
+        const item = child[index];
+        const primitive = typeof item === "string" || typeof item === "number";
+        // CSS: a contiguous run of text children (`Mark {count} as read`) is one
+        // anonymous box, not one per JSX expression; later pieces joined the first.
+        if (primitive && index > 0 && isPrimitive(child[index - 1])) continue;
+        const element = typeof item === "object" && item !== null && !Array.isArray(item);
+        const key = element ? (item as VNode).key : undefined;
+        let piece: Child = item;
+        if (primitive) {
+          let text = String(item);
+          for (let next = index + 1; next < child.length && isPrimitive(child[next]); next++) text += String(child[next]);
+          piece = text;
+        }
+        const at = element ? { index: seen++, count: elements } : undefined;
+        const nodes = visit(piece, path + "/" + (key != null ? "k:" + key : index), group, false, at);
+        for (let n = 0; n < nodes.length; n++) out.push(nodes[n]!);
+      }
+      return out;
     }
     if (typeof child === "string" || typeof child === "number") {
       if (ids.has(path)) throw new Error(`Duplicate node id: ${path}`);
@@ -321,21 +426,13 @@ export function compileTree(
     }
     if (typeof child.type === "function") {
       const info = (child.type as unknown as Record<symbol, MemoInfo<object> | undefined>)[MEMO];
-      if (info && memoStore) return visitMemo(memoStore, info, child.props as object, path, group);
-      return visit(child.type(child.props), path, group);
+      if (info && memoStore) return visitMemo(memoStore, info, child.props as object, path, group, position);
+      return visit(child.type(child.props), path, group, false, info?.template ? position : undefined);
     }
     const isNativeVNode = adapterNative || _isNativeVNode(child);
     if (!isNativeVNode) {
-      const expanded = expandIntrinsic(child, path, {
-        form: currentForm,
-        labelable: (id, nativeId) => { labelableTargets.set(id, nativeId); },
-        label: (targetId, labelId) => {
-          const labels = labelAssociations.get(targetId) ?? [];
-          labels.push(labelId);
-          labelAssociations.set(targetId, labels);
-        },
-        media: (id, request) => { media.set(id, request); },
-      });
+      intrinsicContext.form = currentForm;
+      const expanded = expandIntrinsic(child, path, intrinsicContext);
       if (expanded) {
         if (!expanded.form) return visit(expanded.element, path, group);
         const previous = currentForm;
@@ -397,56 +494,60 @@ export function compileTree(
     const isText = nativeType === "text" || nativeType === "button";
     const isRichLeaf = nativeType === "markdown" || nativeType === "code" || nativeType === "diff";
     if (isRichLeaf && p.children != null) throw new Error(`${nativeType} is a native leaf and cannot have children.`);
-    const divShorthands: Record<string, unknown> = {};
+    let rawStyle: Record<string, unknown>;
     if (isIntrinsicDiv) {
+      const divShorthands: Record<string, unknown> = {};
       for (const key of DIV_SHORTHANDS) if (p[key] !== undefined) divShorthands[key] = p[key];
-    }
-    const rawStyle = isIntrinsicDiv
-      ? { ...divShorthands, ...canonicalizeIntrinsicStyle(p.style) }
-      : { ...p.style };
+      rawStyle = { ...divShorthands, ...canonicalizeIntrinsicStyle(p.style) };
+    } else rawStyle = { ...p.style };
     // CSS: `display: flex` lays a div's children in a row unless flex-direction says otherwise.
     if (isIntrinsicDiv && rawStyle.display === "flex" && rawStyle.direction === undefined) rawStyle.direction = "row";
     if ((interactiveKinds.has(nativeType) && p.focusable !== false) || control?.role === "otpSlot") {
-      rawStyle.focusVisible = {
-        outlineColor: theme.colors.ring,
-        ...lightTheme.focusOutline,
-        ...selectedTheme.focusOutline,
-        ...focusOutlineOverrides(p.style?.focus),
-        ...p.style?.focusVisible,
-      };
+      rawStyle.focusVisible = p.style?.focus === undefined && p.style?.focusVisible === undefined
+        ? defaultFocusRing()
+        : {
+            outlineColor: theme.colors.ring,
+            ...lightTheme.focusOutline,
+            ...selectedTheme.focusOutline,
+            ...focusOutlineOverrides(p.style?.focus),
+            ...p.style?.focusVisible,
+          };
       // OTP slots mirror a hidden input's caret. Pointer focus never sets
       // focus-visible, so without a plain focus ring a clicked OTP shows no
       // active slot at all.
-      if (control?.role === "otpSlot") rawStyle.focus = { ...rawStyle.focusVisible, ...p.style?.focus };
+      if (control?.role === "otpSlot") rawStyle.focus = { ...rawStyle.focusVisible as object, ...p.style?.focus };
     }
-    const variants: VariantContext = { position, viewportWidth: viewport?.width ?? windowOptions?.width ?? 1120, usedViewport: () => { usesViewport = true; } };
+    const variants: VariantContext = { position, viewportWidth: viewport?.width ?? windowOptions?.width ?? 1120, usedViewport, usedPosition };
     const style = resolveThemeStyle(foldVariants(rawStyle, selectedTheme, variants), selectedTheme);
-    for (const key of ["padding", "margin"] as const) {
-      if (style[key] && typeof style[key] === "object") (style as Record<string, unknown>)[key] = { ...style[key] };
-    }
+    if (style.padding && typeof style.padding === "object") style.padding = { ...style.padding };
+    if (style.margin && typeof style.margin === "object") style.margin = { ...style.margin };
     const imageSource = nativeType === "image" && p.src !== undefined
       ? serializeImageSource(p.src)
       : undefined;
     const parentFont = inheritedFont;
     const fontStyle = style as Record<string, unknown>;
     if (INHERITING_TEXT.has(nativeType)) {
-      const initial: Record<string, unknown> = {
-        fontFamily: theme.font.family, fontSize: theme.font.size, fontWeight: 400, lineHeight: theme.font.lineHeight,
-        foreground: resolveStyleString("foreground", theme.colors.foreground, selectedTheme),
-      };
-      for (const key of INHERITED_FONT) if (fontStyle[key] === undefined) fontStyle[key] = parentFont[key] ?? initial[key];
-      for (const key of INHERITED_FONT) if (fontStyle[key] === undefined) delete fontStyle[key];
+      const initial = initialFont();
+      for (let index = 0; index < INHERITED_FONT.length; index++) {
+        const key = INHERITED_FONT[index]!;
+        if (fontStyle[key] !== undefined) continue;
+        const value = parentFont[key] ?? initial[key];
+        if (value !== undefined) fontStyle[key] = value;
+      }
     } else if (TEXT_KINDS.has(nativeType)) {
-      for (const key of ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "textTransform"] as const) {
+      for (const key of CONTROL_FONT) {
         if (fontStyle[key] === undefined && parentFont[key] !== undefined) fontStyle[key] = parentFont[key];
       }
       fontStyle.fontFamily ??= theme.font.family;
     }
     let ownFont = parentFont;
-    for (const key of INHERITED_FONT) {
-      if (fontStyle[key] !== undefined && fontStyle[key] !== parentFont[key]) {
+    // A style has a few keys; INHERITED_FONT has thirteen.
+    for (const key in fontStyle) {
+      if (!INHERITED_FONT_SET.has(key)) continue;
+      const value = fontStyle[key];
+      if (value !== undefined && value !== parentFont[key]) {
         if (ownFont === parentFont) ownFont = { ...parentFont };
-        ownFont[key] = fontStyle[key];
+        ownFont[key] = value;
       }
     }
     inheritedFont = ownFont;
@@ -470,7 +571,7 @@ export function compileTree(
     const node: NativeNode = { id, kind: nativeType as NativeNode["kind"], style, children };
     const optional = node as unknown as Record<string, unknown>;
     if (nativeType === "text") {
-      const inline = compileInline(p.children, String(style.whiteSpace ?? "normal"), inlineContext(id, style as Record<string, unknown>));
+      const inline = compileInline(p.children, String(style.whiteSpace ?? "normal"), style as Record<string, unknown>, () => inlineContext(id, style as Record<string, unknown>));
       node.text = inline.text;
       if (inline.runs.length) node.runs = inline.runs;
     } else if (isText) node.text = textContent(p.children);
@@ -498,7 +599,8 @@ export function compileTree(
       node.image = imageSource.image;
       node.fit = p.fit ?? "cover";
     }
-    for (const key of COPIED_PROPS) if (p[key] !== undefined) optional[key] = p[key];
+    // Props has a few keys; COPIED_PROPS has fifteen.
+    for (const key in p) if (COPIED_PROP_SET.has(key) && p[key] !== undefined) optional[key] = p[key];
     if (p.submitOnEnter !== undefined) node.submitOnEnter = p.submitOnEnter === true;
     if (rovingGroup) node.rovingGroup = rovingGroup;
     if (nativeType === "window" && p.onCloseRequest !== undefined) node.closeIntercept = true;

@@ -159,8 +159,48 @@ export function hasInlineElements(children: Child): boolean {
   return children != null && typeof children === "object";
 }
 
-/** Flattens inline children into text plus runs, applying CSS white-space. */
-export function compileInline(children: Child, whiteSpace: string, ctx: InlineContext): { text: string; runs: TextRun[] } {
+const WHITE_SPACE_RUN = /[\t\n\f]| {2}/;
+
+/** The text of children that hold no elements (strings and numbers only); undefined otherwise. */
+function plainText(children: Child): string | undefined {
+  if (children == null || typeof children === "boolean") return "";
+  // Line breaks normalize per piece, as the per-character walk does.
+  if (typeof children === "string") return children.indexOf("\r") === -1 ? children : children.replace(/\r\n?/g, "\n");
+  if (typeof children === "number") return String(children);
+  if (!Array.isArray(children)) return undefined;
+  let text = "";
+  for (const child of children) {
+    const piece = plainText(child);
+    if (piece === undefined) return undefined;
+    text += piece;
+  }
+  return text;
+}
+
+/**
+ * Flattens inline children into text plus runs, applying CSS white-space.
+ * `base` is the text node's computed style; `context` is built only when the
+ * children hold phrasing elements.
+ */
+export function compileInline(children: Child, whiteSpace: string, base: RunStyle, context: () => InlineContext): { text: string; runs: TextRun[] } {
+  // Plain text (`Record {index}: …`) has one style, so no runs: white space is the
+  // only work, done with two regexes instead of the per-character walk below.
+  const transform = base.textTransform;
+  if (transform !== "uppercase" && transform !== "lowercase" && transform !== "capitalize") {
+    const plain = plainText(children);
+    if (plain !== undefined) {
+      if (whiteSpace === "normal" || whiteSpace === "nowrap") {
+        // Most labels have no runs of white space: skip the replace (and its new string).
+        const text = WHITE_SPACE_RUN.test(plain) ? plain.replace(/[ \t\n\f]+/g, " ") : plain;
+        return { text: text.slice(text.startsWith(" ") ? 1 : 0, text.endsWith(" ") && text.length > 1 ? -1 : text.length), runs: [] };
+      }
+      if (whiteSpace !== "pre-line") return { text: plain, runs: [] };
+    }
+  }
+  return compileInlineRuns(children, whiteSpace, context());
+}
+
+function compileInlineRuns(children: Child, whiteSpace: string, ctx: InlineContext): { text: string; runs: TextRun[] } {
   const pieces: Piece[] = [];
   collect(children, ctx.base, undefined, ctx, pieces);
   const collapseSpaces = whiteSpace === "normal" || whiteSpace === "nowrap" || whiteSpace === "pre-line";

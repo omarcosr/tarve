@@ -23,6 +23,8 @@ mod rich;
 #[cfg(not(target_arch = "wasm32"))]
 mod runtime;
 mod shadow;
+#[cfg(not(target_arch = "wasm32"))]
+mod stats;
 #[cfg(target_os = "windows")]
 mod smtc;
 mod svg;

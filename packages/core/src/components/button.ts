@@ -97,8 +97,10 @@ function composedContent(child: Child, foreground: string): Child {
   return { ...child, props: { ...props, children } };
 }
 
+const BUTTON_HEIGHT = { sm: 32, default: 36, lg: 40 } as const;
+
 export function Button({ variant = "default", size = "default", style, disabled, control, children, ...props }: ButtonProps): VNode {
-  const height = { sm: 32, default: 36, lg: 40 }[size];
+  const height = BUTTON_HEIGHT[size];
   const buttonStyle: Style = {
     height,
     padding: { left: 14, right: 14 },

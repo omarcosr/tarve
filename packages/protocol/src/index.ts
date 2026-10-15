@@ -386,6 +386,7 @@ export type NativeCommand =
   | { type: "focus"; id: string }
   | { type: "scrollToItem"; id: string; index: number; offset?: number; smooth?: boolean }
   | { type: "inspect"; requestId: string }
+  | { type: "stats"; requestId: string; reset?: boolean }
   | { type: "resize"; width: number; height: number }
   | { type: "capture"; path: string; requestId: string }
   | { type: "motionAdvance"; milliseconds: number; requestId: string }
@@ -408,6 +409,20 @@ export interface Snapshot {
   glyphRasterizations?: number | null;
   hovered: string | null; focused: string | null; nodes: NodeSnapshot[];
   width: number; height: number; scale: number;
+}
+/** Milliseconds of one phase over its recent samples (the last 600 frames or updates). */
+export interface PhaseSummary { count: number; p50: number; p95: number; p99: number; max: number }
+/** Process memory: resident (Task Manager "Memory", Linux VmRSS) and private (Windows commit, Linux anonymous RSS). */
+export interface MemoryReading { workingSetMb: number; privateMb: number }
+export interface NativeStats {
+  /**
+   * apply: a JS update applied to the retained tree; layout: layout and text measurement;
+   * paint: recording the frame; present: rasterize and present (includes vsync waits);
+   * frame: motion, layout and paint together. Null in the browser build.
+   */
+  phases: Record<"apply" | "layout" | "paint" | "present" | "frame", PhaseSummary> | null;
+  /** Memory after each startup stage (start, tree, window, graphics, firstFrame) and now. */
+  memory: { stages: (MemoryReading & { label: string })[]; current: MemoryReading | null } | null;
 }
 export type NativeEvent =
   | { type: "ready" | "closed" }
@@ -447,6 +462,7 @@ export type NativeEvent =
   | { type: "shortcut"; shortcut: string }
   | { type: "error"; message: string }
   | { type: "inspect"; requestId: string; snapshot: Snapshot }
+  | { type: "stats"; requestId: string; stats: NativeStats }
   | { type: "captured"; requestId: string; path: string; error?: string }
   | { type: "motionComplete"; id: string; property: MotionProperty }
   | { type: "motionAdvanced"; requestId: string; milliseconds: number; activeMotions: number; error?: string }

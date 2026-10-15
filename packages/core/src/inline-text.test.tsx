@@ -11,6 +11,21 @@ test("white-space follows CSS: normal collapses, pre keeps, pre-line keeps newli
   expect(textOf(<Window><Text id="t">{"one\ntwo"}</Text></Window>, "t").text).toBe("one two");
 });
 
+test("plain text takes the fast path with the same result as the run walk", () => {
+  // A style-less <span> forces the per-character walk over the same pieces.
+  const alphabet = [" ", "  ", "\t", "\n", "\r", "\r\n", "\f", "a", "bc", "é", "😀", "\u00a0"];
+  let seed = 7;
+  const random = (n: number) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  for (const whiteSpace of ["normal", "nowrap", "pre", "pre-wrap", "pre-line"] as const) {
+    for (let round = 0; round < 200; round++) {
+      const pieces = Array.from({ length: 1 + random(3) }, () => random(5) === 0 ? random(100) : Array.from({ length: random(6) }, () => alphabet[random(alphabet.length)]).join(""));
+      const fast = textOf(<Window><p id="t" style={{ whiteSpace }}>{pieces}</p></Window>, "t");
+      const walked = textOf(<Window><p id="t" style={{ whiteSpace }}><span>{pieces}</span></p></Window>, "t");
+      expect([whiteSpace, fast.text, fast.runs]).toEqual([whiteSpace, walked.text, walked.runs]);
+    }
+  }
+});
+
 test("phrasing elements become runs with user-agent styles and byte offsets", () => {
   const node = textOf(<Window><p id="t">Olá <strong>forte</strong> <em>itálico</em><br />fim <mark>m</mark></p></Window>, "t");
   expect(node.text).toBe("Olá forte itálico\nfim m");

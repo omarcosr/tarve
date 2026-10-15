@@ -4,6 +4,32 @@ import { compileTree, diffTreeMutations, invalidateMemos } from "./reconciler";
 import { memo } from "./memo";
 
 describe("memo", () => {
+  test("a reused subtree with bare text children registers each id once", () => {
+    const Label = memo(() => <Column id="label">{"plain"}{" text"}</Column>);
+    const scope = {};
+    const view = () => compileTree(<Window><Label /></Window>, false, "auto", [], scope);
+    view();
+    expect(() => view()).not.toThrow();
+    expect(view().nodes.get("label/children/0")?.text).toBe("plain text");
+  });
+  test("a memoized subtree with breakpoint styles recompiles across breakpoints and keeps the root reporting size", () => {
+    let renders = 0;
+    const Panel = memo(() => { renders++; return <Column id="panel" style={{ padding: 4, md: { padding: 24 } }} />; });
+    const scope = {};
+    const view = (width: number) => compileTree(<Window><Panel /></Window>, false, "auto", [], scope, true, { width, height: 600 });
+    const narrow = view(500);
+    expect(narrow.nodes.get("panel")!.style.padding).toBe(4);
+    expect(narrow.document.root.reportSize).toBe(true);
+    // Same breakpoint: reused, and the root still reports resizes.
+    const narrower = view(520);
+    expect(renders).toBe(1);
+    expect(narrower.document.root.reportSize).toBe(true);
+    // Crossing md (768): recompiled with the wide style.
+    const wide = view(900);
+    expect(renders).toBe(2);
+    expect(wide.nodes.get("panel")!.style.padding).toBe(24);
+    expect(wide.document.root.reportSize).toBe(true);
+  });
   test("reuses a subtree while its props are equal and recompiles it when they change", () => {
     let renders = 0;
     const clicks: string[] = [];

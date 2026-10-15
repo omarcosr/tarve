@@ -231,6 +231,9 @@ export function resolveThemeColor(value: string, selected: ThemeDefinition): str
 const PAINT_KEYS = ["background", "foreground", "borderColor"] as const;
 
 function resolveShadowColors(style: StateStyle, selected: ThemeDefinition): void {
+  // Nothing to resolve in the common case: no transform, shadow or object/gradient paint.
+  if (style.transform === undefined && style.textShadow === undefined && style.boxShadow === undefined
+    && plainPaint(style.background) && plainPaint(style.foreground) && plainPaint(style.borderColor)) return;
   if (typeof style.transform === "string") style.transform = parseTransform(style.transform);
   const colour = (value: string) => resolveThemeColor(cssColor(value), selected);
   if (typeof style.textShadow === "string") {
@@ -255,35 +258,88 @@ function resolveShadowColors(style: StateStyle, selected: ThemeDefinition): void
 }
 
 /** Style keys whose string value is a colour (background, borderColor, diffAddedBackground, …). */
+/** A paint resolveShadowColors leaves as is: unset, or a colour string (not a gradient). */
+function plainPaint(value: unknown): boolean {
+  return value === undefined || (typeof value === "string" && (value.indexOf("gradient(") === -1 || !GRADIENT.test(value)));
+}
+
 const COLOR_KEY = /^(background|foreground|color)$|(Color|Background|Foreground|Accent|Rule)$/;
 
 /** Theme token or CSS colour (hex, rgb(), hsl(), names) for colour keys; other strings unchanged. */
 /** Resolved style strings per theme: every node repeats the same few colors. */
-const resolvedStrings = new WeakMap<ThemeDefinition, Map<string, string>>();
+/** By key, then value: two lookups instead of building a joined key string per call. */
+const resolvedStrings = new WeakMap<ThemeDefinition, Map<string, Map<string, string>>>();
+let resolvedStringCount = 0;
 
 export function resolveStyleString(key: string, value: string, selected: ThemeDefinition): string {
   let cache = resolvedStrings.get(selected);
   if (!cache) resolvedStrings.set(selected, cache = new Map());
-  const cacheKey = key + "\u0000" + value;
-  let resolved = cache.get(cacheKey);
+  let values = cache.get(key);
+  if (!values) cache.set(key, values = new Map());
+  let resolved = values.get(value);
   if (resolved === undefined) {
-    if (cache.size > 4096) cache.clear();
+    if (++resolvedStringCount > 4096) {
+      cache.clear();
+      resolvedStringCount = 1;
+      cache.set(key, values = new Map());
+    }
     resolved = (PAINT_KEYS as readonly string[]).includes(key) && GRADIENT.test(value)
       ? value
       : resolveThemeColor(COLOR_KEY.test(key) ? cssColor(value) : value, selected);
-    cache.set(cacheKey, resolved);
+    values.set(value, resolved);
   }
   return resolved;
 }
 
+const STATE_KEYS = ["hover", "focus", "focusVisible", "active", "disabled"] as const;
+
+const resolvedStyles = new WeakMap<ThemeDefinition, Map<string, Style>>();
+let resolvedStyleCount = 0;
+
+/**
+ * Theme-resolved copy of a style. Equal styles (most nodes of a list share a handful)
+ * resolve once per theme: the result is cached by the style's JSON, which QuickJS
+ * serializes in C far faster than the resolution runs in JS. Nested objects (state
+ * styles, shadows, gradients) are the cache's own copies, shared and frozen; the top
+ * level is a fresh copy callers may extend.
+ */
 export function resolveThemeStyle(style: Style, selected: ThemeDefinition): Style {
+  let key: string;
+  try {
+    key = JSON.stringify(style);
+  } catch {
+    return resolveThemeStyleUncached(style, selected);
+  }
+  // JSON writes NaN and ±Infinity as null: such a style could share a key with another.
+  if (key.includes("null")) return resolveThemeStyleUncached(style, selected);
+  let cache = resolvedStyles.get(selected);
+  if (!cache) resolvedStyles.set(selected, cache = new Map());
+  let resolved = cache.get(key);
+  if (resolved === undefined) {
+    if (++resolvedStyleCount > 4096) {
+      cache.clear();
+      resolvedStyleCount = 1;
+    }
+    // Resolve a private deep copy: the caller's nested objects (a shared padding) must stay its own.
+    resolved = resolveThemeStyleUncached(JSON.parse(key) as Style, selected);
+    for (const name in resolved) {
+      const value = (resolved as Record<string, unknown>)[name];
+      if (value !== null && typeof value === "object") Object.freeze(value);
+    }
+    cache.set(key, resolved);
+  }
+  return { ...resolved };
+}
+
+function resolveThemeStyleUncached(style: Style, selected: ThemeDefinition): Style {
   const resolved: Style = { ...style };
   for (const key of Object.keys(resolved) as (keyof Style)[]) {
     const value = resolved[key];
     if (typeof value === "string") (resolved as Record<string, unknown>)[key] = resolveStyleString(key, value, selected);
   }
   resolveShadowColors(resolved, selected);
-  for (const state of ["hover", "focus", "focusVisible", "active", "disabled"] as const) {
+  for (let index = 0; index < STATE_KEYS.length; index++) {
+    const state = STATE_KEYS[index]!;
     const value = style[state];
     if (!value) continue;
     const next = { ...value };

@@ -352,6 +352,8 @@ function forget(id: string, job: Promise<Resolved>): void {
   if (resolved.get(id) === job) resolved.delete(id);
 }
 
+const BOT_CHECK = "YouTube is blocking this network as a bot (VPN or proxy on?)";
+
 async function resolve(id: string, client: PlayerClient, visitorId: string): Promise<Resolved> {
   const userAgent = String(client.context.userAgent);
   const response = await fetch("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
@@ -362,6 +364,9 @@ async function resolve(id: string, client: PlayerClient, visitorId: string): Pro
   if (!response.ok) throw new Error(`YouTube player answered HTTP ${response.status}`);
   const json: any = await response.json();
   const status = json?.playabilityStatus;
+  // LOGIN_REQUIRED "confirm you're not a bot" is YouTube distrusting the network, not the song: it answers
+  // every client so from VPN and proxy exits (Cloudflare WARP, data centres). Say so instead of the raw reason.
+  if (status?.status === "LOGIN_REQUIRED" && /bot/i.test(String(status.reason))) throw new Error(BOT_CHECK);
   if (status?.status !== "OK") throw new Error(status?.reason || `not playable (${status?.status ?? "no status"})`);
   const formats: any[] = (json?.streamingData?.adaptiveFormats ?? []).filter((format: any) => format.url && String(format.mimeType).startsWith("audio/mp4"));
   // AAC in MP4, the codec Tarve's <audio> decodes; 256 kbps (141) when offered.

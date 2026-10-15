@@ -107,7 +107,7 @@
     "prepack": "bun scripts/prepack.ts",
     "pack": "bun scripts/pack.ts",
     "start:example": "bun run setup:examples && bun examples/basic/basic.tsx",
-    "check": "bun node_modules/typescript/bin/tsc --noEmit && bun scripts/tailwind-palette.ts --check",
+    "check": "bun node_modules/typescript/bin/tsc --noEmit && bun scripts/tailwind-palette.ts --check && bun scripts/generate-txiki-intl.ts --check",
     "lint": "cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings",
     "setup:examples": "bun scripts/setup-examples.ts",
     "install:examples": "bun install --cwd examples --frozen-lockfile",
@@ -144,6 +144,10 @@
     "smoke:studio": "bun run build:native && bun run setup:examples && bun scripts/smoke-studio.tsx",
     "smoke:accessibility": "bun run build:native && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-accessibility.ps1",
     "smoke:exe": "bun scripts/smoke-exe.ts",
+    "smoke:exe:txiki": "bun scripts/smoke-exe.ts --runtime txiki",
+    "smoke:txiki-shims": "bun scripts/smoke-txiki-shims.ts",
+    "smoke:txiki-apps": "bun run build:native && bun run setup:examples && bun scripts/smoke-txiki-apps.ts",
+    "smoke:runtime-parity": "bun run build:native && bun run setup:examples && bun scripts/smoke-runtime-parity.ts",
     "smoke:package": "bun scripts/smoke-package.ts",
     "bench": "bun scripts/benchmark.tsx",
     "bench:reconcile": "bun scripts/bench-reconcile.tsx"
@@ -152,6 +156,12 @@
   "workspaces": [
     "packages/*"
   ],
+  "peerDependencies": {
+    "typescript": "^7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": { "optional": true }
+  },
   "dependencies": {
     "esbuild": "0.25.0",
     "resedit": "3.1.0"

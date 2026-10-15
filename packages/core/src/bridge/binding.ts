@@ -16,6 +16,9 @@ export function openLibrary(path: string): NativeLibrary {
     tarve_last_error: { args: ["buffer", "u32"], returns: "i32" },
     tarve_join: { args: [], returns: "i32" },
   } as const;
+  // txiki.js: the executable's prelude exposes tjs:ffi, whose dlopen matches bun:ffi.
+  const txikiFfi = (globalThis as { __tarveTxikiFfi?: { dlopen(path: string, symbols: typeof definitions): NativeLibrary } }).__tarveTxikiFfi;
+  if (txikiFfi) return txikiFfi.dlopen(path, definitions);
   if (process.versions.bun) {
     const { dlopen } = require("bun:ffi") as typeof import("bun:ffi");
     return dlopen(path, definitions) as NativeLibrary;

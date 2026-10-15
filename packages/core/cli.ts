@@ -20,9 +20,10 @@ function usage(target?: BuildTarget): string {
     "  build  compile a standalone executable",
     "",
     "Options:",
-    "  --runtime bun|node              defaults to the runtime that launched tarve",
+    "  --runtime bun|node|txiki        defaults to the runtime that launched tarve; txiki: build only",
     `  --target ${BUILD_TARGETS.join("|")}  build: target OS (cross-compiles)`,
     `  --outfile ${output}              build: output path`,
+    "  --compile-jsx                   build: compile JSX into reusable templates (needs typescript 7)",
     "  --name App, --version 1.0.0     app metadata (executable, window, app identity)",
     "  --icon icon.png                 app icon: .png (square, 256 px+) or .ico",
     "  --app-id Acme.App               Windows AppUserModelID / Linux app id",
@@ -62,7 +63,7 @@ async function main(): Promise<number> {
       outfile: { type: "string" }, name: { type: "string" }, version: { type: "string" },
       icon: { type: "string" }, "app-id": { type: "string" }, description: { type: "string" },
       publisher: { type: "string" }, copyright: { type: "string" },
-      target: { type: "string" }, runtime: { type: "string" },
+      target: { type: "string" }, runtime: { type: "string" }, "compile-jsx": { type: "boolean" },
       "target-executable": { type: "string" },
       help: { type: "boolean", short: "h" },
     },
@@ -78,7 +79,10 @@ async function main(): Promise<number> {
   if (values.target !== undefined && !isBuildTarget(values.target)) {
     throw new Error(`Unsupported target: ${values.target}. Expected ${BUILD_TARGETS.join(" or ")}.`);
   }
-  const runtime = selectRuntime(values.runtime);
+  // txiki.js only runs compiled executables: there is no `tarve run|dev` on it.
+  const txiki = values.runtime === "txiki";
+  if (txiki && command !== "build") throw new Error("--runtime txiki is only supported by tarve build.");
+  const runtime = txiki ? "txiki" : selectRuntime(values.runtime);
   // Bun apps need Bun: when bunx or `bun run` started this CLI under Node, hand over to Bun.
   if (runtime === "bun" && !process.versions.bun) {
     return forward("bun", [process.argv[1]!, ...process.argv.slice(2), "--runtime", "bun"]);
@@ -90,6 +94,7 @@ async function main(): Promise<number> {
       publisher: values.publisher, copyright: values.copyright,
       target: values.target as BuildTarget | undefined,
       runtime,
+      compileJsx: values["compile-jsx"],
       targetExecutable: values["target-executable"],
     }));
     return 0;

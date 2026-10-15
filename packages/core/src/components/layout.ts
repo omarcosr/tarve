@@ -19,10 +19,14 @@ export interface ViewProps extends BaseProps, DropTargetProps {
 /** Internal helper shared by the primitive container components. */
 export function container(kind: string, props: ViewProps, defaults: Style = {}): VNode {
   const { gap, padding, flex, align, justify, style, ...rest } = props;
-  const overrides = Object.fromEntries(
-    Object.entries({ gap, padding, flex, align, justify }).filter(([, value]) => value !== undefined),
-  );
-  return jsx(kind, { ...rest, style: { ...defaults, ...overrides, ...style } });
+  // Assignments, not Object.entries/filter/fromEntries: this runs for every row and column.
+  const merged: Style = { ...defaults };
+  if (gap !== undefined) merged.gap = gap;
+  if (padding !== undefined) merged.padding = padding;
+  if (flex !== undefined) merged.flex = flex;
+  if (align !== undefined) merged.align = align;
+  if (justify !== undefined) merged.justify = justify;
+  return jsx(kind, { ...rest, style: style ? { ...merged, ...style } : merged });
 }
 
 export function View(props: ViewProps): VNode {

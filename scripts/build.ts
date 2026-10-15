@@ -13,6 +13,7 @@ const { values } = parseArgs({ args: process.argv.slice(2), options: {
   entry: { type: "string" },
   outfile: { type: "string" },
   target: { type: "string" },
+  runtime: { type: "string" },
 } });
 const executable = values.exe;
 const release = !!(executable || values.release);
@@ -25,6 +26,8 @@ if (executable && !target) throw new Error(`Production executables are not suppo
 if (values.target && !executable) throw new Error("--target is only supported with --exe in the repository build script.");
 if (executable && !values.entry) throw new Error("--entry is required with --exe.");
 if (values.entry && !executable) throw new Error("--entry is only supported with --exe.");
+if (values.runtime !== undefined && !["bun", "node", "txiki"].includes(values.runtime)) throw new Error(`Unsupported runtime: ${values.runtime}. Expected bun, node or txiki.`);
+if (values.runtime && !executable) throw new Error("--runtime is only supported with --exe.");
 const executableSuffix = target ? targetConfig(target).executableSuffix : "";
 const outfile = values.outfile ? resolve(process.cwd(), values.outfile) : join(root, `dist/Tarve${executableSuffix}`);
 const prebuiltNative = process.env.TARVE_PREBUILT_NATIVE?.trim();
@@ -55,7 +58,7 @@ if (!release) {
 } else if (executable) {
   await mkdir(join(root, "dist"), { recursive: true });
   const metadata = await Bun.file(join(root, "package.json")).json();
-  const result = await build({ entrypoint: resolve(process.cwd(), values.entry!), outfile, name: parse(outfile).name, version: metadata.version, nativeLibrary: nativeArtifact, target });
+  const result = await build({ entrypoint: resolve(process.cwd(), values.entry!), outfile, name: parse(outfile).name, version: metadata.version, nativeLibrary: nativeArtifact, target, runtime: values.runtime as "bun" | "node" | "txiki" | undefined });
   console.log(`Standalone ${target} executable: ${result}`);
 } else {
   const output = values.outfile ? resolve(process.cwd(), values.outfile) : join(root, "dist", name);
