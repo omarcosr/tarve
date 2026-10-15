@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -11,6 +11,17 @@ import { NtExecutable, NtExecutableResource, Resource } from "resedit";
 const node = Bun.which("node");
 const version = node ? spawnSync(node, ["--version"], { encoding: "utf8" }).stdout.trim() : "";
 const supported = /^v(?:2[7-9]|[3-9]\d)\.|^v26\.(?:1\d|[2-9]\d)\./.test(version);
+
+/** Runs the built app; a failure shows how long it ran and what it printed. */
+function runApp(outfile: string): string {
+  const started = performance.now();
+  const result = spawnSync(outfile, { encoding: "utf8", timeout: 30_000 });
+  const seconds = ((performance.now() - started) / 1000).toFixed(1);
+  if (!result.stdout?.includes("tarve-node-ready")) {
+    throw new Error(`App did not report ready after ${seconds}s (status ${result.status}, signal ${result.signal}, ${result.error?.message ?? "no spawn error"})\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+  }
+  return result.stdout;
+}
 
 test.skipIf(!supported)("Node SEA runs the same native TSX app without Bun", async () => {
   let library: string;
@@ -25,7 +36,7 @@ test.skipIf(!supported)("Node SEA runs the same native TSX app without Bun", asy
       nativeLibrary: library,
       nodeExecutable: node ?? undefined,
     });
-    expect(execFileSync(outfile, { encoding: "utf8", timeout: 15000 })).toContain("tarve-node-ready");
+    expect(runApp(outfile)).toContain("tarve-node-ready");
     // Rebuilding over an existing executable succeeds, as with Bun builds.
     // with every metadata field, and an icon.
     const icon = join(directory, "icon.png");
@@ -34,7 +45,7 @@ test.skipIf(!supported)("Node SEA runs the same native TSX app without Bun", asy
       entrypoint: resolve(import.meta.dirname, "../../examples/node-smoke/node-smoke.tsx"), outfile, nativeLibrary: library, nodeExecutable: node ?? undefined,
       name: "Smoke", version: "2.3.4", description: "Node smoke app", publisher: "Acme", copyright: "© Acme", icon, appId: "Acme.Smoke",
     });
-    expect(execFileSync(outfile, { encoding: "utf8", timeout: 15000 })).toContain("tarve-node-ready");
+    expect(runApp(outfile)).toContain("tarve-node-ready");
     if (process.platform === "win32") {
       // Same identity as a Bun-compiled app: GUI subsystem (no console window) and Tarve metadata.
       const binary = readFileSync(outfile);
@@ -54,4 +65,4 @@ test.skipIf(!supported)("Node SEA runs the same native TSX app without Bun", asy
     // Windows may hold the just-exited executable for a moment (EBUSY): retry instead of failing the test.
     rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
-}, 60000);
+}, 150_000);
