@@ -297,6 +297,13 @@ pub(crate) struct D3d11Graphics {
     /// are not redrawn; a hover or a caret blink repaints only its own tiles.
     frame_cache: Option<ID3D11Texture2D>,
     tile_hashes: Vec<u64>,
+    /// Single-sample path: the retained frame. Only tiles whose commands changed
+    /// are redrawn into it (scissored); it is then copied to the back buffer.
+    canvas: Option<Canvas>,
+    /// Where the commands being replayed draw (the canvas or the back buffer);
+    /// glass copies its backdrop from it.
+    current_target: Option<(ID3D11RenderTargetView, ID3D11Texture2D)>,
+    scissor_rasterizer: ID3D11RasterizerState,
     /// GPU time of presented frames (`app.stats().native.phases.gpu`).
     gpu_timer: Option<crate::gpu_timer::GpuTimer>,
     /// Window-sized stencil, single-sample path only.
@@ -453,6 +460,7 @@ impl D3d11Graphics {
         let first_atlas = create_glyph_atlas(&device)?;
 
         let gpu_timer = crate::gpu_timer::GpuTimer::new(&device);
+        let scissor_rasterizer = create_scissor_rasterizer(&device, &rasterizer)?;
         Ok(Self {
             clip: NO_CLIP,
             analytic_aa,
@@ -464,6 +472,9 @@ impl D3d11Graphics {
             tile,
             frame_cache: None,
             tile_hashes: Vec::new(),
+            canvas: None,
+            current_target: None,
+            scissor_rasterizer,
             gpu_timer,
             depth_view,
             backdrop: None,
@@ -602,6 +613,7 @@ impl D3d11Graphics {
         self.render_target.take();
         self.depth_view.take();
         self.frame_cache.take();
+        self.canvas = None;
         self.backdrop.take();
         self.tile_hashes.clear();
         unsafe {
@@ -691,30 +703,7 @@ impl D3d11Graphics {
         }
         let clear_stencil = windows::Win32::Graphics::Direct3D11::D3D11_CLEAR_STENCIL.0;
         if self.tile.is_none() {
-            let render_target = self
-                .render_target
-                .as_ref()
-                .ok_or("D3D11 render target is unavailable")?;
-            let depth_view = self
-                .depth_view
-                .as_ref()
-                .ok_or("D3D11 stencil target is unavailable")?;
-            upload_dynamic(
-                &self.context,
-                &self.target_transform,
-                bytemuck::cast_slice(&[1.0_f32, 1.0, 0.0, 0.0]),
-            )?;
-            unsafe {
-                self.context.ClearRenderTargetView(render_target, &bg);
-                self.context
-                    .ClearDepthStencilView(depth_view, clear_stencil, 1.0, 0);
-                self.context
-                    .OMSetRenderTargets(Some(&[Some(render_target.clone())]), Some(depth_view));
-            }
-            self.set_viewport(self.width, self.height);
-            self.replay(None, &[]);
-            unsafe { self.context.PSSetShaderResources(0, Some(&[None])) };
-            return Ok(());
+            return self.draw_retained(bg, clear_stencil);
         }
         // Each tile replays the commands that touch it. The vertex shader maps window
         // NDC onto the tile (scale W/T, H/T plus an offset) so the viewport stays the
@@ -807,6 +796,229 @@ impl D3d11Graphics {
         }
         self.tile_hashes = hashes;
         Ok(())
+    }
+
+    /// Single-sample frame: redraws the changed tiles of the retained canvas (all of
+    /// it on the first frame, after a resize or when most of it changed), then
+    /// copies the canvas to the back buffer.
+    fn draw_retained(&mut self, bg: [f32; 4], clear_stencil: u32) -> Result<(), String> {
+        let depth_view = self
+            .depth_view
+            .clone()
+            .ok_or("D3D11 stencil target is unavailable")?;
+        upload_dynamic(
+            &self.context,
+            &self.target_transform,
+            bytemuck::cast_slice(&[1.0_f32, 1.0, 0.0, 0.0]),
+        )?;
+        self.set_viewport(self.width, self.height);
+        let backbuffer: ID3D11Texture2D =
+            unsafe { self.swap_chain.GetBuffer(0) }.map_err(win_error)?;
+        if self.canvas.is_none() {
+            self.canvas = Some(create_canvas(&self.device, &backbuffer)?);
+            self.tile_hashes.clear();
+        }
+        let canvas = self.canvas.clone().ok_or("D3D11 canvas is unavailable")?;
+        let bounds = self.command_bounds();
+        let damage = self.damage_rects(&bounds, bg);
+        self.current_target = Some((canvas.view.clone(), canvas.texture.clone()));
+        unsafe {
+            self.context
+                .OMSetRenderTargets(Some(&[Some(canvas.view.clone())]), Some(&depth_view));
+        }
+        let partial = match &damage {
+            None => {
+                unsafe {
+                    self.context.ClearRenderTargetView(&canvas.view, &bg);
+                    self.context
+                        .ClearDepthStencilView(&depth_view, clear_stencil, 1.0, 0);
+                }
+                self.replay(None, &[]);
+                false
+            }
+            Some(rects) => {
+                unsafe { self.context.RSSetState(&self.scissor_rasterizer) };
+                for rect in rects {
+                    let scissor = windows::Win32::Foundation::RECT {
+                        left: rect[0] as i32,
+                        top: rect[1] as i32,
+                        right: rect[2] as i32,
+                        bottom: rect[3] as i32,
+                    };
+                    unsafe {
+                        self.context.RSSetScissorRects(Some(&[scissor]));
+                        canvas
+                            .context1
+                            .ClearView(&canvas.view, &bg, Some(&[scissor]));
+                        self.context
+                            .ClearDepthStencilView(&depth_view, clear_stencil, 1.0, 0);
+                        self.context
+                            .OMSetRenderTargets(Some(&[Some(canvas.view.clone())]), Some(&depth_view));
+                    }
+                    self.replay(Some(*rect), &bounds);
+                }
+                unsafe { self.context.RSSetState(&self.rasterizer) };
+                !rects.is_empty()
+            }
+        };
+        unsafe {
+            self.context.PSSetShaderResources(0, Some(&[None]));
+            self.context.OMSetRenderTargets(None, None);
+            self.context.CopyResource(&backbuffer, &canvas.texture);
+        }
+        self.current_target = None;
+        if partial && gpu_damage_check() {
+            self.check_partial_redraw(bg, clear_stencil, &canvas, &backbuffer, &depth_view)?;
+        }
+        Ok(())
+    }
+
+    /// The window areas to redraw this frame: the changed tiles merged into
+    /// disjoint rectangles, each grown to hold the whole backdrop region of every
+    /// glass that draws inside it (glass blurs what lies under it, so its backdrop
+    /// must be redrawn in the same pass). Passes may then overlap: each one
+    /// redraws its rectangle from scratch. `None`: redraw everything.
+    fn damage_rects(&mut self, bounds: &[[f32; 4]], bg: [f32; 4]) -> Option<Vec<[f32; 4]>> {
+        let (width, height) = (self.width, self.height);
+        let columns = width.div_ceil(DAMAGE_TILE) as usize;
+        let tiles = columns * height.div_ceil(DAMAGE_TILE) as usize;
+        let fresh = self.tile_hashes.len() != tiles;
+        if fresh {
+            self.tile_hashes = vec![0; tiles];
+        }
+        let command_hashes = self.command_hashes();
+        let mut hashes = std::mem::take(&mut self.tile_hashes);
+        let mut rects = Vec::new();
+        for y in (0..height).step_by(DAMAGE_TILE as usize) {
+            for x in (0..width).step_by(DAMAGE_TILE as usize) {
+                let area = [
+                    x as f32,
+                    y as f32,
+                    (x + DAMAGE_TILE).min(width) as f32,
+                    (y + DAMAGE_TILE).min(height) as f32,
+                ];
+                let slot = (y / DAMAGE_TILE) as usize * columns + (x / DAMAGE_TILE) as usize;
+                let hash = self.tile_hash(area, bounds, &command_hashes, bg);
+                if hashes[slot] != hash {
+                    hashes[slot] = hash;
+                    rects.push(area);
+                }
+            }
+        }
+        self.tile_hashes = hashes;
+        if fresh || partial_redraw_disabled() {
+            return None;
+        }
+        // Per glass: where it draws, and what it reads (its backdrop region).
+        let glass: Vec<([f32; 4], [f32; 4])> = self
+            .commands
+            .iter()
+            .enumerate()
+            .filter_map(|(index, command)| match command {
+                DrawCommand::Glass { region, .. } => {
+                    Some((bounds[index], region.map(|value| value as f32)))
+                }
+                _ => None,
+            })
+            .collect();
+        let mut rects = merge_rects(rects);
+        loop {
+            let mut grown = false;
+            for rect in &mut rects {
+                for region in &glass {
+                    if overlaps(*rect, region.0) && !contains(*rect, region.1) {
+                        *rect = union(*rect, region.1);
+                        grown = true;
+                    }
+                }
+            }
+            if !grown {
+                break;
+            }
+            rects = merge_rects(rects);
+        }
+        let damaged: f32 = rects.iter().map(|r| (r[2] - r[0]) * (r[3] - r[1])).sum();
+        (damaged <= 0.6 * width as f32 * height as f32).then_some(rects)
+    }
+
+    /// TARVE_GPU_DAMAGE_CHECK=1: after a partial redraw, draws the whole frame into
+    /// the back buffer and fails if it differs from the canvas. For tests.
+    fn check_partial_redraw(
+        &mut self,
+        bg: [f32; 4],
+        clear_stencil: u32,
+        canvas: &Canvas,
+        backbuffer: &ID3D11Texture2D,
+        depth_view: &ID3D11DepthStencilView,
+    ) -> Result<(), String> {
+        let render_target = self
+            .render_target
+            .clone()
+            .ok_or("D3D11 render target is unavailable")?;
+        self.current_target = Some((render_target.clone(), backbuffer.clone()));
+        unsafe {
+            self.context.ClearRenderTargetView(&render_target, &bg);
+            self.context
+                .ClearDepthStencilView(depth_view, clear_stencil, 1.0, 0);
+            self.context
+                .OMSetRenderTargets(Some(&[Some(render_target)]), Some(depth_view));
+        }
+        self.replay(None, &[]);
+        self.current_target = None;
+        unsafe {
+            self.context.PSSetShaderResources(0, Some(&[None]));
+            self.context.OMSetRenderTargets(None, None);
+        }
+        let expected = self.read_pixels(backbuffer)?;
+        let actual = self.read_pixels(&canvas.texture)?;
+        let width = self.width as usize;
+        let (mut wrong, mut worst) = (0_usize, 0_i32);
+        let (mut x0, mut y0, mut x1, mut y1) = (usize::MAX, usize::MAX, 0, 0);
+        for (index, (a, b)) in expected.as_chunks::<4>().0.iter().zip(actual.as_chunks::<4>().0).enumerate() {
+            let delta = a.iter().zip(b).map(|(a, b)| (*a as i32 - *b as i32).abs()).max().unwrap_or(0);
+            if delta > 2 {
+                wrong += 1;
+                worst = worst.max(delta);
+                let (x, y) = (index % width, index / width);
+                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+            }
+        }
+        // Present what the full redraw produced either way.
+        unsafe { self.context.CopyResource(backbuffer, &canvas.texture) };
+        if wrong > 0 {
+            return Err(format!(
+                "D3D11 partial redraw differs from a full redraw in {wrong} pixels within {x0},{y0}..{x1},{y1} (by up to {worst})"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Tightly packed BGRA rows of a window-sized texture.
+    fn read_pixels(&self, texture: &ID3D11Texture2D) -> Result<Vec<u8>, String> {
+        let mut desc = D3D11_TEXTURE2D_DESC::default();
+        unsafe { texture.GetDesc(&mut desc) };
+        desc.BindFlags = 0;
+        desc.MiscFlags = 0;
+        desc.Usage = windows::Win32::Graphics::Direct3D11::D3D11_USAGE_STAGING;
+        desc.CPUAccessFlags = windows::Win32::Graphics::Direct3D11::D3D11_CPU_ACCESS_READ.0 as u32;
+        let mut staging = None;
+        unsafe { self.device.CreateTexture2D(&desc, None, Some(&mut staging)) }.map_err(win_error)?;
+        let staging = staging.ok_or("D3D11 staging texture was not created")?;
+        unsafe { self.context.CopyResource(&staging, texture) };
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        unsafe {
+            self.context
+                .Map(&staging, 0, windows::Win32::Graphics::Direct3D11::D3D11_MAP_READ, 0, Some(&mut mapped))
+        }
+        .map_err(win_error)?;
+        let (width, height) = (desc.Width as usize, desc.Height as usize);
+        let mut pixels = Vec::with_capacity(width * height * 4);
+        for row in 0..height {
+            let start = unsafe { (mapped.pData as *const u8).add(row * mapped.RowPitch as usize) };
+            pixels.extend_from_slice(unsafe { std::slice::from_raw_parts(start, width * 4) });
+        }
+        unsafe { self.context.Unmap(&staging, 0) };
+        Ok(pixels)
     }
 
     /// One hash per command over what it draws (kind, texture, vertices),
@@ -1114,9 +1326,15 @@ impl D3d11Graphics {
             let _ = self.upload_glass_params(surface, 0.0);
             return false;
         };
-        let Ok(backbuffer) = (unsafe { self.swap_chain.GetBuffer::<ID3D11Texture2D>(0) }) else {
-            let _ = self.upload_glass_params(surface, 0.0);
-            return false;
+        let (render_target, backbuffer) = match &self.current_target {
+            Some((view, texture)) => (view, texture.clone()),
+            None => match unsafe { self.swap_chain.GetBuffer::<ID3D11Texture2D>(0) } {
+                Ok(backbuffer) => (render_target, backbuffer),
+                Err(_) => {
+                    let _ = self.upload_glass_params(surface, 0.0);
+                    return false;
+                }
+            },
         };
         // Wide blurs run at half resolution: a quarter of the pixels, half the taps,
         // and nothing a blur that wide would show is lost.
@@ -4122,6 +4340,23 @@ mod shader_tests {
     }
 
     #[test]
+    fn damage_rects_merge_when_they_overlap_or_touch() {
+        let merged = merge_rects(vec![
+            [0.0, 0.0, 128.0, 128.0],
+            [128.0, 0.0, 256.0, 128.0],
+            [512.0, 512.0, 640.0, 640.0],
+            [600.0, 600.0, 700.0, 700.0],
+            [900.0, 0.0, 1000.0, 50.0],
+        ]);
+        let mut merged: Vec<[i32; 4]> = merged.iter().map(|r| r.map(|v| v as i32)).collect();
+        merged.sort();
+        assert_eq!(merged, vec![[0, 0, 256, 128], [512, 512, 700, 700], [900, 0, 1000, 50]]);
+        // A chain merges into one box even when only its ends were listed apart.
+        let chain = merge_rects(vec![[0.0, 0.0, 10.0, 10.0], [20.0, 0.0, 30.0, 10.0], [10.0, 0.0, 20.0, 10.0]]);
+        assert_eq!(chain, vec![[0.0, 0.0, 30.0, 10.0]]);
+    }
+
+    #[test]
     fn tile_transform_maps_window_pixels_onto_the_tile() {
         let (width, height) = (1300_u32, 900_u32);
         let ndc = |x: f32, y: f32| [x * 2.0 / width as f32 - 1.0, 1.0 - y * 2.0 / height as f32];
@@ -4156,3 +4391,101 @@ mod shader_tests {
 
 /// Gaussian sigma (device pixels) from which liquid glass blurs at half resolution.
 const HALF_RES_BLUR_SIGMA: f32 = 3.0;
+
+/// Edge of the square tiles whose command hashes decide what the single-sample
+/// path redraws.
+const DAMAGE_TILE: u32 = 128;
+
+/// The retained single-sample frame.
+#[derive(Clone)]
+struct Canvas {
+    texture: ID3D11Texture2D,
+    view: ID3D11RenderTargetView,
+    /// For `ClearView`, which clears a rectangle.
+    context1: windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext1,
+}
+
+fn create_canvas(device: &ID3D11Device, backbuffer: &ID3D11Texture2D) -> Result<Canvas, String> {
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    unsafe { backbuffer.GetDesc(&mut desc) };
+    desc.BindFlags = windows::Win32::Graphics::Direct3D11::D3D11_BIND_RENDER_TARGET.0 as u32;
+    desc.MiscFlags = 0;
+    desc.CPUAccessFlags = 0;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    let mut texture = None;
+    unsafe { device.CreateTexture2D(&desc, None, Some(&mut texture)) }.map_err(win_error)?;
+    let texture = texture.ok_or("D3D11 canvas was not created")?;
+    let mut view = None;
+    unsafe { device.CreateRenderTargetView(&texture, None, Some(&mut view)) }.map_err(win_error)?;
+    use windows::core::Interface;
+    let context1 = unsafe { device.GetImmediateContext() }
+        .map_err(win_error)?
+        .cast::<windows::Win32::Graphics::Direct3D11::ID3D11DeviceContext1>()
+        .map_err(win_error)?;
+    Ok(Canvas {
+        texture,
+        view: view.ok_or("D3D11 canvas view was not created")?,
+        context1,
+    })
+}
+
+fn create_scissor_rasterizer(
+    device: &ID3D11Device,
+    base: &ID3D11RasterizerState,
+) -> Result<ID3D11RasterizerState, String> {
+    let mut desc = D3D11_RASTERIZER_DESC::default();
+    unsafe { base.GetDesc(&mut desc) };
+    desc.ScissorEnable = true.into();
+    let mut state = None;
+    unsafe { device.CreateRasterizerState(&desc, Some(&mut state)) }.map_err(win_error)?;
+    state.ok_or_else(|| "D3D11 scissor rasterizer state was not created".into())
+}
+
+fn overlaps(a: [f32; 4], b: [f32; 4]) -> bool {
+    a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
+}
+
+fn contains(outer: [f32; 4], inner: [f32; 4]) -> bool {
+    outer[0] <= inner[0] && outer[1] <= inner[1] && outer[2] >= inner[2] && outer[3] >= inner[3]
+}
+
+fn union(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+    [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]
+}
+
+/// Merges rectangles that overlap or share an edge into their bounding boxes
+/// until none do: few, disjoint scissor passes.
+pub(crate) fn merge_rects(mut rects: Vec<[f32; 4]>) -> Vec<[f32; 4]> {
+    let touches = |a: [f32; 4], b: [f32; 4]| a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3];
+    let mut merged = true;
+    while merged {
+        merged = false;
+        let mut index = 0;
+        while index < rects.len() {
+            let mut other = index + 1;
+            while other < rects.len() {
+                if touches(rects[index], rects[other]) {
+                    let absorbed = rects.swap_remove(other);
+                    rects[index] = union(rects[index], absorbed);
+                    merged = true;
+                } else {
+                    other += 1;
+                }
+            }
+            index += 1;
+        }
+    }
+    rects
+}
+
+/// TARVE_GPU_DAMAGE_CHECK=1: compare every partial redraw with a full one.
+fn gpu_damage_check() -> bool {
+    static CHECK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CHECK.get_or_init(|| std::env::var_os("TARVE_GPU_DAMAGE_CHECK").is_some_and(|value| value == "1"))
+}
+
+/// TARVE_GPU_FULL_REDRAW=1: redraw every frame whole (for A/B measurements).
+fn partial_redraw_disabled() -> bool {
+    static FULL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FULL.get_or_init(|| std::env::var_os("TARVE_GPU_FULL_REDRAW").is_some_and(|value| value == "1"))
+}
