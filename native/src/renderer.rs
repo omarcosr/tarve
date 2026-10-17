@@ -179,6 +179,8 @@ struct GpuGraphics {
     signals: Arc<GraphicsSignals>,
     backend: wgpu::Backend,
     surface_failure_streak: u16,
+    /// The surface composes alpha: the window shows what is behind it.
+    transparent: bool,
 }
 
 fn supports_vello_float16_packing(
@@ -193,6 +195,7 @@ impl GpuGraphics {
     fn new_with_backends(
         window: Arc<Window>,
         backends: Option<wgpu::Backends>,
+        transparent: bool,
     ) -> Result<Self, String> {
         let backends = backends.unwrap_or_else(|| wgpu::Backends::from_env().unwrap_or_default());
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -263,6 +266,7 @@ impl GpuGraphics {
             error_window.request_redraw();
         }));
         let capabilities = surface.get_capabilities(&adapter);
+        let (alpha_mode, premultiply) = surface_alpha(&capabilities.alpha_modes, transparent);
         let backend = adapter.get_info().backend;
         let format = capabilities
             .formats
@@ -281,11 +285,25 @@ impl GpuGraphics {
             height: size.height.max(1),
             present_mode: wgpu::PresentMode::AutoVsync,
             desired_maximum_frame_latency: 2,
-            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            alpha_mode,
             view_formats: vec![],
         };
         let (target_texture, target_view) = create_targets(config.width, config.height, &device);
-        let blitter = wgpu::util::TextureBlitter::new(&device, format);
+        let blitter = if premultiply {
+            // Vello stores straight alpha; the copy premultiplies it for the compositor.
+            wgpu::util::TextureBlitterBuilder::new(&device, format)
+                .blend_state(wgpu::BlendState {
+                    color: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::SrcAlpha,
+                        dst_factor: wgpu::BlendFactor::Zero,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                    alpha: wgpu::BlendComponent::REPLACE,
+                })
+                .build()
+        } else {
+            wgpu::util::TextureBlitter::new(&device, format)
+        };
         surface.configure(&device, &config);
         let renderer = Renderer::new(
             &device,
@@ -310,6 +328,7 @@ impl GpuGraphics {
             signals,
             backend,
             surface_failure_streak: 0,
+            transparent: alpha_mode != wgpu::CompositeAlphaMode::Auto,
         })
     }
     pub(crate) fn take_fault(&self) -> Option<GraphicsFault> {
@@ -585,6 +604,39 @@ fn should_fallback_to_cpu(
         && gpu_error.contains(VELLO_UNSUPPORTED_ADAPTER_ERROR)
 }
 
+/// The surface alpha mode for a window, and whether Vello's straight-alpha output
+/// must be premultiplied on its way there. Opaque unless the window is transparent
+/// and the compositor takes alpha (wgpu's DX12 window swap chains never do).
+fn surface_alpha(
+    modes: &[wgpu::CompositeAlphaMode],
+    transparent: bool,
+) -> (wgpu::CompositeAlphaMode, bool) {
+    use wgpu::CompositeAlphaMode::{Auto, Inherit, PostMultiplied, PreMultiplied};
+    if !transparent {
+        (Auto, false)
+    } else if modes.contains(&PreMultiplied) {
+        (PreMultiplied, true)
+    } else if modes.contains(&PostMultiplied) {
+        // Core Animation composes a layer as premultiplied, whatever wgpu calls it.
+        (PostMultiplied, cfg!(target_os = "macos"))
+    } else if modes.contains(&Inherit) {
+        (Inherit, true)
+    } else {
+        (Auto, false)
+    }
+}
+
+/// Whether softbuffer's pixels reach the compositor with their alpha byte: GDI
+/// into a DWM window that blurs nothing behind (Windows) and 32-bit X11 visuals.
+/// Elsewhere (Wayland, macOS) softbuffer presents opaque pixels.
+fn softbuffer_alpha(window: &Window) -> bool {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    cfg!(target_os = "windows")
+        || window.window_handle().is_ok_and(|handle| {
+            matches!(handle.as_raw(), RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_))
+        })
+}
+
 struct CpuGraphics {
     _soft_context: SoftContext<Arc<Window>>,
     surface: SoftSurface<Arc<Window>, Arc<Window>>,
@@ -602,6 +654,8 @@ struct CpuGraphics {
     frame_size: (u16, u16),
     scratch: Vec<u8>,
     shadows: ShadowCache,
+    /// Pixels carry premultiplied alpha for a transparent window.
+    alpha: bool,
 }
 
 /// What of the retained frame must be rasterized again.
@@ -651,6 +705,7 @@ fn check_partial_redraw(
     height: usize,
     region: vello::kurbo::Rect,
     background: vello::peniko::Color,
+    alpha: bool,
 ) -> Result<(), RenderError> {
     let mut expected = vec![0_u32; width * height];
     rasterize_cpu_region(
@@ -661,6 +716,7 @@ fn check_partial_redraw(
             pixels: &mut expected,
             width,
             height,
+            alpha,
         },
         &mut Vec::new(),
         None,
@@ -705,6 +761,8 @@ struct CpuFrame<'a> {
     pixels: &'a mut [u32],
     width: usize,
     height: usize,
+    /// Premultiplied ARGB (a transparent window) instead of opaque XRGB.
+    alpha: bool,
 }
 
 /// Rasterizes `region` (tile-aligned, inside the frame) of `list` into `frame`.
@@ -720,6 +778,11 @@ fn rasterize_cpu_region(
     color: vello::peniko::Color,
 ) {
     let (width, height) = (frame.width, frame.height);
+    let pack = if frame.alpha {
+        pack_premultiplied_for_softbuffer
+    } else {
+        flatten_rgba_for_softbuffer
+    };
 
     let (x0, y0) = (region.x0 as usize, region.y0 as usize);
     let (region_width, region_height) = (
@@ -745,7 +808,7 @@ fn rasterize_cpu_region(
         if let Some(pixmap) = PixmapMut::new(region_width as u16, region_height as u16, bytes) {
             context.render(pixmap, resources);
         }
-        flatten_rgba_for_softbuffer(frame.pixels, color);
+        pack(frame.pixels, color);
     } else {
         scratch.clear();
         scratch.resize(raster_width * region_height * 4, 0);
@@ -759,7 +822,7 @@ fn rasterize_cpu_region(
             for (pixel, rgba) in target.iter_mut().zip(source.as_chunks::<4>().0) {
                 *pixel = u32::from_ne_bytes(*rgba);
             }
-            flatten_rgba_for_softbuffer(target, color);
+            pack(target, color);
         }
     }
 }
@@ -773,9 +836,10 @@ impl CpuGraphics {
         Ok((width, height))
     }
 
-    fn new(window: Arc<Window>) -> Result<Self, String> {
+    fn new(window: Arc<Window>, transparent: bool) -> Result<Self, String> {
         let size = window.inner_size();
         let (width, height) = Self::dimensions(size.width, size.height)?;
+        let alpha = transparent && softbuffer_alpha(&window);
         let soft_context = SoftContext::new(window.clone()).map_err(|error| error.to_string())?;
         let surface = SoftSurface::new(&soft_context, window).map_err(|error| error.to_string())?;
         Ok(Self {
@@ -793,6 +857,7 @@ impl CpuGraphics {
             frame_size: (0, 0),
             scratch: Vec::new(),
             shadows: ShadowCache::new(),
+            alpha,
         })
     }
 
@@ -880,6 +945,7 @@ impl CpuGraphics {
                     pixels: &mut buffer,
                     width: frame_width,
                     height: frame_height,
+                    alpha: self.alpha,
                 },
                 &mut self.scratch,
                 Some(&mut self.shadows),
@@ -896,6 +962,7 @@ impl CpuGraphics {
                     frame_height,
                     region,
                     background,
+                    self.alpha,
                 )?;
             }
         }
@@ -990,6 +1057,29 @@ fn flatten_rgba_for_softbuffer(pixels: &mut [u32], background: vello::peniko::Co
     }
 }
 
+/// Premultiplied ARGB for a window that composes alpha: the frame's premultiplied
+/// pixels over the (possibly translucent) background.
+fn pack_premultiplied_for_softbuffer(pixels: &mut [u32], background: vello::peniko::Color) {
+    let background = background.to_rgba8();
+    let premultiply = |channel: u8| (u16::from(channel) * u16::from(background.a) + 127) / 255;
+    let under = [
+        premultiply(background.r),
+        premultiply(background.g),
+        premultiply(background.b),
+        u16::from(background.a),
+    ];
+    for pixel in pixels {
+        let [r, g, b, a] = pixel.to_ne_bytes();
+        let inverse = 255_u16.saturating_sub(u16::from(a));
+        let over =
+            |channel: u8, under: u16| (u16::from(channel) + (under * inverse + 127) / 255).min(255) as u32;
+        *pixel = over(b, under[2])
+            | (over(g, under[1]) << 8)
+            | (over(r, under[0]) << 16)
+            | (over(a, under[3]) << 24);
+    }
+}
+
 enum GraphicsImpl {
     #[cfg(target_os = "windows")]
     D3d11(Box<D3d11Graphics>),
@@ -1004,14 +1094,25 @@ pub struct Graphics {
 }
 
 impl Graphics {
-    pub fn new(window: Arc<Window>, preference: RendererPreference) -> Result<Self, String> {
+    /// `transparent`: the window shows what is behind it where the frame is
+    /// translucent (`WindowOptions.backdrop`); renderers that cannot stay opaque.
+    pub fn new(
+        window: Arc<Window>,
+        preference: RendererPreference,
+        transparent: bool,
+    ) -> Result<Self, String> {
         let renderer_env = std::env::var_os("TARVE_RENDERER");
         let wgpu_backend_explicit = std::env::var_os("WGPU_BACKEND").is_some();
         let resolved = resolve_renderer(preference, renderer_env.as_deref())?;
-        let backend = open_first(&window, &startup_attempts(resolved, wgpu_backend_explicit))
+        let backend = open_first(
+            &window,
+            &startup_attempts(resolved, wgpu_backend_explicit),
+            transparent,
+        )
             .or_else(|error| {
                 cpu_fallback(
                     &window,
+                    transparent,
                     resolved == ResolvedRenderer::Gpu
                         && should_fallback_to_cpu(
                             preference,
@@ -1033,16 +1134,19 @@ impl Graphics {
         window: Arc<Window>,
         previous_backend: RendererBackend,
         preference: RendererPreference,
+        transparent: bool,
     ) -> Result<Self, String> {
         let renderer_env = std::env::var_os("TARVE_RENDERER");
         let wgpu_backend_explicit = std::env::var_os("WGPU_BACKEND").is_some();
         let backend = open_first(
             &window,
             &recovery_attempts(previous_backend, wgpu_backend_explicit),
+            transparent,
         )
         .or_else(|error| {
             cpu_fallback(
                 &window,
+                transparent,
                 previous_backend != RendererBackend::Cpu
                     && should_fallback_to_cpu(
                         preference,
@@ -1204,6 +1308,25 @@ impl Graphics {
         }
     }
 
+    /// Whether presented alpha reaches the compositor. A transparent window whose
+    /// renderer cannot show alpha paints its background opaque instead of black.
+    pub fn shows_alpha(&self) -> bool {
+        match &self.backend {
+            #[cfg(target_os = "windows")]
+            GraphicsImpl::D3d11(graphics) => graphics.shows_alpha(),
+            GraphicsImpl::Gpu(graphics) => graphics.transparent,
+            GraphicsImpl::Cpu(graphics) => graphics.alpha,
+        }
+    }
+
+    fn present_background(&self, background: vello::peniko::Color) -> vello::peniko::Color {
+        if self.shows_alpha() {
+            background
+        } else {
+            background.with_alpha(1.0)
+        }
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) -> Result<bool, RenderError> {
         match &mut self.backend {
             #[cfg(target_os = "windows")]
@@ -1221,6 +1344,7 @@ impl Graphics {
         background: vello::peniko::Color,
         content_changed: bool,
     ) -> Result<PresentResult, RenderError> {
+        let background = self.present_background(background);
         let result = match &mut self.backend {
             #[cfg(target_os = "windows")]
             GraphicsImpl::D3d11(graphics) => graphics
@@ -1245,6 +1369,7 @@ impl Graphics {
         background: vello::peniko::Color,
         path: &str,
     ) -> Result<(), CaptureError> {
+        let background = self.present_background(background);
         match &mut self.backend {
             #[cfg(target_os = "windows")]
             GraphicsImpl::D3d11(graphics) => graphics
@@ -1287,14 +1412,16 @@ impl BackendAttempt {
         }
     }
 
-    fn open(self, window: &Arc<Window>) -> Result<GraphicsImpl, String> {
+    fn open(self, window: &Arc<Window>, transparent: bool) -> Result<GraphicsImpl, String> {
         match self {
             #[cfg(target_os = "windows")]
-            Self::D3d11 => D3d11Graphics::new(window.clone())
+            Self::D3d11 => D3d11Graphics::new(window.clone(), transparent)
                 .map(|graphics| GraphicsImpl::D3d11(Box::new(graphics))),
-            Self::Vello(backends) => GpuGraphics::new_with_backends(window.clone(), backends)
-                .map(|graphics| GraphicsImpl::Gpu(Box::new(graphics))),
-            Self::Cpu => CpuGraphics::new(window.clone())
+            Self::Vello(backends) => {
+                GpuGraphics::new_with_backends(window.clone(), backends, transparent)
+                    .map(|graphics| GraphicsImpl::Gpu(Box::new(graphics)))
+            }
+            Self::Cpu => CpuGraphics::new(window.clone(), transparent)
                 .map(|graphics| GraphicsImpl::Cpu(Box::new(graphics))),
         }
     }
@@ -1345,10 +1472,14 @@ fn recovery_attempts(
 }
 
 /// Opens the first attempt that succeeds; the error names every failure in order.
-fn open_first(window: &Arc<Window>, attempts: &[BackendAttempt]) -> Result<GraphicsImpl, String> {
+fn open_first(
+    window: &Arc<Window>,
+    attempts: &[BackendAttempt],
+    transparent: bool,
+) -> Result<GraphicsImpl, String> {
     let mut failures = Vec::new();
     for attempt in attempts {
-        match attempt.open(window) {
+        match attempt.open(window, transparent) {
             Ok(graphics) => return Ok(graphics),
             Err(error) => failures.push(format!("{} renderer failed: {error}", attempt.name())),
         }
@@ -1358,6 +1489,7 @@ fn open_first(window: &Arc<Window>, attempts: &[BackendAttempt]) -> Result<Graph
 
 fn cpu_fallback(
     window: &Arc<Window>,
+    transparent: bool,
     allowed: bool,
     gpu_error: String,
 ) -> Result<GraphicsImpl, String> {
@@ -1365,7 +1497,7 @@ fn cpu_fallback(
         return Err(gpu_error);
     }
     BackendAttempt::Cpu
-        .open(window)
+        .open(window, transparent)
         .map_err(|cpu_error| format!("{gpu_error}; CPU fallback failed: {cpu_error}"))
 }
 
@@ -1398,8 +1530,9 @@ mod tests {
         CpuFrame, CpuGraphics, CpuRenderContext, CpuResources, DisplayList, GraphicsFault,
         GraphicsFaultKind, GraphicsSignals, HashMap, ResolvedRenderer, SurfaceIssue,
         cpu_redraw_region, damage, flatten_rgba_bytes, flatten_rgba_for_softbuffer,
-        rasterize_cpu_region, resolve_renderer, should_fallback_to_cpu,
-        supports_vello_float16_packing, surface_failure_threshold,
+        pack_premultiplied_for_softbuffer, rasterize_cpu_region, resolve_renderer,
+        should_fallback_to_cpu, supports_vello_float16_packing, surface_alpha,
+        surface_failure_threshold, wgpu,
     };
     use crate::protocol::RendererPreference;
     use std::ffi::OsStr;
@@ -1576,6 +1709,7 @@ mod tests {
                 pixels: &mut frame,
                 width: W,
                 height: H,
+                alpha: false,
             },
             &mut Vec::new(),
             None,
@@ -1601,6 +1735,7 @@ mod tests {
                     pixels: &mut frame,
                     width: W,
                     height: H,
+                    alpha: false,
                 },
                 &mut Vec::new(),
                 None,
@@ -1775,6 +1910,7 @@ mod tests {
                     pixels: &mut frame,
                     width: W,
                     height: H,
+                    alpha: false,
                 },
                 &mut Vec::new(),
                 Some(&mut cache),
@@ -1828,6 +1964,30 @@ mod tests {
         let mut pixel = [u32::from_ne_bytes([100, 50, 25, 128])];
         flatten_rgba_for_softbuffer(&mut pixel, background);
         assert_eq!(pixel[0], 40 | (60 << 8) | (105 << 16));
+    }
+
+    #[test]
+    fn transparent_cpu_pixels_keep_premultiplied_alpha_over_a_translucent_background() {
+        // 50% background (premultiplied 5, 10, 15, 128) under a 50% premultiplied pixel.
+        let background = Color::from_rgba8(10, 20, 30, 128);
+        let mut pixel = [u32::from_ne_bytes([100, 50, 25, 128])];
+        pack_premultiplied_for_softbuffer(&mut pixel, background);
+        assert_eq!(pixel[0], 32 | (55 << 8) | (102 << 16) | (192 << 24));
+        // Nothing drawn over a clear background stays fully transparent.
+        let mut clear = [0_u32];
+        pack_premultiplied_for_softbuffer(&mut clear, Color::from_rgba8(0, 0, 0, 0));
+        assert_eq!(clear[0], 0);
+    }
+
+    #[test]
+    fn transparent_surfaces_pick_a_composited_alpha_mode_and_premultiply_for_it() {
+        use wgpu::CompositeAlphaMode::*;
+        assert_eq!(surface_alpha(&[Opaque, PreMultiplied], false), (Auto, false));
+        assert_eq!(surface_alpha(&[Opaque, PreMultiplied, PostMultiplied], true), (PreMultiplied, true));
+        assert_eq!(surface_alpha(&[Opaque, PostMultiplied], true), (PostMultiplied, cfg!(target_os = "macos")));
+        assert_eq!(surface_alpha(&[Opaque, Inherit], true), (Inherit, true));
+        // DX12 window swap chains: opaque, the window shows no alpha.
+        assert_eq!(surface_alpha(&[Opaque], true), (Auto, false));
     }
 
     #[test]

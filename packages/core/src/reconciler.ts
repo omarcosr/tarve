@@ -466,6 +466,7 @@ export function compileTree(
         decorations: !p.frameless, resizable: p.resizable ?? true, position: p.position ?? "center", debug, visible };
       if (p.level && p.level !== "normal") windowOptions.level = p.level;
       if (p.skipTaskbar) windowOptions.skipTaskbar = true;
+      if (p.backdrop && p.backdrop !== "none") windowOptions.backdrop = p.backdrop;
       if (p.desktopWidget) {
         const { columns, rows } = p.desktopWidget;
         if (![columns, rows].every(n => Number.isInteger(n) && n >= 1 && n <= 16)) {

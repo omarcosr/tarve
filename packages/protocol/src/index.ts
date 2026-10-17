@@ -334,7 +334,18 @@ export interface WindowOptions {
   skipTaskbar?: boolean;
   /** A desktop widget `columns` × `rows` cells (the icon grid on Windows; 80 × 100 cells on Linux). */
   desktopWidget?: DesktopWidget;
+  /** What shows through where the window is translucent; omitted for an opaque window. */
+  backdrop?: WindowBackdrop;
 }
+/**
+ * What a window shows behind its translucent pixels (its background and anything drawn with alpha):
+ * `transparent` the desktop and windows behind as they are; `blur` them blurred by the system
+ * (the Windows accent blur, macOS, KDE on Linux); `mica` (the wallpaper, tinted) and `acrylic` the
+ * Windows 11 materials, solid while the window is inactive (blur on other systems and Windows 10).
+ * Opaque where the compositor or renderer has no alpha; on Windows mica, acrylic and blur are solid
+ * while "Transparency effects" is off.
+ */
+export type WindowBackdrop = "none" | "transparent" | "blur" | "mica" | "acrylic";
 export interface DesktopWidget { columns: number; rows: number }
 /** Stacking: `alwaysOnBottom` keeps the window under every other one, like a desktop widget. */
 export type WindowLevel = "normal" | "alwaysOnTop" | "alwaysOnBottom";
@@ -418,6 +429,10 @@ export interface Snapshot {
   activeMotions: number;
   /** Glyphs rasterized so far on renderers with their own glyph atlas (D3D11); null elsewhere. */
   glyphRasterizations?: number | null;
+  /** The window composes alpha: its translucent pixels show what is behind it (`backdrop`). */
+  windowAlpha?: boolean;
+  /** Windows "Transparency effects" (Settings > Personalization > Colors); while off, mica, acrylic and blur are solid. Always true elsewhere. */
+  transparencyEffects?: boolean;
   hovered: string | null; focused: string | null; nodes: NodeSnapshot[];
   width: number; height: number; scale: number;
 }
@@ -443,6 +458,8 @@ export type NativeEvent =
   | { type: "systemMedia"; action: "play" | "pause" | "next" | "previous" | "seek"; time?: number }
   | { type: "trayMenu"; id: string }
   | { type: "notificationClick" }
+  /** Windows "Transparency effects" changed while the window has a `mica`, `acrylic` or `blur` backdrop. */
+  | { type: "transparencyEffects"; enabled: boolean }
   | { type: "media"; id: string; event: "loadedmetadata" | "play" | "pause" | "timeupdate" | "seeked" | "ended" | "error"; time?: number; duration?: number | null; paused?: boolean; message?: string; videoWidth?: number; videoHeight?: number }
   | { type: "escape" }
   | { type: "click"; id: string }

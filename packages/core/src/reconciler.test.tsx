@@ -644,7 +644,17 @@ describe("native TSX protocol", () => {
     const small = compileTree(<Window width={280} height={190}><Text>Small</Text></Window>).document.window;
     expect([small.minWidth, small.minHeight]).toEqual([280, 190]);
     const plain = compileTree(<Window><Text>App</Text></Window>).document.window;
-    expect("level" in plain || "skipTaskbar" in plain || "desktopWidget" in plain).toBe(false);
+    expect("level" in plain || "skipTaskbar" in plain || "desktopWidget" in plain || "backdrop" in plain).toBe(false);
+  });
+  test("Window backdrop reaches the native window with a transparent default background", () => {
+    const mica = compileTree(<Window backdrop="mica"><Text>x</Text></Window>).document;
+    expect(mica.window.backdrop).toBe("mica");
+    // Clear, in the theme background's colour: an opaque fallback paints the theme background.
+    expect(mica.window.background).toMatch(/^#[0-9a-f]{6}00$/i);
+    expect(mica.window.background.slice(0, 7)).toBe(compileTree(<Window><Text>x</Text></Window>).document.window.background.slice(0, 7));
+    const tinted = compileTree(<Window backdrop="blur" style={{ background: "#11111180" }}><Text>x</Text></Window>).document;
+    expect(tinted.window.background).toBe("#11111180");
+    expect("backdrop" in compileTree(<Window backdrop="none"><Text>x</Text></Window>).document.window).toBe(false);
   });
   test("Window close requests stay in JS handlers while native receives an intercept flag", () => {
     let requested = false;

@@ -20,6 +20,7 @@
     "pulse": "tarve run pulse/pulse.tsx",
     "widget": "tarve run widget/widget.tsx",
     "glass": "tarve run glass/glass.tsx",
+    "translucent": "tarve run translucent/translucent.tsx",
     "liquid": "tarve run liquid/liquid.tsx",
     "tailwind": "tarve run tailwind/tailwind.tsx",
     "svelte": "tarve run svelte/main.ts",
@@ -47,7 +48,8 @@
     "build:liquid": "tarve build liquid/liquid.tsx --outfile dist/Liquid.exe",
     "build:tailwind": "tarve build tailwind/tailwind.tsx --outfile dist/Tailwind.exe",
     "build:svelte": "tarve build svelte/main.ts --outfile dist/Svelte.exe",
-    "build:video": "tarve build video/video.tsx --outfile dist/Video.exe"
+    "build:video": "tarve build video/video.tsx --outfile dist/Video.exe",
+    "build:translucent": "tarve build translucent/translucent.tsx --outfile dist/Translucent.exe"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",

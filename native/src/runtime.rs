@@ -529,6 +529,308 @@ fn configure_custom_window_chrome(
     Ok(())
 }
 
+/// What shows behind a blurred backdrop: `blur` the accent blur of the windows
+/// behind (Windows 10 and 11, also while inactive); `mica`/`acrylic` the system
+/// materials (Windows 11 22H2+; Mica's first attribute on 21H2), else the accent
+/// blur. DWM draws them under the window's transparent pixels, and solid while the
+/// user has transparency effects off (the materials also while inactive).
+#[cfg(target_os = "windows")]
+fn apply_window_backdrop(
+    window: &Window,
+    backdrop: crate::protocol::WindowBackdrop,
+    decorations: bool,
+) -> Result<(), String> {
+    use std::ffi::c_void;
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    if !backdrop.blurred() {
+        return Ok(());
+    }
+    let handle = window.window_handle().map_err(|error| error.to_string())?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return Err("Expected a Win32 window handle".into());
+    };
+    let hwnd = handle.hwnd.get() as *mut c_void;
+    // With transparency effects off DWM draws the material solid until they are
+    // switched on (`app.inspect().transparencyEffects`).
+    // `blur` is the accent blur: it stays while the window is inactive, where
+    // DWM draws Mica and Acrylic solid, as it does for the system's own windows.
+    // DWM draws no material during the window-open animation (~250 ms of the
+    // desktop showing through): skip it; `resumed` turns transitions back on once shown.
+    set_dwm_transitions(hwnd, false);
+    // Acrylic fades in from a lighter tint for ~230 ms once shown; keep the window
+    // cloaked (composed but not on screen) until the fade is over.
+    if backdrop == crate::protocol::WindowBackdrop::Acrylic {
+        cloak_while_material_settles(hwnd);
+    }
+    if backdrop == crate::protocol::WindowBackdrop::Blur && accent_blur(hwnd).is_ok() {
+        return Ok(());
+    }
+    apply_system_backdrop(hwnd, backdrop, decorations);
+    Ok(())
+}
+
+/// Relative luminance (0–1) of `#rgb`/`#rrggbb`/`#rrggbbaa`, as the reconciler's `dark` test.
+fn hex_luminance(color: &str) -> Option<f32> {
+    let hex = color.trim().strip_prefix('#')?;
+    let full: String = match hex.len() {
+        3 | 4 => hex[..3].chars().flat_map(|c| [c, c]).collect(),
+        6 | 8 => hex[..6].to_string(),
+        _ => return None,
+    };
+    let channel = |i: usize| u8::from_str_radix(&full[i..i + 2], 16).ok().map(|v| f32::from(v) / 255.0);
+    Some(0.2126 * channel(0)? + 0.7152 * channel(2)? + 0.0722 * channel(4)?)
+}
+
+#[cfg(test)]
+mod backdrop_appearance_tests {
+    use super::hex_luminance;
+
+    #[test]
+    fn window_background_lightness_picks_the_material_appearance() {
+        assert!(hex_luminance("#ffffff00").unwrap() > 0.99);
+        assert!(hex_luminance("#18181b40").unwrap() < 0.5);
+        assert!(hex_luminance("#fff").unwrap() > 0.99);
+        assert_eq!(hex_luminance("#000000"), Some(0.0));
+        assert_eq!(hex_luminance("transparent"), None);
+        assert_eq!(hex_luminance("#12345"), None);
+    }
+}
+
+/// Cloaks the window for the Acrylic fade-in, then uncloaks it from a timer thread
+/// (DWM attributes may be set from any thread). A window closed meanwhile is left
+/// alone: the handle must still belong to this process.
+#[cfg(target_os = "windows")]
+fn cloak_while_material_settles(hwnd: *mut std::ffi::c_void) {
+    use windows_sys::Win32::Graphics::Dwm::{DWMWA_CLOAK, DwmSetWindowAttribute};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, IsWindow};
+    let cloak = |hwnd: *mut std::ffi::c_void, on: bool| {
+        let value = i32::from(on);
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAK as u32,
+                (&value as *const i32).cast(),
+                size_of::<i32>() as u32,
+            )
+        }
+    };
+    if cloak(hwnd, true) < 0 {
+        return;
+    }
+    let handle = hwnd as usize;
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(260));
+        let hwnd = handle as *mut std::ffi::c_void;
+        let mut process = 0;
+        unsafe {
+            if IsWindow(hwnd) != 0 && {
+                GetWindowThreadProcessId(hwnd, &mut process);
+                process == std::process::id()
+            } {
+                cloak(hwnd, false);
+            }
+        }
+    });
+}
+
+/// DWM's open, close, minimize and restore animations for the window.
+#[cfg(target_os = "windows")]
+fn set_dwm_transitions(hwnd: *mut std::ffi::c_void, enabled: bool) {
+    use windows_sys::Win32::Graphics::Dwm::{DWMWA_TRANSITIONS_FORCEDISABLED, DwmSetWindowAttribute};
+    let disabled = i32::from(!enabled);
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_TRANSITIONS_FORCEDISABLED as u32,
+            (&disabled as *const i32).cast(),
+            size_of::<i32>() as u32,
+        );
+    }
+}
+
+/// Turns DWM transitions back on after a material window has opened without one.
+#[cfg(target_os = "windows")]
+fn restore_dwm_transitions(window: &Window) {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    if let Ok(handle) = window.window_handle()
+        && let RawWindowHandle::Win32(handle) = handle.as_raw()
+    {
+        set_dwm_transitions(handle.hwnd.get() as *mut std::ffi::c_void, true);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn restore_dwm_transitions(_: &Window) {}
+
+/// Dark or light Mica/Acrylic (and the frame), independent of the system theme.
+#[cfg(target_os = "windows")]
+fn set_backdrop_dark(window: &Window, dark: bool) {
+    use windows_sys::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return;
+    };
+    let value = i32::from(dark);
+    unsafe {
+        DwmSetWindowAttribute(
+            handle.hwnd.get() as *mut std::ffi::c_void,
+            DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+            (&value as *const i32).cast(),
+            size_of::<i32>() as u32,
+        );
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn set_backdrop_dark(_: &Window, _: bool) {}
+
+/// Windows' "Transparency effects" setting; DWM draws every material solid while it is off.
+#[cfg(not(target_os = "windows"))]
+fn transparency_effects_enabled() -> bool {
+    true
+}
+
+/// Windows' "Transparency effects" setting; DWM draws every material solid while it is off.
+#[cfg(target_os = "windows")]
+fn transparency_effects_enabled() -> bool {
+    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+    let key: Vec<u16> = "Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\0"
+        .encode_utf16()
+        .collect();
+    let name: Vec<u16> = "EnableTransparency\0".encode_utf16().collect();
+    let mut value: u32 = 1;
+    let mut size = size_of::<u32>() as u32;
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&mut value as *mut u32).cast(),
+            &mut size,
+        )
+    };
+    status != 0 || value != 0
+}
+
+#[cfg(target_os = "windows")]
+fn apply_system_backdrop(
+    hwnd: *mut std::ffi::c_void,
+    backdrop: crate::protocol::WindowBackdrop,
+    decorations: bool,
+) {
+    use crate::protocol::WindowBackdrop;
+    use std::ffi::c_void;
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWMSBT_MAINWINDOW, DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE,
+        DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
+    };
+    use windows_sys::Win32::UI::Controls::MARGINS;
+    let kind = if backdrop == WindowBackdrop::Mica {
+        DWMSBT_MAINWINDOW
+    } else {
+        DWMSBT_TRANSIENTWINDOW
+    };
+    unsafe {
+        let margins = MARGINS {
+            cxLeftWidth: -1,
+            cxRightWidth: -1,
+            cyTopHeight: -1,
+            cyBottomHeight: -1,
+        };
+        // A framed window shows the material through a frame spread over the client
+        // area; spread over a frameless one, DWM would also paint its caption buttons.
+        if decorations {
+            DwmExtendFrameIntoClientArea(hwnd, &margins);
+        }
+        if DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_SYSTEMBACKDROP_TYPE as u32,
+            (&kind as *const _) as *const c_void,
+            size_of_val(&kind) as u32,
+        ) >= 0
+        {
+            return;
+        }
+        const DWMWA_MICA_EFFECT: u32 = 1029;
+        let on: i32 = 1;
+        if backdrop == WindowBackdrop::Mica
+            && DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_MICA_EFFECT,
+                (&on as *const i32).cast(),
+                size_of::<i32>() as u32,
+            ) >= 0
+        {
+            return;
+        }
+    }
+    let _ = accent_blur(hwnd);
+}
+
+/// The undocumented accent policy the shell's flyouts use: the windows behind,
+/// blurred, under the window's transparent pixels.
+#[cfg(target_os = "windows")]
+fn accent_blur(hwnd: *mut std::ffi::c_void) -> Result<(), String> {
+    use std::ffi::c_void;
+    use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
+    #[repr(C)]
+    struct AccentPolicy {
+        state: u32,
+        flags: u32,
+        gradient: u32,
+        animation: u32,
+    }
+    #[repr(C)]
+    struct CompositionData {
+        attribute: u32,
+        data: *mut c_void,
+        size: usize,
+    }
+    type SetWindowCompositionAttribute =
+        unsafe extern "system" fn(*mut c_void, *mut CompositionData) -> i32;
+    const WCA_ACCENT_POLICY: u32 = 19;
+    const ACCENT_ENABLE_BLURBEHIND: u32 = 3;
+    unsafe {
+        let user32 = GetModuleHandleA(c"user32.dll".as_ptr().cast());
+        let Some(set) = GetProcAddress(user32, c"SetWindowCompositionAttribute".as_ptr().cast())
+        else {
+            return Err("no system blur on this Windows version".into());
+        };
+        let set: SetWindowCompositionAttribute = std::mem::transmute(set);
+        let mut policy = AccentPolicy {
+            state: ACCENT_ENABLE_BLURBEHIND,
+            flags: 0,
+            gradient: 0,
+            animation: 0,
+        };
+        let mut data = CompositionData {
+            attribute: WCA_ACCENT_POLICY,
+            data: (&mut policy as *mut AccentPolicy).cast(),
+            size: size_of::<AccentPolicy>(),
+        };
+        if set(hwnd, &mut data) == 0 {
+            return Err("SetWindowCompositionAttribute failed".into());
+        }
+    }
+    Ok(())
+}
+
+
+#[cfg(not(target_os = "windows"))]
+fn apply_window_backdrop(
+    _: &Window,
+    _: crate::protocol::WindowBackdrop,
+    _: bool,
+) -> Result<(), String> {
+    Ok(())
+}
+
 /// Tool-window extended style: no taskbar button and no Alt+Tab entry.
 #[cfg(target_os = "windows")]
 fn tool_window_style(style: u32) -> u32 {
@@ -580,6 +882,8 @@ thread_local! {
     static KEEP_AT_BOTTOM: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// `skipTaskbar`: keep the tool-window style through winit's style rewrites.
     static SKIP_TASK_SWITCHER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// A WM_SETTINGCHANGE arrived (Windows): system settings may have changed.
+    static SETTINGS_CHANGED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 fn keep_at_bottom(enabled: bool) {
@@ -607,7 +911,7 @@ fn install_dpi_scaled_size(window: &Window) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetMenu, GetWindowLongPtrW, GetWindowRect,
         HWND_BOTTOM, STYLESTRUCT, SWP_NOZORDER, WINDOWPOS, WM_EXITSIZEMOVE, WM_MOVING,
-        WM_STYLECHANGING, WM_WINDOWPOSCHANGING,
+        WM_SETTINGCHANGE, WM_STYLECHANGING, WM_WINDOWPOSCHANGING,
     };
 
     const WM_GETDPISCALEDSIZE: u32 = 0x02E4;
@@ -637,6 +941,7 @@ fn install_dpi_scaled_size(window: &Window) {
                 }
             }
             WM_EXITSIZEMOVE => WINDOW_LOGICAL_SIZE.with(|state| state.moving.set(false)),
+            WM_SETTINGCHANGE => SETTINGS_CHANGED.with(|changed| changed.set(true)),
             // Scale the client area exactly by the DPI ratio; Windows' default
             // scales the outer rect, which drifts with the frame and compounds.
             WM_GETDPISCALEDSIZE => {
@@ -954,6 +1259,8 @@ pub fn run(
         videos,
         remote_images,
         present_times: Default::default(),
+        backdrop_dark: None,
+        transparency_effects: None,
         frame_stats: Default::default(),
         memory_stages,
         #[cfg(target_os = "windows")]
@@ -1004,6 +1311,10 @@ struct App {
     remote_images: crate::remote_image::RemoteImages,
     /// When each of the last second's frames was presented, for `inspect().fps`.
     present_times: std::collections::VecDeque<Instant>,
+    /// The dark/light appearance last given to the system material (`backdrop`).
+    backdrop_dark: Option<bool>,
+    /// Windows "Transparency effects" as last reported to JS.
+    transparency_effects: Option<bool>,
     /// Phase timings of recent frames, for `app.stats()`.
     frame_stats: crate::stats::FrameStats,
     /// Process memory after each startup stage, for `app.stats()`.
@@ -1618,8 +1929,8 @@ impl App {
             std::mem::replace(&mut self.graphics, GraphicsState::Fatal)
         {
             let result = match checkpoint.backend {
-                Some(backend) => Graphics::recover(window, backend, self.document.renderer),
-                None => Graphics::new(window, self.document.renderer),
+                Some(backend) => Graphics::recover(window, backend, self.document.renderer, self.document.window.backdrop.transparent()),
+                None => Graphics::new(window, self.document.renderer, self.document.window.backdrop.transparent()),
             };
             self.graphics = match result {
                 Ok(mut graphics) => {
@@ -1894,9 +2205,9 @@ impl App {
         };
         recovery.attempts = recovery.attempts.saturating_add(1);
         let result = if let Some(previous_backend) = recovery.checkpoint.backend {
-            Graphics::recover(window, previous_backend, self.document.renderer)
+            Graphics::recover(window, previous_backend, self.document.renderer, self.document.window.backdrop.transparent())
         } else {
-            Graphics::new(window, self.document.renderer)
+            Graphics::new(window, self.document.renderer, self.document.window.backdrop.transparent())
         };
         match result {
             Ok(mut graphics) => {
@@ -1946,8 +2257,38 @@ impl App {
         }
         true
     }
+    /// The system material follows the window background's lightness (the app's
+    /// theme), not the system theme: light text on a light material stays legible.
+    fn sync_backdrop_appearance(&mut self, background: &str) {
+        if !self.document.window.backdrop.blurred() {
+            return;
+        }
+        let Some(dark) = hex_luminance(background).map(|luminance| luminance < 0.5) else {
+            return;
+        };
+        if self.backdrop_dark == Some(dark) {
+            return;
+        }
+                if let Some(window) = &self.window {
+            set_backdrop_dark(window, dark);
+            self.backdrop_dark = Some(dark);
+        }
+    }
+    /// Reports a change of Windows "Transparency effects" while the window has a
+    /// material backdrop (`transparencyEffects` event).
+    fn sync_transparency_effects(&mut self) {
+        if !self.document.window.backdrop.blurred() || !SETTINGS_CHANGED.with(|changed| changed.replace(false)) {
+            return;
+        }
+        let enabled = transparency_effects_enabled();
+        if self.transparency_effects.replace(enabled) != Some(enabled) {
+            self.events
+                .push(json!({"type": "transparencyEffects", "enabled": enabled}));
+        }
+    }
     fn present(&mut self, content_changed: bool) -> Result<PresentResult, RenderError> {
         let background = self.root_color("background", &self.document.window.background);
+        self.sync_backdrop_appearance(&background);
         let present_started = Instant::now();
         let result = match &mut self.graphics {
             GraphicsState::Ready(graphics) => {
@@ -2378,9 +2719,9 @@ impl ApplicationHandler<Command> for App {
             match state {
                 GraphicsState::Suspended(checkpoint) => {
                     let result = if let Some(previous_backend) = checkpoint.backend {
-                        Graphics::recover(window, previous_backend, self.document.renderer)
+                        Graphics::recover(window, previous_backend, self.document.renderer, self.document.window.backdrop.transparent())
                     } else {
-                        Graphics::new(window, self.document.renderer)
+                        Graphics::new(window, self.document.renderer, self.document.window.backdrop.transparent())
                     };
                     match result {
                         Ok(mut graphics) => {
@@ -2429,6 +2770,12 @@ impl ApplicationHandler<Command> for App {
             .with_window_level(winit_window_level(level))
             .with_visible(false)
             .with_active(!background_windows());
+        if options.backdrop.transparent() {
+            // macOS and Wayland/X11 (KDE) blur through winit; Windows in apply_window_backdrop.
+            attributes = attributes
+                .with_transparent(true)
+                .with_blur(options.backdrop.blurred());
+        }
         // Windows: a small title-bar icon and a large taskbar one. Elsewhere the
         // one window icon (X11 _NET_WM_ICON) serves every size, so it is the large one.
         #[cfg(target_os = "windows")]
@@ -2461,12 +2808,19 @@ impl ApplicationHandler<Command> for App {
             Ok(window) => {
                 let window = Arc::new(window);
                 self.memory_stages.record("window");
+                if let Err(message) = apply_window_backdrop(
+                    &window,
+                    self.document.window.backdrop,
+                    self.document.window.decorations,
+                ) {
+                    self.events.push(error(format!("window backdrop: {message}")));
+                }
                 // Lay out and shape text while the GPU device (prewarmed on
                 // another thread since tarve_start) finishes; prepare() then
                 // finds a clean layout. Errors surface again from prepare().
                 let size = window.inner_size().to_logical::<f32>(window.scale_factor());
                 let _ = self.tree.compute(size.width, size.height);
-                match Graphics::new(window.clone(), self.document.renderer) {
+                match Graphics::new(window.clone(), self.document.renderer, self.document.window.backdrop.transparent()) {
                     Ok(graphics) => {
                         self.memory_stages.record("graphics");
                         self.graphics = GraphicsState::Ready(Box::new(graphics));
@@ -2503,6 +2857,9 @@ impl ApplicationHandler<Command> for App {
                             self.apply_initial_window_position(event_loop, &window, true);
                         }
                         self.redraw_frame(event_loop);
+                        if self.document.window.backdrop.blurred() {
+                            restore_dwm_transitions(&window);
+                        }
                     }
                     Err(error) => self.fail(event_loop, error),
                 }
@@ -2816,6 +3173,10 @@ impl ApplicationHandler<Command> for App {
                         GraphicsState::Ready(graphics) => graphics.video_layers(),
                         _ => (0, None),
                     };
+                    let window_alpha = match &self.graphics {
+                        GraphicsState::Ready(graphics) => graphics.shows_alpha(),
+                        _ => false,
+                    };
                     let fps = self
                         .present_times
                         .iter()
@@ -2826,7 +3187,8 @@ impl ApplicationHandler<Command> for App {
                         "hovered":self.tree.hovered, "focused":self.tree.focused, "nodes":self.tree.snapshots(), "width":size.width, "height":size.height, "scale":window.scale_factor(),
                         "layoutNodes":self.tree.layout_node_count(), "layoutNodesCreated":self.tree.layout_nodes_created, "measureCalls":self.tree.measure_calls, "paintedNodes":self.tree.painted_nodes,
                         "activeMotions":self.tree.active_motion_count(), "glyphRasterizations": glyph_rasterizations,
-                        "videoLayers": video_layers.0, "videoLayerError": video_layers.1
+                        "videoLayers": video_layers.0, "videoLayerError": video_layers.1, "windowAlpha": window_alpha,
+                        "transparencyEffects": transparency_effects_enabled()
                     }}));
                 }
             }
@@ -3020,6 +3382,7 @@ impl ApplicationHandler<Command> for App {
         }
         let media_events = self.media.tick(now);
         self.emit(media_events);
+        self.sync_transparency_effects();
         self.tick_videos();
         if motion_due {
             self.advance_live_motion();

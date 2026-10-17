@@ -477,6 +477,35 @@ pub struct WindowOptions {
     pub skip_taskbar: bool,
     /// Windows: live on the desktop icon grid (see `desktop_widget`).
     pub desktop_widget: Option<DesktopWidget>,
+    /// What shows through where the window's frame is translucent.
+    #[serde(default)]
+    pub backdrop: WindowBackdrop,
+}
+
+/// What a window shows behind its translucent pixels.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WindowBackdrop {
+    /// Opaque: the window background covers everything.
+    #[default]
+    None,
+    /// Per-pixel alpha over the desktop and the windows behind.
+    Transparent,
+    /// What is behind, blurred by the system compositor.
+    Blur,
+    /// Windows 11 Mica (the wallpaper, tinted); blur elsewhere.
+    Mica,
+    /// Windows 11 Acrylic; blur elsewhere.
+    Acrylic,
+}
+
+impl WindowBackdrop {
+    pub fn transparent(self) -> bool {
+        self != Self::None
+    }
+    pub fn blurred(self) -> bool {
+        matches!(self, Self::Blur | Self::Mica | Self::Acrylic)
+    }
 }
 
 /// Size of a desktop widget in desktop icon cells.

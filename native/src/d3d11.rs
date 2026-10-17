@@ -354,12 +354,39 @@ struct MsaaTile {
     depth_view: ID3D11DepthStencilView,
 }
 
+/// A transparent window shows its DirectComposition tree over the GDI redirection
+/// surface, which DWM fills opaque (white) for a framed window: clear it to
+/// transparent black, at creation and whenever a resize grows it.
+fn clear_redirection_surface(hwnd: HWND) {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::Graphics::Gdi::{BLACK_BRUSH, FillRect, GetDC, GetStockObject, ReleaseDC};
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect;
+    let hwnd = hwnd.0 as windows_sys::Win32::Foundation::HWND;
+    unsafe {
+        let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        if GetClientRect(hwnd, &mut rect) == 0 {
+            return;
+        }
+        let dc = GetDC(hwnd);
+        if dc.is_null() {
+            return;
+        }
+        FillRect(dc, &rect, GetStockObject(BLACK_BRUSH));
+        ReleaseDC(hwnd, dc);
+    }
+}
+
 pub(crate) struct D3d11Graphics {
     /// The innermost antialiased (shader-computed) rounded clip, stamped on vertices.
     clip: ShaderClip,
     /// No MSAA (the default, `msaa: 0`): shapes get a one-pixel coverage fringe
     /// instead, without multisampled targets (~30 MB less on Intel).
     analytic_aa: bool,
+    /// The window shows what is behind it where the UI is translucent.
+    transparent: bool,
+    /// The GDI surface under the composition tree is clear for the window's current
+    /// size; GDI drops what is drawn before the window is shown.
+    redirection_cleared: bool,
     _window: Arc<Window>,
     device: ID3D11Device,
     context: ID3D11DeviceContext,
@@ -469,7 +496,9 @@ enum D3d11PaintLayer {
 }
 
 impl D3d11Graphics {
-    pub(crate) fn new(window: Arc<Window>) -> Result<Self, String> {
+    /// `transparent`: the window composes the UI's alpha over what is behind it
+    /// (a transparent or system-material backdrop), through DirectComposition.
+    pub(crate) fn new(window: Arc<Window>, transparent: bool) -> Result<Self, String> {
         let size = window.inner_size();
         let width = size.width.max(1);
         let height = size.height.max(1);
@@ -561,9 +590,11 @@ impl D3d11Graphics {
 
         let gpu_timer = crate::gpu_timer::GpuTimer::new(&device);
         let scissor_rasterizer = create_scissor_rasterizer(&device, &rasterizer)?;
-        Ok(Self {
+        let mut graphics = Self {
             clip: NO_CLIP,
             analytic_aa,
+            transparent,
+            redirection_cleared: false,
             _window: window,
             device,
             context,
@@ -626,7 +657,13 @@ impl D3d11Graphics {
             glyph_rasterizations: 0,
             scale_context: ScaleContext::new(),
             prepared: false,
-        })
+        };
+        // A window swap chain has no alpha: a transparent window starts in composition.
+        if transparent && graphics.enter_composition().is_err() {
+            graphics.transparent = false;
+            graphics.composition_failed = true;
+        }
+        Ok(graphics)
     }
 
     pub(crate) fn prepare(
@@ -830,6 +867,11 @@ impl D3d11Graphics {
         Ok(())
     }
 
+    /// Whether the window composes the UI's alpha (false when composition failed).
+    pub(crate) fn shows_alpha(&self) -> bool {
+        self.transparent
+    }
+
     /// Videos shown in their own layers, and why one could not be.
     pub(crate) fn video_layers(&self) -> (usize, Option<&str>) {
         (self.punched.len(), self.overlay_error.as_deref())
@@ -1004,6 +1046,7 @@ impl D3d11Graphics {
         }
         .map_err(win_error)?;
         self.render_target = Some(create_render_target(&self.device, &self.swap_chain)?);
+        self.redirection_cleared = false;
         if self.tile.is_none() {
             let (_, view) = create_depth_target(&self.device, width, height, self.sample_desc)?;
             self.depth_view = Some(view);
@@ -1029,6 +1072,10 @@ impl D3d11Graphics {
         if let Err(error) = drawn {
             return Err(self.classify_gpu_error("D3D11 draw", error));
         }
+        if self.transparent && !self.redirection_cleared && self._window.is_visible().unwrap_or(false) {
+            clear_redirection_surface(self.hwnd);
+            self.redirection_cleared = true;
+        }
         if let Err(error) = unsafe { self.swap_chain.Present(1, DXGI_PRESENT(0)).ok() } {
             return Err(self.classify_windows_gpu_error("DXGI Present", error));
         }
@@ -1045,7 +1092,10 @@ impl D3d11Graphics {
         self.ensure_gpu_buffers()?;
         self.upload_frame_buffers()?;
         let mut bg = rgba(background);
-        if self.composition.is_some() {
+        if self.transparent {
+            // Premultiplied, as the composition swap chain is.
+            bg = [bg[0] * bg[3], bg[1] * bg[3], bg[2] * bg[3], bg[3]];
+        } else if self.composition.is_some() {
             // The UI swap chain has alpha now; the window itself stays opaque.
             bg[3] = 1.0;
         }
