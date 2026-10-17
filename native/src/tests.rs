@@ -5884,6 +5884,97 @@ fn text_node(id: &str, style: serde_json::Value) -> Node {
 }
 
 #[test]
+fn video_lays_out_at_its_natural_size_and_paints_its_picture_contained() {
+    let mut video = node("clip", "video", json!({"width": 200}), vec![]);
+    video.fit = "contain".into();
+    let mut tree = Tree::new(root(vec![video]));
+    tree.compute(400.0, 300.0).unwrap();
+    // HTML's 300×150 until the video's size is known, scaled to the set width.
+    assert!((tree.entries["clip"].rect.height() - 100.0).abs() < 0.01);
+    let frame = |generation| crate::video::VideoFrame {
+        width: 160,
+        height: 90,
+        generation,
+        pixels: Some(vello::peniko::ImageData {
+            width: 160,
+            height: 90,
+            format: vello::peniko::ImageFormat::Rgba8,
+            alpha_type: vello::peniko::ImageAlphaType::Alpha,
+            data: vello::peniko::Blob::new(std::sync::Arc::new(vec![255; 160 * 90 * 4])),
+        }),
+    };
+    tree.set_video_frame("clip", Some(frame(1)));
+    tree.compute(400.0, 300.0).unwrap();
+    // 200 wide at 16:9 (layout rounds to whole pixels).
+    assert_eq!(tree.entries["clip"].rect.height(), 113.0);
+    let mut recorder = PaintRecorder::default();
+    tree.paint(1.0, &mut recorder);
+    let (key, _, width, height, transform) = recorder.images.last().unwrap().clone();
+    assert_eq!((key.as_str(), width, height), ("video:clip", 160, 90));
+    let [sx, _, _, sy, ..] = transform.as_coeffs();
+    assert!((sx - 1.25).abs() < 1e-6 && (sy - 1.25).abs() < 1e-6, "{transform:?}");
+    // A new picture repaints; the same size does not lay out again.
+    tree.dirty.paint = false;
+    tree.set_video_frame("clip", Some(frame(2)));
+    assert!(tree.dirty.paint && !tree.dirty.layout);
+    // Contain in a taller box: centred, letterboxed.
+    tree.update(root(vec![{
+        let mut video = node("clip", "video", json!({"width": 160, "height": 160}), vec![]);
+        video.fit = "contain".into();
+        video
+    }]));
+    tree.compute(400.0, 300.0).unwrap();
+    let mut recorder = PaintRecorder::default();
+    tree.paint(1.0, &mut recorder);
+    let [_, _, _, _, tx, ty] = recorder.images.last().unwrap().4.as_coeffs();
+    let rect = tree.entries["clip"].rect;
+    assert!((tx - rect.x0).abs() < 1e-6 && (ty - (rect.y0 + 35.0)).abs() < 1e-6);
+    // A picture shown by a composition layer: kept without a repaint while its size holds.
+    tree.dirty.paint = false;
+    assert!(tree.set_video_frame_layered("clip", frame(3)));
+    assert!(!tree.dirty.paint && tree.video_frame("clip").unwrap().generation == 3);
+    let mut bigger = frame(4);
+    bigger.width = 320;
+    assert!(!tree.set_video_frame_layered("clip", bigger), "a new size lays out and paints");
+    assert!(!tree.set_video_frame_layered("missing", frame(1)));
+    // The video went away: back to 300×150.
+    tree.set_video_frame("clip", None);
+    tree.compute(400.0, 300.0).unwrap();
+    assert!(tree.dirty.paint);
+}
+
+#[test]
+fn a_video_off_screen_takes_new_pictures_without_painting() {
+    let frame = |generation, width| crate::video::VideoFrame {
+        width,
+        height: 90,
+        generation,
+        pixels: None,
+    };
+    // Placed below the window, or inside it.
+    let tree_with = |top: f32| {
+        let mut tree = Tree::new(root(vec![node(
+            "clip",
+            "video",
+            json!({"position": "absolute", "top": top, "width": 160, "height": 90}),
+            vec![],
+        )]));
+        tree.set_video_frame("clip", Some(frame(1, 160)));
+        tree.compute(400.0, 300.0).unwrap();
+        tree.paint(1.0, &mut PaintRecorder::default());
+        tree
+    };
+    let mut hidden = tree_with(1000.0);
+    assert!(!hidden.dirty.paint);
+    assert!(hidden.set_video_frame_unseen("clip", &frame(2, 160)), "culled: no repaint");
+    assert!(!hidden.dirty.paint && hidden.video_frame("clip").unwrap().generation == 2);
+    assert!(!hidden.set_video_frame_unseen("clip", &frame(3, 320)), "a new size lays out and paints");
+    assert!(!hidden.set_video_frame_unseen("missing", &frame(1, 160)));
+    let mut shown = tree_with(0.0);
+    assert!(!shown.set_video_frame_unseen("clip", &frame(2, 160)), "on screen: it paints");
+}
+
+#[test]
 fn border_style_paints_dashed_borders_and_can_be_hidden() {
     let border = crate::tree::color("#ff0000");
     let style = |border_style: &str| json!({"width": 80, "height": 40, "borderWidth": 3, "borderColor": "#ff0000", "borderStyle": border_style});

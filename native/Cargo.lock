@@ -3847,6 +3847,8 @@ dependencies = [
  "vello_cpu",
  "wasm-bindgen",
  "windows 0.61.3",
+ "windows-core 0.61.2",
+ "windows-numerics 0.2.0",
  "windows-sys 0.61.2",
  "winit",
  "x11rb",

@@ -12,7 +12,7 @@ import { Progress, Separator } from "../controls";
 import { Label } from "../form-controls";
 import { INLINE_TAG_NAMES } from "../inline-text";
 import { expandCanvas } from "../canvas";
-import { expandAudio, mediaRequest, type MediaElementProps, type MediaRequest } from "../media-element";
+import { expandAudio, expandVideo, mediaRequest, type MediaElementProps, type MediaRequest, type VideoElementProps } from "../media-element";
 import { expandHtml, expandInput, formValues, HTML_ELEMENTS, HTML_INPUT_TYPES, storedValue, storeValue, type FormContext } from "../html-elements";
 
 /**
@@ -115,6 +115,12 @@ export function expandIntrinsic(child: VNode, path: string, context: IntrinsicCo
     const id = String(props.id ?? path);
     context.media(id, mediaRequest(props));
     return expand(expandAudio(props, id));
+  }
+  if (child.type === "video") {
+    const props = child.props as VideoElementProps;
+    const id = String(props.id ?? path);
+    context.media(id, { ...mediaRequest(props), video: true });
+    return expand(expandVideo(props, id));
   }
   if (child.type === "canvas") {
     return expand(expandCanvas(child.props as Record<string, any>, path));

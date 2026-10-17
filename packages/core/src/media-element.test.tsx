@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Window } from "./components";
 import { compileTree } from "./reconciler";
 import { applyMediaEvent, mediaRequest, mediaState } from "./media-element";
+import { createMediaSync } from "./app/media";
 
 describe("mediaRequest", () => {
   test("defaults and clamps the element's flags", () => {
@@ -60,5 +61,67 @@ describe("<audio>", () => {
     const after = compileTree(view(), false, "auto", [], scope);
     expect(after.nodes.get("song-play")?.control?.label).toBe("Pause");
     expect(after.nodes.get("song-time")?.text).toBe("1:01 / 1:35");
+  });
+});
+
+describe("<video>", () => {
+  test("is a native video node the decoder fills, contain by default, registered as video media", () => {
+    const tree = compileTree(<Window title="video"><video id="clip" src="clip.mp4" style={{ width: 320, radius: 8 }} /></Window>);
+    const node = tree.nodes.get("clip")!;
+    expect(node.kind).toBe("video");
+    expect((node as { fit?: string }).fit).toBe("contain");
+    expect(node.style.width).toBe(320);
+    expect(tree.media?.get("clip")).toMatchObject({ src: "clip.mp4", video: true });
+    expect(compileTree(<Window title="v"><video id="c" src="c.mp4" fit="cover" /></Window>).nodes.get("c")).toMatchObject({ fit: "cover" });
+    expect(compileTree(<Window title="v"><video id="c" src="c.mp4" style={{ objectFit: "fill" }} /></Window>).nodes.get("c")).toMatchObject({ fit: "fill" });
+    expect(compileTree(<Window title="v"><video id="c" src="c.mp4" className="object-cover" /></Window>).nodes.get("c")).toMatchObject({ fit: "cover" });
+  });
+
+  test("controls overlay the picture and follow playback, with the video's size", () => {
+    const scope = {};
+    const view = () => <Window title="video"><video id="clip" src="clip.mp4" controls style={{ width: 480, height: 270 }} /></Window>;
+    const before = compileTree(view(), false, "auto", [], scope);
+    expect(before.nodes.get("clip-player")?.style).toMatchObject({ width: 480, height: 270, position: "relative" });
+    expect(before.nodes.get("clip")?.style).toMatchObject({ width: "100%", height: "100%" });
+    expect(before.nodes.get("clip-controls")?.style.position).toBe("absolute");
+    expect(before.nodes.get("clip-play")?.control?.label).toBe("Play");
+    const seen: number[] = [];
+    const request = { ...before.media!.get("clip")!, handlers: { onLoadedMetadata: (info: { videoWidth: number; videoHeight: number }) => { seen.push(info.videoWidth, info.videoHeight); } } };
+    applyMediaEvent({ id: "clip", event: "loadedmetadata", duration: 10, videoWidth: 1920, videoHeight: 1080 }, request as never, scope)?.();
+    expect(seen).toEqual([1920, 1080]);
+    applyMediaEvent({ id: "clip", event: "play", paused: false, time: 3 }, request as never, scope);
+    expect(compileTree(view(), false, "auto", [], scope).nodes.get("clip-play")?.control?.label).toBe("Pause");
+  });
+
+  test("a spinner in the middle while it opens or seeks, a large play button while paused", () => {
+    const scope = {};
+    const view = () => <Window title="video"><video id="clip" src="clip.mp4" controls style={{ width: 480, height: 270 }} /></Window>;
+    const opening = compileTree(view(), false, "auto", [], scope);
+    expect(opening.nodes.get("clip-spinner")?.control).toEqual({ role: "progress", label: "Loading" });
+    expect(opening.nodes.has("clip-big-play")).toBe(false);
+    const request = opening.media!.get("clip")!;
+    applyMediaEvent({ id: "clip", event: "loadedmetadata", duration: 10, videoWidth: 1920, videoHeight: 1080 }, request, scope);
+    const paused = compileTree(view(), false, "auto", [], scope);
+    expect(paused.nodes.has("clip-spinner")).toBe(false);
+    expect(paused.nodes.get("clip-big-play")?.control?.label).toBe("Play");
+    applyMediaEvent({ id: "clip", event: "play", paused: false, time: 1 }, request, scope);
+    const playing = compileTree(view(), false, "auto", [], scope);
+    expect(playing.nodes.has("clip-big-play") || playing.nodes.has("clip-spinner")).toBe(false);
+    expect(playing.nodes.get("clip-play")?.control?.label).toBe("Pause");
+    applyMediaEvent({ id: "clip", event: "error", message: "404" }, request, scope);
+    expect(compileTree(view(), false, "auto", [], scope).nodes.has("clip-spinner")).toBe(false);
+  });
+
+  test("loads through the platform video decoder; switching between audio and video reloads", () => {
+    const sent: Record<string, unknown>[] = [];
+    const sync = createMediaSync(command => { sent.push(command); });
+    sync(compileTree(<Window title="v"><video id="m" src="clip.mp4" autoPlay muted /></Window>));
+    expect(sent).toEqual([
+      { type: "media", id: "m", action: "load", src: "clip.mp4", loop: false, muted: true, volume: 1, kind: "video" },
+      { type: "media", id: "m", action: "play" },
+    ]);
+    sent.length = 0;
+    sync(compileTree(<Window title="v"><audio id="m" src="clip.mp4" muted /></Window>));
+    expect(sent).toEqual([{ type: "media", id: "m", action: "load", src: "clip.mp4", loop: false, muted: true, volume: 1 }]);
   });
 });

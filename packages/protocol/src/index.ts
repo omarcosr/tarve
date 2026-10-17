@@ -17,7 +17,7 @@ export interface MotionTransition {
 }
 export type MotionTransitions = Partial<Record<MotionProperty | "all", MotionTransition>>;
 export type MotionValues = Partial<Record<NumericMotionProperty, number>>;
-export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "markdown" | "code" | "diff" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter";
+export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "markdown" | "code" | "diff" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter" | "video";
 export type SvgElementName = "path" | "circle" | "ellipse" | "g" | "line" | "polygon" | "polyline" | "rect";
 export type SvgAttributeValue = string | number;
 export type SvgAttributes = Record<string, SvgAttributeValue>;
@@ -385,7 +385,7 @@ export type NativeCommand =
   | { type: "tray"; tray: NativeTrayOptions | null }
   | { type: "systemMedia"; session: NativeSystemMediaSession | null }
   | { type: "notify"; title: string; body: string }
-  | { type: "media"; id: string; action: "load" | "unload" | "play" | "pause" | "seek" | "set"; src?: string; time?: number; volume?: number; muted?: boolean; loop?: boolean }
+  | { type: "media"; id: string; action: "load" | "unload" | "play" | "pause" | "seek" | "set"; src?: string; time?: number; volume?: number; muted?: boolean; loop?: boolean; /** `"video"` on a load: the platform video decoder plays it. */ kind?: "video" }
   | { type: "frameOverlay"; enabled: boolean }
   | { type: "frameRate"; maxFps: number | null }
   | { type: "focus"; id: string }
@@ -443,7 +443,7 @@ export type NativeEvent =
   | { type: "systemMedia"; action: "play" | "pause" | "next" | "previous" | "seek"; time?: number }
   | { type: "trayMenu"; id: string }
   | { type: "notificationClick" }
-  | { type: "media"; id: string; event: "loadedmetadata" | "play" | "pause" | "timeupdate" | "seeked" | "ended" | "error"; time?: number; duration?: number | null; paused?: boolean; message?: string }
+  | { type: "media"; id: string; event: "loadedmetadata" | "play" | "pause" | "timeupdate" | "seeked" | "ended" | "error"; time?: number; duration?: number | null; paused?: boolean; message?: string; videoWidth?: number; videoHeight?: number }
   | { type: "escape" }
   | { type: "click"; id: string }
   | { type: "context"; id: string; x: number; y: number }

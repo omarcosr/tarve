@@ -23,7 +23,7 @@ const TIME_UPDATE: Duration = Duration::from_millis(250);
 /// How often a pending remote load is checked while it connects.
 const LOAD_POLL: Duration = Duration::from_millis(50);
 
-mod remote {
+pub(crate) mod remote {
     use std::io::{self, Read, Seek, SeekFrom};
     use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
     use std::time::Duration;
@@ -34,6 +34,11 @@ mod remote {
     const RUN: usize = 16;
     /// How far ahead of the download (in chunks, 8 MB) a seek starts a new pass there.
     const JUMP: usize = 2 * RUN;
+    /// Windowed streams (video) keep a file up to this size whole (32 MB).
+    const KEEP_WHOLE: usize = 32 * 1024 * 1024;
+    /// Windowed streams (video) keep this many chunks behind the reader (4 MB);
+    /// older ones go and are fetched again if it seeks back.
+    const BEHIND: usize = 16;
     /// A read gives up after the network has delivered nothing for this long.
     const STALL: Duration = Duration::from_secs(30);
     /// Consecutive failed requests before the stream reports an error: with the
@@ -42,7 +47,7 @@ mod remote {
 
     use super::failure;
 
-    pub(super) fn is_remote(src: &str) -> bool {
+    pub(crate) fn is_remote(src: &str) -> bool {
         src.starts_with("http://") || src.starts_with("https://")
     }
 
@@ -66,12 +71,17 @@ mod remote {
     }
 
     /// One remote file, downloaded into memory chunk by chunk as it plays.
-    pub(super) struct Stream {
+    pub(crate) struct Stream {
         url: String,
-        pub(super) len: u64,
-        pub(super) mime: Option<String>,
+        pub(crate) len: u64,
+        pub(crate) mime: Option<String>,
         state: Mutex<State>,
         ready: Condvar,
+        /// Whether the server serves ranges (else one sequential download).
+        ranged: bool,
+        /// With ranges: download at most this many chunks ahead of the reader and
+        /// drop the ones far behind it (a video), instead of the whole file (a song).
+        window: Option<usize>,
     }
 
     fn header(response: &ureq::http::Response<ureq::Body>, name: &str) -> Option<String> {
@@ -86,11 +96,23 @@ mod remote {
         /// Requests the first chunk, which also tells the size and whether the
         /// server serves ranges, then downloads the rest in the background.
         pub(super) fn open(url: &str) -> Result<Arc<Self>, String> {
+            Self::open_with(url, None)
+        }
+
+        /// Like [`Stream::open`], keeping only `window` chunks ahead of the reader
+        /// (and `BEHIND` behind it) in memory when the server serves ranges.
+        pub(crate) fn open_windowed(url: &str, window: usize) -> Result<Arc<Self>, String> {
+            Self::open_with(url, Some(window.max(1)))
+        }
+
+        fn open_with(url: &str, window: Option<usize>) -> Result<Arc<Self>, String> {
             let mut attempt = 0;
             let response = loop {
                 match agent()
                     .get(url)
                     .header("Range", format!("bytes=0-{}", CHUNK - 1))
+                    // As browsers fetch media: compressed replies drop the length and the ranges.
+                    .header("Accept-Encoding", "identity")
                     .call()
                 {
                     Ok(response) => break response,
@@ -107,18 +129,20 @@ mod remote {
             let total = header(&response, "content-range")
                 .and_then(|range| range.rsplit('/').next()?.parse::<u64>().ok());
             let ranged = response.status().as_u16() == 206 && total.is_some();
+            let mime = header(&response, "content-type")
+                .and_then(|value| value.split(';').next().map(str::trim).map(str::to_string))
+                .filter(|mime| !mime.is_empty() && mime != "application/octet-stream");
             let len = match total.filter(|_| ranged) {
                 Some(total) => total,
-                None => header(&response, "content-length")
-                    .and_then(|length| length.parse::<u64>().ok())
-                    .ok_or_else(|| failure(url, "the server sends no length"))?,
+                None => match header(&response, "content-length").and_then(|length| length.parse::<u64>().ok()) {
+                    Some(len) => len,
+                    // No length (a chunked or compressed reply): the whole file, then from memory.
+                    None => return Self::whole(url, mime, response.into_body().into_reader(), window),
+                },
             };
             if len == 0 {
                 return Err(failure(url, "empty response"));
             }
-            let mime = header(&response, "content-type")
-                .and_then(|value| value.split(';').next().map(str::trim).map(str::to_string))
-                .filter(|mime| !mime.is_empty() && mime != "application/octet-stream");
             let count =
                 usize::try_from(len.div_ceil(CHUNK as u64)).map_err(|_| "media too large")?;
             let stream = Arc::new(Self {
@@ -131,6 +155,8 @@ mod remote {
                     error: None,
                 }),
                 ready: Condvar::new(),
+                ranged,
+                window,
             });
             let mut body = response.into_body().into_reader();
             if ranged {
@@ -159,6 +185,25 @@ mod remote {
             Ok(stream)
         }
 
+        /// A stream over a body of unknown length, read to its end first.
+        fn whole(url: &str, mime: Option<String>, mut body: impl Read, window: Option<usize>) -> Result<Arc<Self>, String> {
+            let mut data = Vec::new();
+            body.read_to_end(&mut data).map_err(|error| failure(url, error))?;
+            if data.is_empty() {
+                return Err(failure(url, "empty response"));
+            }
+            let chunks = data.chunks(CHUNK).map(|chunk| Some(Arc::<[u8]>::from(chunk))).collect();
+            Ok(Arc::new(Self {
+                url: url.to_string(),
+                len: data.len() as u64,
+                mime,
+                state: Mutex::new(State { chunks, want: 0, error: None }),
+                ready: Condvar::new(),
+                ranged: false,
+                window,
+            }))
+        }
+
         fn lock(&self) -> MutexGuard<'_, State> {
             self.state
                 .lock()
@@ -175,7 +220,7 @@ mod remote {
             self.ready.notify_all();
         }
 
-        pub(super) fn error(&self) -> Option<String> {
+        pub(crate) fn error(&self) -> Option<String> {
             self.lock().error.clone()
         }
 
@@ -184,7 +229,31 @@ mod remote {
             for index in from..to {
                 let mut chunk = vec![0; self.chunk_len(index)];
                 body.read_exact(&mut chunk)?;
-                self.lock().chunks[index] = Some(chunk.into());
+                let mut state = self.lock();
+                state.chunks[index] = Some(chunk.into());
+                if let Some(window) = self.window.filter(|_| self.ranged) {
+                    // At most the window ahead plus a little behind stays in memory:
+                    // past that budget the chunks farthest from the reader go first (a
+                    // jump to the index at the end and back keeps the start it read).
+                    // A short file (up to `KEEP_WHOLE`) stays whole: a loop or a seek
+                    // back replays it without downloading it again.
+                    let budget = (window + 2 * BEHIND + RUN).max(KEEP_WHOLE / CHUNK);
+                    let want = state.want;
+                    let mut held = state.chunks.iter().filter(|chunk| chunk.is_some()).count();
+                    while held > budget {
+                        let farthest = state
+                            .chunks
+                            .iter()
+                            .enumerate()
+                            .filter(|(other, chunk)| chunk.is_some() && *other != index && !(want..=want + window).contains(other))
+                            .max_by_key(|(other, _)| other.abs_diff(want))
+                            .map(|(other, _)| other);
+                        let Some(farthest) = farthest else { break };
+                        state.chunks[farthest] = None;
+                        held -= 1;
+                    }
+                }
+                drop(state);
                 self.ready.notify_all();
             }
             Ok(())
@@ -206,6 +275,8 @@ mod remote {
                     error: None,
                 }),
                 ready: Condvar::new(),
+                ranged: true,
+                window: None,
             };
             stream.next_run()
         }
@@ -217,6 +288,17 @@ mod remote {
         fn next_run(&self) -> Option<(usize, usize)> {
             let state = self.lock();
             let count = state.chunks.len();
+            if let Some(window) = self.window {
+                // From the reader on, within the window; `None` while it is full.
+                let want = state.want.min(count - 1);
+                let limit = count.min(want + window + 1);
+                let start = (want..limit).find(|&index| state.chunks[index].is_none())?;
+                let mut end = start + 1;
+                while end < limit.min(start + RUN) && state.chunks[end].is_none() {
+                    end += 1;
+                }
+                return Some((start, end));
+            }
             let first = (0..count).find(|&index| state.chunks[index].is_none())?;
             let want = state.want.min(count - 1);
             let start = if state.chunks[want].is_none() && want > first + JUMP {
@@ -241,13 +323,20 @@ mod remote {
             let mut failures = 0;
             while let Some(stream) = stream.upgrade() {
                 let Some((start, end)) = stream.next_run() else {
-                    return;
+                    if stream.window.is_none() {
+                        return;
+                    }
+                    // A window full (or the rest downloaded): wait for the reader to move.
+                    let state = stream.lock();
+                    drop(stream.ready.wait_timeout(state, Duration::from_millis(500)));
+                    continue;
                 };
                 let last = ((end * CHUNK) as u64).min(stream.len) - 1;
                 let mut lasting = false;
                 let result = agent()
                     .get(&stream.url)
                     .header("Range", format!("bytes={}-{last}", start * CHUNK))
+                    .header("Accept-Encoding", "identity")
                     .call()
                     .map_err(|error| {
                         lasting = !transient(&error);
@@ -294,13 +383,13 @@ mod remote {
     }
 
     /// A seekable reader over a [`Stream`]; reads block until their chunk arrives.
-    pub(super) struct Reader {
+    pub(crate) struct Reader {
         stream: Arc<Stream>,
         position: u64,
     }
 
     impl Reader {
-        pub(super) fn new(stream: Arc<Stream>) -> Self {
+        pub(crate) fn new(stream: Arc<Stream>) -> Self {
             Self {
                 stream,
                 position: 0,
@@ -316,7 +405,13 @@ mod remote {
             let index = (self.position / CHUNK as u64) as usize;
             let offset = (self.position % CHUNK as u64) as usize;
             let mut state = self.stream.lock();
-            state.want = index;
+            if state.want != index {
+                state.want = index;
+                if state.chunks[index].is_none() {
+                    // A windowed download waits for the reader to move.
+                    self.stream.ready.notify_all();
+                }
+            }
             loop {
                 if let Some(chunk) = &state.chunks[index] {
                     let count = buf.len().min(chunk.len() - offset);
@@ -563,6 +658,11 @@ pub(crate) fn failure(src: &str, reason: impl std::fmt::Display) -> String {
     let source = src.split_once("://").map_or(src, |(_, rest)| {
         rest.split(['/', '?', '#']).next().unwrap_or(rest)
     });
+    let reason = reason.to_string();
+    // Already named (a download error passed up through the video reader).
+    if reason.ends_with(&format!(" ({source})")) {
+        return reason;
+    }
     format!("{reason} ({source})")
 }
 
@@ -737,6 +837,12 @@ impl Media {
             self.sink = Some(output);
         }
         Ok(self.mix.as_ref().unwrap().0.clone())
+    }
+
+    /// The app's audio mix, for `<video>` sound to play through the same output.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn output_mixer(&mut self) -> Result<Mixer, String> {
+        self.mixer()
     }
 
     fn apply_volume(track: &Track) {

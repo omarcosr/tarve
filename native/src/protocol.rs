@@ -664,7 +664,13 @@ pub enum Command {
         muted: Option<bool>,
         #[serde(rename = "loop")]
         looped: Option<bool>,
+        /// `"video"` on a load: the platform video decoder plays it (picture and sound).
+        #[serde(default)]
+        kind: Option<String>,
     },
+    /// A `<video>` engine has news (an event, a picture): poll the videos.
+    #[serde(skip)]
+    VideoWake,
     #[serde(skip)]
     RemoteImage {
         url: String,
@@ -955,6 +961,7 @@ pub fn validate(root: &Node) -> Result<(), String> {
             "svg",
             "slider",
             "splitter",
+            "video",
         ]
         .contains(&n.kind.as_str())
         {
@@ -1005,6 +1012,7 @@ pub fn validate_mutations(mutations: &[TreeMutation]) -> Result<(), String> {
                     "svg",
                     "slider",
                     "splitter",
+                    "video",
                 ]
                 .contains(&node.kind.as_str())
                 {

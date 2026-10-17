@@ -33,6 +33,18 @@ float clipCoverage(PSIn i) {
     return saturate(0.5 - sdRoundRect(p, i.clip, i.clipRadii) * i.clipM1.z);
 }
 Texture2D tex0 : register(t0); SamplerState samp0 : register(s0);
+// A video picture in NV12 (as the decoder makes it): luma in tex0, chroma in tex1,
+// limited range; BT.709 (mode 11, HD) or BT.601 (mode 10, SD) to RGB here, so no
+// conversion pass runs before the frame.
+Texture2D tex1 : register(t1);
+float4 nv12(PSIn i) {
+    float y = (tex0.Sample(samp0, i.uv).r - 0.0627451) * 1.1643836;
+    float2 c = tex1.Sample(samp0, i.uv).rg - 0.5019608;
+    float3 rgb = i.mode > 10.5
+        ? float3(y + 1.7927411*c.y, y - 0.2132486*c.x - 0.5329093*c.y, y + 2.1124018*c.x)
+        : float3(y + 1.5960268*c.y, y - 0.3917623*c.x - 0.8129676*c.y, y + 2.0172321*c.x);
+    return float4(saturate(rgb), 1.0) * i.color;
+}
 // Analytic gaussian-blurred rounded rectangle (Evan Wallace): exact along x
 // via erf, integrated along y with four gaussian-weighted samples.
 float2 erf2(float2 x) { float2 s=sign(x); float2 a=abs(x); x=1.0+(0.278393+(0.230389+0.078108*(a*a))*a)*a; x*=x; return s-s/(x*x); }
@@ -158,6 +170,7 @@ float ringCoverage(PSIn i) {
 }
 float4 shade(PSIn i) {
     if (i.mode < 0.5) return i.color;
+    if (i.mode > 9.5) return nv12(i);
     if (i.mode > 8.5) return float4(i.color.rgb, i.color.a*ringCoverage(i));
     if (i.mode > 7.5) return glassShade(i);
     if (i.mode > 6.5) return blurPass(i.pos.xy, float2(0,1), glassA.x);

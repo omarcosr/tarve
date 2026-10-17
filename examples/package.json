@@ -23,6 +23,7 @@
     "liquid": "tarve run liquid/liquid.tsx",
     "tailwind": "tarve run tailwind/tailwind.tsx",
     "svelte": "tarve run svelte/main.ts",
+    "video": "tarve run video/video.tsx",
     "check": "bun node_modules/typescript/bin/tsc --noEmit && bun node_modules/typescript/bin/tsc --noEmit -p studio/studio-samples && bun studio/studio-samples/generate.ts --check",
     "build:basic": "tarve build basic/basic.tsx --outfile dist/Basic.exe",
     "build:counter": "tarve build counter/counter.tsx --outfile dist/Counter.exe",
@@ -45,7 +46,8 @@
     "build:glass": "tarve build glass/glass.tsx --outfile dist/LiquidGlass.exe",
     "build:liquid": "tarve build liquid/liquid.tsx --outfile dist/Liquid.exe",
     "build:tailwind": "tarve build tailwind/tailwind.tsx --outfile dist/Tailwind.exe",
-    "build:svelte": "tarve build svelte/main.ts --outfile dist/Svelte.exe"
+    "build:svelte": "tarve build svelte/main.ts --outfile dist/Svelte.exe",
+    "build:video": "tarve build video/video.tsx --outfile dist/Video.exe"
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",

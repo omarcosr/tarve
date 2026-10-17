@@ -12,6 +12,8 @@ mod cpu_display;
 #[cfg(target_os = "windows")]
 mod d3d11;
 #[cfg(target_os = "windows")]
+mod d3d11_overlay;
+#[cfg(target_os = "windows")]
 mod desktop_widget;
 #[cfg(target_os = "windows")]
 mod gpu_timer;
@@ -39,6 +41,7 @@ mod text;
 #[cfg(not(target_arch = "wasm32"))]
 mod tray;
 mod tree;
+mod video;
 // Browser build: the same tree, layout, text and CPU paint, driven from JavaScript.
 #[cfg(target_arch = "wasm32")]
 mod web;

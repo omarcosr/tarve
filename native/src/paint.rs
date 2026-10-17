@@ -285,6 +285,14 @@ pub(crate) trait PaintTarget {
         invert: bool,
     );
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine);
+    /// A `<video>` picture with `transform` mapping its pixels into place.
+    /// Renderers that sample the decoder's texture (D3D11) draw it directly;
+    /// the others draw the copy in memory.
+    fn draw_video(&mut self, id: &str, frame: &crate::video::VideoFrame, transform: Affine) {
+        if let Some(pixels) = &frame.pixels {
+            self.draw_image(&format!("video:{id}"), pixels, frame.pixel_transform(transform));
+        }
+    }
     /// Liquid glass over `rect`: what was painted under it shows through blurred and
     /// bent at the rounded edge, under `tint`. Targets without a backdrop paint the tint.
     fn glass(
@@ -407,6 +415,10 @@ impl<P: PaintTarget> PaintTarget for TransformTarget<'_, P> {
 
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine) {
         self.inner.draw_image(key, image, self.map(transform));
+    }
+
+    fn draw_video(&mut self, id: &str, frame: &crate::video::VideoFrame, transform: Affine) {
+        self.inner.draw_video(id, frame, self.map(transform));
     }
 
     fn glass(

@@ -329,6 +329,7 @@ export namespace JSX {
     meter: IntrinsicMeterProps;
     canvas: IntrinsicCanvasProps;
     audio: import("./media-element").MediaElementProps;
+    video: import("./media-element").VideoElementProps;
     abbr: SpanProps & { title?: string };
     fieldset: IntrinsicBlockProps;
     legend: IntrinsicBlockProps;

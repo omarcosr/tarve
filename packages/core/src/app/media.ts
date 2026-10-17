@@ -1,11 +1,20 @@
 import type { NativeCommand } from "../protocol";
 import type { MediaController, MediaRequest } from "../media-element";
 import type { CompiledTree } from "../reconciler";
+import { isAbsolute } from "node:path";
+import { nativeAssetPath } from "#tarve/assets";
 
 type MediaCommand = Extract<NativeCommand, { type: "media" }>;
 
+/**
+ * A path the native decoder can open: `file://` URLs as paths, relative paths as given
+ * (the runtime resolves them from the working directory), and files embedded in an executable (`import film from
+ * "./film.mp4" with { type: "file" }`) extracted once. Other URLs pass through.
+ */
 function resolveMediaPath(src: string): string {
-  return src.startsWith("file://") ? new URL(src).pathname.replace(/^\/([A-Za-z]:)/, "$1") : src;
+  const path = src.startsWith("file://") ? decodeURIComponent(new URL(src).pathname).replace(/^\/([A-Za-z]:)/, "$1") : src;
+  if (/^[a-z][a-z0-9+.-]+:\/\//i.test(path) || path.startsWith("data:")) return path;
+  return isAbsolute(path) ? nativeAssetPath(path) : path;
 }
 
 /**
@@ -27,8 +36,8 @@ export function createMediaSync(send: (command: MediaCommand, event: string, tar
       if (!request.src) continue;
       const previous = loaded.get(id);
       const src = resolveMediaPath(request.src);
-      if (!previous || resolveMediaPath(previous.src!) !== src) {
-        send({ type: "media", id, action: "load", src, loop: request.loop, muted: request.muted, volume: request.volume }, "media:load", id);
+      if (!previous || resolveMediaPath(previous.src!) !== src || previous.video !== request.video) {
+        send({ type: "media", id, action: "load", src, loop: request.loop, muted: request.muted, volume: request.volume, ...(request.video ? { kind: "video" as const } : {}) }, "media:load", id);
         if (request.autoPlay) send({ type: "media", id, action: "play" }, "media:play", id);
       } else if (previous.loop !== request.loop || previous.muted !== request.muted || previous.volume !== request.volume) {
         send({ type: "media", id, action: "set", loop: request.loop, muted: request.muted, volume: request.volume }, "media:set", id);

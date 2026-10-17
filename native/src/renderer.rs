@@ -1116,6 +1116,56 @@ impl Graphics {
         (!uploaded.is_empty(), restored)
     }
 
+    /// The D3D11 renderer's device: `<video>` pictures are decoded onto it.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn d3d11_device(
+        &self,
+    ) -> Option<windows::Win32::Graphics::Direct3D11::ID3D11Device> {
+        match &self.backend {
+            GraphicsImpl::D3d11(graphics) => Some(graphics.device().clone()),
+            _ => None,
+        }
+    }
+
+    /// Whether video `id` shows in its own composition layer (D3D11 only).
+    #[cfg(target_os = "windows")]
+    pub(crate) fn video_layered(&self, id: &str) -> bool {
+        matches!(&self.backend, GraphicsImpl::D3d11(graphics) if graphics.video_layered(id))
+    }
+
+    /// A new picture of a layered video, shown without a UI frame.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn present_video(&mut self, id: &str, view: &crate::d3d11::VideoView, bt709: bool) -> Result<bool, RenderError> {
+        match &mut self.backend {
+            GraphicsImpl::D3d11(graphics) => graphics
+                .present_video(id, view, bt709)
+                .map_err(classify_d3d11_render_error),
+            _ => Ok(false),
+        }
+    }
+
+    /// Videos in their own layers, and why one could not be.
+    pub(crate) fn video_layers(&self) -> (usize, Option<String>) {
+        match &self.backend {
+            #[cfg(target_os = "windows")]
+            GraphicsImpl::D3d11(graphics) => {
+                let (count, error) = graphics.video_layers();
+                (count, error.map(str::to_string))
+            }
+            _ => (0, None),
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn set_video_views(
+        &mut self,
+        views: Vec<(String, crate::d3d11::VideoView)>,
+    ) {
+        if let GraphicsImpl::D3d11(graphics) = &mut self.backend {
+            graphics.set_video_views(views);
+        }
+    }
+
     #[cfg(target_os = "windows")]
     pub(crate) fn prepare_d3d11_frame(
         &mut self,

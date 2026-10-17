@@ -130,7 +130,7 @@ export interface CompiledTree {
   /** Some style carried a window-width breakpoint: the app re-renders when the width changes. */
   usesViewport?: boolean;
 }
-const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "markdown", "code", "diff", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter"]);
+const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "markdown", "code", "diff", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter", "video"]);
 const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
 
 function focusOutlineOverrides(style: NonNullable<NativeNode["style"]["focus"]> | undefined) {
@@ -597,6 +597,8 @@ export function compileTree(
     if (p.newText !== undefined) node.newText = p.newText;
     if (p.svg !== undefined) node.svg = p.svg;
     if (control) node.control = control;
+    // CSS object-fit: a video keeps its ratio inside its box by default.
+    if (nativeType === "video") node.fit = p.fit ?? "contain";
     if (imageSource && "path" in imageSource) {
       node.src = nativeAssetPath(imageSource.path);
       node.fit = p.fit ?? "cover";

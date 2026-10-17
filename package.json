@@ -138,6 +138,8 @@
     "smoke:text": "bun run build:native && bun run setup:examples && bun scripts/smoke-text.tsx",
     "smoke:html": "bun run build:native && bun run setup:examples && bun scripts/smoke-html.tsx",
     "test:canvas": "bun run build:native && bun run setup:examples && bun scripts/canvas-parity.ts check",
+    "smoke:video": "bun run build:native && bun scripts/smoke-video.tsx",
+    "smoke:video-layers": "bun run build:native && bun scripts/smoke-video-layers.tsx",
     "smoke:media": "bun run build:native && bun scripts/smoke-media.tsx",
     "smoke:remote-image": "bun run build:native && bun scripts/smoke-remote-image.tsx",
     "smoke:app-icon": "bun run build:native && bun scripts/smoke-app-icon.tsx",

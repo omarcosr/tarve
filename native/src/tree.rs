@@ -1715,6 +1715,13 @@ pub struct Tree {
     pub highlight_searches: u64,
     highlight_dirty: bool,
     images: HashMap<String, ImageData>,
+    /// The current picture of each `<video>`, by node id (set by the runtime).
+    video_frames: HashMap<String, crate::video::VideoFrame>,
+    /// Device pixels each `<video>` picture covered in the last paint.
+    video_display: HashMap<String, (u32, u32)>,
+    /// `<video>`s the last paint drew (culled ones are absent): a new picture of
+    /// any other one waits for the next paint instead of causing one.
+    video_painted: HashSet<String>,
     /// Keys whose decoded pixels were dropped because a GPU texture holds them.
     released_images: HashSet<String>,
     /// Smooth `scrollToItem` requests in flight, by list id.
@@ -2017,6 +2024,9 @@ impl Tree {
             highlight_searches: 0,
             highlight_dirty: true,
             images: HashMap::default(),
+            video_frames: HashMap::default(),
+            video_display: HashMap::default(),
+            video_painted: HashSet::default(),
             released_images: HashSet::default(),
             scroll_animations: HashMap::default(),
             remote_images: HashMap::default(),
@@ -3094,6 +3104,71 @@ impl Tree {
         self.dirty.paint = true;
     }
 
+    /// The current picture of the `<video>` `id` (`None`: it has none any more).
+    /// A new size lays the video out again (its natural size); any picture repaints.
+    pub(crate) fn set_video_frame(&mut self, id: &str, frame: Option<crate::video::VideoFrame>) {
+        let size = frame.as_ref().map(|frame| (frame.width, frame.height));
+        let previous = match frame {
+            Some(frame) => self.video_frames.insert(id.to_string(), frame),
+            None => {
+                self.video_display.remove(id);
+                self.video_frames.remove(id)
+            }
+        };
+        if previous.map(|frame| (frame.width, frame.height)) != size {
+            if let Some(entry) = self.entries.get_mut(id) {
+                entry.measure_dirty = true;
+            }
+            self.dirty.layout = true;
+        }
+        self.dirty.paint = true;
+    }
+
+    /// Device pixels each `<video>` covered when last painted: the decoder scales
+    /// pictures read back into memory to it.
+    pub(crate) fn video_display_sizes(&self) -> &HashMap<String, (u32, u32)> {
+        &self.video_display
+    }
+
+    /// Whether the last paint drew video `id` (false before the first paint).
+    pub(crate) fn video_painted(&self, id: &str) -> bool {
+        self.video_painted.contains(id)
+    }
+
+    /// A new picture of a video the last paint did not draw (scrolled away, clipped
+    /// out, hidden): recorded without a repaint, as browsers skip painting video
+    /// off screen. The next paint that reaches it shows the latest picture. False
+    /// when it must paint (the first picture, a new size, nothing painted yet).
+    pub(crate) fn set_video_frame_unseen(&mut self, id: &str, frame: &crate::video::VideoFrame) -> bool {
+        if self.paints == 0 || self.video_painted.contains(id) {
+            return false;
+        }
+        match self.video_frames.get_mut(id) {
+            Some(current) if current.width == frame.width && current.height == frame.height => {
+                *current = frame.clone();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// A new picture shown by its own composition layer: recorded without a repaint
+    /// (the UI frame has a hole there). False when the size changed: lay out and paint.
+    pub(crate) fn set_video_frame_layered(&mut self, id: &str, frame: crate::video::VideoFrame) -> bool {
+        match self.video_frames.get_mut(id) {
+            Some(current) if current.width == frame.width && current.height == frame.height => {
+                *current = frame;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn video_frame(&self, id: &str) -> Option<&crate::video::VideoFrame> {
+        self.video_frames.get(id)
+    }
+
     fn prune_images(&mut self) {
         let used: HashSet<String> = self
             .entries
@@ -3495,6 +3570,7 @@ impl Tree {
         let text = &mut self.text;
         let nodes = &self.entries;
         let images = &self.images;
+        let videos = &self.video_frames;
         let measure_calls = &mut self.measure_calls;
         self.layout
             .compute_layout_with_measure(
@@ -3536,6 +3612,18 @@ impl Tree {
                                 measured = Size {
                                     width: w,
                                     height: h,
+                                };
+                            } else if node.kind == "video" {
+                                // HTML: 300×150 until the video's own size is known.
+                                let (width, height) = videos
+                                    .get(&node.id)
+                                    .map_or((300.0, 150.0), |frame| {
+                                        (frame.width as f32, frame.height as f32)
+                                    });
+                                let ratio = width / height;
+                                measured = Size {
+                                    width: known.height.map(|h| h * ratio).unwrap_or(width),
+                                    height: known.width.map(|w| w / ratio).unwrap_or(height),
                                 };
                             } else if let Some(image) =
                                 image_cache_key(node).and_then(|key| images.get(key))
@@ -4057,6 +4145,7 @@ impl Tree {
             self.highlight_dirty = false;
         }
         self.painted_nodes = 0;
+        self.video_painted.clear();
         let target = &mut crate::paint::TransformTarget::new(target);
         let root_rect = self.entries[&self.root].rect;
         self.paint_node(&self.root.clone(), Vec2::ZERO, scale, root_rect, target);
@@ -5022,6 +5111,51 @@ impl Tree {
                     &shape,
                 );
             }
+            if clipped {
+                target.pop_layer();
+            }
+        }
+        if node.kind == "video"
+            && let Some(frame) = self.video_frames.get(&node.id)
+            && frame.width > 0
+            && frame.height > 0
+        {
+            // CSS object-fit, `contain` by default for video: the picture keeps its
+            // ratio inside the box, the rest shows the element's background.
+            let sx = rect.width() / f64::from(frame.width);
+            let sy = rect.height() / f64::from(frame.height);
+            let (fx, fy) = match node.fit.as_str() {
+                "fill" => (sx, sy),
+                "cover" => (sx.max(sy), sx.max(sy)),
+                "none" => (1.0, 1.0),
+                _ => (sx.min(sy), sx.min(sy)),
+            };
+            let r = shape.radii();
+            let clipped = [r.top_left, r.top_right, r.bottom_right, r.bottom_left]
+                .iter()
+                .any(|v| *v > 0.0)
+                || f64::from(frame.width) * fx > rect.width() + 0.01
+                || f64::from(frame.height) * fy > rect.height() + 0.01;
+            if clipped {
+                target.push_clip(Fill::NonZero, transform, &shape);
+            }
+            let tx = rect.x0 + (rect.width() - f64::from(frame.width) * fx) / 2.0;
+            let ty = rect.y0 + (rect.height() - f64::from(frame.height) * fy) / 2.0;
+            let [a, b, c, d, ..] = transform.as_coeffs();
+            let (scale_x, scale_y) = ((a * a + b * b).sqrt(), (c * c + d * d).sqrt());
+            self.video_painted.insert(node.id.clone());
+            self.video_display.insert(
+                node.id.clone(),
+                (
+                    (f64::from(frame.width) * fx * scale_x).ceil().max(1.0) as u32,
+                    (f64::from(frame.height) * fy * scale_y).ceil().max(1.0) as u32,
+                ),
+            );
+            target.draw_video(
+                &node.id,
+                frame,
+                transform * Affine::translate((tx, ty)) * Affine::scale_non_uniform(fx, fy),
+            );
             if clipped {
                 target.pop_layer();
             }
@@ -9344,7 +9478,7 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
     }
     // Replaced elements (img, svg): CSS's automatic minimum size is their
     // specified size, so a sized image never shrinks below it.
-    if matches!(node.kind.as_str(), "image" | "svg") {
+    if matches!(node.kind.as_str(), "image" | "svg" | "video") {
         if node.style["minWidth"].is_null() && node.style["width"].is_number() {
             style.min_size.width = length(node.number("width", 0.0));
         }

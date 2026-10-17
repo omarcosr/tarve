@@ -914,6 +914,15 @@ pub fn run(
         ..document.root.clone()
     });
     memory_stages.record("tree");
+    let videos = {
+        // Engines report from their own threads: each report wakes the loop once.
+        let proxy = std::sync::Mutex::new(event_proxy.clone());
+        crate::video::Videos::new(move || {
+            if let Ok(proxy) = proxy.lock() {
+                let _ = proxy.send_event(Command::VideoWake);
+            }
+        })
+    };
     let mut app = App {
         parked: false,
         document,
@@ -942,6 +951,7 @@ pub fn run(
         event_proxy,
         tray: None,
         media: Default::default(),
+        videos,
         remote_images,
         present_times: Default::default(),
         frame_stats: Default::default(),
@@ -989,6 +999,8 @@ struct App {
     event_proxy: EventLoopProxy<Command>,
     tray: Option<crate::tray::Tray>,
     media: crate::media::Media,
+    /// `<video>` elements: the platform decoder and the pictures it hands the tree.
+    videos: crate::video::Videos,
     remote_images: crate::remote_image::RemoteImages,
     /// When each of the last second's frames was presented, for `inspect().fps`.
     present_times: std::collections::VecDeque<Instant>,
@@ -1676,6 +1688,73 @@ impl App {
             _ => None,
         }
     }
+    /// Videos decode onto the D3D11 renderer's device when there is one (drawn with
+    /// no copy), else onto their own and read the pictures back.
+    fn attach_video_renderer(&mut self) {
+        #[cfg(target_os = "windows")]
+        if let GraphicsState::Ready(graphics) = &self.graphics {
+            self.videos.attach_renderer(graphics.d3d11_device());
+        }
+    }
+
+    /// Video engine news: media events out, new pictures into the tree.
+    fn tick_videos(&mut self) {
+        self.attach_video_renderer();
+        let sizes = self.tree.video_display_sizes();
+        self.videos.set_display_sizes(|id| sizes.get(id).copied());
+        // A minimized window shows no video; before the first paint every one counts as shown.
+        let minimized = self.window.as_ref().is_some_and(|window| window.is_minimized().unwrap_or(false));
+        let painted = self.tree.paints > 0;
+        let tree = &self.tree;
+        self.videos.set_visible(|id| !minimized && (!painted || tree.video_painted(id)));
+        let events = self.videos.tick(Instant::now());
+        self.emit(events);
+        let frames = self.videos.take_frames();
+        if frames.is_empty() {
+            return;
+        }
+        let must_paint = self.videos.take_repaint();
+        let mut repaint = false;
+        for (id, frame) in frames {
+            if must_paint.contains(&id) {
+                self.tree.set_video_frame(&id, frame);
+                repaint = true;
+                continue;
+            }
+            // A video in its own composition layer: the picture goes there, no UI frame.
+            #[cfg(target_os = "windows")]
+            if let Some(next) = &frame
+                && let GraphicsState::Ready(graphics) = &mut self.graphics
+                && graphics.video_layered(&id)
+                && let Some(view) = self.videos.view(&id)
+                && self.tree.set_video_frame_layered(&id, next.clone())
+            {
+                match graphics.present_video(&id, &view, next.height >= 720) {
+                    Ok(true) => continue,
+                    Ok(false) => {}
+                    Err(failure) => self.events.push(error(format!("video layer: {failure:?}"))),
+                }
+            }
+            // Off screen: no paint for a picture nobody sees.
+            if let Some(next) = &frame
+                && self.tree.set_video_frame_unseen(&id, next)
+            {
+                continue;
+            }
+            self.tree.set_video_frame(&id, frame);
+            repaint = true;
+        }
+        // Without a paint the renderer would keep the last pictures' textures (a
+        // parked video's decoder, an off screen one's surfaces): hand it the current ones.
+        #[cfg(target_os = "windows")]
+        if !repaint && let GraphicsState::Ready(graphics) = &mut self.graphics {
+            graphics.set_video_views(self.videos.views());
+        }
+        if repaint && let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
     fn sync_control_flow(&self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         let startup_trim_at = if self.startup_trim_pending.get() {
@@ -1702,11 +1781,13 @@ impl App {
             .filter(|deadline| *deadline > now);
         let motion_at = self.motion_deadline(now);
         let media_at = self.media.deadline();
+        let video_at = self.videos.deadline();
         let deadline = [
             recovery_at,
             present_at,
             motion_at,
             media_at,
+            video_at,
             startup_trim_at,
         ]
         .into_iter()
@@ -1957,6 +2038,7 @@ impl App {
             if let GraphicsState::Ready(graphics) = &mut self.graphics {
                 #[cfg(target_os = "windows")]
                 {
+                    graphics.set_video_views(self.videos.views());
                     retained_prepared = graphics.prepare_d3d11_frame(
                         physical.width,
                         physical.height,
@@ -2529,11 +2611,60 @@ impl ApplicationHandler<Command> for App {
                 volume,
                 muted,
                 looped,
+                kind,
             } => {
-                let events =
+                let video_load = action == "load" && kind.as_deref() == Some("video");
+                let events = if video_load {
+                    // A `<video>` that used to be `<audio>` stops its sound first.
+                    let mut events =
+                        self.media
+                            .command(&id, "unload", None, None, None, None, None);
+                    self.attach_video_renderer();
+                    // Windows mixes a video's sound into the app's audio output;
+                    // GStreamer (Linux) plays it through its own sink: no stream opened for it.
+                    #[cfg(target_os = "windows")]
+                    let mixer = self.media.output_mixer().ok();
+                    #[cfg(not(target_os = "windows"))]
+                    let mixer: Option<()> = None;
+                    events.extend(self.videos.load(
+                        &id,
+                        crate::video::VideoLoad {
+                            src: src.as_deref().unwrap_or(""),
+                            looped: looped.unwrap_or(false),
+                            muted: muted.unwrap_or(false),
+                            volume: volume.unwrap_or(1.0) as f32,
+                        },
+                        mixer,
+                    ));
+                    events
+                } else if self.videos.handles(&id) {
+                    if action == "load" {
+                        let mut events = self.videos.command(&id, "unload", None, None, None, None);
+                        self.tree.set_video_frame(&id, None);
+                        events.extend(self.media.command(
+                            &id,
+                            &action,
+                            src.as_deref(),
+                            time,
+                            volume,
+                            muted,
+                            looped,
+                        ));
+                        events
+                    } else {
+                        self.videos
+                            .command(&id, &action, time, volume, muted, looped)
+                    }
+                } else {
                     self.media
-                        .command(&id, &action, src.as_deref(), time, volume, muted, looped);
+                        .command(&id, &action, src.as_deref(), time, volume, muted, looped)
+                };
                 self.emit(events);
+                self.tick_videos();
+                self.sync_control_flow(event_loop);
+            }
+            Command::VideoWake => {
+                self.tick_videos();
                 self.sync_control_flow(event_loop);
             }
             Command::SystemMedia { session } => {
@@ -2681,6 +2812,10 @@ impl ApplicationHandler<Command> for App {
                         GraphicsState::Ready(graphics) => graphics.glyph_rasterizations(),
                         _ => None,
                     };
+                    let video_layers = match &self.graphics {
+                        GraphicsState::Ready(graphics) => graphics.video_layers(),
+                        _ => (0, None),
+                    };
                     let fps = self
                         .present_times
                         .iter()
@@ -2690,7 +2825,8 @@ impl ApplicationHandler<Command> for App {
                         "frames": frames, "fps": fps, "layouts":self.tree.layouts, "shapes":self.tree.text.shapes, "paints":self.tree.paints,
                         "hovered":self.tree.hovered, "focused":self.tree.focused, "nodes":self.tree.snapshots(), "width":size.width, "height":size.height, "scale":window.scale_factor(),
                         "layoutNodes":self.tree.layout_node_count(), "layoutNodesCreated":self.tree.layout_nodes_created, "measureCalls":self.tree.measure_calls, "paintedNodes":self.tree.painted_nodes,
-                        "activeMotions":self.tree.active_motion_count(), "glyphRasterizations": glyph_rasterizations
+                        "activeMotions":self.tree.active_motion_count(), "glyphRasterizations": glyph_rasterizations,
+                        "videoLayers": video_layers.0, "videoLayerError": video_layers.1
                     }}));
                 }
             }
@@ -2884,6 +3020,7 @@ impl ApplicationHandler<Command> for App {
         }
         let media_events = self.media.tick(now);
         self.emit(media_events);
+        self.tick_videos();
         if motion_due {
             self.advance_live_motion();
         }

@@ -133,6 +133,7 @@ impl AccessibilityTree {
             "titlebar" => Role::TitleBar,
             "text" | "markdown" | "code" | "diff" => Role::Label,
             "image" => Role::Image,
+            "video" => Role::Video,
             "button" => Role::Button,
             "input" => match node.input_type.as_str() {
                 "password" => Role::PasswordInput,
