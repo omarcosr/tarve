@@ -51,6 +51,10 @@ export const writeFileSync = () => unavailable("fs.writeFileSync");
 export const tmpdir = () => "/tmp";
 export const homedir = () => "/";
 export const createConnection = () => unavailable("net.createConnection");
+export const connect = () => unavailable("net.connect");
+export const createServer = () => unavailable("net.createServer");
+export const spawnSync = () => unavailable("child_process.spawnSync");
+export const userInfo = () => ({ username: "user", uid: -1, gid: -1, shell: null, homedir: "/" });
 export const inflateSync = () => unavailable("zlib.inflateSync");
 export const deflateSync = () => unavailable("zlib.deflateSync");
 

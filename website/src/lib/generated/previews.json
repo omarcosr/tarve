@@ -696,8 +696,8 @@
     "top": 250,
     "frameWidth": 858,
     "frameHeight": 720,
-    "contentLeft": 189,
-    "contentWidth": 481
+    "contentLeft": 190,
+    "contentWidth": 480
   },
   "Scroll": {
     "width": 858,
@@ -937,7 +937,7 @@
     "frameWidth": 858,
     "frameHeight": 720,
     "contentLeft": 189,
-    "contentWidth": 480
+    "contentWidth": 481
   },
   "View": {
     "width": 858,

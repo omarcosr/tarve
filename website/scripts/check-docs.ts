@@ -33,4 +33,27 @@ const playground = Bun.spawnSync(
   { cwd: repo, stdout: "inherit", stderr: "inherit" },
 );
 if (playground.exitCode !== 0) process.exit(playground.exitCode ?? 1);
+// The playground loads @tarve/core in the browser with stand-ins for Node/Bun built-ins
+// (src/lib/playground/stubs); a name core imports that a stub lacks breaks every live example.
+const stubs = resolve(import.meta.dir, "../src/lib/playground/stubs");
+const browser = await Bun.build({
+  entrypoints: [resolve(repo, "packages/core/src/index.ts")],
+  target: "browser",
+  throw: false,
+  plugins: [{
+    name: "playground-stubs",
+    setup(build) {
+      build.onResolve({ filter: /^node:/ }, () => ({ path: resolve(stubs, "node.ts") }));
+      build.onResolve({ filter: /^bun:ffi$/ }, () => ({ path: resolve(stubs, "bun-ffi.ts") }));
+      build.onResolve({ filter: /^#tarve\/assets$/ }, () => ({ path: resolve(stubs, "tarve-assets.ts") }));
+      build.onResolve({ filter: /^#tarve\/runtime$/ }, () => ({ path: resolve(stubs, "tarve-runtime.ts") }));
+      build.onResolve({ filter: /^\.\.?\/bridge$/ }, (args) =>
+        args.importer.replace(/\\/g, "/").includes("/packages/core/src/") ? { path: resolve(stubs, "bridge.ts") } : undefined);
+    },
+  }],
+});
+if (!browser.success) {
+  console.error(browser.logs.map((log) => "  ✗ playground: " + log.message).join("\n"));
+  process.exit(1);
+}
 console.log(`[check-docs] ${documented.size} components documented, ${examples.size} examples type-check.`);
