@@ -21,6 +21,7 @@ const { default: ComponentBar } = await import("./fixtures/ComponentBar.svelte")
 const { default: Plain } = await import("./fixtures/Plain.svelte");
 const { default: Visible } = await import("./fixtures/Visible.svelte");
 const { default: Rich } = await import("./fixtures/Rich.svelte");
+const { default: VideoFixture } = await import("./fixtures/Video.svelte");
 
 class FakeBridge implements NativeBridge {
   commands: NativeCommand[] = [];
@@ -541,5 +542,42 @@ describe("@tarve/svelte", () => {
     expect(html()).toBe("plain <b>bolder</b> end");
     expect(rich().runs).toEqual([{ start: 6, end: 12, style: { fontWeight: 700 } }]);
     expect(mounted.target.querySelector("#inputs")!.textContent).toBe("insertText insertLineBreak deleteContentBackward formatItalic formatItalic formatBold formatBold");
+  });
+  test("<video> plays through the platform decoder: fit, controls, videoWidth and bind:videoWidth", async () => {
+    const { bridge, mounted } = start<{ size(): number[] }>(VideoFixture);
+    await mounted.app.ready;
+    await settle();
+    const node = find(bridge.document!.root, item => item.id === "clip")!;
+    expect(node.kind).toBe("video");
+    expect((node as { fit?: string }).fit).toBe("cover");
+    expect(find(bridge.document!.root, item => item.id === "clip-play")).toBeDefined();
+    const load = bridge.commands.find(command => command.type === "media" && command.action === "load");
+    expect(load).toMatchObject({ id: "clip", src: "clip.mp4", muted: true, kind: "video" });
+    expect(bridge.commands.some(command => command.type === "media" && command.action === "play")).toBe(true);
+    bridge.emit({ type: "media", id: "clip", event: "loadedmetadata", time: 0, duration: 4, paused: true, videoWidth: 640, videoHeight: 360 } as NativeEvent);
+    await settle();
+    expect(mounted.component.size()).toEqual([640, 360]);
+    expect(mounted.target.querySelector("#size")!.textContent).toBe("640x360 1");
+  });
+  test("<video> end fires pause once, whether or not the engine sent pause first", async () => {
+    const { bridge, mounted } = start<{ size(): number[] }>(VideoFixture);
+    await mounted.app.ready;
+    await settle();
+    const video = mounted.target.querySelector("video") as unknown as { paused: boolean; ended: boolean; addEventListener(type: string, listener: () => void): void };
+    const seen: string[] = [];
+    for (const type of ["pause", "ended"]) video.addEventListener(type, () => seen.push(type));
+    const send = (event: string, paused: boolean) => bridge.emit({ type: "media", id: "clip", event, time: 4, duration: 4, paused } as NativeEvent);
+    send("play", false);
+    send("pause", true);
+    send("ended", true);
+    await settle();
+    expect(seen).toEqual(["pause", "ended"]);
+    seen.length = 0;
+    send("play", false);
+    send("ended", true);
+    await settle();
+    expect(seen).toEqual(["pause", "ended"]);
+    expect(video.paused).toBe(true);
+    expect(video.ended).toBe(true);
   });
 });

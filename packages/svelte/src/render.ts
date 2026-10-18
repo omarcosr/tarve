@@ -390,6 +390,12 @@ export function build(element: TElement): VNode {
     settle(element);
     return jsx("audio", { ...out, volume: media.volume, muted: media.muted, autoPlay: element.hasAttribute("autoplay"), loop: element.hasAttribute("loop"), controls: element.hasAttribute("controls") });
   }
+  if (tag === "video") {
+    // The platform decoder draws the picture; CSS object-fit picks how it fills the box.
+    const media = element as THTMLMediaElement;
+    settle(element);
+    return jsx("video", { ...out, volume: media.volume, muted: media.muted, autoPlay: element.hasAttribute("autoplay"), loop: element.hasAttribute("loop"), controls: element.hasAttribute("controls") });
+  }
   if (tag === "input") {
     const type = element.type;
     if (type === "checkbox" || type === "radio") {

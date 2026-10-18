@@ -43,14 +43,12 @@ Types: `drag-region`, `window-action` and Tarve's elements (`<row>`, `<column>`,
 | `<style>` | compound, descendant, child and sibling selectors, `:not/:is/:where/:has`, `:nth-child`, `:first/last-child`, `:checked`, `:hover/:focus/:active`, `::before/::after` (`content` with strings and `attr()`), `@media`, `@keyframes` + `animation`, `var()`, `em/rem/vw/vh`, `transform` |
 | events | click, dblclick, auxclick, mousedown/up, pointerdown/up, mouse/pointer enter/leave/move, wheel, contextmenu, scroll, submit, input/change, focus/blur/focusin/focusout, keydown/keyup (every key), drag/dragstart/dragenter/dragover/dragleave/drop/dragend with `dataTransfer` — on elements, `<svelte:window>` and `<svelte:document>` |
 | `contenteditable` | rich text: `<b>`, `<em>`, `<u>`, `<s>`, `<span style>`… style the text in a native text area; typing stays in the element it happened in; `window.getSelection()`, `document.execCommand` (`bold`, `italic`, `underline`, `strikeThrough`, `insertText`, `insertLineBreak`, `delete`, `forwardDelete`), `queryCommandState`, Ctrl+B/I/U |
-| bindings | `value` (inputs, `<select>` with any values), `checked`, `group`, `textContent/innerHTML` (`contenteditable`), `clientWidth/Height`, `contentRect`, `innerWidth/innerHeight`, `<audio>` `paused/currentTime/duration/volume/muted` |
+| bindings | `value` (inputs, `<select>` with any values), `checked`, `group`, `textContent/innerHTML` (`contenteditable`), `clientWidth/Height`, `contentRect`, `innerWidth/innerHeight`, `<audio>`/`<video>` `paused/currentTime/duration/volume/muted`, `videoWidth/videoHeight` |
 | layout reads | `getBoundingClientRect` (after ancestor scroll offsets), `offsetTop/Left/Width/Height`, `ResizeObserver`, `IntersectionObserver` (`root`, `rootMargin`, `threshold`; clipped by scroll ancestors and the window), `input.selectionStart/End`. Reads are synchronous like a browser's forced layout: after a change (or in `onMount`) native lays out and answers in ~1 ms |
 | `transition:`, `in:`, `out:`, `animate()` | keyframes played at 60 fps, interpolated, with easing, iterations and direction |
 | `querySelector(All)`, `matches`, `closest`, `MutationObserver` | over the Svelte DOM |
 | `element.focus()`, `<svelte:head><title>` | native focus, the window title (updated live) |
 | `<TitleBar>` (`import { TitleBar } from "@tarve/svelte"`) or `mount(App, { window: { titleBar: true } })` | Tarve's custom title bar instead of the native frame, showing the `<svelte:head><title>`; props `title`, `height`, `glass`, `appearance`, `showMinimize/Maximize/Close`, children replace the title. `window-action="minimize\|toggleMaximize\|close"` makes any element a window control, `drag-region` a drag handle |
-
-Not drawn: `<video>` frames (Tarve has no video decoder; the element lays out as a box).
 
 `bun run smoke:svelte-input` drives a built app with real Windows input (cursor, clicks, wheel, keys)
 and checks what the components saw; it moves the mouse while it runs.

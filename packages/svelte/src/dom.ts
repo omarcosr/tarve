@@ -1111,26 +1111,40 @@ export class THTMLMediaElement extends THTMLElement {
     touch(this);
     this.dispatchEvent(new TEvent("volumechange"));
   }
+  _videoWidth = 0;
+  _videoHeight = 0;
+  /** `<video>`: the picture's own size, known from `loadedmetadata` (0 before, and for `<audio>`). */
+  get videoWidth(): number { return this._videoWidth; }
+  get videoHeight(): number { return this._videoHeight; }
   get buffered() { return emptyRanges; }
   get played() { return emptyRanges; }
   get seekable() { return this._duration > 0 ? { length: 1, start: () => 0, end: () => this._duration } : emptyRanges; }
   play(): Promise<void> { mediaHook?.(this, "play"); return Promise.resolve(); }
   pause(): void { mediaHook?.(this, "pause"); }
   load(): void {}
-  canPlayType(type: string): string { return /audio\/(mpeg|mp3|wav|ogg|flac|aac|mp4)/.test(type) ? "maybe" : ""; }
+  canPlayType(type: string): string {
+    if (this.localName === "video") return /^video\/(mp4|webm|quicktime|x-matroska)|^application\/vnd\.apple\.mpegurl/.test(type) ? "maybe" : "";
+    return /audio\/(mpeg|mp3|wav|ogg|flac|aac|mp4)/.test(type) ? "maybe" : "";
+  }
   /** A native media event: update the state and fire the DOM events a browser would. */
-  _media(event: "loadedmetadata" | "play" | "pause" | "timeupdate" | "seeked" | "ended" | "error", info: { currentTime?: number; duration?: number | null; paused?: boolean; message?: string }): void {
+  _media(event: "loadedmetadata" | "play" | "pause" | "timeupdate" | "seeked" | "ended" | "error", info: { currentTime?: number; duration?: number | null; paused?: boolean; message?: string; videoWidth?: number; videoHeight?: number }): void {
     if (info.currentTime !== undefined) this._time = info.currentTime;
+    const resized = (info.videoWidth ?? this._videoWidth) !== this._videoWidth || (info.videoHeight ?? this._videoHeight) !== this._videoHeight;
+    if (info.videoWidth) this._videoWidth = info.videoWidth;
+    if (info.videoHeight) this._videoHeight = info.videoHeight;
     if (info.duration !== undefined && info.duration !== null) this._duration = info.duration;
+    const wasPaused = this._paused;
     if (info.paused !== undefined) this._paused = info.paused;
     const fire = (type: string) => this.dispatchEvent(new TEvent(type));
     switch (event) {
-      case "loadedmetadata": this.readyState = 4; this._ended = false; fire("durationchange"); fire("loadedmetadata"); fire("loadeddata"); fire("canplay"); fire("canplaythrough"); break;
+      case "loadedmetadata": this.readyState = 4; this._ended = false; fire("durationchange"); if (resized) fire("resize"); fire("loadedmetadata"); fire("loadeddata"); fire("canplay"); fire("canplaythrough"); break;
       case "play": this._paused = false; this._ended = false; fire("play"); fire("playing"); break;
       case "pause": this._paused = true; fire("pause"); break;
       case "timeupdate": fire("timeupdate"); break;
       case "seeked": this._seeking = false; fire("seeked"); fire("timeupdate"); break;
-      case "ended": this._ended = true; this._paused = true; fire("pause"); fire("ended"); break;
+      // A browser fires `pause` at the end only if no `pause` came before (the native
+      // engines may send one just ahead of `ended`).
+      case "ended": this._ended = true; this._paused = true; if (!wasPaused) fire("pause"); fire("ended"); break;
       case "error": fire("error"); break;
     }
   }
