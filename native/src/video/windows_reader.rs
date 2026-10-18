@@ -144,6 +144,8 @@ struct State {
     video_done: bool,
     audio_done: bool,
     error: Option<String>,
+    /// The decoder cannot hand out NV12 textures: the Media Engine plays it instead.
+    unsupported: bool,
     requests: VecDeque<Request>,
     stop: bool,
 }
@@ -223,9 +225,15 @@ fn reader_thread(shared: Arc<Shared>, url: String, manager: SendCom<IMFDXGIDevic
         shared.lock().error = Some(message);
         (shared.wake)();
     };
+    // A decoder without NV12 textures: the Media Engine plays it instead.
+    let unsupported = |message: String| {
+        shared.lock().unsupported = true;
+        fail(message)
+    };
     let (reader, remote) = match open(&url, &manager.0) {
         Ok(opened) => opened,
-        Err(message) => return fail(message),
+        Err(Fallback::Format(message)) => return unsupported(message),
+        Err(Fallback::Other(message)) => return fail(message),
     };
     // A failed download is the cause of a failed read; Media Foundation only saw the read fail.
     let reason = |error: windows::core::Error| remote.as_ref().and_then(|stream| stream.error()).unwrap_or_else(|| win(error));
@@ -246,6 +254,10 @@ fn reader_thread(shared: Arc<Shared>, url: String, manager: SendCom<IMFDXGIDevic
     let mut skip_before: Option<f64> = None;
     let mut held: Option<(f64, SendCom<IMFSample>)> = None;
     let mut audio_skip_before: Option<f64> = None;
+    // Whether a picture came yet.
+    let mut pictured = false;
+    // A seek made while no stream was selected.
+    let mut deferred_seek: Option<f64> = None;
     loop {
         let stream = {
             let mut state = shared.lock();
@@ -262,6 +274,9 @@ fn reader_thread(shared: Arc<Shared>, url: String, manager: SendCom<IMFDXGIDevic
                             video_off = !on;
                             let _ = unsafe { reader.SetStreamSelection(VIDEO_STREAM, on) };
                             state.video.clear();
+                            if on && let Some(time) = deferred_seek.take() {
+                                seek = seek.or(Some(time));
+                            }
                         }
                         Request::Video(_) => {}
                         Request::Audio(on) if on == audio_off && info.audio.is_some() => {
@@ -280,7 +295,11 @@ fn reader_thread(shared: Arc<Shared>, url: String, manager: SendCom<IMFDXGIDevic
                         let value = &mut *position.Anonymous.Anonymous;
                         value.vt = VT_I8;
                         value.Anonymous.hVal = (time.max(0.0) * 10_000_000.0) as i64;
-                        if let Err(error) = reader.SetCurrentPosition(&GUID::zeroed(), &position) {
+                        // With no stream selected (a silent video off screen) the reader
+                        // refuses to seek (E_INVALIDARG): it seeks when the picture is back.
+                        if video_off && (audio_off || info.audio.is_none()) {
+                            deferred_seek = Some(time);
+                        } else if let Err(error) = reader.SetCurrentPosition(&GUID::zeroed(), &position) {
                             state.error = Some(win(error));
                         }
                     }
@@ -326,11 +345,16 @@ fn reader_thread(shared: Arc<Shared>, url: String, manager: SendCom<IMFDXGIDevic
             )
         };
         if let Err(error) = read {
+            // A decoder that agreed to NV12 but hands out none (VP8).
+            if !pictured && error.code() == MF_E_INVALIDMEDIATYPE {
+                return unsupported(win(error));
+            }
             return fail(reason(error));
         }
         let is_video = unsafe { reader.GetCurrentMediaType(actual) }
             .and_then(|kind| unsafe { kind.GetGUID(&MF_MT_MAJOR_TYPE) })
             .is_ok_and(|major| major == MFMediaType_Video);
+        pictured |= is_video;
         let mut state = shared.lock();
         if flags & MF_SOURCE_READERF_ERROR.0 as u32 != 0 {
             state.error = Some(
@@ -411,53 +435,72 @@ fn reader_thread(shared: Arc<Shared>, url: String, manager: SendCom<IMFDXGIDevic
 }
 
 /// The source reader on `url`, and the app's own download behind it for a remote file.
-fn open(url: &str, manager: &IMFDXGIDeviceManager) -> Result<(IMFSourceReader, Option<Arc<Stream>>), String> {
+fn open(url: &str, manager: &IMFDXGIDeviceManager) -> Result<(IMFSourceReader, Option<Arc<Stream>>), Fallback> {
+    let remote = if is_remote(url) && streamable(url) {
+        Some(Stream::open_windowed(url, VIDEO_WINDOW).map_err(Fallback::Other)?)
+    } else {
+        None
+    };
+    open_with(url, manager, remote.as_ref()).map(|reader| (reader, remote))
+}
+
+enum Fallback {
+    /// The reader opened, but its decoder does not hand out NV12 textures (VP8).
+    Format(String),
+    Other(String),
+}
+
+fn open_with(
+    url: &str,
+    manager: &IMFDXGIDeviceManager,
+    remote: Option<&Arc<Stream>>,
+) -> Result<IMFSourceReader, Fallback> {
+    let other = |error: windows::core::Error| Fallback::Other(win(error));
     unsafe {
         let mut attributes = None;
-        MFCreateAttributes(&mut attributes, 3).map_err(win)?;
-        let attributes = attributes.ok_or("media attributes were not created")?;
+        MFCreateAttributes(&mut attributes, 3).map_err(other)?;
+        let attributes = attributes.ok_or(Fallback::Other("media attributes were not created".into()))?;
         attributes
             .SetUnknown(&MF_SOURCE_READER_D3D_MANAGER, manager)
-            .map_err(win)?;
+            .map_err(other)?;
         attributes
             .SetUINT32(&MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, 1)
-            .map_err(win)?;
+            .map_err(other)?;
         // Decoded textures the pixel shader can read: drawn with no copy.
         attributes
             .SetUINT32(
                 &MF_SOURCE_READER_D3D11_BIND_FLAGS,
                 (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_DECODER.0) as u32,
             )
-            .map_err(win)?;
-        let (reader, remote) = if is_remote(url) && streamable(url) {
-            let stream = Stream::open_windowed(url, VIDEO_WINDOW)?;
-            let bytes = MFCreateMFByteStreamOnStream(&RemoteStream::open(stream.clone())).map_err(win)?;
-            // What Media Foundation picks the container parser by.
-            if let Ok(described) = bytes.cast::<IMFAttributes>() {
-                let _ = described.SetString(&MF_BYTESTREAM_ORIGIN_NAME, &HSTRING::from(url));
-                if let Some(kind) = content_type(url, stream.mime.as_deref()) {
-                    let _ = described.SetString(&MF_BYTESTREAM_CONTENT_TYPE, &HSTRING::from(kind));
+            .map_err(other)?;
+        let reader = match remote {
+            Some(stream) => {
+                let bytes = MFCreateMFByteStreamOnStream(&RemoteStream::open(stream.clone())).map_err(other)?;
+                // What Media Foundation picks the container parser by.
+                if let Ok(described) = bytes.cast::<IMFAttributes>() {
+                    let _ = described.SetString(&MF_BYTESTREAM_ORIGIN_NAME, &HSTRING::from(url));
+                    if let Some(kind) = content_type(url, stream.mime.as_deref()) {
+                        let _ = described.SetString(&MF_BYTESTREAM_CONTENT_TYPE, &HSTRING::from(kind));
+                    }
                 }
+                MFCreateSourceReaderFromByteStream(&bytes, &attributes)
+                    .map_err(|error| Fallback::Other(stream.error().unwrap_or_else(|| win(error))))?
             }
-            let reader = MFCreateSourceReaderFromByteStream(&bytes, &attributes)
-                .map_err(|error| stream.error().unwrap_or_else(|| win(error)))?;
-            (reader, Some(stream))
-        } else {
-            (MFCreateSourceReaderFromURL(&HSTRING::from(url), &attributes).map_err(win)?, None)
+            None => MFCreateSourceReaderFromURL(&HSTRING::from(url), &attributes).map_err(other)?,
         };
-        let video = MFCreateMediaType().map_err(win)?;
-        video.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).map_err(win)?;
-        video.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_NV12).map_err(win)?;
-        reader
-            .SetCurrentMediaType(VIDEO_STREAM, None, &video)
-            .map_err(win)?;
-        let audio = MFCreateMediaType().map_err(win)?;
-        audio.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio).map_err(win)?;
-        audio.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_Float).map_err(win)?;
+        let video = MFCreateMediaType().map_err(other)?;
+        video.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).map_err(other)?;
+        video.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_NV12).map_err(other)?;
+        if let Err(error) = reader.SetCurrentMediaType(VIDEO_STREAM, None, &video) {
+            return Err(Fallback::Format(win(error)));
+        }
+        let audio = MFCreateMediaType().map_err(other)?;
+        audio.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio).map_err(other)?;
+        audio.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_Float).map_err(other)?;
         if reader.SetCurrentMediaType(AUDIO_STREAM, None, &audio).is_err() {
             let _ = reader.SetStreamSelection(AUDIO_STREAM, false);
         }
-        Ok((reader, remote))
+        Ok(reader)
     }
 }
 
@@ -588,6 +631,11 @@ impl ReaderPlayer {
         let time = self.time();
         if on {
             self.audio_off = false;
+            // Parked: the reader opens again with sound when it plays or seeks (an
+            // output attached now would read the closed reader's sound and stop the clock).
+            if self.parked {
+                return;
+            }
             self.shared.lock().requests.push_back(Request::Audio(true));
             if self.info.is_some() {
                 self.attach_output();
@@ -672,6 +720,11 @@ impl ReaderPlayer {
         self.shared.sound.stop.store(true, Ordering::Relaxed);
         self.shared.lock().stop = true;
         self.shared.changed.notify_all();
+    }
+
+    /// Failed because the decoder hands out no NV12 textures (the Media Engine can play it).
+    pub(super) fn unsupported(&self) -> bool {
+        self.shared.lock().unsupported
     }
 
     pub(super) fn size(&self) -> (u32, u32) {
@@ -1136,6 +1189,7 @@ fn spawn_reader(
             video_done: false,
             audio_done: false,
             error: None,
+            unsupported: false,
             requests,
             stop: false,
         }),

@@ -30,13 +30,15 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_SHADER_RESOURCE_VIEW_DESC, D3D11_SHADER_RESOURCE_VIEW_DESC_0, D3D11_TEX2D_SRV,
 };
 use super::windows_reader::ReaderPlayer;
+use super::windows_stream::{RemoteStream, VIDEO_WINDOW, content_type, streamable};
+use crate::media::remote::{Stream, is_remote};
 use super::windows_shared::win;
 use crate::d3d11::VideoView;
 use windows::Win32::Media::MediaFoundation::*;
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
 };
-use windows::core::{BSTR, Interface, implement};
+use windows::core::{BSTR, HSTRING, Interface, implement};
 
 /// While playing, how often the engine is asked for a new picture. Well under
 /// a 120 Hz display's frame, so a picture is shown on the vsync it is due.
@@ -51,6 +53,14 @@ const SETTLE_FOR: Duration = Duration::from_secs(2);
 struct Shared {
     events: Mutex<Vec<u32>>,
     wake: Arc<dyn Fn() + Send + Sync>,
+    /// A remote src opened through the app's download, off the event loop.
+    stream: Mutex<Option<Result<Arc<Stream>, String>>>,
+}
+
+/// A remote src whose download is opening: what was asked of it meanwhile.
+struct Opening {
+    play: bool,
+    seek: Option<f64>,
 }
 
 #[implement(IMFMediaEngineNotify)]
@@ -109,6 +119,12 @@ struct Player {
     /// Pictures stay in the decoder's NV12 for the renderer (converted while drawn);
     /// off when this GPU's video processor cannot write NV12 (then BGRA).
     nv12: bool,
+    /// Paused by its own end: the engine's `pause` for it is not reported again.
+    ended_pause: bool,
+    /// Took over from a reader that already reported `loadedmetadata`.
+    quiet_metadata: bool,
+    /// The remote download is opening; the engine has no source yet.
+    opening: Option<Opening>,
 }
 
 /// A load that waits until the renderer is known (it picks the decoding path).
@@ -226,6 +242,31 @@ impl Player {
                 "videoHeight": self.size.1,
             })
         }
+    }
+
+    /// The remote download opened: the engine reads it as a byte stream, and
+    /// what was asked meanwhile is carried out.
+    fn open_stream(&mut self, stream: Arc<Stream>) -> Result<(), String> {
+        let opening = self.opening.take().unwrap_or(Opening { play: false, seek: None });
+        unsafe {
+            let bytes = MFCreateMFByteStreamOnStream(&RemoteStream::open(stream.clone())).map_err(win)?;
+            if let Ok(described) = bytes.cast::<IMFAttributes>() {
+                let _ = described.SetString(&MF_BYTESTREAM_ORIGIN_NAME, &HSTRING::from(self.src.as_str()));
+                if let Some(kind) = content_type(&self.src, stream.mime.as_deref()) {
+                    let _ = described.SetString(&MF_BYTESTREAM_CONTENT_TYPE, &HSTRING::from(kind));
+                }
+            }
+            let engine: IMFMediaEngineEx = self.engine.cast().map_err(win)?;
+            engine.SetSourceFromByteStream(&bytes, &BSTR::from(self.src.as_str())).map_err(win)?;
+            if let Some(time) = opening.seek {
+                self.settle_until = Some(Instant::now() + SETTLE_FOR);
+                self.engine.SetCurrentTime(time.max(0.0)).map_err(win)?;
+            }
+            if opening.play {
+                self.engine.Play().map_err(win)?;
+            }
+        }
+        Ok(())
     }
 
     fn error_message(&self) -> String {
@@ -615,6 +656,7 @@ impl Videos {
         let shared = Arc::new(Shared {
             events: Mutex::new(Vec::new()),
             wake: self.wake.clone(),
+            stream: Mutex::new(None),
         });
         let notify: IMFMediaEngineNotify = Notify {
             shared: shared.clone(),
@@ -650,10 +692,25 @@ impl Videos {
             engine
                 .SetPreload(MF_MEDIA_ENGINE_PRELOAD_AUTOMATIC)
                 .map_err(win)?;
-            engine
-                .SetSource(&BSTR::from(source_url(load.src)))
-                .map_err(win)?;
         }
+        // A remote file goes through the app's own download (as on the reader
+        // path): a refused or unknown host fails at once, the moov box at the end
+        // is one range request, and a short file stays whole for loops and seeks.
+        let opening = if is_remote(load.src) && streamable(load.src) {
+            let (url, shared) = (load.src.to_string(), shared.clone());
+            std::thread::Builder::new()
+                .name("tarve-video-open".into())
+                .spawn(move || {
+                    let opened = Stream::open_windowed(&url, VIDEO_WINDOW);
+                    *shared.stream.lock().unwrap_or_else(|p| p.into_inner()) = Some(opened);
+                    (shared.wake)();
+                })
+                .map_err(|error| error.to_string())?;
+            Some(Opening { play: false, seek: None })
+        } else {
+            unsafe { engine.SetSource(&BSTR::from(source_url(load.src))) }.map_err(win)?;
+            None
+        };
         Ok(Player {
             engine,
             shared,
@@ -667,6 +724,9 @@ impl Videos {
             redraw: false,
             hidden: false,
             nv12: true,
+            ended_pause: false,
+            quiet_metadata: false,
+            opening,
         })
     }
 
@@ -730,6 +790,29 @@ impl Videos {
         }
     }
 
+    /// A video the Source Reader cannot hand over as NV12 textures (VP8): the
+    /// Media Engine plays it instead, from where the reader was.
+    fn engine_instead(&mut self, id: &str, reader: &ReaderPlayer) -> Option<Value> {
+        let load = VideoLoad {
+            src: &reader.src,
+            looped: reader.looped(),
+            muted: reader.muted(),
+            volume: reader.volume(),
+        };
+        let mut player = match self.create_player(&load) {
+            Ok(player) => player,
+            Err(message) => return Some(media_error(id, failure(&reader.src, message))),
+        };
+        player.quiet_metadata = reader.duration().is_some() || reader.size() != (0, 0);
+        let time = reader.time();
+        let started = unsafe {
+            (if time > 0.05 { player.engine.SetCurrentTime(time) } else { Ok(()) })
+                .and_then(|()| if reader.playing { player.engine.Play() } else { Ok(()) })
+        };
+        self.players.insert(id.to_string(), player);
+        started.err().map(|error| media_error(id, failure(&reader.src, win(error))))
+    }
+
     pub(crate) fn command(
         &mut self,
         id: &str,
@@ -779,6 +862,17 @@ impl Videos {
         let Some(player) = self.players.get_mut(id) else {
             return vec![media_error(id, "media not loaded")];
         };
+        if let Some(opening) = player.opening.as_mut() {
+            match action {
+                "play" => opening.play = true,
+                "pause" => opening.play = false,
+                "seek" => opening.seek = time,
+                _ => {}
+            }
+            if action != "set" {
+                return Vec::new();
+            }
+        }
         let engine = &player.engine;
         let result = unsafe {
             match action {
@@ -816,6 +910,15 @@ impl Videos {
             return out;
         }
         for (id, player) in &mut self.players {
+            let opened = player
+                .opening
+                .as_ref()
+                .and_then(|_| player.shared.stream.lock().unwrap_or_else(|p| p.into_inner()).take());
+            if let Some(opened) = opened
+                && let Err(message) = opened.and_then(|stream| player.open_stream(stream))
+            {
+                out.push(media_error(id, failure(&player.src, message)));
+            }
             let events = std::mem::take(&mut *player.shared.events.lock().unwrap_or_else(|p| p.into_inner()));
             for event in events {
                 let event = MF_MEDIA_ENGINE_EVENT(event as i32);
@@ -823,7 +926,8 @@ impl Videos {
                     MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA | MF_MEDIA_ENGINE_EVENT_FORMATCHANGE => {
                         player.size = player.size();
                         player.settle_until = Some(now + SETTLE_FOR);
-                        (event == MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA).then_some("loadedmetadata")
+                        (event == MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA && !std::mem::take(&mut player.quiet_metadata))
+                            .then_some("loadedmetadata")
                     }
                     MF_MEDIA_ENGINE_EVENT_PLAY => {
                         player.playing = true;
@@ -831,7 +935,7 @@ impl Videos {
                     }
                     MF_MEDIA_ENGINE_EVENT_PAUSE => {
                         player.playing = false;
-                        Some("pause")
+                        (!std::mem::take(&mut player.ended_pause)).then_some("pause")
                     }
                     MF_MEDIA_ENGINE_EVENT_SEEKED => {
                         player.settle_until = Some(now + SETTLE_FOR);
@@ -840,6 +944,12 @@ impl Videos {
                     MF_MEDIA_ENGINE_EVENT_TIMEUPDATE => Some("timeupdate"),
                     MF_MEDIA_ENGINE_EVENT_ENDED => {
                         player.playing = false;
+                        // The Media Engine stays unpaused at the end, so a later play()
+                        // fired no `play` and its clock ran past the duration. Paused, as
+                        // a browser's element is: play() starts over and ends again.
+                        if !unsafe { player.engine.IsPaused() }.as_bool() {
+                            player.ended_pause = unsafe { player.engine.Pause() }.is_ok();
+                        }
                         Some("ended")
                     }
                     MF_MEDIA_ENGINE_EVENT_FIRSTFRAMEREADY | MF_MEDIA_ENGINE_EVENT_CANPLAY => {
@@ -884,9 +994,12 @@ impl Videos {
             }
         }
         for (id, message) in failed {
-            self.readers.remove(&id);
+            let reader = self.readers.remove(&id);
             self.changed.push((id.clone(), None));
-            out.push(media_error(&id, message));
+            match reader.filter(ReaderPlayer::unsupported) {
+                Some(reader) => out.extend(self.engine_instead(&id, &reader)),
+                None => out.push(media_error(&id, message)),
+            }
         }
         let Some(gpu) = self.gpu.as_ref() else {
             return out;

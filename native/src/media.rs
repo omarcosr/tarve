@@ -101,6 +101,7 @@ pub(crate) mod remote {
 
         /// Like [`Stream::open`], keeping only `window` chunks ahead of the reader
         /// (and `BEHIND` behind it) in memory when the server serves ranges.
+        #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
         pub(crate) fn open_windowed(url: &str, window: usize) -> Result<Arc<Self>, String> {
             Self::open_with(url, Some(window.max(1)))
         }
@@ -119,7 +120,7 @@ pub(crate) mod remote {
                     Err(error) => {
                         attempt += 1;
                         // Fewer tries than mid-song: a refused start is often an expired URL.
-                        if attempt >= ATTEMPTS - 1 || !transient(&error) {
+                        if attempt >= ATTEMPTS - 1 || !transient(&error) || unreachable(&error) {
                             return Err(failure(url, error));
                         }
                         std::thread::sleep(backoff(attempt));
@@ -374,6 +375,16 @@ pub(crate) mod remote {
         match error {
             ureq::Error::StatusCode(code) => matches!(code, 403 | 408 | 429) || *code >= 500,
             _ => true,
+        }
+    }
+
+    /// No server at that name or port: a browser reports it at once (retrying a
+    /// refused connection cost ~12 s on Windows, where each refusal takes ~2 s).
+    fn unreachable(error: &ureq::Error) -> bool {
+        match error {
+            ureq::Error::HostNotFound => true,
+            ureq::Error::Io(error) => error.kind() == std::io::ErrorKind::ConnectionRefused,
+            _ => false,
         }
     }
 

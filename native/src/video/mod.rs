@@ -49,6 +49,7 @@ pub(crate) struct VideoFrame {
     pub width: u32,
     pub height: u32,
     /// A new number per picture: cached tiles that show the video must repaint.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub generation: u64,
     /// The picture in memory, for renderers that cannot sample the decoder's
     /// texture (the CPU and wgpu renderers). `None` on D3D11, which draws the texture.

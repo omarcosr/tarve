@@ -1,6 +1,6 @@
 // Idle <video> costs: a muted video decodes no sound (unmuting picks it up at
 // the same time), and a video paused for 15 s lets go of its decoder, keeps its
-// picture on screen, and plays on from where it was. Windows (D3D11 window).
+// picture on screen, and plays on from where it was (unmuted while parked too). Windows (D3D11 window).
 // Needs ffmpeg on PATH; the window shows while it runs.
 // bun scripts/smoke-video-idle.tsx
 import { createApp, Window } from "@tarve/core";
@@ -95,7 +95,8 @@ assert.ok(painted.colors > 12, `a paint draws the parked picture (${painted.colo
 assert.ok(parked.colors > 12, `the paused picture stays on screen (${parked.colors} colours)`);
 assert.ok(differ(held.pixels, parked.pixels) < held.pixels.length / 50, `it is the same picture (${differ(held.pixels, parked.pixels)} pixels differ)`);
 assert.ok(memoryHeld - memoryParked > 20, `a parked video lets go of its decoder (${memoryHeld} → ${memoryParked} MB private)`);
-// Play: opens again from where it was, and moves.
+// Unmuted while parked, then played: opens again with sound from where it was, and moves.
+app.media("clip").setMuted(false);
 app.media("clip").play();
 await sleep(1500);
 assert.ok(time > pausedAt + 0.5 && time < pausedAt + 3, `play goes on from the paused time (${pausedAt.toFixed(2)} → ${time.toFixed(2)} s)`);
