@@ -39,6 +39,16 @@
     "contentLeft": 189,
     "contentWidth": 480
   },
+  "AppMenuBar": {
+    "width": 858,
+    "height": 260,
+    "left": 0,
+    "top": 0,
+    "frameWidth": 858,
+    "frameHeight": 260,
+    "contentLeft": 0,
+    "contentWidth": 858
+  },
   "AspectRatio": {
     "width": 858,
     "height": 350,

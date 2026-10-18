@@ -75,6 +75,15 @@ app.get("/docs/updates", (c) => {
   });
 });
 
+app.get("/docs/desktop", (c) => {
+  const title = "Desktop integration — Tarve docs";
+  return c.render("docs/desktop", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/desktop", title, "Translucent windows, several windows, system file drops, single instance and URL links, remembered windows and a themed menu bar in Tarve."),
+  });
+});
+
 app.get("/docs/components/:name", (c) => {
   const doc = buildComponentDoc(c.req.param("name"));
   if (!doc) return c.notFound();

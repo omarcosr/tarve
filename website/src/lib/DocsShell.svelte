@@ -81,6 +81,7 @@
         <a href="/docs#rendering">How rendering works</a>
         <a href="/docs#common-props">Common props</a>
         <a href="/docs/tailwind" class:active={name === "Tailwind"} aria-current={name === "Tailwind" ? "page" : undefined}>Tailwind classes</a>
+        <a href="/docs/desktop" class:active={name === "Desktop"} aria-current={name === "Desktop" ? "page" : undefined}>Desktop integration</a>
         <a href="/docs/updates" class:active={name === "Updates"} aria-current={name === "Updates" ? "page" : undefined}>Auto-updates</a>
       {/if}
       {#each groups as group (group.id)}

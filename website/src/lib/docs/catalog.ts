@@ -128,6 +128,7 @@ export const catalog: CatalogCategory[] = [
       { name: "Pagination", summary: "Page navigation with previous, next and numbered pages." },
       { name: "NavigationMenu", summary: "Top-level navigation with dropdown link panels." },
       { name: "Menubar", summary: "A desktop-style menu bar: File, Edit, View…" },
+      { name: "AppMenuBar", summary: "The window's application menu bar, with access keys, accelerators and submenus; what app.menuBar draws." },
       { name: "Sidebar", summary: "A collapsible app sidebar with icons and badges." },
       { name: "Carousel", summary: "Steps through slides with buttons and indicators." },
     ],
