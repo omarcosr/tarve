@@ -3154,6 +3154,7 @@ impl Tree {
 
     /// A new picture shown by its own composition layer: recorded without a repaint
     /// (the UI frame has a hole there). False when the size changed: lay out and paint.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub(crate) fn set_video_frame_layered(&mut self, id: &str, frame: crate::video::VideoFrame) -> bool {
         match self.video_frames.get_mut(id) {
             Some(current) if current.width == frame.width && current.height == frame.height => {
@@ -6056,7 +6057,30 @@ impl Tree {
     /// dragged node, clipped by a scroll ancestor, or hidden behind an open modal
     /// layer are skipped; nested targets resolve to the smallest one.
     fn drop_target_at_pointer(&self, source: &str) -> Option<String> {
-        let (x, y) = self.mouse;
+        self.innermost_target_at(self.mouse, |id| self.drop_target_enabled(id, source))
+    }
+    /// Whether `id` takes system file drops: a file drop target, enabled and shown.
+    fn file_drop_target_enabled(&self, id: &str) -> bool {
+        if !self.entries.get(id).is_some_and(|entry| entry.node.file_drop_target) {
+            return false;
+        }
+        let mut current = Some(id);
+        while let Some(current_id) = current {
+            let Some(entry) = self.entries.get(current_id) else {
+                return false;
+            };
+            if entry.node.disabled || entry.node.string("display", "flex") == "none" {
+                return false;
+            }
+            current = entry.parent.as_deref();
+        }
+        true
+    }
+    /// The innermost file drop target at a point (logical px), as for pointer drops.
+    pub(crate) fn file_drop_target_at(&self, point: (f64, f64)) -> Option<String> {
+        self.innermost_target_at(point, |id| self.file_drop_target_enabled(id))
+    }
+    fn innermost_target_at(&self, (x, y): (f64, f64), accepts: impl Fn(&str) -> bool) -> Option<String> {
         let inside = |rect: &BoxRect| x >= rect.x0 && x < rect.x1 && y >= rect.y0 && y < rect.y1;
         let modal = self
             .portal_order
@@ -6065,8 +6089,8 @@ impl Tree {
             .find(|id| self.entries.get(*id).is_some_and(|entry| entry.node.modal))
             .cloned();
         let mut best: Option<(f64, &String)> = None;
-        for (id, entry) in &self.entries {
-            if !entry.node.drop_target || !self.drop_target_enabled(id, source) {
+        for id in self.entries.keys() {
+            if !accepts(id) {
                 continue;
             }
             let Some(rect) = self.visible_rect(id) else {
@@ -6487,16 +6511,17 @@ impl Tree {
             && !over_markdown
             && let Some(id) = self.hit_root(true)
             && let Some(entry) = self.entries.get(&id)
-            && entry.node.kind == "scroll"
-            && entry.node.scroll_orientation != "horizontal"
+            && (entry.node.kind == "textarea"
+                || (entry.node.kind == "scroll" && entry.node.scroll_orientation != "horizontal"))
         {
+            // A text area eases through wheel notches like a scroll view (its speed is 1).
+            let speed = if entry.node.kind == "scroll" { entry.node.scroll_speed } else { 1.0 };
             let base = self
                 .scroll_animations
                 .get(&id)
                 .filter(|animation| animation.wheel)
                 .map_or(entry.scroll, |animation| animation.to);
-            let to =
-                (base + delta_y * entry.node.scroll_speed).clamp(0.0, entry.scroll_max.max(0.0));
+            let to = (base + delta_y * speed).clamp(0.0, entry.scroll_max.max(0.0));
             let from = entry.scroll;
             self.scroll_animations.clear();
             if (to - from).abs() > 1e-6 {
@@ -6573,6 +6598,11 @@ impl Tree {
             return self.scroll_to_2d(&id, entry.scroll_x + dx * speed, entry.scroll + dy * speed);
         }
         vec![]
+    }
+    /// The pointer is over a scrollbar or dragging one: it shows the arrow, as in a
+    /// browser, whatever the content under it (a text area's caret, a CSS `cursor`).
+    pub(crate) fn pointer_on_scrollbar(&self) -> bool {
+        self.scroll_drag.is_some() || self.scrollbar_at_pointer().is_some()
     }
     pub(crate) fn scrollbar_at_pointer(&self) -> Option<(String, ScrollbarAxis, f64)> {
         let id = self.hit_root(true)?;
@@ -7197,6 +7227,21 @@ impl Tree {
         {
             return vec![json!({"type":"key", "id":id, "key":key})];
         }
+        // Menus: a popup trigger (a button with `expanded`) opens on Up/Down, and an item
+        // of a vertical menu moves to the next menu or into a submenu on Left/Right.
+        if let Some(control) = self.entries[&id].node.control.as_ref() {
+            let vertical_menu = control.role == "menuitem"
+                && self
+                    .roving_group(&id)
+                    .and_then(|group| self.entries.get(group))
+                    .and_then(|entry| entry.node.control.as_ref())
+                    .is_some_and(|group| group.orientation != "horizontal");
+            if (control.role == "button" && control.expanded.is_some() && matches!(key, "ArrowDown" | "ArrowUp"))
+                || (vertical_menu && matches!(key, "ArrowLeft" | "ArrowRight"))
+            {
+                return vec![json!({"type":"key", "id":id, "key":key})];
+            }
+        }
         if self.entries[&id]
             .node
             .control
@@ -7318,10 +7363,22 @@ impl Tree {
             {
                 matches!(key, "ArrowUp" | "ArrowDown" | "Home" | "End")
             } else {
-                matches!(
-                    key,
-                    "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | "Home" | "End"
-                )
+                // A navigation group with an orientation roves along it only: a
+                // horizontal menu bar leaves Up/Down to its buttons (they open menus).
+                match self
+                    .entries
+                    .get(&group)
+                    .and_then(|entry| entry.node.control.as_ref())
+                    .filter(|control| control.role == "navigation")
+                    .map(|control| control.orientation.as_str())
+                {
+                    Some("horizontal") => matches!(key, "ArrowLeft" | "ArrowRight" | "Home" | "End"),
+                    Some("vertical") => matches!(key, "ArrowUp" | "ArrowDown" | "Home" | "End"),
+                    _ => matches!(
+                        key,
+                        "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | "Home" | "End"
+                    ),
+                }
             })
         {
             let choices: Vec<_> = self
@@ -7526,9 +7583,12 @@ impl Tree {
             self.caret = start;
         }
         self.caret = floor_boundary(&value, self.caret.min(value.len()));
+        // Pasted Windows (\r\n) and old Mac (\r) line breaks are one \n, as in an HTML
+        // textarea; a text area keeps tabs, which it draws as tab stops.
+        let text = text.replace("\r\n", "\n").replace('\r', "\n");
         let text: String = text
             .chars()
-            .filter(|c| !c.is_control() || (multiline && *c == '\n'))
+            .filter(|c| !c.is_control() || (multiline && matches!(c, '\n' | '\t')))
             .collect();
         value.insert_str(self.caret, &text);
         if self.entries[&id].node.kind == "input"

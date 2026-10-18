@@ -61,3 +61,36 @@ pub(crate) fn states_for(options: &crate::protocol::WindowOptions) -> Vec<&'stat
     }
     states
 }
+
+thread_local! {
+    /// One connection for pointer reads while files are dragged over a window.
+    static POINTER_CONNECTION: std::cell::RefCell<Option<RustConnection>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The pointer in physical window coordinates (X11): read from the server, as no
+/// motion events reach the window while another client drags files over it. None on
+/// Wayland, which has no such query.
+pub(crate) fn pointer_in_window(window: &Window) -> Option<(f64, f64)> {
+    let handle = window.window_handle().ok()?;
+    let id = match handle.as_raw() {
+        RawWindowHandle::Xlib(handle) => handle.window as u32,
+        RawWindowHandle::Xcb(handle) => handle.window.get(),
+        _ => return None,
+    };
+    POINTER_CONNECTION.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        if cell.is_none() {
+            *cell = RustConnection::connect(None).ok().map(|(connection, _)| connection);
+        }
+        let reply = cell.as_ref()?.query_pointer(id).ok()?.reply();
+        match reply {
+            Ok(reply) if reply.same_screen => Some((f64::from(reply.win_x), f64::from(reply.win_y))),
+            Ok(_) => None,
+            Err(_) => {
+                // A broken connection is made again on the next read.
+                *cell = None;
+                None
+            }
+        }
+    })
+}

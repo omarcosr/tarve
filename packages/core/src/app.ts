@@ -1,20 +1,44 @@
-import type { FileDialogOptions, LayoutBox, NativeEvent, NativeCommand, NativeStats, NativeSystemMediaSession, PhaseSummary, Renderer, Snapshot } from "./protocol";
+import type { SceneDocument, FileDialogOptions, LayoutBox, NativeEvent, NativeCommand, NativeStats, NativeSystemMediaSession, PhaseSummary, Renderer, Snapshot } from "./protocol";
 import { readFileSync } from "node:fs";
 import { applyMediaEvent, type MediaController } from "./media-element";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
 import { compileTree, type CompiledTree, invalidateMemos } from "./reconciler";
 import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
-import type { VNode } from "./jsx-runtime";
+import { jsx, type Child, type VNode } from "./jsx-runtime";
 import { createElementDispatcher } from "./app/element-events";
 import { createMediaSync, mediaController } from "./app/media";
 import { createNativeRequests } from "./app/requests";
 import { editShadowNode, nativeShadow, reconciliationCommand } from "./app/shadow";
 import { createTrayController, type TrayHandle, type TrayOptions } from "./app/tray";
+import { createMenuBarController, type MenuBarItem, type MenuBarOptions } from "./app/menu-bar";
+import { MenuBar, menuBarState } from "./menu-bar";
+import { TitleBar } from "./components/titlebar";
+import { Window } from "./components/window";
+export type { MenuBarItem, MenuBarOptions } from "./app/menu-bar";
+
+const APP_MENU_BAR_ID = "tarve-menubar";
+
+/** The view with the app's drawn menu bar at the top of its window, after a TitleBar. */
+function withMenuBar(view: VNode, bar: VNode): VNode {
+  // The view is often a component that returns the Window (`() => <App />`): expand it.
+  for (let depth = 0; typeof view.type === "function" && view.type !== Window && depth < 32; depth++) {
+    const expanded = (view.type as (props: Record<string, unknown>) => unknown)(view.props);
+    if (!expanded || typeof expanded !== "object" || Array.isArray(expanded)) return view;
+    view = expanded as VNode;
+  }
+  if (view.type !== Window) return view;
+  const raw = view.props.children;
+  const children: Child[] = Array.isArray(raw) ? [...raw] : raw === undefined ? [] : [raw];
+  const titleBar = children.findIndex(child => !!child && typeof child === "object" && !Array.isArray(child) && (child as VNode).type === TitleBar);
+  children.splice(titleBar + 1, 0, bar);
+  return { ...view, props: { ...view.props, children } };
+}
 import { withRenderScope } from "./render-scope";
 import { PhaseSamples } from "./app/stats";
 import type { ComponentAdapter } from "./component-adapter";
 import { DevErrorOverlay } from "./dev-overlay";
 import { iconBytes, iconFileForShell, runtimeAppMetadata } from "./app-metadata";
+import { applySavedState, windowStateStore } from "./window-state";
 import { nativeAssetPath } from "./embedded-assets";
 
 export type AppErrorSource =
@@ -55,6 +79,12 @@ export interface AppOptions {
    * Each font is then available by its family name in `fontFamily`.
    */
   fontFaces?: readonly string[];
+  /**
+   * Remember the window's size, position and maximized state between runs, per user
+   * (`<config dir>/<app>/window-state.json`): `true` for this window, or a key naming it.
+   * A saved position off every monitor reopens the window centred.
+   */
+  rememberWindow?: boolean | string;
   /** What the window close button does without an onCloseRequest handler: quit (default) or hide the window, e.g. for tray apps. */
   closeBehavior?: "exit" | "hide";
   /**
@@ -119,6 +149,12 @@ export interface AppJsStats {
   heapUsedMb: number;
 }
 export interface AppStats { js: AppJsStats; native: NativeStats }
+/** Options of a window opened with `app.openWindow`: an app of its own on the same native app. */
+export interface OpenWindowOptions extends Pick<AppOptions, "rememberWindow" | "debug" | "renderer" | "componentAdapters" | "onError" | "dev" | "maxFps" | "msaa" | "keyboardEvents" | "pointerEvents" | "closeBehavior"> {
+  /** Names the window in native events; unique among the app's open windows. Default `window-<n>`. */
+  id?: string;
+}
+
 export interface AppHandle {
   ready: Promise<void>;
   closed: Promise<void>;
@@ -138,6 +174,14 @@ export interface AppHandle {
    */
   textSelection(): { id: string; anchor: number; focus: number } | undefined;
   close(): void;
+  /**
+   * Opens another window of the app, rendering `view` (a `<Window>` of its own: title,
+   * size, position, backdrop…). It returns that window's own handle: `update()`,
+   * `close()`, `closed`, `onEvent`, `inspect()`… for that window only. The tray,
+   * notifications, media session, desktop widget and `alwaysOnBottom`/`skipTaskbar`
+   * stay with the first window. Closing the first window closes every other one.
+   */
+  openWindow(view: () => VNode, options?: OpenWindowOptions): AppHandle;
   focus(id: string): void;
   /** Scrolls a variable VirtualList to an item; `smooth` eases there like CSS `scroll-behavior: smooth`. */
   scrollToItem(id: string, index: number, offset?: number, options?: { smooth?: boolean }): void;
@@ -145,8 +189,19 @@ export interface AppHandle {
   show(): void;
   hide(): void;
   minimize(): void;
+  /** Shows the window, restores it if minimized and brings it to the front (a second launch, a tray click). */
+  activate(): void;
   /** Shows a system tray icon (Windows). A second call replaces the first tray. */
   tray(options: TrayOptions): TrayHandle;
+  /**
+   * The window's menu bar, replaced as a whole on each call; `null` removes it. Drawn in
+   * the theme at the top of the window (after a `TitleBar`), the same on every system, with
+   * F10 and Alt access keys (`&File`). `{ native: true }` uses the system's instead (a
+   * Win32 menu on Windows, framed windows only). Choosing an item runs its `onSelect` and
+   * `onEvent` sees `{ type: "menu", id }`; an item's `accelerator` also runs it from the
+   * keyboard. Place `<MenuBar items>` yourself to put it elsewhere (inside a `TitleBar`).
+   */
+  menuBar(items: readonly MenuBarItem[] | null, options?: MenuBarOptions): void;
   systemMedia(session: SystemMediaSession | null): void;
   /** Shows a system notification from the tray icon; requires an active tray. */
   notify(options: NotifyOptions): void;
@@ -182,6 +237,30 @@ function asError(value: unknown): Error {
 
 export function createApp(view: () => VNode, options: AppOptions = {}): AppHandle {
   const bridge = options.bridge ?? new BunFfiBridge();
+  /** Event listeners of the windows opened with `openWindow`, by window id. */
+  const windows = new Map<string, (event: NativeEvent) => void>();
+  let windowCount = 0;
+  /** A bridge for one more window of this app: its commands and events go through the app's bridge. */
+  function windowBridge(id: string): NativeBridge {
+    return {
+      start(document: SceneDocument, onEvent: (event: NativeEvent) => void): void {
+        if (ended || closing) throw new Error("The app has closed");
+        windows.set(id, onEvent);
+        bridge.send({ type: "openWindow", window: id, document });
+      },
+      send(command: NativeCommand): void {
+        bridge.send({ type: "toWindow", window: id, command });
+      },
+      join(): void {
+        windows.delete(id);
+      },
+      ...(bridge.requestSync ? {
+        requestSync(command: NativeCommand & { requestId: string }, timeoutMs: number): NativeEvent | undefined {
+          return bridge.requestSync!({ type: "toWindow", window: id, command, requestId: command.requestId }, timeoutMs);
+        },
+      } : {}),
+    };
+  }
   let renderScope: object = {};
   let currentView = view;
   const devMode = options.dev ?? envFlag("TARVE_DEV");
@@ -233,8 +312,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       }
     }
     (globalThis as Record<symbol, unknown>)[ACTIVE_APP_KEY] = app;
+    const drawnMenu = menus.drawn();
     const tree = withRenderScope(scope, () => compileTree(
-      currentView(), options.debug, renderer, options.componentAdapters, scope, !options.headless, viewport,
+      drawnMenu ? withMenuBar(currentView(), jsx(MenuBar, { id: APP_MENU_BAR_ID, items: drawnMenu, onSelect: (id: string) => onNativeEvent({ type: "menu", id }) })) : currentView(), options.debug, renderer, options.componentAdapters, scope, !options.headless, viewport,
     ));
     appWindow = tree.document.window;
     if (options.closeBehavior === "hide") tree.document.root.closeIntercept = true;
@@ -345,6 +425,21 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     closedError: () => (ended ? terminalError ?? new Error("Native window is closed") : undefined),
   });
   const trays = createTrayController(appIcon, command => { if (!ended) sendPublic(command); });
+  const menus = createMenuBarController({
+    send: command => { if (!ended) sendPublic(command); },
+    registerHotkey: (shortcut, handler) => app.registerHotkey(shortcut, handler),
+    update: () => { if (!ended) update(); },
+    openMenu: index => {
+      const state = menuBarState(APP_MENU_BAR_ID, renderScope);
+      if (index === null) { state.open = null; state.sub = null; app.focus(`${APP_MENU_BAR_ID}-menu-0`); return; }
+      state.open = index;
+      state.sub = null;
+      // Rendered first: the focus goes to an item of the menu this opens.
+      update();
+      const first = (menus.drawn()?.[index] as { items?: MenuBarItem[] } | undefined)?.items?.findIndex(item => item.type !== "separator" && !item.disabled) ?? -1;
+      app.focus(first >= 0 ? `${APP_MENU_BAR_ID}-item-${index}-${first}` : `${APP_MENU_BAR_ID}-menu-${index}`);
+    },
+  });
   const syncLoadedMedia = createMediaSync((command, event, targetId) => sendInternal(command, { source: "bridge", event, targetId }));
   const dispatchElementEvent = createElementDispatcher(invokeHandler, id => committed?.handlers.get(id));
 
@@ -468,6 +563,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
   function finishClosed(): void {
     if (ended) return;
+    // The app's other windows close with it.
+    for (const onEvent of [...windows.values()]) onEvent({ type: "closed" });
+    windows.clear();
     ended = true;
     closing = true;
     const closeError = terminalError ?? new Error("Native window closed");
@@ -502,7 +600,13 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       reportError(error, { source: "native", event: "error" });
     }
 
-    if (event.type === "closed") finishClosed();
+    if (event.type === "windowState" && rememberKey) {
+      windowStateStore().set(rememberKey, { x: event.x, y: event.y, width: event.width, height: event.height, maximized: event.maximized, ...(event.physical ? { physical: true } : {}) });
+    }
+    if (event.type === "closed") {
+      if (rememberKey) windowStateStore().flush();
+      finishClosed();
+    }
 
     if (!ended && committed && observed && event.type === "escape") {
       const item = [...committed.handlers.entries()].reverse().find(([, handlers]) => handlers.onEscape);
@@ -549,6 +653,11 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         if (onMenu) ran = run("trayMenu", () => onMenu(event.id)) || ran;
       } else ran = run("notificationClick", notificationClick);
       if (ran) update();
+    }
+
+    if (!ended && event.type === "menu") {
+      const handler = menus.handler(event.id);
+      if (handler && invokeHandler("menu", event.id, handler)) update();
     }
 
     if (!ended && event.type === "systemMedia" && systemMediaAction) {
@@ -627,6 +736,13 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   }
 
   function onNativeEvent(event: NativeEvent): void {
+    // Events of the app's other windows go to their own app handles.
+    const target = (event as { window?: string }).window;
+    if (target !== undefined) {
+      const { window: _, ...own } = event as NativeEvent & { window: string };
+      windows.get(target)?.(own as NativeEvent);
+      return;
+    }
     try {
       dispatchNativeEvent(event);
     } catch (error) {
@@ -671,6 +787,17 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         return undefined;
       }
     },
+    openWindow(windowView: () => VNode, windowOptions: OpenWindowOptions = {}): AppHandle {
+      if (ended || closing) throw new Error("The app has closed");
+      const { id = `window-${++windowCount}`, rememberWindow, ...rest } = windowOptions;
+      if (windows.has(id)) throw new Error(`Window '${id}' is already open`);
+      return createApp(windowView, {
+        debug: options.debug, renderer: options.renderer, componentAdapters: options.componentAdapters,
+        onError: options.onError, maxFps: options.maxFps, msaa: options.msaa, ...rest,
+        ...(rememberWindow ? { rememberWindow: rememberWindow === true ? id : rememberWindow } : {}),
+        bridge: windowBridge(id),
+      });
+    },
     close(): void {
       if (ended || closing) return;
       sendPublic({ type: "close" });
@@ -694,8 +821,14 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     minimize(): void {
       if (!ended) sendPublic({ type: "window", action: "minimize" });
     },
+    activate(): void {
+      if (!ended) sendPublic({ type: "window", action: "activate" });
+    },
     tray(initial: TrayOptions): TrayHandle {
       return trays.tray(initial);
+    },
+    menuBar(items: readonly MenuBarItem[] | null, menuOptions?: MenuBarOptions): void {
+      if (!ended) menus.set(items, menuOptions);
     },
     systemMedia(session: SystemMediaSession | null): void {
       if (session) {
@@ -827,6 +960,14 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     return app;
   }
 
+  const rememberKey = options.rememberWindow === true ? "main" : options.rememberWindow || undefined;
+  if (rememberKey) {
+    try {
+      committed.document.window = applySavedState(committed.document.window, windowStateStore().get(rememberKey));
+    } catch (error) {
+      reportError(error, { source: "bridge", event: "rememberWindow" });
+    }
+  }
   try {
     const fonts = options.fontFaces?.map(path => Buffer.from(readFileSync(nativeAssetPath(path))).toString("base64"));
     bridge.start(fonts?.length ? { ...committed.document, fonts } : committed.document, onNativeEvent);

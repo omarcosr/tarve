@@ -345,6 +345,9 @@ pub struct Node {
     pub draggable: bool,
     #[serde(default)]
     pub drop_target: bool,
+    /// Takes files dragged in from the system (Explorer, Finder, a file manager).
+    #[serde(default)]
+    pub file_drop_target: bool,
     /// Emit a `size` event with the inner (padding box minus padding) size whenever it changes.
     #[serde(default)]
     pub report_size: bool,
@@ -449,7 +452,14 @@ pub enum WindowPositionPreset {
 #[serde(untagged)]
 pub enum WindowPosition {
     Preset(WindowPositionPreset),
-    Coordinates { x: f64, y: f64 },
+    /// Logical px, or physical screen px with `physical` (a remembered position:
+    /// logical coordinates depend on the DPI of the monitor the window ends up on).
+    Coordinates {
+        x: f64,
+        y: f64,
+        #[serde(default)]
+        physical: bool,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -480,6 +490,13 @@ pub struct WindowOptions {
     /// What shows through where the window's frame is translucent.
     #[serde(default)]
     pub backdrop: WindowBackdrop,
+    /// Opens maximized (a restored window state); `width`/`height`/`position` are then
+    /// its restored bounds.
+    #[serde(default)]
+    pub maximized: bool,
+    /// Report the window's restored bounds and maximized state as `windowState` events.
+    #[serde(default)]
+    pub report_window_state: bool,
 }
 
 /// What a window shows behind its translucent pixels.
@@ -630,6 +647,10 @@ pub struct SystemMediaSession {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrayMenuItem {
+    /// Shown right-aligned in a window menu (`Ctrl+S`); the app handles the key itself.
+    #[serde(default)]
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub accelerator: Option<String>,
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
@@ -647,6 +668,16 @@ pub struct TrayMenuItem {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Command {
+    /// A command for another window of the app (`openWindow`'s id).
+    ToWindow {
+        window: String,
+        command: Box<Command>,
+    },
+    /// Opens another window of the app, with its own document.
+    OpenWindow {
+        window: String,
+        document: Box<Document>,
+    },
     Patch {
         nodes: Vec<Node>,
     },
@@ -669,6 +700,10 @@ pub enum Command {
     },
     Tray {
         tray: Option<TrayOptions>,
+    },
+    /// The window's native menu bar (Windows); `None` removes it.
+    MenuBar {
+        menu: Option<Vec<TrayMenuItem>>,
     },
     SystemMedia {
         session: Option<SystemMediaSession>,

@@ -1,5 +1,5 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const NATIVE_ABI_VERSION = 5;
+export const NATIVE_ABI_VERSION = 6;
 export const PROTOCOL_VERSION = 59;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
@@ -186,6 +186,8 @@ export interface Style extends StateStyle {
   spin?: number;
   /** CSS text: `font-style`, `letter-spacing`, `word-spacing`, `text-transform`, `white-space`, `text-overflow` and `line-clamp`. */
   fontStyle?: "normal" | "italic" | "oblique"; letterSpacing?: number; wordSpacing?: number;
+  /** Width of a tab in spaces (CSS `tab-size`); default 8. */
+  tabSize?: number;
   /** CSS `font-variant-numeric` (e.g. `"tabular-nums"`, `"slashed-zero"`) and `font-feature-settings` (`'"ss01" 1, "cv11" 1'`). Inherited. */
   fontVariantNumeric?: string; fontFeatureSettings?: string;
   /** CSS `scrollbar-width` on scroll boxes and text areas: `none` hides the bar (still scrollable), `thin` narrows it. */
@@ -302,6 +304,8 @@ export interface NativeNode {
   /** Interactive nodes only: a press past 4px becomes a pointer drag. */
   draggable?: boolean;
   dropTarget?: boolean;
+  /** Takes files dragged in from the system (`onFileDrop`). */
+  fileDropTarget?: boolean;
   /** Native sends a `size` event with the content-box size on first layout and on every change. */
   reportSize?: boolean;
   /** Native sends `pointerMove` events with the pointer's position inside the node while it is over it. */
@@ -323,7 +327,8 @@ export type WindowPositionPreset =
   | "top-left" | "top" | "top-right"
   | "left" | "center" | "right"
   | "bottom-left" | "bottom" | "bottom-right";
-export type WindowPosition = WindowPositionPreset | { x: number; y: number };
+/** Logical px, or physical screen px with `physical` (a remembered position). */
+export type WindowPosition = WindowPositionPreset | { x: number; y: number; physical?: boolean };
 export interface WindowOptions {
   title: string; width: number; height: number; minWidth: number; minHeight: number;
   background: string; decorations: boolean; resizable: boolean; position?: WindowPosition; debug?: boolean;
@@ -336,6 +341,10 @@ export interface WindowOptions {
   desktopWidget?: DesktopWidget;
   /** What shows through where the window is translucent; omitted for an opaque window. */
   backdrop?: WindowBackdrop;
+  /** Opens maximized; `width`/`height`/`position` are then the bounds it restores to. */
+  maximized?: boolean;
+  /** Report the restored bounds and maximized state as `windowState` events. */
+  reportWindowState?: boolean;
 }
 /**
  * What a window shows behind its translucent pixels (its background and anything drawn with alpha):
@@ -379,12 +388,16 @@ export interface FileDialogOptions {
   filters?: FileDialogFilter[];
 }
 export type FileDialogMode = "openFile" | "openFiles" | "openFolder" | "saveFile";
-export type WindowAction = "show" | "hide" | "minimize" | "focus";
+export type WindowAction = "show" | "hide" | "minimize" | "focus" | "activate";
 export interface NativeTrayMenuItem {
-  id?: string; label?: string; separator?: boolean; checked?: boolean; disabled?: boolean; items?: NativeTrayMenuItem[];
+  id?: string; label?: string; /** Shown next to the label in a menu bar (`Ctrl+S`). */ accelerator?: string; separator?: boolean; checked?: boolean; disabled?: boolean; items?: NativeTrayMenuItem[];
 }
 export interface NativeTrayOptions { /** Base64 PNG/JPEG/WebP bytes. */ iconData?: string; tooltip?: string; menu: NativeTrayMenuItem[] }
 export type NativeCommand =
+  /** A command for another window of the app (`app.openWindow`). */
+  | { type: "toWindow"; window: string; command: NativeCommand; requestId?: string }
+  /** Opens another window of the app from its own document. */
+  | { type: "openWindow"; window: string; document: SceneDocument }
   | { type: "patch"; nodes: NativeNode[] }
   | { type: "mutate"; mutations: TreeMutation[] }
   | { type: "update"; root: NativeNode }
@@ -394,6 +407,8 @@ export type NativeCommand =
   | { type: "windowLevel"; level: WindowLevel }
   | { type: "windowTitle"; title: string }
   | { type: "tray"; tray: NativeTrayOptions | null }
+  /** The window's native menu bar (Windows); null removes it. */
+  | { type: "menuBar"; menu: NativeTrayMenuItem[] | null }
   | { type: "systemMedia"; session: NativeSystemMediaSession | null }
   | { type: "notify"; title: string; body: string }
   | { type: "media"; id: string; action: "load" | "unload" | "play" | "pause" | "seek" | "set"; src?: string; time?: number; volume?: number; muted?: boolean; loop?: boolean; /** `"video"` on a load: the platform video decoder plays it. */ kind?: "video" }
@@ -486,6 +501,17 @@ export type NativeEvent =
   | { type: "dragMove"; id: string; x: number; y: number; over: string | null }
   | { type: "drop"; id: string; target: string | null; x: number; y: number }
   | { type: "dragCancel"; id: string }
+  /** Files dragged in from the system entered a file drop target. */
+  | { type: "fileDragEnter"; id: string; paths: string[] }
+  | { type: "fileDragLeave"; id: string }
+  /** An item of the window's menu bar was chosen. */
+  | { type: "menu"; id: string }
+  /** The window's restored bounds (logical outer position, client size) and state changed (`reportWindowState`). */
+  | { type: "windowState"; x: number; y: number; physical?: boolean; width: number; height: number; maximized: boolean; fullscreen: boolean }
+  /** Files dropped from the system on the file drop target under the pointer. */
+  | { type: "fileDrop"; id: string; paths: string[]; x: number; y: number }
+  /** Files dropped from the system outside every file drop target. */
+  | { type: "fileDrop"; paths: string[]; x: number; y: number }
   | { type: "key"; id: string; key: string }
   | { type: "pointer"; phase: "down" | "up" | "wheel"; id: string | null; x: number; y: number; button?: number; deltaX?: number; deltaY?: number; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }
   | { type: "keyboard"; phase: "down" | "up"; id: string | null; key: string; code: string; repeat: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }

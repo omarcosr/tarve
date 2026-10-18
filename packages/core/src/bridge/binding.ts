@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 
-type NativeSymbols = Record<"tarve_start" | "tarve_send" | "tarve_event_pipe_name" | "tarve_poll_event" | "tarve_open_external" | "tarve_last_error", (buffer: Uint8Array, length: number) => number> & { tarve_abi_version(): number; tarve_join(): number };
+type NativeSymbols = Record<"tarve_start" | "tarve_send" | "tarve_event_pipe_name" | "tarve_poll_event" | "tarve_open_external" | "tarve_last_error", (buffer: Uint8Array, length: number) => number> & { tarve_abi_version(): number; tarve_join(): number; tarve_allow_foreground(pid: number): number };
 
 type NativeLibrary = { symbols: NativeSymbols; close(): void };
 
@@ -15,6 +15,7 @@ export function openLibrary(path: string): NativeLibrary {
     tarve_open_external: { args: ["buffer", "u32"], returns: "i32" },
     tarve_last_error: { args: ["buffer", "u32"], returns: "i32" },
     tarve_join: { args: [], returns: "i32" },
+    tarve_allow_foreground: { args: ["u32"], returns: "i32" },
   } as const;
   // txiki.js: the executable's prelude exposes tjs:ffi, whose dlopen matches bun:ffi.
   const txikiFfi = (globalThis as { __tarveTxikiFfi?: { dlopen(path: string, symbols: typeof definitions): NativeLibrary } }).__tarveTxikiFfi;

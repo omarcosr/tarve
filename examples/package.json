@@ -21,6 +21,8 @@
     "widget": "tarve run widget/widget.tsx",
     "glass": "tarve run glass/glass.tsx",
     "translucent": "tarve run translucent/translucent.tsx",
+    "windows": "tarve run windows/windows.tsx",
+    "notes": "tarve run notes/notes.tsx",
     "liquid": "tarve run liquid/liquid.tsx",
     "tailwind": "tarve run tailwind/tailwind.tsx",
     "svelte": "tarve run svelte/main.ts",

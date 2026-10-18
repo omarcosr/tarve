@@ -49,15 +49,19 @@ export interface TextAreaProps extends BaseProps {
   value?: string;
   placeholder?: string;
   disabled?: boolean;
+  /** Line breaks of `value` become `\n` (`\r\n` and `\r` too), as in an HTML textarea; `onChange` reports `\n`. A tab is drawn `style.tabSize` spaces wide (default 8). */
   /** When true, Enter submits and Shift+Enter inserts a newline. Ctrl/Cmd+Enter always submits. */
   submitOnEnter?: boolean;
   onChange?: (value: string) => void;
   onSubmit?: (value: string) => void;
 }
 
-export function TextArea({ style, ...props }: TextAreaProps): VNode {
+export function TextArea({ style, value, ...props }: TextAreaProps): VNode {
   return _nativeJsx("textarea", {
     ...props,
+    // Line breaks are \n, as an HTML textarea's value: a Windows file's \r\n would
+    // draw an empty line after every line and give the caret a stop in between.
+    ...(value !== undefined ? { value: value.includes("\r") ? value.replace(/\r\n?/g, "\n") : value } : {}),
     style: {
       width: "100%",
       height: 120,

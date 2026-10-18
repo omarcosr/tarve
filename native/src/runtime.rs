@@ -342,6 +342,31 @@ pub(crate) fn ime_allowed_for_node(node: Option<&Node>) -> bool {
 /// Keys a focused text field uses for typing, editing and moving the caret.
 /// Alone or with Shift they belong to the field, so they are not hotkeys:
 /// typing a space in a search box must not also press "Space".
+/// Editing chords a focused text field handles itself (clipboard, select all, undo,
+/// word moves): no app shortcut or menu accelerator takes them from it.
+pub(crate) fn editing_shortcut(key: &Key, modifiers: ModifiersState) -> bool {
+    let command = modifiers.control_key() || modifiers.super_key();
+    if !command || modifiers.alt_key() {
+        return false;
+    }
+    match key {
+        Key::Character(value) => matches!(value.to_ascii_lowercase().as_str(), "a" | "c" | "v" | "x" | "z" | "y"),
+        Key::Named(named) => matches!(
+            named,
+            NamedKey::Backspace
+                | NamedKey::Delete
+                | NamedKey::ArrowLeft
+                | NamedKey::ArrowRight
+                | NamedKey::ArrowUp
+                | NamedKey::ArrowDown
+                | NamedKey::Home
+                | NamedKey::End
+                | NamedKey::Insert
+        ),
+        _ => false,
+    }
+}
+
 pub(crate) fn text_field_consumes(key: &Key, modifiers: ModifiersState) -> bool {
     if modifiers.control_key() || modifiers.alt_key() || modifiers.super_key() {
         return false;
@@ -634,6 +659,23 @@ fn cloak_while_material_settles(hwnd: *mut std::ffi::c_void) {
     });
 }
 
+/// Whether the window is maximized now. winit updates its own flag after the resize
+/// it reports, so a `Resized` from maximizing still reads "restored" there.
+#[cfg(target_os = "windows")]
+fn os_maximized(window: &Window) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsZoomed;
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match window.window_handle().map(|handle| handle.as_raw()) {
+        Ok(RawWindowHandle::Win32(handle)) => unsafe { IsZoomed(handle.hwnd.get() as _) != 0 },
+        _ => window.is_maximized(),
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn os_maximized(window: &Window) -> bool {
+    window.is_maximized()
+}
+
 /// DWM's open, close, minimize and restore animations for the window.
 #[cfg(target_os = "windows")]
 fn set_dwm_transitions(hwnd: *mut std::ffi::c_void, enabled: bool) {
@@ -875,15 +917,21 @@ struct WindowLogicalSize {
 }
 
 thread_local! {
-    static WINDOW_LOGICAL_SIZE: WindowLogicalSize = WindowLogicalSize::default();
+    /// By window (`u64::from(WindowId)`, the HWND on Windows): every window keeps its own.
+    static WINDOW_LOGICAL_SIZE: std::cell::RefCell<std::collections::HashMap<u64, WindowLogicalSize>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
     /// `alwaysOnBottom`: Windows only places the window at the bottom once, and
     /// activating it (a click, a drag, being shown) raises it again, so every
     /// z-order change is redirected to the bottom while this is set.
     static KEEP_AT_BOTTOM: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// `skipTaskbar`: keep the tool-window style through winit's style rewrites.
     static SKIP_TASK_SWITCHER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// A WM_SETTINGCHANGE arrived (Windows): system settings may have changed.
-    static SETTINGS_CHANGED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Counts WM_SETTINGCHANGE messages (Windows): system settings may have changed.
+    static SETTINGS_GENERATION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn with_logical_size<T>(window: u64, read: impl FnOnce(&WindowLogicalSize) -> T) -> T {
+    WINDOW_LOGICAL_SIZE.with(|sizes| read(sizes.borrow_mut().entry(window).or_default()))
 }
 
 fn keep_at_bottom(enabled: bool) {
@@ -904,14 +952,14 @@ fn winit_window_level(level: crate::protocol::WindowLevel) -> winit::window::Win
 /// the monitor being left; feeding them back made the window grow by the DPI
 /// ratio on every crossing.
 #[cfg(target_os = "windows")]
-fn install_dpi_scaled_size(window: &Window) {
+fn install_dpi_scaled_size(window: &Window, main: bool) {
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, SIZE, WPARAM};
     use windows_sys::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForWindow};
     use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetMenu, GetWindowLongPtrW, GetWindowRect,
         HWND_BOTTOM, STYLESTRUCT, SWP_NOZORDER, WINDOWPOS, WM_EXITSIZEMOVE, WM_MOVING,
-        WM_SETTINGCHANGE, WM_STYLECHANGING, WM_WINDOWPOSCHANGING,
+        WM_COMMAND, WM_SETTINGCHANGE, WM_STYLECHANGING, WM_WINDOWPOSCHANGING,
     };
 
     const WM_GETDPISCALEDSIZE: u32 = 0x02E4;
@@ -923,25 +971,32 @@ fn install_dpi_scaled_size(window: &Window) {
         wparam: WPARAM,
         lparam: LPARAM,
         _: usize,
-        _: usize,
+        main: usize,
     ) -> LRESULT {
+        // The z-order, task switcher and logical-size state is the main window's.
+        let main = main != 0;
         match message {
-            WM_MOVING => WINDOW_LOGICAL_SIZE.with(|state| state.moving.set(true)),
+            WM_MOVING => with_logical_size(hwnd as u64, |state| state.moving.set(true)),
             WM_STYLECHANGING
-                if wparam as i32 == GWL_EXSTYLE && SKIP_TASK_SWITCHER.with(|skip| skip.get()) =>
+                if main && wparam as i32 == GWL_EXSTYLE && SKIP_TASK_SWITCHER.with(|skip| skip.get()) =>
             {
                 let styles = lparam as *mut STYLESTRUCT;
                 unsafe { (*styles).styleNew = tool_window_style((*styles).styleNew) };
             }
-            WM_WINDOWPOSCHANGING if KEEP_AT_BOTTOM.with(|keep| keep.get()) => {
+            WM_WINDOWPOSCHANGING if main && KEEP_AT_BOTTOM.with(|keep| keep.get()) => {
                 let position = lparam as *mut WINDOWPOS;
                 unsafe {
                     (*position).hwndInsertAfter = HWND_BOTTOM;
                     (*position).flags &= !SWP_NOZORDER;
                 }
             }
-            WM_EXITSIZEMOVE => WINDOW_LOGICAL_SIZE.with(|state| state.moving.set(false)),
-            WM_SETTINGCHANGE => SETTINGS_CHANGED.with(|changed| changed.set(true)),
+            WM_EXITSIZEMOVE => with_logical_size(hwnd as u64, |state| state.moving.set(false)),
+            WM_SETTINGCHANGE => SETTINGS_GENERATION.with(|generation| generation.set(generation.get() + 1)),
+            // A menu bar selection: HIWORD 0 and no control handle.
+            WM_COMMAND if (wparam >> 16) & 0xffff == 0 && lparam == 0 => {
+                crate::menu_bar::selected(hwnd, wparam & 0xffff);
+                return 0;
+            }
             // Scale the client area exactly by the DPI ratio; Windows' default
             // scales the outer rect, which drifts with the frame and compounds.
             WM_GETDPISCALEDSIZE => {
@@ -1010,11 +1065,11 @@ fn install_dpi_scaled_size(window: &Window) {
     let RawWindowHandle::Win32(handle) = handle.as_raw() else {
         return;
     };
-    unsafe { SetWindowSubclass(handle.hwnd.get() as HWND, Some(proc), 0x7a1d, 0) };
+    unsafe { SetWindowSubclass(handle.hwnd.get() as HWND, Some(proc), 0x7a1d, usize::from(main)) };
 }
 
 #[cfg(not(target_os = "windows"))]
-fn install_dpi_scaled_size(_: &Window) {}
+fn install_dpi_scaled_size(_: &Window, _: bool) {}
 
 /// The DPI scale the window is really at; winit's cached factor lags behind
 /// while Windows moves a window between monitors.
@@ -1062,7 +1117,12 @@ fn os_cursor_in_client(window: &Window) -> Option<(f64, f64)> {
     Some((point.x as f64, point.y as f64))
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn os_cursor_in_client(window: &Window) -> Option<(f64, f64)> {
+    crate::x11_state::pointer_in_window(window)
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn os_cursor_in_client(_: &Window) -> Option<(f64, f64)> {
     None
 }
@@ -1139,6 +1199,301 @@ pub(crate) fn window_icons(base64: &str) -> Result<WindowIcons, String> {
     })
 }
 
+/// Where a window's events go: the app's queue, tagged with the window they come
+/// from (`"window"`) unless it is the main one.
+#[derive(Clone)]
+pub(crate) struct EventSink {
+    events: Arc<Events>,
+    window: Option<Arc<str>>,
+}
+
+impl EventSink {
+    pub(crate) fn push(&self, mut event: serde_json::Value) {
+        if let (Some(window), Some(object)) = (&self.window, event.as_object_mut()) {
+            object.insert("window".into(), serde_json::Value::from(window.as_ref()));
+        }
+        self.events.push(event);
+    }
+}
+
+/// Wakes the event loop with a command for one window: worker threads (remote
+/// images, video decoders) report to the window that asked them.
+#[derive(Clone)]
+pub(crate) struct CommandProxy {
+    proxy: EventLoopProxy<Command>,
+    window: Option<Arc<str>>,
+}
+
+impl CommandProxy {
+    /// False once the event loop has closed.
+    pub(crate) fn send(&self, command: Command) -> bool {
+        let command = match &self.window {
+            Some(window) => Command::ToWindow {
+                window: window.to_string(),
+                command: Box::new(command),
+            },
+            None => command,
+        };
+        self.proxy.send_event(command).is_ok()
+    }
+}
+
+/// Files dragged in from the system: winit reports each file once on entry
+/// (`HoveredFile`) and on drop (`DroppedFile`), but not the pointer in between,
+/// so the target under it is polled while the drag lasts.
+#[derive(Default)]
+struct FileDrag {
+    hovered: Vec<String>,
+    dropped: Vec<String>,
+    /// The file drop target the pointer is over, as last reported.
+    over: Option<String>,
+    /// `fileDragEnter` is yet to be reported for `hovered`.
+    entering: bool,
+}
+
+impl FileDrag {
+    fn active(&self) -> bool {
+        !self.hovered.is_empty() || !self.dropped.is_empty()
+    }
+}
+
+/// How often the pointer is read while files are dragged over a window.
+const FILE_DRAG_POLL: Duration = Duration::from_millis(50);
+
+/// The earlier of two wake-ups: what every window waits for together.
+fn earlier_flow(a: ControlFlow, b: ControlFlow) -> ControlFlow {
+    match (a, b) {
+        (ControlFlow::Poll, _) | (_, ControlFlow::Poll) => ControlFlow::Poll,
+        (ControlFlow::WaitUntil(x), ControlFlow::WaitUntil(y)) => ControlFlow::WaitUntil(x.min(y)),
+        (ControlFlow::WaitUntil(x), ControlFlow::Wait) | (ControlFlow::Wait, ControlFlow::WaitUntil(x)) => {
+            ControlFlow::WaitUntil(x)
+        }
+        (ControlFlow::Wait, ControlFlow::Wait) => ControlFlow::Wait,
+    }
+}
+
+/// The app's windows on one event loop: the main one (process-wide state, tray,
+/// media session) and those opened later with `openWindow`, each with its own
+/// tree, renderer and events. Closing the main window quits the app; closing
+/// another drops it and reports `closed` for it.
+struct Host {
+    main: App,
+    others: Vec<(String, App)>,
+}
+
+impl Host {
+    fn window_mut(&mut self, id: &str) -> Option<&mut App> {
+        self.others.iter_mut().find(|(key, _)| key == id).map(|(_, app)| app)
+    }
+    fn open(&mut self, event_loop: &ActiveEventLoop, id: String, mut document: Document) {
+        if id.is_empty() || self.others.iter().any(|(key, _)| *key == id) {
+            // Reported to the window that asked, so its `ready` fails instead of waiting.
+            let window = json!(id);
+            let mut failure = error(format!("window '{id}' is already open"));
+            failure["window"] = window.clone();
+            self.main.events.events.push(failure);
+            self.main.events.events.push(json!({"type": "closed", "window": window}));
+            return;
+        }
+        // App fonts are process-wide: registered once, from the main document.
+        document.fonts.clear();
+        let events = EventSink {
+            events: self.main.events.events.clone(),
+            window: Some(Arc::from(id.as_str())),
+        };
+        let mut app = App::new(
+            document,
+            events,
+            self.main.event_proxy.clone(),
+            crate::stats::MemoryStages::default(),
+            false,
+        );
+        app.resumed(event_loop);
+        self.others.push((id, app));
+    }
+    /// After every callback: quit or drop closed windows, then wait for the
+    /// earliest wake-up any window needs.
+    fn settle(&mut self, event_loop: &ActiveEventLoop) {
+        if self.main.exit_requested {
+            event_loop.exit();
+            return;
+        }
+        self.others.retain_mut(|(_, app)| {
+            if !app.exit_requested {
+                return true;
+            }
+            if let Some(message) = app.fatal.take() {
+                app.events.push(error(message));
+            }
+            app.events.push(json!({"type": "closed"}));
+            if let Some(window) = &app.window {
+                let id = u64::from(window.id());
+                WINDOW_LOGICAL_SIZE.with(|sizes| sizes.borrow_mut().remove(&id));
+            }
+            false
+        });
+        let flow = self
+            .others
+            .iter()
+            .fold(self.main.wanted_flow.get(), |flow, (_, app)| earlier_flow(flow, app.wanted_flow.get()));
+        event_loop.set_control_flow(flow);
+    }
+}
+
+impl ApplicationHandler<Command> for Host {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        self.main.resumed(event_loop);
+        for (_, app) in &mut self.others {
+            app.resumed(event_loop);
+        }
+        self.settle(event_loop);
+    }
+    fn suspended(&mut self, event_loop: &ActiveEventLoop) {
+        self.main.suspended(event_loop);
+        for (_, app) in &mut self.others {
+            app.suspended(event_loop);
+        }
+        self.settle(event_loop);
+    }
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.main.about_to_wait(event_loop);
+        for (_, app) in &mut self.others {
+            app.about_to_wait(event_loop);
+        }
+        self.settle(event_loop);
+    }
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if self.main.owns(id) {
+            self.main.window_event(event_loop, id, event);
+        } else if let Some((_, app)) = self.others.iter_mut().find(|(_, app)| app.owns(id)) {
+            app.window_event(event_loop, id, event);
+        }
+        self.settle(event_loop);
+    }
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, command: Command) {
+        match command {
+            Command::OpenWindow { window, document } => self.open(event_loop, window, *document),
+            Command::ToWindow { window, command } => match *command {
+                // The tray, notifications and the media session are the app's, not a window's.
+                command @ (Command::Tray { .. } | Command::Notify { .. } | Command::SystemMedia { .. }) => {
+                    self.main.user_event(event_loop, command)
+                }
+                command => {
+                    if let Some(app) = self.window_mut(&window) {
+                        app.user_event(event_loop, command);
+                    }
+                }
+            },
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            Command::Accessibility { event } => {
+                let id = event.window_id;
+                if self.main.owns(id) {
+                    self.main.user_event(event_loop, Command::Accessibility { event });
+                } else if let Some((_, app)) = self.others.iter_mut().find(|(_, app)| app.owns(id)) {
+                    app.user_event(event_loop, Command::Accessibility { event });
+                }
+            }
+            command => self.main.user_event(event_loop, command),
+        }
+        self.settle(event_loop);
+    }
+}
+
+impl App {
+    /// A window's state from its document; `resumed` then creates the window.
+    fn new(
+        mut document: Document,
+        events: EventSink,
+        event_proxy: EventLoopProxy<Command>,
+        mut memory_stages: crate::stats::MemoryStages,
+        is_main: bool,
+    ) -> App {
+        if let Some(widget) = document.window.desktop_widget.filter(|_| is_main) {
+            let (width, height) = nominal_widget_size(widget);
+            let window = &mut document.window;
+            (
+                window.width,
+                window.height,
+                window.min_width,
+                window.min_height,
+            ) = (width, height, width, height);
+        }
+        let command_proxy = CommandProxy {
+            proxy: event_proxy.clone(),
+            window: events.window.clone(),
+        };
+        let remote_images = crate::remote_image::RemoteImages::new(command_proxy.clone());
+        // The tree owns the nodes from here on; move the children instead of
+        // deep-cloning the whole document (~11 ms for 6,000 nodes).
+        let tree = Tree::new(Node {
+            children: std::mem::take(&mut document.root.children),
+            ..document.root.clone()
+        });
+        memory_stages.record("tree");
+        let videos = {
+            // Engines report from their own threads: each report wakes the loop once.
+            let proxy = std::sync::Mutex::new(command_proxy.clone());
+            crate::video::Videos::new(move || {
+                if let Ok(proxy) = proxy.lock() {
+                    proxy.send(Command::VideoWake);
+                }
+            })
+        };
+        App {
+            is_main,
+            wanted_flow: std::cell::Cell::new(ControlFlow::Wait),
+            exit_requested: false,
+            settings_seen: 0,
+        file_drag: FileDrag::default(),
+        window_state: None,
+        restored_bounds: None,
+        #[cfg(target_os = "windows")]
+        menu_bar: None,
+            parked: false,
+            document,
+            events,
+            tree,
+            graphics: GraphicsState::Suspended(GraphicsCheckpoint::default()),
+            window: None,
+            modifiers: ModifiersState::empty(),
+            scene: vello::Scene::new(),
+            fatal: None,
+            ready_emitted: false,
+            presentation_retry_at: None,
+            memory_dirty: std::cell::Cell::new(false),
+            trim_at: std::cell::Cell::new(None),
+            startup_trim_pending: std::cell::Cell::new(true),
+            last_memory_release: std::cell::Cell::new(Instant::now()),
+            motion_epoch: Instant::now(),
+            motion_test_clock: false,
+            graphics_recovery_episodes: 0,
+            graphics_stable_since: None,
+            ime_target: None,
+            ime_enabled: false,
+            last_titlebar_click: None,
+            close_request_pending: false,
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            event_proxy,
+            tray: None,
+            media: Default::default(),
+            videos,
+            remote_images,
+            present_times: Default::default(),
+            backdrop_dark: None,
+            transparency_effects: None,
+            frame_stats: Default::default(),
+            memory_stages,
+            #[cfg(target_os = "windows")]
+            system_media: None,
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            accessibility: None,
+        }
+    }
+    fn owns(&self, id: WindowId) -> bool {
+        self.window.as_ref().is_some_and(|window| window.id() == id)
+    }
+}
+
 pub fn run(
     mut document: Document,
     events: Arc<Events>,
@@ -1186,20 +1541,9 @@ pub fn run(
         }
     };
     event_loop.set_control_flow(ControlFlow::Wait);
-    // A desktop widget starts at cells of a typical icon size. Windows then
-    // fits it to the desktop icon grid; elsewhere there is no grid to read.
-    if let Some(widget) = document.window.desktop_widget {
-        let (width, height) = nominal_widget_size(widget);
-        let window = &mut document.window;
-        (
-            window.width,
-            window.height,
-            window.min_width,
-            window.min_height,
-        ) = (width, height, width, height);
-    }
+    // A desktop widget starts at cells of a typical icon size (`App::new`). Windows
+    // then fits it to the desktop icon grid; elsewhere there is no grid to read.
     let event_proxy = event_loop.create_proxy();
-    let remote_images = crate::remote_image::RemoteImages::new(event_proxy.clone());
     ready
         .send(Ok(event_proxy.clone()))
         .map_err(|e| e.to_string())?;
@@ -1212,63 +1556,16 @@ pub fn run(
             ))),
         }
     }
-    // The tree owns the nodes from here on; move the children instead of
-    // deep-cloning the whole document (~11 ms for 6,000 nodes).
-    let tree = Tree::new(Node {
-        children: std::mem::take(&mut document.root.children),
-        ..document.root.clone()
-    });
-    memory_stages.record("tree");
-    let videos = {
-        // Engines report from their own threads: each report wakes the loop once.
-        let proxy = std::sync::Mutex::new(event_proxy.clone());
-        crate::video::Videos::new(move || {
-            if let Ok(proxy) = proxy.lock() {
-                let _ = proxy.send_event(Command::VideoWake);
-            }
-        })
-    };
-    let mut app = App {
-        parked: false,
+    let main = App::new(
         document,
-        events,
-        tree,
-        graphics: GraphicsState::Suspended(GraphicsCheckpoint::default()),
-        window: None,
-        modifiers: ModifiersState::empty(),
-        scene: vello::Scene::new(),
-        fatal: None,
-        ready_emitted: false,
-        presentation_retry_at: None,
-        memory_dirty: std::cell::Cell::new(false),
-        trim_at: std::cell::Cell::new(None),
-        startup_trim_pending: std::cell::Cell::new(true),
-        last_memory_release: std::cell::Cell::new(Instant::now()),
-        motion_epoch: Instant::now(),
-        motion_test_clock: false,
-        graphics_recovery_episodes: 0,
-        graphics_stable_since: None,
-        ime_target: None,
-        ime_enabled: false,
-        last_titlebar_click: None,
-        close_request_pending: false,
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        EventSink { events, window: None },
         event_proxy,
-        tray: None,
-        media: Default::default(),
-        videos,
-        remote_images,
-        present_times: Default::default(),
-        backdrop_dark: None,
-        transparency_effects: None,
-        frame_stats: Default::default(),
         memory_stages,
-        #[cfg(target_os = "windows")]
-        system_media: None,
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
-        accessibility: None,
-    };
-    event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
+        true,
+    );
+    let mut host = Host { main, others: Vec::new() };
+    event_loop.run_app(&mut host).map_err(|e| e.to_string())?;
+    let app = host.main;
     if let Some(error) = app.fatal {
         return Err(error);
     }
@@ -1276,6 +1573,25 @@ pub fn run(
 }
 
 struct App {
+    /// The app's first window (`run`'s document); others come from `openWindow`.
+    /// Process-wide window state (desktop widget, z-order, task switcher, tray)
+    /// belongs to it.
+    is_main: bool,
+    /// The control flow this window needs; the host waits for the earliest of all.
+    wanted_flow: std::cell::Cell<ControlFlow>,
+    /// Closed (main: the app quits) or failed; the host drops the window.
+    exit_requested: bool,
+    /// `SETTINGS_GENERATION` this window last looked at.
+    settings_seen: u64,
+    /// Files dragged in from the system, while over the window.
+    file_drag: FileDrag,
+    /// The last `windowState` reported (`reportWindowState`), and the restored
+    /// bounds a maximized window goes back to.
+    window_state: Option<serde_json::Value>,
+    restored_bounds: Option<(f64, f64, f64, f64)>,
+    /// The window's native menu bar (`menuBar` command, Windows).
+    #[cfg(target_os = "windows")]
+    menu_bar: Option<crate::menu_bar::MenuBar>,
     /// Hidden by the app (`app.hide()`, close-to-tray): no GPU device, no
     /// frames, no motion ticks until it is shown again.
     parked: bool,
@@ -1285,7 +1601,7 @@ struct App {
     startup_trim_pending: std::cell::Cell<bool>,
     last_memory_release: std::cell::Cell<Instant>,
     document: Document,
-    events: Arc<Events>,
+    events: EventSink,
     tree: Tree,
     graphics: GraphicsState,
     window: Option<Arc<Window>>,
@@ -1584,14 +1900,14 @@ impl App {
         }
     }
 
-    fn request_close(&mut self, event_loop: &ActiveEventLoop) {
+    fn request_close(&mut self, _event_loop: &ActiveEventLoop) {
         let intercept = self
             .tree
             .entries
             .get(&self.tree.root)
             .is_some_and(|entry| entry.node.close_intercept);
         match close_request_action(intercept, &mut self.close_request_pending) {
-            CloseRequestAction::Exit => event_loop.exit(),
+            CloseRequestAction::Exit => self.exit_requested = true,
             CloseRequestAction::Emit => self.events.push(json!({"type":"closeRequest"})),
             CloseRequestAction::Ignore => {}
         }
@@ -1633,8 +1949,8 @@ impl App {
     fn desktop_widget_aim(&self, window: &Window) -> ((f64, f64), (i32, i32)) {
         use crate::protocol::WindowPositionPreset::*;
         let anchor = match self.document.window.position.as_ref() {
-            Some(WindowPosition::Coordinates { x, y }) => {
-                let scale = window.scale_factor();
+            Some(WindowPosition::Coordinates { x, y, physical }) => {
+                let scale = if *physical { 1.0 } else { window.scale_factor() };
                 return (
                     (0.0, 0.0),
                     ((x * scale).round() as i32, (y * scale).round() as i32),
@@ -1713,8 +2029,36 @@ impl App {
             return;
         }
         match self.document.window.position.as_ref() {
-            Some(WindowPosition::Coordinates { x, y }) => {
-                window.set_outer_position(LogicalPosition::new(*x, *y));
+            Some(WindowPosition::Coordinates { x, y, physical }) => {
+                // A saved position on a monitor that is gone (or moved) would open the
+                // window off screen: centre it on the primary monitor instead.
+                let scale = window.scale_factor();
+                let size = LogicalSize::new(self.document.window.width, self.document.window.height)
+                    .to_physical::<f64>(scale);
+                let at = if *physical {
+                    PhysicalPosition::new(*x, *y)
+                } else {
+                    LogicalPosition::new(*x, *y).to_physical::<f64>(scale)
+                };
+                let on_screen = event_loop.available_monitors().any(|monitor| {
+                    let (position, extent) = (monitor.position(), monitor.size());
+                    let overlap_x = (at.x + size.width).min(f64::from(position.x) + f64::from(extent.width))
+                        - at.x.max(f64::from(position.x));
+                    let overlap_y = (at.y + 32.0 * scale).min(f64::from(position.y) + f64::from(extent.height))
+                        - at.y.max(f64::from(position.y));
+                    // The title bar strip must be reachable to drag the window back.
+                    overlap_x >= 64.0 * scale && overlap_y >= 16.0 * scale
+                });
+                if on_screen {
+                    window.set_outer_position(at);
+                } else if let Some(monitor) = event_loop.primary_monitor().or_else(|| window.current_monitor()) {
+                    window.set_outer_position(anchored_window_position(
+                        &crate::protocol::WindowPositionPreset::Center,
+                        monitor.position(),
+                        monitor.size(),
+                        size.cast(),
+                    ));
+                }
             }
             Some(WindowPosition::Preset(preset)) => {
                 let Some(monitor) = event_loop
@@ -2066,7 +2410,7 @@ impl App {
         }
     }
 
-    fn sync_control_flow(&self, event_loop: &ActiveEventLoop) {
+    fn sync_control_flow(&self, _event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         let startup_trim_at = if self.startup_trim_pending.get() {
             match self.trim_at.get() {
@@ -2093,7 +2437,9 @@ impl App {
         let motion_at = self.motion_deadline(now);
         let media_at = self.media.deadline();
         let video_at = self.videos.deadline();
+        let file_drag_at = self.file_drag.active().then(|| now + FILE_DRAG_POLL);
         let deadline = [
+            file_drag_at,
             recovery_at,
             present_at,
             motion_at,
@@ -2105,7 +2451,7 @@ impl App {
         .flatten()
         .min();
         if let Some(deadline) = deadline {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+            self.wanted_flow.set(ControlFlow::WaitUntil(deadline));
             return;
         }
         // Idle: hand free allocator pages back once activity settles, at most
@@ -2114,7 +2460,7 @@ impl App {
         // pages startup and the last burst touched back to the OS.
         if let Some(at) = self.trim_at.get() {
             if at > now {
-                event_loop.set_control_flow(ControlFlow::WaitUntil(at));
+                self.wanted_flow.set(ControlFlow::WaitUntil(at));
                 return;
             }
             crate::release_free_memory();
@@ -2126,14 +2472,14 @@ impl App {
         if self.memory_dirty.get() {
             let release_at = self.last_memory_release.get() + MEMORY_RELEASE_INTERVAL;
             if release_at > now {
-                event_loop.set_control_flow(ControlFlow::WaitUntil(release_at));
+                self.wanted_flow.set(ControlFlow::WaitUntil(release_at));
                 return;
             }
             crate::release_free_memory();
             self.memory_dirty.set(false);
             self.last_memory_release.set(now);
         }
-        event_loop.set_control_flow(ControlFlow::Wait);
+        self.wanted_flow.set(ControlFlow::Wait);
     }
     fn start_graphics_recovery(&mut self, event_loop: &ActiveEventLoop, cause: String) -> bool {
         if matches!(self.graphics, GraphicsState::Recovering(_)) {
@@ -2216,7 +2562,7 @@ impl App {
                 self.graphics = GraphicsState::Ready(Box::new(graphics));
                 self.tree.dirty.paint = true;
                 self.presentation_retry_at = None;
-                event_loop.set_control_flow(ControlFlow::Wait);
+                self.wanted_flow.set(ControlFlow::Wait);
                 self.request_present_now();
             }
             Err(error) => match graphics_recovery_failure_action(recovery.attempts) {
@@ -2259,6 +2605,46 @@ impl App {
     }
     /// The system material follows the window background's lightness (the app's
     /// theme), not the system theme: light text on a light material stays legible.
+    /// Creates the window and its renderer; the window's backdrop is applied, the
+    /// layout computed while the GPU device comes up. A window without a GDI
+    /// redirection surface that only the CPU renderer could take is made again with one.
+    fn create_graphics_window(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        attributes: winit::window::WindowAttributes,
+        without_redirection: bool,
+    ) -> Result<(Arc<Window>, Graphics), String> {
+        let open = |app: &mut Self, attributes: winit::window::WindowAttributes| -> Result<(Arc<Window>, Graphics), String> {
+            let window = Arc::new(event_loop.create_window(attributes).map_err(|error| error.to_string())?);
+            app.memory_stages.record("window");
+            if let Err(message) = apply_window_backdrop(&window, app.document.window.backdrop, app.document.window.decorations) {
+                app.events.push(error(format!("window backdrop: {message}")));
+            }
+            // Lay out and shape text while the GPU device (prewarmed on another thread
+            // since tarve_start) finishes; prepare() then finds a clean layout.
+            let size = window.inner_size().to_logical::<f32>(window.scale_factor());
+            let _ = app.tree.compute(size.width, size.height);
+            let graphics = Graphics::new(window.clone(), app.document.renderer, app.document.window.backdrop.transparent())?;
+            Ok((window, graphics))
+        };
+        #[cfg(target_os = "windows")]
+        {
+            use winit::platform::windows::WindowAttributesExtWindows;
+            let fallback = attributes.clone().with_no_redirection_bitmap(false);
+            let (window, graphics) = open(self, attributes)?;
+            if without_redirection && graphics.backend() == crate::renderer::RendererBackend::Cpu {
+                drop(graphics);
+                drop(window);
+                return open(self, fallback);
+            }
+            Ok((window, graphics))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = without_redirection;
+            open(self, attributes)
+        }
+    }
     fn sync_backdrop_appearance(&mut self, background: &str) {
         if !self.document.window.backdrop.blurred() {
             return;
@@ -2274,12 +2660,132 @@ impl App {
             self.backdrop_dark = Some(dark);
         }
     }
+    /// Reports the restored bounds (logical outer position, logical client size) and
+    /// whether the window is maximized, when they change (`reportWindowState`).
+    /// Minimized windows and moves while maximized keep the last restored bounds.
+    fn sync_window_state(&mut self) {
+        if !self.document.window.report_window_state {
+            return;
+        }
+        let Some(window) = &self.window else {
+            return;
+        };
+        if window.is_minimized().unwrap_or(false) || !window.is_visible().unwrap_or(true) {
+            return;
+        }
+        let maximized = os_maximized(window);
+        let fullscreen = window.fullscreen().is_some();
+        if !maximized && !fullscreen {
+            let scale = window.scale_factor();
+            let size = window.inner_size().to_logical::<f64>(scale);
+            // The position in physical screen px: logical px would depend on the
+            // scale of the monitor the window reopens on (mixed-DPI setups).
+            if let Ok(position) = window.outer_position() {
+                self.restored_bounds = Some((f64::from(position.x), f64::from(position.y), size.width, size.height));
+            }
+        }
+        let Some((x, y, width, height)) = self.restored_bounds else {
+            return;
+        };
+        let round = |value: f64| (value * 100.0).round() / 100.0;
+        let state = json!({
+            "type": "windowState", "x": round(x), "y": round(y), "physical": true, "width": round(width),
+            "height": round(height), "maximized": maximized, "fullscreen": fullscreen,
+        });
+        if self.window_state.as_ref() != Some(&state) {
+            self.window_state = Some(state.clone());
+            self.events.push(state);
+        }
+    }
+    #[cfg(target_os = "windows")]
+    fn apply_menu_bar(&mut self, menu: Option<Vec<crate::protocol::TrayMenuItem>>) -> Result<(), String> {
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if !self.document.window.decorations {
+            return Err("a frameless window has no native menu bar; use the Menubar component".into());
+        }
+        let Some(window) = &self.window else {
+            return Err("the window is not open yet".into());
+        };
+        if self.menu_bar.is_none() {
+            let handle = window.window_handle().map_err(|error| error.to_string())?;
+            let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+                return Err("expected a Win32 window".into());
+            };
+            self.menu_bar = Some(crate::menu_bar::MenuBar::new(handle.hwnd.get() as _));
+        }
+        let bar = self.menu_bar.as_mut().expect("created above");
+        bar.apply(menu.as_deref())
+    }
+    #[cfg(not(target_os = "windows"))]
+    fn apply_menu_bar(&mut self, _menu: Option<Vec<crate::protocol::TrayMenuItem>>) -> Result<(), String> {
+        Err(format!("native menu bars are not supported on {} yet", std::env::consts::OS))
+    }
+    /// Menu bar selections since the last loop iteration, as `menu` events.
+    fn sync_menu_selections(&mut self) {
+        #[cfg(target_os = "windows")]
+        if let Some(bar) = &self.menu_bar {
+            for command in crate::menu_bar::take_selected(bar.hwnd()) {
+                if let Some(id) = crate::menu_bar::item_for(&bar.ids, command) {
+                    self.events.push(json!({"type": "menu", "id": id}));
+                }
+            }
+        }
+    }
+    /// The pointer in logical client coordinates: read from the OS where it can be
+    /// (no pointer events arrive during a system drag), else the last one seen.
+    fn pointer_point(&self) -> (f64, f64) {
+        self.window
+            .as_ref()
+            .and_then(|window| {
+                let scale = window.scale_factor();
+                os_cursor_in_client(window).map(|(x, y)| (x / scale, y / scale))
+            })
+            .unwrap_or(self.tree.mouse)
+    }
+    /// Reports files dragged in from the system: `fileDragEnter`/`fileDragLeave` on
+    /// the file drop target under the pointer as it changes, then one `fileDrop`
+    /// with every file (`id` null when no target is under the pointer).
+    fn sync_file_drag(&mut self) {
+        if !self.file_drag.active() {
+            return;
+        }
+        let point = self.pointer_point();
+        let target = self.tree.file_drop_target_at(point);
+        let drag = &mut self.file_drag;
+        let mut events = Vec::new();
+        if !drag.dropped.is_empty() {
+            if let Some(over) = drag.over.take().filter(|over| Some(over) != target.as_ref()) {
+                events.push(json!({"type": "fileDragLeave", "id": over}));
+            }
+            let paths = std::mem::take(&mut drag.dropped);
+            let mut drop = json!({"type": "fileDrop", "paths": paths, "x": point.0, "y": point.1});
+            if let Some(id) = target {
+                drop["id"] = json!(id);
+            }
+            events.push(drop);
+            *drag = FileDrag::default();
+        } else if drag.entering || drag.over != target {
+            if let Some(over) = drag.over.take() {
+                events.push(json!({"type": "fileDragLeave", "id": over}));
+            }
+            if let Some(id) = &target {
+                events.push(json!({"type": "fileDragEnter", "id": id, "paths": drag.hovered}));
+            }
+            drag.over = target;
+            drag.entering = false;
+        }
+        for event in events {
+            self.events.push(event);
+        }
+    }
     /// Reports a change of Windows "Transparency effects" while the window has a
     /// material backdrop (`transparencyEffects` event).
     fn sync_transparency_effects(&mut self) {
-        if !self.document.window.backdrop.blurred() || !SETTINGS_CHANGED.with(|changed| changed.replace(false)) {
+        let generation = SETTINGS_GENERATION.with(std::cell::Cell::get);
+        if !self.document.window.backdrop.blurred() || self.settings_seen == generation {
             return;
         }
+        self.settings_seen = generation;
         let enabled = transparency_effects_enabled();
         if self.transparency_effects.replace(enabled) != Some(enabled) {
             self.events
@@ -2430,10 +2936,10 @@ impl App {
             RenderError::Fatal(message) => self.fail(event_loop, message),
         }
     }
-    fn fail(&mut self, event_loop: &ActiveEventLoop, message: String) {
+    fn fail(&mut self, _event_loop: &ActiveEventLoop, message: String) {
         self.fatal = Some(message);
         self.graphics = GraphicsState::Fatal;
-        event_loop.exit();
+        self.exit_requested = true;
     }
     fn redraw_frame(&mut self, event_loop: &ActiveEventLoop) {
         if self.parked {
@@ -2539,7 +3045,9 @@ impl App {
                     }
                     found
                 };
-                let cursor = if self.tree.text_run_at_pointer().is_some() {
+                let cursor = if self.tree.pointer_on_scrollbar() {
+                    CursorIcon::Default
+                } else if self.tree.text_run_at_pointer().is_some() {
                     CursorIcon::Pointer
                 } else if let Some(cursor) = explicit {
                     cursor
@@ -2755,7 +3263,9 @@ impl ApplicationHandler<Command> for App {
         } else {
             options.level
         };
-        keep_at_bottom(level == crate::protocol::WindowLevel::AlwaysOnBottom);
+        if self.is_main {
+            keep_at_bottom(level == crate::protocol::WindowLevel::AlwaysOnBottom);
+        }
         let icon = self.document.window_icon.as_deref().map(window_icons);
         if let Some(Err(message)) = &icon {
             self.events.push(error(format!("window icon: {message}")));
@@ -2804,31 +3314,31 @@ impl ApplicationHandler<Command> for App {
                 identity.id.clone(),
             );
         }
-        match event_loop.create_window(attributes) {
-            Ok(window) => {
-                let window = Arc::new(window);
-                self.memory_stages.record("window");
-                if let Err(message) = apply_window_backdrop(
-                    &window,
-                    self.document.window.backdrop,
-                    self.document.window.decorations,
-                ) {
-                    self.events.push(error(format!("window backdrop: {message}")));
-                }
-                // Lay out and shape text while the GPU device (prewarmed on
-                // another thread since tarve_start) finishes; prepare() then
-                // finds a clean layout. Errors surface again from prepare().
-                let size = window.inner_size().to_logical::<f32>(window.scale_factor());
-                let _ = self.tree.compute(size.width, size.height);
-                match Graphics::new(window.clone(), self.document.renderer, self.document.window.backdrop.transparent()) {
-                    Ok(graphics) => {
+        // A transparent window drawn by the GPU skips the GDI redirection surface:
+        // DirectComposition shows the UI and nothing opaque sits under it. The CPU
+        // renderer presents through GDI, so a window it ends up on is made again with one.
+        let cpu = self.document.renderer == crate::protocol::RendererPreference::Cpu
+            || std::env::var_os("TARVE_RENDERER").is_some_and(|value| value == "cpu");
+        let without_redirection = cfg!(target_os = "windows") && options.backdrop.transparent() && !cpu;
+        #[cfg(target_os = "windows")]
+        let attributes = {
+            use winit::platform::windows::WindowAttributesExtWindows;
+            attributes.with_no_redirection_bitmap(without_redirection)
+        };
+        match self.create_graphics_window(event_loop, attributes, without_redirection) {
+            Ok((window, graphics)) => {
+                {
+                    {
+
                         self.memory_stages.record("graphics");
                         self.graphics = GraphicsState::Ready(Box::new(graphics));
-                        install_dpi_scaled_size(&window);
+                        install_dpi_scaled_size(&window, self.is_main);
                         self.window = Some(window.clone());
                         self.motion_epoch = Instant::now();
                         self.apply_initial_window_position(event_loop, &window, false);
-                        self.attach_desktop_widget(&window);
+                        if self.is_main {
+                            self.attach_desktop_widget(&window);
+                        }
                         self.sync_custom_window_chrome();
                         if let Err(error) = self.prepare() {
                             self.handle_render_error(event_loop, error);
@@ -2848,7 +3358,7 @@ impl ApplicationHandler<Command> for App {
                         if visible {
                             window.set_visible(true);
                         }
-                        if self.document.window.skip_taskbar {
+                        if self.is_main && self.document.window.skip_taskbar {
                             hide_from_task_switcher(&window);
                         }
                         // Once visible, native decorations have their final outer dimensions.
@@ -2856,15 +3366,20 @@ impl ApplicationHandler<Command> for App {
                         if self.document.window.desktop_widget.is_none() {
                             self.apply_initial_window_position(event_loop, &window, true);
                         }
+                        // After the final position: the restored bounds are recorded first,
+                        // so un-maximizing goes back to them.
+                        if self.document.window.maximized && self.document.window.desktop_widget.is_none() {
+                            self.sync_window_state();
+                            window.set_maximized(true);
+                        }
                         self.redraw_frame(event_loop);
                         if self.document.window.backdrop.blurred() {
                             restore_dwm_transitions(&window);
                         }
                     }
-                    Err(error) => self.fail(event_loop, error),
                 }
             }
-            Err(error) => self.fail(event_loop, error.to_string()),
+            Err(error) => self.fail(event_loop, error),
         }
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, command: Command) {
@@ -2924,8 +3439,13 @@ impl ApplicationHandler<Command> for App {
                     self.frame_stats.reset();
                 }
             }
-            Command::Close => event_loop.exit(),
+            Command::Close => self.exit_requested = true,
             Command::CancelCloseRequest => self.close_request_pending = false,
+            Command::MenuBar { menu } => {
+                if let Err(message) = self.apply_menu_bar(menu) {
+                    self.events.push(error(format!("menu bar: {message}")));
+                }
+            }
             Command::WindowTitle { title } => {
                 if let Some(window) = &self.window {
                     window.set_title(&title);
@@ -2934,7 +3454,9 @@ impl ApplicationHandler<Command> for App {
             }
             Command::WindowLevel { level } => {
                 self.document.window.level = level;
-                keep_at_bottom(level == crate::protocol::WindowLevel::AlwaysOnBottom);
+                if self.is_main {
+            keep_at_bottom(level == crate::protocol::WindowLevel::AlwaysOnBottom);
+        }
                 if let Some(window) = &self.window {
                     window.set_window_level(winit_window_level(level));
                 }
@@ -2946,6 +3468,17 @@ impl ApplicationHandler<Command> for App {
                         "hide" => self.park(event_loop),
                         "minimize" => window.set_minimized(true),
                         "focus" if !background_windows() => window.focus_window(),
+                        // Brought back for the user (a second launch, a tray click): shown,
+                        // restored if minimized and focused.
+                        "activate" => {
+                            self.unpark(event_loop);
+                            if let Some(window) = &self.window {
+                                window.set_minimized(false);
+                                if !background_windows() {
+                                    window.focus_window();
+                                }
+                            }
+                        }
                         other => self.events.push(error(format!("unknown window action {other}"))),
                     }
                 }
@@ -3382,6 +3915,8 @@ impl ApplicationHandler<Command> for App {
         }
         let media_events = self.media.tick(now);
         self.emit(media_events);
+        self.sync_file_drag();
+        self.sync_menu_selections();
         self.sync_transparency_effects();
         self.tick_videos();
         if motion_due {
@@ -3440,6 +3975,22 @@ impl ApplicationHandler<Command> for App {
         }
         match event {
             WindowEvent::CloseRequested => self.request_close(event_loop),
+            WindowEvent::Moved(_) => self.sync_window_state(),
+            WindowEvent::HoveredFile(path) => {
+                if self.file_drag.hovered.is_empty() {
+                    self.file_drag.entering = true;
+                }
+                self.file_drag.hovered.push(path.to_string_lossy().into_owned());
+            }
+            WindowEvent::DroppedFile(path) => {
+                self.file_drag.dropped.push(path.to_string_lossy().into_owned());
+            }
+            WindowEvent::HoveredFileCancelled => {
+                if let Some(over) = self.file_drag.over.take() {
+                    self.events.push(json!({"type": "fileDragLeave", "id": over}));
+                }
+                self.file_drag = FileDrag::default();
+            }
             WindowEvent::Resized(size) => {
                 if size.width > 0
                     && size.height > 0
@@ -3450,7 +4001,7 @@ impl ApplicationHandler<Command> for App {
                     // resizes on the way are DPI transitions, not user intent.
                     // While the user moves the window the logical size stays frozen:
                     // resizes on the way are DPI transitions, not user intent.
-                    WINDOW_LOGICAL_SIZE.with(|state| {
+                    with_logical_size(u64::from(window.id()), |state| {
                         if !state.moving.get() || state.size.get().is_none() {
                             state.size.set(Some((logical.width, logical.height)));
                         }
@@ -3471,6 +4022,7 @@ impl ApplicationHandler<Command> for App {
                     self.presentation_retry_at = None;
                 }
                 self.sync_custom_window_chrome_state();
+                self.sync_window_state();
                 accessibility_changed = true;
             }
             WindowEvent::ScaleFactorChanged {
@@ -3479,7 +4031,11 @@ impl ApplicationHandler<Command> for App {
             } => {
                 // Keep the window's logical size on the new monitor; recomputing it
                 // from the current physical size would compound a stale resize.
-                if let Some((width, height)) = WINDOW_LOGICAL_SIZE.with(|state| state.size.get()) {
+                if let Some((width, height)) = self
+                    .window
+                    .as_ref()
+                    .and_then(|window| with_logical_size(u64::from(window.id()), |state| state.size.get()))
+                {
                     let _ = inner_size_writer.request_inner_size(
                         LogicalSize::new(width, height).to_physical::<u32>(scale_factor),
                     );
@@ -3567,15 +4123,17 @@ impl ApplicationHandler<Command> for App {
             WindowEvent::ModifiersChanged(modifiers) => self.modifiers = modifiers.state(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
                 events = self.clipboard_shortcut(&event.logical_key);
-                let typing = ime_allowed_for_node(
+                let editing = ime_allowed_for_node(
                     self.tree
                         .focused
                         .as_ref()
                         .and_then(|id| self.tree.entries.get(id))
                         .map(|entry| &entry.node),
-                ) && text_field_consumes(&event.logical_key, self.modifiers);
+                );
+                let typing = editing && text_field_consumes(&event.logical_key, self.modifiers);
                 if !event.repeat
                     && !typing
+                    && !(editing && editing_shortcut(&event.logical_key, self.modifiers))
                     && let Some(shortcut) = shortcut_name(&event.logical_key, self.modifiers)
                 {
                     events.push(json!({"type":"shortcut", "shortcut":shortcut}));

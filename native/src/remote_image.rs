@@ -5,7 +5,6 @@ use std::collections::VecDeque;
 use std::io::Read;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
-use winit::event_loop::EventLoopProxy;
 
 /// Concurrent downloads, as many as a browser opens per host.
 const WORKERS: usize = 6;
@@ -175,11 +174,11 @@ type Shared = Arc<(Mutex<Queue>, Condvar)>;
 pub(crate) struct RemoteImages {
     queue: Shared,
     workers: usize,
-    proxy: EventLoopProxy<Command>,
+    proxy: crate::runtime::CommandProxy,
 }
 
 impl RemoteImages {
-    pub(crate) fn new(proxy: EventLoopProxy<Command>) -> Self {
+    pub(crate) fn new(proxy: crate::runtime::CommandProxy) -> Self {
         Self {
             queue: Arc::default(),
             workers: 0,
@@ -219,7 +218,7 @@ impl Drop for RemoteImages {
     }
 }
 
-fn worker(queue: &Shared, proxy: &EventLoopProxy<Command>) {
+fn worker(queue: &Shared, proxy: &crate::runtime::CommandProxy) {
     loop {
         let url = {
             let mut state = queue.0.lock().unwrap();
@@ -239,10 +238,7 @@ fn worker(queue: &Shared, proxy: &EventLoopProxy<Command>) {
             fetch(&url).and_then(|bytes| crate::tree::decode_remote_image(&bytes))
         })
         .unwrap_or_else(|_| Err("the image decoder panicked".into()));
-        if proxy
-            .send_event(Command::RemoteImage { url, result })
-            .is_err()
-        {
+        if !proxy.send(Command::RemoteImage { url, result }) {
             return;
         }
     }

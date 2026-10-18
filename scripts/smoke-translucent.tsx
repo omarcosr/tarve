@@ -121,10 +121,11 @@ async function open(backdrop: WindowBackdrop, background: string, framed = false
   return { pid: child.pid, ready, events, close: async () => { child.kill(); await child.exited; } };
 }
 
-async function shoot(child: Child, name: string, active = true): Promise<Shot> {
+async function shoot(child: Child, name: string, active = true, grow = false): Promise<Shot> {
   const path = resolve(work, `${name}.png`);
   await run(`${win32}
 $h=(Get-Process -Id ${child.pid}).MainWindowHandle
+${grow ? "[W]::SetWindowPos($h,[IntPtr]0,0,0,640,420,0x16) | Out-Null; Start-Sleep -Milliseconds 400;" : ""}
 if(${active ? 1 : 0}){ Front $h } else { Front ([IntPtr]${await plateHandle()}); [W]::SetWindowPos([IntPtr]${await plateHandle()},[IntPtr]0,1500,0,60,60,0x10) | Out-Null }
 Start-Sleep -Milliseconds 900
 $r=New-Object W+RECT; [W]::GetClientRect($h,[ref]$r) | Out-Null; $p=New-Object W+POINT; [W]::ClientToScreen($h,[ref]$p) | Out-Null
@@ -171,12 +172,12 @@ try {
   }
   await probe.close();
 
-  const check = async (backdrop: WindowBackdrop, background: string, framed = false, active = true) => {
+  const check = async (backdrop: WindowBackdrop, background: string, framed = false, active = true, grow = false) => {
     const child = await open(backdrop, background, framed);
     try {
       assert.equal(child.ready.windowAlpha, true, `${backdrop}: the window composes alpha`);
-      const name = `${backdrop}${framed ? "-framed" : ""}${background.startsWith("#ff") ? "-light" : ""}${active ? "" : "-inactive"}`;
-      const shot = await shoot(child, name, active);
+      const name = `${backdrop}${framed ? "-framed" : ""}${background.startsWith("#ff") ? "-light" : ""}${active ? "" : "-inactive"}${grow ? "-grown" : ""}`;
+      const shot = await shoot(child, name, active, grow);
       report(name, shot);
       return shot;
     } finally { await child.close(); }
@@ -192,6 +193,8 @@ try {
     const mica = await check("mica", "#00000000", framed);
     assert.ok(mica.crisp < 0.05 && mica.blurred < 0.3, "mica shows the wallpaper, not the windows behind");
   }
+  const grown = await check("transparent", "#00000000", true, true, true);
+  assert.ok(grown.crisp > 0.6, "a framed transparent window stays transparent after it grows");
   if (effects) {
     const blur = await check("blur", "#00000000", false, false);
     assert.ok(blur.blurred > 0.6, "blur stays blurred while the window is inactive");

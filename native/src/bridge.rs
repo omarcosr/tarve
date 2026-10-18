@@ -333,7 +333,7 @@ struct Host {
 }
 static HOST: OnceLock<Mutex<Option<Host>>> = OnceLock::new();
 static LAST_ERROR: Mutex<String> = Mutex::new(String::new());
-pub const ABI_VERSION: u32 = 5;
+pub const ABI_VERSION: u32 = 6;
 fn host() -> &'static Mutex<Option<Host>> {
     HOST.get_or_init(|| Mutex::new(None))
 }
@@ -384,6 +384,20 @@ mod json_input_tests {
         assert_eq!(result.unwrap_err(), "Invalid input buffer");
     }
 }
+/// Lets process `pid` take the foreground (Windows `AllowSetForegroundWindow`): a
+/// second launch hands its arguments to the first instance, which then brings its
+/// window forward. A no-op elsewhere.
+#[unsafe(no_mangle)]
+pub extern "C" fn tarve_allow_foreground(pid: u32) -> i32 {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(pid);
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = pid;
+    0
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn tarve_abi_version() -> u32 {
     ABI_VERSION
@@ -482,36 +496,68 @@ pub unsafe extern "C" fn tarve_open_external(ptr: *const u8, len: u32) -> i32 {
     })
 }
 
+/// What `tarve_start` and `openWindow` check before a document reaches the event loop.
+fn validate_document(document: &Document) -> Result<(), String> {
+    validate_protocol_version(document.version)?;
+    protocol::validate(&document.root)?;
+    let w = &document.window;
+    if ![w.width, w.height, w.min_width, w.min_height]
+        .iter()
+        .all(|n| n.is_finite() && *n > 0.0 && *n < 32_768.0)
+    {
+        return Err("Invalid window dimensions".into());
+    }
+    if let Some(widget) = w.desktop_widget
+        && ![widget.columns, widget.rows]
+            .iter()
+            .all(|cells| (1..=16).contains(cells))
+    {
+        return Err("Invalid desktop widget size".into());
+    }
+    if let Some(protocol::WindowPosition::Coordinates { x, y, .. }) = &w.position
+        && (!x.is_finite()
+            || !y.is_finite()
+            || *x < i32::MIN as f64
+            || *x > i32::MAX as f64
+            || *y < i32::MIN as f64
+            || *y > i32::MAX as f64)
+    {
+        return Err("Invalid window position".into());
+    }
+    Ok(())
+}
+
+/// Validates a command's payload; a window's command is validated as it is.
+fn validate_command(command: &Command, routed: bool) -> Result<(), String> {
+    match command {
+        Command::Update { root } => protocol::validate(root),
+        Command::Patch { nodes } => protocol::validate_patch(nodes),
+        Command::Mutate { mutations } => protocol::validate_mutations(mutations),
+        Command::FileDialog { mode, options, .. } => protocol::validate_file_dialog(mode, options),
+        Command::ToWindow { .. } | Command::OpenWindow { .. } if routed => {
+            Err("A window command cannot open or address another window".into())
+        }
+        Command::ToWindow { window, command } => {
+            if window.is_empty() {
+                return Err("Window id must not be empty".into());
+            }
+            validate_command(command, true)
+        }
+        Command::OpenWindow { window, document } => {
+            if window.is_empty() {
+                return Err("Window id must not be empty".into());
+            }
+            validate_document(document)
+        }
+        _ => Ok(()),
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
     guard(|| {
         let document: Document = unsafe { read_json(ptr, len)? };
-        validate_protocol_version(document.version)?;
-        protocol::validate(&document.root)?;
-        let w = &document.window;
-        if ![w.width, w.height, w.min_width, w.min_height]
-            .iter()
-            .all(|n| n.is_finite() && *n > 0.0 && *n < 32_768.0)
-        {
-            return Err("Invalid window dimensions".into());
-        }
-        if let Some(widget) = w.desktop_widget
-            && ![widget.columns, widget.rows]
-                .iter()
-                .all(|cells| (1..=16).contains(cells))
-        {
-            return Err("Invalid desktop widget size".into());
-        }
-        if let Some(protocol::WindowPosition::Coordinates { x, y }) = &w.position
-            && (!x.is_finite()
-                || !y.is_finite()
-                || *x < i32::MIN as f64
-                || *x > i32::MAX as f64
-                || *y < i32::MIN as f64
-                || *y > i32::MAX as f64)
-        {
-            return Err("Invalid window position".into());
-        }
+        validate_document(&document)?;
         let mut state = host().lock().map_err(|e| e.to_string())?;
         if state.is_some() {
             return Err("Only one native app can be started per process".into());
@@ -577,18 +623,7 @@ pub unsafe extern "C" fn tarve_event_pipe_name(ptr: *mut u8, capacity: u32) -> i
 pub unsafe extern "C" fn tarve_send(ptr: *const u8, len: u32) -> i32 {
     guard(|| {
         let command: Command = unsafe { read_json(ptr, len)? };
-        if let Command::Update { root } = &command {
-            protocol::validate(root)?;
-        }
-        if let Command::Patch { nodes } = &command {
-            protocol::validate_patch(nodes)?;
-        }
-        if let Command::Mutate { mutations } = &command {
-            protocol::validate_mutations(mutations)?;
-        }
-        if let Command::FileDialog { mode, options, .. } = &command {
-            protocol::validate_file_dialog(mode, options)?;
-        }
+        validate_command(&command, false)?;
         let state = host().lock().map_err(|e| e.to_string())?;
         let proxy = &state.as_ref().ok_or("App not started")?.proxy;
         // The only failure is a closed event loop: the window closed while the

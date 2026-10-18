@@ -332,7 +332,8 @@ fn window_position_protocol_accepts_presets_and_logical_coordinates() {
     exact["position"] = json!({"x":-240,"y":96});
     let exact: protocol::WindowOptions = serde_json::from_value(exact).unwrap();
     match exact.position {
-        Some(protocol::WindowPosition::Coordinates { x, y }) => {
+        Some(protocol::WindowPosition::Coordinates { x, y, physical }) => {
+            assert!(!physical);
             assert_eq!(x, -240.0);
             assert_eq!(y, 96.0);
         }
@@ -7536,6 +7537,43 @@ fn spin_rotates_on_the_native_clock_and_schedules_frames_only_while_present() {
     );
 }
 
+#[test]
+fn editing_chords_stay_with_a_focused_text_field() {
+    use crate::runtime::editing_shortcut;
+    use winit::keyboard::{Key, ModifiersState, NamedKey};
+    let ctrl = ModifiersState::CONTROL;
+    for key in ["c", "V", "x", "a", "z", "y"] {
+        assert!(editing_shortcut(&Key::Character(key.into()), ctrl), "Ctrl+{key}");
+    }
+    assert!(editing_shortcut(&Key::Character("z".into()), ctrl | ModifiersState::SHIFT));
+    assert!(editing_shortcut(&Key::Named(NamedKey::ArrowLeft), ctrl));
+    assert!(!editing_shortcut(&Key::Character("s".into()), ctrl), "Ctrl+S is the app's");
+    assert!(!editing_shortcut(&Key::Character("c".into()), ModifiersState::empty()));
+    assert!(!editing_shortcut(&Key::Character("c".into()), ctrl | ModifiersState::ALT));
+}
+
+#[test]
+fn system_file_drops_resolve_to_the_innermost_enabled_file_target() {
+    let target = |id: &str, size: f32, children: Vec<Node>| -> Node {
+        let mut zone = node(id, "view", json!({"width": size, "height": size}), children);
+        zone.file_drop_target = true;
+        zone
+    };
+    let inner = target("inner", 40.0, vec![]);
+    let mut off = target("off", 100.0, vec![]);
+    off.disabled = true;
+    let mut plain = node("plain", "view", json!({"width": 100, "height": 100}), vec![]);
+    plain.drop_target = true;
+    let zones = vec![target("outer", 100.0, vec![inner]), off, plain];
+    let mut tree = Tree::new(node("root", "window", json!({"direction": "row"}), zones));
+    tree.compute(400.0, 200.0).unwrap();
+    assert_eq!(tree.file_drop_target_at((10.0, 10.0)).as_deref(), Some("inner"));
+    assert_eq!(tree.file_drop_target_at((80.0, 80.0)).as_deref(), Some("outer"));
+    assert_eq!(tree.file_drop_target_at((150.0, 50.0)), None, "a disabled target takes no files");
+    assert_eq!(tree.file_drop_target_at((250.0, 50.0)), None, "a pointer drop target is not a file target");
+    assert_eq!(tree.file_drop_target_at((350.0, 50.0)), None);
+}
+
 fn drag_fixture(disabled_b: bool) -> Tree {
     let card: Node = serde_json::from_value(json!({
         "id": "card", "kind": "pressable", "draggable": true, "children": [],
@@ -7925,6 +7963,69 @@ fn glass_params_hash_the_merge_key_and_clamp_the_blend() {
             .unwrap();
     assert_eq!((empty.merge, empty.blend), (0, 128.0));
     assert!(crate::tree::glass_params(&serde_json::json!({ "merge": "dock" })).is_none());
+}
+
+#[test]
+fn the_pointer_is_on_a_text_area_scrollbar_only_over_its_track_and_while_dragging_it() {
+    let text: String = (0..200).map(|line| format!("line {line}\n")).collect();
+    let root: Node = serde_json::from_value(json!({
+        "id":"root","kind":"window","children":[
+            {"id":"editor","kind":"textarea","value":text,"style":{"width":200,"height":100},"children":[]}
+        ]
+    }))
+    .unwrap();
+    let mut tree = Tree::new(root);
+    tree.compute(240.0, 120.0).unwrap();
+    tree.pointer_move(50.0, 50.0);
+    assert!(!tree.pointer_on_scrollbar(), "over the text: the caret cursor");
+    tree.pointer_move(196.0, 20.0);
+    assert!(tree.pointer_on_scrollbar(), "over the scrollbar: the arrow");
+    tree.pointer_down();
+    tree.pointer_move(50.0, 60.0);
+    assert!(tree.pointer_on_scrollbar(), "dragging the thumb keeps the arrow off the track");
+    tree.pointer_up();
+    assert!(!tree.pointer_on_scrollbar());
+}
+
+#[test]
+fn a_text_area_draws_tabs_as_wide_spaces_and_pasted_crlf_as_one_break() {
+    let root: Node = serde_json::from_value(json!({
+        "id":"root","kind":"window","children":[
+            {"id":"editor","kind":"textarea","value":"a","style":{"width":400,"height":100},"children":[]}
+        ]
+    }))
+    .unwrap();
+    let mut tree = Tree::new(root);
+    tree.compute(440.0, 120.0).unwrap();
+    tree.focus("editor");
+    tree.key("End");
+    tree.type_text("\tb\r\nc\rd");
+    assert_eq!(tree.entries["editor"].node.value.as_deref(), Some("a\tb\nc\nd"), "tabs kept, \r\n and \r are one \n");
+}
+
+#[test]
+fn a_wheel_notch_over_a_text_area_eases_too() {
+    let text: String = (0..200).map(|line| format!("line {line}\n")).collect();
+    let root: Node = serde_json::from_value(json!({
+        "id":"root","kind":"window","children":[
+            {"id":"editor","kind":"textarea","value":text,"style":{"width":200,"height":100},"children":[]}
+        ]
+    }))
+    .unwrap();
+    let mut tree = Tree::new(root);
+    tree.compute(240.0, 120.0).unwrap();
+    tree.pointer_move(20.0, 20.0);
+    assert!(tree.entries["editor"].scroll_max > 100.0, "the text is taller than the area");
+    tree.advance_motion(1000.0);
+    tree.wheel_notch(0.0, 100.0);
+    assert_eq!(tree.entries["editor"].scroll, 0.0, "no jump on the notch itself");
+    tree.advance_motion(1000.0 + 1000.0 / 60.0);
+    let first = tree.entries["editor"].scroll;
+    assert!(first > 0.0 && first < 100.0, "the first frame is part of the way: {first}");
+    for frame in 2..=30 {
+        tree.advance_motion(1000.0 + frame as f64 * 1000.0 / 60.0);
+    }
+    assert_eq!(tree.entries["editor"].scroll, 100.0);
 }
 
 #[test]

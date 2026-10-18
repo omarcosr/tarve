@@ -426,6 +426,7 @@ pub const TEXT_KEYS: &[&str] = &[
     "fontStyle",
     "letterSpacing",
     "wordSpacing",
+    "tabSize",
     "fontVariantNumeric",
     "fontFeatureSettings",
     "whiteSpace",
@@ -1282,6 +1283,23 @@ impl TextEngine {
         content: &str,
         run_limit: usize,
     ) -> Layout<TextBrush> {
+        // A tab has no glyph (fonts draw it as a missing-glyph box): shape it as a
+        // space, one byte as well so offsets stay those of `content`, widened to
+        // `tabSize` spaces (CSS `tab-size`, default 8).
+        let tab_spacing = content
+            .contains('\t')
+            .then(|| self.space_advance(node) * (node.number("tabSize", 8.0).max(1.0) - 1.0));
+        let tabs: Vec<usize> = if tab_spacing.is_some() {
+            content.match_indices('\t').map(|(index, _)| index).collect()
+        } else {
+            Vec::new()
+        };
+        let shaped = if tab_spacing.is_some() {
+            std::borrow::Cow::Owned(content.replace('\t', " "))
+        } else {
+            std::borrow::Cow::Borrowed(content)
+        };
+        let content = shaped.as_ref();
         let mut builder = self
             .context
             .ranged_builder(&mut self.fonts, content, 1.0, true);
@@ -1331,7 +1349,24 @@ impl TextEngine {
                 ),
             );
         }
+        if let Some(spacing) = tab_spacing {
+            let base = node.style["letterSpacing"].as_f64().unwrap_or(0.0) as f32;
+            for index in tabs {
+                builder.push(StyleProperty::LetterSpacing(base + spacing), index..index + 1);
+            }
+        }
         compact(builder.build(content))
+    }
+    /// The advance of a space in the node's font, for tab widths.
+    fn space_advance(&mut self, node: &Node) -> f32 {
+        let size = node.number("fontSize", 14.0);
+        let mut builder = self.context.ranged_builder(&mut self.fonts, " ", 1.0, true);
+        builder.push_default(StyleProperty::FontSize(size));
+        builder.push_default(StyleProperty::FontFamily(node_font_family(node, default_ui_generic_family())));
+        let mut layout: Layout<TextBrush> = builder.build(" ");
+        layout.break_all_lines(None);
+        let width = layout.full_width();
+        if width > 0.0 { width } else { size * 0.5 }
     }
     /// Width and line count of the ellipsized layout painted for `id`.
     #[cfg(test)]

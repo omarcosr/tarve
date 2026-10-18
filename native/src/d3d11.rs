@@ -354,28 +354,6 @@ struct MsaaTile {
     depth_view: ID3D11DepthStencilView,
 }
 
-/// A transparent window shows its DirectComposition tree over the GDI redirection
-/// surface, which DWM fills opaque (white) for a framed window: clear it to
-/// transparent black, at creation and whenever a resize grows it.
-fn clear_redirection_surface(hwnd: HWND) {
-    use windows_sys::Win32::Foundation::RECT;
-    use windows_sys::Win32::Graphics::Gdi::{BLACK_BRUSH, FillRect, GetDC, GetStockObject, ReleaseDC};
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetClientRect;
-    let hwnd = hwnd.0 as windows_sys::Win32::Foundation::HWND;
-    unsafe {
-        let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-        if GetClientRect(hwnd, &mut rect) == 0 {
-            return;
-        }
-        let dc = GetDC(hwnd);
-        if dc.is_null() {
-            return;
-        }
-        FillRect(dc, &rect, GetStockObject(BLACK_BRUSH));
-        ReleaseDC(hwnd, dc);
-    }
-}
-
 pub(crate) struct D3d11Graphics {
     /// The innermost antialiased (shader-computed) rounded clip, stamped on vertices.
     clip: ShaderClip,
@@ -384,9 +362,6 @@ pub(crate) struct D3d11Graphics {
     analytic_aa: bool,
     /// The window shows what is behind it where the UI is translucent.
     transparent: bool,
-    /// The GDI surface under the composition tree is clear for the window's current
-    /// size; GDI drops what is drawn before the window is shown.
-    redirection_cleared: bool,
     _window: Arc<Window>,
     device: ID3D11Device,
     context: ID3D11DeviceContext,
@@ -594,7 +569,6 @@ impl D3d11Graphics {
             clip: NO_CLIP,
             analytic_aa,
             transparent,
-            redirection_cleared: false,
             _window: window,
             device,
             context,
@@ -1046,7 +1020,6 @@ impl D3d11Graphics {
         }
         .map_err(win_error)?;
         self.render_target = Some(create_render_target(&self.device, &self.swap_chain)?);
-        self.redirection_cleared = false;
         if self.tile.is_none() {
             let (_, view) = create_depth_target(&self.device, width, height, self.sample_desc)?;
             self.depth_view = Some(view);
@@ -1071,10 +1044,6 @@ impl D3d11Graphics {
         }
         if let Err(error) = drawn {
             return Err(self.classify_gpu_error("D3D11 draw", error));
-        }
-        if self.transparent && !self.redirection_cleared && self._window.is_visible().unwrap_or(false) {
-            clear_redirection_surface(self.hwnd);
-            self.redirection_cleared = true;
         }
         if let Err(error) = unsafe { self.swap_chain.Present(1, DXGI_PRESENT(0)).ok() } {
             return Err(self.classify_windows_gpu_error("DXGI Present", error));

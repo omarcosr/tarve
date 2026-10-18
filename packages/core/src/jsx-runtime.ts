@@ -21,6 +21,20 @@ export interface DropTargetProps {
   onDragLeave?: (source: string) => void;
   onDrop?: (event: DropEvent) => void;
 }
+/** Files dropped on a node from the system (Explorer, Finder, a file manager), and where. */
+export interface FileDropEvent extends DragPosition { paths: string[] }
+/**
+ * Makes a node take files dragged in from the system. Any of the handlers implies
+ * `fileDropTarget`; the innermost target under the pointer gets them. `app.onEvent`
+ * also sees a `fileDrop` without `id` for files dropped outside every target.
+ */
+export interface FileDropTargetProps {
+  fileDropTarget?: boolean;
+  /** Files entered the node; `paths` are the dragged files. */
+  onFileDragEnter?: (paths: string[]) => void;
+  onFileDragLeave?: () => void;
+  onFileDrop?: (event: FileDropEvent) => void;
+}
 /** Pointer drag on an interactive node. A press only becomes a drag after the
  * pointer travels 4px, so the node keeps its click; Escape or window blur cancels. */
 export interface DraggableProps {
@@ -84,7 +98,7 @@ export type IntrinsicStyle = Omit<Style, "hover" | "focus" | "focusVisible" | "a
   disabled?: IntrinsicStateStyle;
 };
 export type DivStyle = IntrinsicStyle;
-export interface DivProps extends Omit<BaseProps, "style">, DropTargetProps {
+export interface DivProps extends Omit<BaseProps, "style">, DropTargetProps, FileDropTargetProps {
   style?: IntrinsicStyle;
   gap?: number;
   padding?: Style["padding"];

@@ -110,6 +110,9 @@ export function createElementDispatcher(invoke: InvokeHandler, handlersOf: (id: 
         succeeded = result.succeeded && succeeded;
         break;
       }
+      case "fileDragEnter": run("fileDragEnter", handlers?.onFileDragEnter as never, [...event.paths]); break;
+      case "fileDragLeave": run("fileDragLeave", handlers?.onFileDragLeave); break;
+      case "fileDrop": run("fileDrop", handlers?.onFileDrop as never, { paths: [...event.paths], x: event.x, y: event.y }); break;
       case "hover": run("hover", handlers?.onHover as never, event.entered); break;
       case "key": run("key", handlers?.onKeyDown as never, event.key); break;
       case "blur": run("blur", handlers?.onBlur); break;

@@ -19,6 +19,8 @@ mod desktop_widget;
 mod gpu_timer;
 #[cfg(not(target_arch = "wasm32"))]
 mod media;
+#[cfg(not(target_arch = "wasm32"))]
+mod menu_bar;
 mod paint;
 mod protocol;
 #[cfg(not(target_arch = "wasm32"))]

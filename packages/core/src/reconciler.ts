@@ -1,5 +1,5 @@
 import { PROTOCOL_VERSION, type MotionProperty, type NativeNode, type Renderer, type SceneDocument, type ScrollInfo, type ScrollPosition, type VirtualListMeasurement, type WindowOptions } from "./protocol";
-import { Fragment, _isNativeVNode, type Child, type DragEndEvent, type DragMoveEvent, type DragPosition, type DropEvent, type PastePayload, type VNode } from "./jsx-runtime";
+import { Fragment, _isNativeVNode, type Child, type DragEndEvent, type DragMoveEvent, type DragPosition, type DropEvent, type FileDropEvent, type PastePayload, type VNode } from "./jsx-runtime";
 import { lightTheme, resolveStyleString, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
 import type { WindowCloseRequestEvent } from "./components";
@@ -94,7 +94,7 @@ const HANDLER_BY_PROP = new Map<string, keyof Handlers>([
   ["onPaste", "onPaste"], ["onValueChange", "onValueChange"], ["onScroll", "onScroll"], ["onScrollPosition", "onScrollPosition"], ["onVirtualListLayout", "onVirtualListLayout"],
   ["onVirtualListScrollToItem", "onVirtualListScrollToItem"], ["onVirtualListFocus", "onVirtualListFocus"], ["onEscape", "onEscape"], ["onKeyDown", "onKeyDown"], ["onBlur", "onBlur"],
   ["onCloseRequest", "onCloseRequest"], ["onTransitionEnd", "onTransitionEnd"], ["onDragStart", "onDragStart"], ["onDragMove", "onDragMove"], ["onDragEnd", "onDragEnd"],
-  ["onDragEnter", "onDragEnter"], ["onDragLeave", "onDragLeave"], ["onDrop", "onDrop"], ["onSize", "onSize"], ["onPointerMove", "onPointerMove"], ["onPointerLeave", "onPointerLeave"],
+  ["onDragEnter", "onDragEnter"], ["onDragLeave", "onDragLeave"], ["onDrop", "onDrop"], ["onFileDragEnter", "onFileDragEnter"], ["onFileDragLeave", "onFileDragLeave"], ["onFileDrop", "onFileDrop"], ["onSize", "onSize"], ["onPointerMove", "onPointerMove"], ["onPointerLeave", "onPointerLeave"],
 ]);
 
 function handlersOf(p: Record<string, any>, onHover: ((entered: boolean) => void) | undefined): Handlers | undefined {
@@ -109,7 +109,7 @@ function handlersOf(p: Record<string, any>, onHover: ((entered: boolean) => void
 }
 
 export { diffTrees, diffTreeMutations } from "./reconciler/diff";
-export interface Handlers { onClick?: () => void; onMarkdownLink?: (href: string) => void; onDiffToggleFile?: (path: string) => void; onDiffShowMore?: (hidden: number, path?: string) => void; onDiffLineClick?: (event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void; onHighlight?: (event: { matchCount: number }) => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onSubmit?: (value: string) => void; onPaste?: (payload: PastePayload) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number, info: ScrollInfo) => void; onScrollPosition?: (position: ScrollPosition) => void; onVirtualListLayout?: (items: VirtualListMeasurement[]) => void; onVirtualListScrollToItem?: (index: number, offset: number, smooth?: boolean) => void; onVirtualListFocus?: (key: string | null) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void; onTransitionEnd?: (event: { property: MotionProperty }) => void; onDragStart?: (position: DragPosition) => void; onDragMove?: (event: DragMoveEvent) => void; onDragEnd?: (event: DragEndEvent) => void; onDragEnter?: (source: string) => void; onDragLeave?: (source: string) => void; onDrop?: (event: DropEvent) => void; onSize?: (size: { width: number; height: number }) => void; onPointerMove?: (point: { x: number; y: number }) => void; onPointerLeave?: () => void }
+export interface Handlers { onClick?: () => void; onMarkdownLink?: (href: string) => void; onDiffToggleFile?: (path: string) => void; onDiffShowMore?: (hidden: number, path?: string) => void; onDiffLineClick?: (event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void; onHighlight?: (event: { matchCount: number }) => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onSubmit?: (value: string) => void; onPaste?: (payload: PastePayload) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number, info: ScrollInfo) => void; onScrollPosition?: (position: ScrollPosition) => void; onVirtualListLayout?: (items: VirtualListMeasurement[]) => void; onVirtualListScrollToItem?: (index: number, offset: number, smooth?: boolean) => void; onVirtualListFocus?: (key: string | null) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void; onTransitionEnd?: (event: { property: MotionProperty }) => void; onDragStart?: (position: DragPosition) => void; onDragMove?: (event: DragMoveEvent) => void; onDragEnd?: (event: DragEndEvent) => void; onDragEnter?: (source: string) => void; onDragLeave?: (source: string) => void; onDrop?: (event: DropEvent) => void; onFileDragEnter?: (paths: string[]) => void; onFileDragLeave?: () => void; onFileDrop?: (event: FileDropEvent) => void; onSize?: (size: { width: number; height: number }) => void; onPointerMove?: (point: { x: number; y: number }) => void; onPointerLeave?: () => void }
 /** Relative luminance (0–1) of `#rgb`/`#rrggbb`, or null for other colors. */
 function luminance(color: string): number | null {
   const hex = color.trim().replace(/^#/, "");
@@ -157,7 +157,7 @@ const TEXT_KINDS = new Set(["text", "button", "input", "textarea", "markdown", "
 /** Props copied to the native node unchanged when they are set. */
 const COPIED_PROPS = [
   "value", "placeholder", "inputType", "scrollSpeed", "scrollOrientation", "virtualList", "disabled", "modal",
-  "portal", "dismissOnOutside", "focusable", "dragRegion", "draggable", "dropTarget", "windowAction",
+  "portal", "dismissOnOutside", "focusable", "dragRegion", "draggable", "dropTarget", "fileDropTarget", "windowAction",
 ] as const;
 
 const COPIED_PROP_SET: ReadonlySet<string> = new Set(COPIED_PROPS);
@@ -586,6 +586,7 @@ export function compileTree(
     if (p.language !== undefined) node.language = p.language;
     if (p.path !== undefined) node.path = p.path;
     if (p.dropTarget === undefined && (p.onDrop || p.onDragEnter || p.onDragLeave)) node.dropTarget = true;
+    if (p.fileDropTarget === undefined && (p.onFileDrop || p.onFileDragEnter || p.onFileDragLeave)) node.fileDropTarget = true;
     if (p.onSize) node.reportSize = true;
     if (p.onPointerMove || p.onPointerLeave) node.reportPointer = true;
     if (p.showLineNumbers !== undefined) node.showLineNumbers = p.showLineNumbers;

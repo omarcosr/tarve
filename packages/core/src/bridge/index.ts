@@ -136,12 +136,14 @@ export class BunFfiBridge implements NativeBridge {
       // A handler may block on requestSync, which moves newer events to the backlog: those come first.
       const event = this.backlog.shift() ?? this.pollOne();
       if (!event) return;
-      if (event.type === "closed") {
-        this.closed = true;
-        this.closeEventSocket();
+      // Another window's "closed" (it carries `window`) leaves the app running.
+        const appClosed = event.type === "closed" && !("window" in event);
+        if (appClosed) {
+          this.closed = true;
+          this.closeEventSocket();
       }
       onEvent(event);
-      if (this.closed && event.type === "closed") return;
+      if (appClosed) return;
     }
   }
 
@@ -172,7 +174,7 @@ export class BunFfiBridge implements NativeBridge {
         if (event) {
           if ("requestId" in event && event.requestId === command.requestId) return event;
           this.backlog.push(event);
-          if (event.type === "closed") return undefined;
+          if (event.type === "closed" && !("window" in event)) return undefined;
           continue;
         }
         const now = performance.now();
