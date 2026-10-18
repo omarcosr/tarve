@@ -112,6 +112,44 @@ describe("<video>", () => {
     expect(compileTree(view(), false, "auto", [], scope).nodes.has("clip-spinner")).toBe(false);
   });
 
+  test("the mute button toggles an element without a muted attribute, until the attribute changes", () => {
+    const scope = {};
+    const sent: boolean[] = [];
+    const key = Symbol.for("tarve.activeApp");
+    const before = (globalThis as Record<symbol, unknown>)[key];
+    (globalThis as Record<symbol, unknown>)[key] = { media: () => ({ setMuted: (muted: boolean) => sent.push(muted) }) };
+    try {
+      const view = (muted?: boolean) => <Window title="video"><video id="clip" src="clip.mp4" controls muted={muted} /></Window>;
+      compileTree(view(), false, "auto", [], scope).handlers.get("clip-mute")!.onClick!();
+      const muted = compileTree(view(), false, "auto", [], scope);
+      expect(muted.nodes.get("clip-mute")?.control?.label).toBe("Unmute");
+      muted.handlers.get("clip-mute")!.onClick!();
+      expect(sent).toEqual([true, false]);
+      expect(compileTree(view(), false, "auto", [], scope).nodes.get("clip-mute")?.control?.label).toBe("Mute");
+      compileTree(view(), false, "auto", [], scope).handlers.get("clip-mute")!.onClick!();
+      // The app sets the attribute: it wins over the controls' choice.
+      expect(compileTree(view(false), false, "auto", [], scope).nodes.get("clip-mute")?.control?.label).toBe("Unmute");
+      expect(compileTree(view(true), false, "auto", [], scope).nodes.get("clip-mute")?.control?.label).toBe("Unmute");
+    } finally {
+      (globalThis as Record<symbol, unknown>)[key] = before;
+    }
+  });
+
+  test("a new src shows the spinner again and forgets the old error and time", () => {
+    const scope = {};
+    const view = (src: string) => <Window title="video"><video id="clip" src={src} controls style={{ width: 480, height: 270 }} /></Window>;
+    const a = compileTree(view("a.mp4"), false, "auto", [], scope);
+    applyMediaEvent({ id: "clip", event: "loadedmetadata", duration: 10 }, a.media!.get("clip"), scope);
+    applyMediaEvent({ id: "clip", event: "error", message: "decode", time: 7 }, a.media!.get("clip"), scope);
+    const b = compileTree(view("b.mp4"), false, "auto", [], scope);
+    expect(b.nodes.has("clip-spinner")).toBe(true);
+    expect(b.nodes.get("clip-time")?.text).toBe("0:00 / --:--");
+    applyMediaEvent({ id: "clip", event: "loadedmetadata", duration: 4 }, b.media!.get("clip"), scope);
+    expect(mediaState("clip", scope)).toMatchObject({ src: "b.mp4", duration: 4, time: 0, loaded: true });
+    expect(mediaState("clip", scope).error).toBeUndefined();
+    expect(compileTree(view("b.mp4"), false, "auto", [], scope).nodes.has("clip-spinner")).toBe(false);
+  });
+
   test("loads through the platform video decoder; switching between audio and video reloads", () => {
     const sent: Record<string, unknown>[] = [];
     const sync = createMediaSync(command => { sent.push(command); });

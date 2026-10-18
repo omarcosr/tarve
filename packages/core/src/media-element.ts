@@ -17,6 +17,7 @@ import { scopedState, currentRenderScope } from "./render-scope";
 
 export interface MediaElementProps {
   id?: string;
+  key?: string | number;
   src?: string;
   controls?: boolean;
   autoPlay?: boolean;
@@ -64,6 +65,11 @@ interface MediaState {
   loaded?: boolean;
   /** A seek from the controls is in flight (until `seeked`). */
   waiting?: boolean;
+  /** The source these facts are about: a new `src` starts over. */
+  src?: string;
+  /** Muted from the controls, while the `muted` attribute stays `mutedAttribute`. */
+  muted?: boolean;
+  mutedAttribute?: boolean;
 }
 const MEDIA_STATES = Symbol("tarve.mediaStates");
 function states(scope?: object): Map<string, MediaState> {
@@ -73,6 +79,18 @@ function states(scope?: object): Map<string, MediaState> {
 /** Playback state of an element; during render the current scope, otherwise the app's `scope`. */
 export function mediaState(id: string, scope?: object): MediaState {
   return states(scope).get(id) ?? { paused: true, time: 0, duration: null, ended: false };
+}
+
+/** The state the controls show for `props`: nothing known yet after the `src` changed. */
+function shownState(props: MediaElementProps, id: string, scope: object | undefined): MediaState {
+  const state = mediaState(id, scope);
+  return state.src !== undefined && state.src !== props.src ? { paused: true, time: 0, duration: null, ended: false } : state;
+}
+
+/** Muted as the element is: the controls' choice until the `muted` attribute changes. */
+function isMuted(props: MediaElementProps, state: MediaState): boolean {
+  const attribute = props.muted === true;
+  return state.muted !== undefined && state.mutedAttribute === attribute ? state.muted : attribute;
 }
 
 interface MediaCommander { media(id: string): MediaController }
@@ -124,7 +142,8 @@ function togglePlay(id: string, scope: object | undefined): void {
 /** Play, time, seek bar and mute: the default controls of a browser's media element. */
 function controlBar(props: MediaElementProps, id: string, barId: string, label: string, style: Record<string, unknown>): VNode {
   const scope = currentRenderScope();
-  const state = mediaState(id, scope);
+  const state = shownState(props, id, scope);
+  const muted = isMuted(props, state);
   // Over a video the bar is dark: light icons and a light hover.
   const foreground = typeof style.foreground === "string" ? style.foreground : theme.colors.foreground;
   const overVideo = typeof style.foreground === "string";
@@ -141,8 +160,11 @@ function controlBar(props: MediaElementProps, id: string, barId: string, label: 
           states(scope).set(id, { ...mediaState(id, scope), time: value, waiting: true });
           controller(id)?.seek(value);
         } }),
-      Button({ id: `${id}-mute`, size: "sm", variant: "ghost", control: { role: "button", label: props.muted ? "Unmute" : "Mute" } as never,
-        onClick: () => controller(id)?.setMuted(!props.muted), children: props.muted ? "🔇" : "🔊" }),
+      Button({ id: `${id}-mute`, size: "sm", variant: "ghost", control: { role: "button", label: muted ? "Unmute" : "Mute" } as never,
+        onClick: () => {
+          states(scope).set(id, { ...mediaState(id, scope), muted: !muted, mutedAttribute: props.muted === true });
+          controller(id)?.setMuted(!muted);
+        }, children: muted ? "🔇" : "🔊" }),
     ] } as never);
 }
 
@@ -182,7 +204,7 @@ export function expandVideo(props: VideoElementProps, id: string): VNode {
  */
 function centerOverlay(props: VideoElementProps, id: string): VNode | null {
   const scope = currentRenderScope();
-  const state = mediaState(id, scope);
+  const state = shownState(props, id, scope);
   const loading = !state.error && ((props.src !== undefined && !state.loaded) || state.waiting === true);
   const fill = { position: "absolute", left: 0, top: 0, right: 0, bottom: 0, align: "center", justify: "center" };
   if (loading) {
@@ -205,7 +227,10 @@ function centerOverlay(props: VideoElementProps, id: string): VNode | null {
 
 /** Applies a native media event to the element's state; returns the handler to call. */
 export function applyMediaEvent(event: { id: string; event: string; time?: number; duration?: number | null; paused?: boolean; message?: string; videoWidth?: number; videoHeight?: number }, request: MediaRequest | undefined, scope: object): (() => void) | undefined {
-  const previous = mediaState(event.id, scope);
+  const known = mediaState(event.id, scope);
+  // The first event of a new source: what was known is about the old one.
+  const previous: MediaState = request?.src !== undefined && known.src !== undefined && known.src !== request.src
+    ? { paused: true, time: 0, duration: null, ended: false, src: request.src } : { ...known, ...(request?.src !== undefined ? { src: request.src } : {}) };
   const next: MediaState = { ...previous, time: event.time ?? previous.time, duration: event.duration ?? previous.duration, paused: event.paused ?? previous.paused,
     videoWidth: event.videoWidth ?? previous.videoWidth, videoHeight: event.videoHeight ?? previous.videoHeight };
   if (event.event === "ended") { next.ended = true; next.paused = true; }
