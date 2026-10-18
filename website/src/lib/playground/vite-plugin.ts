@@ -1,14 +1,10 @@
 import { basename, resolve } from "node:path";
 import type { Plugin } from "vite";
 import { toPreviewModule } from "./example-transform";
+import { STUBS as stubs, stubFor } from "./resolve";
 
 const root = resolve(import.meta.dirname, "../../../..");
 const core = resolve(root, "packages/core/src");
-const stubs = resolve(import.meta.dirname, "stubs");
-const NODE_BUILTINS = new Set([
-  "node:crypto", "node:fs", "node:fs/promises", "node:os", "node:path", "node:net", "node:zlib",
-  "node:module", "node:child_process", "node:stream", "node:timers/promises",
-]);
 
 /**
  * Lets the browser import Tarve straight from packages/core: maps the package name and its JSX
@@ -38,11 +34,7 @@ export function tarvePlayground(): Plugin {
           return resolve(stubs, "bridge.ts");
         }
       }
-      if (id === "bun:ffi") return resolve(stubs, "bun-ffi.ts");
-      if (id === "#tarve/assets") return resolve(stubs, "tarve-assets.ts");
-      if (id === "#tarve/runtime") return resolve(stubs, "tarve-runtime.ts");
-      if (NODE_BUILTINS.has(id)) return resolve(stubs, "node.ts");
-      return null;
+      return stubFor(id) ?? null;
     },
     transform(code, id) {
       const [file, query] = id.split("?");
