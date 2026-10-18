@@ -11,7 +11,7 @@ import { createNativeRequests } from "./app/requests";
 import { editShadowNode, nativeShadow, reconciliationCommand } from "./app/shadow";
 import { createTrayController, type TrayHandle, type TrayOptions } from "./app/tray";
 import { createMenuBarController, type MenuBarItem, type MenuBarOptions } from "./app/menu-bar";
-import { MenuBar, menuBarState } from "./menu-bar";
+import { AppMenuBar, menuBarState } from "./menu-bar";
 import { TitleBar } from "./components/titlebar";
 import { Window } from "./components/window";
 export type { MenuBarItem, MenuBarOptions } from "./app/menu-bar";
@@ -199,7 +199,7 @@ export interface AppHandle {
    * F10 and Alt access keys (`&File`). `{ native: true }` uses the system's instead (a
    * Win32 menu on Windows, framed windows only). Choosing an item runs its `onSelect` and
    * `onEvent` sees `{ type: "menu", id }`; an item's `accelerator` also runs it from the
-   * keyboard. Place `<MenuBar items>` yourself to put it elsewhere (inside a `TitleBar`).
+   * keyboard. Place `<AppMenuBar items>` yourself to put it elsewhere (inside a `TitleBar`).
    */
   menuBar(items: readonly MenuBarItem[] | null, options?: MenuBarOptions): void;
   systemMedia(session: SystemMediaSession | null): void;
@@ -314,7 +314,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     (globalThis as Record<symbol, unknown>)[ACTIVE_APP_KEY] = app;
     const drawnMenu = menus.drawn();
     const tree = withRenderScope(scope, () => compileTree(
-      drawnMenu ? withMenuBar(currentView(), jsx(MenuBar, { id: APP_MENU_BAR_ID, items: drawnMenu, onSelect: (id: string) => onNativeEvent({ type: "menu", id }) })) : currentView(), options.debug, renderer, options.componentAdapters, scope, !options.headless, viewport,
+      drawnMenu ? withMenuBar(currentView(), jsx(AppMenuBar, { id: APP_MENU_BAR_ID, items: drawnMenu, onSelect: (id: string) => onNativeEvent({ type: "menu", id }) })) : currentView(), options.debug, renderer, options.componentAdapters, scope, !options.headless, viewport,
     ));
     appWindow = tree.document.window;
     if (options.closeBehavior === "hide") tree.document.root.closeIntercept = true;

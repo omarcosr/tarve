@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Window, Text, TitleBar } from "./components";
 import { createApp } from "./app";
-import { accessKey, MenuBar } from "./menu-bar";
+import { accessKey, AppMenuBar } from "./menu-bar";
 import { compileTree } from "./reconciler";
 import type { NativeBridge } from "./bridge";
 import type { NativeCommand, NativeEvent, SceneDocument } from "./protocol";
 
-describe("MenuBar", () => {
+describe("AppMenuBar", () => {
   test("access keys", () => {
     expect(accessKey("&File")).toEqual({ text: "File", key: "F" });
     expect(accessKey("Save &As")).toEqual({ text: "Save As", key: "A" });
@@ -14,7 +14,7 @@ describe("MenuBar", () => {
   });
 
   test("a closed bar is a navigation row of menu buttons in one roving group", () => {
-    const tree = compileTree(<Window><MenuBar id="bar" items={[{ label: "&File", items: [{ id: "new", label: "New" }] }, { label: "Help", onSelect: () => {} }]} /></Window>);
+    const tree = compileTree(<Window><AppMenuBar id="bar" items={[{ label: "&File", items: [{ id: "new", label: "New" }] }, { label: "Help", onSelect: () => {} }]} /></Window>);
     expect(tree.nodes.get("bar")?.control).toMatchObject({ role: "navigation", orientation: "horizontal" });
     expect(tree.nodes.get("bar-menu-0")?.control).toMatchObject({ role: "button", label: "File", expanded: false });
     expect(tree.nodes.get("bar-menu-1")?.control).toMatchObject({ role: "menuitem", label: "Help" });

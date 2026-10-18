@@ -9,7 +9,7 @@ const POPUP_Z_INDEX = 1000;
 const ACTIVE_APP_KEY = Symbol.for("tarve.activeApp");
 
 /**
- * An item of a menu bar (`<MenuBar>` or `app.menuBar`). Top-level items with `items`
+ * An item of a menu bar (`<AppMenuBar>` or `app.menuBar`). Top-level items with `items`
  * are the bar's menus (`&File`; `&` marks the Alt access key, `&&` a literal `&`).
  * `accelerator` (`Ctrl+S`) is shown next to the label; `app.menuBar` also registers it
  * as a hotkey that runs `onSelect`.
@@ -20,7 +20,7 @@ export type MenuBarItem =
 
 type Entry = Exclude<MenuBarItem, { type: "separator" }>;
 
-export interface MenuBarProps extends BaseProps {
+export interface AppMenuBarProps extends BaseProps {
   items: readonly MenuBarItem[];
   /** After an item's own `onSelect`, with its id (`menu-<n>` when it has none). */
   onSelect?: (id: string) => void;
@@ -69,7 +69,7 @@ const itemStyle: Style = {
  * while one is open, like a system menu bar. `app.menuBar(items)` places one at the top
  * of the window (after a `TitleBar`) and adds Alt access keys, F10 and accelerators.
  */
-export function MenuBar({ id = "menubar", items, onSelect, style, ...props }: MenuBarProps): VNode {
+export function AppMenuBar({ id = "menubar", items, onSelect, style, ...props }: AppMenuBarProps): VNode {
   const state = menuBarState(id);
   const close = () => { state.open = null; state.sub = null; };
   const tops = entries(items).filter(({ item }) => item.type !== "separator") as Array<{ item: Entry; index: number }>;
