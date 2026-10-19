@@ -152,6 +152,9 @@ fn shortcut_key_name(key: &Key) -> Option<String> {
 /// and without taking the foreground, so tests and
 /// benchmarks run beside someone's work without touching their screen, mouse or
 /// keyboard. Rendering and keyboard focus inside the app are unaffected.
+mod graphics_startup;
+pub(crate) use graphics_startup::{graphics_fault_action, graphics_recovery_delay, graphics_recovery_failure_action, graphics_recovery_circuit_action, graphics_recoveries_after_stability};
+
 pub(crate) fn background_windows() -> bool {
     static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *FLAG.get_or_init(|| {
@@ -1450,6 +1453,8 @@ impl App {
         #[cfg(target_os = "windows")]
         menu_bar: None,
             parked: false,
+            iconic: false,
+            presence: crate::power::Presence::new(),
             document,
             events,
             tree,
@@ -1483,6 +1488,7 @@ impl App {
             transparency_effects: None,
             frame_stats: Default::default(),
             memory_stages,
+            gpu_upgrade: false,
             #[cfg(target_os = "windows")]
             system_media: None,
             #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -1532,6 +1538,7 @@ pub fn run(
             builder.with_x11();
         }
     }
+    crate::stats::trace("identity");
     let event_loop = match builder.build() {
         Ok(event_loop) => event_loop,
         Err(error) => {
@@ -1543,6 +1550,7 @@ pub fn run(
     event_loop.set_control_flow(ControlFlow::Wait);
     // A desktop widget starts at cells of a typical icon size (`App::new`). Windows
     // then fits it to the desktop icon grid; elsewhere there is no grid to read.
+    crate::stats::trace("eventLoop");
     let event_proxy = event_loop.create_proxy();
     ready
         .send(Ok(event_proxy.clone()))
@@ -1595,6 +1603,11 @@ struct App {
     /// Hidden by the app (`app.hide()`, close-to-tray): no GPU device, no
     /// frames, no motion ticks until it is shown again.
     parked: bool,
+    /// Minimized: the GPU device, swap chain and textures are given back as when
+    /// parked, but the window stays in the taskbar. Restored on the next resize.
+    iconic: bool,
+    /// Counts this window for process-wide EcoQoS (`crate::power`).
+    presence: crate::power::Presence,
     /// Frames were painted since free memory was last released.
     memory_dirty: std::cell::Cell<bool>,
     trim_at: std::cell::Cell<Option<Instant>>,
@@ -1635,6 +1648,9 @@ struct App {
     frame_stats: crate::stats::FrameStats,
     /// Process memory after each startup stage, for `app.stats()`.
     memory_stages: crate::stats::MemoryStages,
+    /// The first frames are drawn on the CPU while the GPU device is still being created;
+    /// set until the GPU renderer takes over.
+    gpu_upgrade: bool,
     #[cfg(target_os = "windows")]
     system_media: Option<crate::smtc::SystemMedia>,
     #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -1691,24 +1707,7 @@ pub(crate) enum GraphicsFaultAction {
     Fatal,
 }
 
-pub(crate) fn graphics_fault_action(kind: GraphicsFaultKind) -> GraphicsFaultAction {
-    match kind {
-        GraphicsFaultKind::DeviceLost | GraphicsFaultKind::Internal => {
-            GraphicsFaultAction::RecoverDevice
-        }
-        GraphicsFaultKind::OutOfMemory | GraphicsFaultKind::Validation => {
-            GraphicsFaultAction::Fatal
-        }
-    }
-}
 
-pub(crate) fn graphics_recovery_delay(attempt: u8) -> Duration {
-    match attempt {
-        0 | 1 => Duration::from_millis(100),
-        2 => Duration::from_millis(250),
-        _ => Duration::from_millis(500),
-    }
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum GraphicsRecoveryFailureAction {
@@ -1716,13 +1715,6 @@ pub(crate) enum GraphicsRecoveryFailureAction {
     Fatal,
 }
 
-pub(crate) fn graphics_recovery_failure_action(attempts: u8) -> GraphicsRecoveryFailureAction {
-    if attempts >= MAX_GRAPHICS_RECOVERY_ATTEMPTS {
-        GraphicsRecoveryFailureAction::Fatal
-    } else {
-        GraphicsRecoveryFailureAction::RetryAfter(graphics_recovery_delay(attempts))
-    }
-}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum GraphicsRecoveryCircuitAction {
@@ -1730,26 +1722,7 @@ pub(crate) enum GraphicsRecoveryCircuitAction {
     Fatal,
 }
 
-pub(crate) fn graphics_recovery_circuit_action(
-    recoveries_in_window: usize,
-) -> GraphicsRecoveryCircuitAction {
-    if recoveries_in_window >= MAX_GRAPHICS_RECOVERY_EPISODES {
-        GraphicsRecoveryCircuitAction::Fatal
-    } else {
-        GraphicsRecoveryCircuitAction::Allow
-    }
-}
 
-pub(crate) fn graphics_recoveries_after_stability(
-    recovery_episodes: usize,
-    stable_for: Duration,
-) -> usize {
-    if stable_for >= GRAPHICS_RECOVERY_WINDOW {
-        0
-    } else {
-        recovery_episodes
-    }
-}
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum CloseRequestAction {
     Exit,
@@ -2264,6 +2237,33 @@ impl App {
         self.scene = vello::Scene::new();
         self.presentation_retry_at = None;
     }
+    /// Minimized: nothing can be seen until it is restored, so the renderer and the
+    /// pages it touched go back to the system, as for a parked window.
+    fn iconify(&mut self, event_loop: &ActiveEventLoop) {
+        if self.parked || self.iconic || !matches!(self.graphics, GraphicsState::Ready(_)) {
+            return;
+        }
+        // Restoring builds the device again (tens of ms, then the first frame);
+        // only `lowPower` apps trade that for the memory.
+        if !self.document.low_power {
+            return;
+        }
+        self.iconic = true;
+        self.release_graphics();
+        self.trim_at.set(None);
+        crate::release_free_memory();
+        crate::trim_working_set();
+        self.memory_dirty.set(false);
+        self.last_memory_release.set(Instant::now());
+        self.sync_control_flow(event_loop);
+    }
+    fn deiconify(&mut self) {
+        if !self.iconic {
+            return;
+        }
+        self.iconic = false;
+        self.restore_graphics();
+    }
     /// Builds a released renderer again for the same window and backend.
     fn restore_graphics(&mut self) {
         let Some(window) = self.window.clone() else {
@@ -2411,6 +2411,7 @@ impl App {
     }
 
     fn sync_control_flow(&self, _event_loop: &ActiveEventLoop) {
+        self.sync_power();
         let now = Instant::now();
         let startup_trim_at = if self.startup_trim_pending.get() {
             match self.trim_at.get() {
@@ -2438,7 +2439,9 @@ impl App {
         let media_at = self.media.deadline();
         let video_at = self.videos.deadline();
         let file_drag_at = self.file_drag.active().then(|| now + FILE_DRAG_POLL);
+        let upgrade_at = self.gpu_upgrade.then(|| now + Duration::from_millis(2));
         let deadline = [
+            upgrade_at,
             file_drag_at,
             recovery_at,
             present_at,
@@ -2480,6 +2483,12 @@ impl App {
             self.last_memory_release.set(now);
         }
         self.wanted_flow.set(ControlFlow::Wait);
+    }
+    /// Background for EcoQoS: minimized or hidden, and no sound or video due.
+    fn sync_power(&self) {
+        let playing = self.media.deadline().is_some() || self.videos.deadline().is_some();
+        self.presence
+            .set_background((self.parked || self.iconic) && !playing);
     }
     fn start_graphics_recovery(&mut self, event_loop: &ActiveEventLoop, cause: String) -> bool {
         if matches!(self.graphics, GraphicsState::Recovering(_)) {
@@ -2624,6 +2633,7 @@ impl App {
             // since tarve_start) finishes; prepare() then finds a clean layout.
             let size = window.inner_size().to_logical::<f32>(window.scale_factor());
             let _ = app.tree.compute(size.width, size.height);
+            crate::stats::trace("layout");
             let graphics = Graphics::new(window.clone(), app.document.renderer, app.document.window.backdrop.transparent())?;
             Ok((window, graphics))
         };
@@ -2974,6 +2984,9 @@ impl App {
         // CPU cost only (motion, layout, paint); present can block on vsync.
         let frame_cpu_ms = frame_started.elapsed().as_secs_f64() * 1000.0;
         self.frame_stats.frame.push(frame_cpu_ms);
+        if !self.ready_emitted {
+            crate::stats::trace("painted");
+        }
         match self.present(content_changed) {
             Ok(PresentResult::Presented) => {
                 self.presentation_retry_at = None;
@@ -3266,6 +3279,7 @@ impl ApplicationHandler<Command> for App {
         if self.is_main {
             keep_at_bottom(level == crate::protocol::WindowLevel::AlwaysOnBottom);
         }
+        crate::stats::trace("resumed");
         let icon = self.document.window_icon.as_deref().map(window_icons);
         if let Some(Err(message)) = &icon {
             self.events.push(error(format!("window icon: {message}")));
@@ -3325,7 +3339,8 @@ impl ApplicationHandler<Command> for App {
             use winit::platform::windows::WindowAttributesExtWindows;
             attributes.with_no_redirection_bitmap(without_redirection)
         };
-        match self.create_graphics_window(event_loop, attributes, without_redirection) {
+        let created = self.create_graphics_window_cpu_first(event_loop, attributes, without_redirection, options.backdrop.transparent());
+        match created {
             Ok((window, graphics)) => {
                 {
                     {
@@ -3344,7 +3359,9 @@ impl ApplicationHandler<Command> for App {
                             self.handle_render_error(event_loop, error);
                             return;
                         }
+                        crate::stats::trace("prepared");
                         self.initialize_accessibility(event_loop, window.as_ref());
+                        crate::stats::trace("a11y");
                         #[cfg(target_os = "linux")]
                         if let Err(message) = crate::x11_state::add_window_states(
                             &window,
@@ -3358,6 +3375,7 @@ impl ApplicationHandler<Command> for App {
                         if visible {
                             window.set_visible(true);
                         }
+                        crate::stats::trace("visible");
                         if self.is_main && self.document.window.skip_taskbar {
                             hide_from_task_switcher(&window);
                         }
@@ -3897,6 +3915,7 @@ impl ApplicationHandler<Command> for App {
         self.sync_control_flow(event_loop);
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.upgrade_graphics();
         let now = Instant::now();
         let present_due = self
             .presentation_retry_at
@@ -3992,6 +4011,11 @@ impl ApplicationHandler<Command> for App {
                 self.file_drag = FileDrag::default();
             }
             WindowEvent::Resized(size) => {
+                if size.width == 0 || size.height == 0 {
+                    self.iconify(event_loop);
+                } else {
+                    self.deiconify();
+                }
                 if size.width > 0
                     && size.height > 0
                     && let Some(window) = &self.window

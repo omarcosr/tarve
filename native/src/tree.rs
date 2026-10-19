@@ -3562,11 +3562,7 @@ impl Tree {
             }
             return Ok(());
         }
-        for entry in self.entries.values() {
-            if entry.measure_dirty {
-                self.text.prepare(&entry.node);
-            }
-        }
+        self.text.prepare_dirty(self.entries.values().filter(|entry| entry.measure_dirty).map(|entry| &entry.node));
         let root = self.build_layout(&self.root.clone(), Some((width, height)))?;
         let text = &mut self.text;
         let nodes = &self.entries;

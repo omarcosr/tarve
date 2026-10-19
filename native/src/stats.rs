@@ -77,25 +77,52 @@ impl FrameStats {
     }
 }
 
-/// Process memory at named startup stages, plus a current reading on request.
+/// Process memory and elapsed time at named startup stages, plus a current reading on request.
 #[derive(Default)]
-pub(crate) struct MemoryStages(Vec<(&'static str, ProcessMemory)>);
+pub(crate) struct MemoryStages(Vec<(&'static str, Option<ProcessMemory>, f64)>);
+
+/// When the native side started (`tarve_start`): stage times count from here.
+static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+pub(crate) fn mark_started() {
+    STARTED.get_or_init(std::time::Instant::now);
+}
+
+fn trace_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("TARVE_TRACE").is_some_and(|v| v == "1"))
+}
+
+/// Milliseconds since `tarve_start`; logged to stderr under TARVE_TRACE=1.
+pub(crate) fn trace(label: &str) -> f64 {
+    let ms = STARTED.get_or_init(std::time::Instant::now).elapsed().as_secs_f64() * 1000.0;
+    if trace_enabled() {
+        eprintln!("[native] {label:<12} {ms:8.2} ms");
+    }
+    ms
+}
 
 impl MemoryStages {
     pub(crate) fn record(&mut self, label: &'static str) {
-        if let Some(memory) = process_memory() {
-            self.0.push((label, memory));
-        }
+        let ms = trace(label);
+        self.0.push((label, process_memory(), ms));
     }
 
     pub(crate) fn summary(&self) -> Value {
         json!({
-            "stages": self.0.iter().map(|(label, memory)| {
-                let mut stage = memory.json();
+            "stages": self.0.iter().filter_map(|(label, memory, ms)| {
+                let mut stage = memory.as_ref()?.json();
                 stage["label"] = json!(label);
-                stage
+                stage["ms"] = json!((ms * 100.0).round() / 100.0);
+                Some(stage)
             }).collect::<Vec<_>>(),
-            "current": process_memory().map(|memory| memory.json()),
+            "current": process_memory().map(|memory| {
+                let mut current = memory.json();
+                if let Some(gpu) = process_video_memory() {
+                    current["gpuMb"] = json!((gpu / 1048576.0 * 10.0).round() / 10.0);
+                }
+                current
+            }),
         })
     }
 }
@@ -147,6 +174,42 @@ pub(crate) fn process_memory() -> Option<ProcessMemory> {
         working_set: counters.working_set_size as f64,
         private: counters.pagefile_usage as f64,
     })
+}
+
+/// Video memory this process holds on every adapter (dedicated and shared
+/// segments), as DXGI budgets it. Readable with no device of our own, so a
+/// minimized window that gave its device back reports what is left.
+#[cfg(target_os = "windows")]
+pub(crate) fn process_video_memory() -> Option<f64> {
+    use windows::Win32::Graphics::Dxgi::{
+        CreateDXGIFactory1, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL,
+        IDXGIAdapter3, IDXGIFactory1,
+    };
+    use windows::core::Interface;
+    // SAFETY: plain DXGI factory/adapter queries; every COM object is released on drop.
+    unsafe {
+        let factory: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
+        let mut total = 0.0;
+        let mut index = 0;
+        while let Ok(adapter) = factory.EnumAdapters1(index) {
+            index += 1;
+            let Ok(adapter) = adapter.cast::<IDXGIAdapter3>() else {
+                continue;
+            };
+            for group in [DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL] {
+                let mut info = Default::default();
+                if adapter.QueryVideoMemoryInfo(0, group, &mut info).is_ok() {
+                    total += info.CurrentUsage as f64;
+                }
+            }
+        }
+        Some(total)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn process_video_memory() -> Option<f64> {
+    None
 }
 
 #[cfg(target_os = "linux")]

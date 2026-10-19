@@ -384,20 +384,6 @@ mod json_input_tests {
         assert_eq!(result.unwrap_err(), "Invalid input buffer");
     }
 }
-/// Lets process `pid` take the foreground (Windows `AllowSetForegroundWindow`): a
-/// second launch hands its arguments to the first instance, which then brings its
-/// window forward. A no-op elsewhere.
-#[unsafe(no_mangle)]
-pub extern "C" fn tarve_allow_foreground(pid: u32) -> i32 {
-    #[cfg(target_os = "windows")]
-    unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(pid);
-    }
-    #[cfg(not(target_os = "windows"))]
-    let _ = pid;
-    0
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn tarve_abi_version() -> u32 {
     ABI_VERSION
@@ -553,8 +539,11 @@ fn validate_command(command: &Command, routed: bool) -> Result<(), String> {
     }
 }
 
+mod entry_points;
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
+    crate::stats::mark_started();
     guard(|| {
         let document: Document = unsafe { read_json(ptr, len)? };
         validate_document(&document)?;

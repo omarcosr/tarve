@@ -257,6 +257,9 @@ struct TaskMarkerPaintStyle {
     check_color: Color,
 }
 
+mod shape;
+use shape::{Preshaped, ShapeKey};
+
 fn draw_task_markers<P: PaintTarget>(
     target: &mut P,
     layout: &Layout<TextBrush>,
@@ -690,6 +693,13 @@ pub struct TextEngine {
     /// Hashes of the content and of the style a layout was shaped from:
     /// a retained copy of every text would double its memory.
     signatures: HashMap<String, (u64, u64)>,
+    /// A node last shaped with each signature: an equal text (a list's 2,000 "Open"
+    /// buttons) copies that layout instead of shaping again.
+    shaped_by: HashMap<ShapeKey, String>,
+    /// Layouts shaped ahead on worker threads (`preshape`), taken by `prepare`.
+    preshaped: HashMap<ShapeKey, Preshaped>,
+    /// Font and layout contexts of the shaping workers, kept between frames.
+    workers: Vec<(FontContext, LayoutContext<TextBrush>)>,
     alignments: HashMap<String, parley::Alignment>,
     /// Blurred text-shadow images by node id, with their signature and
     /// device-pixel offset from the recorder base.
@@ -1172,6 +1182,9 @@ impl TextEngine {
             #[cfg(test)]
             markdown_painted_lines: 0,
             signatures: HashMap::default(),
+            shaped_by: HashMap::default(),
+            preshaped: HashMap::default(),
+            workers: Vec::new(),
             alignments: HashMap::default(),
             shadow_images: HashMap::default(),
             ink_images: HashMap::default(),
@@ -1207,7 +1220,36 @@ impl TextEngine {
             self.shapes += 1;
             return;
         }
-        let mut layout = self.build_text_layout(node, &content, content.len());
+        // Plain text and buttons shape the same from content and style alone; copy an equal one.
+        let shareable = matches!(node.kind.as_str(), "text" | "button") && node.rich.is_none() && !content.contains('\t');
+        let share_key = (signature.0, signature.1, node.kind == "button");
+        let copied = shareable
+            .then(|| self.shaped_by.get(&share_key))
+            .flatten()
+            .filter(|id| self.signatures.get(*id) == Some(&signature))
+            .and_then(|id| self.layouts.get(id))
+            .cloned();
+        let (preshaped, min_content) = match shareable.then(|| self.preshaped.remove(&share_key)).flatten() {
+            Some((layout, min_content)) => (Some(layout), min_content),
+            None => (None, None),
+        };
+        // A preshaped layout arrives broken into unwrapped lines; a copied one at its last width.
+        let preshaped_broken = copied.is_none() && preshaped.is_some();
+        let mut layout = match copied.or(preshaped) {
+            Some(layout) => {
+                if shareable && !self.shaped_by.contains_key(&share_key) {
+                    self.shaped_by.insert(share_key, node.id.clone());
+                }
+                layout
+            }
+            None => {
+                let layout = self.build_text_layout(node, &content, content.len());
+                if shareable {
+                    self.shaped_by.insert(share_key, node.id.clone());
+                }
+                layout
+            }
+        };
         self.truncated.remove(&node.id);
         if text_nowrap(node) {
             self.nowrap.insert(node.id.clone());
@@ -1223,7 +1265,29 @@ impl TextEngine {
         // only measures — the a11y pass, the hit test, a snapshot — must see the
         // same line structure, or the gutter numbers a different set of lines
         // than the text does.
-        layout.break_all_lines(None);
+        if !preshaped_broken {
+            layout.break_all_lines(None);
+        }
+        // The unwrapped lines are what layout asks for first (max-content) and for any wider width.
+        if matches!(node.kind.as_str(), "text" | "button") {
+            let mut height = layout.height();
+            if let Some(extents) = shifted_line_extents(&layout) {
+                height += shifted_line_offsets(&extents).1;
+            }
+            if let Some(lines) = self.clamps.get(&node.id).copied()
+                && layout.len() > lines
+                && let Some(line) = layout.get(lines - 1)
+            {
+                height = line.metrics().block_max_coord;
+            }
+            let size = (layout.width().ceil(), height.ceil());
+            let cache = self.measure_cache.entry(node.id.clone()).or_default();
+            cache.natural = Some((layout.width(), size));
+            cache.sizes.push((None, size));
+            if let Some(min) = min_content.filter(|_| preshaped_broken) {
+                cache.sizes.push((Some(0.0_f32.to_bits()), min));
+            }
+        }
         if node.kind == "code" && node.show_line_numbers {
             // Keep the gutter on the exact same typographic grid as the code.
             // A smaller standalone layout can share the mathematical baseline
@@ -1274,99 +1338,6 @@ impl TextEngine {
         self.alignments
             .insert(node.id.clone(), alignment_for_node(node));
         self.shapes += 1;
-    }
-    /// Shapes `content` with the node's text style, its rich spans and the runs
-    /// that start before `run_limit` (a truncated copy keeps its prefix runs).
-    fn build_text_layout(
-        &mut self,
-        node: &Node,
-        content: &str,
-        run_limit: usize,
-    ) -> Layout<TextBrush> {
-        // A tab has no glyph (fonts draw it as a missing-glyph box): shape it as a
-        // space, one byte as well so offsets stay those of `content`, widened to
-        // `tabSize` spaces (CSS `tab-size`, default 8).
-        let tab_spacing = content
-            .contains('\t')
-            .then(|| self.space_advance(node) * (node.number("tabSize", 8.0).max(1.0) - 1.0));
-        let tabs: Vec<usize> = if tab_spacing.is_some() {
-            content.match_indices('\t').map(|(index, _)| index).collect()
-        } else {
-            Vec::new()
-        };
-        let shaped = if tab_spacing.is_some() {
-            std::borrow::Cow::Owned(content.replace('\t', " "))
-        } else {
-            std::borrow::Cow::Borrowed(content)
-        };
-        let content = shaped.as_ref();
-        let mut builder = self
-            .context
-            .ranged_builder(&mut self.fonts, content, 1.0, true);
-        builder.push_default(StyleProperty::FontSize(node.number("fontSize", 14.0)));
-        // CSS `font-optical-sizing: auto`: a variable font's `opsz` axis follows
-        // the font size. Fonts without the axis ignore it.
-        builder.push_default(optical_size(node.number("fontSize", 14.0)));
-        builder.push_default(StyleProperty::FontWeight(FontWeight::new(
-            node.number("fontWeight", 400.0),
-        )));
-        builder.push_default(StyleProperty::FontFamily(node_font_family(
-            node,
-            default_ui_generic_family(),
-        )));
-        builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
-            node.number("lineHeight", 1.5),
-        )));
-        if matches!(node.string("fontStyle", "normal"), "italic" | "oblique") {
-            builder.push_default(StyleProperty::FontStyle(FontStyle::Italic));
-        }
-        if let Some(spacing) = node.style["letterSpacing"].as_f64() {
-            builder.push_default(StyleProperty::LetterSpacing(spacing as f32));
-        }
-        if let Some(spacing) = node.style["wordSpacing"].as_f64() {
-            builder.push_default(StyleProperty::WordSpacing(spacing as f32));
-        }
-        if let Some(features) = font_features(&node.style) {
-            builder.push_default(StyleProperty::FontFeatures(parley::FontFeatures::Source(
-                std::borrow::Cow::Owned(features),
-            )));
-        }
-        if let Some(rich) = &node.rich
-            && let RichContent::Text { spans, .. } = rich.as_ref()
-        {
-            for span in spans {
-                push_span(&mut builder, span, node, node.number("fontSize", 14.0));
-            }
-        }
-        for run in text_runs(node, run_limit.min(content.len()), content) {
-            push_text_style(
-                &mut builder,
-                run.style,
-                run.start..run.end,
-                (
-                    node.number("fontSize", 14.0),
-                    node.number("lineHeight", 1.5),
-                ),
-            );
-        }
-        if let Some(spacing) = tab_spacing {
-            let base = node.style["letterSpacing"].as_f64().unwrap_or(0.0) as f32;
-            for index in tabs {
-                builder.push(StyleProperty::LetterSpacing(base + spacing), index..index + 1);
-            }
-        }
-        compact(builder.build(content))
-    }
-    /// The advance of a space in the node's font, for tab widths.
-    fn space_advance(&mut self, node: &Node) -> f32 {
-        let size = node.number("fontSize", 14.0);
-        let mut builder = self.context.ranged_builder(&mut self.fonts, " ", 1.0, true);
-        builder.push_default(StyleProperty::FontSize(size));
-        builder.push_default(StyleProperty::FontFamily(node_font_family(node, default_ui_generic_family())));
-        let mut layout: Layout<TextBrush> = builder.build(" ");
-        layout.break_all_lines(None);
-        let width = layout.full_width();
-        if width > 0.0 { width } else { size * 0.5 }
     }
     /// Width and line count of the ellipsized layout painted for `id`.
     #[cfg(test)]
@@ -1683,6 +1654,8 @@ impl TextEngine {
             .retain(|id, _| self.layouts.contains_key(id));
         self.alignments
             .retain(|id, _| self.layouts.contains_key(id));
+        self.shaped_by
+            .retain(|_, id| self.layouts.contains_key(id));
         self.diff_layouts.retain(|id, _| keep(id));
         self.code_gutter_layouts.retain(|id, _| keep(id));
         self.code_gutter_widths.retain(|id, _| keep(id));
@@ -1721,15 +1694,16 @@ impl TextEngine {
         // (min-content, max-content, the final width), and a window resize asks
         // again for every text: answer repeats from the cache, and any width at
         // least as wide as the unwrapped line from the unwrapped measurement.
-        let cache = self.measure_cache.entry(id.to_string()).or_default();
         let key = wrap.map(f32::to_bits);
-        if let Some((_, size)) = cache.sizes.iter().find(|(width, _)| *width == key) {
-            return *size;
-        }
-        if let (Some(w), Some((natural, size))) = (wrap, cache.natural)
-            && w >= natural
-        {
-            return size;
+        if let Some(cache) = self.measure_cache.get(id) {
+            if let Some((_, size)) = cache.sizes.iter().find(|(width, _)| *width == key) {
+                return *size;
+            }
+            if let (Some(w), Some((natural, size))) = (wrap, cache.natural)
+                && w >= natural
+            {
+                return size;
+            }
         }
         layout.break_all_lines(wrap);
         let mut height = layout.height();
@@ -1743,7 +1717,10 @@ impl TextEngine {
             height = line.metrics().block_max_coord;
         }
         let size = (layout.width().ceil(), height.ceil());
-        let cache = self.measure_cache.entry(id.to_string()).or_default();
+        let cache = match self.measure_cache.get_mut(id) {
+            Some(cache) => cache,
+            None => self.measure_cache.entry(id.to_string()).or_default(),
+        };
         if wrap.is_none() {
             cache.natural = Some((layout.width(), size));
         }

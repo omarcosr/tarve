@@ -8,6 +8,8 @@ extern "C" {
    Never unload the DLL until tarve_join has returned.
    Exactly one start per process (Winit's event loop lifecycle). */
 uint32_t tarve_abi_version(void);
+/* Optional: start GPU device creation before the document is ready. 0 auto, 1 gpu, 2 cpu. */
+int32_t tarve_prewarm(uint32_t renderer);
 /* UTF-8 JSON document/command, explicit byte length, no NUL terminator. 0 = success. */
 int32_t tarve_start(const uint8_t *json, uint32_t length);
 int32_t tarve_send(const uint8_t *json, uint32_t length);

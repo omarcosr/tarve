@@ -557,6 +557,9 @@ pub struct Document {
     /// trimmed (Windows); negative turns it off. Default 3000.
     #[serde(default, rename = "memoryTrimDelay")]
     pub memory_trim_delay: Option<f64>,
+    /// `lowPower`: a minimized window gives its renderer back too.
+    #[serde(default, rename = "lowPower")]
+    pub low_power: bool,
     /// Windows AppUserModelID identity for media controls and notifications.
     #[serde(default, rename = "appIdentity")]
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]

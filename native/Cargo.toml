@@ -12,6 +12,8 @@ crate-type = ["cdylib", "rlib"]
 default = ["mimalloc", "fxhash"]
 mimalloc = ["dep:mimalloc"]
 fxhash = ["dep:rustc-hash"]
+# Prototype host (examples/qjs_host.rs): Tarve on an embedded QuickJS-ng, no Bun/Node/txiki.
+qjs-prototype = ["dep:rquickjs"]
 
 [dependencies]
 vello = "=0.10.0"
@@ -32,6 +34,7 @@ unicode-width = "0.2"
 bytemuck = "=1.25.0"
 lru = { version = "0.18.5", default-features = false }
 rustc-hash = { version = "2", optional = true }
+rquickjs = { version = "0.10", default-features = false, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 winit = "0.30.12"
@@ -82,6 +85,10 @@ accesskit_windows = { path = "vendor/accesskit_windows" }
 # Taffy 0.14 with one fix: an auto-sized flex container counts its items' automatic
 # minimum size (see vendor/taffy/src/compute/flexbox.rs, "Tarve patch").
 taffy = { path = "vendor/taffy" }
+
+[[example]]
+name = "qjs_host"
+required-features = ["qjs-prototype"]
 
 [profile.dev]
 opt-level = 1
