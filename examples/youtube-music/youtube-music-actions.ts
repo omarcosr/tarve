@@ -5,6 +5,9 @@ import { lineAt, lyricsFor, type Lyrics } from "./youtube-music-lyrics";
 import * as source from "./youtube-music-source";
 import { AUDIO_ID, LYRICS_LIST, lyricsShown, state, type Page } from "./youtube-music-view";
 
+/** Waits before retrying a song the bot check refused (VPN exits change; the block often lifts). */
+const BLOCKED_RETRIES = [20_000, 60_000, 180_000];
+
 export function connect(app: ReturnType<typeof createApp>): void {
   // One system-media sync per burst of state changes; app.update() batches the render itself.
   let queued = false;
@@ -153,6 +156,8 @@ export function connect(app: ReturnType<typeof createApp>): void {
   let retriedToken = -1;
   /** Songs skipped in a row because they would not play; stops a run of failures from looping. */
   let skipped = 0;
+  /** Retries of the current song after YouTube's bot check refused the network. */
+  let blocked = 0;
 
   // Autoplay, as YouTube Music does: when the queue runs low, the radio of its
   // last song is added after it, so playback never just stops.
@@ -180,8 +185,18 @@ export function connect(app: ReturnType<typeof createApp>): void {
   function skipUnplayable(failure: string): void {
     state.playError = failure;
     state.playing = false;
-    if (++skipped > 3) { refresh(); return; }
     const token = playToken;
+    // The bot check refuses the network, not the song: every next song would fail the same
+    // way, so skipping would only spam YouTube. Retry this one a few times, slower each time.
+    if (failure === source.BOT_CHECK) {
+      if (blocked < BLOCKED_RETRIES.length) {
+        const index = state.index;
+        setTimeout(() => { if (token === playToken && state.index === index) { blocked++; start(); } }, BLOCKED_RETRIES[blocked]);
+      }
+      refresh();
+      return;
+    }
+    if (++skipped > 3) { refresh(); return; }
     setTimeout(() => { if (token === playToken) state.next(); }, 1500);
     refresh();
   }
@@ -248,7 +263,7 @@ export function connect(app: ReturnType<typeof createApp>): void {
       refresh();
       // Resolve the next song meanwhile so it starts at once.
       const upcoming = state.queue[state.index + 1];
-      if (upcoming) void source.streamUrl(upcoming.id).catch(() => undefined);
+      if (upcoming && !blocked) void source.streamUrl(upcoming.id).catch(() => undefined);
     }, error => {
       if (token !== playToken) return;
       state.loading = null;
@@ -257,7 +272,7 @@ export function connect(app: ReturnType<typeof createApp>): void {
     if (state.index + 3 >= state.queue.length) void extendQueue();
     refresh();
   }
-  state.played = () => { skipped = 0; };
+  state.played = () => { skipped = 0; blocked = 0; };
   state.play = (queue, index, from = "") => {
     state.queue = [...queue];
     state.index = index;

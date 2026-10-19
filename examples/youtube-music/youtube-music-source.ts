@@ -352,7 +352,7 @@ function forget(id: string, job: Promise<Resolved>): void {
   if (resolved.get(id) === job) resolved.delete(id);
 }
 
-const BOT_CHECK = "YouTube is blocking this network as a bot (VPN or proxy on?)";
+export const BOT_CHECK = "YouTube is blocking this network as a bot (VPN or proxy on?)";
 
 async function resolve(id: string, client: PlayerClient, visitorId: string): Promise<Resolved> {
   const userAgent = String(client.context.userAgent);

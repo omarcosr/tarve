@@ -120,7 +120,7 @@ test("the music window intercepts the titlebar close and hides instead of quitti
   expect(prevented).toBe(true);
 });
 
-/** A fake YouTube backend: the radio of any song is its id with -1 … -3 after it; player answers for every id except "bad". */
+/** A fake YouTube backend: the radio of any song is its id with -1 … -3 after it; player answers for every id except "bad" and "bot". */
 function backend() {
   const calls: string[] = [];
   globalThis.fetch = (async (url: string, options?: RequestInit) => {
@@ -133,6 +133,7 @@ function backend() {
     }
     if (endpoint === "player") {
       if (body.videoId === "bad") return new Response(JSON.stringify({ playabilityStatus: { status: "ERROR", reason: "unavailable" } }));
+      if (body.videoId === "bot") return new Response(JSON.stringify({ playabilityStatus: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you're not a bot" } }));
       return new Response(JSON.stringify({ playabilityStatus: { status: "OK" }, streamingData: { adaptiveFormats: [{ itag: 140, mimeType: "audio/mp4", url: `https://cdn.test/${body.videoId}?expire=${Math.floor(Date.now() / 1000) + 3600}` }] } }));
     }
     return new Response(JSON.stringify({ responseContext: { visitorData: "v" } }));
@@ -195,6 +196,20 @@ test("an unplayable song is skipped", async () => {
     expect(state.playError).toContain("unavailable");
     await until(() => state.index === 1);
     expect(state.queue[state.index]?.id).toBe("good");
+  } finally { close(); }
+});
+
+test("a bot check stays on the song instead of skipping through the queue", async () => {
+  const calls = backend();
+  const { state, close } = await connected();
+  try {
+    state.repeat = "off";
+    state.play([song("bot"), song("good")], 0);
+    await until(() => state.playError !== null);
+    expect(state.playError).toContain("bot");
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    expect(state.index).toBe(0);
+    expect(calls).not.toContain("player:good");
   } finally { close(); }
 });
 
