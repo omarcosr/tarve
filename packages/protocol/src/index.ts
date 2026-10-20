@@ -362,7 +362,7 @@ export interface SceneDocument {
   version: number; renderer: Renderer; window: WindowOptions; root: NativeNode;
   /** D3D11 MSAA samples: 0 (default) uses a coverage fringe instead; 2, 4 or 8. */
   msaa?: number;
-  /** Idle ms after the last frame before the working set is trimmed (Windows); negative: never. */
+  /** Idle ms after the last frame before the working set is trimmed (Windows); unset or negative: never. */
   memoryTrimDelay?: number;
   /** `AppOptions.lowPower`: a minimized window gives its renderer back. */
   lowPower?: boolean;

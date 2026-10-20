@@ -282,7 +282,7 @@ describe("controlled native reconciliation", () => {
     await app.ready;
     expect(bridge.document?.renderer).toBe("cpu");
     expect(bridge.document?.msaa).toBe(0);
-    expect(bridge.document?.memoryTrimDelay).toBe(1000);
+    expect(bridge.document?.memoryTrimDelay).toBeUndefined();
     expect(bridge.document?.lowPower).toBe(true);
 
     const explicitBridge = new FakeBridge();

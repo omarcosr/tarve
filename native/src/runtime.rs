@@ -1661,8 +1661,6 @@ const MAX_GRAPHICS_RECOVERY_ATTEMPTS: u8 = 3;
 const MAX_GRAPHICS_RECOVERY_EPISODES: usize = 3;
 const GRAPHICS_RECOVERY_WINDOW: Duration = Duration::from_secs(30);
 const PRESENT_RETRY_DELAY: Duration = Duration::from_millis(16);
-/// Default idle time after the last frame before the working set is trimmed.
-const IDLE_TRIM_DELAY: Duration = Duration::from_secs(3);
 const MEMORY_RELEASE_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_PASTE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PASTE_IMAGE_DIMENSION: usize = 16_384;
@@ -2219,7 +2217,9 @@ impl App {
         self.release_graphics();
         self.trim_at.set(None);
         crate::release_free_memory();
-        crate::trim_working_set();
+        if self.trim_delay().is_some() {
+            crate::trim_working_set();
+        }
         self.memory_dirty.set(false);
         self.last_memory_release.set(Instant::now());
         self.sync_control_flow(event_loop);
@@ -2252,7 +2252,9 @@ impl App {
         self.release_graphics();
         self.trim_at.set(None);
         crate::release_free_memory();
-        crate::trim_working_set();
+        if self.trim_delay().is_some() {
+            crate::trim_working_set();
+        }
         self.memory_dirty.set(false);
         self.last_memory_release.set(Instant::now());
         self.sync_control_flow(event_loop);
@@ -2330,7 +2332,9 @@ impl App {
         self.presentation_retry_at = Some(Instant::now() + PRESENT_RETRY_DELAY);
         self.sync_control_flow(event_loop);
     }
-    /// The app's `memoryTrimDelay` (ms; negative: never), `TARVE_TRIM` overriding it (0: never).
+    /// Opt-in `EmptyWorkingSet` trim: the app's `memoryTrimDelay` (ms; unset or negative:
+    /// never), `TARVE_TRIM` overriding it (0: never). Off by default: it only moves pages to
+    /// the standby list, so Task Manager drops while the commit stays the same.
     fn trim_delay(&self) -> Option<Duration> {
         let ms = std::env::var("TARVE_TRIM")
             .ok()
@@ -2338,7 +2342,6 @@ impl App {
             .map(|value| if value == 0.0 { -1.0 } else { value })
             .or(self.document.memory_trim_delay);
         match ms {
-            None => Some(IDLE_TRIM_DELAY),
             Some(ms) if ms.is_finite() && ms >= 0.0 => Some(Duration::from_secs_f64(ms / 1000.0)),
             _ => None,
         }

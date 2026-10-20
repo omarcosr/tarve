@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/tarve/tarve-go/tarve"
+	"github.com/omarcosr/tarve/go/tarve"
 )
 
 // TestParityWithTypeScript compares the native documents with examples/counter/counter.tsx's.

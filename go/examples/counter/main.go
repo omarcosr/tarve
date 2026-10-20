@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/tarve/tarve-go/examples/counter/counter"
-	"github.com/tarve/tarve-go/tarve"
+	"github.com/omarcosr/tarve/go/examples/counter/counter"
+	"github.com/omarcosr/tarve/go/tarve"
 )
 
 func main() {

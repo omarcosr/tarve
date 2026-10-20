@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tarve/tarve-go/tarve"
+	"github.com/omarcosr/tarve/go/tarve"
 )
 
 // diff lists where two JSON values differ (up to limit).

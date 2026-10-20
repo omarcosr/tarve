@@ -57,6 +57,7 @@ use windows::{
                 },
                 CreateDXGIFactory1, DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
                 DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_DISCARD,
+                DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_PRESENT_PARAMETERS,
                 DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIFactory2, IDXGISwapChain1,
                 Common::DXGI_ALPHA_MODE_PREMULTIPLIED,
             },
@@ -153,6 +154,8 @@ unsafe impl bytemuck::Pod for Vertex {}
 enum TextureRef {
     Solid,
     Glyph(ID3D11ShaderResourceView),
+    /// An RGBA ClearType atlas page, drawn with `ps_cleartype` (see `cleartype`).
+    ClearType(ID3D11ShaderResourceView),
     Image(ID3D11ShaderResourceView),
     /// A `<video>` picture: the same texture shows a new picture each generation.
     /// Its node id: a video in its own composition layer is drawn as a hole.
@@ -377,6 +380,9 @@ pub(crate) struct D3d11Graphics {
     /// Single-sample path: the retained frame. Only tiles whose commands changed
     /// are redrawn into it (scissored); it is then copied to the back buffer.
     canvas: Option<Canvas>,
+    /// What the frame drawn last changed, for Present1: `None` the whole window,
+    /// empty nothing (no present), else these dirty rectangles.
+    present_rects: Option<Vec<windows::Win32::Foundation::RECT>>,
     /// Where the commands being replayed draw (the canvas or the back buffer);
     /// glass copies its backdrop from it.
     current_target: Option<(ID3D11RenderTargetView, ID3D11Texture2D)>,
@@ -451,6 +457,8 @@ pub(crate) struct D3d11Graphics {
     /// already-seen text must not move it.
     glyph_rasterizations: u64,
     scale_context: ScaleContext,
+    /// `textRendering: "cleartype"`: DirectWrite glyphs and their own atlas pages.
+    cleartype: cleartype::ClearType,
     prepared: bool,
 }
 
@@ -495,7 +503,8 @@ impl D3d11Graphics {
             BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
             BufferCount: 2,
             Scaling: DXGI_SCALING_STRETCH,
-            SwapEffect: DXGI_SWAP_EFFECT_FLIP_DISCARD,
+            // Sequential, not discard: only it lets Present1 hand DWM dirty rectangles.
+            SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
             AlphaMode: DXGI_ALPHA_MODE_IGNORE,
             Flags: 0,
         };
@@ -578,6 +587,7 @@ impl D3d11Graphics {
             frame_cache: None,
             tile_hashes: Vec::new(),
             canvas: None,
+            present_rects: None,
             current_target: None,
             scissor_rasterizer,
             gpu_timer,
@@ -630,6 +640,7 @@ impl D3d11Graphics {
             glyph_atlas_exhausted: false,
             glyph_rasterizations: 0,
             scale_context: ScaleContext::new(),
+            cleartype: cleartype::ClearType::default(),
             prepared: false,
         };
         // A window swap chain has no alpha: a transparent window starts in composition.
@@ -676,6 +687,9 @@ impl D3d11Graphics {
             };
             self.glyph_atlases.push(atlas);
             self.glyph_atlas_exhausted = false;
+        }
+        if self.cleartype.begin_frame(&self.device, self.transparent) {
+            self.tile_hashes.clear();
         }
         let mut target = D3d11PaintTarget {
             graphics: self,
@@ -1045,7 +1059,24 @@ impl D3d11Graphics {
         if let Err(error) = drawn {
             return Err(self.classify_gpu_error("D3D11 draw", error));
         }
-        if let Err(error) = unsafe { self.swap_chain.Present(1, DXGI_PRESENT(0)).ok() } {
+        // The composition swap chain is flip-discard: it always presents whole frames.
+        let rects = if self.composition.is_none() { self.present_rects.take() } else { None };
+        let presented = match &rects {
+            // Nothing changed: the window already shows this frame.
+            Some(rects) if rects.is_empty() => Ok(()),
+            Some(rects) => {
+                let mut rects = rects.clone();
+                let parameters = DXGI_PRESENT_PARAMETERS {
+                    DirtyRectsCount: rects.len() as u32,
+                    pDirtyRects: rects.as_mut_ptr(),
+                    pScrollRect: std::ptr::null_mut(),
+                    pScrollOffset: std::ptr::null_mut(),
+                };
+                unsafe { self.swap_chain.Present1(1, DXGI_PRESENT(0), &parameters).ok() }
+            }
+            None => unsafe { self.swap_chain.Present(1, DXGI_PRESENT(0)).ok() },
+        };
+        if let Err(error) = presented {
             return Err(self.classify_windows_gpu_error("DXGI Present", error));
         }
         // Layer moves and holes show with the frame that drew them.
@@ -1058,6 +1089,7 @@ impl D3d11Graphics {
     }
 
     fn draw_frame(&mut self, background: Color) -> Result<(), String> {
+        self.present_rects = None;
         self.ensure_gpu_buffers()?;
         self.upload_frame_buffers()?;
         let mut bg = rgba(background);
@@ -1134,11 +1166,13 @@ impl D3d11Graphics {
         }
         let columns = self.width.div_ceil(MSAA_TILE) as usize;
         let tiles = columns * self.height.div_ceil(MSAA_TILE) as usize;
-        if self.tile_hashes.len() != tiles {
+        let hashes_fresh = self.tile_hashes.len() != tiles;
+        if hashes_fresh {
             self.tile_hashes = vec![0; tiles];
         }
         let size = MSAA_TILE as f32;
         let mut hashes = std::mem::take(&mut self.tile_hashes);
+        let mut changed = Vec::new();
         let (Some(tile), Some(cache)) = (&self.tile, &self.frame_cache) else {
             return Err("D3D11 MSAA tile is unavailable".into());
         };
@@ -1153,6 +1187,7 @@ impl D3d11Graphics {
                     continue;
                 }
                 hashes[slot] = hash;
+                changed.push([left, top, (left + size).min(self.width as f32), (top + size).min(self.height as f32)]);
                 let transform = tile_transform(self.width, self.height, x, y);
                 upload_dynamic(
                     &self.context,
@@ -1204,6 +1239,9 @@ impl D3d11Graphics {
             self.context.CopyResource(&backbuffer, cache);
         }
         self.tile_hashes = hashes;
+        if !hashes_fresh && !partial_redraw_disabled() {
+            self.present_rects = Some(merge_rects(changed).into_iter().map(to_rect).collect());
+        }
         Ok(())
     }
 
@@ -1230,6 +1268,11 @@ impl D3d11Graphics {
         let canvas = self.canvas.clone().ok_or("D3D11 canvas is unavailable")?;
         let bounds = self.command_bounds();
         let damage = self.damage_rects(&bounds, bg);
+        self.present_rects = damage.as_ref().map(|rects| rects.iter().map(|rect| to_rect(*rect)).collect());
+        // Nothing changed and nothing to present: the back buffer is not touched either.
+        if damage.as_ref().is_some_and(Vec::is_empty) && self.composition.is_none() {
+            return Ok(());
+        }
         self.current_target = Some((canvas.view.clone(), canvas.texture.clone()));
         unsafe {
             self.context
@@ -1466,7 +1509,9 @@ impl D3d11Graphics {
                         *count,
                         match texture {
                             TextureRef::Solid => 0,
-                            TextureRef::Glyph(view) | TextureRef::Image(view) => {
+                            TextureRef::Glyph(view)
+                            | TextureRef::ClearType(view)
+                            | TextureRef::Image(view) => {
                                 windows::core::Interface::as_raw(view) as u64
                             }
                             // A new picture in the same texture must repaint its tiles.
@@ -1621,6 +1666,7 @@ impl D3d11Graphics {
         #[derive(Clone, Copy, PartialEq)]
         enum State {
             Draw(u32),
+            ClearType(u32),
             Push(u32),
             Pop(u32),
             Punch(u32),
@@ -1639,6 +1685,11 @@ impl D3d11Graphics {
             }
             let (blend, stencil, depth) = match next {
                 State::Draw(depth) => (&self.blend, &self.stencil_draw, depth),
+                State::ClearType(depth) => (
+                    self.cleartype.pipeline().map_or(&self.blend, |(_, blend)| blend),
+                    &self.stencil_draw,
+                    depth,
+                ),
                 State::Punch(depth) => (&self.punch_blend, &self.stencil_draw, depth),
                 State::Push(depth) => (&self.clip_blend, &self.stencil_push, depth),
                 State::Pop(depth) => (&self.clip_blend, &self.stencil_pop, depth),
@@ -1650,6 +1701,19 @@ impl D3d11Graphics {
             }
             *state = Some(next);
         };
+        // ClearType draws swap in their own pixel shader; everything else uses the main one.
+        let mut cleartype_shader = false;
+        let use_cleartype = |on: bool, current: &mut bool| {
+            if *current == on {
+                return;
+            }
+            let shader = match self.cleartype.pipeline() {
+                Some((shader, _)) if on => shader,
+                _ => &self.pixel_shader,
+            };
+            unsafe { self.context.PSSetShader(shader, None) };
+            *current = on;
+        };
         let mut clip_depth = 0_u32;
         for (index, command) in self.commands.iter().enumerate() {
             match command {
@@ -1660,13 +1724,16 @@ impl D3d11Graphics {
                 } => {
                     let key = match texture {
                         TextureRef::Solid => 0,
-                        TextureRef::Glyph(view) | TextureRef::Image(view) => {
+                        TextureRef::Glyph(view)
+                        | TextureRef::ClearType(view)
+                        | TextureRef::Image(view) => {
                             windows::core::Interface::as_raw(view) as usize
                         }
                         TextureRef::Video(_, _, id) if self.punched.contains(&**id) => {
                             // The video shows through: clear the UI's alpha under it.
                             flush(&mut batch);
                             if visible(index) {
+                                use_cleartype(false, &mut cleartype_shader);
                                 set_state(State::Punch(clip_depth), &mut state);
                                 unsafe { self.context.DrawIndexed(*count, *first, 0) };
                             }
@@ -1687,14 +1754,19 @@ impl D3d11Graphics {
                         continue;
                     }
                     flush(&mut batch);
-                    set_state(State::Draw(clip_depth), &mut state);
+                    let cleartype = matches!(texture, TextureRef::ClearType(_));
+                    use_cleartype(cleartype, &mut cleartype_shader);
+                    set_state(
+                        if cleartype { State::ClearType(clip_depth) } else { State::Draw(clip_depth) },
+                        &mut state,
+                    );
                     if bound_texture != Some(key) {
                         unsafe {
                             match texture {
                                 TextureRef::Solid => {
                                     self.context.PSSetShaderResources(0, Some(&[None]))
                                 }
-                                TextureRef::Glyph(view) => {
+                                TextureRef::Glyph(view) | TextureRef::ClearType(view) => {
                                     self.context.PSSetSamplers(
                                         0,
                                         Some(&[Some(self.glyph_sampler.clone())]),
@@ -1736,6 +1808,7 @@ impl D3d11Graphics {
                 DrawCommand::PushClip { first, count } => {
                     flush(&mut batch);
                     if visible(index) {
+                        use_cleartype(false, &mut cleartype_shader);
                         set_state(State::Push(clip_depth), &mut state);
                         unsafe { self.context.DrawIndexed(*count, *first, 0) };
                     }
@@ -1744,6 +1817,7 @@ impl D3d11Graphics {
                 DrawCommand::PopClip { first, count } => {
                     flush(&mut batch);
                     if visible(index) {
+                        use_cleartype(false, &mut cleartype_shader);
                         set_state(State::Pop(clip_depth), &mut state);
                         unsafe { self.context.DrawIndexed(*count, *first, 0) };
                     }
@@ -1763,6 +1837,7 @@ impl D3d11Graphics {
                     if !visible(index) {
                         continue;
                     }
+                    use_cleartype(false, &mut cleartype_shader);
                     let surface = GlassSurface {
                         params: *params,
                         region: *region,
@@ -1782,6 +1857,7 @@ impl D3d11Graphics {
             }
         }
         flush(&mut batch);
+        use_cleartype(false, &mut cleartype_shader);
     }
 
     /// Copies the backdrop under a glass box, blurs it in place and leaves it bound
@@ -3814,19 +3890,30 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         }
         let scale = x_scale.max(y_scale) as f32;
         let scale = scale.max(0.01);
+        // DirectWrite gets static faces only; variable-font instances stay with swash.
+        let cleartype = self.graphics.cleartype.active() && normalized_coords.is_empty();
         for glyph in glyphs {
             let baseline = transform * Point::new(f64::from(glyph.x), f64::from(glyph.y));
             let (base_x, subpixel_x) = quantize_glyph_position(baseline.x as f32);
             let (base_y, subpixel_y) = quantize_glyph_position(baseline.y as f32);
-            let Some(entry) = self.graphics.glyph_entry(
-                font,
-                font_size,
-                normalized_coords,
-                glyph.id,
-                subpixel_x,
-                subpixel_y,
-                scale,
-            ) else {
+            let cleartype_entry = if cleartype {
+                self.graphics
+                    .cleartype_entry(font, font_size, glyph.id, subpixel_x, subpixel_y, scale)
+            } else {
+                None
+            };
+            let subpixel = cleartype_entry.is_some();
+            let Some(entry) = cleartype_entry.or_else(|| {
+                self.graphics.glyph_entry(
+                    font,
+                    font_size,
+                    normalized_coords,
+                    glyph.id,
+                    subpixel_x,
+                    subpixel_y,
+                    scale,
+                )
+            }) else {
                 continue;
             };
             if entry.width == 0 || entry.height == 0 {
@@ -3847,7 +3934,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                 entry.uv,
                 color.multiply_alpha(self.opacity),
                 2.0,
-                TextureRef::Glyph(view),
+                if subpixel { TextureRef::ClearType(view) } else { TextureRef::Glyph(view) },
             );
         }
     }
@@ -3861,7 +3948,11 @@ fn hwnd(window: &Window) -> Result<HWND, String> {
     }
 }
 
+mod cleartype;
+mod dwrite_glyphs;
 mod prewarm;
+mod text_rendering;
+pub(crate) use text_rendering::set_text_rendering;
 pub(crate) use prewarm::{prewarm_device, prewarm_pending};
 use prewarm::create_device;
 fn create_device_now() -> Result<(ID3D11Device, ID3D11DeviceContext), String> {
@@ -4889,7 +4980,11 @@ mod shader_tests {
             "shaders/ui.hlsl changed without regenerating its bytecode; run \
              `cargo test --lib regenerate_d3d11_shaders -- --ignored`"
         );
-        for (name, bytes) in [("vertex", VERTEX_SHADER), ("pixel", PIXEL_SHADER)] {
+        for (name, bytes) in [
+            ("vertex", VERTEX_SHADER),
+            ("pixel", PIXEL_SHADER),
+            ("ClearType pixel", cleartype::PIXEL_SHADER),
+        ] {
             assert!(
                 bytes.starts_with(b"DXBC"),
                 "{name} shader is not DXBC bytecode"
@@ -5013,6 +5108,7 @@ mod shader_tests {
         for (entry, target, file) in [
             (&b"vs_main\0"[..], &b"vs_5_0\0"[..], "ui.vs.dxbc"),
             (&b"ps_main\0"[..], &b"ps_5_0\0"[..], "ui.ps.dxbc"),
+            (&b"ps_cleartype\0"[..], &b"ps_5_0\0"[..], "cleartype.ps.dxbc"),
         ] {
             let blob = compile_shader(SOURCE, entry, target).unwrap();
             std::fs::write(dir.join(file), blob_bytes(&blob)).unwrap();
@@ -5071,6 +5167,16 @@ fn create_scissor_rasterizer(
     let mut state = None;
     unsafe { device.CreateRasterizerState(&desc, Some(&mut state)) }.map_err(win_error)?;
     state.ok_or_else(|| "D3D11 scissor rasterizer state was not created".into())
+}
+
+/// A damage rectangle as a whole-pixel Win32 RECT (damage is tile-aligned already).
+fn to_rect(rect: [f32; 4]) -> windows::Win32::Foundation::RECT {
+    windows::Win32::Foundation::RECT {
+        left: rect[0].floor() as i32,
+        top: rect[1].floor() as i32,
+        right: rect[2].ceil() as i32,
+        bottom: rect[3].ceil() as i32,
+    }
 }
 
 fn overlaps(a: [f32; 4], b: [f32; 4]) -> bool {

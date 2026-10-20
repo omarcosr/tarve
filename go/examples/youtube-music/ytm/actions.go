@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tarve/tarve-go/tarve"
+	"github.com/omarcosr/tarve/go/tarve"
 )
 
 // blockedRetries are the waits before retrying a song the bot check refused (VPN exits

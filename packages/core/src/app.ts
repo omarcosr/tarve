@@ -102,16 +102,16 @@ export interface AppOptions {
   /** Report every mouse button press/release and wheel turn to `onEvent` as `pointer` events, on the deepest node under the pointer. */
   pointerEvents?: boolean;
   /**
-   * Windows: after this many ms without a new frame (default 3000), return the pages only
-   * startup touched to the OS, so Task Manager shows what the app really uses. `false` never
-   * does. `TARVE_TRIM` (ms, or 0 to disable) overrides it.
+   * Windows, opt-in: after this many ms without a new frame, move the process's pages to the
+   * standby list (`EmptyWorkingSet`), and do the same when a window is hidden or minimized.
+   * Task Manager's working set drops but nothing is freed: commit stays the same and touched
+   * pages fault back in. Unset or `false` never trims. `TARVE_TRIM` (ms, or 0 to disable) overrides it.
    */
   memoryTrimDelay?: number | false;
   /**
    * Least memory over speed: the CPU renderer (no GPU driver, ~90 MB less, more CPU
-   * per frame while animating or scrolling), no MSAA, and startup pages returned to the
-   * OS after one second idle instead of three. Explicit `renderer`, `msaa` and
-   * `memoryTrimDelay` still win. A minimized or hidden window gives its renderer back
+   * per frame while animating or scrolling) and no MSAA. Explicit `renderer` and `msaa`
+   * still win. A minimized or hidden window gives its renderer back
    * and asks Windows for EcoQoS with or without this option.
    */
   lowPower?: boolean;
@@ -341,7 +341,6 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     if (options.keyboardEvents) tree.document.keyboardEvents = true;
     if (options.pointerEvents) tree.document.pointerEvents = true;
     if (options.memoryTrimDelay !== undefined) tree.document.memoryTrimDelay = options.memoryTrimDelay === false ? -1 : options.memoryTrimDelay;
-    else if (options.lowPower) tree.document.memoryTrimDelay = 1000;
     if (options.lowPower) tree.document.lowPower = true;
     return tree;
   }

@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	. "github.com/tarve/tarve-go/tarve"
+	. "github.com/omarcosr/tarve/go/tarve"
 )
 
 const AudioID = "ytm-audio"

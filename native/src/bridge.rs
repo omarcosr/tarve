@@ -553,6 +553,8 @@ pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
         }
         #[cfg(target_os = "windows")]
         crate::d3d11::set_msaa(document.msaa);
+        #[cfg(target_os = "windows")]
+        crate::d3d11::set_text_rendering(document.text_rendering.as_deref());
         crate::renderer::prewarm(document.renderer);
         let events = Arc::new(Events::new()?);
         let out = events.clone();

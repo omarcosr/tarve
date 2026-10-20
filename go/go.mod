@@ -1,4 +1,4 @@
-module github.com/tarve/tarve-go
+module github.com/omarcosr/tarve/go
 
 go 1.25.0
 

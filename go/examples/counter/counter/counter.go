@@ -4,7 +4,7 @@ package counter
 import (
 	"fmt"
 
-	. "github.com/tarve/tarve-go/tarve"
+	. "github.com/omarcosr/tarve/go/tarve"
 )
 
 // State is the counter's module state, as the let bindings of counter.tsx.

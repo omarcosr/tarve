@@ -11,7 +11,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/tarve/tarve-go/tarve"
+	"github.com/omarcosr/tarve/go/tarve"
 )
 
 var processStart = time.Now()

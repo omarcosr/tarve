@@ -85,8 +85,9 @@ CPU ocioso: 0 frames e 0–1% de um core em todas as linhas (0–2 ticks de 15,6
 
 O que entrou:
 
-- **`lowPower: true`** (`AppOptions`, herdado por `openWindow`): renderer CPU, `msaa: 0`, trim de memória 1 s após o
-  último frame e devolução do renderer ao minimizar. `renderer`, `msaa` e `memoryTrimDelay` explícitos continuam valendo.
+- **`lowPower: true`** (`AppOptions`, herdado por `openWindow`): renderer CPU, `msaa: 0` e devolução do renderer ao
+  minimizar. `renderer` e `msaa` explícitos continuam valendo. O trim do working set (`EmptyWorkingSet`) é opt-in via
+  `memoryTrimDelay`/`TARVE_TRIM`: só move páginas para a standby list, não libera commit.
   Troca ~100 MB e ~22 threads de driver por mais CPU por frame ao animar/rolar (D3D11 continua sendo o padrão).
 - **EcoQoS** (`native/src/lib.rs`, `power`): enquanto todas as janelas do processo estão minimizadas (`lowPower`) ou
   escondidas e nada toca (áudio/vídeo), o processo pede `ProcessPowerThrottling` ao Windows; quando uma janela volta, o

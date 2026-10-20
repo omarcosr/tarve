@@ -187,6 +187,17 @@ float4 shade(PSIn i) {
     if (i.mode < 1.5) return sample * i.color;
     return float4(i.color.rgb, i.color.a * sample.r);
 }
+// ClearType glyphs: tex0 holds coverage per colour channel. Dual-source blending
+// weights each channel of the destination by its own coverage (the second output).
+struct ClearTypeOut { float4 color : SV_Target0; float4 coverage : SV_Target1; };
+ClearTypeOut ps_cleartype(PSIn i) {
+    float3 coverage = tex0.Sample(samp0, i.uv).rgb;
+    float a = i.color.a * clipCoverage(i);
+    ClearTypeOut o;
+    o.coverage = float4(coverage * a, dot(coverage, 1.0 / 3.0) * a);
+    o.color = float4(i.color.rgb * o.coverage.rgb, o.coverage.a);
+    return o;
+}
 float4 ps_main(PSIn i) : SV_TARGET {
     float4 c = shade(i);
     c.a *= clipCoverage(i);

@@ -554,7 +554,7 @@ pub struct Document {
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub msaa: Option<u32>,
     /// Idle milliseconds after the last frame before the working set is
-    /// trimmed (Windows); negative turns it off. Default 3000.
+    /// trimmed (Windows, `EmptyWorkingSet`); unset or negative: never.
     #[serde(default, rename = "memoryTrimDelay")]
     pub memory_trim_delay: Option<f64>,
     /// `lowPower`: a minimized window gives its renderer back too.

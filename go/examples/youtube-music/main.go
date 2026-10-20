@@ -9,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/tarve/tarve-go/examples/youtube-music/ytm"
-	"github.com/tarve/tarve-go/tarve"
+	"github.com/omarcosr/tarve/go/examples/youtube-music/ytm"
+	"github.com/omarcosr/tarve/go/tarve"
 )
 
 // iconPath finds examples/youtube-music/icon.png from the repository or next to the executable.

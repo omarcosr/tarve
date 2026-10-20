@@ -8,10 +8,20 @@
     "skipLibCheck": true,
     "jsx": "react-jsx",
     "jsxImportSource": "@tarve/core",
-    "types": ["bun", "@tarve/core/assets"],
-    // Linked packages (@tarve/svelte, @tarve/react-icons) resolve their imports from here, not from their source folder.
-    "preserveSymlinks": true
+    "types": ["bun"],
+    // Examples run the repository's own source, never a published or staged @tarve/core.
+    "paths": {
+      "@tarve/core": ["../packages/core/src/index.ts"],
+      "@tarve/core/assets": ["../packages/core/src/assets.d.ts"],
+      "@tarve/core/build": ["../packages/core/build.ts"],
+      "@tarve/core/*": ["../packages/core/src/*"],
+      "@tarve/protocol": ["../packages/protocol/src/index.ts"],
+      "@tarve/react-icons": ["../packages/react-icons/src/index.ts"],
+      "@tarve/react-icons/*": ["../packages/react-icons/src/*"],
+      "@tarve/svelte": ["../packages/svelte/src/index.ts"],
+      "@tarve/svelte/*": ["../packages/svelte/src/*"]
+    }
   },
-  "include": ["**/*.ts", "**/*.tsx"],
+  "include": ["**/*.ts", "**/*.tsx", "../packages/core/src/assets.d.ts"],
   "exclude": ["node_modules", "**/dist", "studio/studio-samples", "microts-prototype/app", "microts-prototype/.pocketjs"]
 }

@@ -209,7 +209,7 @@ func (a *App) compileView() (tree *CompiledTree, err error) {
 		tree.Document[k] = v
 	}
 	if a.options.LowPower {
-		tree.Document["msaa"], tree.Document["memoryTrimDelay"], tree.Document["lowPower"] = 0, 1000, true
+		tree.Document["msaa"], tree.Document["lowPower"] = 0, true
 	}
 	return tree, nil
 }
