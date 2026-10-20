@@ -61,7 +61,9 @@ export function sveltePlugin(options: SveltePluginOptions = {}) {
         namespace: NAMESPACE,
       }));
       // A bundle resolves `svelte` through this plugin: no runtime lookup by path.
-      build.onLoad({ filter: /[\\/]svelte-client\.ts$/ }, () => ({ contents: 'export { mount, unmount, flushSync } from "svelte";', loader: "ts" }));
+      // The client build by absolute path: under Bun.plugin this hook also runs at runtime, where a
+        // bare "svelte" may reach Bun's resolver (no importer) and load the server build.
+        build.onLoad({ filter: /[\\/]svelte-client\.ts$/ }, () => ({ contents: `export { mount, unmount, flushSync } from ${JSON.stringify(resolveImport("svelte"))};`, loader: "ts" }));
       build.onLoad({ filter: /.*/, namespace: NAMESPACE }, async args => {
         // The compiler loads on the first component: plugins for apps without Svelte stay cheap.
         const { compileSvelte, compileSvelteModule } = await import("./compiler");
