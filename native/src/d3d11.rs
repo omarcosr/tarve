@@ -26,10 +26,7 @@ use windows::{
     Win32::{
         Foundation::{HMODULE, HWND},
         Graphics::{
-            Direct3D::{
-                D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0,
-                D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
-            },
+            Direct3D::{D3D_FEATURE_LEVEL_11_0, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST},
             Direct3D11::{
                 D3D11_BIND_DEPTH_STENCIL, D3D11_BIND_INDEX_BUFFER, D3D11_BIND_SHADER_RESOURCE,
                 D3D11_BIND_VERTEX_BUFFER, D3D11_BLEND_DESC, D3D11_BLEND_INV_SRC_ALPHA,
@@ -4019,7 +4016,7 @@ mod cleartype;
 mod dwrite_glyphs;
 mod prewarm;
 mod text_rendering;
-use prewarm::create_device;
+use prewarm::{create_device, driver_type};
 pub(crate) use prewarm::{prewarm_device, prewarm_pending};
 pub(crate) use text_rendering::set_text_rendering;
 fn create_device_now() -> Result<(ID3D11Device, ID3D11DeviceContext), String> {
@@ -4036,12 +4033,7 @@ fn create_device_with(
     unsafe {
         D3D11CreateDevice(
             None,
-            // TARVE_D3D11_WARP=1: the software rasterizer GPU-less CI runners get, to reproduce them.
-            if std::env::var_os("TARVE_D3D11_WARP").is_some_and(|value| value == "1") {
-                windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_WARP
-            } else {
-                D3D_DRIVER_TYPE_HARDWARE
-            },
+            driver_type(),
             HMODULE::default(),
             flags,
             Some(&[D3D_FEATURE_LEVEL_11_0]),

@@ -35,3 +35,14 @@ pub(super) fn create_device() -> Result<(ID3D11Device, ID3D11DeviceContext), Str
         None => super::create_device_now(),
     }
 }
+
+/// The hardware driver; `TARVE_D3D11_WARP=1` picks WARP, the software rasterizer GPU-less CI
+/// runners get, to reproduce them on a machine with a GPU.
+pub(super) fn driver_type() -> windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE {
+    use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP};
+    if std::env::var_os("TARVE_D3D11_WARP").is_some_and(|value| value == "1") {
+        D3D_DRIVER_TYPE_WARP
+    } else {
+        D3D_DRIVER_TYPE_HARDWARE
+    }
+}
