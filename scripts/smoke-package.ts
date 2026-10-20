@@ -21,9 +21,17 @@ await cp(sourceExamples, examples, {
     const path = relative(sourceExamples, source);
     const first = path.split(/[\\/]/)[0];
     if (["node_modules", "dist", ".bun-cache"].includes(first)) return false;
+    // Local checkouts and Cargo output inside prototypes (microts-prototype/.pocketjs).
+    if (path.split(/[\\/]/).some(part => part === ".pocketjs" || part === "target")) return false;
     return !/\.(?:exe|dll|so)$/i.test(path);
   },
 });
+// The repository's examples/tsconfig.json maps @tarve/* to packages/* sources; a consumer
+// type-checks the same examples against the installed package instead.
+await Bun.write(join(examples, "tsconfig.json"), JSON.stringify({ compilerOptions: {
+  target: "ESNext", module: "ESNext", moduleResolution: "Bundler", strict: true, noEmit: true, skipLibCheck: true,
+  jsx: "react-jsx", jsxImportSource: "@tarve/core", types: ["bun", "@tarve/core/assets"],
+}, include: ["**/*.ts", "**/*.tsx"], exclude: ["node_modules", "**/dist", "studio/studio-samples", "microts-prototype/app"] }));
 await Bun.write(join(directory, "package.json"), JSON.stringify({ name: "tarve-consumer-test", private: true, type: "module" }));
 await Bun.write(join(directory, "tsconfig.json"), JSON.stringify({ compilerOptions: {
   target: "ESNext", module: "ESNext", moduleResolution: "Bundler", strict: true, noEmit: true,
