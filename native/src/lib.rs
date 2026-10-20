@@ -3,7 +3,13 @@
 #![cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
 // A library trimmed to the features an app uses (`tarve build`) leaves helpers of the others unreferenced.
 #![cfg_attr(
-    not(all(feature = "vello-gpu", feature = "syntax", feature = "markdown", feature = "net", feature = "media")),
+    not(all(
+        feature = "vello-gpu",
+        feature = "syntax",
+        feature = "markdown",
+        feature = "net",
+        feature = "media"
+    )),
     allow(dead_code, unused_imports, unused_variables)
 )]
 
@@ -41,10 +47,10 @@ mod runtime;
 mod shadow;
 #[cfg(target_os = "windows")]
 mod smtc;
-#[cfg(not(target_arch = "wasm32"))]
-mod stats;
 #[cfg(test)]
 mod startup_bench;
+#[cfg(not(target_arch = "wasm32"))]
+mod stats;
 mod svg;
 mod syntax;
 #[cfg(test)]
@@ -123,7 +129,9 @@ pub(crate) mod power {
         pub(crate) fn new() -> Self {
             WINDOWS.fetch_add(1, Ordering::Relaxed);
             sync();
-            Self { background: Cell::new(false) }
+            Self {
+                background: Cell::new(false),
+            }
         }
         pub(crate) fn set_background(&self, background: bool) {
             if self.background.replace(background) == background {
@@ -165,7 +173,12 @@ pub(crate) mod power {
         const EXECUTION_SPEED: u32 = 1;
         unsafe extern "system" {
             fn GetCurrentProcess() -> isize;
-            fn SetProcessInformation(process: isize, class: i32, information: *const core::ffi::c_void, size: u32) -> i32;
+            fn SetProcessInformation(
+                process: isize,
+                class: i32,
+                information: *const core::ffi::c_void,
+                size: u32,
+            ) -> i32;
         }
         // On: throttle execution speed. Off: an empty control mask returns the
         // decision to Windows' own heuristics instead of opting out of them.
@@ -197,11 +210,21 @@ pub(crate) mod power {
             let mut state = [1_u32, 0, 0];
             unsafe extern "system" {
                 fn GetCurrentProcess() -> isize;
-                fn GetProcessInformation(process: isize, class: i32, information: *mut core::ffi::c_void, size: u32) -> i32;
+                fn GetProcessInformation(
+                    process: isize,
+                    class: i32,
+                    information: *mut core::ffi::c_void,
+                    size: u32,
+                ) -> i32;
             }
             // SAFETY: a correctly sized PROCESS_POWER_THROTTLING_STATE (version 1) for this process.
-            let ok = unsafe { GetProcessInformation(GetCurrentProcess(), 4, state.as_mut_ptr().cast(), 12) };
-            assert_ne!(ok, 0, "GetProcessInformation(ProcessPowerThrottling) failed");
+            let ok = unsafe {
+                GetProcessInformation(GetCurrentProcess(), 4, state.as_mut_ptr().cast(), 12)
+            };
+            assert_ne!(
+                ok, 0,
+                "GetProcessInformation(ProcessPowerThrottling) failed"
+            );
             (state[1], state[2])
         }
 
@@ -212,11 +235,23 @@ pub(crate) mod power {
             first.set_background(true);
             assert_eq!(throttling(), (0, 0), "one window still in front: no EcoQoS");
             second.set_background(true);
-            assert_eq!(throttling(), (1, 1), "every window in the background: EcoQoS");
+            assert_eq!(
+                throttling(),
+                (1, 1),
+                "every window in the background: EcoQoS"
+            );
             first.set_background(false);
-            assert_eq!(throttling(), (0, 0), "a window back in front hands control back to Windows");
+            assert_eq!(
+                throttling(),
+                (0, 0),
+                "a window back in front hands control back to Windows"
+            );
             drop(first);
-            assert_eq!(throttling(), (1, 1), "the remaining window is in the background");
+            assert_eq!(
+                throttling(),
+                (1, 1),
+                "the remaining window is in the background"
+            );
             drop(second);
             assert_eq!(throttling(), (0, 0), "no windows: no EcoQoS");
         }

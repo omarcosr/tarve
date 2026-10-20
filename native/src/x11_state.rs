@@ -80,11 +80,15 @@ pub(crate) fn pointer_in_window(window: &Window) -> Option<(f64, f64)> {
     POINTER_CONNECTION.with(|cell| {
         let mut cell = cell.borrow_mut();
         if cell.is_none() {
-            *cell = RustConnection::connect(None).ok().map(|(connection, _)| connection);
+            *cell = RustConnection::connect(None)
+                .ok()
+                .map(|(connection, _)| connection);
         }
         let reply = cell.as_ref()?.query_pointer(id).ok()?.reply();
         match reply {
-            Ok(reply) if reply.same_screen => Some((f64::from(reply.win_x), f64::from(reply.win_y))),
+            Ok(reply) if reply.same_screen => {
+                Some((f64::from(reply.win_x), f64::from(reply.win_y)))
+            }
             Ok(_) => None,
             Err(_) => {
                 // A broken connection is made again on the next read.

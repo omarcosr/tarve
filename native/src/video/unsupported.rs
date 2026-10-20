@@ -13,10 +13,26 @@ impl Videos {
     pub(crate) fn handles(&self, _id: &str) -> bool {
         false
     }
-    pub(crate) fn load<Mixer>(&mut self, id: &str, _load: VideoLoad<'_>, _mixer: Option<Mixer>) -> Vec<Value> {
-        vec![media_error(id, "Video playback is not supported on this platform yet")]
+    pub(crate) fn load<Mixer>(
+        &mut self,
+        id: &str,
+        _load: VideoLoad<'_>,
+        _mixer: Option<Mixer>,
+    ) -> Vec<Value> {
+        vec![media_error(
+            id,
+            "Video playback is not supported on this platform yet",
+        )]
     }
-    pub(crate) fn command(&mut self, _id: &str, _action: &str, _time: Option<f64>, _volume: Option<f64>, _muted: Option<bool>, _looped: Option<bool>) -> Vec<Value> {
+    pub(crate) fn command(
+        &mut self,
+        _id: &str,
+        _action: &str,
+        _time: Option<f64>,
+        _volume: Option<f64>,
+        _muted: Option<bool>,
+        _looped: Option<bool>,
+    ) -> Vec<Value> {
         Vec::new()
     }
     pub(crate) fn tick(&mut self, _now: Instant) -> Vec<Value> {
@@ -34,7 +50,11 @@ impl Videos {
         None
     }
     #[cfg(target_os = "windows")]
-    pub(crate) fn attach_renderer(&mut self, _device: Option<windows::Win32::Graphics::Direct3D11::ID3D11Device>) {}
+    pub(crate) fn attach_renderer(
+        &mut self,
+        _device: Option<windows::Win32::Graphics::Direct3D11::ID3D11Device>,
+    ) {
+    }
     #[cfg(target_os = "windows")]
     pub(crate) fn view(&self, _id: &str) -> Option<crate::d3d11::VideoView> {
         None

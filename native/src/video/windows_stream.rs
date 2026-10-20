@@ -7,10 +7,12 @@
 use crate::media::remote::{Reader, Stream};
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
-use windows::Win32::Foundation::{E_FAIL, E_NOTIMPL, S_FALSE, S_OK, STG_E_ACCESSDENIED, STG_E_INVALIDFUNCTION};
+use windows::Win32::Foundation::{
+    E_FAIL, E_NOTIMPL, S_FALSE, S_OK, STG_E_ACCESSDENIED, STG_E_INVALIDFUNCTION,
+};
 use windows::Win32::System::Com::{
-    ISequentialStream_Impl, IStream, IStream_Impl, LOCKTYPE, STATFLAG, STATSTG, STGC, STGM_READ, STGTY_STREAM,
-    STREAM_SEEK, STREAM_SEEK_CUR, STREAM_SEEK_END, STREAM_SEEK_SET,
+    ISequentialStream_Impl, IStream, IStream_Impl, LOCKTYPE, STATFLAG, STATSTG, STGC, STGM_READ,
+    STGTY_STREAM, STREAM_SEEK, STREAM_SEEK_CUR, STREAM_SEEK_END, STREAM_SEEK_SET,
 };
 use windows::core::{HRESULT, Ref, implement};
 
@@ -26,19 +28,31 @@ pub(super) struct RemoteStream {
 impl RemoteStream {
     pub(super) fn open(stream: Arc<Stream>) -> IStream {
         let len = stream.len;
-        Self { reader: Mutex::new(Reader::new(stream)), len }.into()
+        Self {
+            reader: Mutex::new(Reader::new(stream)),
+            len,
+        }
+        .into()
     }
 }
 
 /// Whether `url` is a progressive file this stream can serve (not an HLS or DASH manifest).
 pub(super) fn streamable(url: &str) -> bool {
-    let path = url.split(['?', '#']).next().unwrap_or(url).to_ascii_lowercase();
+    let path = url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(url)
+        .to_ascii_lowercase();
     !(path.ends_with(".m3u8") || path.ends_with(".mpd") || path.ends_with(".ism/manifest"))
 }
 
 /// The content type Media Foundation picks a parser by: the server's, else the extension's.
 pub(super) fn content_type(url: &str, mime: Option<&str>) -> Option<&'static str> {
-    let path = url.split(['?', '#']).next().unwrap_or(url).to_ascii_lowercase();
+    let path = url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(url)
+        .to_ascii_lowercase();
     let by_mime = mime.and_then(|mime| match mime {
         "video/mp4" | "audio/mp4" | "application/mp4" => Some("video/mp4"),
         "video/webm" | "audio/webm" => Some("video/webm"),
@@ -93,7 +107,12 @@ impl ISequentialStream_Impl for RemoteStream_Impl {
 }
 
 impl IStream_Impl for RemoteStream_Impl {
-    fn Seek(&self, dlibmove: i64, dworigin: STREAM_SEEK, plibnewposition: *mut u64) -> windows::core::Result<()> {
+    fn Seek(
+        &self,
+        dlibmove: i64,
+        dworigin: STREAM_SEEK,
+        plibnewposition: *mut u64,
+    ) -> windows::core::Result<()> {
         let to = match dworigin {
             STREAM_SEEK_SET => SeekFrom::Start(dlibmove.max(0) as u64),
             STREAM_SEEK_CUR => SeekFrom::Current(dlibmove),
@@ -116,7 +135,13 @@ impl IStream_Impl for RemoteStream_Impl {
         Err(STG_E_ACCESSDENIED.into())
     }
 
-    fn CopyTo(&self, _pstm: Ref<'_, IStream>, _cb: u64, _pcbread: *mut u64, _pcbwritten: *mut u64) -> windows::core::Result<()> {
+    fn CopyTo(
+        &self,
+        _pstm: Ref<'_, IStream>,
+        _cb: u64,
+        _pcbread: *mut u64,
+        _pcbwritten: *mut u64,
+    ) -> windows::core::Result<()> {
         Err(E_NOTIMPL.into())
     }
 
@@ -128,11 +153,21 @@ impl IStream_Impl for RemoteStream_Impl {
         Ok(())
     }
 
-    fn LockRegion(&self, _liboffset: u64, _cb: u64, _dwlocktype: &LOCKTYPE) -> windows::core::Result<()> {
+    fn LockRegion(
+        &self,
+        _liboffset: u64,
+        _cb: u64,
+        _dwlocktype: &LOCKTYPE,
+    ) -> windows::core::Result<()> {
         Err(E_NOTIMPL.into())
     }
 
-    fn UnlockRegion(&self, _liboffset: u64, _cb: u64, _dwlocktype: u32) -> windows::core::Result<()> {
+    fn UnlockRegion(
+        &self,
+        _liboffset: u64,
+        _cb: u64,
+        _dwlocktype: u32,
+    ) -> windows::core::Result<()> {
         Err(E_NOTIMPL.into())
     }
 
@@ -162,9 +197,18 @@ mod tests {
 
     #[test]
     fn picks_a_parser_by_type_or_extension_and_leaves_manifests_to_media_foundation() {
-        assert_eq!(content_type("https://a.test/v.mp4?sig=1", None), Some("video/mp4"));
-        assert_eq!(content_type("https://a.test/v", Some("video/webm")), Some("video/webm"));
-        assert_eq!(content_type("https://a.test/v.MOV", Some("text/plain")), Some("video/quicktime"));
+        assert_eq!(
+            content_type("https://a.test/v.mp4?sig=1", None),
+            Some("video/mp4")
+        );
+        assert_eq!(
+            content_type("https://a.test/v", Some("video/webm")),
+            Some("video/webm")
+        );
+        assert_eq!(
+            content_type("https://a.test/v.MOV", Some("text/plain")),
+            Some("video/quicktime")
+        );
         assert_eq!(content_type("https://a.test/v", None), None);
         assert!(streamable("https://a.test/v.mp4"));
         assert!(!streamable("https://a.test/live/index.m3u8?token=x"));

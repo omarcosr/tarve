@@ -3975,9 +3975,21 @@ fn report_size_sends_the_inner_size_once_per_change() {
 
 #[test]
 fn shift_runs_keeps_rich_text_styles_on_their_text_across_edits() {
-    let runs = |pairs: &[(usize, usize)]| json!(pairs.iter().map(|(s, e)| json!({"start":s, "end":e, "style":{}})).collect::<Vec<_>>());
+    let runs = |pairs: &[(usize, usize)]| {
+        json!(
+            pairs
+                .iter()
+                .map(|(s, e)| json!({"start":s, "end":e, "style":{}}))
+                .collect::<Vec<_>>()
+        )
+    };
     let spans = |value: &serde_json::Value| -> Vec<(u64, u64)> {
-        value.as_array().unwrap().iter().map(|run| (run["start"].as_u64().unwrap(), run["end"].as_u64().unwrap())).collect()
+        value
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|run| (run["start"].as_u64().unwrap(), run["end"].as_u64().unwrap()))
+            .collect()
     };
     // Typing at the end of a bold run extends it.
     let mut value = runs(&[(2, 4)]);
@@ -4005,7 +4017,12 @@ fn shift_runs_keeps_rich_text_styles_on_their_text_across_edits() {
 
 #[test]
 fn layout_boxes_answer_a_synchronous_layout_read() {
-    let card = node("card", "view", json!({"width":120,"height":40,"padding":5,"margin":{"left":10,"top":7}}), vec![]);
+    let card = node(
+        "card",
+        "view",
+        json!({"width":120,"height":40,"padding":5,"margin":{"left":10,"top":7}}),
+        vec![],
+    );
     let mut tree = Tree::new(root(vec![card]));
     tree.compute(300.0, 200.0).unwrap();
     let boxes = tree.layout_boxes(&["card".to_string(), "missing".to_string()]);
@@ -5913,14 +5930,22 @@ fn video_lays_out_at_its_natural_size_and_paints_its_picture_contained() {
     let (key, _, width, height, transform) = recorder.images.last().unwrap().clone();
     assert_eq!((key.as_str(), width, height), ("video:clip", 160, 90));
     let [sx, _, _, sy, ..] = transform.as_coeffs();
-    assert!((sx - 1.25).abs() < 1e-6 && (sy - 1.25).abs() < 1e-6, "{transform:?}");
+    assert!(
+        (sx - 1.25).abs() < 1e-6 && (sy - 1.25).abs() < 1e-6,
+        "{transform:?}"
+    );
     // A new picture repaints; the same size does not lay out again.
     tree.dirty.paint = false;
     tree.set_video_frame("clip", Some(frame(2)));
     assert!(tree.dirty.paint && !tree.dirty.layout);
     // Contain in a taller box: centred, letterboxed.
     tree.update(root(vec![{
-        let mut video = node("clip", "video", json!({"width": 160, "height": 160}), vec![]);
+        let mut video = node(
+            "clip",
+            "video",
+            json!({"width": 160, "height": 160}),
+            vec![],
+        );
         video.fit = "contain".into();
         video
     }]));
@@ -5936,7 +5961,10 @@ fn video_lays_out_at_its_natural_size_and_paints_its_picture_contained() {
     assert!(!tree.dirty.paint && tree.video_frame("clip").unwrap().generation == 3);
     let mut bigger = frame(4);
     bigger.width = 320;
-    assert!(!tree.set_video_frame_layered("clip", bigger), "a new size lays out and paints");
+    assert!(
+        !tree.set_video_frame_layered("clip", bigger),
+        "a new size lays out and paints"
+    );
     assert!(!tree.set_video_frame_layered("missing", frame(1)));
     // The video went away: back to 300×150.
     tree.set_video_frame("clip", None);
@@ -5967,12 +5995,21 @@ fn a_video_off_screen_takes_new_pictures_without_painting() {
     };
     let mut hidden = tree_with(1000.0);
     assert!(!hidden.dirty.paint);
-    assert!(hidden.set_video_frame_unseen("clip", &frame(2, 160)), "culled: no repaint");
+    assert!(
+        hidden.set_video_frame_unseen("clip", &frame(2, 160)),
+        "culled: no repaint"
+    );
     assert!(!hidden.dirty.paint && hidden.video_frame("clip").unwrap().generation == 2);
-    assert!(!hidden.set_video_frame_unseen("clip", &frame(3, 320)), "a new size lays out and paints");
+    assert!(
+        !hidden.set_video_frame_unseen("clip", &frame(3, 320)),
+        "a new size lays out and paints"
+    );
     assert!(!hidden.set_video_frame_unseen("missing", &frame(1, 160)));
     let mut shown = tree_with(0.0);
-    assert!(!shown.set_video_frame_unseen("clip", &frame(2, 160)), "on screen: it paints");
+    assert!(
+        !shown.set_video_frame_unseen("clip", &frame(2, 160)),
+        "on screen: it paints"
+    );
 }
 
 #[test]
@@ -7543,13 +7580,28 @@ fn editing_chords_stay_with_a_focused_text_field() {
     use winit::keyboard::{Key, ModifiersState, NamedKey};
     let ctrl = ModifiersState::CONTROL;
     for key in ["c", "V", "x", "a", "z", "y"] {
-        assert!(editing_shortcut(&Key::Character(key.into()), ctrl), "Ctrl+{key}");
+        assert!(
+            editing_shortcut(&Key::Character(key.into()), ctrl),
+            "Ctrl+{key}"
+        );
     }
-    assert!(editing_shortcut(&Key::Character("z".into()), ctrl | ModifiersState::SHIFT));
+    assert!(editing_shortcut(
+        &Key::Character("z".into()),
+        ctrl | ModifiersState::SHIFT
+    ));
     assert!(editing_shortcut(&Key::Named(NamedKey::ArrowLeft), ctrl));
-    assert!(!editing_shortcut(&Key::Character("s".into()), ctrl), "Ctrl+S is the app's");
-    assert!(!editing_shortcut(&Key::Character("c".into()), ModifiersState::empty()));
-    assert!(!editing_shortcut(&Key::Character("c".into()), ctrl | ModifiersState::ALT));
+    assert!(
+        !editing_shortcut(&Key::Character("s".into()), ctrl),
+        "Ctrl+S is the app's"
+    );
+    assert!(!editing_shortcut(
+        &Key::Character("c".into()),
+        ModifiersState::empty()
+    ));
+    assert!(!editing_shortcut(
+        &Key::Character("c".into()),
+        ctrl | ModifiersState::ALT
+    ));
 }
 
 #[test]
@@ -7562,15 +7614,34 @@ fn system_file_drops_resolve_to_the_innermost_enabled_file_target() {
     let inner = target("inner", 40.0, vec![]);
     let mut off = target("off", 100.0, vec![]);
     off.disabled = true;
-    let mut plain = node("plain", "view", json!({"width": 100, "height": 100}), vec![]);
+    let mut plain = node(
+        "plain",
+        "view",
+        json!({"width": 100, "height": 100}),
+        vec![],
+    );
     plain.drop_target = true;
     let zones = vec![target("outer", 100.0, vec![inner]), off, plain];
     let mut tree = Tree::new(node("root", "window", json!({"direction": "row"}), zones));
     tree.compute(400.0, 200.0).unwrap();
-    assert_eq!(tree.file_drop_target_at((10.0, 10.0)).as_deref(), Some("inner"));
-    assert_eq!(tree.file_drop_target_at((80.0, 80.0)).as_deref(), Some("outer"));
-    assert_eq!(tree.file_drop_target_at((150.0, 50.0)), None, "a disabled target takes no files");
-    assert_eq!(tree.file_drop_target_at((250.0, 50.0)), None, "a pointer drop target is not a file target");
+    assert_eq!(
+        tree.file_drop_target_at((10.0, 10.0)).as_deref(),
+        Some("inner")
+    );
+    assert_eq!(
+        tree.file_drop_target_at((80.0, 80.0)).as_deref(),
+        Some("outer")
+    );
+    assert_eq!(
+        tree.file_drop_target_at((150.0, 50.0)),
+        None,
+        "a disabled target takes no files"
+    );
+    assert_eq!(
+        tree.file_drop_target_at((250.0, 50.0)),
+        None,
+        "a pointer drop target is not a file target"
+    );
     assert_eq!(tree.file_drop_target_at((350.0, 50.0)), None);
 }
 
@@ -7977,12 +8048,18 @@ fn the_pointer_is_on_a_text_area_scrollbar_only_over_its_track_and_while_draggin
     let mut tree = Tree::new(root);
     tree.compute(240.0, 120.0).unwrap();
     tree.pointer_move(50.0, 50.0);
-    assert!(!tree.pointer_on_scrollbar(), "over the text: the caret cursor");
+    assert!(
+        !tree.pointer_on_scrollbar(),
+        "over the text: the caret cursor"
+    );
     tree.pointer_move(196.0, 20.0);
     assert!(tree.pointer_on_scrollbar(), "over the scrollbar: the arrow");
     tree.pointer_down();
     tree.pointer_move(50.0, 60.0);
-    assert!(tree.pointer_on_scrollbar(), "dragging the thumb keeps the arrow off the track");
+    assert!(
+        tree.pointer_on_scrollbar(),
+        "dragging the thumb keeps the arrow off the track"
+    );
     tree.pointer_up();
     assert!(!tree.pointer_on_scrollbar());
 }
@@ -8000,7 +8077,11 @@ fn a_text_area_draws_tabs_as_wide_spaces_and_pasted_crlf_as_one_break() {
     tree.focus("editor");
     tree.key("End");
     tree.type_text("\tb\r\nc\rd");
-    assert_eq!(tree.entries["editor"].node.value.as_deref(), Some("a\tb\nc\nd"), "tabs kept, \r\n and \r are one \n");
+    assert_eq!(
+        tree.entries["editor"].node.value.as_deref(),
+        Some("a\tb\nc\nd"),
+        "tabs kept, \r\n and \r are one \n"
+    );
 }
 
 #[test]
@@ -8015,13 +8096,22 @@ fn a_wheel_notch_over_a_text_area_eases_too() {
     let mut tree = Tree::new(root);
     tree.compute(240.0, 120.0).unwrap();
     tree.pointer_move(20.0, 20.0);
-    assert!(tree.entries["editor"].scroll_max > 100.0, "the text is taller than the area");
+    assert!(
+        tree.entries["editor"].scroll_max > 100.0,
+        "the text is taller than the area"
+    );
     tree.advance_motion(1000.0);
     tree.wheel_notch(0.0, 100.0);
-    assert_eq!(tree.entries["editor"].scroll, 0.0, "no jump on the notch itself");
+    assert_eq!(
+        tree.entries["editor"].scroll, 0.0,
+        "no jump on the notch itself"
+    );
     tree.advance_motion(1000.0 + 1000.0 / 60.0);
     let first = tree.entries["editor"].scroll;
-    assert!(first > 0.0 && first < 100.0, "the first frame is part of the way: {first}");
+    assert!(
+        first > 0.0 && first < 100.0,
+        "the first frame is part of the way: {first}"
+    );
     for frame in 2..=30 {
         tree.advance_motion(1000.0 + frame as f64 * 1000.0 / 60.0);
     }

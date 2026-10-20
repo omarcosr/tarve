@@ -3139,7 +3139,11 @@ impl Tree {
     /// out, hidden): recorded without a repaint, as browsers skip painting video
     /// off screen. The next paint that reaches it shows the latest picture. False
     /// when it must paint (the first picture, a new size, nothing painted yet).
-    pub(crate) fn set_video_frame_unseen(&mut self, id: &str, frame: &crate::video::VideoFrame) -> bool {
+    pub(crate) fn set_video_frame_unseen(
+        &mut self,
+        id: &str,
+        frame: &crate::video::VideoFrame,
+    ) -> bool {
         if self.paints == 0 || self.video_painted.contains(id) {
             return false;
         }
@@ -3155,7 +3159,11 @@ impl Tree {
     /// A new picture shown by its own composition layer: recorded without a repaint
     /// (the UI frame has a hole there). False when the size changed: lay out and paint.
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    pub(crate) fn set_video_frame_layered(&mut self, id: &str, frame: crate::video::VideoFrame) -> bool {
+    pub(crate) fn set_video_frame_layered(
+        &mut self,
+        id: &str,
+        frame: crate::video::VideoFrame,
+    ) -> bool {
         match self.video_frames.get_mut(id) {
             Some(current) if current.width == frame.width && current.height == frame.height => {
                 *current = frame;
@@ -3562,7 +3570,12 @@ impl Tree {
             }
             return Ok(());
         }
-        self.text.prepare_dirty(self.entries.values().filter(|entry| entry.measure_dirty).map(|entry| &entry.node));
+        self.text.prepare_dirty(
+            self.entries
+                .values()
+                .filter(|entry| entry.measure_dirty)
+                .map(|entry| &entry.node),
+        );
         let root = self.build_layout(&self.root.clone(), Some((width, height)))?;
         let text = &mut self.text;
         let nodes = &self.entries;
@@ -3612,9 +3625,8 @@ impl Tree {
                                 };
                             } else if node.kind == "video" {
                                 // HTML: 300×150 until the video's own size is known.
-                                let (width, height) = videos
-                                    .get(&node.id)
-                                    .map_or((300.0, 150.0), |frame| {
+                                let (width, height) =
+                                    videos.get(&node.id).map_or((300.0, 150.0), |frame| {
                                         (frame.width as f32, frame.height as f32)
                                     });
                                 let ratio = width / height;
@@ -6057,7 +6069,11 @@ impl Tree {
     }
     /// Whether `id` takes system file drops: a file drop target, enabled and shown.
     fn file_drop_target_enabled(&self, id: &str) -> bool {
-        if !self.entries.get(id).is_some_and(|entry| entry.node.file_drop_target) {
+        if !self
+            .entries
+            .get(id)
+            .is_some_and(|entry| entry.node.file_drop_target)
+        {
             return false;
         }
         let mut current = Some(id);
@@ -6076,7 +6092,11 @@ impl Tree {
     pub(crate) fn file_drop_target_at(&self, point: (f64, f64)) -> Option<String> {
         self.innermost_target_at(point, |id| self.file_drop_target_enabled(id))
     }
-    fn innermost_target_at(&self, (x, y): (f64, f64), accepts: impl Fn(&str) -> bool) -> Option<String> {
+    fn innermost_target_at(
+        &self,
+        (x, y): (f64, f64),
+        accepts: impl Fn(&str) -> bool,
+    ) -> Option<String> {
         let inside = |rect: &BoxRect| x >= rect.x0 && x < rect.x1 && y >= rect.y0 && y < rect.y1;
         let modal = self
             .portal_order
@@ -6511,7 +6531,11 @@ impl Tree {
                 || (entry.node.kind == "scroll" && entry.node.scroll_orientation != "horizontal"))
         {
             // A text area eases through wheel notches like a scroll view (its speed is 1).
-            let speed = if entry.node.kind == "scroll" { entry.node.scroll_speed } else { 1.0 };
+            let speed = if entry.node.kind == "scroll" {
+                entry.node.scroll_speed
+            } else {
+                1.0
+            };
             let base = self
                 .scroll_animations
                 .get(&id)
@@ -7232,7 +7256,9 @@ impl Tree {
                     .and_then(|group| self.entries.get(group))
                     .and_then(|entry| entry.node.control.as_ref())
                     .is_some_and(|group| group.orientation != "horizontal");
-            if (control.role == "button" && control.expanded.is_some() && matches!(key, "ArrowDown" | "ArrowUp"))
+            if (control.role == "button"
+                && control.expanded.is_some()
+                && matches!(key, "ArrowDown" | "ArrowUp"))
                 || (vertical_menu && matches!(key, "ArrowLeft" | "ArrowRight"))
             {
                 return vec![json!({"type":"key", "id":id, "key":key})];
@@ -7368,7 +7394,9 @@ impl Tree {
                     .filter(|control| control.role == "navigation")
                     .map(|control| control.orientation.as_str())
                 {
-                    Some("horizontal") => matches!(key, "ArrowLeft" | "ArrowRight" | "Home" | "End"),
+                    Some("horizontal") => {
+                        matches!(key, "ArrowLeft" | "ArrowRight" | "Home" | "End")
+                    }
                     Some("vertical") => matches!(key, "ArrowUp" | "ArrowDown" | "Home" | "End"),
                     _ => matches!(
                         key,

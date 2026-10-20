@@ -5,8 +5,13 @@
 //! renderer's own device: no copy through memory. Other renderers get the
 //! picture read back into memory.
 
+use super::windows_reader::ReaderPlayer;
+use super::windows_shared::win;
+use super::windows_stream::{RemoteStream, VIDEO_WINDOW, content_type, streamable};
 use super::{VideoFrame, VideoLoad, media_error};
+use crate::d3d11::VideoView;
 use crate::media::failure;
+use crate::media::remote::{Stream, is_remote};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -14,6 +19,7 @@ use std::time::{Duration, Instant};
 use vello::peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
 use windows::Win32::Foundation::{HMODULE, RECT, S_OK};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
+use windows::Win32::Graphics::Direct3D::D3D11_SRV_DIMENSION_TEXTURE2D;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_CPU_ACCESS_READ,
     D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_MAP_READ,
@@ -21,19 +27,13 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Multithread,
     ID3D11ShaderResourceView, ID3D11Texture2D,
 };
+use windows::Win32::Graphics::Direct3D11::{
+    D3D11_SHADER_RESOURCE_VIEW_DESC, D3D11_SHADER_RESOURCE_VIEW_DESC_0, D3D11_TEX2D_SRV,
+};
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_NV12, DXGI_FORMAT_R8_UNORM,
     DXGI_FORMAT_R8G8_UNORM, DXGI_SAMPLE_DESC,
 };
-use windows::Win32::Graphics::Direct3D::D3D11_SRV_DIMENSION_TEXTURE2D;
-use windows::Win32::Graphics::Direct3D11::{
-    D3D11_SHADER_RESOURCE_VIEW_DESC, D3D11_SHADER_RESOURCE_VIEW_DESC_0, D3D11_TEX2D_SRV,
-};
-use super::windows_reader::ReaderPlayer;
-use super::windows_stream::{RemoteStream, VIDEO_WINDOW, content_type, streamable};
-use crate::media::remote::{Stream, is_remote};
-use super::windows_shared::win;
-use crate::d3d11::VideoView;
 use windows::Win32::Media::MediaFoundation::*;
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
@@ -247,17 +247,26 @@ impl Player {
     /// The remote download opened: the engine reads it as a byte stream, and
     /// what was asked meanwhile is carried out.
     fn open_stream(&mut self, stream: Arc<Stream>) -> Result<(), String> {
-        let opening = self.opening.take().unwrap_or(Opening { play: false, seek: None });
+        let opening = self.opening.take().unwrap_or(Opening {
+            play: false,
+            seek: None,
+        });
         unsafe {
-            let bytes = MFCreateMFByteStreamOnStream(&RemoteStream::open(stream.clone())).map_err(win)?;
+            let bytes =
+                MFCreateMFByteStreamOnStream(&RemoteStream::open(stream.clone())).map_err(win)?;
             if let Ok(described) = bytes.cast::<IMFAttributes>() {
-                let _ = described.SetString(&MF_BYTESTREAM_ORIGIN_NAME, &HSTRING::from(self.src.as_str()));
+                let _ = described.SetString(
+                    &MF_BYTESTREAM_ORIGIN_NAME,
+                    &HSTRING::from(self.src.as_str()),
+                );
                 if let Some(kind) = content_type(&self.src, stream.mime.as_deref()) {
                     let _ = described.SetString(&MF_BYTESTREAM_CONTENT_TYPE, &HSTRING::from(kind));
                 }
             }
             let engine: IMFMediaEngineEx = self.engine.cast().map_err(win)?;
-            engine.SetSourceFromByteStream(&bytes, &BSTR::from(self.src.as_str())).map_err(win)?;
+            engine
+                .SetSourceFromByteStream(&bytes, &BSTR::from(self.src.as_str()))
+                .map_err(win)?;
             if let Some(time) = opening.seek {
                 self.settle_until = Some(Instant::now() + SETTLE_FOR);
                 self.engine.SetCurrentTime(time.max(0.0)).map_err(win)?;
@@ -331,7 +340,9 @@ impl Player {
             DXGI_FORMAT_B8G8R8A8_UNORM
         };
         let reuse = self.surface.as_ref().is_some_and(|surface| {
-            surface.width == target_width && surface.height == target_height && surface.format == format
+            surface.width == target_width
+                && surface.height == target_height
+                && surface.format == format
         });
         if !reuse {
             match create_surface(gpu, target_width, target_height, format) {
@@ -408,11 +419,17 @@ fn plane_view(
         },
     };
     let mut view = None;
-    unsafe { device.CreateShaderResourceView(texture, Some(&desc), Some(&mut view)) }.map_err(win)?;
+    unsafe { device.CreateShaderResourceView(texture, Some(&desc), Some(&mut view)) }
+        .map_err(win)?;
     view.ok_or_else(|| "video texture view was not created".into())
 }
 
-fn create_surface(gpu: &Gpu, width: u32, height: u32, format: DXGI_FORMAT) -> Result<Surface, String> {
+fn create_surface(
+    gpu: &Gpu,
+    width: u32,
+    height: u32,
+    format: DXGI_FORMAT,
+) -> Result<Surface, String> {
     let desc = D3D11_TEXTURE2D_DESC {
         Width: width,
         Height: height,
@@ -465,10 +482,17 @@ fn read_back(gpu: &Gpu, surface: &mut Surface) -> Result<ImageData, String> {
         unsafe { gpu.device.CreateTexture2D(&desc, None, Some(&mut staging)) }.map_err(win)?;
         surface.staging = staging;
     }
-    let staging = surface.staging.as_ref().ok_or("video staging texture was not created")?;
+    let staging = surface
+        .staging
+        .as_ref()
+        .ok_or("video staging texture was not created")?;
     unsafe { gpu.context.CopyResource(staging, &surface.texture) };
     let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-    unsafe { gpu.context.Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped)) }.map_err(win)?;
+    unsafe {
+        gpu.context
+            .Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+    }
+    .map_err(win)?;
     let (width, height) = (surface.width as usize, surface.height as usize);
     let mut pixels = vec![0_u8; width * height * 4];
     for row in 0..height {
@@ -480,9 +504,15 @@ fn read_back(gpu: &Gpu, surface: &mut Surface) -> Result<ImageData, String> {
         };
         let target = &mut pixels[row * width * 4..(row + 1) * width * 4];
         // BGRA to opaque RGBA, a word at a time (vectorized).
-        for (to, from) in target.as_chunks_mut::<4>().0.iter_mut().zip(source.as_chunks::<4>().0) {
+        for (to, from) in target
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(source.as_chunks::<4>().0)
+        {
             let pixel = u32::from_le_bytes(*from);
-            *to = ((pixel & 0x00FF_00FF).rotate_left(16) | (pixel & 0x0000_FF00) | 0xFF00_0000).to_le_bytes();
+            *to = ((pixel & 0x00FF_00FF).rotate_left(16) | (pixel & 0x0000_FF00) | 0xFF00_0000)
+                .to_le_bytes();
         }
     }
     unsafe { gpu.context.Unmap(staging, 0) };
@@ -514,7 +544,9 @@ impl Videos {
     }
 
     pub(crate) fn handles(&self, id: &str) -> bool {
-        self.players.contains_key(id) || self.readers.contains_key(id) || self.pending_loads.contains_key(id)
+        self.players.contains_key(id)
+            || self.readers.contains_key(id)
+            || self.pending_loads.contains_key(id)
     }
 
     /// The renderer's D3D11 device (`None` for the CPU and wgpu renderers). Engines
@@ -538,22 +570,26 @@ impl Videos {
         let readers: Vec<(String, ReaderPlayer)> = self.readers.drain().collect();
         for (id, reader) in readers {
             self.changed.push((id.clone(), None));
-            self.pending_loads.insert(id, PendingLoad {
-                src: reader.src.clone(),
-                looped: reader.looped(),
-                muted: reader.muted(),
-                volume: reader.volume(),
-                mixer: Some(reader.mixer()),
-                play: reader.playing,
-                seek: Some(reader.time()),
-            });
+            self.pending_loads.insert(
+                id,
+                PendingLoad {
+                    src: reader.src.clone(),
+                    looped: reader.looped(),
+                    muted: reader.muted(),
+                    volume: reader.volume(),
+                    mixer: Some(reader.mixer()),
+                    play: reader.playing,
+                    seek: Some(reader.time()),
+                },
+            );
         }
         if self.gpu.is_some()
             && let Err(message) = self.switch_device()
         {
             for (id, player) in self.players.drain() {
                 self.changed.push((id.clone(), None));
-                self.pending.push(media_error(&id, failure(&player.src, &message)));
+                self.pending
+                    .push(media_error(&id, failure(&player.src, &message)));
             }
         }
         self.start_pending();
@@ -608,8 +644,10 @@ impl Videos {
         self.ensure_gpu()?;
         if self.factory.is_none() {
             self.factory = Some(
-                unsafe { CoCreateInstance(&CLSID_MFMediaEngineClassFactory, None, CLSCTX_INPROC_SERVER) }
-                    .map_err(win)?,
+                unsafe {
+                    CoCreateInstance(&CLSID_MFMediaEngineClassFactory, None, CLSCTX_INPROC_SERVER)
+                }
+                .map_err(win)?,
             );
         }
         Ok(())
@@ -688,7 +726,9 @@ impl Videos {
         unsafe {
             engine.SetLoop(load.looped).map_err(win)?;
             engine.SetMuted(load.muted).map_err(win)?;
-            engine.SetVolume(f64::from(load.volume.clamp(0.0, 1.0))).map_err(win)?;
+            engine
+                .SetVolume(f64::from(load.volume.clamp(0.0, 1.0)))
+                .map_err(win)?;
             engine
                 .SetPreload(MF_MEDIA_ENGINE_PRELOAD_AUTOMATIC)
                 .map_err(win)?;
@@ -706,7 +746,10 @@ impl Videos {
                     (shared.wake)();
                 })
                 .map_err(|error| error.to_string())?;
-            Some(Opening { play: false, seek: None })
+            Some(Opening {
+                play: false,
+                seek: None,
+            })
         } else {
             unsafe { engine.SetSource(&BSTR::from(source_url(load.src))) }.map_err(win)?;
             None
@@ -730,7 +773,12 @@ impl Videos {
         })
     }
 
-    pub(crate) fn load(&mut self, id: &str, load: VideoLoad<'_>, mixer: Option<rodio::mixer::Mixer>) -> Vec<Value> {
+    pub(crate) fn load(
+        &mut self,
+        id: &str,
+        load: VideoLoad<'_>,
+        mixer: Option<rodio::mixer::Mixer>,
+    ) -> Vec<Value> {
         let removed = self.players.remove(id).is_some() | self.readers.remove(id).is_some();
         self.pending_loads.remove(id);
         if removed {
@@ -806,11 +854,23 @@ impl Videos {
         player.quiet_metadata = reader.duration().is_some() || reader.size() != (0, 0);
         let time = reader.time();
         let started = unsafe {
-            (if time > 0.05 { player.engine.SetCurrentTime(time) } else { Ok(()) })
-                .and_then(|()| if reader.playing { player.engine.Play() } else { Ok(()) })
+            (if time > 0.05 {
+                player.engine.SetCurrentTime(time)
+            } else {
+                Ok(())
+            })
+            .and_then(|()| {
+                if reader.playing {
+                    player.engine.Play()
+                } else {
+                    Ok(())
+                }
+            })
         };
         self.players.insert(id.to_string(), player);
-        started.err().map(|error| media_error(id, failure(&reader.src, win(error))))
+        started
+            .err()
+            .map(|error| media_error(id, failure(&reader.src, win(error))))
     }
 
     pub(crate) fn command(
@@ -857,7 +917,9 @@ impl Videos {
                 }
                 _ => None,
             };
-            return event.map(|name| vec![reader_event(id, reader, name)]).unwrap_or_default();
+            return event
+                .map(|name| vec![reader_event(id, reader, name)])
+                .unwrap_or_default();
         }
         let Some(player) = self.players.get_mut(id) else {
             return vec![media_error(id, "media not loaded")];
@@ -910,24 +972,35 @@ impl Videos {
             return out;
         }
         for (id, player) in &mut self.players {
-            let opened = player
-                .opening
-                .as_ref()
-                .and_then(|_| player.shared.stream.lock().unwrap_or_else(|p| p.into_inner()).take());
+            let opened = player.opening.as_ref().and_then(|_| {
+                player
+                    .shared
+                    .stream
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .take()
+            });
             if let Some(opened) = opened
                 && let Err(message) = opened.and_then(|stream| player.open_stream(stream))
             {
                 out.push(media_error(id, failure(&player.src, message)));
             }
-            let events = std::mem::take(&mut *player.shared.events.lock().unwrap_or_else(|p| p.into_inner()));
+            let events = std::mem::take(
+                &mut *player
+                    .shared
+                    .events
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner()),
+            );
             for event in events {
                 let event = MF_MEDIA_ENGINE_EVENT(event as i32);
                 let name = match event {
                     MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA | MF_MEDIA_ENGINE_EVENT_FORMATCHANGE => {
                         player.size = player.size();
                         player.settle_until = Some(now + SETTLE_FOR);
-                        (event == MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA && !std::mem::take(&mut player.quiet_metadata))
-                            .then_some("loadedmetadata")
+                        (event == MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA
+                            && !std::mem::take(&mut player.quiet_metadata))
+                        .then_some("loadedmetadata")
                     }
                     MF_MEDIA_ENGINE_EVENT_PLAY => {
                         player.playing = true;
@@ -1090,7 +1163,11 @@ impl Videos {
     pub(crate) fn deadline(&self) -> Option<Instant> {
         let now = Instant::now();
         // Readers wake at their next picture's time, not on a fixed poll.
-        let reading = self.readers.values().filter_map(|reader| reader.due(now)).min();
+        let reading = self
+            .readers
+            .values()
+            .filter_map(|reader| reader.due(now))
+            .min();
         self.players
             .values()
             .filter_map(|player| {

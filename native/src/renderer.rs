@@ -641,7 +641,10 @@ fn softbuffer_alpha(window: &Window) -> bool {
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     cfg!(target_os = "windows")
         || window.window_handle().is_ok_and(|handle| {
-            matches!(handle.as_raw(), RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_))
+            matches!(
+                handle.as_raw(),
+                RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_)
+            )
         })
 }
 
@@ -1079,8 +1082,9 @@ fn pack_premultiplied_for_softbuffer(pixels: &mut [u32], background: vello::peni
     for pixel in pixels {
         let [r, g, b, a] = pixel.to_ne_bytes();
         let inverse = 255_u16.saturating_sub(u16::from(a));
-        let over =
-            |channel: u8, under: u16| (u16::from(channel) + (under * inverse + 127) / 255).min(255) as u32;
+        let over = |channel: u8, under: u16| {
+            (u16::from(channel) + (under * inverse + 127) / 255).min(255) as u32
+        };
         *pixel = over(b, under[2])
             | (over(g, under[1]) << 8)
             | (over(r, under[0]) << 16)
@@ -1118,20 +1122,20 @@ impl Graphics {
             &startup_attempts(resolved, wgpu_backend_explicit),
             transparent,
         )
-            .or_else(|error| {
-                cpu_fallback(
-                    &window,
-                    transparent,
-                    resolved == ResolvedRenderer::Gpu
-                        && should_fallback_to_cpu(
-                            preference,
-                            renderer_env.as_deref(),
-                            wgpu_backend_explicit,
-                            &error,
-                        ),
-                    error,
-                )
-            })?;
+        .or_else(|error| {
+            cpu_fallback(
+                &window,
+                transparent,
+                resolved == ResolvedRenderer::Gpu
+                    && should_fallback_to_cpu(
+                        preference,
+                        renderer_env.as_deref(),
+                        wgpu_backend_explicit,
+                        &error,
+                    ),
+                error,
+            )
+        })?;
         Ok(Self {
             backend,
             frames: 0,
@@ -1249,7 +1253,12 @@ impl Graphics {
 
     /// A new picture of a layered video, shown without a UI frame.
     #[cfg(target_os = "windows")]
-    pub(crate) fn present_video(&mut self, id: &str, view: &crate::d3d11::VideoView, bt709: bool) -> Result<bool, RenderError> {
+    pub(crate) fn present_video(
+        &mut self,
+        id: &str,
+        view: &crate::d3d11::VideoView,
+        bt709: bool,
+    ) -> Result<bool, RenderError> {
         match &mut self.backend {
             GraphicsImpl::D3d11(graphics) => graphics
                 .present_video(id, view, bt709)
@@ -1271,10 +1280,7 @@ impl Graphics {
     }
 
     #[cfg(target_os = "windows")]
-    pub(crate) fn set_video_views(
-        &mut self,
-        views: Vec<(String, crate::d3d11::VideoView)>,
-    ) {
+    pub(crate) fn set_video_views(&mut self, views: Vec<(String, crate::d3d11::VideoView)>) {
         if let GraphicsImpl::D3d11(graphics) = &mut self.backend {
             graphics.set_video_views(views);
         }
@@ -2012,9 +2018,18 @@ mod tests {
     #[test]
     fn transparent_surfaces_pick_a_composited_alpha_mode_and_premultiply_for_it() {
         use wgpu::CompositeAlphaMode::*;
-        assert_eq!(surface_alpha(&[Opaque, PreMultiplied], false), (Auto, false));
-        assert_eq!(surface_alpha(&[Opaque, PreMultiplied, PostMultiplied], true), (PreMultiplied, true));
-        assert_eq!(surface_alpha(&[Opaque, PostMultiplied], true), (PostMultiplied, cfg!(target_os = "macos")));
+        assert_eq!(
+            surface_alpha(&[Opaque, PreMultiplied], false),
+            (Auto, false)
+        );
+        assert_eq!(
+            surface_alpha(&[Opaque, PreMultiplied, PostMultiplied], true),
+            (PreMultiplied, true)
+        );
+        assert_eq!(
+            surface_alpha(&[Opaque, PostMultiplied], true),
+            (PostMultiplied, cfg!(target_os = "macos"))
+        );
         assert_eq!(surface_alpha(&[Opaque, Inherit], true), (Inherit, true));
         // DX12 window swap chains: opaque, the window shows no alpha.
         assert_eq!(surface_alpha(&[Opaque], true), (Auto, false));

@@ -40,18 +40,25 @@ impl App {
                 return;
             }
             self.gpu_upgrade = false;
-            let (Some(window), GraphicsState::Ready(old)) = (self.window.clone(), &self.graphics) else {
+            let (Some(window), GraphicsState::Ready(old)) = (self.window.clone(), &self.graphics)
+            else {
                 return;
             };
             let (frames, generation) = (old.frames(), old.generation());
-            match Graphics::new(window, self.document.renderer, self.document.window.backdrop.transparent()) {
+            match Graphics::new(
+                window,
+                self.document.renderer,
+                self.document.window.backdrop.transparent(),
+            ) {
                 Ok(mut graphics) => {
                     graphics.restore_counters(frames, generation.saturating_add(1));
                     self.graphics = GraphicsState::Ready(Box::new(graphics));
                     self.tree.dirty.paint = true;
                     self.request_present_now();
                 }
-                Err(message) => self.events.push(error(format!("GPU renderer unavailable, staying on the CPU: {message}"))),
+                Err(message) => self.events.push(error(format!(
+                    "GPU renderer unavailable, staying on the CPU: {message}"
+                ))),
             }
         }
     }

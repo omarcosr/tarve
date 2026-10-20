@@ -9,7 +9,8 @@ const examples = resolve(import.meta.dirname, "../../examples");
 function sources(directory: string): string[] {
   return readdirSync(directory).flatMap(name => {
     const path = join(directory, name);
-    if (name === "node_modules" || name === "dist" || name.startsWith("_") || name.startsWith("work-")) return [];
+    // Dot directories are local checkouts and caches (microts-prototype/.pocketjs), not example code.
+    if (name === "node_modules" || name === "dist" || name.startsWith(".") || name.startsWith("_") || name.startsWith("work-")) return [];
     if (statSync(path).isDirectory()) return sources(path);
     return /\.(?:ts|tsx)$/.test(name) && !/\.test\.tsx?$/.test(name) && !name.endsWith(".d.ts") ? [path] : [];
   });

@@ -95,7 +95,11 @@ fn trace_enabled() -> bool {
 
 /// Milliseconds since `tarve_start`; logged to stderr under TARVE_TRACE=1.
 pub(crate) fn trace(label: &str) -> f64 {
-    let ms = STARTED.get_or_init(std::time::Instant::now).elapsed().as_secs_f64() * 1000.0;
+    let ms = STARTED
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_secs_f64()
+        * 1000.0;
     if trace_enabled() {
         eprintln!("[native] {label:<12} {ms:8.2} ms");
     }
@@ -196,7 +200,10 @@ pub(crate) fn process_video_memory() -> Option<f64> {
             let Ok(adapter) = adapter.cast::<IDXGIAdapter3>() else {
                 continue;
             };
-            for group in [DXGI_MEMORY_SEGMENT_GROUP_LOCAL, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL] {
+            for group in [
+                DXGI_MEMORY_SEGMENT_GROUP_LOCAL,
+                DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL,
+            ] {
                 let mut info = Default::default();
                 if adapter.QueryVideoMemoryInfo(0, group, &mut info).is_ok() {
                     total += info.CurrentUsage as f64;

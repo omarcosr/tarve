@@ -38,7 +38,9 @@ impl Media {
         _looped: Option<bool>,
     ) -> Vec<Value> {
         match src.filter(|src| action == "load" && !src.is_empty()) {
-            Some(src) => vec![json!({"type":"media", "id":id, "event":"error", "message":failure(src, UNAVAILABLE)})],
+            Some(src) => vec![
+                json!({"type":"media", "id":id, "event":"error", "message":failure(src, UNAVAILABLE)}),
+            ],
             None => Vec::new(),
         }
     }

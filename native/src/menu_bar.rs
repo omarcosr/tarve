@@ -54,7 +54,9 @@ mod windows_impl {
     pub(crate) fn take_selected(hwnd: HWND) -> Vec<usize> {
         SELECTED.with(|selected| {
             let mut selected = selected.borrow_mut();
-            let (mine, others): (Vec<_>, Vec<_>) = selected.drain(..).partition(|(owner, _)| *owner == hwnd as usize);
+            let (mine, others): (Vec<_>, Vec<_>) = selected
+                .drain(..)
+                .partition(|(owner, _)| *owner == hwnd as usize);
             *selected = others;
             mine.into_iter().map(|(_, command)| command).collect()
         })
@@ -74,9 +76,18 @@ mod windows_impl {
                 } else if !item.items.is_empty() {
                     let sub = CreatePopupMenu();
                     append(sub, &item.items, next);
-                    AppendMenuW(menu, MF_POPUP | MF_STRING | disabled, sub as usize, text.as_ptr());
+                    AppendMenuW(
+                        menu,
+                        MF_POPUP | MF_STRING | disabled,
+                        sub as usize,
+                        text.as_ptr(),
+                    );
                 } else {
-                    let checked = if item.checked == Some(true) { MF_CHECKED } else { 0 };
+                    let checked = if item.checked == Some(true) {
+                        MF_CHECKED
+                    } else {
+                        0
+                    };
                     AppendMenuW(menu, MF_STRING | checked | disabled, *next, text.as_ptr());
                     *next += 1;
                 }
@@ -93,7 +104,11 @@ mod windows_impl {
 
     impl MenuBar {
         pub(crate) fn new(hwnd: HWND) -> Self {
-            Self { hwnd, menu: std::ptr::null_mut(), ids: Vec::new() }
+            Self {
+                hwnd,
+                menu: std::ptr::null_mut(),
+                ids: Vec::new(),
+            }
         }
         /// Top-level items are the bar's menus (`File`, `Edit`…); an item without
         /// `items` is a command directly on the bar.
@@ -151,7 +166,11 @@ mod tests {
     use super::*;
 
     fn item(id: &str, label: &str) -> TrayMenuItem {
-        TrayMenuItem { id: Some(id.into()), label: Some(label.into()), ..Default::default() }
+        TrayMenuItem {
+            id: Some(id.into()),
+            label: Some(label.into()),
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -160,7 +179,14 @@ mod tests {
         save.accelerator = Some("Ctrl+S".into());
         let file = TrayMenuItem {
             label: Some("&File".into()),
-            items: vec![item("new", "&New"), TrayMenuItem { separator: true, ..Default::default() }, save.clone()],
+            items: vec![
+                item("new", "&New"),
+                TrayMenuItem {
+                    separator: true,
+                    ..Default::default()
+                },
+                save.clone(),
+            ],
             ..Default::default()
         };
         let ids = item_ids(&[file, item("about", "About")]);

@@ -4,7 +4,9 @@
 #[test]
 #[ignore]
 fn startup_profile() {
-    let Some(path) = std::env::var_os("TARVE_DOC") else { return };
+    let Some(path) = std::env::var_os("TARVE_DOC") else {
+        return;
+    };
     let data = std::fs::read(path).unwrap();
     let t = std::time::Instant::now();
     let doc: crate::protocol::Document = serde_json::from_slice(&data).unwrap();
@@ -13,7 +15,12 @@ fn startup_profile() {
     let built = t.elapsed();
     tree.compute(1024.0, 760.0).unwrap();
     let laid = t.elapsed();
-    eprintln!("parse {:?} tree {:?} layout {:?}", parsed, built - parsed, laid - built);
+    eprintln!(
+        "parse {:?} tree {:?} layout {:?}",
+        parsed,
+        built - parsed,
+        laid - built
+    );
     for _ in 0..3 {
         let doc: crate::protocol::Document = serde_json::from_slice(&data).unwrap();
         let t = std::time::Instant::now();

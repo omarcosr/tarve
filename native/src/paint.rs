@@ -290,7 +290,11 @@ pub(crate) trait PaintTarget {
     /// the others draw the copy in memory.
     fn draw_video(&mut self, id: &str, frame: &crate::video::VideoFrame, transform: Affine) {
         if let Some(pixels) = &frame.pixels {
-            self.draw_image(&format!("video:{id}"), pixels, frame.pixel_transform(transform));
+            self.draw_image(
+                &format!("video:{id}"),
+                pixels,
+                frame.pixel_transform(transform),
+            );
         }
     }
     /// Liquid glass over `rect`: what was painted under it shows through blurred and

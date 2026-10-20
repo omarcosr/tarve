@@ -129,7 +129,8 @@ mod disk {
 /// Built without the native "net" feature: remote images report an error.
 #[cfg(not(feature = "net"))]
 fn fetch(url: &str) -> Result<Vec<u8>, String> {
-    disk::read(url, now()).ok_or_else(|| "remote images need the native \"net\" feature".to_string())
+    disk::read(url, now())
+        .ok_or_else(|| "remote images need the native \"net\" feature".to_string())
 }
 
 #[cfg(feature = "net")]

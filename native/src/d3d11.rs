@@ -6,6 +6,7 @@ use std::{
     sync::Arc,
 };
 
+use crate::d3d11_overlay::{Composition, LayerFormat, LayerTarget, OverlayPlacement};
 use lyon_tessellation::{
     BuffersBuilder, FillOptions, FillRule, FillTessellator, FillVertex, LineCap, LineJoin,
     StrokeOptions, StrokeTessellator, StrokeVertex, VertexBuffers,
@@ -34,32 +35,32 @@ use windows::{
                 D3D11_BIND_VERTEX_BUFFER, D3D11_BLEND_DESC, D3D11_BLEND_INV_SRC_ALPHA,
                 D3D11_BLEND_ONE, D3D11_BLEND_OP_ADD, D3D11_BLEND_SRC_ALPHA, D3D11_BUFFER_DESC,
                 D3D11_COLOR_WRITE_ENABLE_ALL, D3D11_COMPARISON_EQUAL, D3D11_CPU_ACCESS_WRITE,
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, D3D11_CULL_NONE, D3D11_DEPTH_STENCIL_DESC,
-                D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_FILTER_MIN_MAG_MIP_LINEAR,
-                D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_INPUT_ELEMENT_DESC,
-                D3D11_INPUT_PER_VERTEX_DATA, D3D11_MAP_WRITE_DISCARD, D3D11_MAPPED_SUBRESOURCE,
-                D3D11_RASTERIZER_DESC, D3D11_RENDER_TARGET_BLEND_DESC, D3D11_SAMPLER_DESC,
-                D3D11_SDK_VERSION, D3D11_STENCIL_OP_DECR_SAT, D3D11_STENCIL_OP_INCR_SAT,
-                D3D11_STENCIL_OP_KEEP, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE_ADDRESS_CLAMP,
-                D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_DYNAMIC,
-                D3D11_USAGE_IMMUTABLE, D3D11_VIEWPORT, D3D11CreateDevice, ID3D11BlendState,
-                ID3D11Buffer, ID3D11DepthStencilState, ID3D11DepthStencilView, ID3D11Device,
-                ID3D11DeviceContext, ID3D11InputLayout, ID3D11PixelShader, ID3D11RasterizerState,
-                ID3D11RenderTargetView, ID3D11SamplerState, ID3D11ShaderResourceView,
-                ID3D11Texture2D, ID3D11VertexShader,
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+                D3D11_CULL_NONE, D3D11_DEPTH_STENCIL_DESC, D3D11_DEPTH_WRITE_MASK_ZERO,
+                D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FILTER_MIN_MAG_MIP_POINT,
+                D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA, D3D11_MAP_WRITE_DISCARD,
+                D3D11_MAPPED_SUBRESOURCE, D3D11_RASTERIZER_DESC, D3D11_RENDER_TARGET_BLEND_DESC,
+                D3D11_SAMPLER_DESC, D3D11_SDK_VERSION, D3D11_STENCIL_OP_DECR_SAT,
+                D3D11_STENCIL_OP_INCR_SAT, D3D11_STENCIL_OP_KEEP, D3D11_SUBRESOURCE_DATA,
+                D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
+                D3D11_USAGE_DYNAMIC, D3D11_USAGE_IMMUTABLE, D3D11_VIEWPORT, D3D11CreateDevice,
+                ID3D11BlendState, ID3D11Buffer, ID3D11DepthStencilState, ID3D11DepthStencilView,
+                ID3D11Device, ID3D11DeviceContext, ID3D11InputLayout, ID3D11PixelShader,
+                ID3D11RasterizerState, ID3D11RenderTargetView, ID3D11SamplerState,
+                ID3D11ShaderResourceView, ID3D11Texture2D, ID3D11VertexShader,
             },
             Dxgi::{
+                Common::DXGI_ALPHA_MODE_PREMULTIPLIED,
                 Common::{
                     DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_B8G8R8A8_UNORM,
                     DXGI_FORMAT_D24_UNORM_S8_UINT, DXGI_FORMAT_R8_UNORM,
                     DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_UINT,
                     DXGI_FORMAT_R32G32_FLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT, DXGI_SAMPLE_DESC,
                 },
-                CreateDXGIFactory1, DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
-                DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_DISCARD,
-                DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_PRESENT_PARAMETERS,
-                DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIFactory2, IDXGISwapChain1,
-                Common::DXGI_ALPHA_MODE_PREMULTIPLIED,
+                CreateDXGIFactory1, DXGI_PRESENT, DXGI_PRESENT_PARAMETERS, DXGI_SCALING_STRETCH,
+                DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_DISCARD,
+                DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIFactory2,
+                IDXGISwapChain1,
             },
         },
     },
@@ -69,7 +70,6 @@ use winit::{
     raw_window_handle::{HasWindowHandle, RawWindowHandle},
     window::Window,
 };
-use crate::d3d11_overlay::{Composition, LayerFormat, LayerTarget, OverlayPlacement};
 
 use crate::paint::{GlassParams, GradientGeometry, PaintGlyph, PaintGradient, PaintTarget};
 
@@ -197,10 +197,9 @@ struct OverlayRequest {
 const PUNCH_HASH: u64 = 0x7075_6e63_685f_6c61;
 
 fn hash_str(text: &str) -> u64 {
-    text.bytes()
-        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
-        })
+    text.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
 }
 
 /// Where a video picture can go as a composition layer: axis-aligned, opaque,
@@ -221,7 +220,12 @@ fn overlay_placement(
     if b.abs() > 1e-6 || c.abs() > 1e-6 || a <= 0.0 || d <= 0.0 {
         return None;
     }
-    let dest = [e as f32, f as f32, (e + a * width) as f32, (f + d * height) as f32];
+    let dest = [
+        e as f32,
+        f as f32,
+        (e + a * width) as f32,
+        (f + d * height) as f32,
+    ];
     let clip = if clip.rect[0] > clip.rect[2] {
         None
     } else if clip.axis_aligned() {
@@ -729,7 +733,13 @@ impl D3d11Graphics {
             .any(|command| matches!(command, DrawCommand::Glass { .. }));
         let enabled = std::env::var_os("TARVE_VIDEO_LAYERS").is_none_or(|value| value != "0");
         // Glass samples the UI behind it, which would not hold the video: draw it in the frame.
-        if requests.is_empty() || !shown || glass || !enabled || self.tile.is_some() || self.composition_failed {
+        if requests.is_empty()
+            || !shown
+            || glass
+            || !enabled
+            || self.tile.is_some()
+            || self.composition_failed
+        {
             if let Some(composition) = &mut self.composition {
                 composition.retain(&HashSet::new());
             }
@@ -789,7 +799,11 @@ impl D3d11Graphics {
             match result {
                 Ok(fresh) => {
                     if fresh {
-                        fresh_layers.push((request.id.clone(), request.view.clone(), request.bt709));
+                        fresh_layers.push((
+                            request.id.clone(),
+                            request.view.clone(),
+                            request.bt709,
+                        ));
                     }
                     self.punched.insert(request.id.clone());
                     kept.insert(request.id);
@@ -871,7 +885,12 @@ impl D3d11Graphics {
     }
 
     /// Shows a new picture of a layered video. False when it is not layered.
-    pub(crate) fn present_video(&mut self, id: &str, view: &VideoView, bt709: bool) -> Result<bool, D3d11Error> {
+    pub(crate) fn present_video(
+        &mut self,
+        id: &str,
+        view: &VideoView,
+        bt709: bool,
+    ) -> Result<bool, D3d11Error> {
         if !self.video_layered(id) {
             return Ok(false);
         }
@@ -897,15 +916,25 @@ impl D3d11Graphics {
                     ..
                 },
             ) => Composition::copy_picture(&self.context, &target, texture, *slice),
-            (LayerFormat::Bgra, VideoView::Nv12 { .. }) => self.draw_layer_picture(&target, view, bt709)?,
+            (LayerFormat::Bgra, VideoView::Nv12 { .. }) => {
+                self.draw_layer_picture(&target, view, bt709)?
+            }
             _ => return Ok(()),
         }
         composition.present(id)
     }
 
     /// One quad over a BGRA layer's back buffer, NV12 converted in the pixel shader.
-    fn draw_layer_picture(&self, target: &LayerTarget, view: &VideoView, bt709: bool) -> Result<(), String> {
-        let VideoView::Nv12 { luma, chroma, uv, .. } = view else {
+    fn draw_layer_picture(
+        &self,
+        target: &LayerTarget,
+        view: &VideoView,
+        bt709: bool,
+    ) -> Result<(), String> {
+        let VideoView::Nv12 {
+            luma, chroma, uv, ..
+        } = view
+        else {
             return Ok(());
         };
         let Some(render_target) = &target.view else {
@@ -930,7 +959,11 @@ impl D3d11Graphics {
             corner(-1.0, -1.0, 0.0, uv[1]),
             corner(1.0, -1.0, uv[0], uv[1]),
         ];
-        upload_dynamic(&self.context, &self.layer_vertices, bytemuck::cast_slice(&vertices))?;
+        upload_dynamic(
+            &self.context,
+            &self.layer_vertices,
+            bytemuck::cast_slice(&vertices),
+        )?;
         upload_dynamic(
             &self.context,
             &self.target_transform,
@@ -942,8 +975,9 @@ impl D3d11Graphics {
             self.set_viewport(target.size.0, target.size.1);
             self.context.RSSetState(&self.rasterizer);
             self.context.IASetInputLayout(&self.input_layout);
-            self.context
-                .IASetPrimitiveTopology(windows::Win32::Graphics::Direct3D::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+            self.context.IASetPrimitiveTopology(
+                windows::Win32::Graphics::Direct3D::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP,
+            );
             let buffers = [Some(self.layer_vertices.clone())];
             let strides = [size_of::<Vertex>() as u32];
             let offsets = [0_u32];
@@ -1060,7 +1094,11 @@ impl D3d11Graphics {
             return Err(self.classify_gpu_error("D3D11 draw", error));
         }
         // The composition swap chain is flip-discard: it always presents whole frames.
-        let rects = if self.composition.is_none() { self.present_rects.take() } else { None };
+        let rects = if self.composition.is_none() {
+            self.present_rects.take()
+        } else {
+            None
+        };
         let presented = match &rects {
             // Nothing changed: the window already shows this frame.
             Some(rects) if rects.is_empty() => Ok(()),
@@ -1072,7 +1110,11 @@ impl D3d11Graphics {
                     pScrollRect: std::ptr::null_mut(),
                     pScrollOffset: std::ptr::null_mut(),
                 };
-                unsafe { self.swap_chain.Present1(1, DXGI_PRESENT(0), &parameters).ok() }
+                unsafe {
+                    self.swap_chain
+                        .Present1(1, DXGI_PRESENT(0), &parameters)
+                        .ok()
+                }
             }
             None => unsafe { self.swap_chain.Present(1, DXGI_PRESENT(0)).ok() },
         };
@@ -1083,7 +1125,9 @@ impl D3d11Graphics {
         if let Some(composition) = &mut self.composition
             && let Err(error) = composition.commit()
         {
-            return Err(D3d11Error::RecoverDevice(format!("DirectComposition commit: {error}")));
+            return Err(D3d11Error::RecoverDevice(format!(
+                "DirectComposition commit: {error}"
+            )));
         }
         Ok(())
     }
@@ -1187,7 +1231,12 @@ impl D3d11Graphics {
                     continue;
                 }
                 hashes[slot] = hash;
-                changed.push([left, top, (left + size).min(self.width as f32), (top + size).min(self.height as f32)]);
+                changed.push([
+                    left,
+                    top,
+                    (left + size).min(self.width as f32),
+                    (top + size).min(self.height as f32),
+                ]);
                 let transform = tile_transform(self.width, self.height, x, y);
                 upload_dynamic(
                     &self.context,
@@ -1268,7 +1317,9 @@ impl D3d11Graphics {
         let canvas = self.canvas.clone().ok_or("D3D11 canvas is unavailable")?;
         let bounds = self.command_bounds();
         let damage = self.damage_rects(&bounds, bg);
-        self.present_rects = damage.as_ref().map(|rects| rects.iter().map(|rect| to_rect(*rect)).collect());
+        self.present_rects = damage
+            .as_ref()
+            .map(|rects| rects.iter().map(|rect| to_rect(*rect)).collect());
         // Nothing changed and nothing to present: the back buffer is not touched either.
         if damage.as_ref().is_some_and(Vec::is_empty) && self.composition.is_none() {
             return Ok(());
@@ -1686,7 +1737,9 @@ impl D3d11Graphics {
             let (blend, stencil, depth) = match next {
                 State::Draw(depth) => (&self.blend, &self.stencil_draw, depth),
                 State::ClearType(depth) => (
-                    self.cleartype.pipeline().map_or(&self.blend, |(_, blend)| blend),
+                    self.cleartype
+                        .pipeline()
+                        .map_or(&self.blend, |(_, blend)| blend),
                     &self.stencil_draw,
                     depth,
                 ),
@@ -1757,7 +1810,11 @@ impl D3d11Graphics {
                     let cleartype = matches!(texture, TextureRef::ClearType(_));
                     use_cleartype(cleartype, &mut cleartype_shader);
                     set_state(
-                        if cleartype { State::ClearType(clip_depth) } else { State::Draw(clip_depth) },
+                        if cleartype {
+                            State::ClearType(clip_depth)
+                        } else {
+                            State::Draw(clip_depth)
+                        },
                         &mut state,
                     );
                     if bound_texture != Some(key) {
@@ -3799,7 +3856,11 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         let Some(view) = self.graphics.video_views.get(id).cloned() else {
             // No texture on this device (the decoder is reading back): the copy in memory.
             if let Some(pixels) = &frame.pixels {
-                self.draw_image(&format!("video:{id}"), pixels, frame.pixel_transform(transform));
+                self.draw_image(
+                    &format!("video:{id}"),
+                    pixels,
+                    frame.pixel_transform(transform),
+                );
             }
             return;
         };
@@ -3826,7 +3887,9 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                 D3d11PaintLayer::Clip(Some(_)) | D3d11PaintLayer::AnalyticClip(_, Some(_))
             )
         });
-        if let VideoView::Nv12 { source: Some(_), .. } = &view
+        if let VideoView::Nv12 {
+            source: Some(_), ..
+        } = &view
             && let Some(placement) = overlay_placement(
                 transform,
                 width,
@@ -3934,7 +3997,11 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                 entry.uv,
                 color.multiply_alpha(self.opacity),
                 2.0,
-                if subpixel { TextureRef::ClearType(view) } else { TextureRef::Glyph(view) },
+                if subpixel {
+                    TextureRef::ClearType(view)
+                } else {
+                    TextureRef::Glyph(view)
+                },
             );
         }
     }
@@ -3952,9 +4019,9 @@ mod cleartype;
 mod dwrite_glyphs;
 mod prewarm;
 mod text_rendering;
-pub(crate) use text_rendering::set_text_rendering;
-pub(crate) use prewarm::{prewarm_device, prewarm_pending};
 use prewarm::create_device;
+pub(crate) use prewarm::{prewarm_device, prewarm_pending};
+pub(crate) use text_rendering::set_text_rendering;
 fn create_device_now() -> Result<(ID3D11Device, ID3D11DeviceContext), String> {
     // Video support lets `<video>` decode on this device (no copy to draw it);
     // a driver without video falls back to a device without it.
@@ -5083,8 +5150,20 @@ mod shader_tests {
         let clipped = overlay_placement(at, 640.0, 360.0, &clip, 1.0, false).unwrap();
         assert_eq!(clipped.visible(), ([50.0, 20.0, 290.0, 200.0], [8.0; 4]));
         // Rotated, mirrored, translucent, a rotated clip or a path clip: drawn in the frame.
-        assert!(overlay_placement(Affine::rotate(0.3), 640.0, 360.0, &NO_CLIP, 1.0, false).is_none());
-        assert!(overlay_placement(Affine::scale_non_uniform(-1.0, 1.0), 640.0, 360.0, &NO_CLIP, 1.0, false).is_none());
+        assert!(
+            overlay_placement(Affine::rotate(0.3), 640.0, 360.0, &NO_CLIP, 1.0, false).is_none()
+        );
+        assert!(
+            overlay_placement(
+                Affine::scale_non_uniform(-1.0, 1.0),
+                640.0,
+                360.0,
+                &NO_CLIP,
+                1.0,
+                false
+            )
+            .is_none()
+        );
         assert!(overlay_placement(at, 640.0, 360.0, &NO_CLIP, 0.5, false).is_none());
         let mut rotated = clip;
         rotated.m0 = [0.0, 1.0, -1.0, 0.0];
@@ -5098,7 +5177,10 @@ mod shader_tests {
         // The hole's hash leaves out the picture: new pictures redraw no UI tile.
         assert_eq!(hash_str("clip"), hash_str("clip"));
         assert_ne!(hash_str("clip"), hash_str("clip2"));
-        assert_ne!(mix_hash(PUNCH_HASH, hash_str("clip")), mix_hash(PUNCH_HASH, hash_str("other")));
+        assert_ne!(
+            mix_hash(PUNCH_HASH, hash_str("clip")),
+            mix_hash(PUNCH_HASH, hash_str("other"))
+        );
     }
 
     #[test]
@@ -5108,7 +5190,11 @@ mod shader_tests {
         for (entry, target, file) in [
             (&b"vs_main\0"[..], &b"vs_5_0\0"[..], "ui.vs.dxbc"),
             (&b"ps_main\0"[..], &b"ps_5_0\0"[..], "ui.ps.dxbc"),
-            (&b"ps_cleartype\0"[..], &b"ps_5_0\0"[..], "cleartype.ps.dxbc"),
+            (
+                &b"ps_cleartype\0"[..],
+                &b"ps_5_0\0"[..],
+                "cleartype.ps.dxbc",
+            ),
         ] {
             let blob = compile_shader(SOURCE, entry, target).unwrap();
             std::fs::write(dir.join(file), blob_bytes(&blob)).unwrap();

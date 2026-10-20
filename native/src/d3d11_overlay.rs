@@ -162,7 +162,8 @@ impl Composition {
         }
         let layer = self.layers.get_mut(id).unwrap();
         if layer.placement != Some(placement) {
-            unsafe { place(layer, placement) }.map_err(|error| format!("layer placement: {error}"))?;
+            unsafe { place(layer, placement) }
+                .map_err(|error| format!("layer placement: {error}"))?;
             layer.placement = Some(placement);
             self.dirty = true;
         }
@@ -181,7 +182,11 @@ impl Composition {
         let mut desc = DXGI_SWAP_CHAIN_DESC1 {
             Width: size.0,
             Height: size.1,
-            Format: if nv12 { DXGI_FORMAT_NV12 } else { DXGI_FORMAT_B8G8R8A8_UNORM },
+            Format: if nv12 {
+                DXGI_FORMAT_NV12
+            } else {
+                DXGI_FORMAT_B8G8R8A8_UNORM
+            },
             Stereo: false.into(),
             SampleDesc: DXGI_SAMPLE_DESC {
                 Count: 1,
@@ -193,7 +198,11 @@ impl Composition {
             SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
             AlphaMode: DXGI_ALPHA_MODE_IGNORE,
             // A candidate for a hardware overlay plane.
-            Flags: if nv12 { DXGI_SWAP_CHAIN_FLAG_YUV_VIDEO.0 as u32 } else { 0 },
+            Flags: if nv12 {
+                DXGI_SWAP_CHAIN_FLAG_YUV_VIDEO.0 as u32
+            } else {
+                0
+            },
         };
         let swap_chain = unsafe {
             factory
@@ -300,7 +309,9 @@ impl Composition {
             bottom: target.size.1,
             back: 1,
         };
-        unsafe { context.CopySubresourceRegion(&target.back, 0, 0, 0, 0, texture, slice, Some(&region)) };
+        unsafe {
+            context.CopySubresourceRegion(&target.back, 0, 0, 0, 0, texture, slice, Some(&region))
+        };
     }
 
     /// Shows the picture drawn or copied into video `id`'s back buffer.

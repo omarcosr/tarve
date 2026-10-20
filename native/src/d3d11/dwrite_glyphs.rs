@@ -79,14 +79,25 @@ impl DWriteGlyphs {
         let mut file_type = DWRITE_FONT_FILE_TYPE_UNKNOWN;
         let mut face_type = DWRITE_FONT_FACE_TYPE_UNKNOWN;
         let mut faces = 0;
-        unsafe { file.Analyze(&mut supported, &mut file_type, Some(&mut face_type), &mut faces) }
-            .ok()?;
+        unsafe {
+            file.Analyze(
+                &mut supported,
+                &mut file_type,
+                Some(&mut face_type),
+                &mut faces,
+            )
+        }
+        .ok()?;
         if !supported.as_bool() || font.index >= faces {
             return None;
         }
         unsafe {
-            self.factory
-                .CreateFontFace(face_type, &[Some(file)], font.index, DWRITE_FONT_SIMULATIONS_NONE)
+            self.factory.CreateFontFace(
+                face_type,
+                &[Some(file)],
+                font.index,
+                DWRITE_FONT_SIMULATIONS_NONE,
+            )
         }
         .ok()
     }
@@ -129,11 +140,18 @@ impl DWriteGlyphs {
         };
         drop(ManuallyDrop::into_inner(run.fontFace));
         let analysis = analysis.ok()?;
-        let bounds = unsafe { analysis.GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1) }.ok()?;
+        let bounds =
+            unsafe { analysis.GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1) }.ok()?;
         let width = u32::try_from(bounds.right - bounds.left).unwrap_or(0);
         let height = u32::try_from(bounds.bottom - bounds.top).unwrap_or(0);
         if width == 0 || height == 0 {
-            return Some(Mask { left: bounds.left, top: -bounds.top, width: 0, height: 0, rgba: Vec::new() });
+            return Some(Mask {
+                left: bounds.left,
+                top: -bounds.top,
+                width: 0,
+                height: 0,
+                rgba: Vec::new(),
+            });
         }
         let mut rgb = vec![0_u8; width as usize * height as usize * 3];
         unsafe { analysis.CreateAlphaTexture(DWRITE_TEXTURE_CLEARTYPE_3x1, &bounds, &mut rgb) }

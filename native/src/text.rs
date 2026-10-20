@@ -1221,7 +1221,9 @@ impl TextEngine {
             return;
         }
         // Plain text and buttons shape the same from content and style alone; copy an equal one.
-        let shareable = matches!(node.kind.as_str(), "text" | "button") && node.rich.is_none() && !content.contains('\t');
+        let shareable = matches!(node.kind.as_str(), "text" | "button")
+            && node.rich.is_none()
+            && !content.contains('\t');
         let share_key = (signature.0, signature.1, node.kind == "button");
         let copied = shareable
             .then(|| self.shaped_by.get(&share_key))
@@ -1229,7 +1231,10 @@ impl TextEngine {
             .filter(|id| self.signatures.get(*id) == Some(&signature))
             .and_then(|id| self.layouts.get(id))
             .cloned();
-        let (preshaped, min_content) = match shareable.then(|| self.preshaped.remove(&share_key)).flatten() {
+        let (preshaped, min_content) = match shareable
+            .then(|| self.preshaped.remove(&share_key))
+            .flatten()
+        {
             Some((layout, min_content)) => (Some(layout), min_content),
             None => (None, None),
         };
@@ -1654,8 +1659,7 @@ impl TextEngine {
             .retain(|id, _| self.layouts.contains_key(id));
         self.alignments
             .retain(|id, _| self.layouts.contains_key(id));
-        self.shaped_by
-            .retain(|_, id| self.layouts.contains_key(id));
+        self.shaped_by.retain(|_, id| self.layouts.contains_key(id));
         self.diff_layouts.retain(|id, _| keep(id));
         self.code_gutter_layouts.retain(|id, _| keep(id));
         self.code_gutter_widths.retain(|id, _| keep(id));

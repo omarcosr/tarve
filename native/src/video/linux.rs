@@ -146,7 +146,9 @@ fn gst() -> Result<&'static Gst, String> {
     GST.get_or_init(|| {
         let gst = Gst::load()?;
         let mut error = std::ptr::null_mut();
-        if unsafe { (gst.gst_init_check)(std::ptr::null_mut(), std::ptr::null_mut(), &mut error) } == 0 {
+        if unsafe { (gst.gst_init_check)(std::ptr::null_mut(), std::ptr::null_mut(), &mut error) }
+            == 0
+        {
             return Err(take_error(&gst, error, "GStreamer could not start"));
         }
         Ok(gst)
@@ -163,7 +165,9 @@ fn take_error(gst: &Gst, error: *mut GError, fallback: &str) -> String {
     let text = if message.is_null() {
         fallback.to_string()
     } else {
-        unsafe { CStr::from_ptr(message) }.to_string_lossy().into_owned()
+        unsafe { CStr::from_ptr(message) }
+            .to_string_lossy()
+            .into_owned()
     };
     unsafe { (gst.g_error_free)(error) };
     text
@@ -221,24 +225,35 @@ struct Player {
 }
 
 impl Player {
-    fn new(gst: &'static Gst, load: &VideoLoad<'_>, wake: Arc<dyn Fn() + Send + Sync>) -> Result<Self, String> {
+    fn new(
+        gst: &'static Gst,
+        load: &VideoLoad<'_>,
+        wake: Arc<dyn Fn() + Send + Sync>,
+    ) -> Result<Self, String> {
         let uri = if load.src.contains("://") {
             load.src.to_string()
         } else {
             let path = std::path::absolute(load.src).unwrap_or_else(|_| load.src.into());
             let mut error = std::ptr::null_mut();
-            let uri = unsafe { (gst.gst_filename_to_uri)(c(&path.to_string_lossy()).as_ptr(), &mut error) };
+            let uri = unsafe {
+                (gst.gst_filename_to_uri)(c(&path.to_string_lossy()).as_ptr(), &mut error)
+            };
             if uri.is_null() {
                 return Err(take_error(gst, error, "invalid video path"));
             }
-            let text = unsafe { CStr::from_ptr(uri) }.to_string_lossy().into_owned();
+            let text = unsafe { CStr::from_ptr(uri) }
+                .to_string_lossy()
+                .into_owned();
             unsafe { (gst.g_free)(uri.cast()) };
             text
         };
         let make = |factory: &str| {
-            let element = unsafe { (gst.gst_element_factory_make)(c(factory).as_ptr(), std::ptr::null()) };
+            let element =
+                unsafe { (gst.gst_element_factory_make)(c(factory).as_ptr(), std::ptr::null()) };
             if element.is_null() {
-                Err(format!("the GStreamer element {factory} is missing (install gstreamer1.0-plugins-base)"))
+                Err(format!(
+                    "the GStreamer element {factory} is missing (install gstreamer1.0-plugins-base)"
+                ))
             } else {
                 Ok(element)
             }
@@ -268,13 +283,25 @@ impl Player {
         };
         let sink = make("appsink")?;
         player.sink = sink;
-        let caps = unsafe { (gst.gst_caps_from_string)(c"video/x-raw,format=RGBA,pixel-aspect-ratio=1/1".as_ptr()) };
+        let caps = unsafe {
+            (gst.gst_caps_from_string)(c"video/x-raw,format=RGBA,pixel-aspect-ratio=1/1".as_ptr())
+        };
         unsafe {
             (gst.g_object_set)(sink, c"caps".as_ptr(), caps, std::ptr::null::<c_char>());
             (gst.gst_mini_object_unref)(caps);
             // Only the newest picture matters: a late one is dropped, never queued.
-            (gst.g_object_set)(sink, c"max-buffers".as_ptr(), 1 as c_uint, std::ptr::null::<c_char>());
-            (gst.g_object_set)(sink, c"drop".as_ptr(), 1 as c_int, std::ptr::null::<c_char>());
+            (gst.g_object_set)(
+                sink,
+                c"max-buffers".as_ptr(),
+                1 as c_uint,
+                std::ptr::null::<c_char>(),
+            );
+            (gst.g_object_set)(
+                sink,
+                c"drop".as_ptr(),
+                1 as c_int,
+                std::ptr::null::<c_char>(),
+            );
             let callbacks = AppSinkCallbacks {
                 eos: None,
                 new_preroll: Some(on_preroll),
@@ -283,12 +310,32 @@ impl Player {
             };
             let data = &*player.signal as *const Signal as Ptr;
             (gst.gst_app_sink_set_callbacks)(sink, &callbacks, data, None);
-            (gst.g_object_set)(pipeline, c"video-sink".as_ptr(), sink, std::ptr::null::<c_char>());
-            (gst.g_object_set)(pipeline, c"uri".as_ptr(), c(&uri).as_ptr(), std::ptr::null::<c_char>());
+            (gst.g_object_set)(
+                pipeline,
+                c"video-sink".as_ptr(),
+                sink,
+                std::ptr::null::<c_char>(),
+            );
+            (gst.g_object_set)(
+                pipeline,
+                c"uri".as_ptr(),
+                c(&uri).as_ptr(),
+                std::ptr::null::<c_char>(),
+            );
             if std::env::var_os("TARVE_AUDIO").is_some_and(|value| value == "silent") {
                 let quiet = make("fakesink")?;
-                (gst.g_object_set)(quiet, c"sync".as_ptr(), 1 as c_int, std::ptr::null::<c_char>());
-                (gst.g_object_set)(pipeline, c"audio-sink".as_ptr(), quiet, std::ptr::null::<c_char>());
+                (gst.g_object_set)(
+                    quiet,
+                    c"sync".as_ptr(),
+                    1 as c_int,
+                    std::ptr::null::<c_char>(),
+                );
+                (gst.g_object_set)(
+                    pipeline,
+                    c"audio-sink".as_ptr(),
+                    quiet,
+                    std::ptr::null::<c_char>(),
+                );
             }
             player.bus = (gst.gst_element_get_bus)(pipeline);
             (gst.gst_bus_set_sync_handler)(player.bus, Some(on_message), data, None);
@@ -305,10 +352,20 @@ impl Player {
         }
         unsafe {
             if let Some(muted) = muted {
-                (self.gst.g_object_set)(self.pipeline, c"mute".as_ptr(), c_int::from(muted), std::ptr::null::<c_char>());
+                (self.gst.g_object_set)(
+                    self.pipeline,
+                    c"mute".as_ptr(),
+                    c_int::from(muted),
+                    std::ptr::null::<c_char>(),
+                );
             }
             if let Some(volume) = volume {
-                (self.gst.g_object_set)(self.pipeline, c"volume".as_ptr(), volume.clamp(0.0, 1.0), std::ptr::null::<c_char>());
+                (self.gst.g_object_set)(
+                    self.pipeline,
+                    c"volume".as_ptr(),
+                    volume.clamp(0.0, 1.0),
+                    std::ptr::null::<c_char>(),
+                );
             }
         }
     }
@@ -327,7 +384,15 @@ impl Player {
 
     fn seek(&mut self, time: f64) {
         let nanos = (time.max(0.0) * 1e9) as i64;
-        if unsafe { (self.gst.gst_element_seek_simple)(self.pipeline, FORMAT_TIME, SEEK_FLUSH | SEEK_ACCURATE, nanos) } != 0 {
+        if unsafe {
+            (self.gst.gst_element_seek_simple)(
+                self.pipeline,
+                FORMAT_TIME,
+                SEEK_FLUSH | SEEK_ACCURATE,
+                nanos,
+            )
+        } != 0
+        {
             self.seeking = true;
             self.ended = false;
         }
@@ -380,7 +445,12 @@ impl Player {
             if message.is_null() {
                 return Ok(());
             }
-            let kind = unsafe { *(message.cast::<u8>().add(MESSAGE_TYPE_OFFSET).cast::<c_uint>()) };
+            let kind = unsafe {
+                *(message
+                    .cast::<u8>()
+                    .add(MESSAGE_TYPE_OFFSET)
+                    .cast::<c_uint>())
+            };
             let mut failed = None;
             match kind {
                 MESSAGE_ERROR => {
@@ -405,7 +475,9 @@ impl Player {
                     self.seeking = false;
                     out.push(self.event(id, "seeked"));
                 }
-                MESSAGE_DURATION_CHANGED if self.metadata => out.push(self.event(id, "durationchange")),
+                MESSAGE_DURATION_CHANGED if self.metadata => {
+                    out.push(self.event(id, "durationchange"))
+                }
                 _ => {}
             }
             unsafe { (self.gst.gst_mini_object_unref)(message) };
@@ -466,7 +538,8 @@ impl Player {
         }
         // RGBA rows are 4-byte aligned already: the stride is width × 4.
         let bytes = width * height * 4;
-        let pixels = (map.size >= bytes).then(|| unsafe { std::slice::from_raw_parts(map.data, bytes) }.to_vec());
+        let pixels = (map.size >= bytes)
+            .then(|| unsafe { std::slice::from_raw_parts(map.data, bytes) }.to_vec());
         unsafe { (gst.gst_buffer_unmap)(buffer, &mut map) };
         let pixels = pixels?;
         self.size = (width as u32, height as u32);
@@ -518,7 +591,12 @@ impl Videos {
     }
 
     /// GStreamer plays the sound itself (its clock keeps it in sync): no mixer.
-    pub(crate) fn load<Mixer>(&mut self, id: &str, load: VideoLoad<'_>, _mixer: Option<Mixer>) -> Vec<Value> {
+    pub(crate) fn load<Mixer>(
+        &mut self,
+        id: &str,
+        load: VideoLoad<'_>,
+        _mixer: Option<Mixer>,
+    ) -> Vec<Value> {
         if self.players.remove(id).is_some() {
             self.changed.push((id.to_string(), None));
         }
@@ -562,7 +640,9 @@ impl Videos {
             }
             _ => None,
         };
-        event.map(|name| vec![player.event(id, name)]).unwrap_or_default()
+        event
+            .map(|name| vec![player.event(id, name)])
+            .unwrap_or_default()
     }
 
     pub(crate) fn tick(&mut self, now: Instant) -> Vec<Value> {
@@ -610,7 +690,10 @@ impl Videos {
 
     /// Only \`timeupdate\` needs a timer; pictures and bus messages wake the loop.
     pub(crate) fn deadline(&self) -> Option<Instant> {
-        self.players.values().filter_map(|player| player.next_update).min()
+        self.players
+            .values()
+            .filter_map(|player| player.next_update)
+            .min()
     }
 }
 
@@ -623,7 +706,12 @@ mod tests {
     #[test]
     fn a_missing_file_reports_an_error() {
         let mut videos = Videos::new(|| {});
-        let load = VideoLoad { src: "/nonexistent/tarve-missing.mp4", looped: false, muted: true, volume: 1.0 };
+        let load = VideoLoad {
+            src: "/nonexistent/tarve-missing.mp4",
+            looped: false,
+            muted: true,
+            volume: 1.0,
+        };
         let mut events = videos.load::<()>("clip", load, None);
         let end = Instant::now() + Duration::from_secs(5);
         while events.is_empty() && Instant::now() < end {
@@ -635,7 +723,10 @@ mod tests {
         assert!(!videos.handles("clip"));
         assert!(matches!(videos.take_frames().as_slice(), [] | [(_, None)]));
         if gst().is_err() {
-            assert!(events[0]["message"].as_str().unwrap().contains("GStreamer"), "{events:?}");
+            assert!(
+                events[0]["message"].as_str().unwrap().contains("GStreamer"),
+                "{events:?}"
+            );
         }
     }
 }

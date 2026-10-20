@@ -54,7 +54,12 @@ impl Pipeline {
         })
     }
 
-    fn allocate(&mut self, device: &ID3D11Device, width: u32, height: u32) -> Option<(usize, u32, u32)> {
+    fn allocate(
+        &mut self,
+        device: &ID3D11Device,
+        width: u32,
+        height: u32,
+    ) -> Option<(usize, u32, u32)> {
         for (page, atlas) in self.atlases.iter_mut().enumerate() {
             if let Some((x, y)) = atlas.allocate(width + 1, height + 1) {
                 return Some((page, x, y));
@@ -112,7 +117,9 @@ impl ClearType {
 
     /// The shader and blend state ClearType draws use.
     pub(super) fn pipeline(&self) -> Option<(&ID3D11PixelShader, &ID3D11BlendState)> {
-        self.pipeline.as_ref().map(|pipeline| (&pipeline.shader, &pipeline.blend))
+        self.pipeline
+            .as_ref()
+            .map(|pipeline| (&pipeline.shader, &pipeline.blend))
     }
 }
 
@@ -153,7 +160,14 @@ impl D3d11Graphics {
             return None;
         };
         let entry = if mask.width == 0 || mask.height == 0 {
-            GlyphEntry { view: None, uv: [0.0; 4], left: mask.left, top: mask.top, width: 0, height: 0 }
+            GlyphEntry {
+                view: None,
+                uv: [0.0; 4],
+                left: mask.left,
+                top: mask.top,
+                width: 0,
+                height: 0,
+            }
         } else {
             let (page, x, y) = pipeline.allocate(&self.device, mask.width, mask.height)?;
             let atlas = &pipeline.atlases[page];
@@ -210,7 +224,10 @@ fn create_atlas(device: &ID3D11Device) -> Result<GlyphAtlas, String> {
         MipLevels: 1,
         ArraySize: 1,
         Format: DXGI_FORMAT_R8G8B8A8_UNORM,
-        SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+        SampleDesc: DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
         Usage: D3D11_USAGE_DEFAULT,
         BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
         CPUAccessFlags: 0,
@@ -225,7 +242,8 @@ fn create_atlas(device: &ID3D11Device) -> Result<GlyphAtlas, String> {
     unsafe { device.CreateTexture2D(&desc, Some(&data), Some(&mut texture)) }.map_err(win_error)?;
     let texture = texture.ok_or("ClearType glyph atlas was not created")?;
     let mut view = None;
-    unsafe { device.CreateShaderResourceView(&texture, None, Some(&mut view)) }.map_err(win_error)?;
+    unsafe { device.CreateShaderResourceView(&texture, None, Some(&mut view)) }
+        .map_err(win_error)?;
     Ok(GlyphAtlas {
         _texture: texture,
         view: view.ok_or("ClearType glyph atlas view was not created")?,
@@ -245,6 +263,13 @@ fn upload(context: &ID3D11DeviceContext, texture: &ID3D11Texture2D, x: u32, y: u
         back: 1,
     };
     unsafe {
-        context.UpdateSubresource(texture, 0, Some(&region), mask.rgba.as_ptr().cast(), mask.width * 4, 0)
+        context.UpdateSubresource(
+            texture,
+            0,
+            Some(&region),
+            mask.rgba.as_ptr().cast(),
+            mask.width * 4,
+            0,
+        )
     };
 }

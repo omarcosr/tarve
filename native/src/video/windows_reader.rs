@@ -5,8 +5,8 @@
 
 use super::windows_shared::{SendCom, plane_array_view, win};
 use super::windows_stream::{RemoteStream, VIDEO_WINDOW, content_type, streamable};
-use crate::media::remote::{Stream, is_remote};
 use crate::d3d11::VideoView;
+use crate::media::remote::{Stream, is_remote};
 use rodio::mixer::Mixer;
 use rodio::{Player, Source};
 use std::collections::{HashMap, VecDeque};
@@ -236,16 +236,21 @@ fn reader_thread(shared: Arc<Shared>, url: String, manager: SendCom<IMFDXGIDevic
         Err(Fallback::Other(message)) => return fail(message),
     };
     // A failed download is the cause of a failed read; Media Foundation only saw the read fail.
-    let reason = |error: windows::core::Error| remote.as_ref().and_then(|stream| stream.error()).unwrap_or_else(|| win(error));
+    let reason = |error: windows::core::Error| {
+        remote
+            .as_ref()
+            .and_then(|stream| stream.error())
+            .unwrap_or_else(|| win(error))
+    };
     let info = match describe(&reader) {
         Ok(info) => info,
         Err(message) => return fail(message),
     };
     shared.lock().info = Some(info);
     (shared.wake)();
-    let audio_ahead = info
-        .audio
-        .map_or(0, |(channels, rate)| (AUDIO_AHEAD * f64::from(rate) * f64::from(channels)) as usize);
+    let audio_ahead = info.audio.map_or(0, |(channels, rate)| {
+        (AUDIO_AHEAD * f64::from(rate) * f64::from(channels)) as usize
+    });
     let mut video_off = false;
     let mut audio_off = false;
     // After a seek the source starts at the key frame before the target: the
@@ -282,7 +287,12 @@ fn reader_thread(shared: Arc<Shared>, url: String, manager: SendCom<IMFDXGIDevic
                         Request::Audio(on) if on == audio_off && info.audio.is_some() => {
                             audio_off = !on;
                             let _ = unsafe { reader.SetStreamSelection(AUDIO_STREAM, on) };
-                            shared.sound.samples.lock().unwrap_or_else(|p| p.into_inner()).clear();
+                            shared
+                                .sound
+                                .samples
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .clear();
                             shared.sound.epoch.fetch_add(1, Ordering::Release);
                             state.audio_done = audio_off;
                         }
@@ -299,12 +309,19 @@ fn reader_thread(shared: Arc<Shared>, url: String, manager: SendCom<IMFDXGIDevic
                         // refuses to seek (E_INVALIDARG): it seeks when the picture is back.
                         if video_off && (audio_off || info.audio.is_none()) {
                             deferred_seek = Some(time);
-                        } else if let Err(error) = reader.SetCurrentPosition(&GUID::zeroed(), &position) {
+                        } else if let Err(error) =
+                            reader.SetCurrentPosition(&GUID::zeroed(), &position)
+                        {
                             state.error = Some(win(error));
                         }
                     }
                     state.video.clear();
-                    shared.sound.samples.lock().unwrap_or_else(|p| p.into_inner()).clear();
+                    shared
+                        .sound
+                        .samples
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .clear();
                     shared.sound.epoch.fetch_add(1, Ordering::Release);
                     state.video_done = false;
                     state.audio_done = info.audio.is_none() || audio_off;
@@ -316,7 +333,13 @@ fn reader_thread(shared: Arc<Shared>, url: String, manager: SendCom<IMFDXGIDevic
                 let video_full = video_off || state.video_done || state.video.len() >= VIDEO_AHEAD;
                 let audio_full = audio_off
                     || state.audio_done
-                    || shared.sound.samples.lock().unwrap_or_else(|p| p.into_inner()).len() >= audio_ahead;
+                    || shared
+                        .sound
+                        .samples
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .len()
+                        >= audio_ahead;
                 if !video_full && !audio_full {
                     break ANY_STREAM;
                 }
@@ -412,7 +435,8 @@ fn reader_thread(shared: Arc<Shared>, url: String, manager: SendCom<IMFDXGIDevic
                     // Sound before the seek target is dropped (to the sample): the clock starts there.
                     let skip = match (audio_skip_before, info.audio) {
                         (Some(target), Some((channels, rate))) => {
-                            let frames = ((target - time).max(0.0) * f64::from(rate)).round() as usize;
+                            let frames =
+                                ((target - time).max(0.0) * f64::from(rate)).round() as usize;
                             let skip = (frames * usize::from(channels)).min(floats.len());
                             if skip < floats.len() {
                                 audio_skip_before = None;
@@ -435,7 +459,10 @@ fn reader_thread(shared: Arc<Shared>, url: String, manager: SendCom<IMFDXGIDevic
 }
 
 /// The source reader on `url`, and the app's own download behind it for a remote file.
-fn open(url: &str, manager: &IMFDXGIDeviceManager) -> Result<(IMFSourceReader, Option<Arc<Stream>>), Fallback> {
+fn open(
+    url: &str,
+    manager: &IMFDXGIDeviceManager,
+) -> Result<(IMFSourceReader, Option<Arc<Stream>>), Fallback> {
     let remote = if is_remote(url) && streamable(url) {
         Some(Stream::open_windowed(url, VIDEO_WINDOW).map_err(Fallback::Other)?)
     } else {
@@ -459,7 +486,8 @@ fn open_with(
     unsafe {
         let mut attributes = None;
         MFCreateAttributes(&mut attributes, 3).map_err(other)?;
-        let attributes = attributes.ok_or(Fallback::Other("media attributes were not created".into()))?;
+        let attributes =
+            attributes.ok_or(Fallback::Other("media attributes were not created".into()))?;
         attributes
             .SetUnknown(&MF_SOURCE_READER_D3D_MANAGER, manager)
             .map_err(other)?;
@@ -475,29 +503,43 @@ fn open_with(
             .map_err(other)?;
         let reader = match remote {
             Some(stream) => {
-                let bytes = MFCreateMFByteStreamOnStream(&RemoteStream::open(stream.clone())).map_err(other)?;
+                let bytes = MFCreateMFByteStreamOnStream(&RemoteStream::open(stream.clone()))
+                    .map_err(other)?;
                 // What Media Foundation picks the container parser by.
                 if let Ok(described) = bytes.cast::<IMFAttributes>() {
                     let _ = described.SetString(&MF_BYTESTREAM_ORIGIN_NAME, &HSTRING::from(url));
                     if let Some(kind) = content_type(url, stream.mime.as_deref()) {
-                        let _ = described.SetString(&MF_BYTESTREAM_CONTENT_TYPE, &HSTRING::from(kind));
+                        let _ =
+                            described.SetString(&MF_BYTESTREAM_CONTENT_TYPE, &HSTRING::from(kind));
                     }
                 }
-                MFCreateSourceReaderFromByteStream(&bytes, &attributes)
-                    .map_err(|error| Fallback::Other(stream.error().unwrap_or_else(|| win(error))))?
+                MFCreateSourceReaderFromByteStream(&bytes, &attributes).map_err(|error| {
+                    Fallback::Other(stream.error().unwrap_or_else(|| win(error)))
+                })?
             }
             None => MFCreateSourceReaderFromURL(&HSTRING::from(url), &attributes).map_err(other)?,
         };
         let video = MFCreateMediaType().map_err(other)?;
-        video.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video).map_err(other)?;
-        video.SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_NV12).map_err(other)?;
+        video
+            .SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)
+            .map_err(other)?;
+        video
+            .SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_NV12)
+            .map_err(other)?;
         if let Err(error) = reader.SetCurrentMediaType(VIDEO_STREAM, None, &video) {
             return Err(Fallback::Format(win(error)));
         }
         let audio = MFCreateMediaType().map_err(other)?;
-        audio.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio).map_err(other)?;
-        audio.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_Float).map_err(other)?;
-        if reader.SetCurrentMediaType(AUDIO_STREAM, None, &audio).is_err() {
+        audio
+            .SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio)
+            .map_err(other)?;
+        audio
+            .SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_Float)
+            .map_err(other)?;
+        if reader
+            .SetCurrentMediaType(AUDIO_STREAM, None, &audio)
+            .is_err()
+        {
             let _ = reader.SetStreamSelection(AUDIO_STREAM, false);
         }
         Ok(reader)
@@ -560,7 +602,11 @@ impl ReaderPlayer {
     ) -> Result<Self, String> {
         let manager = SendCom(manager.clone());
         // Muted from the start: the sound is never decoded.
-        let requests = if muted { VecDeque::from([Request::Audio(false)]) } else { VecDeque::new() };
+        let requests = if muted {
+            VecDeque::from([Request::Audio(false)])
+        } else {
+            VecDeque::new()
+        };
         let shared = spawn_reader(&url, &manager, &wake, requests)?;
         Ok(Self {
             shared,
@@ -597,7 +643,11 @@ impl ReaderPlayer {
 
     /// The sound's channels and rate while it is the clock (not muted away).
     fn sound(&self) -> Option<(u16, u32)> {
-        if self.audio_off { None } else { self.info.and_then(|info| info.audio) }
+        if self.audio_off {
+            None
+        } else {
+            self.info.and_then(|info| info.audio)
+        }
     }
 
     /// The output that plays the decoded sound, in the app's mix.
@@ -658,11 +708,28 @@ impl ReaderPlayer {
     /// Paused long enough: keep a copy of the picture, close the reader (and with
     /// it the decoder and its surfaces). True when it parked.
     fn park(&mut self, now: Instant) -> Result<bool, String> {
-        let due = self.paused_since.is_some_and(|since| now.duration_since(since) >= PARK_AFTER);
-        if self.parked || self.playing || self.reopening || self.seeking.is_some() || self.info.is_none() || !due {
+        let due = self
+            .paused_since
+            .is_some_and(|since| now.duration_since(since) >= PARK_AFTER);
+        if self.parked
+            || self.playing
+            || self.reopening
+            || self.seeking.is_some()
+            || self.info.is_none()
+            || !due
+        {
             return Ok(false);
         }
-        let Some(Shown { view: VideoView::Nv12 { uv, source: Some((texture, slice)), .. }, .. }) = &self.shown else {
+        let Some(Shown {
+            view:
+                VideoView::Nv12 {
+                    uv,
+                    source: Some((texture, slice)),
+                    ..
+                },
+            ..
+        }) = &self.shown
+        else {
             return Ok(false);
         };
         let (uv, texture, slice) = (*uv, texture.clone(), *slice);
@@ -688,7 +755,10 @@ impl ReaderPlayer {
             source: Some((copy, 0)),
         };
         // Nothing may hold the decoder's textures any more.
-        self.shown = Some(Shown { _sample: None, view });
+        self.shown = Some(Shown {
+            _sample: None,
+            view,
+        });
         self.views.clear();
         self.copy = None;
         self.output = None;
@@ -739,7 +809,13 @@ impl ReaderPlayer {
     pub(super) fn time(&self) -> f64 {
         let sound = self.sound();
         let state_done = self.shared.lock().audio_done;
-        let pending = self.shared.sound.samples.lock().unwrap_or_else(|p| p.into_inner()).len();
+        let pending = self
+            .shared
+            .sound
+            .samples
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .len();
         match sound {
             // While there is sound to play, it is the clock (a sound that ended earlier hands over to the wall).
             Some((channels, rate)) if !(state_done && pending == 0 && self.wall.is_some()) => {
@@ -756,7 +832,13 @@ impl ReaderPlayer {
     fn audio_drained(&self) -> bool {
         self.sound().is_some()
             && self.shared.lock().audio_done
-            && self.shared.sound.samples.lock().unwrap_or_else(|p| p.into_inner()).is_empty()
+            && self
+                .shared
+                .sound
+                .samples
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .is_empty()
     }
 
     /// Hands the clock from the sound to the wall once the sound is drained.
@@ -871,7 +953,8 @@ impl ReaderPlayer {
             let buffer = sample.GetBufferByIndex(0).map_err(win)?;
             let dxgi: IMFDXGIBuffer = buffer.cast().map_err(win)?;
             let mut raw = std::ptr::null_mut();
-            dxgi.GetResource(&ID3D11Texture2D::IID, &mut raw).map_err(win)?;
+            dxgi.GetResource(&ID3D11Texture2D::IID, &mut raw)
+                .map_err(win)?;
             let texture = ID3D11Texture2D::from_raw(raw);
             (texture, dxgi.GetSubresourceIndex().map_err(win)?)
         };
@@ -893,7 +976,12 @@ impl ReaderPlayer {
                 .and_then(|luma| {
                     Ok(VideoView::Nv12 {
                         luma,
-                        chroma: plane_array_view(&self.device, &texture, DXGI_FORMAT_R8G8_UNORM, slice)?,
+                        chroma: plane_array_view(
+                            &self.device,
+                            &texture,
+                            DXGI_FORMAT_R8G8_UNORM,
+                            slice,
+                        )?,
                         uv,
                         source: Some((texture.clone(), slice)),
                     })
@@ -922,7 +1010,11 @@ impl ReaderPlayer {
             copy_desc.CPUAccessFlags = 0;
             copy_desc.Usage = windows::Win32::Graphics::Direct3D11::D3D11_USAGE_DEFAULT;
             let mut copy = None;
-            unsafe { self.device.CreateTexture2D(&copy_desc, None, Some(&mut copy)) }.map_err(win)?;
+            unsafe {
+                self.device
+                    .CreateTexture2D(&copy_desc, None, Some(&mut copy))
+            }
+            .map_err(win)?;
             let copy = copy.ok_or("video copy texture was not created")?;
             let view = VideoView::Nv12 {
                 luma: plane_array_view(&self.device, &copy, DXGI_FORMAT_R8_UNORM, 0)?,
@@ -995,7 +1087,10 @@ impl ReaderPlayer {
                 let settled = self.suspended
                     || state.video.len() > 1
                     || state.video_done
-                    || state.video.front().is_some_and(|(time, _)| *time + 0.0005 >= target);
+                    || state
+                        .video
+                        .front()
+                        .is_some_and(|(time, _)| *time + 0.0005 >= target);
                 if settled {
                     next = state.video.pop_front();
                 }
@@ -1019,7 +1114,13 @@ impl ReaderPlayer {
             let ended = self.playing
                 && pictures_done
                 && (state.audio_done || self.sound().is_none())
-                && self.shared.sound.samples.lock().unwrap_or_else(|p| p.into_inner()).is_empty();
+                && self
+                    .shared
+                    .sound
+                    .samples
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .is_empty();
             drop(state);
             if next.is_some() {
                 // A slot freed in the picture queue: the reader may decode the next one.
@@ -1086,7 +1187,9 @@ impl ReaderPlayer {
         if self.suspended {
             // No pictures: only the end, or the next `timeupdate`.
             let end = self.duration().map_or(timeupdate, |duration| {
-                now + Duration::from_secs_f64((duration - clock).clamp(0.0, TIMEUPDATE.as_secs_f64()))
+                now + Duration::from_secs_f64(
+                    (duration - clock).clamp(0.0, TIMEUPDATE.as_secs_f64()),
+                )
             });
             return Some(end.max(now + MIN_WAKE).min(timeupdate));
         }
@@ -1095,7 +1198,11 @@ impl ReaderPlayer {
             now + SETTLE_POLL
         } else {
             match state.video.front() {
-                Some((time, _)) => now + Duration::from_secs_f64((time - clock).clamp(0.0, TIMEUPDATE.as_secs_f64())),
+                Some((time, _)) => {
+                    now + Duration::from_secs_f64(
+                        (time - clock).clamp(0.0, TIMEUPDATE.as_secs_f64()),
+                    )
+                }
                 None if state.video_done => now + SETTLE_POLL,
                 None => timeupdate,
             }

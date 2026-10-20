@@ -113,7 +113,10 @@ pub(crate) mod remote {
         #[cfg(not(feature = "net"))]
         fn open_with(url: &str, window: Option<usize>) -> Result<Arc<Self>, String> {
             let _ = window;
-            Err(failure(url, "remote media needs the native \"net\" feature"))
+            Err(failure(
+                url,
+                "remote media needs the native \"net\" feature",
+            ))
         }
 
         #[cfg(feature = "net")]
@@ -146,10 +149,14 @@ pub(crate) mod remote {
                 .filter(|mime| !mime.is_empty() && mime != "application/octet-stream");
             let len = match total.filter(|_| ranged) {
                 Some(total) => total,
-                None => match header(&response, "content-length").and_then(|length| length.parse::<u64>().ok()) {
+                None => match header(&response, "content-length")
+                    .and_then(|length| length.parse::<u64>().ok())
+                {
                     Some(len) => len,
                     // No length (a chunked or compressed reply): the whole file, then from memory.
-                    None => return Self::whole(url, mime, response.into_body().into_reader(), window),
+                    None => {
+                        return Self::whole(url, mime, response.into_body().into_reader(), window);
+                    }
                 },
             };
             if len == 0 {
@@ -198,18 +205,31 @@ pub(crate) mod remote {
         }
 
         /// A stream over a body of unknown length, read to its end first.
-        fn whole(url: &str, mime: Option<String>, mut body: impl Read, window: Option<usize>) -> Result<Arc<Self>, String> {
+        fn whole(
+            url: &str,
+            mime: Option<String>,
+            mut body: impl Read,
+            window: Option<usize>,
+        ) -> Result<Arc<Self>, String> {
             let mut data = Vec::new();
-            body.read_to_end(&mut data).map_err(|error| failure(url, error))?;
+            body.read_to_end(&mut data)
+                .map_err(|error| failure(url, error))?;
             if data.is_empty() {
                 return Err(failure(url, "empty response"));
             }
-            let chunks = data.chunks(CHUNK).map(|chunk| Some(Arc::<[u8]>::from(chunk))).collect();
+            let chunks = data
+                .chunks(CHUNK)
+                .map(|chunk| Some(Arc::<[u8]>::from(chunk)))
+                .collect();
             Ok(Arc::new(Self {
                 url: url.to_string(),
                 len: data.len() as u64,
                 mime,
-                state: Mutex::new(State { chunks, want: 0, error: None }),
+                state: Mutex::new(State {
+                    chunks,
+                    want: 0,
+                    error: None,
+                }),
                 ready: Condvar::new(),
                 ranged: false,
                 window,
@@ -257,7 +277,11 @@ pub(crate) mod remote {
                             .chunks
                             .iter()
                             .enumerate()
-                            .filter(|(other, chunk)| chunk.is_some() && *other != index && !(want..=want + window).contains(other))
+                            .filter(|(other, chunk)| {
+                                chunk.is_some()
+                                    && *other != index
+                                    && !(want..=want + window).contains(other)
+                            })
                             .max_by_key(|(other, _)| other.abs_diff(want))
                             .map(|(other, _)| other);
                         let Some(farthest) = farthest else { break };
