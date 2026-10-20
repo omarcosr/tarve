@@ -1,0 +1,21 @@
+{
+  "$schema": "https://pocketjs.dev/schema/pocket-2.json",
+  "pocket": 2,
+  "id": "dev.tarve.examples.counter.microts",
+  "name": "tarve-counter",
+  "title": "Tarve Counter (MicroTS)",
+  "version": "0.1.0",
+  "engine": {
+    "capabilities": {
+      "requires": ["text.glyphs.baked", "input.buttons"]
+    }
+  },
+  "app": {
+    "entry": "apps/tarve-counter/main.tsx",
+    "output": "tarve-counter-main",
+    "framework": "solid",
+    "viewport": { "fixed": { "logical": [620, 520], "presentation": "integer-fit" } },
+    "aot": true,
+    "model": "compiled"
+  }
+}

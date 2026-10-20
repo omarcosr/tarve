@@ -1,5 +1,6 @@
 //! Parsed, styled content for native rich leaves. No TSX descendants are created.
 use crate::syntax::{self, HighlightKind};
+#[cfg(feature = "markdown")]
 use comrak::{
     Arena, Options,
     nodes::{AstNode, ListType, NodeValue, TableAlignment},
@@ -246,12 +247,14 @@ impl Writer {
     }
 }
 
+#[cfg(feature = "markdown")]
 fn render_children<'a>(node: &'a AstNode<'a>, writer: &mut Writer, depth: usize) {
     for child in node.children() {
         render_node(child, writer, depth);
     }
 }
 
+#[cfg(feature = "markdown")]
 fn render_table<'a>(
     node: &'a AstNode<'a>,
     writer: &mut Writer,
@@ -351,6 +354,7 @@ fn render_table<'a>(
     writer.breaks(2);
 }
 
+#[cfg(feature = "markdown")]
 fn render_node<'a>(node: &'a AstNode<'a>, writer: &mut Writer, depth: usize) {
     let value = node.data.borrow().value.clone();
     match value {
@@ -516,6 +520,7 @@ fn render_node<'a>(node: &'a AstNode<'a>, writer: &mut Writer, depth: usize) {
     }
 }
 
+#[cfg(feature = "markdown")]
 pub fn markdown(source: &str) -> (String, RichContent) {
     let arena = Arena::new();
     let mut options = Options::default();
@@ -561,6 +566,19 @@ pub fn markdown(source: &str) -> (String, RichContent) {
             spans: writer.spans,
             task_markers: writer.task_markers,
             blocks: writer.blocks,
+        },
+    )
+}
+
+/// Built without the native "markdown" feature: the source shows as plain text.
+#[cfg(not(feature = "markdown"))]
+pub fn markdown(source: &str) -> (String, RichContent) {
+    (
+        source.to_string(),
+        RichContent::Text {
+            spans: Vec::new(),
+            task_markers: Vec::new(),
+            blocks: Vec::new(),
         },
     )
 }

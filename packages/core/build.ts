@@ -1,5 +1,5 @@
 import type { BunPlugin } from "bun";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, writeFileSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -8,6 +8,7 @@ import { nativePath } from "#tarve/runtime";
 import { buildMetadata, writeLinuxDesktopEntry } from "./package-metadata";
 import { frameworkPlugins } from "./framework-plugins";
 import { BUILD_TARGETS, hostBuildTarget, isBuildTarget, targetConfig, type BuildTarget } from "./targets";
+import type { NativeFeature } from "./native-features";
 import {
   NATIVE_COMPATIBILITY_MANIFEST_NAME,
   assertNativeRuntimeCompatible,
@@ -45,6 +46,12 @@ export interface BuildOptions {
    * bursts of allocation. txiki.js (QuickJS) has no such setting and ignores it.
    */
   smol?: boolean;
+  /**
+   * Native subsystems to compile in: "auto" (default) keeps the ones the app's code uses,
+   * "all" ships the full prebuilt library, or a list (see native-features.ts). Trimming needs
+   * a Tarve checkout with Cargo; otherwise the full library is used. Also TARVE_NATIVE_FEATURES.
+   */
+  nativeFeatures?: string | readonly string[];
 }
 
 /** Flags a `smol` executable starts with, per runtime. */
@@ -83,6 +90,7 @@ function resolveNativeLibrary(target: BuildTarget, override?: string): string {
 
 /** Compile an ordinary Tarve app. No production entrypoint or app-side bridge setup is needed. */
 export async function build(options: BuildOptions): Promise<string> {
+  options = await withTrimmedNative(options);
   if (options.runtime === "txiki") {
     const { buildTxiki } = await import("./txiki-build");
     return buildTxiki(options);
@@ -152,6 +160,7 @@ export async function build(options: BuildOptions): Promise<string> {
     },
   };
   await mkdir(dirname(outfile), { recursive: true });
+  assertWritable(outfile);
   // Bun reads the executable icon from a file.
   const iconDirectory = images && config.platform === "win32" ? mkdtempSync(join(tmpdir(), "tarve-icon-")) : undefined;
   const icoPath = iconDirectory ? join(iconDirectory, "app.ico") : undefined;
@@ -191,7 +200,88 @@ export async function build(options: BuildOptions): Promise<string> {
   return outfile;
 }
 
+/** Bun reports only "Bundle failed" when the output is a running executable (Windows locks it). */
+function assertWritable(outfile: string): void {
+  if (!existsSync(outfile)) return;
+  try {
+    closeSync(openSync(outfile, "r+"));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EBUSY" || code === "EPERM" || code === "EACCES") {
+      throw new Error(`Cannot write ${outfile}: the file is in use. Close the running app and build again.`);
+    }
+    throw error;
+  }
+}
+
 /** The metadata fields of build options, as overrides of package.json `tarve`. */
 export function metadataOverrides(options: BuildOptions) {
   return { name: options.name, version: options.version, description: options.description, publisher: options.publisher, copyright: options.copyright, icon: options.icon, appId: options.appId };
+}
+/**
+ * Points `nativeLibrary` at a library with only the native features the app uses: compiled
+ * from a Tarve checkout with Cargo, otherwise the smallest prebuilt variant that covers them.
+ */
+async function withTrimmedNative(options: BuildOptions): Promise<BuildOptions> {
+  if (options.nativeLibrary) return options;
+  const features = await import("./native-features");
+  const requested = features.parseNativeFeatures(options.nativeFeatures ?? process.env.TARVE_NATIVE_FEATURES);
+  if (requested === "all") return options;
+  const target = options.target ?? hostBuildTarget();
+  if (!target || !isBuildTarget(target)) return options;
+  const platform = targetConfig(target).platform;
+  let required: NativeFeature[];
+  if (requested === "auto") {
+    try {
+      const report = await features.detectNativeFeatures(options.entrypoint, platform);
+      required = report.features;
+      const listed = required.map(feature => `${feature} (${report.reasons[feature]})`);
+      console.log(`Native features: ${listed.length ? listed.join(", ") : "core only"}`);
+    } catch (error) {
+      console.warn(`Tarve: could not detect native features (${(error as Error).message}); using the full library.`);
+      return options;
+    }
+  } else {
+    required = requested;
+    console.log(`Native features: ${required.length ? required.join(", ") : "core only"}`);
+  }
+  // TARVE_NATIVE_COMPILE=0: use the prebuilt variants even in a checkout with Cargo.
+  if (process.env.TARVE_NATIVE_COMPILE !== "0" && features.canTrimNative(target)) {
+    return { ...options, nativeLibrary: await features.buildTrimmedNative(target, required) };
+  }
+  const variant = await prebuiltVariant(target, required);
+  if (variant) {
+    console.log(`Native library: prebuilt "${variant.name}" variant`);
+    return { ...options, nativeLibrary: variant.path };
+  }
+  return options;
+}
+
+/** The smallest prebuilt variant library covering `required`, checked against this Tarve version. */
+async function prebuiltVariant(target: BuildTarget, required: readonly NativeFeature[]): Promise<{ name: string; path: string } | undefined> {
+  const { nativeVariantPath, pickNativeVariant } = await import("./native-features");
+  const config = targetConfig(target);
+  const variant = pickNativeVariant(required, config.platform);
+  if (!variant) return undefined;
+  let full: string | undefined;
+  try { full = resolveNativeLibrary(target); } catch { /* No full library to sit next to. */ }
+  const directories = [
+    ...full ? [dirname(full)] : [],
+    resolve(import.meta.dir, "../../native", config.nativeDirectory),
+    resolve(import.meta.dir, "native", config.nativeDirectory),
+  ];
+  const path = directories.map(directory => nativeVariantPath(directory, variant.name, config.nativeName)).find(existsSync);
+  if (!path) return undefined;
+  const sourceDirectory = join(import.meta.dir, "src");
+  const packageMetadata = await Bun.file(resolve(import.meta.dir, "../../package.json")).json() as { version: string };
+  const expected = existsSync(join(sourceDirectory, "index.ts"))
+    ? await createNativeCompatibilityManifest(resolve(import.meta.dir, "../.."), packageMetadata.version)
+    : await readNativeCompatibilityManifest(join(import.meta.dir, NATIVE_COMPATIBILITY_MANIFEST_NAME));
+  try {
+    await assertNativeRuntimeCompatible(path, target, expected);
+  } catch (error) {
+    console.warn(`Tarve: prebuilt "${variant.name}" native variant is unusable (${(error as Error).message}); using the full library.`);
+    return undefined;
+  }
+  return { name: variant.name, path };
 }

@@ -9,17 +9,29 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["mimalloc", "fxhash"]
+default = ["mimalloc", "fxhash", "vello-gpu", "syntax", "markdown", "net", "media"]
+# Optional subsystems. `tarve build` compiles only the ones an app uses
+# (packages/core/native-features.ts); `tarve run` and the prebuilt library carry all of them.
+# Vello over wgpu (DX12/Vulkan/Metal). Windows renders on D3D11 without it.
+vello-gpu = ["vello/wgpu", "vello/wgpu_default"]
+# <Code>, <Diff> and Markdown code fences: syntect grammars.
+syntax = ["dep:syntect", "dep:two-face"]
+# <Markdown>: CommonMark + GFM parsing.
+markdown = ["dep:comrak"]
+# https:// images and media: ureq over rustls.
+net = ["dep:ureq"]
+# <audio> and <video> sound: rodio decoders and the WASAPI/ALSA output.
+media = ["dep:rodio"]
 mimalloc = ["dep:mimalloc"]
 fxhash = ["dep:rustc-hash"]
 # Prototype host (examples/qjs_host.rs): Tarve on an embedded QuickJS-ng, no Bun/Node/txiki.
 qjs-prototype = ["dep:rquickjs"]
 
 [dependencies]
-vello = "=0.10.0"
+vello = { version = "=0.10.0", default-features = false }
 vello_cpu = { version = "=0.2.0", default-features = false, features = ["std", "text", "u8_pipeline"] }
 parley = "=0.11.1"
-comrak = { version = "=0.55.0", default-features = false }
+comrak = { version = "=0.55.0", default-features = false, optional = true }
 diffy = "=0.5.2"
 taffy = { version = "=0.14.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout", "content_size", "parse"] }
 serde = { version = "1", features = ["derive"] }
@@ -42,17 +54,17 @@ pollster = "0.4"
 softbuffer = "=0.4.8"
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 mimalloc = { version = "0.1", default-features = false, optional = true }
-syntect = { version = "=5.3.0", default-features = false, features = ["regex-onig"] }
-two-face = { version = "=0.5.2", default-features = false, features = ["syntect-onig"] }
+syntect = { version = "=5.3.0", default-features = false, features = ["regex-onig"], optional = true }
+two-face = { version = "=0.5.2", default-features = false, features = ["syntect-onig"], optional = true }
 # <audio>/<video> sound: WASAPI on Windows, ALSA on Linux; MP3, WAV, FLAC, Ogg Vorbis and AAC in MP4, all pure Rust.
-rodio = { version = "=0.22.2", default-features = false, features = ["playback", "mp3", "wav", "flac", "vorbis", "mp4"] }
+rodio = { version = "=0.22.2", default-features = false, features = ["playback", "mp3", "wav", "flac", "vorbis", "mp4"], optional = true }
 # <audio src="https://…">: range-request streaming over rustls (no system TLS library).
-ureq = { version = "3", default-features = false, features = ["rustls"] }
+ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }
 
 # Browser build (bun run build:web): no windowing, clipboard or C regex engine.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-syntect = { version = "=5.3.0", default-features = false, features = ["regex-fancy"] }
-two-face = { version = "=0.5.2", default-features = false, features = ["syntect-fancy"] }
+syntect = { version = "=5.3.0", default-features = false, features = ["regex-fancy"], optional = true }
+two-face = { version = "=0.5.2", default-features = false, features = ["syntect-fancy"], optional = true }
 wasm-bindgen = "=0.2.129"
 
 [target.'cfg(windows)'.dependencies]

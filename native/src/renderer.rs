@@ -12,7 +12,9 @@ use std::{
     num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
-use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene, wgpu};
+use vello::Scene;
+#[cfg(feature = "vello-gpu")]
+use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, wgpu};
 use vello_cpu::{PixmapMut, RenderContext as CpuRenderContext, Resources as CpuResources};
 use winit::window::Window;
 
@@ -98,6 +100,7 @@ impl CaptureError {
     }
 }
 
+#[cfg(feature = "vello-gpu")]
 fn classify_vello_error(error: vello::Error) -> RenderError {
     match error {
         vello::Error::WgpuErrorFromScope(wgpu::Error::Internal { .. }) => {
@@ -164,6 +167,7 @@ impl GraphicsSignals {
     }
 }
 
+#[cfg(feature = "vello-gpu")]
 struct GpuGraphics {
     // Keep surface before instance so it is dropped first.
     surface: wgpu::Surface<'static>,
@@ -183,6 +187,7 @@ struct GpuGraphics {
     transparent: bool,
 }
 
+#[cfg(feature = "vello-gpu")]
 fn supports_vello_float16_packing(
     features: wgpu::Features,
     downlevel: wgpu::DownlevelFlags,
@@ -191,6 +196,7 @@ fn supports_vello_float16_packing(
         || downlevel.contains(wgpu::DownlevelFlags::SHADER_F16_IN_F32)
 }
 
+#[cfg(feature = "vello-gpu")]
 impl GpuGraphics {
     fn new_with_backends(
         window: Arc<Window>,
@@ -534,6 +540,7 @@ impl GpuGraphics {
 pub(crate) enum RendererBackend {
     #[cfg(target_os = "windows")]
     D3d11,
+    #[cfg(feature = "vello-gpu")]
     Gpu(wgpu::Backend),
     Cpu,
 }
@@ -607,6 +614,7 @@ fn should_fallback_to_cpu(
 /// The surface alpha mode for a window, and whether Vello's straight-alpha output
 /// must be premultiplied on its way there. Opaque unless the window is transparent
 /// and the compositor takes alpha (wgpu's DX12 window swap chains never do).
+#[cfg(feature = "vello-gpu")]
 fn surface_alpha(
     modes: &[wgpu::CompositeAlphaMode],
     transparent: bool,
@@ -1083,6 +1091,7 @@ fn pack_premultiplied_for_softbuffer(pixels: &mut [u32], background: vello::peni
 enum GraphicsImpl {
     #[cfg(target_os = "windows")]
     D3d11(Box<D3d11Graphics>),
+    #[cfg(feature = "vello-gpu")]
     Gpu(Box<GpuGraphics>),
     Cpu(Box<CpuGraphics>),
 }
@@ -1200,6 +1209,7 @@ impl Graphics {
         match &self.backend {
             #[cfg(target_os = "windows")]
             GraphicsImpl::D3d11(_) => RendererBackend::D3d11,
+            #[cfg(feature = "vello-gpu")]
             GraphicsImpl::Gpu(graphics) => RendererBackend::Gpu(graphics.backend()),
             GraphicsImpl::Cpu(_) => RendererBackend::Cpu,
         }
@@ -1303,6 +1313,7 @@ impl Graphics {
         match &self.backend {
             #[cfg(target_os = "windows")]
             GraphicsImpl::D3d11(_) => None,
+            #[cfg(feature = "vello-gpu")]
             GraphicsImpl::Gpu(graphics) => graphics.take_fault(),
             GraphicsImpl::Cpu(_) => None,
         }
@@ -1314,6 +1325,7 @@ impl Graphics {
         match &self.backend {
             #[cfg(target_os = "windows")]
             GraphicsImpl::D3d11(graphics) => graphics.shows_alpha(),
+            #[cfg(feature = "vello-gpu")]
             GraphicsImpl::Gpu(graphics) => graphics.transparent,
             GraphicsImpl::Cpu(graphics) => graphics.alpha,
         }
@@ -1333,6 +1345,7 @@ impl Graphics {
             GraphicsImpl::D3d11(graphics) => graphics
                 .resize(width, height)
                 .map_err(classify_d3d11_render_error),
+            #[cfg(feature = "vello-gpu")]
             GraphicsImpl::Gpu(graphics) => Ok(graphics.resize(width, height)),
             GraphicsImpl::Cpu(graphics) => Ok(graphics.resize(width, height)),
         }
@@ -1351,6 +1364,7 @@ impl Graphics {
                 .render(background)
                 .map(|()| PresentResult::Presented)
                 .map_err(classify_d3d11_render_error),
+            #[cfg(feature = "vello-gpu")]
             GraphicsImpl::Gpu(graphics) => graphics.render(scene, background),
             GraphicsImpl::Cpu(graphics) => {
                 let _ = content_changed;
@@ -1375,6 +1389,7 @@ impl Graphics {
             GraphicsImpl::D3d11(graphics) => graphics
                 .capture(background, path)
                 .map_err(classify_d3d11_capture_error),
+            #[cfg(feature = "vello-gpu")]
             GraphicsImpl::Gpu(graphics) => graphics.capture(scene, background, path),
             GraphicsImpl::Cpu(graphics) => graphics.capture(background, path),
         }
@@ -1396,6 +1411,7 @@ enum BackendAttempt {
     D3d11,
     /// Vello over the given wgpu backends; `None` defers to `WGPU_BACKEND`
     /// or wgpu's defaults.
+    #[cfg(feature = "vello-gpu")]
     Vello(Option<wgpu::Backends>),
     Cpu,
 }
@@ -1405,8 +1421,11 @@ impl BackendAttempt {
         match self {
             #[cfg(target_os = "windows")]
             Self::D3d11 => "D3D11",
+            #[cfg(feature = "vello-gpu")]
             Self::Vello(Some(backends)) if backends == wgpu::Backends::DX12 => "Vello/DX12",
+            #[cfg(feature = "vello-gpu")]
             Self::Vello(Some(backends)) if backends == wgpu::Backends::VULKAN => "Vello/Vulkan",
+            #[cfg(feature = "vello-gpu")]
             Self::Vello(_) => "Vello/WGPU",
             Self::Cpu => "CPU",
         }
@@ -1417,6 +1436,7 @@ impl BackendAttempt {
             #[cfg(target_os = "windows")]
             Self::D3d11 => D3d11Graphics::new(window.clone(), transparent)
                 .map(|graphics| GraphicsImpl::D3d11(Box::new(graphics))),
+            #[cfg(feature = "vello-gpu")]
             Self::Vello(backends) => {
                 GpuGraphics::new_with_backends(window.clone(), backends, transparent)
                     .map(|graphics| GraphicsImpl::Gpu(Box::new(graphics)))
@@ -1431,16 +1451,23 @@ fn startup_attempts(
     resolved: ResolvedRenderer,
     wgpu_backend_explicit: bool,
 ) -> Vec<BackendAttempt> {
+    let _ = wgpu_backend_explicit;
     match resolved {
         ResolvedRenderer::Cpu => vec![BackendAttempt::Cpu],
+        #[cfg(feature = "vello-gpu")]
         ResolvedRenderer::Gpu if wgpu_backend_explicit => vec![BackendAttempt::Vello(None)],
-        #[cfg(target_os = "windows")]
+        #[cfg(all(target_os = "windows", feature = "vello-gpu"))]
         ResolvedRenderer::Gpu => vec![
             BackendAttempt::D3d11,
             BackendAttempt::Vello(Some(wgpu::Backends::DX12)),
         ],
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(all(target_os = "windows", not(feature = "vello-gpu")))]
+        ResolvedRenderer::Gpu => vec![BackendAttempt::D3d11],
+        #[cfg(all(not(target_os = "windows"), feature = "vello-gpu"))]
         ResolvedRenderer::Gpu => vec![BackendAttempt::Vello(None)],
+        // Without Vello the only GPU renderer is D3D11; elsewhere GPU requests paint on the CPU.
+        #[cfg(all(not(target_os = "windows"), not(feature = "vello-gpu")))]
+        ResolvedRenderer::Gpu => vec![BackendAttempt::Cpu],
     }
 }
 
@@ -1449,12 +1476,14 @@ fn recovery_attempts(
     previous: RendererBackend,
     wgpu_backend_explicit: bool,
 ) -> Vec<BackendAttempt> {
+    let _ = wgpu_backend_explicit;
     match previous {
         RendererBackend::Cpu => vec![BackendAttempt::Cpu],
         #[cfg(target_os = "windows")]
         RendererBackend::D3d11 => startup_attempts(ResolvedRenderer::Gpu, false),
+        #[cfg(feature = "vello-gpu")]
         RendererBackend::Gpu(_) if wgpu_backend_explicit => vec![BackendAttempt::Vello(None)],
-        #[cfg(target_os = "windows")]
+        #[cfg(all(target_os = "windows", feature = "vello-gpu"))]
         RendererBackend::Gpu(lost) => {
             let (first, second) = if lost == wgpu::Backend::Vulkan {
                 (wgpu::Backends::VULKAN, wgpu::Backends::DX12)
@@ -1466,7 +1495,7 @@ fn recovery_attempts(
                 BackendAttempt::Vello(Some(second)),
             ]
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(all(not(target_os = "windows"), feature = "vello-gpu"))]
         RendererBackend::Gpu(_) => vec![BackendAttempt::Vello(None)],
     }
 }
@@ -1501,6 +1530,7 @@ fn cpu_fallback(
         .map_err(|cpu_error| format!("{gpu_error}; CPU fallback failed: {cpu_error}"))
 }
 
+#[cfg(feature = "vello-gpu")]
 fn create_targets(
     width: u32,
     height: u32,

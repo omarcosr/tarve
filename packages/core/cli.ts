@@ -33,6 +33,7 @@ function usage(target?: BuildTarget): string {
     `  --outfile ${output}              build: output path`,
     "  --compile-jsx                   build: compile JSX into reusable templates (needs typescript 7)",
     "  --smol                          smaller JS heap, collected more often (bun, node)",
+    "  --native-features auto|all|<list> build: native subsystems (vello-gpu, syntax, markdown, net, media); auto = what the app uses",
     "  --name App, --version 1.0.0     app metadata (executable, window, app identity)",
     "  --icon icon.png                 app icon: .png (square, 256 px+) or .ico",
     "  --app-id Acme.App               Windows AppUserModelID / Linux app id",
@@ -81,6 +82,7 @@ async function main(): Promise<number> {
       icon: { type: "string" }, "app-id": { type: "string" }, description: { type: "string" },
       publisher: { type: "string" }, copyright: { type: "string" },
       target: { type: "string" }, runtime: { type: "string" }, "compile-jsx": { type: "boolean" }, smol: { type: "boolean" },
+      "native-features": { type: "string" },
       "target-executable": { type: "string" },
       artifact: { type: "string", multiple: true }, key: { type: "string" }, "public-key": { type: "string" },
       out: { type: "string" }, "base-url": { type: "string" }, notes: { type: "string" }, sign: { type: "string" },
@@ -128,6 +130,7 @@ async function main(): Promise<number> {
       compileJsx: values["compile-jsx"],
       smol: values.smol,
       targetExecutable: values["target-executable"],
+        nativeFeatures: values["native-features"],
     }));
     return 0;
   }

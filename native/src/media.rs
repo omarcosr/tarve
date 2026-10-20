@@ -23,6 +23,7 @@ const TIME_UPDATE: Duration = Duration::from_millis(250);
 /// How often a pending remote load is checked while it connects.
 const LOAD_POLL: Duration = Duration::from_millis(50);
 
+#[cfg_attr(not(feature = "net"), allow(dead_code))]
 pub(crate) mod remote {
     use std::io::{self, Read, Seek, SeekFrom};
     use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
@@ -51,6 +52,7 @@ pub(crate) mod remote {
         src.starts_with("http://") || src.starts_with("https://")
     }
 
+    #[cfg(feature = "net")]
     fn agent() -> &'static ureq::Agent {
         static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
         AGENT.get_or_init(|| {
@@ -84,6 +86,7 @@ pub(crate) mod remote {
         window: Option<usize>,
     }
 
+    #[cfg(feature = "net")]
     fn header(response: &ureq::http::Response<ureq::Body>, name: &str) -> Option<String> {
         response
             .headers()
@@ -106,6 +109,14 @@ pub(crate) mod remote {
             Self::open_with(url, Some(window.max(1)))
         }
 
+        /// Built without the native "net" feature: remote media reports an error.
+        #[cfg(not(feature = "net"))]
+        fn open_with(url: &str, window: Option<usize>) -> Result<Arc<Self>, String> {
+            let _ = window;
+            Err(failure(url, "remote media needs the native \"net\" feature"))
+        }
+
+        #[cfg(feature = "net")]
         fn open_with(url: &str, window: Option<usize>) -> Result<Arc<Self>, String> {
             let mut attempt = 0;
             let response = loop {
@@ -320,6 +331,7 @@ pub(crate) mod remote {
         /// server handles, and it is fast (a song in well under a second). A seek ahead
         /// waits for the pass to get there. It holds the stream weakly, so it stops
         /// once every reader (and the track) is gone.
+        #[cfg(feature = "net")]
         fn download(stream: &Weak<Self>) {
             let mut failures = 0;
             while let Some(stream) = stream.upgrade() {
@@ -371,6 +383,7 @@ pub(crate) mod remote {
 
     /// Worth retrying: the network, a busy or throttling server (a CDN's
     /// rate-limit 403 often lifts after a second or two). A 404 or 410 will not change.
+    #[cfg(feature = "net")]
     fn transient(error: &ureq::Error) -> bool {
         match error {
             ureq::Error::StatusCode(code) => matches!(code, 403 | 408 | 429) || *code >= 500,
@@ -380,6 +393,7 @@ pub(crate) mod remote {
 
     /// No server at that name or port: a browser reports it at once (retrying a
     /// refused connection cost ~12 s on Windows, where each refusal takes ~2 s).
+    #[cfg(feature = "net")]
     fn unreachable(error: &ureq::Error) -> bool {
         match error {
             ureq::Error::HostNotFound => true,
@@ -389,6 +403,7 @@ pub(crate) mod remote {
     }
 
     /// 0.5 s, 1 s, 2 s, 4 s…: enough for a throttling server to let go.
+    #[cfg(feature = "net")]
     fn backoff(attempt: u32) -> Duration {
         Duration::from_millis(250 << attempt.min(6))
     }

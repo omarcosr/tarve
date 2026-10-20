@@ -33,4 +33,14 @@ impl Videos {
     pub(crate) fn deadline(&self) -> Option<Instant> {
         None
     }
+    #[cfg(target_os = "windows")]
+    pub(crate) fn attach_renderer(&mut self, _device: Option<windows::Win32::Graphics::Direct3D11::ID3D11Device>) {}
+    #[cfg(target_os = "windows")]
+    pub(crate) fn view(&self, _id: &str) -> Option<crate::d3d11::VideoView> {
+        None
+    }
+    #[cfg(target_os = "windows")]
+    pub(crate) fn views(&self) -> Vec<(String, crate::d3d11::VideoView)> {
+        Vec::new()
+    }
 }

@@ -1,0 +1,17 @@
+[package]
+name = "tarve-counter-microts"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+microts = { path = "../../engine/crates/microts" }
+minifb = "0.27"
+
+[profile.dev]
+overflow-checks = false
+
+[profile.release]
+overflow-checks = false

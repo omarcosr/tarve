@@ -1,5 +1,7 @@
 node_modules/
 native/target/
+native/target-*/
+native/bin-features/
 native/bin/
 native/win32-x64/
 native/linux-x64/
@@ -12,3 +14,4 @@ plan.md
 .bun-cache
 # update signing keys (tarve keygen)
 tarve-update.key
+*.exe

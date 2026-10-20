@@ -6,6 +6,7 @@ use std::{
 };
 
 use lru::LruCache;
+#[cfg(feature = "syntax")]
 use syntect::{
     easy::ScopeRangeIterator,
     parsing::{ParseState, ScopeStack, SyntaxReference, SyntaxSet},
@@ -206,6 +207,7 @@ fn hash64(value: &str) -> u64 {
     hasher.finish()
 }
 
+#[cfg(feature = "syntax")]
 fn syntax_set() -> &'static SyntaxSet {
     static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
     SYNTAXES.get_or_init(two_face::syntax::extra_newlines)
@@ -299,6 +301,7 @@ fn language_for_shebang(line: &str) -> Option<LanguageId> {
     }
 }
 
+#[cfg(feature = "syntax")]
 fn syntax_for_language(language: LanguageId) -> Option<&'static SyntaxReference> {
     let set = syntax_set();
     let (names, extensions): (&[&str], &[&str]) = match language {
@@ -341,6 +344,7 @@ fn syntax_for_language(language: LanguageId) -> Option<&'static SyntaxReference>
         })
 }
 
+#[cfg(feature = "syntax")]
 const SCOPE_PREFIXES: &[(&str, HighlightKind)] = &[
     ("entity.other.attribute-name", HighlightKind::Attribute),
     ("support.type.property-name", HighlightKind::Property),
@@ -405,6 +409,7 @@ const SCOPE_PREFIXES: &[(&str, HighlightKind)] = &[
     ("type", HighlightKind::Type),
 ];
 
+#[cfg(feature = "syntax")]
 fn scope_matches(name: &str, prefix: &str) -> bool {
     name == prefix
         || (name.len() > prefix.len()
@@ -412,6 +417,7 @@ fn scope_matches(name: &str, prefix: &str) -> bool {
             && name.as_bytes()[prefix.len()] == b'.')
 }
 
+#[cfg(feature = "syntax")]
 fn kind_for_scope_name(name: &str) -> Option<HighlightKind> {
     SCOPE_PREFIXES
         .iter()
@@ -419,6 +425,7 @@ fn kind_for_scope_name(name: &str) -> Option<HighlightKind> {
         .map(|(_, kind)| *kind)
 }
 
+#[cfg(feature = "syntax")]
 fn kind_for_stack(stack: &ScopeStack) -> Option<HighlightKind> {
     let mut best = None;
     for scope in stack.as_slice() {
@@ -432,6 +439,7 @@ fn kind_for_stack(stack: &ScopeStack) -> Option<HighlightKind> {
     best
 }
 
+#[cfg(feature = "syntax")]
 fn highlight(language: LanguageId, source: &str) -> Option<HighlightedDocument> {
     if source.len() > DEFAULT_MAX_SOURCE_BYTES {
         return None;
@@ -470,6 +478,12 @@ fn highlight(language: LanguageId, source: &str) -> Option<HighlightedDocument> 
     Some(HighlightedDocument { language, lines })
 }
 
+/// Built without the native "syntax" feature: code renders unhighlighted.
+#[cfg(not(feature = "syntax"))]
+fn highlight(_language: LanguageId, _source: &str) -> Option<HighlightedDocument> {
+    None
+}
+
 pub fn highlight_cached(
     source: &str,
     explicit_language: Option<&str>,
@@ -493,7 +507,7 @@ pub fn highlight_cached(
     Some(document)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "syntax"))]
 mod tests {
     use super::*;
 

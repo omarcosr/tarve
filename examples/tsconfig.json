@@ -13,5 +13,5 @@
     "preserveSymlinks": true
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", "**/dist", "studio/studio-samples"]
+  "exclude": ["node_modules", "**/dist", "studio/studio-samples", "microts-prototype/app", "microts-prototype/.pocketjs"]
 }

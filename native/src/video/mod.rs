@@ -20,15 +20,15 @@
 
 use vello::peniko::ImageData;
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "media"))]
 mod windows;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "media"))]
 mod windows_reader;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "media"))]
 mod windows_shared;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "media"))]
 mod windows_stream;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", feature = "media"))]
 pub(crate) use windows::Videos;
 
 #[cfg(target_os = "linux")]
@@ -36,10 +36,10 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub(crate) use linux::Videos;
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(not(any(all(target_os = "windows", feature = "media"), target_os = "linux")))]
 mod unsupported;
 // The browser build has no runtime to play videos in.
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(not(any(all(target_os = "windows", feature = "media"), target_os = "linux")))]
 #[cfg_attr(target_arch = "wasm32", allow(unused_imports))]
 pub(crate) use unsupported::Videos;
 

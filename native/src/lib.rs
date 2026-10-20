@@ -1,6 +1,11 @@
 // The AccessKit bridge runs on Windows (UIA) and Linux (AT-SPI); the text/tree accessibility helpers it
 // consumes are shared code that is simply unreferenced on other targets.
 #![cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
+// A library trimmed to the features an app uses (`tarve build`) leaves helpers of the others unreferenced.
+#![cfg_attr(
+    not(all(feature = "vello-gpu", feature = "syntax", feature = "markdown", feature = "net", feature = "media")),
+    allow(dead_code, unused_imports, unused_variables)
+)]
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 mod accessibility;
@@ -17,7 +22,10 @@ mod d3d11_overlay;
 mod desktop_widget;
 #[cfg(target_os = "windows")]
 mod gpu_timer;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "media"))]
+mod media;
+#[cfg(all(not(target_arch = "wasm32"), not(feature = "media")))]
+#[path = "media_off.rs"]
 mod media;
 #[cfg(not(target_arch = "wasm32"))]
 mod menu_bar;

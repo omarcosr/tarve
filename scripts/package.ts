@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { cp, copyFile, mkdir, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { BUILD_TARGETS, hostBuildTarget, targetConfig } from "../packages/core/targets";
 import {
@@ -11,6 +11,7 @@ import {
   writeNativeRuntimeManifest,
 } from "../packages/core/native-runtime";
 import { buildNative } from "./native";
+import { NATIVE_VARIANTS, nativeVariantPath, variantFeatures } from "../packages/core/native-features";
 import { cleanPackageOutputs } from "./package-output";
 
 const root = resolve(import.meta.dir, "..");
@@ -22,6 +23,8 @@ const { values } = parseArgs({
   options: {
     "native-only": { type: "boolean" },
     local: { type: "boolean" },
+    // Skip the trimmed libraries `tarve build` picks for apps that use fewer native features.
+    "no-variants": { type: "boolean" },
   },
 });
 const platformDirectory = hostConfig.nativeDirectory;
@@ -40,6 +43,17 @@ await mkdir(platformOutput, { recursive: true });
 const packagedLibrary = join(platformOutput, nativeName);
 await copyFile(library, packagedLibrary);
 await writeNativeRuntimeManifest(packagedLibrary, hostTarget, compatibility);
+if (!values["no-variants"]) {
+  for (const variant of NATIVE_VARIANTS) {
+    const features = variantFeatures(variant, hostConfig.platform);
+    const built = await buildNative(true, features);
+    const destination = nativeVariantPath(platformOutput, variant.name, nativeName);
+    await mkdir(dirname(destination), { recursive: true });
+    await copyFile(built, destination);
+    await writeNativeRuntimeManifest(destination, hostTarget, compatibility);
+    console.log(`Native variant ${variant.name} [${features.join(", ") || "core"}]: ${(Bun.file(destination).size / 1048576).toFixed(1)} MiB`);
+  }
+}
 
 if (values["native-only"]) {
   console.log(`Tarve native ${platformDirectory} release runtime ready: ${packagedLibrary}`);
@@ -61,6 +75,11 @@ if (!values.local) {
   }
   for (let index = 0; index < BUILD_TARGETS.length; index++) {
     await assertNativeRuntimeCompatible(requiredRuntimes[index]!, BUILD_TARGETS[index]!, compatibility);
+    // Variants are optional: `tarve build` falls back to the full library without them.
+    for (const variant of NATIVE_VARIANTS) {
+      const path = nativeVariantPath(dirname(requiredRuntimes[index]!), variant.name, targetConfig(BUILD_TARGETS[index]!).nativeName);
+      if (existsSync(path)) await assertNativeRuntimeCompatible(path, BUILD_TARGETS[index]!, compatibility);
+    }
   }
 }
 

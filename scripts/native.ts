@@ -15,7 +15,11 @@ function linuxNativePrerequisiteError(missing: string[]): Error {
   ].join("\n"));
 }
 
-export async function buildNative(release: boolean): Promise<string> {
+/**
+ * `features`: build with only these optional native features (native/Cargo.toml) instead of the
+ * defaults, into a separate target directory so the full library stays incremental.
+ */
+export async function buildNative(release: boolean, features?: readonly string[]): Promise<string> {
   const target = hostBuildTarget();
   if (!target) throw new Error(`Unsupported native platform: ${process.platform}-${process.arch}`);
   const config = targetConfig(target);
@@ -35,10 +39,11 @@ export async function buildNative(release: boolean): Promise<string> {
     if (env.CARGO_ENCODED_RUSTFLAGS !== undefined) env.CARGO_ENCODED_RUSTFLAGS += "\u001f-Ctarget-feature=+crt-static";
     else env.RUSTFLAGS = `${env.RUSTFLAGS ?? ""} -Ctarget-feature=+crt-static`.trim();
   }
-  const targetDirectory = join(root, "native/target");
+  const targetDirectory = join(root, features ? "native/target-variants" : "native/target");
   const cargo = Bun.spawn([
     cargoExecutable!, "build", "--locked", "--manifest-path", join(root, "native/Cargo.toml"),
     "--target-dir", targetDirectory, ...(release ? ["--release"] : []),
+    ...(features ? ["--no-default-features", "--features", ["mimalloc", "fxhash", ...features].join(",")] : []),
   ], { cwd: root, env, stdout: "inherit", stderr: "inherit" });
   if (await cargo.exited !== 0) throw new Error("Native build failed");
   return join(targetDirectory, release ? "release" : "debug", config.nativeName);

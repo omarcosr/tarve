@@ -10,6 +10,7 @@ use std::time::Duration;
 const WORKERS: usize = 6;
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
 
+#[cfg(feature = "net")]
 fn agent() -> &'static ureq::Agent {
     static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
     AGENT.get_or_init(|| {
@@ -125,6 +126,13 @@ mod disk {
     }
 }
 
+/// Built without the native "net" feature: remote images report an error.
+#[cfg(not(feature = "net"))]
+fn fetch(url: &str) -> Result<Vec<u8>, String> {
+    disk::read(url, now()).ok_or_else(|| "remote images need the native \"net\" feature".to_string())
+}
+
+#[cfg(feature = "net")]
 fn fetch(url: &str) -> Result<Vec<u8>, String> {
     if let Some(bytes) = disk::read(url, now()) {
         return Ok(bytes);
