@@ -21,7 +21,10 @@ impl App {
             && std::env::var_os("TARVE_CPU_FIRST").is_none_or(|value| value != "0")
             && crate::d3d11::prewarm_pending();
         #[cfg(not(target_os = "windows"))]
-        let cpu_first = false;
+        let cpu_first = {
+            let _ = transparent;
+            false
+        };
         if cpu_first {
             self.document.renderer = crate::protocol::RendererPreference::Cpu;
         }
