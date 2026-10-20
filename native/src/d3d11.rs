@@ -4036,7 +4036,12 @@ fn create_device_with(
     unsafe {
         D3D11CreateDevice(
             None,
-            D3D_DRIVER_TYPE_HARDWARE,
+            // TARVE_D3D11_WARP=1: the software rasterizer GPU-less CI runners get, to reproduce them.
+            if std::env::var_os("TARVE_D3D11_WARP").is_some_and(|value| value == "1") {
+                windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_WARP
+            } else {
+                D3D_DRIVER_TYPE_HARDWARE
+            },
             HMODULE::default(),
             flags,
             Some(&[D3D_FEATURE_LEVEL_11_0]),

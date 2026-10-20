@@ -82,6 +82,10 @@ await run([process.execPath, "add", "./tarve.tgz"]);
 const reactIconsPackage = await Bun.file(join(root, "packages/react-icons/package.json")).json() as { version: string };
 await run([process.execPath, "pm", "pack", "--ignore-scripts", "--destination", directory], join(root, "packages/react-icons"));
 await run([process.execPath, "add", `./tarve-react-icons-${reactIconsPackage.version}.tgz`]);
+// examples/svelte imports @tarve/svelte (and its .svelte module types come with svelte).
+const sveltePackage = await Bun.file(join(root, "packages/svelte/package.json")).json() as { version: string };
+await run([process.execPath, "pm", "pack", "--ignore-scripts", "--destination", directory], join(root, "packages/svelte"));
+await run([process.execPath, "add", `./tarve-svelte-${sveltePackage.version}.tgz`], directory, env, 240_000);
 const bunTypes = await Bun.file(join(root, "node_modules/@types/bun/package.json")).json();
 const typescript = await Bun.file(join(root, "node_modules/typescript/package.json")).json();
 const examplePackage = await Bun.file(join(root, "examples/package.json")).json() as {
