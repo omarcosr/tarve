@@ -553,6 +553,11 @@ pub struct Document {
     #[serde(default)]
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub msaa: Option<u32>,
+    /// D3D11 text: "grayscale" (default, the same pixels as every renderer) or
+    /// "cleartype" (DirectWrite subpixel glyphs on opaque windows).
+    #[serde(default, rename = "textRendering")]
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub text_rendering: Option<String>,
     /// Idle milliseconds after the last frame before the working set is
     /// trimmed (Windows, `EmptyWorkingSet`); unset or negative: never.
     #[serde(default, rename = "memoryTrimDelay")]

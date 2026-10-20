@@ -1465,6 +1465,7 @@ impl App {
             fatal: None,
             ready_emitted: false,
             presentation_retry_at: None,
+            input_hold: None,
             memory_dirty: std::cell::Cell::new(false),
             trim_at: std::cell::Cell::new(None),
             startup_trim_pending: std::cell::Cell::new(true),
@@ -1623,6 +1624,9 @@ struct App {
     fatal: Option<String>,
     ready_emitted: bool,
     presentation_retry_at: Option<Instant>,
+    /// After a click or key reaches JS: the frame waits (until this deadline at most)
+    /// for the patch its handler sends, so release and update show in one frame.
+    input_hold: Option<Instant>,
     motion_epoch: Instant,
     motion_test_clock: bool,
     graphics_recovery_episodes: usize,
@@ -1661,6 +1665,8 @@ const MAX_GRAPHICS_RECOVERY_ATTEMPTS: u8 = 3;
 const MAX_GRAPHICS_RECOVERY_EPISODES: usize = 3;
 const GRAPHICS_RECOVERY_WINDOW: Duration = Duration::from_secs(30);
 const PRESENT_RETRY_DELAY: Duration = Duration::from_millis(16);
+/// Longest a frame waits for the JS patch answering a click or key (under a 60 Hz frame).
+const INPUT_HOLD: Duration = Duration::from_millis(10);
 const MEMORY_RELEASE_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_PASTE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PASTE_IMAGE_DIMENSION: usize = 16_384;
@@ -2162,6 +2168,9 @@ impl App {
         self.emit(layout_events);
     }
     fn redraw(&self) {
+        if self.input_hold.is_some_and(|until| until > Instant::now()) {
+            return;
+        }
         if (self.tree.dirty.paint || self.tree.dirty.layout || self.tree.dirty.text)
             && let Some(window) = &self.window
         {
@@ -2438,6 +2447,7 @@ impl App {
         let present_at = self
             .presentation_retry_at
             .filter(|deadline| *deadline > now);
+        let hold_at = self.input_hold.filter(|deadline| *deadline > now);
         let motion_at = self.motion_deadline(now);
         let media_at = self.media.deadline();
         let video_at = self.videos.deadline();
@@ -2448,6 +2458,7 @@ impl App {
             file_drag_at,
             recovery_at,
             present_at,
+            hold_at,
             motion_at,
             media_at,
             video_at,
@@ -3412,6 +3423,12 @@ impl ApplicationHandler<Command> for App {
             self.advance_live_motion();
         }
         let apply_started = Instant::now();
+        if matches!(
+            command,
+            Command::Patch { .. } | Command::Mutate { .. } | Command::Update { .. }
+        ) {
+            self.input_hold = None;
+        }
         match command {
             Command::Patch { nodes } => {
                 let chrome_changed = nodes.iter().any(|node| {
@@ -3935,6 +3952,10 @@ impl ApplicationHandler<Command> for App {
         if present_due {
             self.presentation_retry_at = None;
         }
+        if self.input_hold.is_some_and(|until| until <= now) {
+            self.input_hold = None;
+            self.redraw();
+        }
         let media_events = self.media.tick(now);
         self.emit(media_events);
         self.sync_file_drag();
@@ -3966,6 +3987,12 @@ impl ApplicationHandler<Command> for App {
         ) {
             self.sync_input_clock();
         }
+        // A release or key a JS handler may answer: hold its frame for that patch.
+        let holds_for_js = matches!(
+            event,
+            WindowEvent::MouseInput { state: ElementState::Released, .. }
+                | WindowEvent::KeyboardInput { .. }
+        );
         let mut events = vec![];
         // DOM-style input events go first; the match below may replace `events`.
         let mut dom_events = vec![];
@@ -4310,6 +4337,9 @@ impl ApplicationHandler<Command> for App {
         if !dom_events.is_empty() {
             dom_events.append(&mut events);
             events = dom_events;
+        }
+        if holds_for_js && !events.is_empty() && !self.parked {
+            self.input_hold = Some(Instant::now() + INPUT_HOLD);
         }
         self.emit(events);
         if accessibility_changed {

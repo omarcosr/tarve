@@ -1,4 +1,4 @@
-import type { SceneDocument, FileDialogOptions, LayoutBox, NativeEvent, NativeCommand, NativeStats, NativeSystemMediaSession, PhaseSummary, Renderer, Snapshot } from "./protocol";
+import type { SceneDocument, FileDialogOptions, LayoutBox, NativeEvent, NativeCommand, NativeStats, NativeSystemMediaSession, PhaseSummary, Renderer, Snapshot, TextRendering } from "./protocol";
 import { readFileSync } from "node:fs";
 import { applyMediaEvent, type MediaController } from "./media-element";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
@@ -97,6 +97,13 @@ export interface AppOptions {
    * many samples, smoother clip edges (rounded `overflow: hidden`, gradients). `TARVE_MSAA` overrides it.
    */
   msaa?: 0 | 2 | 4 | 8;
+  /**
+   * Text on Windows' GPU renderer. `"grayscale"` (default): the same glyph pixels as the
+   * CPU renderer and Linux. `"cleartype"`: DirectWrite rasterizes glyphs with Windows'
+   * hinting and subpixel ClearType, as native apps draw them; transparent windows, variable
+   * fonts and a system with ClearType turned off keep grayscale. `TARVE_TEXT_RENDERING` overrides it.
+   */
+  textRendering?: TextRendering;
   /** Report every key press and release to `onEvent` as `keyboard` events (DOM `key`/`code`), whatever is focused. */
   keyboardEvents?: boolean;
   /** Report every mouse button press/release and wheel turn to `onEvent` as `pointer` events, on the deepest node under the pointer. */
@@ -162,7 +169,7 @@ export interface AppJsStats {
 }
 export interface AppStats { js: AppJsStats; native: NativeStats }
 /** Options of a window opened with `app.openWindow`: an app of its own on the same native app. */
-export interface OpenWindowOptions extends Pick<AppOptions, "rememberWindow" | "debug" | "renderer" | "componentAdapters" | "onError" | "dev" | "maxFps" | "msaa" | "lowPower" | "keyboardEvents" | "pointerEvents" | "closeBehavior"> {
+export interface OpenWindowOptions extends Pick<AppOptions, "rememberWindow" | "debug" | "renderer" | "componentAdapters" | "onError" | "dev" | "maxFps" | "msaa" | "textRendering" | "lowPower" | "keyboardEvents" | "pointerEvents" | "closeBehavior"> {
   /** Names the window in native events; unique among the app's open windows. Default `window-<n>`. */
   id?: string;
 }
@@ -338,6 +345,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     Object.assign(tree.document, appIdentityDocument());
     if (options.msaa !== undefined) tree.document.msaa = options.msaa;
     else if (options.lowPower) tree.document.msaa = 0;
+    if (options.textRendering) tree.document.textRendering = options.textRendering;
     if (options.keyboardEvents) tree.document.keyboardEvents = true;
     if (options.pointerEvents) tree.document.pointerEvents = true;
     if (options.memoryTrimDelay !== undefined) tree.document.memoryTrimDelay = options.memoryTrimDelay === false ? -1 : options.memoryTrimDelay;
@@ -812,7 +820,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (windows.has(id)) throw new Error(`Window '${id}' is already open`);
       return createApp(windowView, {
         debug: options.debug, renderer: options.renderer, componentAdapters: options.componentAdapters,
-        onError: options.onError, maxFps: options.maxFps, msaa: options.msaa, lowPower: options.lowPower, ...rest,
+        onError: options.onError, maxFps: options.maxFps, msaa: options.msaa, textRendering: options.textRendering, lowPower: options.lowPower, ...rest,
         ...(rememberWindow ? { rememberWindow: rememberWindow === true ? id : rememberWindow } : {}),
         bridge: windowBridge(id),
       });

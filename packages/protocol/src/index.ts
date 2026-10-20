@@ -358,10 +358,13 @@ export type WindowBackdrop = "none" | "transparent" | "blur" | "mica" | "acrylic
 export interface DesktopWidget { columns: number; rows: number }
 /** Stacking: `alwaysOnBottom` keeps the window under every other one, like a desktop widget. */
 export type WindowLevel = "normal" | "alwaysOnTop" | "alwaysOnBottom";
+export type TextRendering = "grayscale" | "cleartype";
 export interface SceneDocument {
   version: number; renderer: Renderer; window: WindowOptions; root: NativeNode;
   /** D3D11 MSAA samples: 0 (default) uses a coverage fringe instead; 2, 4 or 8. */
   msaa?: number;
+  /** D3D11 text: "grayscale" (default) or "cleartype" (DirectWrite subpixel glyphs on opaque windows). */
+  textRendering?: TextRendering;
   /** Idle ms after the last frame before the working set is trimmed (Windows); unset or negative: never. */
   memoryTrimDelay?: number;
   /** `AppOptions.lowPower`: a minimized window gives its renderer back. */
