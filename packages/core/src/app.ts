@@ -108,6 +108,14 @@ export interface AppOptions {
    */
   memoryTrimDelay?: number | false;
   /**
+   * Least memory over speed: the CPU renderer (no GPU driver, ~90 MB less, more CPU
+   * per frame while animating or scrolling), no MSAA, and startup pages returned to the
+   * OS after one second idle instead of three. Explicit `renderer`, `msaa` and
+   * `memoryTrimDelay` still win. A minimized or hidden window gives its renderer back
+   * and asks Windows for EcoQoS with or without this option.
+   */
+  lowPower?: boolean;
+  /**
    * Windows app identity (AppUserModelID). Without it, media controls and notifications show
    * the host executable (bun.exe, node.exe) or "Unknown app". `icon` is an .ico/.png path.
    */
@@ -154,7 +162,7 @@ export interface AppJsStats {
 }
 export interface AppStats { js: AppJsStats; native: NativeStats }
 /** Options of a window opened with `app.openWindow`: an app of its own on the same native app. */
-export interface OpenWindowOptions extends Pick<AppOptions, "rememberWindow" | "debug" | "renderer" | "componentAdapters" | "onError" | "dev" | "maxFps" | "msaa" | "keyboardEvents" | "pointerEvents" | "closeBehavior"> {
+export interface OpenWindowOptions extends Pick<AppOptions, "rememberWindow" | "debug" | "renderer" | "componentAdapters" | "onError" | "dev" | "maxFps" | "msaa" | "lowPower" | "keyboardEvents" | "pointerEvents" | "closeBehavior"> {
   /** Names the window in native events; unique among the app's open windows. Default `window-<n>`. */
   id?: string;
 }
@@ -300,7 +308,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     const scope = renderScope;
     // A hidden (headless) window never reaches the screen: the CPU renderer draws and
     // captures the same pixels without loading a GPU driver (~85 MB, ~70 ms on Windows).
-    const renderer = options.renderer ?? (options.headless ? "cpu" : "auto");
+    const renderer = options.renderer ?? (options.headless || options.lowPower ? "cpu" : "auto");
     const shown = devError;
     const shownWindow = appWindow;
     overlayCompiled = false;
@@ -329,9 +337,12 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     if (options.closeBehavior === "hide") tree.document.root.closeIntercept = true;
     Object.assign(tree.document, appIdentityDocument());
     if (options.msaa !== undefined) tree.document.msaa = options.msaa;
+    else if (options.lowPower) tree.document.msaa = 0;
     if (options.keyboardEvents) tree.document.keyboardEvents = true;
     if (options.pointerEvents) tree.document.pointerEvents = true;
     if (options.memoryTrimDelay !== undefined) tree.document.memoryTrimDelay = options.memoryTrimDelay === false ? -1 : options.memoryTrimDelay;
+    else if (options.lowPower) tree.document.memoryTrimDelay = 1000;
+    if (options.lowPower) tree.document.lowPower = true;
     return tree;
   }
 
@@ -802,7 +813,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (windows.has(id)) throw new Error(`Window '${id}' is already open`);
       return createApp(windowView, {
         debug: options.debug, renderer: options.renderer, componentAdapters: options.componentAdapters,
-        onError: options.onError, maxFps: options.maxFps, msaa: options.msaa, ...rest,
+        onError: options.onError, maxFps: options.maxFps, msaa: options.msaa, lowPower: options.lowPower, ...rest,
         ...(rememberWindow ? { rememberWindow: rememberWindow === true ? id : rememberWindow } : {}),
         bridge: windowBridge(id),
       });

@@ -4,15 +4,14 @@
 // boxes (600 shadowed boxes changing size and color every tick), text (300 labels whose
 // numbers change every tick) or list (a 100,000-row VirtualList); R picks the renderer.
 const t0 = performance.now();
-import { execFile } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { promisify } from "node:util";
 import { Button, Column, Row, Scroll, Text, View, VirtualList, Window, createApp, type Renderer } from "@tarve/core";
 import { App as ComponentsApp } from "../components/components-view";
 import { lucideReactAdapter, phosphorReactAdapter, reactSvgAdapter } from "@tarve/react-icons";
 const tImport = performance.now();
 const scene = process.env.SCENE ?? "empty";
-const renderer = (process.env.R ?? "auto") as Renderer;
+// R=default leaves the renderer to the app's options (lowPower picks cpu).
+const renderer = (process.env.R === "default" ? undefined : process.env.R ?? "auto") as Renderer | undefined;
 function Empty() { return <Window title="bench" width={800} height={600}><Text>hi</Text></Window>; }
 let tick = 0;
 function Fixed() {
@@ -48,36 +47,33 @@ function List() {
 const animated = scene === "updates" || scene === "boxes" || scene === "text";
 const SceneView = scene === "fixed" || scene === "updates" ? Fixed : scene === "components" ? ComponentsApp
   : scene === "boxes" ? Boxes : scene === "text" ? Labels : scene === "list" ? List : Empty;
-const app = createApp(SceneView, { debug: true, renderer, componentAdapters: [reactSvgAdapter, lucideReactAdapter, phosphorReactAdapter] });
+const app = createApp(SceneView, { debug: true, renderer, lowPower: process.env.LOWPOWER === "1", componentAdapters: [reactSvgAdapter, lucideReactAdapter, phosphorReactAdapter] });
 await app.ready;
 let s = await app.inspect();
 while (s.frames === 0) { await sleep(1); s = await app.inspect(); }
 const tFrame = performance.now();
 const r = Math.round;
-const mb = (x: number) => r(x / 1048576);
-const ps = async (cmd: string) => (await promisify(execFile)("powershell", ["-NoProfile", "-Command", cmd], { windowsHide: true })).stdout.trim();
-const cpu = () => { const u = process.cpuUsage(); return (u.user + u.system) / 1000; };
+// Process numbers come from the parent (bench:compare samples Windows at each mark), so every
+// runtime, txiki.js included, is measured the same way.
+const mark = async (name: string) => { console.log(`@mark ${name}`); await sleep(600); };
 const out: Record<string, unknown> = { scene, renderer, importsMs: r(tImport - t0), firstFrameMs: r(tFrame) };
 await sleep(3000);
-out.privateMb = mb(Number(await ps(`(Get-Process -Id ${process.pid}).PrivateMemorySize64`)));
-out.wsMb = mb(process.memoryUsage().rss);
-let f0 = (await app.inspect()).frames, c0 = cpu(), w0 = performance.now();
+await mark("idle-start");
+let f0 = (await app.inspect()).frames;
 await sleep(4000);
-out.idleCpuPct = +((cpu() - c0) / (performance.now() - w0) * 100).toFixed(2);
+await mark("idle-end");
 out.idleFrames = (await app.inspect()).frames - f0;
 const cx = s.width / 2, cy = s.height / 2;
-f0 = (await app.inspect()).frames; c0 = cpu(); w0 = performance.now();
-let peak = 0;
+f0 = (await app.inspect()).frames;
+await mark("busy-start");
 for (let i = 0; i < 240; i++) {
   app.debug({ type: "input", action: "wheel", delta: i % 80 < 40 ? 60 : -60 });
   app.debug({ type: "input", action: "move", x: cx + Math.sin(i / 7) * cx * 0.8, y: cy + Math.cos(i / 9) * cy * 0.6 });
   if (animated) { tick++; app.update(); }
   await sleep(16);
-  if (i % 20 === 0) peak = Math.max(peak, process.memoryUsage().rss);
 }
-out.busyCpuPct = +((cpu() - c0) / (performance.now() - w0) * 100).toFixed(1);
+await mark("busy-end");
 out.busyFrames = (await app.inspect()).frames - f0;
-out.wsPeakMb = mb(peak);
 // Phase percentiles of the busy run (app.stats() is missing on builds older than it).
 if (typeof app.stats === "function") {
   const { js, native } = await app.stats();
@@ -86,10 +82,22 @@ if (typeof app.stats === "function") {
     jsUpdateMs: ms(js.update), jsRenderMs: ms(js.render), jsDiffMs: ms(js.diff),
     applyMs: ms(native.phases?.apply), layoutMs: ms(native.phases?.layout), paintMs: ms(native.phases?.paint),
     presentMs: ms(native.phases?.present), frameMs: ms(native.phases?.frame),
+    gpuMb: (native.memory?.current as { gpuMb?: number } | undefined)?.gpuMb,
     memoryStages: Object.fromEntries((native.memory?.stages ?? []).map(stage => [stage.label, stage.workingSetMb])),
   });
 }
-out.gpuDedicatedMb = Number(await ps(`[math]::Round(((Get-Counter '\\GPU Process Memory(pid_${process.pid}_*)\\Dedicated Usage' -ErrorAction SilentlyContinue).CounterSamples | Measure-Object CookedValue -Sum).Sum / 1MB)`)) || 0;
+// Minimized: what an app left in the taskbar costs.
+if (process.env.MINIMIZED !== "0") {
+  // HIDE=1: hidden (tray) instead of minimized.
+  if (process.env.HIDE === "1") app.hide(); else app.minimize();
+  await sleep(3000);
+  f0 = (await app.inspect()).frames;
+  await mark("min-start");
+  await sleep(4000);
+  await mark("min-end");
+  out.minFrames = (await app.inspect()).frames - f0;
+  if (typeof app.stats === "function") out.minGpuMb = ((await app.stats()).native.memory?.current as { gpuMb?: number } | undefined)?.gpuMb;
+}
 console.log(JSON.stringify(out));
 app.close();
 process.exit(0);

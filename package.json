@@ -135,6 +135,7 @@
     "smoke:devtools": "bun run build:native && bun scripts/smoke-devtools.ts",
     "smoke:tray": "bun run build:native && bun scripts/smoke-tray.tsx",
     "smoke:hidden": "bun run build:native && bun scripts/smoke-hidden.tsx",
+    "smoke:minimized": "bun run build:native && bun scripts/smoke-minimized.tsx",
     "smoke:glass": "bun run build:native && bun scripts/smoke-glass.tsx",
     "smoke:translucent": "bun run build:native && bun scripts/smoke-translucent.tsx",
     "smoke:windows": "bun run build:native && bun scripts/smoke-windows.tsx",
