@@ -46,3 +46,52 @@ pub(super) fn driver_type() -> windows::Win32::Graphics::Direct3D::D3D_DRIVER_TY
         D3D_DRIVER_TYPE_HARDWARE
     }
 }
+
+/// Device lifetime, the other end: D3D11 destroys a released object only once the GPU is
+/// done with it, so a window's flip-model swap chain can outlive its renderer and make the
+/// next one for the same window (shown again after `app.hide()`) fail with E_ACCESSDENIED.
+/// Unbind everything, drop the back buffer's views and wait for the GPU before the fields go.
+impl Drop for super::D3d11Graphics {
+    fn drop(&mut self) {
+        use windows::Win32::Graphics::Direct3D11::{
+            D3D11_QUERY_DESC, D3D11_QUERY_EVENT, ID3D11Query,
+        };
+        self.current_target = None;
+        self.render_target = None;
+        self.canvas = None;
+        self.frame_cache = None;
+        self.backdrop = None;
+        self.depth_view = None;
+        unsafe {
+            self.context.ClearState();
+            let desc = D3D11_QUERY_DESC {
+                Query: D3D11_QUERY_EVENT,
+                MiscFlags: 0,
+            };
+            let mut query: Option<ID3D11Query> = None;
+            if self.device.CreateQuery(&desc, Some(&mut query)).is_ok()
+                && let Some(query) = query
+            {
+                self.context.End(&query);
+                self.context.Flush();
+                // A lost device never signals: give up after about a second.
+                let mut done = windows::core::BOOL(0);
+                for _ in 0..1000 {
+                    // S_FALSE (not yet) is a success code too: `done` says when it finished.
+                    let ready = self.context.GetData(
+                        &query,
+                        Some(&mut done as *mut _ as *mut _),
+                        std::mem::size_of_val(&done) as u32,
+                        0,
+                    );
+                    if ready.is_err() || done.as_bool() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+            } else {
+                self.context.Flush();
+            }
+        }
+    }
+}
