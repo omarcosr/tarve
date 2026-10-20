@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { resolveAppMetadata, runtimeMetadata } from "./package-metadata";
-import { build } from "./build";
+import { build, smolExecArgv } from "./build";
 import { devNode, runNode } from "./node-dev";
 import { selectRuntime } from "./runtime-select";
 import { frameworkPreloads } from "./framework-plugins";
@@ -32,6 +32,7 @@ function usage(target?: BuildTarget): string {
     `  --target ${BUILD_TARGETS.join("|")}  build: target OS (cross-compiles)`,
     `  --outfile ${output}              build: output path`,
     "  --compile-jsx                   build: compile JSX into reusable templates (needs typescript 7)",
+    "  --smol                          smaller JS heap, collected more often (bun, node)",
     "  --name App, --version 1.0.0     app metadata (executable, window, app identity)",
     "  --icon icon.png                 app icon: .png (square, 256 px+) or .ico",
     "  --app-id Acme.App               Windows AppUserModelID / Linux app id",
@@ -79,7 +80,7 @@ async function main(): Promise<number> {
       outfile: { type: "string" }, name: { type: "string" }, version: { type: "string" },
       icon: { type: "string" }, "app-id": { type: "string" }, description: { type: "string" },
       publisher: { type: "string" }, copyright: { type: "string" },
-      target: { type: "string" }, runtime: { type: "string" }, "compile-jsx": { type: "boolean" },
+      target: { type: "string" }, runtime: { type: "string" }, "compile-jsx": { type: "boolean" }, smol: { type: "boolean" },
       "target-executable": { type: "string" },
       artifact: { type: "string", multiple: true }, key: { type: "string" }, "public-key": { type: "string" },
       out: { type: "string" }, "base-url": { type: "string" }, notes: { type: "string" }, sign: { type: "string" },
@@ -125,6 +126,7 @@ async function main(): Promise<number> {
       target: values.target as BuildTarget | undefined,
       runtime,
       compileJsx: values["compile-jsx"],
+      smol: values.smol,
       targetExecutable: values["target-executable"],
     }));
     return 0;
@@ -134,15 +136,16 @@ async function main(): Promise<number> {
   process.env.TARVE_APP_METADATA = runtimeMetadata(metadata, metadata.icon);
   if (runtime === "node") {
     if (command === "dev") {
-      await devNode(entrypoint);
+      await devNode(entrypoint, values.smol ? smolExecArgv("node") : []);
       return 0;
     }
-    return runNode(entrypoint);
+    return runNode(entrypoint, values.smol ? smolExecArgv("node") : []);
   }
   const app = resolve(entrypoint);
+  const smol = values.smol ? smolExecArgv("bun") : [];
   return command === "dev"
-    ? forward(process.execPath, [...frameworkPreloads(app), "--hot", app], { ...process.env, TARVE_DEV: process.env.TARVE_DEV ?? "1" })
-    : forward(process.execPath, [...frameworkPreloads(app), app]);
+    ? forward(process.execPath, [...smol, ...frameworkPreloads(app), "--hot", app], { ...process.env, TARVE_DEV: process.env.TARVE_DEV ?? "1" })
+    : forward(process.execPath, [...smol, ...frameworkPreloads(app), app]);
 }
 
 try {

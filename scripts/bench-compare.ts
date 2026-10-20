@@ -7,8 +7,15 @@
  *
  * SCENES=fixed,updates,components limits the scenes; RUNS sets the runs per cell
  * (default 3, the median is reported).
+ * SCENES=boxes,text,list runs the stress scenes (see examples/bench/bench.tsx).
+ *
+ * Every run is appended to HISTORY (default work/bench-history.jsonl; HISTORY=0 skips it),
+ * named by LABEL="what changed", and each row is compared with the previous and the best
+ * run of the same executable name, scene and renderer: "Δ last" and "Δ best" per metric,
+ * lower is better, changes within ±5% shown as "≈". Keep a change when the numbers climb.
  */
-export {};
+import { appendFile, mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 
 const exes = process.argv.slice(2);
 if (exes.length === 0) throw new Error("usage: bun run bench:compare <bench.exe> [<bench.exe> …]");
@@ -40,3 +47,42 @@ for (const scene of scenes) for (const renderer of renderers) for (const exe of 
   console.log(JSON.stringify(row));
 }
 console.table(rows);
+if (process.env.HISTORY !== "0") await recordHistory(rows, process.env.HISTORY ?? "work/bench-history.jsonl", process.env.LABEL ?? "");
+
+/** Lower is better for every tracked metric; phase metrics compare their p50. */
+const trackedKeys = ["firstFrameMs", "privateMb", "idleCpuPct", "busyCpuPct", "minCpuPct", "gpuMb", "jsUpdateMs", "layoutMs", "paintMs", "frameMs"] as const;
+function metric(row: Record<string, unknown>, key: string): number | undefined {
+  const value = row[key];
+  const number = typeof value === "string" ? Number(value.split("/")[0]) : typeof value === "number" ? value : NaN;
+  return Number.isFinite(number) ? number : undefined;
+}
+function delta(now: number | undefined, then: number | undefined): string {
+  if (now === undefined || then === undefined) return "";
+  if (then === 0) return now === 0 ? "≈" : "new";
+  const percent = (now - then) / Math.abs(then) * 100;
+  return Math.abs(percent) <= 5 ? "≈" : `${percent > 0 ? "+" : ""}${percent.toFixed(0)}%`;
+}
+async function recordHistory(current: Record<string, unknown>[], path: string, label: string): Promise<void> {
+  const file = Bun.file(path);
+  const past: Record<string, unknown>[] = (await file.exists() ? await file.text() : "").split("\n").filter(Boolean).map(line => JSON.parse(line));
+  const id = (row: Record<string, unknown>) => `${row.exe}|${row.scene}|${row.renderer}`;
+  const comparison = current.map(row => {
+    const same = past.filter(entry => id(entry) === id(row));
+    const last = same.at(-1);
+    const out: Record<string, unknown> = { scene: row.scene, renderer: row.renderer, exe: row.exe };
+    for (const key of trackedKeys) {
+      const now = metric(row, key);
+      if (now === undefined) continue;
+      const values = same.map(entry => metric(entry, key)).filter((value): value is number => value !== undefined);
+      out[key] = `${now} (last ${delta(now, last && metric(last, key)) || "-"}, best ${delta(now, values.length ? Math.min(...values) : undefined) || "-"})`;
+    }
+    return out;
+  });
+  if (past.length) console.table(comparison);
+  const commit = Bun.spawnSync(["git", "rev-parse", "--short", "HEAD"]).stdout.toString().trim();
+  const at = new Date().toISOString();
+  const lines = current.map(row => JSON.stringify({ at, label, commit, ...row })).join("\n") + "\n";
+  await mkdir(dirname(path), { recursive: true });
+  await appendFile(path, lines);
+  console.log(`history: ${current.length} row(s) → ${path}${label ? ` (${label})` : ""}`);
+}

@@ -1,0 +1,14 @@
+const f = () => { throw new Error("unavailable in the QuickJS prototype"); };
+export const createRequire = () => f, spawn = f, spawnSync = f, execFile = f, execFileSync = f, setTimeout = (ms) => new Promise(r => globalThis.setTimeout(r, ms));
+export const readFileSync = f, writeFileSync = f, existsSync = () => false, mkdirSync = f, statSync = f, readdirSync = f, rmSync = f, mkdtempSync = f, renameSync = f, unlinkSync = f, copyFileSync = f;
+export const readFile = f, writeFile = f, mkdir = f, rm = f, stat = f, readdir = f, rename = f, copyFile = f, access = f;
+export const join = (...p) => p.join("/"), resolve = (...p) => p.join("/"), dirname = p => p, basename = p => p, extname = () => "", relative = (a, b) => b, sep = "/", isAbsolute = () => true, parse = p => ({ name: p });
+export const tmpdir = () => "/tmp", homedir = () => "/", platform = () => "win32", EOL = "\n", hostname = () => "", userInfo = () => ({ username: "" });
+export const createHash = f, randomUUID = () => globalThis.crypto.randomUUID(), randomBytes = f;
+export const fileURLToPath = p => p, pathToFileURL = p => ({ href: p }), promisify = fn => fn, inspect = v => String(v), format = (...a) => a.join(" ");
+export const EventEmitter = class { on() { return this; } off() { return this; } once() { return this; } emit() { return false; } removeListener() { return this; } };
+export const createServer = f, connect = f, createConnection = f, gzipSync = f, gunzipSync = f, inflateSync = f, deflateSync = f, Buffer = undefined;
+export const chmodSync = f, accessSync = f, closeSync = f, constants = {}, createWriteStream = f, createReadStream = f, openSync = f, readSync = f, writeSync = f, fstatSync = f, watch = f;
+export const createPublicKey = f, createPrivateKey = f, verify = f, sign = f, generateKeyPairSync = f, timingSafeEqual = f;
+export const Readable = class {}, Writable = class {}, Transform = class {}, PassThrough = class {};
+export default new Proxy({}, { get: () => f });

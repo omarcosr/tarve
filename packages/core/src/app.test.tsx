@@ -276,6 +276,23 @@ describe("controlled native reconciliation", () => {
     expect(autoBridge.document?.renderer).toBe("auto");
   });
 
+  test("lowPower picks the CPU renderer, no MSAA and an early trim unless set explicitly", async () => {
+    const bridge = new FakeBridge();
+    const app = createApp(() => <Window />, { bridge, lowPower: true });
+    await app.ready;
+    expect(bridge.document?.renderer).toBe("cpu");
+    expect(bridge.document?.msaa).toBe(0);
+    expect(bridge.document?.memoryTrimDelay).toBe(1000);
+    expect(bridge.document?.lowPower).toBe(true);
+
+    const explicitBridge = new FakeBridge();
+    const explicit = createApp(() => <Window />, { bridge: explicitBridge, lowPower: true, renderer: "gpu", msaa: 4, memoryTrimDelay: false });
+    await explicit.ready;
+    expect(explicitBridge.document?.renderer).toBe("gpu");
+    expect(explicitBridge.document?.msaa).toBe(4);
+    expect(explicitBridge.document?.memoryTrimDelay).toBe(-1);
+  });
+
   test("createApp forwards component adapters without knowing foreign libraries", async () => {
     const bridge = new FakeBridge();
     const foreignType = { library: "external" };

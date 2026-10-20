@@ -34,7 +34,7 @@ Windows x64, Bun 1.4.2, Ryzen 7 9800X3D, Counter 620x520, usando o mesmo pacote 
 
 Uma execução D3D11 imediatamente anterior mediu 85.4 MB de working set e 0.00% de um core no mesmo Counter, portanto 82.2 MB deve ser tratado como uma amostra e não como promessa fixa. No run comparativo, o processo D3D11 carregou `d3d11.dll` sem `d3d12.dll` nem `vulkan-1.dll`; ao forçar o legado DX12, `d3d12.dll` apareceu e o working set ficou ~90 MB maior.
 
-O backend D3D11 renderiza para um target BGRA associado ao flip-model swapchain, usa buffers de vértices/índices pequenos com crescimento sob demanda, atlas R8 de glifos limitado a quatro páginas de 1024x1024, cache de imagens limitado ao display list retido e MSAA 4x quando suportado (fallback 2x/1x). Não há os grandes buffers intermediários do Vello Classic nem o custo-base do `wgpu + D3D12` no caminho padrão do Windows. O renderer legado permanece disponível como fallback se a criação D3D11 falhar e como escape hatch explícito via `WGPU_BACKEND`.
+O backend D3D11 renderiza para um target BGRA associado ao flip-model swapchain, usa buffers de vértices/índices pequenos com crescimento sob demanda, atlas R8 de glifos limitado a quatro páginas de 1024x1024, cache de imagens limitado ao display list retido e, por padrão, sem MSAA (`msaa: 0`, bordas com franja de cobertura); `msaa: 2 | 4 | 8` liga multisampling em tiles de 256 px quando suportado. Não há os grandes buffers intermediários do Vello Classic nem o custo-base do `wgpu + D3D12` no caminho padrão do Windows. O renderer legado permanece disponível como fallback se a criação D3D11 falhar e como escape hatch explícito via `WGPU_BACKEND`.
 
 No mesmo PC, um probe separado do GPUix 0.10.0 ficou em ~94.3 MB de working set vazio e ~95.8–97.6 MB com a UI de teste. Esses números são apenas contexto local: processos, drivers e workloads diferentes não tornam isso uma garantia de que Tarve sempre usará menos memória.
 
@@ -63,6 +63,54 @@ Windows x64 measurements after 1.8 s idle, using the standalone release executab
 | Basic | ~207–215 MB | ~597 MB |
 
 Before requesting wgpu's memory-oriented allocation strategy and limiting Vello shader initialization to one thread, the Counter executable measured about 266 MB working set / 842 MB private bytes. In an isolated Bun process, the old dedicated event Worker added roughly 15–16 MB working set and about 40 MB private bytes. It has since been removed: native events remain in a FIFO queue, a Windows named pipe wakes the Bun event loop only when work arrives, and the main runtime then drains the queue with non-blocking FFI calls.
+
+## Modo leve (2026-10-18, Windows x64)
+
+Ryzen 7 9800X3D, Bun 1.4.2, executáveis `tarve build` de `examples/bench/bench.tsx`, mediana de 3 execuções por célula
+(`bun run bench:compare`). Memória, threads e CPU são lidos pelo Windows (`Get-Process`) nos marcadores `@mark` que o app
+imprime, então Bun, Node.js e txiki.js são medidos do mesmo jeito; VRAM vem de `app.stats().native.memory.current.gpuMb`
+(DXGI `QueryVideoMemoryInfo`, funciona com os contadores de desempenho do Windows desligados). *Private bytes* é a métrica
+principal: depois do trim ocioso o working set fica em 2–11 MB em todas as combinações e não diferencia nada.
+
+| Runtime · renderer | `components` private / threads | `fixed` (2.000 linhas) private / threads | CPU ocupado (`components`) | Primeiro frame (`components`) |
+| --- | ---: | ---: | ---: | ---: |
+| Bun · `auto` (D3D11, padrão) | 275 MB / 43 | 303 MB / 43 | 13.7% | 214 ms |
+| Bun · `lowPower` (CPU) | 175 MB / 21 | 214 MB / 21 | 29.1% | 107 ms |
+| Node.js SEA · CPU | 144 MB / 15 | 187 MB / 15 | 17.8% | 572 ms |
+| txiki.js · `auto` | 175 MB / 37 | 193 MB / 37 | 15.5% | 210 ms |
+| **txiki.js · `lowPower`** | **118 MB / 15** | **149 MB / 15** | 20.7% | 100 ms |
+
+CPU ocioso: 0 frames e 0–1% de um core em todas as linhas (0–2 ticks de 15,6 ms do relógio de CPU do Windows na janela de
+4,6 s; é o piso de resolução da medição, não trabalho periódico).
+
+O que entrou:
+
+- **`lowPower: true`** (`AppOptions`, herdado por `openWindow`): renderer CPU, `msaa: 0`, trim de memória 1 s após o
+  último frame e devolução do renderer ao minimizar. `renderer`, `msaa` e `memoryTrimDelay` explícitos continuam valendo.
+  Troca ~100 MB e ~22 threads de driver por mais CPU por frame ao animar/rolar (D3D11 continua sendo o padrão).
+- **EcoQoS** (`native/src/lib.rs`, `power`): enquanto todas as janelas do processo estão minimizadas (`lowPower`) ou
+  escondidas e nada toca (áudio/vídeo), o processo pede `ProcessPowerThrottling` ao Windows; quando uma janela volta, o
+  controle retorna às heurísticas do sistema. Teste: `eco_qos_follows_the_windows_in_the_background`.
+- **Minimizar com `lowPower`** devolve device, swap chain e texturas como `app.hide()` já fazia; restaurar reconstrói o
+  device (primeiro frame em ~110–125 ms, `bun run smoke:minimized`). Ganho medido pequeno: `fixed` 33,4 → 23,6 MB de VRAM
+  e −9 MB private; `components` e o smoke de 320×200 ficam em ~30 MB. Por isso só com `lowPower`.
+- **`--smol`** em `tarve run|dev|build` (Bun: `--smol`; Node.js: `--optimize-for-size --max-semi-space-size=1`; txiki.js
+  ignora). Bun: sem diferença mensurável (172 → 175 MB em `components`, 214 → 214 MB em `fixed`). Node.js: −12 MB em
+  `components`, +4 MB em `fixed` e mais CPU ocioso por GC. Fica opcional; não é parte de `lowPower`.
+
+Achado em aberto: tanto escondida (`hide`) quanto minimizada, a janela mantém ~30 MB de memória de vídeo segundo o DXGI
+mesmo sem device próprio. Por isso `bun run smoke:hidden` falha nesta máquina (36 → 35 MB; com a DLL do commit
+`ac592b0`, sem as mudanças acima, 23 → 22 MB), então a falha já existia. O próximo passo é `ID3D11Debug::ReportLiveDeviceObjects` antes de soltar o device para ver se
+algo ainda o referencia.
+
+Não feito, com motivo:
+
+- **Features Cargo para tirar syntect/comrak/rodio/vídeo**: o código da DLL (26 MB) é mapeado do arquivo e compartilhado, não
+  conta em *private bytes*, e o working set ocioso já está em 2–8 MB depois do trim. Reduziria só o download.
+- **Inicialização preguiçosa de sintaxe e fontes**: já é preguiçosa (`SyntaxSet` em `OnceLock` no primeiro `<Code>`; o
+  fontique consulta as fontes do sistema sob demanda).
+- **Atlas de glifos menor / MSAA opcional**: o MSAA já é opcional e desligado por padrão; as páginas R8 de 1024² (1 MB) do
+  atlas já são criadas sob demanda.
 
 ## Startup and memory floor (0.3.x, Windows x64)
 

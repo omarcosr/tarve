@@ -7,7 +7,7 @@ import { nativePath } from "#tarve/runtime";
 import { fileImportAttributes } from "./esbuild-file-imports";
 import { frameworkPlugins } from "./framework-plugins";
 import { hostBuildTarget, targetConfig } from "./targets";
-import { metadataOverrides, type BuildOptions } from "./build";
+import { metadataOverrides, smolExecArgv, type BuildOptions } from "./build";
 import { buildMetadata, writeLinuxDesktopEntry } from "./package-metadata";
 import { NATIVE_COMPATIBILITY_MANIFEST_NAME, assertNativeRuntimeCompatible, readNativeCompatibilityManifest, createNativeCompatibilityManifest } from "./native-runtime";
 import { assertNodeVersion, targetNodeExecutable } from "./node-target";
@@ -103,7 +103,7 @@ export async function buildNode(options: NodeBuildOptions): Promise<string> {
       main: seaPath(join(temporary, "app.mjs")), mainFormat: "module", output: seaPath(outfile),
       ...(executable ? { executable: seaPath(executable) } : {}),
       useVfs: true, useCodeCache: false, useSnapshot: false, assets,
-      execArgv: ["--disable-warning=ExperimentalWarning"], execArgvExtension: "env",
+      execArgv: ["--disable-warning=ExperimentalWarning", ...(options.smol ? smolExecArgv("node") : [])], execArgvExtension: "env",
     }));
     await mkdir(dirname(outfile), { recursive: true });
     // Rebuild in place like `bun build --compile`; Node refuses an existing SEA output.

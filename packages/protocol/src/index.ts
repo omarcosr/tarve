@@ -364,6 +364,8 @@ export interface SceneDocument {
   msaa?: number;
   /** Idle ms after the last frame before the working set is trimmed (Windows); negative: never. */
   memoryTrimDelay?: number;
+  /** `AppOptions.lowPower`: a minimized window gives its renderer back. */
+  lowPower?: boolean;
   /** App font files as base64 (CSS `@font-face`), usable by their family name. */
   fonts?: string[];
   /** Windows app identity (AppUserModelID): names the app in media controls and notifications. */

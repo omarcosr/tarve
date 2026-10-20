@@ -130,6 +130,8 @@
     "smoke:editor": "bun run build:native && bun scripts/smoke-editor.tsx",
     "smoke:steady-frames": "bun run build:native && bun scripts/smoke-steady-frames.tsx",
     "bench:compare": "bun scripts/bench-compare.ts",
+    "test:renderer-parity": "bun run build:native && bun scripts/renderer-parity.tsx",
+    "check:lines": "bun scripts/check-lines.ts",
     "smoke:devtools": "bun run build:native && bun scripts/smoke-devtools.ts",
     "smoke:tray": "bun run build:native && bun scripts/smoke-tray.tsx",
     "smoke:hidden": "bun run build:native && bun scripts/smoke-hidden.tsx",

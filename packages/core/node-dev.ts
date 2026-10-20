@@ -20,7 +20,7 @@ const installedBuildApi: Plugin = {
   },
 };
 
-export async function devNode(entrypoint: string): Promise<void> {
+export async function devNode(entrypoint: string, execArgv: string[] = []): Promise<void> {
   const directory = mkdtempSync(join(tmpdir(), "tarve-node-dev-"));
   const app = join(directory, "app.mjs");
   const bootstrap = join(directory, "bootstrap.mjs");
@@ -73,7 +73,7 @@ process.on("disconnect", () => process.exit(0));
     child = fork(bootstrap, [app], {
       execPath: nodeExecutable(),
       stdio: ["inherit", "inherit", "inherit", "ipc"],
-      execArgv: ["--disable-warning=ExperimentalWarning"],
+      execArgv: ["--disable-warning=ExperimentalWarning", ...execArgv],
       env: { ...process.env, TARVE_DEV: "1", TARVE_HOT: "1", TARVE_NATIVE: nativePath(), TARVE_ENTRY: resolve(entrypoint) },
     });
     child.on("message", message => {
@@ -107,7 +107,7 @@ process.on("disconnect", () => process.exit(0));
 export function nodeExecutable(): string {
   return process.versions.bun ? (Bun.which("node") ?? "node") : process.execPath;
 }
-export async function runNode(entrypoint: string): Promise<number> {
+export async function runNode(entrypoint: string, execArgv: string[] = []): Promise<number> {
   const directory = mkdtempSync(join(tmpdir(), "tarve-node-run-"));
   try {
     const app = join(directory, "app.mjs");
@@ -119,7 +119,7 @@ export async function runNode(entrypoint: string): Promise<number> {
       loader: { ".png": "file", ".jpg": "file", ".jpeg": "file", ".webp": "file", ".gif": "file", ".svg": "file" },
       plugins: [installedBuildApi, fileImportAttributes, ...frameworks],
     });
-    const result = spawnSync(nodeExecutable(), ["--disable-warning=ExperimentalWarning", app], {
+    const result = spawnSync(nodeExecutable(), ["--disable-warning=ExperimentalWarning", ...execArgv, app], {
       stdio: "inherit",
       env: { ...process.env, TARVE_NATIVE: nativePath(), TARVE_ENTRY: resolve(entrypoint) },
     });

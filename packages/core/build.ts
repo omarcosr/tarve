@@ -39,6 +39,17 @@ export interface BuildOptions {
   compileJsx?: boolean;
   /** Runtime binary for the target OS (Node.js or txiki.js); required when cross-compiling a Node SEA or txiki.js app. */
   targetExecutable?: string;
+  /**
+   * A smaller JavaScript heap, collected more often: Bun's `--smol`, Node.js'
+   * `--optimize-for-size` with a 1 MB young generation. Less memory, slower
+   * bursts of allocation. txiki.js (QuickJS) has no such setting and ignores it.
+   */
+  smol?: boolean;
+}
+
+/** Flags a `smol` executable starts with, per runtime. */
+export function smolExecArgv(runtime: "bun" | "node"): string[] {
+  return runtime === "bun" ? ["--smol"] : ["--optimize-for-size", "--max-semi-space-size=1"];
 }
 
 // Level 12: within 1 MB of level 19 at a fiftieth of the compression time.

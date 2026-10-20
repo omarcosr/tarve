@@ -40,6 +40,10 @@ import { DevErrorOverlay } from "./dev-overlay";
 import { iconBytes, iconFileForShell, runtimeAppMetadata } from "./app-metadata";
 import { applySavedState, windowStateStore } from "./window-state";
 import { nativeAssetPath } from "./embedded-assets";
+import { readAutomation, runAutomation } from "./app/automation";
+
+/** The command-line automation (`--tarve-script`, `--tarve-snapshot`) drives the first app only. */
+let automationClaimed = false;
 
 export type AppErrorSource =
   | "render"
@@ -236,6 +240,11 @@ function asError(value: unknown): Error {
 }
 
 export function createApp(view: () => VNode, options: AppOptions = {}): AppHandle {
+  const automation = options.bridge || automationClaimed ? undefined : readAutomation();
+  if (automation) {
+    automationClaimed = true;
+    options = { ...options, debug: true };
+  }
   const bridge = options.bridge ?? new BunFfiBridge();
   /** Event listeners of the windows opened with `openWindow`, by window id. */
   const windows = new Map<string, (event: NativeEvent) => void>();
@@ -981,6 +990,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     settleClosed();
   }
 
+  if (automation && !ended) void runAutomation(app, automation);
   return app;
 }
 
