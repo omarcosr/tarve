@@ -2164,9 +2164,10 @@ impl D3d11Graphics {
                 "D3D11 frame was not prepared before capture".into(),
             ));
         }
-        // Capture the current prepared command list. Flip-model swapchain buffers are not
-        // retained-frame storage, so never read them without drawing this frame first.
+        // Flip-model swap chain buffers are not retained frames: draw this one first.
         // Videos in layers are drawn into the capture (a capture has no layers).
+        // An unchanged frame skips the back buffer: forget the tiles so all of it is drawn.
+        self.tile_hashes.clear();
         let punched = std::mem::take(&mut self.punched);
         let drawn = self.draw_frame(background);
         self.punched = punched;
