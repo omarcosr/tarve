@@ -1,5 +1,5 @@
 import type { BunPlugin } from "bun";
-import { closeSync, existsSync, mkdtempSync, openSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -249,7 +249,11 @@ async function withTrimmedNative(options: BuildOptions): Promise<BuildOptions> {
   if (process.env.TARVE_NATIVE_COMPILE !== "0" && features.canTrimNative(target)) {
     return { ...options, nativeLibrary: await features.buildTrimmedNative(target, required) };
   }
-  const variant = await prebuiltVariant(target, required);
+  // Trimming is an optimization: any failure here builds with the full library.
+  const variant = await prebuiltVariant(target, required).catch((error: Error) => {
+    console.warn(`Tarve: no prebuilt native variant (${error.message}); using the full library.`);
+    return undefined;
+  });
   if (variant) {
     console.log(`Native library: prebuilt "${variant.name}" variant`);
     return { ...options, nativeLibrary: variant.path };
@@ -257,27 +261,32 @@ async function withTrimmedNative(options: BuildOptions): Promise<BuildOptions> {
   return options;
 }
 
-/** The smallest prebuilt variant library covering `required`, checked against this Tarve version. */
+/**
+ * The smallest prebuilt variant library covering `required`, checked against this Tarve version.
+ * Runs before the runtime split, so under Node.js too: no Bun APIs here.
+ */
 async function prebuiltVariant(target: BuildTarget, required: readonly NativeFeature[]): Promise<{ name: string; path: string } | undefined> {
   const { nativeVariantPath, pickNativeVariant } = await import("./native-features");
   const config = targetConfig(target);
   const variant = pickNativeVariant(required, config.platform);
   if (!variant) return undefined;
+  const here = import.meta.dirname;
   let full: string | undefined;
-  try { full = resolveNativeLibrary(target); } catch { /* No full library to sit next to. */ }
+  if (target === hostBuildTarget()) {
+    try { full = nativePath(); } catch { /* No full library to sit next to. */ }
+  }
   const directories = [
     ...full ? [dirname(full)] : [],
-    resolve(import.meta.dir, "../../native", config.nativeDirectory),
-    resolve(import.meta.dir, "native", config.nativeDirectory),
+    resolve(here, "../../native", config.nativeDirectory),
+    resolve(here, "native", config.nativeDirectory),
   ];
   const path = directories.map(directory => nativeVariantPath(directory, variant.name, config.nativeName)).find(existsSync);
   if (!path) return undefined;
-  const sourceDirectory = join(import.meta.dir, "src");
-  const packageMetadata = await Bun.file(resolve(import.meta.dir, "../../package.json")).json() as { version: string };
-  const expected = existsSync(join(sourceDirectory, "index.ts"))
-    ? await createNativeCompatibilityManifest(resolve(import.meta.dir, "../.."), packageMetadata.version)
-    : await readNativeCompatibilityManifest(join(import.meta.dir, NATIVE_COMPATIBILITY_MANIFEST_NAME));
+  const packageMetadata = JSON.parse(readFileSync(resolve(here, "../../package.json"), "utf8")) as { version: string };
   try {
+    const expected = existsSync(join(here, "src/index.ts"))
+      ? await createNativeCompatibilityManifest(resolve(here, "../.."), packageMetadata.version)
+      : await readNativeCompatibilityManifest(join(here, NATIVE_COMPATIBILITY_MANIFEST_NAME));
     await assertNativeRuntimeCompatible(path, target, expected);
   } catch (error) {
     console.warn(`Tarve: prebuilt "${variant.name}" native variant is unusable (${(error as Error).message}); using the full library.`);
