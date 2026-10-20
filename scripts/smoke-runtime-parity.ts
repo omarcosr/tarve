@@ -13,8 +13,8 @@ import { readPngRgba } from "../packages/core/src/index";
 
 const root = resolve(import.meta.dir, "..");
 const examples = join(root, "examples");
-const cli = join(examples, "node_modules/@tarve/core/dist/npm/cli.js");
-if (!existsSync(cli)) throw new Error("Run bun run setup:examples first (examples/node_modules/@tarve/core is missing).");
+// The repository CLI, as examples run it (scripts/setup-examples.ts).
+const cli = join(root, "packages/core/cli.ts");
 const VIEWS = ["basic","components","diff","drag-and-drop","forms","glass","gradients","html","intrinsics","large-list","liquid","motion","performance","rich-content","tailwind","text"];
 const views = process.argv.slice(2).length ? process.argv.slice(2) : VIEWS;
 const variants = (process.env.RUNTIME_PARITY_VARIANTS ?? "node,node-c,txiki,txiki-c,bun-c").split(",");
@@ -133,7 +133,7 @@ try {
     for (const variant of variants) {
       const [runtime, compiled] = variant.split("-");
       const executable = join(out, `${view}-${variant}.exe`);
-      const build = Bun.spawnSync(["bun", cli, "build", source, "--outfile", executable, "--runtime", runtime!, ...(compiled ? ["--compile-jsx"] : [])], { cwd: examples, stdout: "pipe", stderr: "pipe" });
+      const build = Bun.spawnSync(["bun", cli, "build", source, "--outfile", executable, "--runtime", runtime!, ...(compiled ? ["--compile-jsx"] : [])], { cwd: examples, stdout: "pipe", stderr: "pipe", env: { ...process.env, TARVE_NATIVE_FEATURES: process.env.TARVE_NATIVE_FEATURES ?? "all" } });
       if (build.exitCode !== 0) { failures.push(`${view} ${variant} build: ${(build.stderr.toString() + build.stdout.toString()).trim().split(/\r?\n/)[0]}`); line.push(`${variant}=BUILD`); continue; }
       // Animations finish in wall-clock time (the motion example reports which ended first):
       // a mismatch counts only when a second run reproduces it.
