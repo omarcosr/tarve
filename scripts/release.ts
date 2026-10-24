@@ -44,6 +44,11 @@ await run([bun, "pm", "pack", "--ignore-scripts", "--destination", join(root, "d
 const headless = join(root, "dist", headlessName);
 await verifyHeadlessPack(headless);
 
+// @tarve/svelte ships TypeScript sources as-is, like @tarve/react-icons.
+const svelteName = `tarve-svelte-${policy.version}.tgz`;
+await run([bun, "pm", "pack", "--ignore-scripts", "--destination", join(root, "dist")], join(root, "packages/svelte"));
+const svelte = join(root, "dist", svelteName);
+
 const library = fromRoot(windowsNativeRelative);
 const linuxLibrary = fromRoot(linuxNativeRelative);
 // bun pm pack names scoped packages <scope>-<name>-<version>.tgz.
@@ -63,12 +68,14 @@ try {
   if (packedManifest.version !== policy.version) {
     throw new Error(`Packed version ${packedManifest.version} does not match ${policy.version}.`);
   }
-  const iconsExtraction = join(extraction, "icons");
-  await mkdir(iconsExtraction, { recursive: true });
-  await run(["tar", "-xzf", icons, "-C", iconsExtraction]);
-  const iconsManifest = await Bun.file(join(iconsExtraction, "package", "package.json")).json() as { name: string; version: string };
-  if (iconsManifest.name !== "@tarve/react-icons" || iconsManifest.version !== policy.version) {
-    throw new Error(`Packed icons package is ${iconsManifest.name}@${iconsManifest.version}, expected @tarve/react-icons@${policy.version}.`);
+  for (const [file, name] of [[icons, "@tarve/react-icons"], [svelte, "@tarve/svelte"]] as const) {
+    const directory = join(extraction, name.replace("@tarve/", ""));
+    await mkdir(directory, { recursive: true });
+    await run(["tar", "-xzf", file, "-C", directory]);
+    const packed = await Bun.file(join(directory, "package", "package.json")).json() as { name: string; version: string; peerDependencies?: Record<string, string> };
+    if (packed.name !== name || packed.version !== policy.version || packed.peerDependencies?.["@tarve/core"] !== `^${policy.version}`) {
+      throw new Error(`Packed ${name} is ${packed.name}@${packed.version} (peer @tarve/core ${packed.peerDependencies?.["@tarve/core"]}), expected ${name}@${policy.version} with ^${policy.version}.`);
+    }
   }
   const manifest = {
     product: "@tarve/core",
@@ -86,6 +93,7 @@ try {
       { file: tarballName, sha256: await sha256(tarball) },
       { file: iconsName, sha256: await sha256(icons) },
       { file: headlessName, sha256: await sha256(headless) },
+      { file: svelteName, sha256: await sha256(svelte) },
     ],
   };
   await writeFile(join(root, "dist/release-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);

@@ -55,6 +55,7 @@ jobs:
           path: |
             native/linux-x64/libtarve_native.so
             native/linux-x64/runtime.json
+            native/linux-x64/variants/
 
   linux-x64:
     name: Linux x64 gate

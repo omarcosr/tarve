@@ -1,6 +1,6 @@
 {
   "name": "@tarve/svelte",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Svelte 5 components in native Tarve windows",
   "license": "Apache-2.0",
   "type": "module",
@@ -35,13 +35,15 @@
   },
   "files": [
     "src",
+    "!src/**/*.test.ts",
+    "!src/fixtures",
     "README.md"
   ],
   "dependencies": {
     "svelte": "^5.57.2"
   },
   "peerDependencies": {
-    "@tarve/core": "^0.6.0"
+    "@tarve/core": "^0.7.0"
   },
   "engines": {
     "bun": ">=1.4.0",

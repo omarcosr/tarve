@@ -9,10 +9,12 @@ export interface ProductVersionState {
   protocolPackage: string;
   reactIcons: string;
   headless: string;
+  svelte: string;
   bunCore: string;
   bunProtocol: string;
   bunReactIcons: string;
   bunHeadless: string;
+  bunSvelte: string;
   native: string;
   cargoLock: string;
 }
@@ -80,12 +82,13 @@ export function assertValidSemver(version: string): void {
 }
 
 export async function readProductVersions(root: string): Promise<ProductVersionState> {
-  const [rootPackage, corePackage, protocolPackage, reactIconsPackage, headlessPackage, bunLock, cargoToml, cargoLock] = await Promise.all([
+  const [rootPackage, corePackage, protocolPackage, reactIconsPackage, headlessPackage, sveltePackage, bunLock, cargoToml, cargoLock] = await Promise.all([
     Bun.file(join(root, "package.json")).json() as Promise<{ version?: string }>,
     Bun.file(join(root, "packages/core/package.json")).json() as Promise<{ version?: string }>,
     Bun.file(join(root, "packages/protocol/package.json")).json() as Promise<{ version?: string }>,
     Bun.file(join(root, "packages/react-icons/package.json")).json() as Promise<{ version?: string }>,
     Bun.file(join(root, "packages/headless/package.json")).json() as Promise<{ version?: string }>,
+    Bun.file(join(root, "packages/svelte/package.json")).json() as Promise<{ version?: string }>,
     readFile(join(root, "bun.lock"), "utf8"),
     readFile(join(root, "native/Cargo.toml"), "utf8"),
     readFile(join(root, "native/Cargo.lock"), "utf8"),
@@ -97,10 +100,12 @@ export async function readProductVersions(root: string): Promise<ProductVersionS
     protocolPackage: protocolPackage.version ?? "",
     reactIcons: reactIconsPackage.version ?? "",
     headless: headlessPackage.version ?? "",
+    svelte: sveltePackage.version ?? "",
     bunCore: bunWorkspaceVersion(bunLock, "packages/core") ?? "",
     bunProtocol: bunWorkspaceVersion(bunLock, "packages/protocol") ?? "",
     bunReactIcons: bunWorkspaceVersion(bunLock, "packages/react-icons") ?? "",
     bunHeadless: bunWorkspaceVersion(bunLock, "packages/headless") ?? "",
+    bunSvelte: bunWorkspaceVersion(bunLock, "packages/svelte") ?? "",
     native: cargoPackageValue(cargoToml, "version") ?? "",
     cargoLock: lock ?? "",
   };
@@ -119,10 +124,13 @@ export function assertVersionsSynchronized(state: ProductVersionState): string {
 
 export async function setProductVersion(root: string, version: string): Promise<void> {
   assertValidSemver(version);
-  for (const relative of ["package.json", "packages/core/package.json", "packages/protocol/package.json", "packages/react-icons/package.json", "packages/headless/package.json"]) {
+  for (const relative of ["package.json", "packages/core/package.json", "packages/protocol/package.json", "packages/react-icons/package.json", "packages/headless/package.json", "packages/svelte/package.json"]) {
     const path = join(root, relative);
     const manifest = await Bun.file(path).json() as Record<string, unknown>;
     manifest.version = version;
+    // Published companions require the @tarve/core release they ship with.
+    const peers = manifest.peerDependencies as Record<string, string> | undefined;
+    if (peers?.["@tarve/core"]) peers["@tarve/core"] = `^${version}`;
     await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
   }
   const bunLockPath = join(root, "bun.lock");
@@ -131,6 +139,7 @@ export async function setProductVersion(root: string, version: string): Promise<
   bunLock = replaceBunWorkspaceVersion(bunLock, "packages/protocol", version);
   bunLock = replaceBunWorkspaceVersion(bunLock, "packages/react-icons", version);
   bunLock = replaceBunWorkspaceVersion(bunLock, "packages/headless", version);
+  bunLock = replaceBunWorkspaceVersion(bunLock, "packages/svelte", version);
   await writeFile(bunLockPath, bunLock);
   const cargoTomlPath = join(root, "native/Cargo.toml");
   await writeFile(cargoTomlPath, replaceCargoPackageValue(await readFile(cargoTomlPath, "utf8"), "version", version));

@@ -10,13 +10,15 @@ async function fixture(): Promise<string> {
   await mkdir(join(root, "packages/protocol"), { recursive: true });
   await mkdir(join(root, "packages/react-icons"), { recursive: true });
   await mkdir(join(root, "packages/headless"), { recursive: true });
+  await mkdir(join(root, "packages/svelte"), { recursive: true });
   await mkdir(join(root, "native"), { recursive: true });
   await Bun.write(join(root, "package.json"), JSON.stringify({ name: "tarve", version: "1.2.3" }));
   await Bun.write(join(root, "packages/core/package.json"), JSON.stringify({ name: "@tarve/core-internal", version: "1.2.3" }));
   await Bun.write(join(root, "packages/protocol/package.json"), JSON.stringify({ name: "@tarve/protocol", version: "1.2.3" }));
   await Bun.write(join(root, "packages/react-icons/package.json"), JSON.stringify({ name: "@tarve/react-icons", version: "1.2.3" }));
   await Bun.write(join(root, "packages/headless/package.json"), JSON.stringify({ name: "@tarve/headless", version: "1.2.3" }));
-  await Bun.write(join(root, "bun.lock"), '{"workspaces":{"packages/core":{"name":"@tarve/core-internal","version":"1.2.3"},"packages/protocol":{"name":"@tarve/protocol","version":"1.2.3"},"packages/react-icons":{"name":"@tarve/react-icons","version":"1.2.3"},"packages/headless":{"name":"@tarve/headless","version":"1.2.3"}}}');
+  await Bun.write(join(root, "packages/svelte/package.json"), JSON.stringify({ name: "@tarve/svelte", version: "1.2.3", peerDependencies: { "@tarve/core": "^1.2.3" } }));
+  await Bun.write(join(root, "bun.lock"), '{"workspaces":{"packages/core":{"name":"@tarve/core-internal","version":"1.2.3"},"packages/protocol":{"name":"@tarve/protocol","version":"1.2.3"},"packages/react-icons":{"name":"@tarve/react-icons","version":"1.2.3"},"packages/headless":{"name":"@tarve/headless","version":"1.2.3"},"packages/svelte":{"name":"@tarve/svelte","version":"1.2.3"}}}');
   await Bun.write(join(root, "native/Cargo.toml"), '[package]\nname = "tarve_native"\nversion = "1.2.3"\nedition = "2024"\n\n[lib]\ncrate-type = ["cdylib"]\n');
   await Bun.write(join(root, "native/Cargo.lock"), 'version = 4\n\n[[package]]\nname = "tarve_native"\nversion = "1.2.3"\n');
   return root;
@@ -34,5 +36,6 @@ describe("product version policy", () => {
     expect(() => assertVersionsSynchronized(drifted)).toThrow("Product version drift");
     await setProductVersion(root, "2.0.0-beta.1");
     expect(assertVersionsSynchronized(await readProductVersions(root))).toBe("2.0.0-beta.1");
+    expect((await Bun.file(join(root, "packages/svelte/package.json")).json()).peerDependencies["@tarve/core"]).toBe("^2.0.0-beta.1");
   });
 });
