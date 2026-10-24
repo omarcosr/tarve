@@ -94,7 +94,8 @@ export function Counter() {
 }
 
 app = createApp(Counter, {
-  renderer: "gpu",
+  renderer: "cpu",
+  lowPower: true,
 });
 app.registerHotkey("Ctrl+S", () => {
   status = `Ctrl+S handled at count ${count}`;
