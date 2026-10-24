@@ -11,7 +11,7 @@ import { connect } from "./youtube-music-actions";
 import { YouTubeMusicView } from "./youtube-music-view";
 
 // Name, icon and app id (media controls, taskbar) come from examples/package.json "tarve".
-const app = createApp(() => <YouTubeMusicView />, { closeBehavior: "hide" });
+const app = createApp(() => <YouTubeMusicView />, { closeBehavior: "hide", textRendering: "cleartype" });
 connect(app);
 await app.ready;
 app.tray({
