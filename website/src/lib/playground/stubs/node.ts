@@ -44,6 +44,7 @@ export const copyFileSync = () => unavailable("fs.copyFileSync");
 export const createWriteStream = () => unavailable("fs.createWriteStream");
 export const mkdirSync = () => unavailable("fs.mkdirSync");
 export const readFileSync = () => unavailable("fs.readFileSync");
+export const readdirSync = () => unavailable("fs.readdirSync");
 export const renameSync = () => unavailable("fs.renameSync");
 export const rmSync = () => unavailable("fs.rmSync");
 export const statSync = () => unavailable("fs.statSync");
