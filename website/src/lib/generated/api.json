@@ -5667,10 +5667,16 @@
     {
       "name": "TitleBar",
       "source": "packages/core/src/components/titlebar.ts",
-      "line": 61,
+      "line": 70,
       "generic": false,
       "propsType": "TitleBarProps",
       "props": [
+        {
+          "name": "actions",
+          "type": "Child",
+          "optional": true,
+          "doc": "After the title (before the window controls on desktop): icon buttons, a search field."
+        },
         {
           "name": "align",
           "type": "Style[\"align\"]",
@@ -5731,13 +5737,25 @@
           "name": "height",
           "type": "number",
           "optional": true,
-          "default": "40"
+          "default": "MOBILE ? 56 : 40"
         },
         {
           "name": "justify",
           "type": "Style[\"justify\"]",
           "optional": true,
           "from": "ViewProps"
+        },
+        {
+          "name": "leading",
+          "type": "Child",
+          "optional": true,
+          "doc": "Before the title: a menu button, an avatar. Replaces the back button `onBack` draws."
+        },
+        {
+          "name": "onBack",
+          "type": "() => void",
+          "optional": true,
+          "doc": "Draws a back arrow before the title that calls this: the usual top bar of a pushed screen."
         },
         {
           "name": "onOutsideClick",
@@ -5761,19 +5779,19 @@
           "name": "showClose",
           "type": "boolean",
           "optional": true,
-          "default": "true"
+          "default": "!MOBILE"
         },
         {
           "name": "showMaximize",
           "type": "boolean",
           "optional": true,
-          "default": "true"
+          "default": "!MOBILE"
         },
         {
           "name": "showMinimize",
           "type": "boolean",
           "optional": true,
-          "default": "true"
+          "default": "!MOBILE"
         },
         {
           "name": "title",
