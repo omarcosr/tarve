@@ -41,7 +41,9 @@ export interface OpenRequests {
 export function createOpenRequests(options: OpenRequestsOptions): OpenRequests {
   const urlListeners = new Set<OpenUrlListener>();
   const fileListeners = new Set<OpenFilesListener>();
-  const initial = options.launch ?? { args: process.argv.slice(2), cwd: process.cwd() };
+  // No `process` in a browser (the WebAssembly playground): nothing was opened with the app.
+  const host = (globalThis as { process?: NodeJS.Process }).process;
+  const initial = options.launch ?? { args: host?.argv?.slice(2) ?? [], cwd: host?.cwd?.() ?? "" };
   let unsubscribe: (() => void) | undefined;
   let disposed = false;
   /** The launch's own opens that came as events (Android), replayed like the argv ones. */
