@@ -76,15 +76,16 @@ export function App() {
       theme={appTheme}
       width={1140}
       height={870}
-      minWidth={860}
-      minHeight={640}
+      minWidth={360}
+      minHeight={520}
       position="center"
     >
       <TitleBar title="Tarve — Native workspace" />
       <Row
         style={{
           height: 70,
-          padding: { left: 32, right: 32 },
+          padding: { left: 16, right: 16 },
+          sm: { padding: { left: 32, right: 32 } },
           background: c.card,
           borderWidth: {
             bottom: 1,
@@ -111,10 +112,11 @@ export function App() {
           <Text size={18} weight={600}>
             tarve
           </Text>
+          {/* The workspace name and the status pill only where there is room (not on a phone). */}
           <View
-            style={{ width: 1, height: 22, background: c.border, margin: { left: 12, right: 12 } }}
+            style={{ width: 1, height: 22, background: c.border, margin: { left: 12, right: 12 }, display: "none", sm: { display: "flex" } }}
           />
-          <Text color={c.mutedForeground}>Personal workspace</Text>
+          <Text color={c.mutedForeground} style={{ display: "none", sm: { display: "flex" } }}>Personal workspace</Text>
         </Row>
         <Row gap={10}>
           <Button
@@ -132,6 +134,8 @@ export function App() {
               background: c.successMuted,
               radius: 20,
               padding: { left: 10, right: 10, top: 4, bottom: 4 },
+              display: "none",
+              sm: { display: "flex" },
             }}
           >
             <Text size={12} color={c.success}>
@@ -155,8 +159,8 @@ export function App() {
         </Row>
       </Row>
       <Scroll id="page-scroll" flex={1}>
-        <Column padding={32} gap={24} style={{ width: "100%" }}>
-          <Row justify="between" align="end">
+        <Column gap={24} style={{ width: "100%", padding: 16, sm: { padding: 32 } }}>
+          <Row justify="between" align="end" style={{ wrap: true, gap: 16 }}>
             <Column gap={5}>
               <Text size={28} weight={650}>
                 Your workspace
@@ -174,7 +178,7 @@ export function App() {
               + New project
             </Button>
           </Row>
-          <Row gap={4} style={{ padding: 4, background: c.muted, radius: 8, width: 316 }}>
+          <Row gap={4} style={{ padding: 4, background: c.muted, radius: 8, width: 316, maxWidth: "100%" }}>
             {["Overview", "Activity", "Settings"].map((tab) => (
               <Button
                 key={tab}
@@ -197,7 +201,7 @@ export function App() {
               </Button>
             ))}
           </Row>
-          <View id="stats-grid" style={{ display: "grid", columns: 3, gap: 16 }}>
+          <View id="stats-grid" style={{ display: "grid", columns: 1, sm: { columns: 3 }, gap: 16 }}>
             {[
               ["Projects", String(12 + clicks), "+2 this month"],
               ["Team members", "8", "Across 3 teams"],
@@ -216,8 +220,9 @@ export function App() {
               </Column>
             ))}
           </View>
-          <Row gap={20} align="start">
-            <Column flex={1} gap={20}>
+          {/* Two columns of cards on a wide window, one on a phone. */}
+          <Row gap={20} style={{ direction: "column", align: "stretch", md: { direction: "row", align: "start" } }}>
+            <Column flex={1} gap={20} style={{ minWidth: 0 }}>
               <Card title="Profile" description="Your details, just the way you like them.">
                 <Column gap={7}>
                   <Text size={13} weight={500}>
@@ -248,7 +253,7 @@ export function App() {
                   />
                 </Column>
                 <View style={divider} />
-                <Row justify="between">
+                <Row justify="between" align="center" style={{ wrap: true, gap: 12 }}>
                   <Text id="save-status" size={12} color={c.mutedForeground}>
                     {status}
                   </Text>
@@ -270,7 +275,7 @@ export function App() {
                   style={{ width: "100%", radius: 6 }}
                   fit="cover"
                 />
-                <Row justify="between">
+                <Row justify="between" align="center" style={{ wrap: true, gap: 12 }}>
                   <Column gap={3}>
                     <Text weight={500}>A fresh perspective</Text>
                     <Text size={12} color={c.mutedForeground}>
@@ -290,7 +295,7 @@ export function App() {
                 </Row>
               </Card>
             </Column>
-            <Column flex={1} gap={20}>
+            <Column flex={1} gap={20} style={{ minWidth: 0 }}>
               <Card title="Buttons" description="The right emphasis for every action.">
                 <Row gap={10} style={{ wrap: true }}>
                   <Button

@@ -156,7 +156,7 @@ export function App() {
   const windowStart = Math.max(0, first - WINDOW_MARGIN);
   const windowEnd = Math.min(ROW_COUNT, first + visible + WINDOW_MARGIN);
   return (
-    <Window title="Tarve — 100,000 rows" width={1080} height={820} minWidth={560} minHeight={600} position="center" theme={darkTheme}>
+    <Window title="Tarve — 100,000 rows" width={1080} height={820} minWidth={360} minHeight={520} position="center" theme={darkTheme}>
       <TitleBar title="Tarve — 100,000 rows" />
       <Column gap={14} padding={20} flex={1} style={{ width: "100%" }}>
         <Row justify="between" align="center" style={{ width: "100%" }}>
@@ -174,7 +174,7 @@ export function App() {
 
         {view === "list" ? (
           <Column gap={12} flex={1} style={{ width: "100%" }}>
-            <Row gap={8} align="center" style={{ width: "100%" }}>
+            <Row gap={8} align="center" style={{ width: "100%", wrap: true }}>
               <Input id="jump-row" type="number" value={jumpText} onChange={value => { jumpText = value; }} style={{ width: 140 }} />
               <Button id="fly-to-row" disabled={!Number.isFinite(target) || flight !== undefined} onClick={() => flyTo(target)}>Fly to row</Button>
               <Button id="fly-to-top" variant="outline" disabled={flight !== undefined} onClick={() => flyTo(0)}>Top</Button>

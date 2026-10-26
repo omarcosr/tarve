@@ -76,6 +76,9 @@ test.skipIf(!supported)("Node dev remounts the same window and process on TSX ed
       expect(output, errors).toContain(text);
     };
     await waitFor("tarve dev: ready");
+    // The app's own log and the CLI's "ready" come from two processes sharing one pipe; on
+    // Windows the child's pipe writes are asynchronous, so "ready" can arrive first.
+    await waitFor("render:v1:");
     const pid = /render:v1:(\d+)/.exec(output)?.[1];
     expect(pid).toBeDefined();
     await Bun.sleep(500);

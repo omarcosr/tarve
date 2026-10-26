@@ -1,0 +1,5 @@
+{
+  "name": "Basic",
+  "description": "a counter with Tarve components",
+  "entry": "app.tsx"
+}

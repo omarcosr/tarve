@@ -23,7 +23,8 @@ function alpha(token: string | undefined): number {
 }
 
 function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-  const k = (n: number) => (n + h / 30) % 12;
+  const hue = ((h % 360) + 360) % 360;
+  const k = (n: number) => (n + hue / 30) % 12;
   const a = s * Math.min(l, 1 - l);
   const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
   return [f(0) * 255, f(8) * 255, f(4) * 255];
@@ -49,7 +50,7 @@ export function cssColor(value: string): string {
   if (parts.length < 3) throw new TypeError(`Unsupported colour: ${value}`);
   const [r, g, b] = fn[1]!.startsWith("rgb")
     ? [channel(parts[0]!, 255), channel(parts[1]!, 255), channel(parts[2]!, 255)]
-    : hslToRgb(Number.parseFloat(parts[0]!), channel(parts[1]!, 1), channel(parts[2]!, 1));
+    : hslToRgb(angle(parts[0]!) ?? channel(parts[0]!, 1), channel(parts[1]!, 1), channel(parts[2]!, 1));
   return `#${hex2(r)}${hex2(g)}${hex2(b)}${hex2(a * 255)}`;
 }
 

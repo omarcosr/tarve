@@ -23,7 +23,7 @@ import { StackIcon } from "@phosphor-icons/react/dist/csr/Stack";
 import { WarningIcon } from "@phosphor-icons/react/dist/csr/Warning";
 import { XIcon } from "@phosphor-icons/react/dist/csr/X";
 import { XCircleIcon } from "@phosphor-icons/react/dist/csr/XCircle";
-import { Column, darkTheme, Image, Input, memo, Modal, Path, Pressable, Row, Scroll, Svg, Text, Theme, TitleBar, Tooltip, View, VirtualList, Window, type Child, type VNode } from "@tarve/core";
+import { viewport, Column, darkTheme, Image, Input, memo, Modal, Path, Pressable, Row, Scroll, Svg, Text, Theme, TitleBar, Tooltip, View, VirtualList, Window, type Child, type VNode } from "@tarve/core";
 import { cpuBasis, iconFor, setCpuBasis, type CpuBasis, type Proc, type Sample } from "./pulse-source";
 
 export type Page = "overview" | "processes" | "cpu" | "memory" | "gpu" | "disk" | "network" | "energy" | "system";
@@ -69,8 +69,8 @@ export const state = {
   widths: {} as Record<string, number>,
   /** The chart column under the pointer. */
   hover: null as { id: string; col: number } | null,
-  /** Sidebar shown; settings panel open; the choices made there. */
-  sidebar: true,
+  /** Sidebar shown (from the start only where it fits beside the content); settings panel open; the choices made there. */
+  sidebar: viewport().width >= 640,
   settings: false,
   prefs: { cpu: cpuBasis() as CpuBasis, interval: "1" as "1" | "2" | "5", network: "bits" as "bits" | "bytes", temperature: "c" as "c" | "f", virtual: "show" as "show" | "hide" },
   skipped: 0,
@@ -371,7 +371,7 @@ const StaticCardHeader = memo((props: { page: Page; color: string; title: string
 
 function Card({ id, title, page, color, open, aside, children, style }: { id: string; title: string; page: Page; color: string; open?: Page; aside?: Child; children: Child; style?: object }) {
   const header = aside ? <CardHeader page={page} color={color} title={title} aside={aside} /> : <StaticCardHeader page={page} color={color} title={title} caret={!!open} />;
-  const base = { flex: 1, minWidth: 0, padding: 14, gap: 12, radius: 16, background: c.card, ...style };
+  const base = { flex: 1, minWidth: 0, minHeight: 230, padding: 14, gap: 12, radius: 16, background: c.card, ...style };
   return open
     ? <Pressable id={id} onClick={() => { state.page = open; }} control={{ role: "button", label: title }} style={{ ...base, direction: "column", cursor: "pointer", hover: { background: "#252429" } }}>{header}{children}</Pressable>
     : <Column id={id} style={base}>{header}{children}</Column>;
@@ -602,9 +602,9 @@ function Overview() {
   return (
     <Scroll id="overview" flex={1} style={{ minHeight: 0, scrollbarWidth: "none" }}>
       <Column gap={16} style={{ padding: PAD }}>
-        <Row gap={16} align="stretch" style={{ height: 248 }}><CpuCard s={s} /><MemoryCard s={s} /><GpuCard s={s} /></Row>
-        <Row gap={16} align="stretch" style={{ height: 248 }}><DiskCard s={s} /><NetworkCard s={s} /><BatteryCard s={s} /></Row>
-        <Row gap={16} align="stretch" style={{ minHeight: 230 }}><MemoryByType s={s} /><MemoryByApp s={s} /><EnergyByApp s={s} /></Row>
+        <Row gap={16} align="stretch" style={{ direction: "column", md: { direction: "row", height: 248 } }}><CpuCard s={s} /><MemoryCard s={s} /><GpuCard s={s} /></Row>
+        <Row gap={16} align="stretch" style={{ direction: "column", md: { direction: "row", height: 248 } }}><DiskCard s={s} /><NetworkCard s={s} /><BatteryCard s={s} /></Row>
+        <Row gap={16} align="stretch" style={{ minHeight: 230, direction: "column", md: { direction: "row" } }}><MemoryByType s={s} /><MemoryByApp s={s} /><EnergyByApp s={s} /></Row>
       </Column>
     </Scroll>
   );
@@ -934,7 +934,7 @@ function EnergyPage() {
   return (
     <Scroll flex={1} style={{ minHeight: 0, scrollbarWidth: "none" }}>
       <Column gap={16} style={{ padding: PAD }}>
-        <Row gap={16} align="stretch" style={{ height: 248 }}>
+        <Row gap={16} align="stretch" style={{ direction: "column", md: { direction: "row", height: 248 } }}>
           <BatteryCard s={s} />
           <Card id="power" title="Power" page="energy" color={c.energy}>
             <Column gap={4}><Text size={12} color={c.muted}>{b?.draw ? "Drawing from the battery" : "CPU package + GPU"}</Text><Big value={watts(s.power.system).replace(/ m?W$/, "")} unit={watts(s.power.system).endsWith("mW") ? "mW" : "W"} /></Column>

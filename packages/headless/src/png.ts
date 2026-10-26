@@ -1,4 +1,4 @@
-import { deflateSync } from "node:zlib";
+import { headlessRuntime } from "./runtime";
 
 const CRC_TABLE = new Uint32Array(256).map((_, n) => {
   let c = n;
@@ -21,7 +21,11 @@ function chunk(type: string, data: Uint8Array): Buffer {
   return out;
 }
 
-/** Encodes RGBA8 pixels as an 8-bit truecolour-with-alpha PNG. */
+/**
+ * Encodes RGBA8 pixels as an 8-bit truecolour-with-alpha PNG. The image data is deflated by the
+ * WebAssembly runtime (the same code on Bun, Node.js and txiki.js), so call and await
+ * `loadHeadlessRuntime()` first; every render function already has.
+ */
 export function encodePng(rgba: Uint8Array, width: number, height: number): Uint8Array {
   const stride = width * 4;
   const raw = Buffer.alloc((stride + 1) * height);
@@ -37,7 +41,7 @@ export function encodePng(rgba: Uint8Array, width: number, height: number): Uint
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
-    chunk("IDAT", deflateSync(raw, { level: 9 })),
+    chunk("IDAT", headlessRuntime().zlib.deflate(raw, 9)),
     chunk("IEND", new Uint8Array()),
   ]);
 }

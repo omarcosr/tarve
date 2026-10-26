@@ -1,0 +1,29 @@
+{
+  "name": "tarve-plugin-hello",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sample Tarve plugin: a Rust cdylib (hello_add) behind a typed TypeScript command",
+  "type": "module",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./plugin.ts"
+  },
+  "scripts": {
+    "build:native": "cargo build --release --manifest-path native/Cargo.toml",
+    "test": "bun test",
+    "demo": "bun ../../packages/core/cli.ts run demo.tsx"
+  },
+  "peerDependencies": {
+    "@tarve/core": ">=0.7.0"
+  },
+  "tarve": {
+    "tarvePluginApi": 1,
+    "plugin": "./plugin.ts",
+    "native": {
+      "win32-x64": "./native/target/release/tarve_plugin_hello.dll",
+      "linux-x64": "./native/target/release/libtarve_plugin_hello.so",
+      "darwin-arm64": "./native/target/release/libtarve_plugin_hello.dylib",
+      "android-arm64": "./native/target/aarch64-linux-android/release/libtarve_plugin_hello.so"
+    }
+  }
+}

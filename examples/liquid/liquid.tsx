@@ -1,7 +1,6 @@
 import { createApp } from "@tarve/core";
 import { App, step } from "./liquid-view";
 
-// Liquid Glass needs the D3D11 renderer (Windows). Other renderers show the tints only.
 const app = createApp(App);
 await app.ready;
 step();

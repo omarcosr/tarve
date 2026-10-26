@@ -154,7 +154,7 @@ let emailAddress = "hello@example.com";
 
 export function App() {
   return (
-    <Window title="Tarve — Components" width={1180} height={900} minWidth={900} minHeight={650} position="center">
+    <Window title="Tarve — Components" width={1180} height={900} minWidth={360} minHeight={520} position="center">
       <TitleBar title="Tarve — Components" />
       <Scroll id="components-scroll" flex={1} speed={1}>
         <Column gap={20} padding={28} style={{ width: "100%" }}>
@@ -163,7 +163,7 @@ export function App() {
             <Text color={c.mutedForeground}>Interactive examples for the 27 high-level components added to Tarve.</Text>
           </Column>
 
-          <View style={{ display: "grid", columns: 2, gap: 18 }}>
+          <View style={{ display: "grid", columns: 1, md: { columns: 2 }, gap: 18 }}>
             <Section title="Alert" description="Status messages with semantic variants.">
               <Column gap={8}>
                 <Alert title="Default alert" description="A neutral application message." />
@@ -173,7 +173,7 @@ export function App() {
             </Section>
 
             <Section title="AspectRatio" description="Keeps media at a predictable proportion.">
-              <AspectRatio ratio={16 / 9} width={360} style={{ background: c.muted, radius: 8, align: "center", justify: "center" }}>
+              <AspectRatio ratio={16 / 9} width="100%" style={{ maxWidth: 360, background: c.muted, radius: 8, align: "center", justify: "center" }}>
                 <Typography variant="muted">16:9 media surface</Typography>
               </AspectRatio>
             </Section>
@@ -204,18 +204,18 @@ export function App() {
 
             <Section title="SVG + Icons" description="Native SVG plus external icon libraries through pluggable component adapters.">
               <Column gap={14}>
-                <Row gap={14} align="center">
-                  <View style={{ width: 220, height: 124, shrink: 0, background: c.muted, borderWidth: 1, borderColor: c.border, radius: 10 }}>
+                <Row gap={14} style={{ direction: "column", align: "stretch", sm: { direction: "row", align: "center" } }}>
+                  <View style={{ width: 220, maxWidth: "100%", height: 124, shrink: 0, background: c.muted, borderWidth: 1, borderColor: c.border, radius: 10 }}>
                     <Image id="demo-svg-image" src={vectorScene} width={220} height={124} fit="contain" style={{ radius: 10 }} />
                   </View>
-                  <Column gap={7} flex={1}>
+                  <Column gap={7} flex={1} style={{ minWidth: 0 }}>
                     <Text weight={650}>File SVG + declarative TSX</Text>
                     <Text size={11} color={c.mutedForeground}>Image can load a .svg file, while Svg/Path/Circle declare vector geometry directly in TSX.</Text>
                     <Svg id="demo-inline-svg" size={48} viewBox="0 0 24 24" color={c.foreground} strokeWidth={1.8}>
                       <Circle cx={12} cy={12} r={9} />
                       <Path d="M8 12.5 10.7 15 16 9" />
                     </Svg>
-                    <Row gap={8}>
+                    <Row gap={8} style={{ wrap: true }}>
                       <Button size="sm"><Icon iconNode={lucideStyleIcons[4].iconNode} /><Text>Export</Text></Button>
                       <Button size="sm" variant="outline"><Icon iconNode={lucideStyleIcons[5].iconNode} /><Text>Mail</Text></Button>
                     </Row>

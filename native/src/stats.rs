@@ -106,6 +106,19 @@ pub(crate) fn trace(label: &str) -> f64 {
     ms
 }
 
+/// One line per presented frame under TARVE_TRACE=1: when it ended, its CPU cost and its total
+/// (CPU plus present), so a device run can be measured from the log alone.
+pub(crate) fn trace_frame(cpu_ms: f64, total_ms: f64) {
+    if trace_enabled() {
+        let at = STARTED
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_secs_f64()
+            * 1000.0;
+        eprintln!("[frame] {at:.2} {cpu_ms:.2} {total_ms:.2}");
+    }
+}
+
 impl MemoryStages {
     pub(crate) fn record(&mut self, label: &'static str) {
         let ms = trace(label);

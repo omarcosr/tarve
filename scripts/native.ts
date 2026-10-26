@@ -30,10 +30,17 @@ export async function buildNative(release: boolean, features?: readonly string[]
     if (!Bun.which("cc") && !Bun.which("gcc") && !Bun.which("clang")) missing.push("C compiler");
     if (!Bun.which("pkg-config")) missing.push("pkg-config");
     if (missing.length > 0) throw linuxNativePrerequisiteError(missing);
+  } else if (config.platform === "darwin") {
+    const missing: string[] = [];
+    if (!cargoExecutable) missing.push("cargo (https://rustup.rs)");
+    if (!Bun.which("cc") && !Bun.which("clang")) missing.push("C compiler (xcode-select --install)");
+    if (missing.length > 0) throw new Error(`Missing macOS native build prerequisites: ${missing.join(", ")}.`);
   } else if (!cargoExecutable) {
     throw new Error("Rust Cargo is required to build the Tarve native runtime. Install the stable Rust toolchain from https://rustup.rs and retry.");
   }
   const env = { ...process.env };
+  // Matches LSMinimumSystemVersion in the .app Info.plist (packages/core/macos-bundle.ts).
+  if (config.platform === "darwin") env.MACOSX_DEPLOYMENT_TARGET ??= "11.0";
   if (release && config.platform === "win32") {
     // Keep the CRT inside our DLL; no allocator ownership crosses the C ABI.
     if (env.CARGO_ENCODED_RUSTFLAGS !== undefined) env.CARGO_ENCODED_RUSTFLAGS += "\u001f-Ctarget-feature=+crt-static";

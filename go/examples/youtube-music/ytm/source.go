@@ -104,9 +104,6 @@ func authorization() string {
 }
 
 func call(ctx context.Context, endpoint string, body map[string]any, query string) (any, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	payload := map[string]any{"context": map[string]any{"client": map[string]any{"clientName": "WEB_REMIX", "clientVersion": "1.20250101.01.00", "hl": "en", "gl": "US"}}}
 	for k, v := range body {
 		payload[k] = v
@@ -346,7 +343,7 @@ func Home(ctx context.Context, onProgress func([]*Shelf)) ([]*Shelf, error) {
 }
 
 func Search(query string) ([]*Item, error) {
-	data, err := call(nil, "search", map[string]any{"query": query, "params": "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"}, "")
+	data, err := call(context.Background(), "search", map[string]any{"query": query, "params": "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"}, "")
 	if err != nil {
 		return nil, err
 	}
@@ -479,7 +476,7 @@ func panelItem(row any) *Item {
 
 // Radio is what YouTube Music plays after a song: songs like it, the song itself first.
 func Radio(id string) ([]*Item, error) {
-	data, err := call(nil, "next", map[string]any{"videoId": id, "playlistId": "RDAMVM" + id, "isAudioOnly": true, "enablePersistentPlaylistPanel": true, "tunerSettingValue": "AUTOMIX_SETTING_NORMAL"}, "")
+	data, err := call(context.Background(), "next", map[string]any{"videoId": id, "playlistId": "RDAMVM" + id, "isAudioOnly": true, "enablePersistentPlaylistPanel": true, "tunerSettingValue": "AUTOMIX_SETTING_NORMAL"}, "")
 	if err != nil {
 		return nil, err
 	}
@@ -499,7 +496,7 @@ func Library() ([]*Item, error) {
 	if !SignedIn() {
 		return []*Item{}, nil
 	}
-	data, err := call(nil, "browse", map[string]any{"browseId": "FEmusic_liked_playlists"}, "")
+	data, err := call(context.Background(), "browse", map[string]any{"browseId": "FEmusic_liked_playlists"}, "")
 	if err != nil {
 		return nil, err
 	}
@@ -587,7 +584,7 @@ func visitorData(fresh bool) (string, error) {
 		e = &visitorEntry{done: make(chan struct{}), at: time.Now()}
 		visitor = e
 		go func() {
-			data, err := call(nil, "browse", map[string]any{"browseId": "FEmusic_home"}, "")
+			data, err := call(context.Background(), "browse", map[string]any{"browseId": "FEmusic_home"}, "")
 			e.id, e.err = gstr(data, "responseContext", "visitorData"), err
 			if err != nil {
 				visitorMu.Lock()

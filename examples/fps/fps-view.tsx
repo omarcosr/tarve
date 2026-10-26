@@ -71,8 +71,8 @@ function Controls() {
         <Text size={13} style={{ width: 56, textAlign: "end", fontFamily: "monospace" }}>{String(state.load)}</Text>
       </Row>
       <Row gap={10} align="center">
-        <Switch id="animate" label="Animate" checked={state.animate} onCheckedChange={checked => { state.animate = checked; }} />
-        <Text size={13}>Animate (off: the window stops drawing, 0 fps)</Text>
+        <Switch id="animate" label="Animate (off: the window stops drawing, 0 fps)" checked={state.animate}
+            onCheckedChange={checked => { state.animate = checked; }} style={{ foreground: "#e5e7eb", shrink: 1 }} />
       </Row>
     </Column>
   );
@@ -94,8 +94,8 @@ export function FpsView() {
   return (
     <Window title={`Frame rate — ${state.fps.toFixed(0)} fps`} width={940} height={640} minWidth={640} minHeight={480} position="center"
       style={{ background: bg, foreground: "#e5e7eb" }}>
-      <Row flex={1} gap={14} align="stretch" style={{ padding: 14, minHeight: 0 }}>
-        <Column gap={14} style={{ width: 380, shrink: 0 }}>
+      <Row flex={1} gap={14} align="stretch" style={{ padding: 14, minHeight: 0, direction: "column", sm: { direction: "row" } }}>
+        <Column gap={14} style={{ shrink: 0, sm: { width: 380 } }}>
           <Meter />
           <Controls />
         </Column>

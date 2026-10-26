@@ -5,6 +5,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { builtinModules } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 import type { Plugin } from "esbuild";
 import { nativePath } from "#tarve/runtime";
@@ -12,6 +13,7 @@ import { metadataOverrides, type BuildOptions } from "./build";
 import { frameworkPlugins } from "./framework-plugins";
 import { buildMetadata, writeLinuxDesktopEntry } from "./package-metadata";
 import { hostBuildTarget, targetConfig } from "./targets";
+import { pluginNativeModule, pluginNativesForBuild } from "./plugins-build";
 
 export interface TxikiBuildOptions extends BuildOptions {
   /** txiki.js (tjs) used to compile the bundle. Defaults to TARVE_TXIKI, then `tjs` on PATH. */
@@ -30,7 +32,7 @@ const ASSET = /\.(?:png|jpe?g|webp|gif|svg|ico|ttf|otf|woff2?)$/i;
 /** Prefix of the string each unavailable() call site carries; one in the bundle fails the build. */
 const UNAVAILABLE = "tarve-txiki-unavailable:";
 
-interface EmbeddedFile { name: string; data: Uint8Array; gzip: boolean }
+export interface EmbeddedFile { name: string; data: Uint8Array; gzip: boolean }
 
 function findTxiki(explicit?: string): string {
   const candidate = explicit ?? process.env.TARVE_TXIKI ?? (process.versions.bun ? Bun.which("tjs") : undefined) ?? "tjs";
@@ -74,114 +76,20 @@ export async function buildTxiki(options: TxikiBuildOptions): Promise<string> {
   const temporary = mkdtempSync(join(tmpdir(), "tarve-txiki-build-"));
   try {
     const root = import.meta.dirname;
-    const source = existsSync(join(root, "src/index.ts"));
-    const assets: EmbeddedFile[] = [];
-    // node:* names the app imports that no shim provides, found by a first bundle attempt.
-    const missing = new Map<string, Set<string>>();
-    const importers = new Map<string, Set<string>>();
-    const runtime: Plugin = {
-      name: "tarve-txiki-runtime",
-      setup(build) {
-        build.onResolve({ filter: /^tjs:/ }, args => ({ path: args.path, external: true }));
-        build.onResolve({ filter: /^(?:node:)?[a-z_]+(?:\/[a-z_]+)?$/ }, args => {
-          const name = args.path.replace(/^node:/, "");
-          // Bundled packages (the npm build of @tarve/core) import builtins without "node:".
-          if (!NODE_SHIMS[name] && !args.path.startsWith("node:") && !builtinModules.includes(name)) return undefined;
-          if (!importers.has(name)) importers.set(name, new Set());
-          importers.get(name)!.add(args.importer);
-          return { path: name, namespace: "tarve-node", sideEffects: false };
-        });
-        build.onResolve({ filter: /^#tarve\/runtime$/ }, () => ({ path: join(root, "txiki/runtime.ts") }));
-        if (source) {
-          build.onResolve({ filter: /^(?:@tarve\/core(?:-internal)?|tarve)(?:\/(?:jsx-runtime|jsx-dev-runtime))?$/ }, args => {
-            const entry = args.path.replace(/^(?:@tarve\/core(?:-internal)?|tarve)/, "") || "/index";
-            return { path: join(root, "src", `${entry.slice(1)}.ts`) };
-          });
-        }
-        build.onResolve({ filter: /.*/ }, args => {
-          const type = args.with?.type ?? (ASSET.test(args.path) && args.kind === "import-statement" ? "file" : undefined);
-          if (type !== "file" && type !== "text") return undefined;
-          return { path: resolve(dirname(args.importer), args.path), namespace: `tarve-${type}` };
-        });
-        // node:<name>: the shim's exports plus an unavailable() placeholder per name it lacks.
-        // Tooling the app never reaches (test-renderer, visual-testing) tree-shakes away with them.
-        build.onLoad({ filter: /.*/, namespace: "tarve-node" }, args => {
-          const shim = NODE_SHIMS[args.path] && JSON.stringify(join(root, "txiki/shims", `${NODE_SHIMS[args.path]}.ts`));
-          const placeholder = (api: string) => `/* @__PURE__ */ unavailable(${JSON.stringify(`${UNAVAILABLE}node:${api}`)})`;
-          return {
-            contents: [
-              `import { unavailable } from ${JSON.stringify(join(root, "txiki/unavailable.ts"))};`,
-              ...shim ? [`export * from ${shim};`, `export { default } from ${shim};`] : [`export default ${placeholder(args.path)};`],
-              ...[...missing.get(args.path) ?? []].map(name => `export const ${name} = ${placeholder(`${args.path}.${name}`)};`),
-            ].join("\n"),
-            loader: "js",
-            resolveDir: root,
-          };
-        });
-        if (options.compileJsx) {
-          build.onLoad({ filter: /\.[jt]sx$/ }, async args => {
-            if (/[\\/]node_modules[\\/]/.test(args.path) || args.path.startsWith(join(root, "src"))) return undefined;
-            const { compileJsx } = await import("./jsx-compile");
-            return { contents: (await compileJsx(readFileSync(args.path, "utf8"))).code, loader: args.path.endsWith(".jsx") ? "jsx" : "tsx", resolveDir: dirname(args.path) };
-          });
-        }
-        build.onLoad({ filter: /.*/, namespace: "tarve-text" }, args => ({ contents: readFileSync(args.path, "utf8"), loader: "text" }));
-        build.onLoad({ filter: /.*/, namespace: "tarve-file" }, args => {
-          const data = readFileSync(args.path);
-          const name = `${createHash("sha256").update(data).digest("hex").slice(0, 12)}-${basename(args.path)}`;
-          if (!assets.some(asset => asset.name === name)) assets.push({ name, data, gzip: false });
-          // The prelude extracts every embedded file before app modules evaluate.
-          return { contents: `export default globalThis.__tarveAssets[${JSON.stringify(name)}];`, loader: "js" };
-        });
-      },
-    };
-    const entry = join(temporary, "entry.ts");
-    writeFileSync(entry, [
-      `import ${JSON.stringify(join(root, "txiki/prelude.ts"))};`,
-      `import ${JSON.stringify(resolve(options.entrypoint))};`,
-    ].join("\n"));
-    const bundle = join(temporary, "app.js");
-    const { build: esbuild } = await import("esbuild");
-    const frameworks = await frameworkPlugins(options.entrypoint);
-    const bundleApp = () => esbuild({
-      entryPoints: [entry],
-      outfile: bundle,
-      bundle: true,
-      platform: "neutral",
-      mainFields: ["module", "main"],
-      format: "esm",
-      target: "es2023",
-      minify: !process.env.TARVE_TXIKI_DEBUG,
-      jsx: "automatic",
-      jsxImportSource: "@tarve/core",
-      logLevel: "silent",
+    const { bundle, assets } = await bundleQuickJs(options, {
+      label: "txiki.js",
+      prelude: join(root, "txiki/prelude.ts"),
+      runtimeModule: join(root, "txiki/runtime.ts"),
+      shims: Object.fromEntries(Object.entries(NODE_SHIMS).map(([name, file]) => [name, join(root, "txiki/shims", `${file}.ts`)])),
+      tjs: "external",
+      // Plugins' native libraries ride along as embedded files, registered in #tarve/runtime.
+      runtimeExtra: pluginNativeModule(pluginNativesForBuild(options.entrypoint, target).embeds, fileURLToPath(import.meta.resolve("#tarve/assets"))),
       define: {
         ...define,
-        "process.env.NODE_ENV": JSON.stringify("production"),
-        "import.meta.dirname": "globalThis.__tarveDirname",
         TARVE_TXIKI_PLATFORM: JSON.stringify(config.platform),
         TARVE_TXIKI_NATIVE_NAME: JSON.stringify(config.nativeName),
       },
-      plugins: [runtime, ...frameworks],
-      metafile: !!process.env.TARVE_TXIKI_DEBUG,
-    });
-    // A name a shim lacks is a build error; record it, then bundle again with a placeholder for it.
-    for (let attempt = 0; ; attempt++) {
-      try {
-        const result = await bundleApp();
-        if (process.env.TARVE_TXIKI_DEBUG) writeFileSync(`${process.env.TARVE_TXIKI_DEBUG}.meta.json`, JSON.stringify(result.metafile));
-        break;
-      } catch (error) {
-        const errors = (error as { errors?: { text: string }[] }).errors ?? [];
-        const lacking = errors.map(({ text }) => /^No matching export in "tarve-node:([^"]+)" for import "([^"]+)"$/.exec(text));
-        if (!lacking.length || lacking.some(match => !match) || attempt > 3) throw error;
-        for (const match of lacking) {
-          if (!missing.has(match![1]!)) missing.set(match![1]!, new Set());
-          missing.get(match![1]!)!.add(match![2]!);
-        }
-      }
-    }
-    assertAvailable(readFileSync(bundle, "utf8"), importers);
+    }, temporary);
 
     // TARVE_TXIKI_DEBUG=<file>: keep a readable bundle there (and <file>.meta.json, the esbuild metafile);
     // `tjs run <file>` gives real stack lines.
@@ -217,8 +125,154 @@ export async function buildTxiki(options: TxikiBuildOptions): Promise<string> {
   }
 }
 
+/** How a QuickJS-ng runtime (txiki.js, the Android host) gets its bundle: its prelude, #tarve/runtime and node:* shims. */
+export interface QuickJsFlavor {
+  /** The runtime, as error messages name it. */
+  label: string;
+  prelude: string;
+  runtimeModule: string;
+  /** Source appended to `#tarve/runtime` (the registration of plugins' native libraries). */
+  runtimeExtra?: string;
+  /** node:* module name → absolute path of its shim. */
+  shims: Record<string, string>;
+  /** tjs:* imports: provided by the runtime (txiki.js), or each mapped to a module. */
+  tjs: "external" | Record<string, string>;
+  define: Record<string, string>;
+}
+
+/**
+ * Bundle an app into one ES module for QuickJS-ng: the flavor's prelude first, node:*
+ * builtins through its shims, a placeholder for each name a shim lacks (the build fails if
+ * one survives tree shaking), and imported files collected as assets the prelude publishes.
+ */
+export async function bundleQuickJs(
+  options: BuildOptions,
+  flavor: QuickJsFlavor,
+  temporary: string,
+): Promise<{ bundle: string; assets: EmbeddedFile[] }> {
+  const root = import.meta.dirname;
+  const source = existsSync(join(root, "src/index.ts"));
+  const assets: EmbeddedFile[] = [];
+  // node:* names the app imports that no shim provides, found by a first bundle attempt.
+  const missing = new Map<string, Set<string>>();
+  const importers = new Map<string, Set<string>>();
+  const runtime: Plugin = {
+    name: "tarve-txiki-runtime",
+    setup(build) {
+      build.onResolve({ filter: /^tjs:/ }, args => flavor.tjs === "external"
+        ? { path: args.path, external: true }
+        : { path: flavor.tjs[args.path] ?? join(root, "txiki/unavailable.ts") });
+      build.onResolve({ filter: /^(?:node:)?[a-z_]+(?:\/[a-z_]+)?$/ }, args => {
+        const name = args.path.replace(/^node:/, "");
+        // Bundled packages (the npm build of @tarve/core) import builtins without "node:".
+        if (!flavor.shims[name] && !args.path.startsWith("node:") && !builtinModules.includes(name)) return undefined;
+        if (!importers.has(name)) importers.set(name, new Set());
+        importers.get(name)!.add(args.importer);
+        return { path: name, namespace: "tarve-node", sideEffects: false };
+      });
+      build.onResolve({ filter: /^#tarve\/runtime$/ }, () => flavor.runtimeExtra
+        ? { path: "runtime", namespace: "tarve-runtime" }
+        : { path: flavor.runtimeModule });
+      build.onLoad({ filter: /.*/, namespace: "tarve-runtime" }, () => ({
+        contents: `export * from ${JSON.stringify(flavor.runtimeModule)};\n${flavor.runtimeExtra}`,
+        loader: "js",
+        resolveDir: root,
+      }));
+      if (source) {
+        build.onResolve({ filter: /^(?:@tarve\/core(?:-internal)?|tarve)(?:\/(?:jsx-runtime|jsx-dev-runtime))?$/ }, args => {
+          const entry = args.path.replace(/^(?:@tarve\/core(?:-internal)?|tarve)/, "") || "/index";
+          return { path: join(root, "src", `${entry.slice(1)}.ts`) };
+        });
+      }
+      build.onResolve({ filter: /.*/ }, args => {
+        const type = args.with?.type ?? (ASSET.test(args.path) && args.kind === "import-statement" ? "file" : undefined);
+        if (type !== "file" && type !== "text") return undefined;
+        return { path: resolve(dirname(args.importer), args.path), namespace: `tarve-${type}` };
+      });
+      // node:<name>: the shim's exports plus an unavailable() placeholder per name it lacks.
+      // Tooling the app never reaches (test-renderer, visual-testing) tree-shakes away with them.
+      build.onLoad({ filter: /.*/, namespace: "tarve-node" }, args => {
+        const shim = flavor.shims[args.path] && JSON.stringify(flavor.shims[args.path]);
+        const placeholder = (api: string) => `/* @__PURE__ */ unavailable(${JSON.stringify(`${UNAVAILABLE}node:${api}`)})`;
+        return {
+          contents: [
+            `import { unavailable } from ${JSON.stringify(join(root, "txiki/unavailable.ts"))};`,
+            ...shim ? [`export * from ${shim};`, `export { default } from ${shim};`] : [`export default ${placeholder(args.path)};`],
+            ...[...missing.get(args.path) ?? []].map(name => `export const ${name} = ${placeholder(`${args.path}.${name}`)};`),
+          ].join("\n"),
+          loader: "js",
+          resolveDir: root,
+        };
+      });
+      if (options.compileJsx) {
+        build.onLoad({ filter: /\.[jt]sx$/ }, async args => {
+          if (/[\\/]node_modules[\\/]/.test(args.path) || args.path.startsWith(join(root, "src"))) return undefined;
+          const { compileJsx } = await import("./jsx-compile");
+          return { contents: (await compileJsx(readFileSync(args.path, "utf8"))).code, loader: args.path.endsWith(".jsx") ? "jsx" : "tsx", resolveDir: dirname(args.path) };
+        });
+      }
+      build.onLoad({ filter: /.*/, namespace: "tarve-text" }, args => ({ contents: readFileSync(args.path, "utf8"), loader: "text" }));
+      build.onLoad({ filter: /.*/, namespace: "tarve-file" }, args => {
+        const data = readFileSync(args.path);
+        const name = `${createHash("sha256").update(data).digest("hex").slice(0, 12)}-${basename(args.path)}`;
+        if (!assets.some(asset => asset.name === name)) assets.push({ name, data, gzip: false });
+        // The prelude extracts every embedded file before app modules evaluate.
+        return { contents: `export default globalThis.__tarveAssets[${JSON.stringify(name)}];`, loader: "js" };
+      });
+    },
+  };
+  const entry = join(temporary, "entry.ts");
+  writeFileSync(entry, [
+    `import ${JSON.stringify(flavor.prelude)};`,
+    `import ${JSON.stringify(resolve(options.entrypoint))};`,
+  ].join("\n"));
+  const bundle = join(temporary, "app.js");
+  const { build: esbuild } = await import("esbuild");
+  const frameworks = await frameworkPlugins(options.entrypoint);
+  const bundleApp = () => esbuild({
+    entryPoints: [entry],
+    outfile: bundle,
+    bundle: true,
+    platform: "neutral",
+    mainFields: ["module", "main"],
+    format: "esm",
+    target: "es2023",
+    minify: !process.env.TARVE_TXIKI_DEBUG,
+    // Function.name stays what the source says (component names in the inspector, errors), as on Bun and Node.js.
+    keepNames: true,
+    jsx: "automatic",
+    jsxImportSource: "@tarve/core",
+    logLevel: "silent",
+    define: {
+      ...flavor.define,
+      "process.env.NODE_ENV": JSON.stringify("production"),
+      "import.meta.dirname": "globalThis.__tarveDirname",
+    },
+    plugins: [runtime, ...frameworks],
+    metafile: !!process.env.TARVE_TXIKI_DEBUG,
+  });
+  // A name a shim lacks is a build error; record it, then bundle again with a placeholder for it.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const result = await bundleApp();
+      if (process.env.TARVE_TXIKI_DEBUG) writeFileSync(`${process.env.TARVE_TXIKI_DEBUG}.meta.json`, JSON.stringify(result.metafile));
+      break;
+    } catch (error) {
+      const errors = (error as { errors?: { text: string }[] }).errors ?? [];
+      const lacking = errors.map(({ text }) => /^No matching export in "tarve-node:([^"]+)" for import "([^"]+)"$/.exec(text));
+      if (!lacking.length || lacking.some(match => !match) || attempt > 3) throw error;
+      for (const match of lacking) {
+        if (!missing.has(match![1]!)) missing.set(match![1]!, new Set());
+        missing.get(match![1]!)!.add(match![2]!);
+      }
+    }
+  }
+  assertAvailable(readFileSync(bundle, "utf8"), importers, flavor.label);
+  return { bundle, assets };
+}
+
 /** Fails the build when a placeholder for a missing Node API survived tree shaking: the app would throw at run time. */
-export function assertAvailable(bundle: string, importers: ReadonlyMap<string, ReadonlySet<string>> = new Map()): void {
+export function assertAvailable(bundle: string, importers: ReadonlyMap<string, ReadonlySet<string>> = new Map(), label = "txiki.js"): void {
   const apis = [...new Set([...bundle.matchAll(new RegExp(`${UNAVAILABLE}node:([\\w/.-]+)`, "g"))].map(match => match[1]!))].sort();
   // The Bun global: a use counts unless a typeof Bun check precedes it closely (`typeof Bun<"u"&&Bun.main`).
   const bun = [...new Set([...bundle.matchAll(/(?<![\w$.])Bun\.([A-Za-z_$][\w$]*)/g)]
@@ -234,7 +288,7 @@ export function assertAvailable(bundle: string, importers: ReadonlyMap<string, R
     return `  node:${api}${users.length ? `  (imported by ${users.slice(0, 3).join(", ")}${users.length > 3 ? ", …" : ""})` : ""}`;
   });
   throw new Error([
-    "This app reaches APIs the txiki.js runtime does not provide:",
+    `This app reaches APIs the ${label} runtime does not provide:`,
     ...lines,
     ...bun.map(api => `  ${api}  (the Bun global; guard it with typeof Bun !== "undefined")`),
     "Remove those calls from code the app can run, or build with --runtime bun or --runtime node.",

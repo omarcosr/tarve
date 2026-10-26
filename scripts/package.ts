@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { cp, copyFile, mkdir, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { BUILD_TARGETS, hostBuildTarget, targetConfig } from "../packages/core/targets";
+import { PACKAGED_TARGETS, hostBuildTarget, targetConfig } from "../packages/core/targets";
 import {
   NATIVE_COMPATIBILITY_MANIFEST_NAME,
   assertNativeRuntimeCompatible,
@@ -61,7 +61,8 @@ if (values["native-only"]) {
 }
 
 if (!values.local) {
-  const requiredRuntimes = BUILD_TARGETS.map(target => {
+  // macOS runtimes are not part of the npm package yet (no macOS release runner); see reports/gap/macos-ts.md.
+  const requiredRuntimes = PACKAGED_TARGETS.map(target => {
     const config = targetConfig(target);
     return join(root, "native", config.nativeDirectory, config.nativeName);
   });
@@ -73,12 +74,12 @@ if (!values.local) {
       "Build the missing runtime on its native OS with `bun run package:native`, then run `bun run package` again.",
     ].join("\n"));
   }
-  for (let index = 0; index < BUILD_TARGETS.length; index++) {
-    await assertNativeRuntimeCompatible(requiredRuntimes[index]!, BUILD_TARGETS[index]!, compatibility);
+  for (let index = 0; index < PACKAGED_TARGETS.length; index++) {
+    await assertNativeRuntimeCompatible(requiredRuntimes[index]!, PACKAGED_TARGETS[index]!, compatibility);
     // Variants are optional: `tarve build` falls back to the full library without them.
     for (const variant of NATIVE_VARIANTS) {
-      const path = nativeVariantPath(dirname(requiredRuntimes[index]!), variant.name, targetConfig(BUILD_TARGETS[index]!).nativeName);
-      if (existsSync(path)) await assertNativeRuntimeCompatible(path, BUILD_TARGETS[index]!, compatibility);
+      const path = nativeVariantPath(dirname(requiredRuntimes[index]!), variant.name, targetConfig(PACKAGED_TARGETS[index]!).nativeName);
+      if (existsSync(path)) await assertNativeRuntimeCompatible(path, PACKAGED_TARGETS[index]!, compatibility);
     }
   }
 }
@@ -95,12 +96,13 @@ const entries = [
   ["packages/core/build.ts", "build.js"],
   ["packages/core/cli.ts", "cli.js"],
   ["packages/core/node-build.ts", "node-build.js"],
+  ["packages/core/package-installer.ts", "package-installer.js"],
   ["packages/protocol/src/index.ts", "protocol.js"],
 ];
 const results = await Promise.all(entries.map(([entry, naming]) => Bun.build({
   entrypoints: [join(root, entry)], outdir: output, naming,
   // The CLI and the Node build API must start under Node as well as Bun.
-  target: entry.endsWith("/cli.ts") || entry.includes("/node-") ? "node" : "bun",
+  target: entry.endsWith("/cli.ts") || entry.includes("/node-") || entry.endsWith("/package-installer.ts") ? "node" : "bun",
   external: ["#tarve/runtime", "#tarve/assets", "esbuild", "resedit", "typescript", "typescript/*"],
 })));
 for (const result of results) {
@@ -108,6 +110,8 @@ for (const result of results) {
 }
 // build({ runtime: "txiki" }) bundles the app with these sources (prelude and node:* shims).
 await cp(join(root, "packages/core/txiki"), join(output, "txiki"), { recursive: true });
+// tarve build --target android bundles the app with the Android prelude and shims.
+await cp(join(root, "packages/core/android"), join(output, "android"), { recursive: true });
 await writeNativeCompatibilityManifest(
   join(output, NATIVE_COMPATIBILITY_MANIFEST_NAME),
   compatibility,
@@ -117,4 +121,4 @@ if (await types.exited !== 0) throw new Error("Package declaration generation fa
 await copyFile(join(root, "packages/core/src/assets.d.ts"), join(root, "dist/types/core/src/assets.d.ts"));
 console.log(values.local
   ? `local package staging ready for ${hostTarget}.`
-  : `npm package ready: JS, declarations, CLI, and native ${BUILD_TARGETS.join(" + ")} release runtimes.`);
+  : `npm package ready: JS, declarations, CLI, and native ${PACKAGED_TARGETS.join(" + ")} release runtimes.`);

@@ -18,6 +18,7 @@
       "@tarve/protocol": ["../packages/protocol/src/index.ts"],
       "@tarve/react-icons": ["../packages/react-icons/src/index.ts"],
       "@tarve/react-icons/*": ["../packages/react-icons/src/*"],
+      "@tarve/router": ["../packages/router/src/index.ts"],
       "@tarve/svelte": ["../packages/svelte/src/index.ts"],
       "@tarve/svelte/*": ["../packages/svelte/src/*"]
     }

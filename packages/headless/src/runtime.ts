@@ -1,5 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+// `with { type: "file" }` is how Tarve apps reach files on every runtime: Bun resolves it to the
+// path, the Node.js bundle (`tarve run --runtime node`) copies the file next to itself and the
+// txiki.js build embeds it (packages/core/esbuild-file-imports.ts, txiki-build.ts).
+import interFont from "../fonts/InterVariable.ttf" with { type: "file" };
+import monoFont from "../fonts/JetBrainsMono.ttf" with { type: "file" };
 
 /** The part of the wasm-bindgen output this package uses (see native/src/web.rs). */
 export interface WebTreeHandle {
@@ -17,7 +21,15 @@ export interface WebTreeHandle {
   free(): void;
 }
 
-interface WasmModule {
+/** zlib streams from the WebAssembly runtime (native/src/zlib.rs): the PNG encoder's, on every engine. */
+export interface HeadlessZlib {
+  /** A zlib-wrapped deflate stream of `data` at `level` (0–9). */
+  deflate(data: Uint8Array, level: number): Uint8Array;
+  /** The bytes of a zlib stream; throws when `data` is not one. */
+  inflate(data: Uint8Array): Uint8Array;
+}
+
+interface WasmModule extends HeadlessZlib {
   initSync(options: { module: BufferSource }): { memory: WebAssembly.Memory };
   registerFont(bytes: Uint8Array, generics: string): void;
   WebTree: new (document: string) => WebTreeHandle;
@@ -38,6 +50,12 @@ export interface HeadlessRuntimeOptions {
 export interface HeadlessRuntime {
   memory: WebAssembly.Memory;
   WebTree: WasmModule["WebTree"];
+  zlib: HeadlessZlib;
+  /**
+   * Which build runs: `simd` (wasm simd128, about twice as fast to paint) where the engine has
+   * WebAssembly SIMD, else `baseline`. Both render the same pixels.
+   */
+  build: "simd" | "baseline";
 }
 
 const SANS = ["system-ui", "ui-sans-serif", "sans-serif", "serif", "ui-serif", "cursive", "fantasy", "emoji"];
@@ -47,8 +65,23 @@ let runtime: Promise<HeadlessRuntime> | undefined;
 let loaded: HeadlessRuntime | undefined;
 let wasmModule: WasmModule | undefined;
 
-function asset(path: string): string {
-  return fileURLToPath(new URL(path, import.meta.url));
+/** The smallest module with a v128 value: engines without WebAssembly SIMD (txiki.js's WAMR) reject it. */
+const SIMD_PROBE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11]);
+
+type FileModule = { default: string };
+
+/** The build this engine can compile, chosen by feature detection: the glue module and the path of its binary. */
+async function wasmBuild(): Promise<{ build: HeadlessRuntime["build"]; module: WasmModule; binary: string }> {
+  const build = WebAssembly.validate(SIMD_PROBE) ? "simd" : "baseline";
+  try {
+    // Literal specifiers, so bundlers (Node.js and txiki.js builds) include both builds.
+    const [module, binary] = await (build === "simd"
+      ? Promise.all([import("../wasm/tarve_web.js"), import("../wasm/tarve_web_bg.wasm", { with: { type: "file" } })])
+      : Promise.all([import("../wasm/baseline/tarve_web.js"), import("../wasm/baseline/tarve_web_bg.wasm", { with: { type: "file" } })]));
+    return { build, module: module as WasmModule, binary: (binary as unknown as FileModule).default };
+  } catch (cause) {
+    throw new Error(`@tarve/headless: could not load the ${build} WebAssembly runtime. In the Tarve repository, build it with \`bun run build:wasm\`.`, { cause });
+  }
 }
 
 /**
@@ -58,17 +91,12 @@ function asset(path: string): string {
  */
 export function loadHeadlessRuntime(options: HeadlessRuntimeOptions = {}): Promise<HeadlessRuntime> {
   runtime ??= (async () => {
-    const glue = asset("../wasm/tarve_web.js");
-    const binary = asset("../wasm/tarve_web_bg.wasm");
-    if (!existsSync(glue) || !existsSync(binary)) {
-      throw new Error("@tarve/headless: the WebAssembly runtime is missing. Run `bun run build:wasm` in the Tarve repository.");
-    }
-    const module = (await import(glue)) as WasmModule;
+    const { build, module, binary } = await wasmBuild();
     const { memory } = module.initSync({ module: readFileSync(binary) });
-    module.registerFont(readFileSync(asset("../fonts/InterVariable.ttf")), SANS.join(","));
-    module.registerFont(readFileSync(asset("../fonts/JetBrainsMono.ttf")), MONO.join(","));
+    module.registerFont(readFileSync(interFont), SANS.join(","));
+    module.registerFont(readFileSync(monoFont), MONO.join(","));
     wasmModule = module;
-    loaded = { memory, WebTree: module.WebTree };
+    loaded = { memory, WebTree: module.WebTree, zlib: { deflate: module.deflate, inflate: module.inflate }, build };
     return loaded;
   })();
   return runtime.then((ready) => {

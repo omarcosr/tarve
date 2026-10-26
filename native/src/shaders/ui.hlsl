@@ -181,6 +181,9 @@ float4 shade(PSIn i) {
     if (i.mode > 2.5) {
         float coverage=saturate(rounded_box_shadow(i.uv,i.params));
         if (i.mode > 3.5) coverage=1.0-coverage;
+        // An outer shadow never shows through its own box: inner holds that box
+        // (relative to the shadow centre), shape its radii; x0 > x1 when there is none.
+        if (i.inner.x < i.inner.z) coverage*=saturate(0.5+sdRoundRect(i.uv, i.inner, i.shape));
         return float4(i.color.rgb, i.color.a*coverage);
     }
     float4 sample = tex0.Sample(samp0, i.uv);

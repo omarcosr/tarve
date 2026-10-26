@@ -1,0 +1,44 @@
+{
+  "name": "create-tarve",
+  "version": "0.7.0",
+  "description": "Scaffold a new Tarve app: bun create tarve my-app / npm create tarve@latest my-app",
+  "license": "Apache-2.0",
+  "keywords": [
+    "tarve",
+    "create",
+    "scaffold",
+    "template",
+    "gui",
+    "desktop",
+    "native"
+  ],
+  "homepage": "https://github.com/omarcosr/tarve/tree/main/packages/create-tarve#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/omarcosr/tarve.git",
+    "directory": "packages/create-tarve"
+  },
+  "bugs": {
+    "url": "https://github.com/omarcosr/tarve/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "bin": {
+    "create-tarve": "./index.js"
+  },
+  "exports": {
+    ".": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "templates",
+    "README.md"
+  ],
+  "engines": {
+    "bun": ">=1.4.0",
+    "node": ">=26.10.0"
+  }
+}

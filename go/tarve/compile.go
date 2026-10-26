@@ -40,6 +40,10 @@ type CompiledTree struct {
 	HandlerOrder []string
 	// UsesViewport: a style has breakpoints, so the app renders again when the width crosses one.
 	UsesViewport bool
+	// ReadsViewportSize: the view read Viewport(), so any resize renders it again.
+	ReadsViewportSize bool
+	// Environment is the environment key the render read (viewport.go), "" when it read none.
+	Environment string
 	// fresh are the nodes not reused from base, the tree this one was compiled against.
 	fresh    []*NNode
 	freshSet map[*NNode]bool
@@ -58,7 +62,7 @@ var handlerProps = set("onClick", "onMarkdownLink", "onToggleFile", "onShowMore"
 var inheritedFont = []string{"fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "fontVariantNumeric", "fontFeatureSettings", "fontSize", "fontWeight", "lineHeight", "foreground", "textAlign", "textTransform", "whiteSpace"}
 var inheritedFontSet = set(inheritedFont...)
 var controlFont = []string{"fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "textTransform"}
-var variantKeys = []string{"first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl", "dark"}
+var variantKeys = []string{"first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl", "portrait", "landscape", "pointerCoarse", "pointerFine", "motionReduce", "motionSafe", "dark"}
 
 func set(keys ...string) map[string]bool {
 	m := make(map[string]bool, len(keys))
@@ -81,8 +85,9 @@ type memoEntry struct {
 	media    map[string]*MediaRequest
 	nested   []string
 	idSet    map[string]bool
-	// breakpoint is the width breakpoint the subtree was styled for; -1 when it reads no width.
-	breakpoint int
+	// breakpoint is the breakpoint, orientation and environment the subtree was styled for
+	// (viewportKey); "" when it reads none.
+	breakpoint string
 }
 
 // renderScope holds what outlives one render: memoized subtrees and component state.
@@ -141,6 +146,7 @@ type compiler struct {
 	// pos is the position of the element being visited among its element siblings.
 	pos          *position
 	width        float64
+	height       float64
 	usesViewport bool
 	// prev are the last render's nodes: an equal node is reused, so the diff skips it by pointer.
 	prev  map[string]*NNode
@@ -157,16 +163,15 @@ func compileTree(view func() Child, debug bool, renderer string, scope *renderSc
 	defer func() { activeScope = previous }()
 	n := scope.lastNodes
 	c := &compiler{debug: debug, visible: visible, scope: scope, handlers: make(map[string]Handlers, scope.lastHandlers), nodes: make(map[string]*NNode, n), media: map[string]*MediaRequest{}, theme: LightTheme, memoSeen: map[string]bool{},
-		idLog: make([]string, 0, n), width: -1}
+		idLog: make([]string, 0, n), width: -1, height: -1}
 	c.t = sharedFor(LightTheme)
 	c.font = c.intern(1, S{})
 	if prev != nil {
 		c.prev = prev.Nodes
 	}
-	if viewport != nil {
-		c.width = viewport.Width
-	}
+	reads := c.startViewport(viewport)
 	roots := c.visit(view(), "root", "", nil)
+	readsSize, environment := reads()
 	for path := range scope.memos {
 		if !c.memoSeen[path] {
 			delete(scope.memos, path)
@@ -221,18 +226,7 @@ func compileTree(view func() Child, debug bool, renderer string, scope *renderSc
 		root.set("reportSize", true)
 	}
 	doc := S{"version": ProtocolVersion, "renderer": renderer, "window": c.window, "root": root}
-	return &CompiledTree{Document: doc, Root: root, Window: c.window, Handlers: c.handlers, HandlerOrder: c.order, Nodes: c.nodes, Media: c.media, UsesViewport: c.usesViewport, fresh: c.fresh, base: prev}
-}
-
-// viewportWidth is the width breakpoints compare with: the window's laid-out width once known.
-func (c *compiler) viewportWidth() float64 {
-	if c.width >= 0 {
-		return c.width
-	}
-	if w, ok := num(c.window["width"]); ok {
-		return w
-	}
-	return 1120
+	return &CompiledTree{Document: doc, Root: root, Window: c.window, Handlers: c.handlers, HandlerOrder: c.order, Nodes: c.nodes, Media: c.media, UsesViewport: c.usesViewport, ReadsViewportSize: readsSize, Environment: environment, fresh: c.fresh, base: prev}
 }
 
 func (c *compiler) claim(id string) {
@@ -264,8 +258,8 @@ func isPrimitive(v Child) bool {
 func (c *compiler) visitMemo(m *Memo, props Props, path, group string) []*NNode {
 	c.seeMemo(path)
 	if prev := c.scope.memos[path]; prev != nil && prev.memo == m && prev.group == group && prev.theme == c.theme &&
-		prev.font == c.font && (prev.breakpoint < 0 || prev.breakpoint == breakpointOf(c.viewportWidth())) && m.Equal(prev.props, props) {
-		if prev.breakpoint >= 0 {
+		prev.font == c.font && (prev.breakpoint == "" || prev.breakpoint == c.viewportKey(strings.Contains(prev.breakpoint, "x"))) && m.Equal(prev.props, props) {
+		if prev.breakpoint != "" {
 			c.usesViewport = true
 		}
 		for _, id := range prev.ids {
@@ -296,18 +290,21 @@ func (c *compiler) visitMemo(m *Memo, props Props, path, group string) []*NNode 
 	outerViewport := c.usesViewport
 	c.usesViewport = false
 	c.memoDepth++
+	sizeReads := viewportReads.Load()
 	result := c.visit(m.Render(props), path, group, nil)
+	exact := viewportReads.Load() != sizeReads
 	c.memoDepth--
-	readViewport := c.usesViewport
+	readViewport := c.usesViewport || exact
 	c.usesViewport = outerViewport || readViewport
 	if (window == nil) != (c.window == nil) {
 		delete(c.scope.memos, path)
 		return result
 	}
 	e := &memoEntry{memo: m, props: props, group: group, theme: theme, font: font, result: result,
-		handlers: map[string]Handlers{}, media: map[string]*MediaRequest{}, breakpoint: -1}
+		handlers: map[string]Handlers{}, media: map[string]*MediaRequest{}}
 	if readViewport {
-		e.breakpoint = breakpointOf(c.viewportWidth())
+		c.usesViewport = true
+		e.breakpoint = c.viewportKey(exact)
 	}
 	seen := map[string]bool{}
 	for _, id := range c.idLog[mark:] {
@@ -530,7 +527,7 @@ func (c *compiler) visitNode(child *VNode, path, group string, out []*NNode) []*
 		}
 	}
 	if hasVariants(style) {
-		style = foldVariants(style, c.theme, variantContext{pos: pos, width: c.viewportWidth(), usedViewport: &c.usesViewport})
+		style = foldVariants(style, c.theme, variantContext{pos: pos, width: c.viewportWidth(), height: c.viewportHeight(), usedViewport: &c.usesViewport})
 	}
 	if uaMargin != 0 && style["margin"] == nil {
 		size := numberOr(style["fontSize"], numberOr(c.font.style["fontSize"], FontSize))

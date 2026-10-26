@@ -2319,6 +2319,8 @@ impl D3d11Graphics {
     /// One quad over `area` whose pixels evaluate an analytic gaussian-blurred
     /// rounded rectangle (mode 3), or its inverse for inset shadows (mode 4).
     /// `uv` carries each corner's offset from the shadow centre in pixels.
+    /// `exclude`: a rounded box (rect relative to that centre, corner radii) the
+    /// shadow is cut out of with coverage, instead of a stencil clip per shadow.
     fn append_shadow_quad(
         &mut self,
         area: [[f32; 2]; 2],
@@ -2326,11 +2328,14 @@ impl D3d11Graphics {
         color: Color,
         invert: bool,
         params: [f32; 4],
+        exclude: Option<([f32; 4], [f32; 4])>,
     ) {
         let first = self.indices.len() as u32;
         let base = self.vertices.len() as u32;
         let rgba = rgba(color);
         let [[x0, y0], [x1, y1]] = area;
+        // x0 > x1: nothing cut out.
+        let (inner, shape) = exclude.unwrap_or(([1.0, 1.0, -1.0, -1.0], [0.0; 4]));
         for [x, y] in [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] {
             self.push_vertex(Vertex {
                 pos: self.ndc(x, y),
@@ -2338,6 +2343,8 @@ impl D3d11Graphics {
                 color: rgba,
                 mode: if invert { 4.0 } else { 3.0 },
                 params,
+                shape,
+                inner,
                 ..Default::default()
             });
         }
@@ -3633,6 +3640,76 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                 ((radius * scale) as f32).min(half[0].min(half[1])).max(0.0),
                 ((std_dev * scale) as f32).max(0.01),
             ],
+            None,
+        );
+    }
+
+    fn outer_box_shadow(
+        &mut self,
+        transform: Affine,
+        area: vello::kurbo::Rect,
+        rect: vello::kurbo::Rect,
+        color: Color,
+        radius: f64,
+        std_dev: f64,
+        shape: &RoundedRect,
+    ) {
+        let [a, b, c, d, ..] = transform.as_coeffs();
+        // The cut-out is axis-aligned in device pixels: other transforms clip as before.
+        if self.suppressed_clips > 0 || b.abs() > 1e-6 || c.abs() > 1e-6 || a <= 0.0 || d <= 0.0 {
+            crate::paint::clipped_outer_box_shadow(
+                self, transform, area, rect, color, radius, std_dev, shape,
+            );
+            return;
+        }
+        let (scale_x, scale_y) = (a, d);
+        let scale = (scale_x * scale_y).sqrt();
+        let device = |point: Point| transform * point;
+        let center = device(rect.center());
+        let (top_left, bottom_right) = (
+            device(Point::new(shape.rect().x0, shape.rect().y0)),
+            device(Point::new(shape.rect().x1, shape.rect().y1)),
+        );
+        let radii = shape.radii();
+        let half = [
+            (rect.width() * scale_x / 2.0) as f32,
+            (rect.height() * scale_y / 2.0) as f32,
+        ];
+        self.graphics.append_shadow_quad(
+            [
+                [
+                    device(Point::new(area.x0, area.y0)).x as f32,
+                    device(Point::new(area.x0, area.y0)).y as f32,
+                ],
+                [
+                    device(Point::new(area.x1, area.y1)).x as f32,
+                    device(Point::new(area.x1, area.y1)).y as f32,
+                ],
+            ],
+            [center.x as f32, center.y as f32],
+            color.multiply_alpha(self.opacity),
+            false,
+            [
+                half[0],
+                half[1],
+                ((radius * scale) as f32).min(half[0].min(half[1])).max(0.0),
+                ((std_dev * scale) as f32).max(0.01),
+            ],
+            Some((
+                [
+                    (top_left.x - center.x) as f32,
+                    (top_left.y - center.y) as f32,
+                    (bottom_right.x - center.x) as f32,
+                    (bottom_right.y - center.y) as f32,
+                ],
+                [
+                    radii.top_left,
+                    radii.top_right,
+                    radii.bottom_right,
+                    radii.bottom_left,
+                ]
+                .map(|radius| (radius * scale) as f32),
+            )),
         );
     }
 

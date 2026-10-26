@@ -536,9 +536,9 @@ fn push_text_style(
     range: std::ops::Range<usize>,
     base: (f32, f32),
 ) {
-    if let Some(size) = style["fontSize"].as_f64() {
-        builder.push(StyleProperty::FontSize(size as f32), range.clone());
-        builder.push(optical_size(size as f32), range.clone());
+    if let Some(size) = crate::environment::scaled(style["fontSize"].as_f64()) {
+        builder.push(StyleProperty::FontSize(size), range.clone());
+        builder.push(optical_size(size), range.clone());
     }
     if let Some(weight) = style["fontWeight"].as_f64() {
         builder.push(
@@ -564,10 +564,7 @@ fn push_text_style(
         .as_str()
         .map_or(DecorationStyle::Solid, DecorationStyle::parse);
     if style["foreground"].is_string() || shift != 0.0 || decoration != DecorationStyle::Solid {
-        let size = style["fontSize"]
-            .as_f64()
-            .map(|n| n as f32)
-            .unwrap_or(base.0);
+        let size = crate::environment::scaled(style["fontSize"].as_f64()).unwrap_or(base.0);
         builder.push(
             StyleProperty::Brush(TextBrush(
                 style["foreground"].as_str().map(str::to_string),
@@ -617,18 +614,18 @@ fn font_family_from_name(family: &str) -> FontFamily<'_> {
         // using the portable sans-serif generic on Linux.
         Some(GenericFamily::SystemUi) => default_ui_generic_family().into(),
         Some(generic) => generic.into(),
+        // Android: a missing family falls back per character (digits too); sans-serif first.
+        #[cfg(target_os = "android")]
+        None => FontFamily::Source(format!("{family}, sans-serif").into()),
+        #[cfg(not(target_os = "android"))]
         None => FontFamily::Source(family.into()),
     }
 }
 
 fn default_ui_generic_family() -> GenericFamily {
-    // Fontconfig does not map the CSS-like `system-ui` generic consistently
-    // across Linux distributions. In particular, a bad system-ui match can
-    // force otherwise basic characters into per-glyph fallback faces. The
-    // standard `sans-serif` generic is the portable Fontconfig UI fallback.
-    // Keep the native system UI family on platforms where the mapping is
-    // provided directly by the OS font backend (for example Segoe UI on
-    // Windows).
+    // Fontconfig maps `system-ui` inconsistently across Linux distributions (a bad match
+    // splits basic characters into per-glyph fallback faces): `sans-serif` there. Elsewhere
+    // the OS font backend maps it directly (Segoe UI on Windows).
     if cfg!(target_os = "linux") {
         GenericFamily::SansSerif
     } else {
@@ -647,7 +644,7 @@ fn hash_text(text: &str) -> u64 {
 /// key; without it a node that turns line numbers on keeps the geometry of the
 /// unnumbered block and paints the code underneath its own numbers).
 fn text_style_hash(node: &Node) -> u64 {
-    let mut hasher = std::hash::DefaultHasher::new();
+    let mut hasher = crate::environment::scaled_hasher();
     for key in TEXT_KEYS {
         crate::protocol::hash_value(&node.style[*key], &mut hasher);
     }
@@ -1068,7 +1065,7 @@ fn draw_layout_with<P: PaintTarget>(
 }
 
 fn diff_line_height(node: &Node) -> f32 {
-    (node.number("fontSize", 13.0) * node.number("lineHeight", 1.5)).max(1.0)
+    (node.font_size(13.0) * node.number("lineHeight", 1.5)).max(1.0)
 }
 
 const DIFF_ACCENT_WIDTH: f64 = 3.0;
@@ -1149,10 +1146,29 @@ pub(crate) mod app_fonts {
 
     pub(crate) fn context() -> parley::FontContext {
         let mut fonts = parley::FontContext::new();
+        #[cfg(target_os = "android")]
+        android_monospace(&mut fonts.collection);
         for blob in FONTS.lock().unwrap().iter() {
             fonts.collection.register_fonts(blob.clone(), None);
         }
         fonts
+    }
+
+    /// fontique maps `monospace` on Android to the fonts.xml family name, which holds no
+    /// fonts (they are scanned under their own names), so monospace text fell back glyph
+    /// by glyph to Roboto: proportional code, misaligned table columns, spread-out digits.
+    #[cfg(target_os = "android")]
+    fn android_monospace(collection: &mut parley::fontique::Collection) {
+        use parley::fontique::GenericFamily;
+        let ids: Vec<_> = ["Droid Sans Mono", "Cutive Mono", "Noto Sans Mono"]
+            .into_iter()
+            .filter_map(|name| collection.family_by_name(name))
+            .filter(|family| !family.fonts().is_empty())
+            .map(|family| family.id())
+            .collect();
+        if !ids.is_empty() {
+            collection.set_generic_families(GenericFamily::Monospace, ids.into_iter());
+        }
     }
 }
 
@@ -1212,7 +1228,7 @@ impl TextEngine {
             }
             self.prepare_markdown_lines(node, &content);
             let mut placeholder = self.context.ranged_builder(&mut self.fonts, "", 1.0, true);
-            placeholder.push_default(StyleProperty::FontSize(node.number("fontSize", 14.0)));
+            placeholder.push_default(StyleProperty::FontSize(node.font_size(14.0)));
             self.layouts.insert(node.id.clone(), placeholder.build(""));
             self.signatures.insert(node.id.clone(), signature);
             self.alignments
@@ -1298,7 +1314,7 @@ impl TextEngine {
             // A smaller standalone layout can share the mathematical baseline
             // and still look vertically offset because its glyph box and line
             // box use different metrics.
-            let gutter_size = node.number("fontSize", 13.0);
+            let gutter_size = node.font_size(13.0);
             let gutter_line_height = node.number("lineHeight", 1.5);
             let gutter_weight = node.number("fontWeight", 400.0);
             let family = node.string("fontFamily", "monospace").to_string();
@@ -1452,7 +1468,7 @@ impl TextEngine {
             let mut builder = self
                 .context
                 .ranged_builder(&mut self.fonts, value, 1.0, true);
-            builder.push_default(StyleProperty::FontSize(node.number("fontSize", 14.0)));
+            builder.push_default(StyleProperty::FontSize(node.font_size(14.0)));
             builder.push_default(StyleProperty::FontWeight(FontWeight::new(
                 node.number("fontWeight", 400.0),
             )));
@@ -1470,7 +1486,7 @@ impl TextEngine {
                 if clipped.start < clipped.end {
                     let mut local = (*span).clone();
                     local.range = clipped.start - start..clipped.end - start;
-                    push_span(&mut builder, &local, node, node.number("fontSize", 14.0));
+                    push_span(&mut builder, &local, node, node.font_size(14.0));
                 }
             }
             let layout = compact(builder.build(value));
@@ -1487,7 +1503,7 @@ impl TextEngine {
         }
         if content.is_empty() || content.ends_with('\n') {
             let mut builder = self.context.ranged_builder(&mut self.fonts, "", 1.0, true);
-            builder.push_default(StyleProperty::FontSize(node.number("fontSize", 14.0)));
+            builder.push_default(StyleProperty::FontSize(node.font_size(14.0)));
             builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
                 node.number("lineHeight", 1.5),
             )));
@@ -2000,7 +2016,7 @@ impl TextEngine {
                 task_markers,
                 origin,
                 TaskMarkerPaintStyle {
-                    font_size: node.number("fontSize", 14.0),
+                    font_size: node.font_size(14.0),
                     marker_color: crate::tree::color(
                         node.string("taskMarkerColor", node.string("foreground", "#18181b")),
                     ),
@@ -2160,7 +2176,7 @@ impl TextEngine {
                         }],
                         (origin.0, origin.1 + f64::from(line.y)),
                         TaskMarkerPaintStyle {
-                            font_size: node.number("fontSize", 14.0),
+                            font_size: node.font_size(14.0),
                             marker_color: crate::tree::color(
                                 node.string(
                                     "taskMarkerColor",
@@ -2213,7 +2229,7 @@ impl TextEngine {
         // even though each file sizes its own gutter.
         let gutter = diff_gutter_width(node, *max_line_number);
         let family = node.string("fontFamily", "monospace");
-        let size = node.number("fontSize", 13.0);
+        let size = node.font_size(13.0);
         let column_width = match self.diff_column_widths.get(&node.id) {
             Some((cached_family, cached_size, width))
                 if cached_family == family && *cached_size == size =>
@@ -2461,7 +2477,7 @@ impl TextEngine {
         let mut builder =
             self.context
                 .ranged_builder(&mut self.fonts, row.content_text(), 1.0, true);
-        builder.push_default(StyleProperty::FontSize(node.number("fontSize", 13.0)));
+        builder.push_default(StyleProperty::FontSize(node.font_size(13.0)));
         builder.push_default(StyleProperty::FontFamily(font_family_from_name(
             node.string("fontFamily", "monospace"),
         )));
@@ -2517,7 +2533,7 @@ impl TextEngine {
             .context
             .ranged_builder(&mut self.fonts, value, 1.0, true);
         builder.push_default(StyleProperty::FontSize(
-            (node.number("fontSize", 13.0) * 0.88).max(9.0),
+            (node.font_size(13.0) * 0.88).max(9.0),
         ));
         builder.push_default(StyleProperty::FontFamily(font_family_from_name(
             node.string("fontFamily", "monospace"),
@@ -2898,12 +2914,12 @@ fn estimated_code_gutter_width(node: &Node) -> f32 {
     }
     // `prepare` replaces this estimate with the actual shaped width.
     let digits = node.text.split('\n').count().max(1).to_string().len() as f32;
-    (digits * node.number("fontSize", 13.0) * 0.62 + CODE_GUTTER_PADDING * 2.0).ceil()
+    (digits * node.font_size(13.0) * 0.62 + CODE_GUTTER_PADDING * 2.0).ceil()
 }
 
 fn diff_gutter_width(node: &Node, max_line_number: u32) -> f32 {
     let digits = max_line_number.max(1).to_string().len() as f32;
-    (digits * node.number("fontSize", 13.0) * 0.56 + 14.0).max(32.0)
+    (digits * node.font_size(13.0) * 0.56 + 14.0).max(32.0)
 }
 
 #[cfg(test)]

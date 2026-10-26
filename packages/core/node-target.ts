@@ -7,12 +7,13 @@ import type { BuildTarget } from "./targets";
 
 /** Where an official Node.js binary for a target lives inside a release. */
 function distribution(target: BuildTarget, version: string): { file: string; member?: string; executable: string } {
-  return target === "windows-x64"
-    ? { file: "win-x64/node.exe", executable: "node.exe" }
-    : { file: `node-v${version}-linux-x64.tar.gz`, member: `node-v${version}-linux-x64/bin/node`, executable: "node" };
+  if (target === "windows-x64") return { file: "win-x64/node.exe", executable: "node.exe" };
+  const name = `node-v${version}-${target}`;
+  return { file: `${name}.tar.gz`, member: `${name}/bin/node`, executable: "node" };
 }
 
-function cacheRoot(): string {
+/** Downloads Tarve keeps between builds: TARVE_CACHE_DIR, else %LOCALAPPDATA%\\tarve\\cache or ~/.cache/tarve. */
+export function cacheRoot(): string {
   if (process.env.TARVE_CACHE_DIR) return process.env.TARVE_CACHE_DIR;
   if (process.platform === "win32") return join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "tarve", "cache");
   return join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "tarve");

@@ -116,7 +116,7 @@ func transformText(text string, transform any, wordStart bool) string {
 }
 
 func (c *compiler) resolveRun(style S) S {
-	return resolveThemeStyle(foldVariants(style, c.theme, variantContext{width: c.viewportWidth(), usedViewport: &c.usesViewport}), c.theme)
+	return resolveThemeStyle(foldVariants(style, c.theme, variantContext{width: c.viewportWidth(), height: c.viewportHeight(), usedViewport: &c.usesViewport}), c.theme)
 }
 
 func (c *compiler) collectInline(child Child, style S, id string, textID string, runs *int, out *[]piece) {

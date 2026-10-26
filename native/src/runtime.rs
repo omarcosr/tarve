@@ -9,29 +9,12 @@ use crate::{
     tree::{Tree, color},
 };
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
 use crate::accessibility::AccessibilityBridge;
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-use crate::tree::AccessibilityScrollAlignment;
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-use accesskit::{Action, ActionData, ActionRequest, ScrollHint, ScrollUnit};
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
+use accesskit::ActionRequest;
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
 use accesskit_winit::WindowEvent as AccessKitWindowEvent;
-
-#[cfg(any(target_os = "windows", target_os = "linux"))]
-fn accessibility_scroll_alignment(
-    data: Option<&ActionData>,
-) -> Option<AccessibilityScrollAlignment> {
-    match data {
-        Some(ActionData::ScrollHint(ScrollHint::TopLeft | ScrollHint::TopEdge)) => {
-            Some(AccessibilityScrollAlignment::Top)
-        }
-        Some(ActionData::ScrollHint(ScrollHint::BottomRight | ScrollHint::BottomEdge)) => {
-            Some(AccessibilityScrollAlignment::Bottom)
-        }
-        _ => None,
-    }
-}
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 fn run_file_dialog(
@@ -147,12 +130,21 @@ fn shortcut_key_name(key: &Key) -> Option<String> {
     }
 }
 
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
+mod accessibility_actions;
+mod clipboard;
+mod cursor;
 /// Word-wise caret motion: Ctrl on Windows/Linux, Option (Alt) on macOS.
 /// `TARVE_BACKGROUND=1`: windows open off every monitor, under other windows
 /// and without taking the foreground, so tests and
 /// benchmarks run beside someone's work without touching their screen, mouse or
 /// keyboard. Rendering and keyboard focus inside the app are unaffected.
 mod graphics_startup;
+mod system_requests;
+mod viewport;
+use viewport::{layout_viewport, request_frame, set_ime_allowed};
+#[cfg(target_os = "android")]
+mod android_input;
 pub(crate) use graphics_startup::{
     graphics_fault_action, graphics_recoveries_after_stability, graphics_recovery_circuit_action,
     graphics_recovery_delay, graphics_recovery_failure_action,
@@ -287,59 +279,7 @@ use winit::{
     window::{CursorIcon, ResizeDirection, Window, WindowId},
 };
 
-pub(crate) fn cursor_for_node(node: Option<&Node>) -> CursorIcon {
-    match node {
-        Some(node) if node.kind == "splitter" => {
-            if node
-                .control
-                .as_ref()
-                .is_some_and(|control| control.orientation == "vertical")
-            {
-                CursorIcon::RowResize
-            } else {
-                CursorIcon::ColResize
-            }
-        }
-        Some(node) if matches!(node.kind.as_str(), "button" | "pressable" | "slider") => {
-            CursorIcon::Pointer
-        }
-        Some(node) if matches!(node.kind.as_str(), "input" | "textarea") => CursorIcon::Text,
-        _ => CursorIcon::Default,
-    }
-}
-
-/// CSS `cursor` keywords winit can show.
-pub(crate) fn css_cursor(name: &str) -> Option<CursorIcon> {
-    Some(match name {
-        "default" => CursorIcon::Default,
-        "pointer" => CursorIcon::Pointer,
-        "text" => CursorIcon::Text,
-        "vertical-text" => CursorIcon::VerticalText,
-        "move" => CursorIcon::Move,
-        "grab" => CursorIcon::Grab,
-        "grabbing" => CursorIcon::Grabbing,
-        "not-allowed" => CursorIcon::NotAllowed,
-        "no-drop" => CursorIcon::NoDrop,
-        "wait" => CursorIcon::Wait,
-        "progress" => CursorIcon::Progress,
-        "help" => CursorIcon::Help,
-        "crosshair" => CursorIcon::Crosshair,
-        "copy" => CursorIcon::Copy,
-        "alias" => CursorIcon::Alias,
-        "context-menu" => CursorIcon::ContextMenu,
-        "cell" => CursorIcon::Cell,
-        "zoom-in" => CursorIcon::ZoomIn,
-        "zoom-out" => CursorIcon::ZoomOut,
-        "col-resize" => CursorIcon::ColResize,
-        "row-resize" => CursorIcon::RowResize,
-        "ew-resize" => CursorIcon::EwResize,
-        "ns-resize" => CursorIcon::NsResize,
-        "nesw-resize" => CursorIcon::NeswResize,
-        "nwse-resize" => CursorIcon::NwseResize,
-        "all-scroll" => CursorIcon::AllScroll,
-        _ => return None,
-    })
-}
+pub(crate) use cursor::{css_cursor, cursor_for_node};
 
 pub(crate) fn ime_allowed_for_node(node: Option<&Node>) -> bool {
     node.is_some_and(|node| matches!(node.kind.as_str(), "input" | "textarea"))
@@ -621,19 +561,7 @@ fn hex_luminance(color: &str) -> Option<f32> {
 }
 
 #[cfg(test)]
-mod backdrop_appearance_tests {
-    use super::hex_luminance;
-
-    #[test]
-    fn window_background_lightness_picks_the_material_appearance() {
-        assert!(hex_luminance("#ffffff00").unwrap() > 0.99);
-        assert!(hex_luminance("#18181b40").unwrap() < 0.5);
-        assert!(hex_luminance("#fff").unwrap() > 0.99);
-        assert_eq!(hex_luminance("#000000"), Some(0.0));
-        assert_eq!(hex_luminance("transparent"), None);
-        assert_eq!(hex_luminance("#12345"), None);
-    }
-}
+mod backdrop_appearance_tests;
 
 /// Cloaks the window for the Acrylic fade-in, then uncloaks it from a timer thread
 /// (DWM attributes may be set from any thread). A window closed meanwhile is left
@@ -1263,6 +1191,41 @@ impl CommandProxy {
     }
 }
 
+/// winit's Android loop drops wake-ups while the activity is in the background and drains the
+/// app's commands only on a timeout, so a request sent then (`inspect`, `layout`, a notification)
+/// waited for the user to come back and timed out. In the background the loop polls: often for a
+/// few seconds after a command, then rarely (the system freezes cached apps anyway).
+#[cfg(target_os = "android")]
+pub(crate) mod background_poll {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    static LAST_COMMAND_MS: AtomicU64 = AtomicU64::new(0);
+    const BUSY: Duration = Duration::from_millis(50);
+    const IDLE: Duration = Duration::from_secs(1);
+    const BUSY_FOR: Duration = Duration::from_secs(5);
+
+    fn origin() -> Instant {
+        static ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        *ORIGIN.get_or_init(Instant::now)
+    }
+
+    pub(crate) fn command_sent() {
+        let ms = origin().elapsed().as_millis() as u64;
+        LAST_COMMAND_MS.store(ms.max(1), Ordering::Relaxed);
+    }
+
+    pub(crate) fn deadline(now: Instant) -> Option<Instant> {
+        if crate::android::media::foreground() {
+            return None;
+        }
+        let last = LAST_COMMAND_MS.load(Ordering::Relaxed);
+        let recent = last != 0
+            && now.saturating_duration_since(origin() + Duration::from_millis(last)) < BUSY_FOR;
+        Some(now + if recent { BUSY } else { IDLE })
+    }
+}
+
 /// Files dragged in from the system: winit reports each file once on entry
 /// (`HoveredFile`) and on drop (`DroppedFile`), but not the pointer in between,
 /// so the target under it is polled while the drag lasts.
@@ -1284,6 +1247,8 @@ impl FileDrag {
 
 /// How often the pointer is read while files are dragged over a window.
 const FILE_DRAG_POLL: Duration = Duration::from_millis(50);
+/// How often a GPU frame's pending buffer check is polled (renderer.rs).
+const GPU_CHECK_POLL: Duration = Duration::from_millis(4);
 
 /// The earlier of two wake-ups: what every window waits for together.
 fn earlier_flow(a: ControlFlow, b: ControlFlow) -> ControlFlow {
@@ -1416,7 +1381,7 @@ impl ApplicationHandler<Command> for Host {
                     }
                 }
             },
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
             Command::Accessibility { event } => {
                 let id = event.window_id;
                 if self.main.owns(id) {
@@ -1493,6 +1458,8 @@ impl App {
             window: None,
             modifiers: ModifiersState::empty(),
             scene: vello::Scene::new(),
+            glass: None,
+            glass_seen: false,
             fatal: None,
             ready_emitted: false,
             presentation_retry_at: None,
@@ -1509,7 +1476,6 @@ impl App {
             ime_enabled: false,
             last_titlebar_click: None,
             close_request_pending: false,
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
             event_proxy,
             tray: None,
             media: Default::default(),
@@ -1521,9 +1487,10 @@ impl App {
             frame_stats: Default::default(),
             memory_stages,
             gpu_upgrade: false,
+            gpu_check_pending: false,
             #[cfg(target_os = "windows")]
             system_media: None,
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
             accessibility: None,
         }
     }
@@ -1550,6 +1517,14 @@ pub fn run(
     {
         use winit::platform::windows::EventLoopBuilderExtWindows;
         builder.with_any_thread(true);
+    }
+    #[cfg(target_os = "android")]
+    {
+        use winit::platform::android::EventLoopBuilderExtAndroid;
+        builder.with_android_app(
+            crate::android::app()
+                .ok_or("Tarve on Android starts from android_main (NativeActivity)")?,
+        );
     }
     #[cfg(target_os = "linux")]
     {
@@ -1658,6 +1633,9 @@ struct App {
     window: Option<Arc<Window>>,
     modifiers: ModifiersState,
     scene: vello::Scene,
+    /// The scene's glass and whether the last frame had any (glass/scene.rs).
+    glass: Option<crate::glass::GlassFrame>,
+    glass_seen: bool,
     fatal: Option<String>,
     ready_emitted: bool,
     presentation_retry_at: Option<Instant>,
@@ -1672,7 +1650,6 @@ struct App {
     ime_enabled: bool,
     last_titlebar_click: Option<(Instant, (f64, f64))>,
     close_request_pending: bool,
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
     event_proxy: EventLoopProxy<Command>,
     tray: Option<crate::tray::Tray>,
     media: crate::media::Media,
@@ -1692,9 +1669,11 @@ struct App {
     /// The first frames are drawn on the CPU while the GPU device is still being created;
     /// set until the GPU renderer takes over.
     gpu_upgrade: bool,
+    /// A GPU frame's check against Vello's buffer sizes is still on the GPU (renderer.rs).
+    gpu_check_pending: bool,
     #[cfg(target_os = "windows")]
     system_media: Option<crate::smtc::SystemMedia>,
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
     accessibility: Option<AccessibilityBridge>,
 }
 
@@ -1777,7 +1756,7 @@ pub(crate) fn close_request_action(intercept: bool, pending: &mut bool) -> Close
     CloseRequestAction::Emit
 }
 impl App {
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
     fn initialize_accessibility(&mut self, event_loop: &ActiveEventLoop, window: &Window) {
         self.accessibility = Some(AccessibilityBridge::new(
             event_loop,
@@ -1786,10 +1765,10 @@ impl App {
         ));
     }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "android")))]
     fn initialize_accessibility(&mut self, _: &ActiveEventLoop, _: &Window) {}
 
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
     fn sync_accessibility(&mut self) {
         if !self
             .accessibility
@@ -1802,7 +1781,7 @@ impl App {
             return;
         };
         let scale = window.scale_factor();
-        let size = window.inner_size().to_logical::<f32>(scale);
+        let size = layout_viewport(window, &mut self.tree);
         if let Err(message) = self.tree.compute(size.width, size.height) {
             self.events.push(error(format!(
                 "Accessibility layout update failed: {message}"
@@ -1819,96 +1798,8 @@ impl App {
         }
     }
 
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "android")))]
     fn sync_accessibility(&mut self) {}
-
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
-    fn handle_accessibility_action(&mut self, request: ActionRequest) -> Vec<serde_json::Value> {
-        let text_run_start = self
-            .accessibility
-            .as_ref()
-            .and_then(|accessibility| accessibility.text_run_start(request.target_node));
-        let Some(native_id) = self
-            .accessibility
-            .as_ref()
-            .and_then(|accessibility| accessibility.resolve(request.target_node))
-            .map(str::to_string)
-        else {
-            return vec![];
-        };
-        if !self.tree.entries.contains_key(&native_id) {
-            return vec![];
-        }
-        match request.action {
-            Action::Focus => self.tree.accessibility_focus(&native_id),
-            Action::Blur => self.tree.accessibility_blur(&native_id),
-            Action::Click | Action::Expand | Action::Collapse => {
-                self.tree.accessibility_click(&native_id)
-            }
-            Action::ShowContextMenu => self.tree.accessibility_context(&native_id),
-            Action::Increment => self.tree.accessibility_adjust_numeric(&native_id, 1.0),
-            Action::Decrement => self.tree.accessibility_adjust_numeric(&native_id, -1.0),
-            Action::SetValue => match request.data {
-                Some(ActionData::Value(value)) => {
-                    self.tree.accessibility_set_text_value(&native_id, &value)
-                }
-                Some(ActionData::NumericValue(value)) => {
-                    self.tree.accessibility_set_numeric_value(&native_id, value)
-                }
-                _ => vec![],
-            },
-            Action::ReplaceSelectedText => match request.data {
-                Some(ActionData::Value(value)) => self
-                    .tree
-                    .accessibility_replace_selected_text(&native_id, &value),
-                _ => vec![],
-            },
-            Action::SetTextSelection => match request.data {
-                Some(ActionData::SetTextSelection(selection)) => {
-                    let positions = self.accessibility.as_ref().and_then(|accessibility| {
-                        let anchor = accessibility.resolve_text_position(selection.anchor)?;
-                        let focus = accessibility.resolve_text_position(selection.focus)?;
-                        (anchor.0 == native_id && focus.0 == native_id)
-                            .then_some((anchor.1, focus.1))
-                    });
-                    positions.map_or_else(Vec::new, |(anchor, focus)| {
-                        self.tree
-                            .accessibility_set_text_selection(&native_id, anchor, focus)
-                    })
-                }
-                _ => vec![],
-            },
-            Action::ScrollUp | Action::ScrollDown | Action::ScrollLeft | Action::ScrollRight => {
-                let page = matches!(request.data, Some(ActionData::ScrollUnit(ScrollUnit::Page)));
-                let (direction_x, direction_y) = match request.action {
-                    Action::ScrollUp => (0.0, -1.0),
-                    Action::ScrollDown => (0.0, 1.0),
-                    Action::ScrollLeft => (-1.0, 0.0),
-                    Action::ScrollRight => (1.0, 0.0),
-                    _ => (0.0, 0.0),
-                };
-                self.tree
-                    .accessibility_scroll_by(&native_id, direction_x, direction_y, page)
-            }
-            Action::SetScrollOffset => match request.data {
-                Some(ActionData::SetScrollOffset(point)) => self
-                    .tree
-                    .accessibility_set_scroll(&native_id, point.x, point.y),
-                _ => vec![],
-            },
-            Action::ScrollIntoView => {
-                if let Some(character) = text_run_start {
-                    let alignment = accessibility_scroll_alignment(request.data.as_ref());
-                    self.tree.accessibility_scroll_text_position_into_view(
-                        &native_id, character, alignment,
-                    )
-                } else {
-                    self.tree.accessibility_scroll_into_view(&native_id)
-                }
-            }
-            _ => vec![],
-        }
-    }
 
     fn request_close(&mut self, _event_loop: &ActiveEventLoop) {
         let intercept = self
@@ -1930,9 +1821,12 @@ impl App {
             .unwrap_or_else(|| fallback.to_string())
     }
     fn window_chrome_suppressed(&self) -> bool {
-        self.window
-            .as_ref()
-            .is_some_and(|window| window.is_maximized() || window.fullscreen().is_some())
+        // An Android activity fills the screen: no frame around it.
+        cfg!(target_os = "android")
+            || self
+                .window
+                .as_ref()
+                .is_some_and(|window| window.is_maximized() || window.fullscreen().is_some())
     }
     fn apply_custom_window_chrome(&self) {
         if self.document.window.decorations {
@@ -2112,73 +2006,6 @@ impl App {
             None => {}
         }
     }
-    fn clipboard_shortcut(&mut self, key: &Key) -> Vec<serde_json::Value> {
-        if !self.modifiers.control_key() {
-            return vec![];
-        }
-        let Key::Character(key) = key else {
-            return vec![];
-        };
-        let key = key.to_ascii_lowercase();
-        if !matches!(key.as_str(), "c" | "v" | "x") {
-            return vec![];
-        }
-        let Ok(mut clipboard) = arboard::Clipboard::new() else {
-            return vec![];
-        };
-        if key == "v" {
-            if let Ok(text) = clipboard.get_text()
-                && !text.is_empty()
-            {
-                return self.tree.type_text(&text);
-            }
-            return self.rich_paste(&mut clipboard);
-        }
-        let Some(text) = self.tree.selected_text() else {
-            return vec![];
-        };
-        if clipboard.set_text(text).is_ok() && key == "x" {
-            return self.tree.key("Backspace");
-        }
-        vec![]
-    }
-    /// Clipboard payloads without text (file lists, bitmaps) are forwarded to
-    /// the focused node as a `paste` event instead of being dropped.
-    fn rich_paste(&self, clipboard: &mut arboard::Clipboard) -> Vec<serde_json::Value> {
-        let Some(id) = self.tree.focused.clone() else {
-            return vec![];
-        };
-        if let Ok(files) = clipboard.get().file_list()
-            && !files.is_empty()
-        {
-            let files: Vec<String> = files
-                .iter()
-                .take(MAX_PASTE_FILES)
-                .map(|path| path.to_string_lossy().into_owned())
-                .collect();
-            return vec![json!({"type":"paste", "id":id, "files":files})];
-        }
-        if let Ok(image) = clipboard.get_image()
-            && image.width > 0
-            && image.height > 0
-            && image.width <= MAX_PASTE_IMAGE_DIMENSION
-            && image.height <= MAX_PASTE_IMAGE_DIMENSION
-            && image
-                .width
-                .checked_mul(image.height)
-                .and_then(|pixels| pixels.checked_mul(4))
-                .is_some_and(|bytes| bytes == image.bytes.len() && bytes <= MAX_PASTE_IMAGE_BYTES)
-        {
-            use base64::Engine as _;
-            let rgba = base64::engine::general_purpose::STANDARD.encode(&image.bytes);
-            return vec![json!({
-                "type":"paste",
-                "id":id,
-                "image":{"width":image.width, "height":image.height, "rgba":rgba}
-            })];
-        }
-        vec![]
-    }
     fn emit(&self, events: Vec<serde_json::Value>) {
         for event in events {
             self.events.push(event);
@@ -2198,7 +2025,7 @@ impl App {
         if window.is_visible() != Some(false) {
             return;
         }
-        let size = window.inner_size().to_logical::<f32>(window.scale_factor());
+        let size = layout_viewport(window, &mut self.tree);
         if size.width <= 0.0 || size.height <= 0.0 {
             return;
         }
@@ -2217,7 +2044,7 @@ impl App {
         if (self.tree.dirty.paint || self.tree.dirty.layout || self.tree.dirty.text)
             && let Some(window) = &self.window
         {
-            window.request_redraw();
+            request_frame(window);
         }
     }
     fn emit_motion_events(&mut self) {
@@ -2229,6 +2056,11 @@ impl App {
             return;
         }
         let now_ms = self.motion_epoch.elapsed().as_secs_f64() * 1000.0;
+        #[cfg(target_os = "android")]
+        let now_ms = match crate::android::vsync::frame_age() {
+            Some(age) => (now_ms - age.as_secs_f64() * 1000.0).max(self.tree.motion_time_ms()),
+            None => now_ms,
+        };
         self.tree.advance_motion(now_ms);
         self.emit_motion_events();
     }
@@ -2287,6 +2119,7 @@ impl App {
             other => other,
         };
         self.scene = vello::Scene::new();
+        self.glass = None;
         self.presentation_retry_at = None;
     }
     /// Minimized: nothing can be seen until it is restored, so the renderer and the
@@ -2506,11 +2339,20 @@ impl App {
         let hold_at = self.input_hold.filter(|deadline| *deadline > now);
         let motion_at = self.motion_deadline(now);
         let media_at = self.media.deadline();
+        #[cfg(target_os = "android")]
+        let media_at = media_at
+            .into_iter()
+            .chain(crate::android::media::background_deadline(now))
+            .chain(crate::android::frame_rate::deadline())
+            .chain(background_poll::deadline(now))
+            .min();
         let video_at = self.videos.deadline();
         let file_drag_at = self.file_drag.active().then(|| now + FILE_DRAG_POLL);
         let upgrade_at = self.gpu_upgrade.then(|| now + Duration::from_millis(2));
+        let gpu_check_at = self.gpu_check_pending.then(|| now + GPU_CHECK_POLL);
         let deadline = [
             upgrade_at,
+            gpu_check_at,
             file_drag_at,
             recovery_at,
             present_at,
@@ -2721,7 +2563,7 @@ impl App {
             }
             // Lay out and shape text while the GPU device (prewarmed on another thread
             // since tarve_start) finishes; prepare() then finds a clean layout.
-            let size = window.inner_size().to_logical::<f32>(window.scale_factor());
+            let size = layout_viewport(&window, &mut app.tree);
             let _ = app.tree.compute(size.width, size.height);
             crate::stats::trace("layout");
             let graphics = Graphics::new(
@@ -2921,9 +2763,12 @@ impl App {
         self.sync_backdrop_appearance(&background);
         let present_started = Instant::now();
         let result = match &mut self.graphics {
-            GraphicsState::Ready(graphics) => {
-                graphics.render(&self.scene, color(&background), content_changed)
-            }
+            GraphicsState::Ready(graphics) => graphics.render(
+                &self.scene,
+                self.glass.as_ref(),
+                color(&background),
+                content_changed,
+            ),
             _ => Err(RenderError::Fatal("Renderer not ready".into())),
         }?;
         self.frame_stats
@@ -2977,7 +2822,7 @@ impl App {
         if physical.width == 0 || physical.height == 0 {
             return Ok(false);
         }
-        let size = window.inner_size().to_logical::<f32>(scale);
+        let size = layout_viewport(window, &mut self.tree);
         // Only D3D11 paints released images (from their textures); any other
         // renderer, e.g. after a fallback, needs the pixels back.
         let d3d11 = {
@@ -3027,16 +2872,26 @@ impl App {
                     }
                 }
                 if !retained_prepared {
+                    let (width, height) =
+                        crate::renderer::scaled_size(physical.width, physical.height, scale);
+                    let device_scale = scale * crate::renderer::render_scale(scale);
                     retained_prepared = graphics
-                        .prepare_cpu_frame(physical.width, physical.height, |target| {
-                            tree.paint(scale, target)
+                        .prepare_cpu_frame(width, height, device_scale, |target| {
+                            tree.paint(device_scale, target)
                         })
                         .map_err(RenderError::Fatal)?;
                 }
             }
             // Parked: nothing to show, and no scene to keep in memory.
             if !retained_prepared && !self.parked {
-                self.scene = self.tree.scene(scale);
+                let device_scale = scale * crate::renderer::render_scale(scale);
+                let size = crate::renderer::scaled_size(physical.width, physical.height, scale);
+                (self.scene, self.glass) = crate::glass::paint_scene(
+                    &mut self.tree,
+                    device_scale,
+                    size,
+                    &mut self.glass_seen,
+                );
             }
             self.frame_stats
                 .paint
@@ -3105,6 +2960,12 @@ impl App {
             Ok(PresentResult::Presented) => {
                 self.presentation_retry_at = None;
                 self.tree.record_frame_time(frame_cpu_ms);
+                #[cfg(target_os = "android")]
+                self.android_frame_presented(frame_started);
+                crate::stats::trace_frame(
+                    frame_cpu_ms,
+                    frame_started.elapsed().as_secs_f64() * 1000.0,
+                );
                 if self.graphics_recovery_episodes > 0 {
                     let now = Instant::now();
                     if let Some(stable_since) = self.graphics_stable_since {
@@ -3203,11 +3064,11 @@ impl App {
                 .cloned();
             if target != self.ime_target {
                 self.tree.ime_cancel();
-                window.set_ime_allowed(false);
+                set_ime_allowed(&window, false);
                 self.ime_enabled = false;
                 self.ime_target = target.clone();
             }
-            window.set_ime_allowed(target.is_some());
+            set_ime_allowed(&window, target.is_some());
             if self.ime_enabled
                 && target.is_some()
                 && let Some(rect) = self.tree.ime_cursor_area()
@@ -3267,6 +3128,10 @@ impl App {
         self.tree.pointer_move(x, y)
     }
     fn titlebar_pressed(&mut self) {
+        // A phone's window fills the screen: a TitleBar is only the app's top bar there.
+        if cfg!(target_os = "android") {
+            return;
+        }
         let Some(window) = &self.window else {
             return;
         };
@@ -3328,25 +3193,7 @@ impl App {
 }
 
 #[cfg(all(test, target_os = "windows"))]
-mod accessibility_tests {
-    use super::*;
-
-    #[test]
-    fn preserves_vertical_accesskit_scroll_hints_for_text_ranges() {
-        assert_eq!(
-            accessibility_scroll_alignment(Some(&ActionData::ScrollHint(ScrollHint::TopEdge))),
-            Some(AccessibilityScrollAlignment::Top)
-        );
-        assert_eq!(
-            accessibility_scroll_alignment(Some(&ActionData::ScrollHint(ScrollHint::BottomEdge))),
-            Some(AccessibilityScrollAlignment::Bottom)
-        );
-        assert_eq!(
-            accessibility_scroll_alignment(Some(&ActionData::ScrollHint(ScrollHint::LeftEdge))),
-            None
-        );
-    }
-}
+mod accessibility_tests;
 impl ApplicationHandler<Command> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(window) = self.window.clone() {
@@ -3489,6 +3336,7 @@ impl ApplicationHandler<Command> for App {
                         }
                         crate::stats::trace("prepared");
                         self.initialize_accessibility(event_loop, window.as_ref());
+                        self.sync_environment(true);
                         crate::stats::trace("a11y");
                         #[cfg(target_os = "linux")]
                         if let Err(message) = crate::x11_state::add_window_states(
@@ -3558,7 +3406,9 @@ impl ApplicationHandler<Command> for App {
                         self.sync_custom_window_chrome();
                     }
                 }
-                self.frame_stats.apply.push(apply_started.elapsed().as_secs_f64() * 1000.0);
+                self.frame_stats
+                    .apply
+                    .push(apply_started.elapsed().as_secs_f64() * 1000.0);
             }
             Command::Mutate { mutations } => {
                 let chrome_changed = mutations.iter().any(|mutation| match mutation {
@@ -3576,23 +3426,19 @@ impl ApplicationHandler<Command> for App {
                         self.sync_custom_window_chrome();
                     }
                 }
-                self.frame_stats.apply.push(apply_started.elapsed().as_secs_f64() * 1000.0);
+                self.frame_stats
+                    .apply
+                    .push(apply_started.elapsed().as_secs_f64() * 1000.0);
             }
             Command::Update { root } => {
                 self.tree.update(*root);
                 self.sync_custom_window_chrome();
                 accessibility_changed = true;
-                self.frame_stats.apply.push(apply_started.elapsed().as_secs_f64() * 1000.0);
+                self.frame_stats
+                    .apply
+                    .push(apply_started.elapsed().as_secs_f64() * 1000.0);
             }
-            Command::Stats { request_id, reset } => {
-                self.events.push(json!({"type":"stats", "requestId":request_id, "stats": {
-                    "phases": self.frame_stats.summary(),
-                    "memory": self.memory_stages.summary(),
-                }}));
-                if reset {
-                    self.frame_stats.reset();
-                }
-            }
+            Command::Stats { request_id, reset } => self.stats(request_id, reset),
             Command::Close => self.exit_requested = true,
             Command::CancelCloseRequest => self.close_request_pending = false,
             Command::MenuBar { menu } => {
@@ -3609,8 +3455,8 @@ impl ApplicationHandler<Command> for App {
             Command::WindowLevel { level } => {
                 self.document.window.level = level;
                 if self.is_main {
-            keep_at_bottom(level == crate::protocol::WindowLevel::AlwaysOnBottom);
-        }
+                    keep_at_bottom(level == crate::protocol::WindowLevel::AlwaysOnBottom);
+                }
                 if let Some(window) = &self.window {
                     window.set_window_level(winit_window_level(level));
                 }
@@ -3618,8 +3464,13 @@ impl ApplicationHandler<Command> for App {
             Command::Window { action } => {
                 if let Some(window) = &self.window {
                     match action.as_str() {
+                        // An activity cannot hide: it goes to the background, still running.
+                        #[cfg(target_os = "android")]
+                        "hide" | "minimize" => crate::android::move_to_back(),
                         "show" => self.unpark(event_loop),
+                        #[cfg(not(target_os = "android"))]
                         "hide" => self.park(event_loop),
+                        #[cfg(not(target_os = "android"))]
                         "minimize" => window.set_minimized(true),
                         "focus" if !background_windows() => window.focus_window(),
                         // Brought back for the user (a second launch, a tray click): shown,
@@ -3633,7 +3484,9 @@ impl ApplicationHandler<Command> for App {
                                 }
                             }
                         }
-                        other => self.events.push(error(format!("unknown window action {other}"))),
+                        other => self
+                            .events
+                            .push(error(format!("unknown window action {other}"))),
                     }
                 }
             }
@@ -3660,9 +3513,9 @@ impl ApplicationHandler<Command> for App {
                 let video_load = action == "load" && kind.as_deref() == Some("video");
                 let events = if video_load {
                     // A `<video>` that used to be `<audio>` stops its sound first.
-                    let mut events =
-                        self.media
-                            .command(&id, "unload", None, None, None, None, None);
+                    let mut events = self
+                        .media
+                        .command(&id, "unload", None, None, None, None, None);
                     self.attach_video_renderer();
                     // Windows mixes a video's sound into the app's audio output;
                     // GStreamer (Linux) plays it through its own sink: no stream opened for it.
@@ -3720,7 +3573,9 @@ impl ApplicationHandler<Command> for App {
                     {
                         match crate::smtc::SystemMedia::new(window, self.event_proxy.clone()) {
                             Ok(controls) => self.system_media = Some(controls),
-                            Err(message) => self.events.push(error(format!("system media: {message}"))),
+                            Err(message) => {
+                                self.events.push(error(format!("system media: {message}")))
+                            }
                         }
                     }
                     if let Some(controls) = self.system_media.as_mut()
@@ -3729,21 +3584,51 @@ impl ApplicationHandler<Command> for App {
                         self.events.push(error(format!("system media: {message}")));
                     }
                 }
-                #[cfg(not(target_os = "windows"))]
+                #[cfg(target_os = "android")]
+                crate::android::media::set_session(session);
+                #[cfg(not(any(target_os = "windows", target_os = "android")))]
                 let _ = session;
             }
             Command::SystemMediaEvent { action, time } => {
+                #[cfg(target_os = "android")]
+                for event in crate::android::media::action(&mut self.media, &action) {
+                    self.events.push(event);
+                }
                 let mut event = json!({"type":"systemMedia", "action":action});
                 if let Some(time) = time {
                     event["time"] = json!(time);
                 }
                 self.events.push(event);
             }
-            Command::Notify { title, body } => {
-                let result = match self.tray.as_mut() {
-                    Some(tray) => tray.notify(&title, &body),
-                    None => Err("notifications need an active tray icon (call app.tray first)".into()),
+            Command::Notify { id, title, body } => {
+                let app_name = self
+                    .document
+                    .app_identity
+                    .as_ref()
+                    .map(|identity| identity.name.trim())
+                    .filter(|name| !name.is_empty())
+                    .or_else(|| Some(self.document.window.title.trim()).filter(|t| !t.is_empty()))
+                    .unwrap_or("Tarve")
+                    .to_owned();
+                let notification = crate::notification::Notification {
+                    id: id.as_deref(),
+                    title: &title,
+                    body: &body,
+                    app_name: &app_name,
                 };
+                #[cfg(target_os = "windows")]
+                let result = crate::notification::show(
+                    &notification,
+                    self.document.app_identity.as_ref(),
+                    self.event_proxy.clone(),
+                )
+                .or_else(|error| match self.tray.as_mut() {
+                    // A toast that cannot show (no notification platform) falls back to the tray balloon.
+                    Some(tray) => tray.notify(&title, &body),
+                    None => Err(error),
+                });
+                #[cfg(not(target_os = "windows"))]
+                let result = crate::notification::show(&notification, self.event_proxy.clone());
                 if let Err(message) = result {
                     self.events.push(error(message));
                 }
@@ -3764,6 +3649,13 @@ impl ApplicationHandler<Command> for App {
                         self.events.push(error(message));
                     }
                 } else {
+                    if event["type"] == "notificationClick"
+                        && let Some(window) = self.window.as_ref()
+                        && window.is_visible() != Some(false)
+                    {
+                        window.set_minimized(false);
+                        window.focus_window();
+                    }
                     self.events.push(event);
                 }
             }
@@ -3799,10 +3691,12 @@ impl ApplicationHandler<Command> for App {
                 offset,
                 smooth,
             } => {
-                match self
-                    .tree
-                    .request_virtual_scroll_to_item(&id, index, offset.unwrap_or(0.0), smooth)
-                {
+                match self.tree.request_virtual_scroll_to_item(
+                    &id,
+                    index,
+                    offset.unwrap_or(0.0),
+                    smooth,
+                ) {
                     Ok(events) => self.emit(events),
                     Err(message) => self.events.push(error(message)),
                 }
@@ -3820,11 +3714,14 @@ impl ApplicationHandler<Command> for App {
                 let size = self
                     .window
                     .as_ref()
-                    .map(|window| window.inner_size().to_logical::<f32>(window.scale_factor()))
+                    .map(|window| layout_viewport(window, &mut self.tree))
                     .filter(|size| size.width > 0.0 && size.height > 0.0)
                     .map(|size| (size.width, size.height))
                     // Before the window exists (or while minimized) the requested size stands in.
-                    .unwrap_or((self.document.window.width as f32, self.document.window.height as f32));
+                    .unwrap_or((
+                        self.document.window.width as f32,
+                        self.document.window.height as f32,
+                    ));
                 match self.tree.compute(size.0, size.1) {
                     Ok(()) => {
                         let events = self.tree.take_layout_events();
@@ -3906,9 +3803,12 @@ impl ApplicationHandler<Command> for App {
                     }
                     Err(RenderError::Fatal(message)) => Err(CaptureError::FatalGpu(message)),
                     Ok(_) => match &mut self.graphics {
-                        GraphicsState::Ready(graphics) => {
-                            graphics.capture(&self.scene, color(&background), &path)
-                        }
+                        GraphicsState::Ready(graphics) => graphics.capture(
+                            &self.scene,
+                            self.glass.as_ref(),
+                            color(&background),
+                            &path,
+                        ),
                         _ => Err(CaptureError::Request("Window renderer is not ready".into())),
                     },
                 };
@@ -3967,12 +3867,16 @@ impl ApplicationHandler<Command> for App {
                     }));
                 }
             }
-            Command::FileDialog { mode, options, request_id } => {
-                match run_file_dialog(self.window.as_ref(), &mode, options) {
-                    Ok(paths) => self.events.push(json!({"type":"fileDialog", "requestId":request_id, "paths":paths})),
-                    Err(message) => self.events.push(json!({"type":"fileDialog", "requestId":request_id, "paths":[], "error":message})),
-                }
-            }
+            Command::WebSignIn(request) => self.web_sign_in(request),
+            Command::Permissions(request) => self.permissions(request),
+            Command::Share(request) => self.share(request),
+            Command::Location(request) => self.location(request),
+            Command::Authenticate(request) => self.authenticate(request),
+            Command::FileDialog(crate::protocol::requests::FileDialog {
+                mode,
+                options,
+                request_id,
+            }) => self.file_dialog(request_id, &mode, options),
             Command::Input {
                 action,
                 x,
@@ -3986,10 +3890,9 @@ impl ApplicationHandler<Command> for App {
                     "move" => self.tree.pointer_move(x.unwrap_or(0.0), y.unwrap_or(0.0)),
                     "down" => self.tree.pointer_down(),
                     "up" => self.tree.pointer_up(),
-                    "wheel" => self.tree.wheel_2d(
-                        delta_x.unwrap_or(0.0),
-                        delta_y.or(delta).unwrap_or(0.0),
-                    ),
+                    "wheel" => self
+                        .tree
+                        .wheel_2d(delta_x.unwrap_or(0.0), delta_y.or(delta).unwrap_or(0.0)),
                     "text" => self.tree.type_text(text.as_deref().unwrap_or("")),
                     "key" if text.as_deref() == Some("Escape") => {
                         vec![json!({"type":"escape"})]
@@ -4000,7 +3903,7 @@ impl ApplicationHandler<Command> for App {
                 self.emit(events);
                 accessibility_changed = true;
             }
-            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
             Command::Accessibility { event } => match event.window_event {
                 AccessKitWindowEvent::InitialTreeRequested => {
                     if let Some(accessibility) = self.accessibility.as_mut() {
@@ -4022,7 +3925,7 @@ impl ApplicationHandler<Command> for App {
                         accessibility.set_active(false);
                     }
                 }
-            }
+            },
             _ => self
                 .events
                 .push(error("Diagnostic command requires debug: true")),
@@ -4052,6 +3955,9 @@ impl ApplicationHandler<Command> for App {
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.upgrade_graphics();
+        // Android reports the system bars and the keyboard as a content rect, not a resize.
+        #[cfg(target_os = "android")]
+        self.android_about_to_wait();
         let now = Instant::now();
         let present_due = self
             .presentation_retry_at
@@ -4081,15 +3987,21 @@ impl ApplicationHandler<Command> for App {
         if motion_due {
             self.advance_live_motion();
         }
-        if (present_due || recovery_due || motion_due)
+        let gpu_redraw = self.poll_gpu_check();
+        if (present_due || recovery_due || motion_due || gpu_redraw)
             && let Some(window) = &self.window
         {
             window.request_redraw();
         }
         self.sync_control_flow(event_loop);
     }
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        let _ = id;
+        #[cfg(target_os = "android")]
+        let Some(event) = self.android_input(event_loop, id, event) else {
+            return;
+        };
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
         if let (Some(accessibility), Some(window)) = (&mut self.accessibility, &self.window) {
             accessibility.process_event(window.as_ref(), &event);
         }
@@ -4271,9 +4183,8 @@ impl ApplicationHandler<Command> for App {
             } => {
                 events = self.tree.pointer_context();
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                // A notch moves the system's lines per notch (3 by default) of ~33 px,
-                // 100 px as browsers do, eased; touchpads send pixels, already smooth.
+            WindowEvent::MouseWheel { delta, phase, .. } => {
+                // A notch: the system's lines per notch of ~33 px (100 px as browsers), eased.
                 let notch = matches!(delta, MouseScrollDelta::LineDelta(..));
                 let (mut dx, mut dy) = match delta {
                     MouseScrollDelta::LineDelta(x, y) => {
@@ -4297,7 +4208,11 @@ impl ApplicationHandler<Command> for App {
                 events = if notch {
                     self.tree.wheel_notch(dx, dy)
                 } else {
-                    self.tree.wheel_2d(dx, dy)
+                    if phase == winit::event::TouchPhase::Started {
+                        self.tree.begin_wheel_gesture();
+                    }
+                    let ended = phase == winit::event::TouchPhase::Ended;
+                    self.tree.wheel_pixels(dx, dy, ended)
                 };
                 accessibility_changed = !events.is_empty();
             }
@@ -4479,27 +4394,4 @@ impl ApplicationHandler<Command> for App {
 }
 
 #[cfg(all(test, target_os = "linux"))]
-mod linux_backend_tests {
-    use super::should_force_x11_on_wsl;
-
-    #[test]
-    fn forces_x11_only_for_wsl_with_a_display() {
-        assert!(should_force_x11_on_wsl(
-            "6.18.33.2-microsoft-standard-WSL2",
-            Some(":0")
-        ));
-        assert!(should_force_x11_on_wsl(
-            "5.15.167.4-MICROSOFT-standard-WSL2",
-            Some(":0")
-        ));
-        assert!(!should_force_x11_on_wsl("6.18.0-generic", Some(":0")));
-        assert!(!should_force_x11_on_wsl(
-            "6.18.33.2-microsoft-standard-WSL2",
-            None
-        ));
-        assert!(!should_force_x11_on_wsl(
-            "6.18.33.2-microsoft-standard-WSL2",
-            Some("")
-        ));
-    }
-}
+mod linux_backend_tests;

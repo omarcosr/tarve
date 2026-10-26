@@ -1,39 +1,23 @@
-import type { SceneDocument, FileDialogOptions, LayoutBox, NativeEvent, NativeCommand, NativeStats, NativeSystemMediaSession, PhaseSummary, Renderer, Snapshot, TextRendering } from "./protocol";
+import type { SceneDocument, FileDialogOptions, LayoutBox, NativeEvent, NativeCommand, NativeStats, NativeSystemMediaSession, PermissionState, PhaseSummary, Renderer, Snapshot, TextRendering } from "./protocol";
 import { readFileSync } from "node:fs";
+import { environmentKey, initialViewport, setEnvironment, trackViewport } from "./viewport";
 import { applyMediaEvent, type MediaController } from "./media-element";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
 import { compileTree, type CompiledTree, invalidateMemos } from "./reconciler";
 import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
-import { jsx, type Child, type VNode } from "./jsx-runtime";
+import { jsx, type VNode } from "./jsx-runtime";
 import { createElementDispatcher } from "./app/element-events";
 import { createMediaSync, mediaController } from "./app/media";
-import { createNativeRequests } from "./app/requests";
+import { createNativeRequests, type WebSignInOptions } from "./app/requests";
 import { editShadowNode, nativeShadow, reconciliationCommand } from "./app/shadow";
 import { createTrayController, type TrayHandle, type TrayOptions } from "./app/tray";
-import { createMenuBarController, type MenuBarItem, type MenuBarOptions } from "./app/menu-bar";
+import { createMenuBarController, withMenuBar, type MenuBarItem, type MenuBarOptions } from "./app/menu-bar";
 import { AppMenuBar, menuBarState } from "./menu-bar";
-import { TitleBar } from "./components/titlebar";
-import { Window } from "./components/window";
+import { withRenderScope } from "./render-scope";
 export type { MenuBarItem, MenuBarOptions } from "./app/menu-bar";
 
 const APP_MENU_BAR_ID = "tarve-menubar";
 
-/** The view with the app's drawn menu bar at the top of its window, after a TitleBar. */
-function withMenuBar(view: VNode, bar: VNode): VNode {
-  // The view is often a component that returns the Window (`() => <App />`): expand it.
-  for (let depth = 0; typeof view.type === "function" && view.type !== Window && depth < 32; depth++) {
-    const expanded = (view.type as (props: Record<string, unknown>) => unknown)(view.props);
-    if (!expanded || typeof expanded !== "object" || Array.isArray(expanded)) return view;
-    view = expanded as VNode;
-  }
-  if (view.type !== Window) return view;
-  const raw = view.props.children;
-  const children: Child[] = Array.isArray(raw) ? [...raw] : raw === undefined ? [] : [raw];
-  const titleBar = children.findIndex(child => !!child && typeof child === "object" && !Array.isArray(child) && (child as VNode).type === TitleBar);
-  children.splice(titleBar + 1, 0, bar);
-  return { ...view, props: { ...view.props, children } };
-}
-import { withRenderScope } from "./render-scope";
 import { PhaseSamples } from "./app/stats";
 import type { ComponentAdapter } from "./component-adapter";
 import { DevErrorOverlay } from "./dev-overlay";
@@ -41,6 +25,18 @@ import { iconBytes, iconFileForShell, runtimeAppMetadata } from "./app-metadata"
 import { applySavedState, windowStateStore } from "./window-state";
 import { nativeAssetPath } from "./embedded-assets";
 import { readAutomation, runAutomation } from "./app/automation";
+import { createInspector, INSPECTOR_SLOT, type DevOptions, type Inspector } from "./devtools/inspector";
+export type { DevOptions } from "./devtools/inspector";
+
+/** Bridges of windows opened with `openWindow`: they never get an inspector of their own. */
+const childWindowBridges = new WeakSet<NativeBridge>();
+/** Windows opened with `openWindow` share the first window's plugins and their commands. */
+const childPluginHosts = new WeakMap<NativeBridge, PluginHost>();
+import { createPluginHost, type PluginHost, type TarvePlugin } from "./plugins";
+import { createOpenRequests, type OpenFilesListener, type OpenUrlListener } from "./app/open-requests";
+import { createDeviceRequests, type AuthenticateOptions, type AuthenticateResult, type DeviceRequests, type PositionOptions, type PositionResult, type ShareOptions, type ShareResult } from "./app/device";
+import type { FileTypeAssociation } from "./associations";
+export type { OpenEvent, OpenFilesListener, OpenUrlListener } from "./app/open-requests";
 
 /** The command-line automation (`--tarve-script`, `--tarve-snapshot`) drives the first app only. */
 let automationClaimed = false;
@@ -53,7 +49,8 @@ export type AppErrorSource =
   | "bridge"
   | "native"
   | "request"
-  | "file-dialog";
+  | "file-dialog"
+  | "plugin";
 
 export interface AppErrorEvent {
   error: Error;
@@ -72,8 +69,12 @@ export interface AppOptions {
   componentAdapters?: readonly ComponentAdapter[];
   bridge?: NativeBridge;
   onError?: (event: AppErrorEvent) => void;
-  /** Development mode: runtime errors render an in-window overlay and render() remounts in the same window. Defaults to TARVE_DEV=1. */
-  dev?: boolean;
+  /**
+   * Development mode: runtime errors render an in-window overlay and render() remounts in the same window. Defaults to TARVE_DEV=1.
+   * `{ inspector: true }` also opens the visual inspector window (component tree, props, layout, picker, render counts,
+   * events); `TARVE_INSPECTOR=1` (`tarve dev --inspect`) opens it too. (TARVE_INSPECT is the automation's node-tree path.)
+   */
+  dev?: boolean | DevOptions;
   /** Show the native frame-time graph. Defaults to TARVE_FRAME_OVERLAY=1. Never schedules frames on its own. */
   frameOverlay?: boolean;
   /** Animation frames per second (transitions, `spin`, keyframes); `null` follows the display's refresh rate. Default 60. */
@@ -132,6 +133,15 @@ export interface AppOptions {
    * or a data URL. Defaults to the `tarve.icon` of the app's package.json under `tarve run`/`dev`/`build`.
    */
   icon?: string;
+  /** URL schemes the app opens (`"myapp"` for `myapp://…`): what `onOpenUrl` reports. Register them with `registerProtocol` or a package. */
+  protocols?: readonly string[];
+  /** File types the app opens: what `onOpenFiles` reports. Register them with `registerFileType` or a package. */
+  fileTypes?: readonly FileTypeAssociation[];
+  /**
+   * Plugins (`definePlugin`, usually imported from their npm package). Each one's setup runs
+   * once, before the window opens; their commands are called with `app.invoke`.
+   */
+  plugins?: readonly TarvePlugin[];
 }
 
 export interface SystemMediaSession extends NativeSystemMediaSession {
@@ -140,6 +150,11 @@ export interface SystemMediaSession extends NativeSystemMediaSession {
 
 export type { TrayMenuItem, TrayOptions, TrayHandle } from "./app/tray";
 
+/**
+ * A system notification: a toast on Windows, org.freedesktop.Notifications on Linux, the
+ * notification shade on Android (which asks for POST_NOTIFICATIONS the first time on Android
+ * 13+). No tray icon is needed. Clicking it brings the window forward and runs `onClick`.
+ */
 export interface NotifyOptions { title: string; body?: string; onClick?: () => void }
 
 const DEV_OVERLAY_SOURCES = new Set<AppErrorSource>(["render", "event-handler", "listener", "hotkey"]);
@@ -222,15 +237,45 @@ export interface AppHandle {
    */
   menuBar(items: readonly MenuBarItem[] | null, options?: MenuBarOptions): void;
   systemMedia(session: SystemMediaSession | null): void;
-  /** Shows a system notification from the tray icon; requires an active tray. */
+  /** Shows a system notification (see `NotifyOptions`); the same call on every platform. */
   notify(options: NotifyOptions): void;
+  /** Runtime permission states by name (`CAMERA` or `android.permission.CAMERA`); every name is "granted" on desktops. */
+  checkPermissions(names: readonly string[]): Promise<Record<string, PermissionState>>;
+  /**
+   * Android: shows the system prompt for the permissions not granted yet (each must be in the
+   * manifest: package.json `tarve.android.permissions` or `tarve build --permission`) and
+   * resolves with every state. Desktops grant every name at once.
+   */
+  requestPermissions(names: readonly string[]): Promise<Record<string, PermissionState>>;
   /** HTMLMediaElement methods for an `<audio>` element by id. */
   media(id: string): MediaController;
   openFileDialog(options?: FileDialogOptions): Promise<string | undefined>;
   openFilesDialog(options?: FileDialogOptions): Promise<string[]>;
   openFolderDialog(options?: FileDialogOptions): Promise<string | undefined>;
   saveFileDialog(options?: FileDialogOptions): Promise<string | undefined>;
+  /** Android: a sign-in page in the system WebView; resolves with the cookies of `cookieUrl` (see `NativeRequests.webSignIn`). */
+  webSignIn(options: WebSignInOptions): Promise<string | undefined>;
   onEvent(listener: (event: NativeEvent) => void): () => void;
+  /**
+   * Links of `protocols` the app is asked to open: those it was launched with (right after
+   * this call), then those of later launches `requestSingleInstance` hands to this process.
+   */
+  onOpenUrl(listener: OpenUrlListener): () => void;
+  /** Files (absolute paths) of `fileTypes` the app is asked to open, like `onOpenUrl`. Android copies a shared document into the app's cache first. */
+  onOpenFiles(listener: OpenFilesListener): () => void;
+  /** The system share sheet (Android chooser, Windows share UI); `{ supported: false }` on Linux. Resolves once it is shown. */
+  share(options: ShareOptions): Promise<ShareResult>;
+  /** One location fix (Android LocationManager, Windows Geolocator); asks for the location permission first. `{ supported: false }` on Linux. */
+  getCurrentPosition(options?: PositionOptions): Promise<PositionResult>;
+  /** Location fixes about every second until the returned function is called; errors come to `callback` too. */
+  watchPosition(callback: (result: PositionResult) => void, options?: Pick<PositionOptions, "highAccuracy">): () => void;
+  /** A biometric (or device PIN) check: Android BiometricPrompt, Windows Hello. `{ supported: false }` on Linux. */
+  authenticate(options: AuthenticateOptions): Promise<AuthenticateResult>;
+  /**
+   * Calls a plugin command (`"<namespace>.<command>"`, see `definePlugin`); rejects when no
+   * installed plugin registered it. `plugin.client(app)` gives typed calls.
+   */
+  invoke<R = unknown>(command: string, ...args: unknown[]): Promise<R>;
   inspect(): Promise<Snapshot>;
   /**
    * Where time and memory go: percentiles (ms) of the JS update phases and of the
@@ -287,7 +332,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   }
   let renderScope: object = {};
   let currentView = view;
-  const devMode = options.dev ?? envFlag("TARVE_DEV");
+  const devMode = options.dev === undefined ? envFlag("TARVE_DEV") : options.dev !== false;
+  const wantsInspector = !(options.bridge && childWindowBridges.has(options.bridge)) && options.dev !== false
+    && (typeof options.dev === "object" && options.dev.inspector !== undefined ? options.dev.inspector : envFlag("TARVE_INSPECTOR"));
+  let inspector: Inspector | undefined;
   let devError: AppErrorEvent | undefined;
   let devOverlayBroken = false;
   let overlayCompiled = false;
@@ -337,9 +385,16 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
     (globalThis as Record<symbol, unknown>)[ACTIVE_APP_KEY] = app;
     const drawnMenu = menus.drawn();
-    const tree = withRenderScope(scope, () => compileTree(
+    const size = viewport ?? initialViewport() ?? { width: appWindow?.width ?? 1120, height: appWindow?.height ?? 760 };
+    const compile = () => compileTree(
       drawnMenu ? withMenuBar(currentView(), jsx(AppMenuBar, { id: APP_MENU_BAR_ID, items: drawnMenu, onSelect: (id: string) => onNativeEvent({ type: "menu", id }) })) : currentView(), options.debug, renderer, options.componentAdapters, scope, !options.headless, viewport,
-    ));
+    );
+    const tracked = trackViewport(size, () => withRenderScope(scope, () => inspector ? inspector.compile(compile) : compile()));
+    const tree = tracked.value;
+    inspector?.decorate(tree);
+    // `viewport()` read the size: the root reports it, and any change re-renders.
+    if (tracked.readSize) { tree.usesViewport = true; tree.readsViewportSize = true; tree.document.root.reportSize = true; }
+    if (tracked.readEnvironment) tree.environment = environmentKey();
     appWindow = tree.document.window;
     if (options.closeBehavior === "hide") tree.document.root.closeIntercept = true;
     Object.assign(tree.document, appIdentityDocument());
@@ -376,6 +431,13 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   let resolveClosed!: () => void;
   const ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
   const closed = new Promise<void>((resolve) => { resolveClosed = resolve; });
+  const opens = createOpenRequests({ protocols: options.protocols, fileTypes: options.fileTypes, report: error => reportError(error, { source: "listener", event: "open" }) });
+  void closed.then(() => opens.dispose({ appClosed: !childWindowBridges.has(bridge) }));
+  // Share, location and biometrics: created with the bridge's requests (below).
+  let device!: DeviceRequests;
+  void closed.then(() => device?.dispose());
+  /** Plugin setups and commands; a window opened with `openWindow` reuses its opener's. */
+  let pluginHost: PluginHost | undefined = options.bridge ? childPluginHosts.get(options.bridge) : undefined;
 
   function reportError(value: unknown, context: Omit<AppErrorEvent, "error">): Error {
     const error = asError(value);
@@ -450,6 +512,12 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     send: command => bridge.send(command),
     reportError,
     closedError: () => (ended ? terminalError ?? new Error("Native window is closed") : undefined),
+  });
+  device = createDeviceRequests({
+    request: (command, timeoutMs) => requests.request(command, timeoutMs),
+    permissions: (action, names) => requests.permissions(action, names),
+    send: command => { if (!ended) sendPublic(command); },
+    report: (error, event) => reportError(error, { source: "listener", event }),
   });
   const trays = createTrayController(appIcon, command => { if (!ended) sendPublic(command); });
   const menus = createMenuBarController({
@@ -678,7 +746,11 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         ran = run("trayMenu", trays.menuHandler(event.id));
         const onMenu = tray?.onMenu;
         if (onMenu) ran = run("trayMenu", () => onMenu(event.id)) || ran;
-      } else ran = run("notificationClick", notificationClick);
+      } else {
+        const handler = event.id === undefined ? lastNotificationClick : notificationClicks.get(event.id);
+        if (event.id !== undefined) notificationClicks.delete(event.id);
+        ran = run("notificationClick", handler);
+      }
       if (ran) update();
     }
 
@@ -716,14 +788,23 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
 
     requests.settle(event);
+    if (!ended && event.type === "position") device.position(event);
+    if (!ended && event.type === "open") opens.deliver(event, event.initial);
+
+    if (event.type === "environment") {
+      setEnvironment(event);
+      if (!ended && committed?.environment !== undefined && committed.environment !== environmentKey()) update();
+    }
 
     if (!ended && committed && event.type === "size" && event.id === committed.document.root.id) {
-      const crossed = committed.usesViewport && viewport?.width !== event.width;
+      const portrait = (size?: { width: number; height: number }) => !!size && size.height > size.width;
+      const crossed = committed.usesViewport && (viewport?.width !== event.width || portrait(viewport) !== portrait(event))
+        || !!committed.readsViewportSize && viewport?.height !== event.height;
       viewport = { width: event.width, height: event.height };
       if (crossed) update();
     }
     // `keyboard` and `pointer` events go to `onEvent` listeners only: they name the focused node, not a handler.
-    if (!ended && committed && observed && event.type !== "keyboard" && event.type !== "pointer" && "id" in event) {
+    if (!ended && committed && observed && event.type !== "keyboard" && event.type !== "pointer" && event.type !== "notificationClick" && "id" in event) {
       const handlers = committed.handlers.get(event.id);
       if (handlers) invalidateMemos(renderScope, event.id);
       let optimisticEdit = false;
@@ -756,7 +837,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   }
 
   let systemMediaAction: SystemMediaSession["onAction"];
-  let notificationClick: (() => void) | undefined;
+  /** onClick by notification id; the newest one answers a click without an id (the Windows tray balloon). */
+  const notificationClicks = new Map<string, () => void>();
+  let lastNotificationClick: (() => void) | undefined;
+  let notificationCount = 0;
 
   function syncMedia(): void {
     if (!ended && committed) syncLoadedMedia(committed);
@@ -818,11 +902,14 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (ended || closing) throw new Error("The app has closed");
       const { id = `window-${++windowCount}`, rememberWindow, ...rest } = windowOptions;
       if (windows.has(id)) throw new Error(`Window '${id}' is already open`);
+      const childBridge = windowBridge(id);
+      childWindowBridges.add(childBridge);
+      if (pluginHost) childPluginHosts.set(childBridge, pluginHost);
       return createApp(windowView, {
         debug: options.debug, renderer: options.renderer, componentAdapters: options.componentAdapters,
         onError: options.onError, maxFps: options.maxFps, msaa: options.msaa, textRendering: options.textRendering, lowPower: options.lowPower, ...rest,
         ...(rememberWindow ? { rememberWindow: rememberWindow === true ? id : rememberWindow } : {}),
-        bridge: windowBridge(id),
+        bridge: childBridge,
       });
     },
     close(): void {
@@ -869,9 +956,17 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     },
     notify({ title, body = "", onClick }: NotifyOptions): void {
       if (!title) throw new TypeError("notify requires a title");
-      notificationClick = onClick;
-      if (!ended) sendPublic({ type: "notify", title, body });
+      const id = `n${++notificationCount}`;
+      lastNotificationClick = onClick;
+      if (onClick) {
+        notificationClicks.set(id, onClick);
+        // Unclicked notifications are dismissed eventually: keep the newest 100 handlers.
+        if (notificationClicks.size > 100) notificationClicks.delete(notificationClicks.keys().next().value!);
+      }
+      if (!ended) sendPublic({ type: "notify", title, body, id });
     },
+    checkPermissions: names => requests.permissions("check", names),
+    requestPermissions: names => requests.permissions("request", names),
     media(id: string): MediaController {
       return mediaController(id, command => { if (!ended) sendPublic(command); });
     },
@@ -888,14 +983,21 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     async openFileDialog(dialogOptions?: FileDialogOptions): Promise<string | undefined> {
       return (await requests.fileDialog("openFile", dialogOptions))[0];
     },
-    async openFilesDialog(dialogOptions?: FileDialogOptions): Promise<string[]> {
-      return requests.fileDialog("openFiles", dialogOptions);
-    },
+    openFilesDialog: dialogOptions => requests.fileDialog("openFiles", dialogOptions),
     async openFolderDialog(dialogOptions?: FileDialogOptions): Promise<string | undefined> {
       return (await requests.fileDialog("openFolder", dialogOptions))[0];
     },
-    async saveFileDialog(dialogOptions?: FileDialogOptions): Promise<string | undefined> {
-      return (await requests.fileDialog("saveFile", dialogOptions))[0];
+    saveFileDialog: async dialogOptions => (await requests.fileDialog("saveFile", dialogOptions))[0],
+    webSignIn: options => requests.webSignIn(options),
+    onOpenUrl: listener => opens.onOpenUrl(listener),
+    onOpenFiles: listener => opens.onOpenFiles(listener),
+    share: shareOptions => device.share(shareOptions),
+    getCurrentPosition: positionOptions => device.getCurrentPosition(positionOptions),
+    watchPosition: (callback, positionOptions) => device.watchPosition(callback, positionOptions),
+    authenticate: authOptions => device.authenticate(authOptions),
+    invoke<R = unknown>(command: string, ...args: unknown[]): Promise<R> {
+      if (!pluginHost) return Promise.reject(new Error(`Unknown plugin command: ${command} (the app has no plugins)`));
+      return pluginHost.invoke(command, args) as Promise<R>;
     },
     onEvent(listener: (event: NativeEvent) => void): () => void {
       listeners.add(listener);
@@ -975,6 +1077,18 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     },
   };
 
+  if (wantsInspector) {
+    inspector = createInspector(app);
+    // Not public API: smoke tests reach the inspector through this slot.
+    Object.defineProperty(app, INSPECTOR_SLOT, { value: inspector });
+  }
+  if (!pluginHost && options.plugins?.length) {
+    pluginHost = createPluginHost(options.plugins, {
+      app,
+      request: (command, timeoutMs) => requests.request(command, timeoutMs),
+      report: (error, event) => { reportError(error, { source: "plugin", event }); },
+    });
+  }
   try {
     committed = compileView();
     observed = nativeShadow(committed);

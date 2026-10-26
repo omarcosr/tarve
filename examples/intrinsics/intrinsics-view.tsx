@@ -38,7 +38,7 @@ export function App() {
             </p>
           </div>
 
-          <div style={{ ...card, flexDirection: "row", align: "center", gap: 18 }}>
+          <div style={{ ...card, flexDirection: "column", align: "start", gap: 18, sm: { direction: "row", align: "center" } }}>
             <img
               src={studio}
               width={148}
@@ -46,7 +46,7 @@ export function App() {
               fit="cover"
               style={{ radius: 10 }}
             />
-            <div style={{ flex: 1, gap: 6, flexDirection: "column" }}>
+            <div style={{ flex: 1, gap: 6, flexDirection: "column", alignSelf: "stretch" }}>
               <h2>Native elements</h2>
               <p style={{ color: c.mutedForeground }}>
                 Familiar text, media, form and vector primitives rendered directly by Tarve.
@@ -66,7 +66,7 @@ export function App() {
             </svg>
           </div>
 
-          <div style={{ display: "grid", columns: 2, gap: 18 }}>
+          <div style={{ display: "grid", columns: 1, gap: 18, sm: { columns: 2 } }}>
             <div style={{ ...card, flexDirection: "column" }}>
               <h3>Profile form</h3>
 
@@ -163,7 +163,7 @@ export function App() {
             </div>
           </div>
 
-          <div style={{ ...card, flexDirection: "row", justify: "between", align: "center" }}>
+          <div style={{ ...card, flexDirection: "row", justify: "between", align: "center", wrap: true }}>
             <div style={{ gap: 3, flexDirection: "column" }}>
               <h4>Live state</h4>
               <span style={{ color: c.mutedForeground }}>{status}</span>

@@ -18,10 +18,10 @@ const grid = { background: c.border, gap: 1, padding: 1 } as const;
 
 export function App() {
   return (
-    <Window title="Tarve — HTML" width={900} height={780} minWidth={760} minHeight={560} position="center">
+    <Window title="Tarve — HTML" width={900} height={780} minWidth={360} minHeight={520} position="center">
       <TitleBar title="Tarve — HTML" />
-      <div style={{ display: "flex", gap: 18, flex: 1, width: "100%", minHeight: 0, background: c.background, padding: { left: 18, right: 6, top: 12 } }}>
-        <div id="left" style={{ overflow: "auto", flex: 1, height: "100%", minWidth: 0 }}>
+      <div style={{ display: "flex", flexDirection: "column", md: { direction: "row" }, gap: 18, flex: 1, width: "100%", minHeight: 0, background: c.background, padding: { left: 18, right: 6, top: 12 } }}>
+        <div id="left" style={{ overflow: "auto", flex: 1, minHeight: 0, minWidth: 0 }}>
           <div style={{ display: "block", width: "100%", padding: { right: 12, bottom: 18 } }}>
             <h2>Form</h2>
             <form id="signup"
@@ -64,7 +64,7 @@ export function App() {
             {state.submitted ? <pre id="submitted" style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{state.submitted}</pre> : null}
           </div>
         </div>
-        <div id="right" style={{ overflow: "auto", flex: 1, height: "100%", minWidth: 0 }}>
+        <div id="right" style={{ overflow: "auto", flex: 1, minHeight: 0, minWidth: 0 }}>
           <div style={{ display: "block", width: "100%", padding: { right: 12, bottom: 18 } }}>
             <h1>Text</h1>
             <p>

@@ -1,7 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
+import { readMacAppBundle, zipMacApp } from "./macos-bundle";
+import { notarizeMacApp, runCommand, signMacApp, type CommandRunner, type MacSignOptions } from "./macos-sign";
+import { machOKind } from "./src/macho";
 import { assertUpdateUrl, isValidPlatform, isValidVersion, looksExecutable, verifyUpdateManifest, type SignedUpdateManifest, type UpdateManifest } from "./src/updates";
 
 export interface UpdateKeys {
@@ -60,6 +64,51 @@ export interface ReleaseOptions {
    * path; without it the path is appended.
    */
   sign?: string;
+  /**
+   * macOS: sign each `darwin-*` .app artifact (codesign --deep --options runtime) and, when set,
+   * notarize and staple it, before it is zipped and hashed. Only on a Mac (see macos-sign.ts).
+   */
+  macSign?: MacSignOptions;
+  /** Runs codesign/xcrun; for tests. */
+  macRunner?: CommandRunner;
+}
+
+/**
+ * A `darwin-*` artifact as an update zip in `outDir`: a `.app` is copied, signed (and notarized)
+ * when asked, then zipped; a ready zip or a bare Mach-O is copied as it is.
+ */
+function releaseMacArtifact(source: string, target: string, options: ReleaseOptions): void {
+  if (!statSync(source).isDirectory()) {
+    if (options.macSign) throw new Error(`Pass the .app bundle, not ${basename(source)}, to sign it: codesign seals the whole bundle.`);
+    copyFileSync(source, target);
+    return;
+  }
+  const staging = mkdtempSync(join(tmpdir(), "tarve-release-app-"));
+  try {
+    const app = join(staging, basename(source));
+    cpSync(source, app, { recursive: true });
+    const run = options.macRunner ?? runCommand;
+    if (options.macSign) signMacApp(app, options.macSign, run);
+    zipMacApp(app, target);
+    if (options.macSign?.notarize) {
+      notarizeMacApp(app, target, options.macSign.notarize, run);
+      // Staple wrote the ticket into the bundle: zip it again so the download carries it.
+      zipMacApp(app, target);
+    }
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
+}
+
+/** Whether `source` is a valid `darwin-*` artifact: a .app bundle with a Mach-O executable, a zip, or a Mach-O file. */
+function checkMacArtifact(source: string, platform: string): void {
+  if (statSync(source).isDirectory()) {
+    if (!/\.app$/i.test(source)) throw new Error(`${source} is a folder; a ${platform} artifact folder must be a .app bundle`);
+    const { executable } = readMacAppBundle(source);
+    if (!machOKind(readFileSync(executable).subarray(0, 4))) throw new Error(`${executable} is not a Mach-O executable`);
+    return;
+  }
+  if (!looksExecutable(readFileSync(source).subarray(0, 4), platform)) throw new Error(`${source} is not a ${platform} executable or zipped .app`);
 }
 
 /** Runs `command` on `file` through the shell (see ReleaseOptions.sign); throws when it fails. */
@@ -86,7 +135,12 @@ export function release(options: ReleaseOptions): string {
     if (at <= 0) throw new Error(`Expected --artifact platform=path, got ${pair}`);
     const platform = pair.slice(0, at), source = resolve(pair.slice(at + 1));
     if (!isValidPlatform(platform)) throw new Error(`Invalid platform ${platform}, expected e.g. win32-x64`);
-    if (!existsSync(source) || !statSync(source).isFile()) throw new Error(`Artifact not found: ${source}`);
+    const mac = platform.startsWith("darwin-");
+    if (!existsSync(source) || !(statSync(source).isFile() || (mac && statSync(source).isDirectory()))) throw new Error(`Artifact not found: ${source}`);
+    if (mac) {
+      checkMacArtifact(source, platform);
+      return { platform, source };
+    }
     if (statSync(source).size === 0) throw new Error(`Artifact is empty: ${source}`);
     if (!looksExecutable(readFileSync(source).subarray(0, 4), platform)) throw new Error(`${source} is not a ${platform} executable`);
     return { platform, source };
@@ -101,10 +155,13 @@ export function release(options: ReleaseOptions): string {
   const platforms: UpdateManifest["platforms"] = {};
   for (const { platform, source } of entries) {
     const stem = basename(source, extname(source));
-    const file = `${stem}-${options.version}-${platform}${extname(source)}`;
+    // A .app is released zipped: macOS updates replace the whole bundle.
+    const extension = statSync(source).isDirectory() ? ".zip" : extname(source);
+    const file = `${stem}-${options.version}-${platform}${extension}`;
     const target = join(outDir, file);
     if (resolve(target) === source) throw new Error(`Artifact ${source} is already in --out; build it elsewhere`);
-    copyFileSync(source, target);
+    if (platform.startsWith("darwin-")) releaseMacArtifact(source, target, options);
+    else copyFileSync(source, target);
     if (options.sign && platform.startsWith("win32-")) {
       const before = createHash("sha256").update(readFileSync(target)).digest("hex");
       signFile(options.sign, target);

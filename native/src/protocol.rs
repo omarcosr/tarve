@@ -4,7 +4,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
-pub const VERSION: u32 = 59;
+pub(crate) mod requests;
+
+pub const VERSION: u32 = 60;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -723,6 +725,9 @@ pub enum Command {
         time: Option<f64>,
     },
     Notify {
+        /// Echoed by the `notificationClick` it raises.
+        #[serde(default)]
+        id: Option<String>,
         title: String,
         #[serde(default)]
         body: String,
@@ -807,13 +812,12 @@ pub enum Command {
         #[serde(rename = "requestId")]
         request_id: String,
     },
-    FileDialog {
-        mode: String,
-        #[serde(default)]
-        options: FileDialogOptions,
-        #[serde(rename = "requestId")]
-        request_id: String,
-    },
+    WebSignIn(requests::WebSignIn),
+    FileDialog(requests::FileDialog),
+    Permissions(requests::Permissions),
+    Share(requests::Share),
+    Location(requests::Location),
+    Authenticate(requests::Authenticate),
     Input {
         action: String,
         x: Option<f64>,
@@ -825,14 +829,14 @@ pub enum Command {
         delta_y: Option<f64>,
         text: Option<String>,
     },
-    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
     #[serde(skip)]
     Accessibility {
         event: accesskit_winit::Event,
     },
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
 impl From<accesskit_winit::Event> for Command {
     fn from(event: accesskit_winit::Event) -> Self {
         Self::Accessibility { event }

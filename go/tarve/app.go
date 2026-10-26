@@ -23,7 +23,7 @@ import (
 
 // ProtocolVersion is @tarve/protocol PROTOCOL_VERSION; NativeABIVersion is NATIVE_ABI_VERSION.
 const (
-	ProtocolVersion  = 59
+	ProtocolVersion  = 60
 	NativeABIVersion = 6
 )
 
@@ -100,7 +100,9 @@ type App struct {
 	trayHandlers map[string]func()
 	trayIconSent string
 	mediaAction  func(action string, time *float64)
-	notifyClick  func()
+	notifyClicks map[string]func()
+	lastNotify   func()
+	notifyCount  int
 	listeners    []func(map[string]any)
 
 	ready, closed chan struct{}
@@ -716,7 +718,13 @@ func (a *App) dispatchNativeEvent(ev map[string]any) {
 				run("trayMenu", func() { a.tray.OnMenu(id) })
 			}
 		} else if kind == "notificationClick" {
-			run("notificationClick", a.notifyClick)
+			// Each notification runs its own onClick; a click without an id (the Windows tray balloon) the newest.
+			handler := a.lastNotify
+			if id, ok := ev["id"].(string); ok {
+				handler = a.notifyClicks[id]
+				delete(a.notifyClicks, id)
+			}
+			run("notificationClick", handler)
 		}
 		if ran {
 			a.Update()
@@ -753,12 +761,8 @@ func (a *App) dispatchNativeEvent(ev map[string]any) {
 			a.Update()
 		}
 	}
-	if id, ok := ev["id"].(string); ok && kind == "size" && !a.ended && a.committed != nil && id == a.committed.Root.ID {
-		crossed := a.committed.UsesViewport && (a.viewport == nil || a.viewport.Width != fnum(ev["width"]))
-		a.viewport = &Size{fnum(ev["width"]), fnum(ev["height"])}
-		if crossed {
-			a.Update()
-		}
+	if a.viewportEvent(kind, ev) {
+		a.Update()
 	}
 	if id, ok := ev["id"].(string); ok && !a.ended && a.committed != nil && kind != "keyboard" && kind != "pointer" {
 		a.elementEvent(kind, id, ev)

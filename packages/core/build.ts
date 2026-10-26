@@ -1,5 +1,6 @@
 import type { BunPlugin } from "bun";
-import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { closeSync, copyFileSync, existsSync, mkdtempSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -7,8 +8,10 @@ import { fileURLToPath } from "node:url";
 import { nativePath } from "#tarve/runtime";
 import { buildMetadata, writeLinuxDesktopEntry } from "./package-metadata";
 import { frameworkPlugins } from "./framework-plugins";
-import { BUILD_TARGETS, hostBuildTarget, isBuildTarget, targetConfig, type BuildTarget } from "./targets";
+import { BUILD_TARGETS, hostBuildTarget, isBuildTarget, isMacTarget, targetConfig, type BuildTarget } from "./targets";
+import { bundleExecutableName, macAppPath, writeMacAppBundle } from "./macos-bundle";
 import type { NativeFeature } from "./native-features";
+import { pluginNativesForBuild, pluginNativeRuntimeLines } from "./plugins-build";
 import {
   NATIVE_COMPATIBILITY_MANIFEST_NAME,
   assertNativeRuntimeCompatible,
@@ -31,6 +34,7 @@ export interface BuildOptions {
   icon?: string;
   /** Windows AppUserModelID / Linux app id, e.g. `Acme.Notes`. */
   appId?: string;
+  /** darwin-arm64/darwin-x64 build a `<name>.app` bundle (outfile gets `.app`), with the runtime in Contents/Frameworks. */
   target?: BuildTarget;
   /** Override for building the repository against a freshly compiled release library. */
   nativeLibrary?: string;
@@ -91,6 +95,10 @@ function resolveNativeLibrary(target: BuildTarget, override?: string): string {
 /** Compile an ordinary Tarve app. No production entrypoint or app-side bridge setup is needed. */
 export async function build(options: BuildOptions): Promise<string> {
   options = await withTrimmedNative(options);
+  const requested = options.target ?? hostBuildTarget();
+  if (requested && isBuildTarget(requested) && isMacTarget(requested) && options.runtime && options.runtime !== "bun") {
+    throw new Error(`--runtime ${options.runtime} cannot build a macOS app yet; use --runtime bun.`);
+  }
   if (options.runtime === "txiki") {
     const { buildTxiki } = await import("./txiki-build");
     return buildTxiki(options);
@@ -104,13 +112,18 @@ export async function build(options: BuildOptions): Promise<string> {
   if (!isBuildTarget(target)) throw new TypeError(`Unsupported Tarve build target: ${String(target)}. Expected ${BUILD_TARGETS.join(" or ")}.`);
   const config = targetConfig(target);
   const entrypoint = resolve(options.entrypoint);
+  // Plugins' native libraries for the target (package.json `tarve.native` of the app's plugins).
+  const pluginPlan = pluginNativesForBuild(entrypoint, target);
   const packageMetadata = await Bun.file(resolve(import.meta.dir, "../../package.json")).json() as { version?: string };
   if (typeof packageMetadata.version !== "string" || packageMetadata.version.length === 0) {
     throw new Error("Tarve package version is missing.");
   }
   const { metadata, images, define } = buildMetadata(entrypoint, metadataOverrides(options));
   const name = metadata.name;
-  const outfile = resolve(options.outfile ?? `dist/${name}${config.executableSuffix}`);
+  const mac = config.platform === "darwin";
+  const outfile = mac
+    ? macAppPath(resolve(options.outfile ?? `dist/${name}`))
+    : resolve(options.outfile ?? `dist/${name}${config.executableSuffix}`);
   const library = resolveNativeLibrary(target, options.nativeLibrary);
   const assetsModule = fileURLToPath(import.meta.resolve("#tarve/assets"));
   const sourceDirectory = join(import.meta.dir, "src");
@@ -131,7 +144,10 @@ export async function build(options: BuildOptions): Promise<string> {
   // The DLL compresses to about a third; it is decompressed once, on first launch, into the asset cache.
   const packDirectory = mkdtempSync(join(tmpdir(), "tarve-native-"));
   const packedLibrary = join(packDirectory, `${config.nativeName}.zst`);
-  writeFileSync(packedLibrary, Bun.zstdCompressSync(libraryBytes, { level: NATIVE_ZSTD_LEVEL }));
+  // macOS: the dylib sits in Contents/Frameworks, signed with the bundle, instead of being
+  // extracted at run time (the hardened runtime refuses unsigned libraries).
+  const macExecutable = mac ? join(packDirectory, bundleExecutableName(name)) : undefined;
+  if (!mac) writeFileSync(packedLibrary, Bun.zstdCompressSync(libraryBytes, { level: NATIVE_ZSTD_LEVEL }));
   const runtime: BunPlugin = {
     name: "tarve-native-runtime",
     setup(builder) {
@@ -148,19 +164,27 @@ export async function build(options: BuildOptions): Promise<string> {
         });
       }
       builder.onResolve({ filter: /^#tarve\/runtime$/ }, () => ({ path: "runtime", namespace: "tarve" }));
-      builder.onLoad({ filter: /^runtime$/, namespace: "tarve" }, () => ({
+      builder.onLoad({ filter: /^runtime$/, namespace: "tarve" }, () => (mac ? {
+        loader: "ts",
+        contents: [
+          `import { dirname, join } from "node:path";`,
+          `export function nativePath() { return join(dirname(process.execPath), "..", "Frameworks", ${JSON.stringify(config.nativeName)}); }`,
+          ...pluginNativeRuntimeLines(pluginPlan.embeds, "frameworks"),
+        ].join("\n"),
+      } : {
         loader: "ts",
         contents: [
           `import library from ${JSON.stringify(packedLibrary)} with { type: "file" };`,
           `import { materializeAsset } from ${JSON.stringify(assetsModule)};`,
           `const digest = ${JSON.stringify(libraryDigest)};`,
           `export function nativePath() { return materializeAsset(library, ${JSON.stringify(config.nativeName)}, digest, "zstd"); }`,
+          ...pluginNativeRuntimeLines(pluginPlan.embeds, "embedded"),
         ].join("\n"),
       }));
     },
   };
   await mkdir(dirname(outfile), { recursive: true });
-  assertWritable(outfile);
+  if (!mac) assertWritable(outfile);
   // Bun reads the executable icon from a file.
   const iconDirectory = images && config.platform === "win32" ? mkdtempSync(join(tmpdir(), "tarve-icon-")) : undefined;
   const icoPath = iconDirectory ? join(iconDirectory, "app.ico") : undefined;
@@ -171,10 +195,12 @@ export async function build(options: BuildOptions): Promise<string> {
       target: "bun",
       plugins: [runtime, ...await frameworkPlugins<BunPlugin>(entrypoint)],
       define: { "process.env.NODE_ENV": JSON.stringify("production"), ...define },
-      minify: true,
+      // Identifiers keep their names: Function.name stays what the source says (component names in
+      // the inspector, errors), as in Node.js and txiki.js builds. Bun 1.4 ignores `keepNames`.
+      minify: { whitespace: true, syntax: true, identifiers: false },
       compile: {
         target: config.bunTarget,
-        outfile,
+        outfile: macExecutable ?? outfile,
         autoloadDotenv: false,
         autoloadBunfig: false,
         ...(config.platform === "win32" ? {
@@ -191,6 +217,18 @@ export async function build(options: BuildOptions): Promise<string> {
       },
     });
     if (!result.success) throw new AggregateError(result.logs, "Could not compile the Tarve application");
+      if (macExecutable) {
+      writeMacAppBundle(outfile, {
+        executable: new Uint8Array(readFileSync(macExecutable)), nativeLibrary: libraryBytes, metadata,
+        icon: metadata.icon ? new Uint8Array(readFileSync(metadata.icon)) : undefined,
+      });
+      // Plugin dylibs sit beside the runtime and are signed with the bundle.
+      for (const embed of pluginPlan.embeds) {
+        if (embed.fileName === config.nativeName) throw new Error(`Plugin ${embed.plugin}: its library cannot be named ${config.nativeName}.`);
+        copyFileSync(embed.path, join(outfile, "Contents", "Frameworks", embed.fileName));
+      }
+      adHocSign(outfile);
+    }
   } finally {
     if (options.compileJsx) await (await import("./jsx-compile")).closeJsxCompiler();
     await rm(packDirectory, { recursive: true, force: true });
@@ -198,6 +236,17 @@ export async function build(options: BuildOptions): Promise<string> {
   }
   if (config.platform === "linux" && (metadata.icon || metadata.appId)) writeLinuxDesktopEntry(outfile, metadata, images?.png);
   return outfile;
+}
+
+/**
+ * Apple silicon only runs signed code: on a Mac, sign the fresh bundle ad hoc so it starts locally
+ * (TARVE_MACOS_ADHOC_SIGN=0 skips it). Distribution signing is `tarve release --sign`. Elsewhere
+ * there is no codesign: the bundle must be signed on a Mac before it runs.
+ */
+function adHocSign(app: string): void {
+  if (process.platform !== "darwin" || process.env.TARVE_MACOS_ADHOC_SIGN === "0") return;
+  const result = spawnSync("codesign", ["--force", "--deep", "--sign", "-", app], { stdio: "ignore" });
+  if (result.error || result.status !== 0) console.warn(`Tarve: ad-hoc codesign of ${app} failed; sign it before running it on Apple silicon.`);
 }
 
 /** Bun reports only "Bundle failed" when the output is a running executable (Windows locks it). */

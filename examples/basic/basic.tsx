@@ -2,6 +2,6 @@ import { render } from "@tarve/core";
 import { App } from "./basic-view";
 
 await render(App, {
-  renderer: "gpu",
+  // renderer: "gpu",
   lowPower: true,
 });

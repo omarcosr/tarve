@@ -1,5 +1,5 @@
 import { PROTOCOL_VERSION, type MotionProperty, type NativeNode, type Renderer, type SceneDocument, type ScrollInfo, type ScrollPosition, type VirtualListMeasurement, type WindowOptions } from "./protocol";
-import { Fragment, _isNativeVNode, type Child, type DragEndEvent, type DragMoveEvent, type DragPosition, type DropEvent, type FileDropEvent, type PastePayload, type VNode } from "./jsx-runtime";
+import { Fragment, _isNativeVNode, type Child, type Component, type DragEndEvent, type DragMoveEvent, type DragPosition, type DropEvent, type FileDropEvent, type PastePayload, type VNode } from "./jsx-runtime";
 import { lightTheme, resolveStyleString, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
 import type { WindowCloseRequestEvent } from "./components";
@@ -15,76 +15,12 @@ import type { MediaRequest } from "./media-element";
 import type { FormContext } from "./html-elements";
 import { DIV_SHORTHANDS, expandIntrinsic, textContent } from "./reconciler/intrinsics";
 import { sameValue } from "./reconciler/diff";
-import { Style } from "./style";
+import { environmentKey, initialViewport, setViewportHook } from "./viewport";
+import { BREAKPOINTS, foldVariants, luminance, type Position, type VariantContext } from "./reconciler/variants";
 
 const isPrimitive = (child: Child): child is string | number => typeof child === "string" || typeof child === "number";
 
 
-/**
- * A variant's `padding: { top: 0 }` overrides one side of the base's padding, as `first:pt-0`
- * over `p-2` does in CSS; a plain merge would drop the other three sides.
- */
-function combineSides(base: Style, variant: Style): Partial<Style> {
-  const out: Record<string, unknown> = {};
-  for (const key of ["padding", "margin", "borderWidth"] as const) {
-    const a = base[key], b = variant[key];
-    if (a === undefined || b === undefined || typeof b !== "object") continue;
-    const expanded = typeof a === "object" ? { ...a } : { top: a, right: a, bottom: a, left: a };
-    out[key] = { ...expanded, ...b };
-  }
-  const a = base.radius, b = variant.radius;
-  if (a !== undefined && b !== undefined && typeof b === "object") {
-    const expanded = typeof a === "object" ? { ...a } : { topLeft: a, topRight: a, bottomRight: a, bottomLeft: a };
-    out.radius = { ...expanded, ...b };
-  }
-  return out as Partial<Style>;
-}
-
-/** Where a node sits among its parent's element children, for `first`/`last`/`odd`/`even`. */
-interface Position { index: number; count: number }
-
-/** Tailwind's breakpoints: the window must be at least this wide (CSS px) for the variant to apply. */
-const BREAKPOINTS: readonly [keyof Style, number][] = [["sm", 640], ["md", 768], ["lg", 1024], ["xl", 1280], ["2xl", 1536]];
-
-interface VariantContext { position?: Position; viewportWidth: number; usedViewport: () => void; usedPosition?: () => void }
-
-/**
- * Folds the reconciler-side variants into the style and drops their keys, so the native
- * tree never sees them: `first`/`last`/`odd`/`even` by position, `sm`…`2xl` by window
- * width (ascending, so a wider breakpoint wins), then `dark` by theme, whose own
- * variants fold the same way.
- */
-const VARIANT_KEYS = new Set(["first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl", "dark"]);
-
-function foldVariants(style: Record<string, unknown>, selected: ThemeDefinition, context: VariantContext): Record<string, unknown> {
-  // Most styles have no variants: skip the rest-destructuring copy and the variant objects.
-  let variant = false;
-  for (const key in style) if (VARIANT_KEYS.has(key)) { variant = true; break; }
-  if (!variant) return style;
-  const { first, last, odd, even, sm, md, lg, xl, "2xl": xxl, dark, ...base } = style;
-  let out = base as Style;
-  const merge = (variant: unknown) => {
-    if (!variant || typeof variant !== "object") return;
-    const sides = combineSides(out, variant as Style);
-    out = { ...Style.merge(out, variant as Style), ...sides };
-  };
-  const { position } = context;
-  if (position && (first !== undefined || last !== undefined || odd !== undefined || even !== undefined)) context.usedPosition?.();
-  if (position) {
-    const nth = position.index + 1;
-    if (nth === 1) merge(first);
-    if (nth === position.count) merge(last);
-    merge(nth % 2 === 1 ? odd : even);
-  }
-  const responsive: Record<string, unknown> = { sm, md, lg, xl, "2xl": xxl };
-  if (Object.values(responsive).some(Boolean)) context.usedViewport();
-  for (const [name, minWidth] of BREAKPOINTS) if (context.viewportWidth >= minWidth) merge(responsive[name]);
-  if (dark && typeof dark === "object") {
-    const themed = luminance(selected.colors.background);
-    if (themed !== null && themed < 0.5) out = foldVariants(Style.merge(out, dark as Style) as Record<string, unknown>, selected, context) as Style;
-  }
-  return out as Record<string, unknown>;
-}
 
 
 /** The handler name the app dispatches each `on*` prop under. Most nodes have none: no object is made for them. */
@@ -110,14 +46,6 @@ function handlersOf(p: Record<string, any>, onHover: ((entered: boolean) => void
 
 export { diffTrees, diffTreeMutations } from "./reconciler/diff";
 export interface Handlers { onClick?: () => void; onMarkdownLink?: (href: string) => void; onDiffToggleFile?: (path: string) => void; onDiffShowMore?: (hidden: number, path?: string) => void; onDiffLineClick?: (event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void; onHighlight?: (event: { matchCount: number }) => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onSubmit?: (value: string) => void; onPaste?: (payload: PastePayload) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number, info: ScrollInfo) => void; onScrollPosition?: (position: ScrollPosition) => void; onVirtualListLayout?: (items: VirtualListMeasurement[]) => void; onVirtualListScrollToItem?: (index: number, offset: number, smooth?: boolean) => void; onVirtualListFocus?: (key: string | null) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void; onTransitionEnd?: (event: { property: MotionProperty }) => void; onDragStart?: (position: DragPosition) => void; onDragMove?: (event: DragMoveEvent) => void; onDragEnd?: (event: DragEndEvent) => void; onDragEnter?: (source: string) => void; onDragLeave?: (source: string) => void; onDrop?: (event: DropEvent) => void; onFileDragEnter?: (paths: string[]) => void; onFileDragLeave?: () => void; onFileDrop?: (event: FileDropEvent) => void; onSize?: (size: { width: number; height: number }) => void; onPointerMove?: (point: { x: number; y: number }) => void; onPointerLeave?: () => void }
-/** Relative luminance (0–1) of `#rgb`/`#rrggbb`, or null for other colors. */
-function luminance(color: string): number | null {
-  const hex = color.trim().replace(/^#/, "");
-  const full = hex.length === 3 || hex.length === 4 ? [...hex.slice(0, 3)].map(c => c + c).join("") : hex.slice(0, 6);
-  if (!/^[0-9a-f]{6}$/i.test(full)) return null;
-  const [r, g, b] = [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16) / 255);
-  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
-}
 
 function windowBorder(background: string, selected: ThemeDefinition): string {
   const own = luminance(background), themed = luminance(selected.colors.background);
@@ -129,6 +57,10 @@ export interface CompiledTree {
   document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode>; media?: Map<string, MediaRequest>;
   /** Some style carried a window-width breakpoint: the app re-renders when the width changes. */
   usesViewport?: boolean;
+  /** `viewport()` read the exact size: any resize re-renders (set by the app). */
+  readsViewportSize?: boolean;
+  /** The environment key the render read (viewport.ts), when it read one: a change re-renders. */
+  environment?: string;
 }
 const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "markdown", "code", "diff", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter", "video"]);
 const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
@@ -178,12 +110,22 @@ interface MemoEntry {
   /** Memoized components inside this one, kept alive when it is reused. */
   nested: string[];
   idSet?: Set<string>;
-  /** The breakpoint (BREAKPOINTS passed) the subtree was styled for, when it read the viewport width. */
-  breakpoint?: number;
+  /** The breakpoint, orientation and environment the subtree was styled for, when it read them (currentBreakpoint). */
+  breakpoint?: string;
   /** "index/count" of the list position a template's element was styled for (first/last/odd/even). */
   position?: string;
 }
 const memoStores = new WeakMap<object, Map<string, MemoEntry>>();
+
+/** Devtools (devtools/trace.ts): wraps each function component's compile while the inspector traces a render. */
+export type ComponentTrace = (type: Component, props: Record<string, any>, path: string, compile: () => NativeNode[]) => NativeNode[];
+let componentTrace: ComponentTrace | undefined;
+/** Installs a component trace for the next compiles; returns the previous one to restore. */
+export function setComponentTrace(trace: ComponentTrace | undefined): ComponentTrace | undefined {
+  const previous = componentTrace;
+  componentTrace = trace;
+  return previous;
+}
 
 /**
  * Forgets every memoized subtree containing `id`, so the next render compiles it
@@ -210,6 +152,12 @@ export function compileTree(
   viewport?: { width: number; height: number },
 ): CompiledTree {
   let usesViewport = false;
+  /** `viewport()` was read: a memoized subtree keys on the exact size, not just the breakpoint. */
+  let exactViewport = false;
+  const outerViewportHook = setViewportHook(() => { usesViewport = true; exactViewport = true; });
+  const startViewport = viewport ?? initialViewport();
+  const viewportWidth = () => startViewport?.width ?? windowOptions?.width ?? 1120;
+  const viewportHeight = () => startViewport?.height ?? windowOptions?.height ?? 760;
   const handlers = new Map<string, Handlers>();
   const ids = new Set<string>();
   /** Every id in the order it was claimed: memo entries slice their own span. */
@@ -259,7 +207,7 @@ export function compileTree(
     if (previous && previous.render === info.render && previous.group === group && previous.theme === selectedTheme
       && previous.form === currentForm && sameValue(previous.font, inheritedFont)
       // A subtree with breakpoint styles is reused only at the breakpoint it was styled for.
-      && (previous.breakpoint === undefined || previous.breakpoint === currentBreakpoint())
+      && (previous.breakpoint === undefined || previous.breakpoint === currentBreakpoint(previous.breakpoint.includes("x")))
       && (previous.position === undefined || previous.position === at)
       && info.equal(previous.props, props)) {
       // It still depends on the width: the root must keep reporting resizes.
@@ -285,10 +233,12 @@ export function compileTree(
     const theme = selectedTheme;
     const form = currentForm;
     // Track whether this subtree reads the viewport, apart from the rest of the tree.
-    const outerViewport = usesViewport;
+    const outerViewport = usesViewport, outerExact = exactViewport;
     usesViewport = false;
+    exactViewport = false;
     let result: NativeNode[];
     let readViewport: boolean;
+    let readExact = false;
     let readPosition = false;
     try {
       // A template's element is the list item itself: it keeps the position (CSS :first-child).
@@ -303,6 +253,8 @@ export function compileTree(
     } finally {
       readViewport = usesViewport;
       usesViewport = outerViewport || readViewport;
+      readExact = exactViewport;
+      exactViewport = outerExact || readExact;
     }
     // Labels and windows tie a subtree to nodes outside it; such subtrees always recompile.
     const selfContained = labelAssociations.size === before.labels && labelableTargets.size === before.labelable && windowOptions === before.window;
@@ -311,7 +263,7 @@ export function compileTree(
         render: info.render, props, group, theme, font, form, result,
         ...claimedSince(before.log),
         nested: added(memoSeen, seenBefore),
-        ...readViewport ? { breakpoint: currentBreakpoint() } : {},
+        ...readViewport ? { breakpoint: currentBreakpoint(readExact) } : {},
         ...readPosition && at ? { position: at } : {},
       });
     } else store.delete(path);
@@ -322,7 +274,7 @@ export function compileTree(
     return {
       base,
       linkColor: resolveStyleString("foreground", theme.colors.primary, selectedTheme),
-      resolve: style => resolveThemeStyle(foldVariants(style, selectedTheme, { viewportWidth: viewport?.width ?? windowOptions?.width ?? 1120, usedViewport: () => { usesViewport = true; } }) as never, selectedTheme) as Record<string, unknown>,
+      resolve: style => resolveThemeStyle(foldVariants(style, selectedTheme, { viewportWidth: viewportWidth(), viewportHeight: viewportHeight(), usedViewport: () => { usesViewport = true; } }) as never, selectedTheme) as Record<string, unknown>,
       register(id, onClick) {
         const runId = id ?? `${textId}/run:${runs++}`;
         if (ids.has(runId)) throw new Error(`Duplicate node id: ${runId}`);
@@ -348,12 +300,12 @@ export function compileTree(
   // Set while a template's own element compiles; true when its style read the list position.
   let positionRead = false;
   const usedPosition = () => { positionRead = true; };
-  /** How many responsive breakpoints the current viewport width passes. */
-  const currentBreakpoint = () => {
-    const width = viewport?.width ?? windowOptions?.width ?? 1120;
+  /** How many responsive breakpoints the viewport width passes, its orientation and the environment; the exact size too when `viewport()` was read. */
+  const currentBreakpoint = (exact: boolean) => {
+    const width = viewportWidth(), height = viewportHeight();
     let passed = 0;
     for (let index = 0; index < BREAKPOINTS.length; index++) if (width >= BREAKPOINTS[index]![1]) passed++;
-    return passed;
+    return `${passed}|${height > width ? "p" : "l"}|${environmentKey()}${exact ? `|${width}x${height}` : ""}`;
   };
   // The theme focus ring most interactive nodes use, built once per theme; resolveThemeStyle copies it.
   let focusRingTheme: ThemeDefinition | undefined, focusRing: Record<string, unknown> = {};
@@ -376,6 +328,12 @@ export function compileTree(
     }
     return initialFontValues;
   };
+  function visitComponent(child: VNode, path: string, group: string | undefined, position: Position | undefined): NativeNode[] {
+    const type = child.type as Component;
+    const info = (type as unknown as Record<symbol, MemoInfo<object> | undefined>)[MEMO];
+    if (info && memoStore) return visitMemo(memoStore, info, child.props as object, path, group, position);
+    return visit(type(child.props), path, group, false, info?.template ? position : undefined);
+  }
   function visit(child: Child, path: string, group?: string, adapterNative = false, position?: Position): NativeNode[] {
     if (child == null || typeof child === "boolean") return [];
     if (Array.isArray(child)) {
@@ -425,9 +383,11 @@ export function compileTree(
       }
     }
     if (typeof child.type === "function") {
-      const info = (child.type as unknown as Record<symbol, MemoInfo<object> | undefined>)[MEMO];
-      if (info && memoStore) return visitMemo(memoStore, info, child.props as object, path, group, position);
-      return visit(child.type(child.props), path, group, false, info?.template ? position : undefined);
+      if (componentTrace !== undefined) {
+        const component = child;
+        return componentTrace(child.type, child.props, path, () => visitComponent(component, path, group, position));
+      }
+      return visitComponent(child, path, group, position);
     }
     const isNativeVNode = adapterNative || _isNativeVNode(child);
     if (!isNativeVNode) {
@@ -518,7 +478,7 @@ export function compileTree(
       // active slot at all.
       if (control?.role === "otpSlot") rawStyle.focus = { ...rawStyle.focusVisible as object, ...p.style?.focus };
     }
-    const variants: VariantContext = { position, viewportWidth: viewport?.width ?? windowOptions?.width ?? 1120, usedViewport, usedPosition };
+    const variants: VariantContext = { position, viewportWidth: viewportWidth(), viewportHeight: viewportHeight(), usedViewport, usedPosition };
     const style = resolveThemeStyle(foldVariants(rawStyle, selectedTheme, variants), selectedTheme);
     if (style.padding && typeof style.padding === "object") style.padding = { ...style.padding };
     if (style.margin && typeof style.margin === "object") style.margin = { ...style.margin };
@@ -644,5 +604,6 @@ export function compileTree(
   }
   // The root reports its size so the app can re-render when the window crosses a breakpoint.
   if (usesViewport) roots[0].reportSize = true;
+  setViewportHook(outerViewportHook);
   return { document: { version: PROTOCOL_VERSION, renderer, window: windowOptions, root: roots[0] }, handlers, nodes, media, usesViewport };
 }

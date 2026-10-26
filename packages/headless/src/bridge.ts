@@ -3,6 +3,7 @@ import { dirname, extname, isAbsolute, resolve } from "node:path";
 import type { NativeBridge, RgbaImage } from "@tarve/core";
 import { encodePng } from "./png";
 import { headlessRuntime, type WebTreeHandle } from "./runtime";
+import { SceneTreeMirror, type SceneNode } from "./tree";
 
 type SceneDocument = Parameters<NativeBridge["start"]>[0];
 type NativeEvent = Parameters<Parameters<NativeBridge["start"]>[1]>[0];
@@ -50,10 +51,42 @@ export class HeadlessBridge implements NativeBridge {
   /** Remote images being fetched; `settle` waits for them. */
   private fetching = 0;
 
+  /** The scene tree the app sent, kept in step with every command (see `scene`). */
+  private readonly mirror = new SceneTreeMirror();
+
   constructor(private readonly options: HeadlessBridgeOptions = {}) {}
+
+  /**
+   * The compiled scene tree as the app last sent it (`compileTree`'s document root with every
+   * later patch applied): ids, kinds, text, values, `control` roles and labels. No layout; use
+   * `inspect` for boxes. `undefined` before the app starts.
+   */
+  scene(): SceneNode | undefined {
+    return this.mirror.root();
+  }
+
+  /** Bumped whenever the app sends the tree a change, so callers can cache what they derive from `scene()`. */
+  get sceneVersion(): number {
+    return this.mirror.version;
+  }
+
+  /**
+   * Delivers `event` to the app exactly as if the native tree had emitted it: the app dispatches
+   * it to the node's handlers (`onClick`, `onChange`, `onKeyDown`…) and re-renders. Prefer
+   * `debug` input, which goes through hit testing and focus like a user; use this for events
+   * input cannot produce headless.
+   */
+  emit(event: NativeEvent): void {
+    if (this.closed || !this.onEvent) throw new Error(this.closed ? "The headless app is closed" : "The headless app has not started");
+    this.activity++;
+    this.mirror.observe(event);
+    this.onEvent(event);
+    this.queueFlush();
+  }
 
   start(document: SceneDocument, onEvent: (event: NativeEvent) => void): void {
     this.onEvent = onEvent;
+    this.mirror.reset(document.root);
     this.inlineImages(document);
     const { WebTree } = headlessRuntime();
     this.tree = new WebTree(JSON.stringify(document));
@@ -85,6 +118,7 @@ export class HeadlessBridge implements NativeBridge {
         this.emitSoon({ type: "fileDialog", requestId: command.requestId, paths: [], error: "File dialogs are not available headless" });
         return;
     }
+    this.mirror.apply(command);
     this.inlineImages(command);
     try {
       this.tree.command(JSON.stringify(command));
@@ -159,6 +193,7 @@ export class HeadlessBridge implements NativeBridge {
     if (events.length > 0) this.activity++;
     for (const event of events) {
       if (this.closed) break;
+      this.mirror.observe(event);
       this.onEvent?.(event);
     }
     if (this.options.clock === "realtime") this.scheduleTick();

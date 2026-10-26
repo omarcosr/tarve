@@ -11,6 +11,8 @@
 //!   converts each picture on the GPU, read back at the size it is shown.
 //! - Linux: GStreamer (`playbin`, loaded at run time) decodes and plays the
 //!   sound; RGBA pictures are handed over in memory (`linux`).
+//! - Android: MediaPlayer decodes and plays the sound; YUV pictures from an
+//!   ImageReader are converted to RGBA in memory (`android`).
 //! - Other platforms: not yet (AVFoundation on macOS); a `<video>` reports an
 //!   `error` event and lays out as an empty box.
 //!
@@ -36,10 +38,23 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub(crate) use linux::Videos;
 
-#[cfg(not(any(all(target_os = "windows", feature = "media"), target_os = "linux")))]
+#[cfg(target_os = "android")]
+mod android;
+#[cfg(target_os = "android")]
+pub(crate) use android::Videos;
+
+#[cfg(not(any(
+    all(target_os = "windows", feature = "media"),
+    target_os = "linux",
+    target_os = "android"
+)))]
 mod unsupported;
 // The browser build has no runtime to play videos in.
-#[cfg(not(any(all(target_os = "windows", feature = "media"), target_os = "linux")))]
+#[cfg(not(any(
+    all(target_os = "windows", feature = "media"),
+    target_os = "linux",
+    target_os = "android"
+)))]
 #[cfg_attr(target_arch = "wasm32", allow(unused_imports))]
 pub(crate) use unsupported::Videos;
 

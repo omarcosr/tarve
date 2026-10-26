@@ -303,6 +303,8 @@ impl Events {
             was_empty
         };
         self.wake.notify_one();
+        #[cfg(target_os = "android")]
+        crate::android::notify_host();
         if should_wake {
             self.wake_pipe
                 .lock()
@@ -465,7 +467,9 @@ fn open_external(target: &str) -> Result<(), String> {
             .map_err(|error| format!("Could not open external URI with gio: {error}"))?;
         Ok(())
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "android")]
+    return crate::android::open_external(target.trim());
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     Err("Opening external URIs is not supported on this platform".into())
 }
 
@@ -519,7 +523,7 @@ fn validate_command(command: &Command, routed: bool) -> Result<(), String> {
         Command::Update { root } => protocol::validate(root),
         Command::Patch { nodes } => protocol::validate_patch(nodes),
         Command::Mutate { mutations } => protocol::validate_mutations(mutations),
-        Command::FileDialog { mode, options, .. } => protocol::validate_file_dialog(mode, options),
+        Command::FileDialog(r) => protocol::validate_file_dialog(&r.mode, &r.options),
         Command::ToWindow { .. } | Command::OpenWindow { .. } if routed => {
             Err("A window command cannot open or address another window".into())
         }
@@ -539,7 +543,7 @@ fn validate_command(command: &Command, routed: bool) -> Result<(), String> {
     }
 }
 
-mod entry_points;
+pub(crate) mod entry_points;
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
@@ -559,27 +563,42 @@ pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
         let events = Arc::new(Events::new()?);
         let out = events.clone();
         let (tx, rx) = mpsc::sync_channel(1);
-        let thread = std::thread::Builder::new()
-            .name("tarve-window".into())
-            .spawn(move || {
-                let result =
-                    catch_unwind(AssertUnwindSafe(|| runtime::run(document, out.clone(), tx)));
-                match result {
-                    Ok(Err(e)) => out.push(protocol::error(e)),
-                    Err(_) => out.push(protocol::error("Native window thread panicked")),
-                    _ => {}
-                }
-                out.push(serde_json::json!({"type":"closed"}));
-            })
-            .map_err(|e| e.to_string())?;
+        let window = move || {
+            let result = catch_unwind(AssertUnwindSafe(|| runtime::run(document, out.clone(), tx)));
+            match result {
+                Ok(Err(e)) => out.push(protocol::error(e)),
+                Err(_) => out.push(protocol::error("Native window thread panicked")),
+                _ => {}
+            }
+            out.push(serde_json::json!({"type":"closed"}));
+        };
+        // Android: the activity's looper belongs to the android_main thread, so the
+        // event loop runs there; the app (JS or Go) keeps its own thread.
+        #[cfg(target_os = "android")]
+        let thread: Option<JoinHandle<()>> = {
+            crate::android::run_on_main(window)?;
+            None
+        };
+        #[cfg(not(target_os = "android"))]
+        let thread = Some(
+            std::thread::Builder::new()
+                .name("tarve-window".into())
+                .spawn(window)
+                .map_err(|e| e.to_string())?,
+        );
         let proxy = rx
             .recv()
             .map_err(|_| "Could not initialize native event loop".to_string())??;
         *state = Some(Host {
             proxy,
             events,
-            thread: Some(thread),
+            thread,
         });
+        // Android: the links and files the activity was opened with (and every later one)
+        // become `open` events from here on. After the lock: delivering one takes it.
+        drop(state);
+        #[cfg(target_os = "android")]
+        crate::android::open_intent::attach();
         Ok(0)
     })
 }
@@ -621,6 +640,8 @@ pub unsafe extern "C" fn tarve_send(ptr: *const u8, len: u32) -> i32 {
         // command was on its way. The "closed" event is already queued, so the
         // command is dropped, like a message posted to a destroyed window.
         let _ = proxy.send_event(command);
+        #[cfg(target_os = "android")]
+        crate::runtime::background_poll::command_sent();
         Ok(0)
     })
 }
@@ -719,138 +740,7 @@ pub extern "C" fn tarve_join() -> i32 {
 }
 
 #[cfg(all(test, target_os = "windows"))]
-mod tests {
-    use super::Events;
-    use std::{
-        fs::OpenOptions,
-        io::Read,
-        os::windows::io::AsRawHandle,
-        sync::Arc,
-        time::{Duration, Instant},
-    };
-    use windows_sys::Win32::System::Pipes::PeekNamedPipe;
-
-    fn available_bytes(file: &std::fs::File) -> u32 {
-        let mut available = 0u32;
-        let ok = unsafe {
-            PeekNamedPipe(
-                file.as_raw_handle() as _,
-                std::ptr::null_mut(),
-                0,
-                std::ptr::null_mut(),
-                &mut available,
-                std::ptr::null_mut(),
-            )
-        };
-        assert_ne!(ok, 0);
-        available
-    }
-
-    #[test]
-    fn named_pipe_wakes_once_per_empty_to_nonempty_queue_transition() {
-        let events = Events::new().expect("wake pipe");
-        let name = events.wake_pipe_name();
-        let mut client = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(name)
-            .expect("connect wake pipe client");
-
-        events.push(serde_json::json!({"type":"first"}));
-        let mut byte = [0u8; 1];
-        client.read_exact(&mut byte).expect("read first wake");
-        assert_eq!(byte, [1]);
-
-        events.push(serde_json::json!({"type":"second"}));
-        assert_eq!(
-            available_bytes(&client),
-            0,
-            "queued bursts must coalesce wake signals"
-        );
-
-        events
-            .queue
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clear();
-        events.push(serde_json::json!({"type":"third"}));
-        client.read_exact(&mut byte).expect("read rearmed wake");
-        assert_eq!(byte, [1]);
-    }
-
-    #[test]
-    fn named_pipe_survives_wake_backpressure() {
-        let events = Events::new().expect("wake pipe");
-        let name = events.wake_pipe_name();
-        let client = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(name)
-            .expect("connect wake pipe client");
-
-        // The pipe is only a wake hint. Simulate a consumer that drains the FIFO faster than it
-        // reads the wake bytes, causing many empty->nonempty transitions to accumulate in the
-        // tiny pipe buffer. Backpressure must not destroy the transport.
-        for index in 0..512 {
-            events.push(serde_json::json!({"type":"burst", "index": index}));
-            events
-                .queue
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .clear();
-        }
-
-        assert!(
-            available_bytes(&client) > 0,
-            "at least one wake must remain readable"
-        );
-        events.push(serde_json::json!({"type":"after-backpressure"}));
-        assert!(
-            available_bytes(&client) > 0,
-            "wake pipe must remain connected after backpressure"
-        );
-    }
-
-    #[test]
-    fn named_pipe_large_fifo_has_no_lost_wake() {
-        const TOTAL: usize = 50_000;
-        let events = Arc::new(Events::new().expect("wake pipe"));
-        let name = events.wake_pipe_name();
-        let mut client = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(name)
-            .expect("connect wake pipe client");
-        let producer_events = events.clone();
-        let producer = std::thread::spawn(move || {
-            for index in 0..TOTAL {
-                producer_events.push(serde_json::json!({"type":"stress", "index":index}));
-            }
-        });
-
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let mut drained = 0usize;
-        let mut byte = [0u8; 1];
-        while drained < TOTAL && Instant::now() < deadline {
-            if available_bytes(&client) == 0 {
-                std::thread::yield_now();
-                continue;
-            }
-            client.read_exact(&mut byte).expect("read wake");
-            assert_eq!(byte, [1]);
-            let mut queue = events.queue.lock().unwrap_or_else(|p| p.into_inner());
-            drained += queue.len();
-            queue.clear();
-        }
-        producer.join().expect("producer");
-        if drained < TOTAL {
-            let mut queue = events.queue.lock().unwrap_or_else(|p| p.into_inner());
-            drained += queue.len();
-            queue.clear();
-        }
-        assert_eq!(drained, TOTAL, "every queued event must remain drainable");
-    }
-}
+mod tests;
 
 #[cfg(all(test, unix))]
 mod unix_tests {

@@ -46,13 +46,15 @@ unicode-width = "0.2"
 bytemuck = "=1.25.0"
 lru = { version = "0.18.5", default-features = false }
 rustc-hash = { version = "2", optional = true }
+# Synchronous zlib (src/zlib.rs): node:zlib deflateSync/inflateSync on txiki.js and Android,
+# and @tarve/headless's PNG encoder. Already in the tree through the png crate.
+miniz_oxide = "0.8"
 rquickjs = { version = "0.10", default-features = false, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 winit = "0.30.12"
 pollster = "0.4"
 softbuffer = "=0.4.8"
-arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 mimalloc = { version = "0.1", default-features = false, optional = true }
 syntect = { version = "=5.3.0", default-features = false, features = ["regex-onig"], optional = true }
 two-face = { version = "=0.5.2", default-features = false, features = ["syntect-onig"], optional = true }
@@ -60,6 +62,30 @@ two-face = { version = "=0.5.2", default-features = false, features = ["syntect-
 rodio = { version = "=0.22.2", default-features = false, features = ["playback", "mp3", "wav", "flac", "vorbis", "mp4"], optional = true }
 # <audio src="https://…">: range-request streaming over rustls (no system TLS library).
 ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }
+
+# Clipboard on desktops; Android reads and writes it through the activity (runtime/android.rs).
+[target.'cfg(not(any(target_arch = "wasm32", target_os = "android")))'.dependencies]
+arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+
+# Android: winit over NativeActivity (android-activity); the app's JS or Go runs in the same process.
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { version = "0.30.12", features = ["android-native-activity"] }
+jni = "0.21"
+ndk-context = "0.1"
+ndk = "0.9"
+# The JS app's engine: QuickJS-ng, the engine of txiki.js (src/android/qjs.rs).
+rquickjs = { version = "0.10", default-features = false }
+# node:crypto createHash for the QuickJS app.
+sha1 = "0.10"
+sha2 = "0.10"
+md-5 = "0.10"
+# TalkBack: AccessKit's Android provider injected into the NativeActivity view (src/accessibility/android.rs).
+accesskit = "=0.25.0"
+accesskit_winit = { version = "=0.34.0", default-features = false, features = ["rwh_06"] }
+accesskit_android = { version = "=0.8.0", features = ["embedded-dex"] }
+# The CPU renderer rasterizes on every core: a phone's single core cannot fill a 1080 px wide
+# frame per vsync, and phones draw on the CPU when an app asks for `lowPower` or `renderer: "cpu"`.
+vello_cpu = { version = "=0.2.0", default-features = false, features = ["multithreading"] }
 
 # Browser build (bun run build:web): no windowing, clipboard or C regex engine.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -72,11 +98,15 @@ wasm-bindgen = "=0.2.129"
 windows-core = "=0.61.2"
 # DirectComposition video layers take a numerics matrix.
 windows-numerics = "=0.2.0"
+# WinRT async results and collections of `windows` 0.61 (already in its tree): Windows Hello's
+# IAsyncOperation and the share UI's IIterable<IStorageItem> (src/device.rs).
+windows-future = "=0.2.1"
+windows-collections = "=0.2.0"
 accesskit = "=0.25.0"
 accesskit_winit = { version = "=0.34.0", default-features = false, features = ["rwh_06"] }
 lyon_tessellation = "=1.0.22"
 rfd = { version = "=0.17.2", default-features = false, features = ["common-controls-v6"] }
-windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc", "Win32_Graphics_Direct3D11", "Win32_Graphics_DirectWrite", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Foundation", "Media", "Win32_Media_MediaFoundation", "Win32_Graphics_DirectComposition", "Storage_Streams", "Win32_System_WinRT", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging", "Win32_System_Ole", "Win32_Storage_EnhancedStorage"] }
+windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc", "Win32_Graphics_Direct3D11", "Win32_Graphics_DirectWrite", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Foundation", "Media", "Win32_Media_MediaFoundation", "Win32_Graphics_DirectComposition", "Storage_Streams", "Win32_System_WinRT", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging", "Win32_System_Ole", "Win32_Storage_EnhancedStorage", "UI_Notifications", "Data_Xml_Dom", "ApplicationModel_DataTransfer", "Devices_Geolocation", "Foundation_Collections", "Security_Credentials_UI", "Storage"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_System_Registry", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -84,7 +114,7 @@ accesskit = "=0.25.0"
 # AT-SPI over D-Bus (pure Rust zbus); no system libraries required.
 accesskit_winit = { version = "=0.34.0", default-features = false, features = ["rwh_06", "accesskit_unix", "async-io"] }
 rfd = { version = "=0.17.2", default-features = false, features = ["xdg-portal", "pollster"] }
-# System tray (StatusNotifierItem + dbusmenu) and notifications over the same zbus/async-io stack.
+# System tray (StatusNotifierItem + dbusmenu) and notifications (src/notification.rs) over the same zbus/async-io stack.
 ksni = { version = "=0.3.6", default-features = false, features = ["blocking", "async-io"] }
 notify-rust = { version = "=4.18.1", default-features = false, features = ["z"] }
 # EWMH window state (below, skip taskbar, sticky) for desktop widgets; winit already links it.
@@ -97,6 +127,21 @@ accesskit_windows = { path = "vendor/accesskit_windows" }
 # Taffy 0.14 with one fix: an auto-sized flex container counts its items' automatic
 # minimum size (see vendor/taffy/src/compute/flexbox.rs, "Tarve patch").
 taffy = { path = "vendor/taffy" }
+# rquickjs-sys 0.10 with pregenerated bindings for Android (aarch64, x86_64): the same
+# LP64 layout as the Linux GNU bindings they are copied from (src/bindings/*-linux-android.rs).
+rquickjs-sys = { path = "vendor/rquickjs-sys" }
+# android-activity 0.6.1 with one change: NativeActivity hover events (TalkBack's touch
+# exploration) are finished unhandled, so they reach the view AccessKit listens on.
+android-activity = { path = "vendor/android-activity" }
+# accesskit_android 0.8.0 with two changes: its JNI entry points catch a panic instead of aborting
+# the process (src/inject.rs), and an event raised after accessibility turned off is dropped
+# (src/event.rs) instead of throwing.
+accesskit_android = { path = "vendor/accesskit_android" }
+# vello and vello_encoding 0.10 with the bump-allocated buffers sized from use instead of
+# upstream's fixed ~165 MB: each frame reads back what its coarse stages needed and grows them
+# (running those stages again) before fine rasterization (vendor/vello/src/bump.rs).
+vello = { path = "vendor/vello" }
+vello_encoding = { path = "vendor/vello_encoding" }
 
 [[example]]
 name = "qjs_host"

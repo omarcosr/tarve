@@ -93,7 +93,7 @@ export function App() {
             <Scroll
               id="rich-diff-scroll"
               orientation="vertical"
-              style={{ height: 320, width: "100%", borderWidth: 1, borderColor: c.border, radius: 8 }}
+              style={{ maxHeight: 320, width: "100%", borderWidth: 1, borderColor: c.border, radius: 8 }}
             >
               <Diff
                 id="rich-diff"

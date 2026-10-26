@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 6;
-export const PROTOCOL_VERSION = 59;
+export const PROTOCOL_VERSION = 60;
 export type Renderer = "auto" | "gpu" | "cpu";
 export type Length = number | `${number}%` | "auto";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
@@ -236,6 +236,12 @@ export interface Style extends StateStyle {
    * reconciler against the window's current size; the app re-renders when the width crosses one.
    */
   sm?: Omit<Style, "dark">; md?: Omit<Style, "dark">; lg?: Omit<Style, "dark">; xl?: Omit<Style, "dark">; "2xl"?: Omit<Style, "dark">;
+  /** The window's shape (height above width is `portrait`), as CSS `orientation`; folded by the reconciler. */
+  portrait?: Omit<Style, "dark">; landscape?: Omit<Style, "dark">;
+  /** A finger (`coarse`, Android) or a mouse (`fine`), as CSS `pointer`: `pointerCoarse: { minHeight: 48 }` grows touch targets. */
+  pointerCoarse?: Omit<Style, "dark">; pointerFine?: Omit<Style, "dark">;
+  /** The system asks for no animation (`motionReduce`) or allows it (`motionSafe`), as CSS `prefers-reduced-motion`. */
+  motionReduce?: Omit<Style, "dark">; motionSafe?: Omit<Style, "dark">;
   /**
    * Overrides applied when the window theme is dark (its background luminance below 0.5),
    * like Tailwind's `dark:`. The reconciler folds them in; the native tree never sees the key.
@@ -415,7 +421,8 @@ export type NativeCommand =
   /** The window's native menu bar (Windows); null removes it. */
   | { type: "menuBar"; menu: NativeTrayMenuItem[] | null }
   | { type: "systemMedia"; session: NativeSystemMediaSession | null }
-  | { type: "notify"; title: string; body: string }
+  /** A system notification; its `notificationClick` carries the same `id`. */
+  | { type: "notify"; title: string; body: string; id?: string }
   | { type: "media"; id: string; action: "load" | "unload" | "play" | "pause" | "seek" | "set"; src?: string; time?: number; volume?: number; muted?: boolean; loop?: boolean; /** `"video"` on a load: the platform video decoder plays it. */ kind?: "video" }
   | { type: "frameOverlay"; enabled: boolean }
   | { type: "frameRate"; maxFps: number | null }
@@ -431,6 +438,18 @@ export type NativeCommand =
   | { type: "capture"; path: string; requestId: string }
   | { type: "motionAdvance"; milliseconds: number; requestId: string }
   | { type: "fileDialog"; mode: FileDialogMode; options: FileDialogOptions; requestId: string }
+  | { type: "webSignIn"; url: string; cookieUrl: string; cookies: string[]; requestId: string }
+  /** Runtime permissions: Android asks the user; desktops grant every name. */
+  | { type: "permissions"; action: "check" | "request"; permissions: string[]; requestId: string }
+  /** The system share sheet (Android chooser, Windows share UI); answered by a `share` event once it is shown. */
+  | { type: "share"; requestId: string; title?: string; text?: string; url?: string; files?: string[] }
+  /**
+   * Device location. "get" answers one `location` event; "watch" starts `position` events whose
+   * `watchId` is this `requestId`; "clear" stops the watch with that `requestId` (no answer).
+   */
+  | { type: "location"; action: "get" | "watch" | "clear"; requestId: string; highAccuracy?: boolean; timeoutMs?: number; maximumAgeMs?: number }
+  /** Biometric or device-credential check (Android BiometricPrompt, Windows Hello); answered by `authenticate`. */
+  | { type: "authenticate"; requestId: string; reason: string }
   | { type: "input"; action: "move" | "down" | "up" | "wheel" | "text" | "key"; x?: number; y?: number; delta?: number; deltaX?: number; deltaY?: number; text?: string };
 /** A node's laid-out box, like its `size` event: the content size, and the border box in the window. */
 export interface LayoutBox { width: number; height: number; x: number; y: number; borderWidth: number; borderHeight: number }
@@ -477,7 +496,7 @@ export type NativeEvent =
   | { type: "tray"; action: "click" | "doubleClick" }
   | { type: "systemMedia"; action: "play" | "pause" | "next" | "previous" | "seek"; time?: number }
   | { type: "trayMenu"; id: string }
-  | { type: "notificationClick" }
+  | { type: "notificationClick"; id?: string }
   /** Windows "Transparency effects" changed while the window has a `mica`, `acrylic` or `blur` backdrop. */
   | { type: "transparencyEffects"; enabled: boolean }
   | { type: "media"; id: string; event: "loadedmetadata" | "play" | "pause" | "timeupdate" | "seeked" | "ended" | "error"; time?: number; duration?: number | null; paused?: boolean; message?: string; videoWidth?: number; videoHeight?: number }
@@ -492,6 +511,8 @@ export type NativeEvent =
   | { type: "scroll"; id: string; offset: number; max: number; offsetX?: number; offsetY?: number; maxX?: number; maxY?: number; source?: ScrollSource }
   | { type: "virtualListLayout"; id: string; items: VirtualListMeasurement[] }
   | { type: "size"; id: string; width: number; height: number; x?: number; y?: number; borderWidth?: number; borderHeight?: number }
+  /** The system text size, motion preference and pointer: when the window opens and when they change. */
+  | { type: "environment"; fontScale: number; reducedMotion: boolean; pointer: "coarse" | "fine" }
   | { type: "pointerMove"; id: string; x: number; y: number }
   | { type: "pointerLeave"; id: string }
   | { type: "virtualListScrollToItem"; id: string; index: number; offset: number; smooth?: boolean }
@@ -531,5 +552,24 @@ export type NativeEvent =
   | { type: "motionComplete"; id: string; property: MotionProperty }
   | { type: "motionAdvanced"; requestId: string; milliseconds: number; activeMotions: number; error?: string }
   | { type: "fileDialog"; requestId: string; paths: string[]; error?: string }
+  | { type: "webSignIn"; requestId: string; cookie?: string | null; error?: string }
+  | { type: "permissions"; requestId: string; results: Record<string, PermissionState>; error?: string }
+  | { type: "share"; requestId: string; supported: boolean; error?: string }
+  | { type: "location"; requestId: string; supported: boolean; position?: GeoPosition; code?: GeoErrorCode; error?: string }
+  /** A fix (or an error) of the watch started by the `location` command with `requestId` = `watchId`. */
+  | { type: "position"; watchId: string; supported: boolean; position?: GeoPosition; code?: GeoErrorCode; error?: string }
+  | { type: "authenticate"; requestId: string; supported: boolean; success: boolean; code?: AuthErrorCode; error?: string }
+  /** Links and files the OS asked the app to open (Android VIEW intents); `initial` for the launch's own. */
+  | { type: "open"; urls: string[]; files: string[]; initial: boolean }
   | { type: "frame"; frames: number };
+/** A runtime permission's state: "prompt" until the user has answered Android's dialog; always "granted" on desktops. */
+export type PermissionState = "granted" | "prompt" | "denied";
+/** A location fix, like the DOM `GeolocationCoordinates` plus its time (ms since the epoch); null when the source does not know. */
+export interface GeoPosition {
+  latitude: number; longitude: number; /** Metres. */ accuracy: number;
+  altitude: number | null; altitudeAccuracy: number | null; /** Degrees from north. */ heading: number | null; /** Metres per second. */ speed: number | null;
+  timestamp: number;
+}
+export type GeoErrorCode = "unsupported" | "denied" | "unavailable" | "timeout";
+export type AuthErrorCode = "unsupported" | "not-enrolled" | "canceled" | "failed" | "lockout" | "busy";
 export interface NativeSystemMediaSession { title: string; artist?: string; album?: string; artwork?: string; playing: boolean; duration?: number; position?: number; canSeek?: boolean; canNext?: boolean; canPrevious?: boolean; }

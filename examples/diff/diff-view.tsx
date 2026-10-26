@@ -80,26 +80,26 @@ export function connectOpenPatch(open: () => Promise<void>) { openPatch = open; 
 export function App() {
   const found = search.getSnapshot({ query });
   return (
-    <Window title="Tarve — Diff viewer" width={1000} height={720} minWidth={720} minHeight={500} position="center">
+    <Window title="Tarve — Diff viewer" width={1000} height={720} minWidth={360} minHeight={500} position="center">
       <TitleBar title="Tarve — Diff viewer" />
       <Column flex={1} gap={12} padding={18} style={{ background: colors.background }}>
         <Column gap={4}>
           <Text size={22} weight={700}>Review changes</Text>
           <Text size={12} color={colors.mutedForeground}>Example inspired by GPUix's diff.tsx. Open a Git patch or unified diff to review your own files.</Text>
         </Column>
-        <Row gap={8} align="center" style={{ width: "100%" }}>
+        <Row gap={8} align="center" style={{ width: "100%", wrap: true }}>
           <Button id="diff-open-patch" size="sm" onClick={() => { void openPatch(); }}>Open .patch / .diff</Button>
           <Button size="sm" variant="outline" onClick={() => setPatchSource(patch, "Example: counter.tsx + counter.toml")}>Default example</Button>
           <Text id="diff-file-name" size={12} color={colors.mutedForeground}>{patchName}</Text>
         </Row>
-        <Row gap={8} align="center" style={{ width: "100%" }}>
-          <Input id="diff-search" type="search" value={query} placeholder="Search the patch" onChange={value => { query = value; }} style={{ width: 230 }} />
+        <Row gap={8} align="center" style={{ width: "100%", wrap: true }}>
+          <Input id="diff-search" type="search" value={query} placeholder="Search the patch" onChange={value => { query = value; }} style={{ width: 230, minWidth: 0, shrink: 1 }} />
           <Button size="sm" variant="outline" onClick={() => search.previous()}>Previous</Button>
           <Button size="sm" variant="outline" onClick={() => search.next()}>Next</Button>
           <Text size={12} color={colors.mutedForeground}>{query ? `${found.total ? found.active + 1 : 0}/${found.total}` : "Search"}</Text>
           <Button size="sm" variant="outline" onClick={() => { wordDiff = !wordDiff; }}>{wordDiff ? "Words: on" : "Words: off"}</Button>
         </Row>
-        <Row gap={8} align="center" style={{ width: "100%" }}>
+        <Row gap={8} align="center" style={{ width: "100%", wrap: true }}>
           <Button size="sm" variant="outline" onClick={() => { collapsed.clear(); status = "All files expanded."; }}>Expand all</Button>
           <Button size="sm" variant="outline" onClick={() => { maxLines += 20; }}>Show more lines</Button>
           <Text size={12} color={colors.mutedForeground}>Click a file header to collapse it.</Text>

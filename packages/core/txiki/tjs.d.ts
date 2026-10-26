@@ -31,6 +31,8 @@ interface TjsGlobal {
   rename(from: string, to: string): Promise<void>;
   remove(path: string): Promise<void>;
   connect(transport: "pipe" | "tcp", host: string, port?: number): Promise<TjsConnection>;
+  /** Accepted connections arrive on `opened.readable`. */
+  listen(transport: "pipe" | "tcp", host: string, port?: number): Promise<{ readonly opened: Promise<{ readable: ReadableStream<TjsConnection> }>; close(): void }>;
 }
 
 declare var tjs: TjsGlobal;
@@ -42,6 +44,12 @@ declare module "tjs:ffi" {
     symbols: { [K in keyof T]: (...args: any[]) => any };
     close(): void;
   };
+  /** The address of a buffer's bytes (`toString()` gives it as `0x…`); valid while the buffer lives. */
+  export function bufferToPointer(buffer: Uint8Array): { toString(): string };
+  /** Reads a value at a byte offset of a pointer (a `ptr` result or `bufferToPointer`). */
+  export const read: Record<"u8" | "i8" | "u16" | "i16" | "u32" | "i32" | "f32" | "f64", (pointer: unknown, offset?: number) => number> & Record<"u64" | "i64" | "ptr", (pointer: unknown, offset?: number) => unknown>;
+  /** errno after the last foreign call. */
+  export function errno(): number;
 }
 
 declare module "tjs:hashing" {

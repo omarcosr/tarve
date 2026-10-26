@@ -1,4 +1,4 @@
-import {
+import { viewport,
   Glass,
   memo,
   Pressable,
@@ -190,11 +190,16 @@ function Toggle(): VNode {
 }
 
 export function App(): VNode {
+  const { width, height } = viewport();
+  const fit = Math.min(1, width / WIDTH, height / HEIGHT);
+  const left = Math.max(0, (width - WIDTH * fit) / 2), top = Math.max(0, (height - HEIGHT * fit) / 2);
   return (
-    <Window title="Liquid" width={WIDTH} height={HEIGHT} resizable={false} style={{ background: "#2a0f52", radius: 0, borderWidth: 0 }}>
+    <Window title="Liquid" width={WIDTH} height={HEIGHT} style={{ background: "#2a0f52", radius: 0, borderWidth: 0 }}>
       <View id="stage" style={{ position: "relative", flex: 1, overflow: "hidden" }}
-        onPointerMove={({ x, y }) => { scene.pointer = { x, y }; }}
+        onPointerMove={({ x, y }) => { scene.pointer = { x: (x - left) / fit, y: (y - top) / fit }; }}
         onPointerLeave={() => { scene.pointer = null; }}>
+        {/* A designed canvas: shrunk to fit a smaller window (a phone), never enlarged. */}
+        <View style={{ position: "absolute", left, top, width: WIDTH, height: HEIGHT, transform: { scale: fit, originX: 0, originY: 0 } }}>
         <Wallpaper />
         <WeatherCard />
         <Lens />
@@ -202,6 +207,7 @@ export function App(): VNode {
         <Dock />
         <Drops />
         <Toggle />
+        </View>
         <TitleBar id="chrome" glass="clear" appearance="dark" title="Liquid" height={36} showMaximize={false} style={{ position: "absolute", left: 0, right: 0, top: 0 }} />
       </View>
     </Window>

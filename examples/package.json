@@ -28,10 +28,15 @@
     "svelte": "tarve run svelte/main.ts",
     "video": "tarve run video/video.tsx",
     "svelte-video": "tarve run svelte/video.ts",
+    "topbar": "tarve run topbar/topbar.tsx",
+    "router": "tarve run router/router.tsx",
+    "build:topbar-android": "tarve build topbar/topbar.tsx --target android-arm64 --outfile dist/TopBar.apk --app-id dev.tarve.topbar",
     "microts": "bun microts-prototype/run.ts",
     "check": "bun node_modules/typescript/bin/tsc --noEmit && bun node_modules/typescript/bin/tsc --noEmit -p studio/studio-samples && bun studio/studio-samples/generate.ts --check",
+    "deep-link": "tarve run deep-link/deep-link.tsx",
     "build:basic": "tarve build basic/basic.tsx --outfile dist/Basic.exe",
     "build:counter": "tarve build counter/counter.tsx --outfile dist/Counter.exe",
+    "build:counter-android": "tarve build counter/counter.tsx --target android-arm64 --outfile dist/Counter.apk --app-id dev.tarve.counter",
     "build:components": "tarve build components/components.tsx --outfile dist/Components.exe",
     "build:rich-content": "tarve build rich-content/rich-content.tsx --outfile dist/RichContent.exe",
     "build:diff": "tarve build diff/diff.tsx --outfile dist/Diff.exe",
@@ -82,6 +87,42 @@
         "description": "Desktop widget built with Tarve",
         "icon": "widget/icon.png",
         "appId": "Tarve.Examples.Widget"
+      },
+      "fps/fps.tsx": {
+        "name": "FPS",
+        "description": "Frame-rate benchmark built with Tarve",
+        "icon": "fps/icon.png",
+        "appId": "Tarve.Examples.Fps"
+      },
+      "tray/tray.tsx": {
+        "name": "Tray",
+        "description": "Tray and notifications demo built with Tarve",
+        "icon": "tray/icon.png",
+        "appId": "Tarve.Examples.Tray"
+      },
+      "video/video.tsx": {
+        "name": "Video",
+        "description": "Video player built with Tarve",
+        "icon": "video/icon.png",
+        "appId": "Tarve.Examples.Video"
+      },
+      "intrinsics/intrinsics.tsx": {
+        "name": "Intrinsics",
+        "description": "Intrinsic elements gallery built with Tarve",
+        "icon": "intrinsics/icon.png",
+        "appId": "Tarve.Examples.Intrinsics"
+      },
+      "rich-content/rich-content.tsx": {
+        "name": "Rich content",
+        "description": "Markdown, code and rich content built with Tarve",
+        "icon": "rich-content/icon.png",
+        "appId": "Tarve.Examples.RichContent"
+      },
+      "motion/motion.tsx": {
+        "name": "Motion",
+        "description": "Animation demo built with Tarve",
+        "icon": "motion/icon.png",
+        "appId": "Tarve.Examples.Motion"
       },
       "youtube-music/youtube-music.tsx": {
         "name": "YouTube Music (Tarve)",

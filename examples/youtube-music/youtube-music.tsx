@@ -8,13 +8,15 @@
 
 import { createApp } from "@tarve/core";
 import { connect } from "./youtube-music-actions";
+import { phone } from "./youtube-music-mobile";
 import { YouTubeMusicView } from "./youtube-music-view";
 
 // Name, icon and app id (media controls, taskbar) come from examples/package.json "tarve".
 const app = createApp(() => <YouTubeMusicView />, { closeBehavior: "hide", textRendering: "cleartype" });
 connect(app);
 await app.ready;
-app.tray({
+// Android has no system tray; Back sends the app to the background, still playing.
+if (!phone) app.tray({
   tooltip: "YouTube Music",
   onDoubleClick: () => app.show(),
   menu: [

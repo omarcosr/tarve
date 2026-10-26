@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { TitleBar, Window } from "./components";
+import { Text, TitleBar, Window } from "./components";
 import { compileTree } from "./reconciler";
 
 describe("TitleBar", () => {
@@ -33,5 +33,17 @@ describe("TitleBar", () => {
     expect(bar.borderWidth).toBe(1);
     expect(bar.boxShadow).toHaveLength(4);
     expect(bar.overflow).toBe("hidden");
+  });
+
+  test("onBack draws a labelled back button before the title, actions sit before the window controls", () => {
+    const tree = compileTree(<Window><TitleBar id="bar" title="Album" onBack={() => {}} actions={<Text id="action">Share</Text>} /></Window>);
+    const nodes = [...tree.nodes.values()];
+    const back = nodes.find(node => node.control?.label === "Back")!;
+    expect(back).toBeDefined();
+    expect(tree.nodes.get("bar")!.dragRegion).toBe(true);
+    const order = nodes.map(node => node.id);
+    expect(order.indexOf(back.id)).toBeLessThan(order.indexOf("action"));
+    const close = nodes.find(node => node.windowAction === "close")!;
+    expect(order.indexOf("action")).toBeLessThan(order.indexOf(close.id));
   });
 });

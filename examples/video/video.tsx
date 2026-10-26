@@ -26,9 +26,9 @@ function App() {
             <Text style={{ fontSize: 13, fontWeight: 600, foreground: "#fafafa" }}>● LIVE PREVIEW</Text>
           </View>
         </View>
-        <Row style={{ gap: 14, height: 120 }}>
+        <Row style={{ gap: 14, height: 120, align: "stretch" }}>
           {(["cover", "contain", "fill"] as const).map(fit => (
-            <Column key={fit} style={{ gap: 6, flex: 1 }}>
+            <Column key={fit} style={{ gap: 6, flex: 1, minWidth: 0 }}>
               <video id={`thumb-${fit}`} src={film} autoPlay muted loop fit={fit}
                 style={{ flex: 1, minHeight: 0, radius: 12, background: "#18181b" }} />
               <Text style={{ fontSize: 12, foreground: "#a1a1aa" }}>object-fit: {fit}</Text>

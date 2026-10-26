@@ -16,6 +16,9 @@ use vello_cpu::{
     Image as CpuImage, ImageSource as CpuImageSource, Pixmap, RenderContext, Resources,
 };
 
+use crate::glass::{GlassCall, GlassPlan};
+mod replay;
+
 use crate::paint::{
     CpuCachedImage, GlassParams, PaintGlyph, PaintGradient, PaintTarget, cached_cpu_pixmap,
 };
@@ -66,6 +69,10 @@ enum Op {
         width: u32,
         height: u32,
     },
+    /// A glass box of the frame.
+    Glass {
+        call: GlassCall,
+    },
     Glyphs {
         font: FontData,
         size: f32,
@@ -86,6 +93,9 @@ struct Recorded {
 #[derive(Default)]
 pub(crate) struct DisplayList {
     ops: Vec<Recorded>,
+    /// The frame's glass boxes in paint order, and the op of the first one.
+    glass: Vec<GlassCall>,
+    first_glass: usize,
 }
 
 /// Everything when bounds cannot be computed (a non-finite transform).
@@ -165,6 +175,9 @@ pub(crate) struct CpuRecorder<'a> {
     open: Vec<usize>,
     images: &'a mut HashMap<String, CpuCachedImage>,
     used_images: HashSet<String>,
+    glass: Vec<GlassCall>,
+    /// Opacity of the open layers (a fading merged glass shape shrinks away).
+    opacity: Vec<f32>,
 }
 
 impl<'a> CpuRecorder<'a> {
@@ -174,6 +187,8 @@ impl<'a> CpuRecorder<'a> {
             open: Vec::new(),
             images,
             used_images: HashSet::new(),
+            glass: Vec::new(),
+            opacity: Vec::new(),
         }
     }
 
@@ -191,10 +206,25 @@ impl<'a> CpuRecorder<'a> {
             self.pop_layer();
         }
         self.images.retain(|key, _| self.used_images.contains(key));
-        DisplayList { ops: self.ops }
+        let first_glass = self
+            .ops
+            .iter()
+            .position(|op| matches!(op.op, Op::Glass { .. }))
+            .unwrap_or(self.ops.len());
+        DisplayList {
+            ops: self.ops,
+            glass: self.glass,
+            first_glass,
+        }
     }
 
     fn push_layer(&mut self, op: Op, hasher: DefaultHasher, bounds: Rect) {
+        let alpha = match &op {
+            Op::PushOpacity { alpha, .. } => *alpha,
+            _ => 1.0,
+        };
+        self.opacity
+            .push(self.opacity.last().copied().unwrap_or(1.0) * alpha);
         self.open.push(self.ops.len());
         self.push(op, hasher, bounds);
     }
@@ -307,6 +337,7 @@ impl PaintTarget for CpuRecorder<'_> {
 
     fn pop_layer(&mut self) {
         let Some(start) = self.open.pop() else { return };
+        self.opacity.pop();
         let close = self.ops.len();
         // A layer clips and fades what it holds: changing it changes all of that.
         let extent = self.ops[start..]
@@ -388,16 +419,18 @@ impl PaintTarget for CpuRecorder<'_> {
         rect: Rect,
         radius: f64,
         tint: Color,
-        _glass: &GlassParams,
+        glass: &GlassParams,
     ) {
-        if tint.components[3] > 0.0 {
-            self.fill(
-                Fill::NonZero,
-                transform,
-                tint,
-                &vello::kurbo::RoundedRect::from_rect(rect, radius),
-            );
-        }
+        let opacity = self.opacity.last().copied().unwrap_or(1.0);
+        let Some(call) = GlassCall::new(transform, rect, radius, tint, glass, opacity) else {
+            return;
+        };
+        let mut hasher = DefaultHasher::new();
+        11u8.hash(&mut hasher);
+        format!("{call:?}").hash(&mut hasher);
+        self.glass.push(call);
+        // A glass box shows what lies around it: it changes wherever its backdrop can.
+        self.push(Op::Glass { call }, hasher, call.reach());
     }
 
     fn draw_glyphs(
@@ -575,167 +608,6 @@ impl ShadowCache {
     }
 }
 
-impl DisplayList {
-    /// Rasterizes the part of the frame inside `region` (device pixels, integer
-    /// origin) into `context`, which must already be sized to the region.
-    pub(crate) fn replay(
-        &self,
-        context: &mut RenderContext,
-        resources: &mut Resources,
-        region: Rect,
-        mut shadows: Option<&mut ShadowCache>,
-    ) {
-        let origin = Affine::translate((-region.x0, -region.y0));
-        let mut index = 0;
-        while index < self.ops.len() {
-            let recorded = &self.ops[index];
-            let visible = recorded.bounds.intersect(region).area() > 0.0;
-            match &recorded.op {
-                Op::PushClip {
-                    rule,
-                    transform,
-                    path,
-                    close,
-                } => {
-                    if !visible {
-                        index = close + 1;
-                        continue;
-                    }
-                    context.set_fill_rule(*rule);
-                    context.set_transform(origin * *transform);
-                    context.push_clip_layer(path);
-                }
-                Op::PushOpacity {
-                    alpha,
-                    transform,
-                    path,
-                    close,
-                } => {
-                    if !visible {
-                        index = close + 1;
-                        continue;
-                    }
-                    context.set_fill_rule(Fill::NonZero);
-                    context.set_transform(origin * *transform);
-                    context.push_layer(Some(path), None, Some(*alpha), None, None);
-                }
-                Op::Pop => context.pop_layer(),
-                _ if !visible => {}
-                Op::Fill {
-                    rule,
-                    transform,
-                    paint,
-                    path,
-                } => {
-                    context.set_fill_rule(*rule);
-                    context.set_transform(origin * *transform);
-                    match paint {
-                        Paint::Solid(color) => context.set_paint(*color),
-                        Paint::Gradient(gradient, brush) => {
-                            context.set_paint(gradient.clone());
-                            context.set_paint_transform(*brush);
-                        }
-                    }
-                    context.fill_path(path);
-                    context.set_paint_transform(Affine::IDENTITY);
-                }
-                Op::Stroke {
-                    stroke,
-                    transform,
-                    color,
-                    path,
-                } => {
-                    context.set_stroke(stroke.clone());
-                    context.set_transform(origin * *transform);
-                    context.set_paint(*color);
-                    context.stroke_path(path);
-                }
-                Op::Shadow {
-                    transform,
-                    area,
-                    rect,
-                    color,
-                    radius,
-                    std_dev,
-                    invert,
-                } => {
-                    let cached = shadows.as_deref_mut().and_then(|cache| {
-                        cache.get(
-                            recorded.hash,
-                            resources,
-                            *transform,
-                            *area,
-                            *rect,
-                            *color,
-                            *radius,
-                            *std_dev,
-                            *invert,
-                        )
-                    });
-                    if let Some((pixmap, x, y)) = cached {
-                        // Whole-pixel placement: the cached pixels land unchanged.
-                        let (width, height) =
-                            (f64::from(pixmap.width()), f64::from(pixmap.height()));
-                        context.set_transform(Affine::translate((x - region.x0, y - region.y0)));
-                        context.set_paint(CpuImage {
-                            image: CpuImageSource::Pixmap(pixmap),
-                            sampler: vello_cpu::peniko::ImageSampler::default(),
-                        });
-                        context.fill_rect(&Rect::new(0.0, 0.0, width, height));
-                        index += 1;
-                        continue;
-                    }
-                    context.set_fill_rule(Fill::NonZero);
-                    context.set_transform(origin * *transform);
-                    context.push_clip_layer(&area.to_path(0.1));
-                    context.set_paint(*color);
-                    context.fill_blurred_rounded_rect(
-                        rect,
-                        *radius as f32,
-                        *std_dev as f32,
-                        *invert,
-                    );
-                    context.pop_layer();
-                }
-                Op::Image {
-                    transform,
-                    pixmap,
-                    width,
-                    height,
-                } => {
-                    context.set_transform(origin * *transform);
-                    context.set_paint(CpuImage {
-                        image: CpuImageSource::Pixmap(pixmap.clone()),
-                        sampler: vello_cpu::peniko::ImageSampler::default(),
-                    });
-                    context.fill_rect(&Rect::new(0.0, 0.0, f64::from(*width), f64::from(*height)));
-                }
-                Op::Glyphs {
-                    font,
-                    size,
-                    coords,
-                    transform,
-                    color,
-                    glyphs,
-                } => {
-                    context.set_transform(origin * *transform);
-                    context.set_paint(*color);
-                    context
-                        .glyph_run(resources, font)
-                        .font_size(*size)
-                        .normalized_coords(coords)
-                        .fill_glyphs(glyphs.iter().map(|glyph| vello_cpu::Glyph {
-                            id: glyph.id,
-                            x: glyph.x,
-                            y: glyph.y,
-                        }));
-                }
-            }
-            index += 1;
-        }
-    }
-}
-
 /// The device-pixel region whose pixels can differ between two frames; None when
 /// the frames paint the same. Ops are matched by content: one that appears,
 /// disappears or changes damages where it was and where it is, and one that
@@ -769,6 +641,14 @@ pub(crate) fn damage(previous: &DisplayList, next: &DisplayList) -> Option<Rect>
     for (index, op) in previous.ops.iter().enumerate() {
         if !matched[index] {
             add(op.bounds);
+        }
+    }
+    // A glass box shows what changed under or around it.
+    if let Some(changed) = region {
+        for op in &next.ops {
+            if matches!(op.op, Op::Glass { .. }) && op.bounds.intersect(changed).area() > 0.0 {
+                region = region.map(|all| all.union(op.bounds));
+            }
         }
     }
     region

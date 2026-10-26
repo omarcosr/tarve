@@ -1,5 +1,5 @@
-// The AccessKit bridge runs on Windows (UIA) and Linux (AT-SPI); the text/tree accessibility helpers it
-// consumes are shared code that is simply unreferenced on other targets.
+// Desktop services (tray, file dialogs, paste limits) are shared code that is simply
+// unreferenced on other targets; the AccessKit bridge runs on Windows, Linux and Android.
 #![cfg_attr(not(any(target_os = "windows", target_os = "linux")), allow(dead_code))]
 // A library trimmed to the features an app uses (`tarve build`) leaves helpers of the others unreferenced.
 #![cfg_attr(
@@ -13,8 +13,16 @@
     allow(dead_code, unused_imports, unused_variables)
 )]
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
 mod accessibility;
+// The platform adapter: accesskit_winit's, or on Android the one injected into NativeActivity.
+#[cfg(target_os = "android")]
+#[path = "accessibility/android.rs"]
+mod accessibility_adapter;
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+use accesskit_winit as accessibility_adapter;
+#[cfg(target_os = "android")]
+mod android;
 #[cfg(not(target_arch = "wasm32"))]
 mod bridge;
 mod controls;
@@ -26,6 +34,10 @@ mod d3d11;
 mod d3d11_overlay;
 #[cfg(target_os = "windows")]
 mod desktop_widget;
+#[cfg(not(target_arch = "wasm32"))]
+mod device;
+mod environment;
+mod glass;
 #[cfg(target_os = "windows")]
 mod gpu_timer;
 #[cfg(all(not(target_arch = "wasm32"), feature = "media"))]
@@ -35,6 +47,8 @@ mod media;
 mod media;
 #[cfg(not(target_arch = "wasm32"))]
 mod menu_bar;
+#[cfg(not(target_arch = "wasm32"))]
+mod notification;
 mod paint;
 mod protocol;
 #[cfg(not(target_arch = "wasm32"))]
@@ -57,6 +71,7 @@ mod syntax;
 mod tests;
 mod text;
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg_attr(target_os = "android", allow(unused_imports))]
 mod tray;
 mod tree;
 mod video;
@@ -65,6 +80,7 @@ mod video;
 mod web;
 #[cfg(target_os = "linux")]
 mod x11_state;
+mod zlib;
 
 #[cfg(all(test, not(feature = "mimalloc")))]
 pub(crate) mod counting_alloc {

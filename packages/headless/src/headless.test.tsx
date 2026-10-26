@@ -2,10 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { deflateSync, inflateSync } from "node:zlib";
 import { Button, Card, Column, Image, Input, Row, Spinner, Text, View, Window, darkTheme, readPngRgba, type RgbaImage } from "@tarve/core";
-import { createHeadlessApp, createHeadlessTestRenderer, matchImageSnapshot, renderToPng, renderToRgba } from "./index";
+import { createHeadlessApp, createHeadlessTestRenderer, loadHeadlessRuntime, matchImageSnapshot, renderToPng, renderToRgba } from "./index";
 
-const snapshots = resolve(import.meta.dir, "../__snapshots__");
+const snapshots = resolve(import.meta.dirname, "../__snapshots__");
 
 function pixel(image: RgbaImage, x: number, y: number): [number, number, number] {
   const i = (Math.round(y) * image.width + Math.round(x)) * 4;
@@ -55,6 +56,14 @@ describe("@tarve/headless", () => {
     const first = await renderToPng(settingsCard);
     const second = await renderToPng(settingsCard);
     expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
+  });
+
+  test("the WebAssembly runtime's zlib streams are node:zlib's", async () => {
+    const { zlib } = await loadHeadlessRuntime();
+    const data = new Uint8Array(5000).map((_, i) => (i * 7) % 13);
+    expect(Buffer.from(inflateSync(zlib.deflate(data, 9))).equals(Buffer.from(data))).toBe(true);
+    expect(Buffer.from(zlib.inflate(deflateSync(data))).equals(Buffer.from(data))).toBe(true);
+    expect(() => zlib.inflate(new Uint8Array([1, 2, 3]))).toThrow(/invalid zlib data/);
   });
 
   test("matches its stored image snapshot", async () => {

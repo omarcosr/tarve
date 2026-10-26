@@ -1,8 +1,9 @@
 import { createHash, createPublicKey, verify } from "node:crypto";
-import { spawn } from "node:child_process";
-import { accessSync, chmodSync, closeSync, constants, copyFileSync, createWriteStream, existsSync, openSync, readSync, renameSync, rmSync, statSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { accessSync, chmodSync, closeSync, constants, copyFileSync, createWriteStream, existsSync, mkdirSync, openSync, readdirSync, readSync, renameSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { runtimeAppMetadata } from "./app-metadata";
+import { MACHO_MAGICS, ZIP_MAGIC, isZip, machOKind } from "./macho";
 
 /** One downloadable build of a release, keyed by `<platform>-<arch>` (e.g. `win32-x64`). */
 export interface UpdateArtifact {
@@ -205,17 +206,82 @@ export async function checkForUpdate(options: CheckForUpdateOptions): Promise<Up
   return { ...artifact, url, version: manifest.version, currentVersion, notes: manifest.notes, pubDate: manifest.pubDate, platform };
 }
 
-/** Bytes every executable for `platform` starts with; undefined when Tarve does not know the format. */
-export function executableMagic(platform: string): Uint8Array | undefined {
-  if (platform.startsWith("win32-")) return Uint8Array.of(0x4d, 0x5a);
-  if (platform.startsWith("linux-")) return Uint8Array.of(0x7f, 0x45, 0x4c, 0x46);
+/**
+ * The byte prefixes an update artifact for `platform` may start with; undefined when Tarve does
+ * not know the format. macOS takes a Mach-O executable (thin or universal) or a zipped `.app`:
+ * a signed bundle is replaced whole, since swapping its executable would break the signature.
+ */
+export function executableMagics(platform: string): readonly Uint8Array[] | undefined {
+  if (platform.startsWith("win32-")) return [Uint8Array.of(0x4d, 0x5a)];
+  if (platform.startsWith("linux-")) return [Uint8Array.of(0x7f, 0x45, 0x4c, 0x46)];
+  if (platform.startsWith("darwin-")) return [...MACHO_MAGICS, ZIP_MAGIC];
   return undefined;
 }
 
-/** Whether `bytes` (the start of a file) looks like an executable for `platform`. */
+/** The main byte prefix of an executable for `platform` (Mach-O 64-bit on macOS). */
+export function executableMagic(platform: string): Uint8Array | undefined {
+  return executableMagics(platform)?.[0];
+}
+
+/** Whether `bytes` (the start of a file) looks like an executable (or, on macOS, a zipped app) for `platform`. */
 export function looksExecutable(bytes: Uint8Array, platform: string): boolean {
-  const magic = executableMagic(platform);
-  return !magic || (bytes.length >= magic.length && magic.every((byte, i) => bytes[i] === byte));
+  const magics = executableMagics(platform);
+  return !magics || magics.some(magic => bytes.length >= magic.length && magic.every((byte, i) => bytes[i] === byte));
+}
+
+/** The `.app` an executable at `<Name>.app/Contents/MacOS/<exe>` belongs to, or undefined. */
+export function macBundleOf(executable: string): string | undefined {
+  const macos = dirname(executable), contents = dirname(macos), bundle = dirname(contents);
+  return basename(macos) === "MacOS" && basename(contents) === "Contents" && /\.app$/i.test(bundle) ? bundle : undefined;
+}
+
+/** How a macOS update replaces a whole bundle: unzip beside it, swap by rename, keep the old one until cleanup. */
+export interface MacBundleUpdatePlan {
+  /** The running `.app`. */
+  bundle: string;
+  /** Its executable, relative to the bundle (`Contents/MacOS/<exe>`). */
+  executable: string;
+  /** Where the zip is extracted (a sibling of the bundle, so the swap is a rename on one volume). */
+  staging: string;
+  /** The old bundle until `cleanupUpdate`. */
+  backup: string;
+}
+
+export function planMacBundleUpdate(executable: string): MacBundleUpdatePlan | undefined {
+  const bundle = macBundleOf(executable);
+  if (!bundle) return undefined;
+  return {
+    bundle,
+    executable: `Contents/MacOS/${basename(executable)}`,
+    staging: join(dirname(bundle), `.${basename(bundle)}.update`),
+    backup: `${bundle}.old`,
+  };
+}
+
+/** Unzips `zip` (with ditto, which keeps signatures and modes) and swaps the bundle in `plan`. macOS only. */
+function installMacBundle(zip: string, plan: MacBundleUpdatePlan): void {
+  rmSync(plan.staging, { recursive: true, force: true });
+  mkdirSync(plan.staging, { recursive: true });
+  try {
+    const result = spawnSync("/usr/bin/ditto", ["-x", "-k", zip, plan.staging], { stdio: "ignore" });
+    if (result.error || result.status !== 0) throw new Error(`Could not extract the update ${zip} (ditto exit ${result.status})`);
+    const apps = readdirSync(plan.staging).filter(name => /\.app$/i.test(name));
+    if (apps.length !== 1) throw new Error(`The update holds ${apps.length} .app bundles; expected exactly one`);
+    const fresh = join(plan.staging, apps[0]!);
+    const executable = join(fresh, ...plan.executable.split("/"));
+    if (!existsSync(executable) || !machOKind(head(executable, 4))) throw new Error(`The update has no Mach-O ${plan.executable}`);
+    rmSync(plan.backup, { recursive: true, force: true });
+    renameSync(plan.bundle, plan.backup);
+    try {
+      renameSync(fresh, plan.bundle);
+    } catch (error) {
+      renameSync(plan.backup, plan.bundle);
+      throw error;
+    }
+  } finally {
+    rmSync(plan.staging, { recursive: true, force: true });
+  }
+  rmSync(zip, { force: true });
 }
 
 function head(path: string, length: number): Uint8Array {
@@ -234,7 +300,11 @@ export async function downloadUpdate(update: Update, options: DownloadUpdateOpti
     throw new TypeError("Invalid update: size and sha256 come from checkForUpdate");
   }
   assertUpdateUrl(update.url, options.allowInsecure);
-  const path = options.path ?? join(dirname(process.execPath), `.${basename(process.execPath)}.${update.version}.download`);
+  // Inside a macOS bundle, download beside the .app: writing into it would break its sealed signature.
+  const bundle = macBundleOf(process.execPath);
+  const path = options.path ?? (bundle
+    ? join(dirname(bundle), `.${basename(bundle)}.${update.version}.download`)
+    : join(dirname(process.execPath), `.${basename(process.execPath)}.${update.version}.download`));
   const response = await (options.fetch ?? fetch)(update.url, { signal: options.signal });
   if (!response.ok || !response.body) throw new Error(`Update download failed: HTTP ${response.status}`);
   const length = response.headers.get("content-length");
@@ -276,9 +346,10 @@ const RUNTIMES = /^(bun|node|tjs|txiki)(\.exe)?$/i;
 /** Whether this process can replace its own executable (a built app in a writable folder). */
 export function canInstallUpdate(executable = process.execPath): boolean {
   if (RUNTIMES.test(basename(executable))) return false;
+  const bundle = macBundleOf(executable);
   try {
-    accessSync(dirname(executable), constants.W_OK);
-    accessSync(executable, constants.W_OK);
+    accessSync(dirname(bundle ?? executable), constants.W_OK);
+    accessSync(bundle ?? executable, constants.W_OK);
     return true;
   } catch {
     return false;
@@ -308,6 +379,16 @@ export function installUpdate(file: string, options: InstallUpdateOptions = {}):
   if (!existsSync(file) || !statSync(file).isFile() || statSync(file).size === 0) throw new Error(`Update file not found or empty: ${file}`);
   if (!looksExecutable(head(file, 4), updatePlatform())) throw new Error(`${file} is not an executable for ${updatePlatform()}`);
   if (!canInstallUpdate(executable)) throw new Error(`Cannot write ${executable}: update it with the installer or package manager that installed it`);
+  const plan = process.platform === "darwin" ? planMacBundleUpdate(executable) : undefined;
+  if (plan) {
+    // A signed bundle seals its executable: replace the whole .app, never just Contents/MacOS/<exe>.
+    if (!isZip(head(file, 4))) throw new Error(`${file} is not a zipped .app: macOS bundle updates replace the whole bundle (tarve release --artifact darwin-arm64=dist/App.app)`);
+    installMacBundle(file, plan);
+    if (options.restart === false) return;
+    spawn(executable, options.args ?? process.argv.slice(2), { detached: true, stdio: "ignore" }).unref();
+    process.exit(0);
+  }
+  if (isZip(head(file, 4))) throw new Error(`${file} is a zipped app bundle; only an executable inside a .app can install it`);
   const old = executable + ".old";
   rmSync(old, { force: true });
   if (process.platform === "win32") {
@@ -332,5 +413,9 @@ export function cleanupUpdate(executable = process.execPath): void {
   const old = executable + ".old";
   try {
     if (existsSync(old) && statSync(old).isFile()) rmSync(old, { force: true });
+  } catch {}
+  const bundle = macBundleOf(executable);
+  try {
+    if (bundle && existsSync(`${bundle}.old`) && statSync(`${bundle}.old`).isDirectory()) rmSync(`${bundle}.old`, { recursive: true, force: true });
   } catch {}
 }

@@ -1,7 +1,7 @@
 import { Column, darkTheme, DropdownMenu, Image, Input, memo, Modal, Path, Pressable, Row, Scroll, Slider, Svg, Text, Theme, TitleBar, Tooltip, View, VirtualList, Window, type Child, type MediaController, type ScrollInfo } from "@tarve/core";
 import { lineAt, type Lyrics } from "./youtube-music-lyrics";
+import { compact, MobileNav, MobilePlayerBar, phone } from "./youtube-music-mobile";
 import type { Collection, Item, Shelf, Song } from "./youtube-music-source";
-
 export const AUDIO_ID = "ytm-audio";
 export type Page = { kind: "home" } | { kind: "search"; query: string } | { kind: "library" } | { kind: "collection"; entry: Collection } | { kind: "playing" };
 export type Repeat = "off" | "all" | "one";
@@ -64,6 +64,7 @@ export const state = {
   signOut: () => { },
   refresh: () => { },
   mediaFailed: (_message: string) => { },
+  mediaEnded: () => { },
   /** A song started playing: resets the skip-unplayable counter. */
   played: () => { },
   /** The lyrics list was scrolled: by the user, or by following the song. */
@@ -74,7 +75,7 @@ export const state = {
 };
 
 // YouTube Music's palette: near-black surfaces, one red accent.
-const c = {
+export const c = {
   window: "#030303",
   panel: "#0f0f0f",
   raised: "#212121",
@@ -88,7 +89,7 @@ const c = {
   selected: "#2b2b2b",
   liked: "#7a1426",
 };
-const ellipsis = { whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" } as const;
+export const ellipsis = { whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" } as const;
 // Built-in controls (tooltips, menus, the title bar's buttons, focus rings) follow this palette.
 const ytmTheme = Theme.create(darkTheme, {
   colors: {
@@ -98,7 +99,7 @@ const ytmTheme = Theme.create(darkTheme, {
   },
 });
 
-function clock(seconds: number | null | undefined): string {
+export function clock(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds)) return "-:--";
   const s = Math.max(0, Math.floor(seconds));
   const h = Math.floor(s / 3600);
@@ -106,7 +107,7 @@ function clock(seconds: number | null | undefined): string {
   return `${h ? `${h}:${String(m).padStart(2, "0")}` : m}:${String(s % 60).padStart(2, "0")}`;
 }
 
-const icons = {
+export const icons = {
   play: "M7 4.8v14.4a1 1 0 0 0 1.5.86l11.9-7.2a1 1 0 0 0 0-1.72L8.5 3.94A1 1 0 0 0 7 4.8z",
   pause: "M7 4h3.5v16H7zM13.5 4H17v16h-3.5z",
   next: "M6 5v14l9.5-7zM17 5h2v14h-2z",
@@ -126,7 +127,7 @@ const icons = {
   bars: "M5 20V10M10 20V4M15 20v-8M20 20V7",
 };
 
-function Glyph({ d, size = 18, color = c.text, fill = false, weight = 2 }: { d: string; size?: number; color?: string; fill?: boolean; weight?: number }) {
+export function Glyph({ d, size = 18, color = c.text, fill = false, weight = 2 }: { d: string; size?: number; color?: string; fill?: boolean; weight?: number }) {
   return (
     <Svg size={size} viewBox="0 0 24 24" color={color} fill={fill ? color : "none"} stroke={fill ? "none" : color} strokeWidth={weight} strokeLinecap="round" strokeLinejoin="round">
       <Path d={d} />
@@ -143,7 +144,7 @@ function Tip({ id, label, side = "top", children }: { id: string; label: string;
   );
 }
 
-function IconButton({ id, d, label, onClick, size = 18, fill = false, active = false, disabled = false, box = 32, tip = "top" }: { id: string; d: string; label: string; onClick: () => void; size?: number; fill?: boolean; active?: boolean; disabled?: boolean; box?: number; tip?: "top" | "bottom" }) {
+export function IconButton({ id, d, label, onClick, size = 18, fill = false, active = false, disabled = false, box = 32, tip = "top" }: { id: string; d: string; label: string; onClick: () => void; size?: number; fill?: boolean; active?: boolean; disabled?: boolean; box?: number; tip?: "top" | "bottom" }) {
   return (
     <Tip id={id} label={label} side={tip}>
       <Pressable id={id} onClick={disabled ? () => { } : onClick} control={{ role: "button", label }}
@@ -165,7 +166,7 @@ function cover(url: string, size: number): string {
 
 // Tarve fetches a URL source natively once it is on screen and caches it,
 // so covers below the fold or in a closed panel cost nothing.
-function Art({ url, size, radius = 6, round = false }: { url: string | null | undefined; size: number; radius?: number; round?: boolean }) {
+export function Art({ url, size, radius = 6, round = false }: { url: string | null | undefined; size: number; radius?: number; round?: boolean }) {
   const shape = { width: size, height: size, shrink: 0, radius: round ? size / 2 : radius, overflow: "hidden" as const, background: c.raised, placeholderBackground: c.raised };
   return url
     ? <Image src={cover(url, size)} width={size} height={size} fit="cover" style={shape} />
@@ -231,9 +232,9 @@ function TopBar() {
   return (
     <TitleBar id="titlebar" height={44} style={{ background: c.panel, foreground: c.text, borderColor: c.border, padding: { left: 8 } }}>
       <Row align="center" style={{ flex: 1, minWidth: 0, height: "100%", padding: { right: 8 }, gap: 8 }}>
-        <Row gap={8} align="center" style={{ width: 200, shrink: 0, padding: { left: 6 } }}>
+        <Row gap={8} align="center" style={{ width: compact() ? undefined : 200, shrink: 0, padding: { left: 6 } }}>
           <View style={{ width: 24, height: 24, radius: 12, background: c.accent, align: "center", justify: "center" }}><Glyph d={icons.play} size={12} fill color={c.accentInk} /></View>
-          <Text size={15} weight={700}>Music</Text>
+          {compact() ? null : <Text size={15} weight={700}>Music</Text>}
         </Row>
         <IconButton id="back" d={icons.back} label="Back" tip="bottom" onClick={state.goBack} disabled={!state.back.length} />
         {/* The field is the pill: hover and focus show on it, the icon sits inside. */}
@@ -250,17 +251,17 @@ function TopBar() {
           <View style={{ position: "absolute", left: 12, top: 10, pointerEvents: "auto" }}><Glyph d={icons.search} size={14} color={c.muted} /></View>
         </View>
         <View flex={1} />
-        <IconButton id="toggle-queue" d={icons.queue} label={state.showQueue ? "Hide queue" : "Show queue"} tip="bottom" active={state.showQueue} onClick={() => { state.showQueue = !state.showQueue; }} />
+        {compact() ? null : <IconButton id="toggle-queue" d={icons.queue} label={state.showQueue ? "Hide queue" : "Show queue"} tip="bottom" active={state.showQueue} onClick={() => { state.showQueue = !state.showQueue; }} />}
         {state.signedIn
           // Signed in: an avatar; Sign out lives in its menu, out of the way.
           ? <DropdownMenu id="account" label="Account" open={state.accountOpen} onOpenChange={open => { state.accountOpen = open; }}
             items={[{ value: "sign-out", label: "Sign out" }]} onSelect={value => { if (value === "sign-out") state.signOut(); }}
             trigger={<View style={{ width: 30, height: 30, radius: 15, background: c.selected, align: "center", justify: "center", hover: { background: "#3a3a3a" } }}><Glyph d={icons.user} size={15} color={c.text} /></View>}
             contentStyle={{ left: undefined, right: 0, minWidth: 160, background: c.raised, borderColor: c.border }} />
-          : <Pressable id="account" onClick={() => { state.signIn = "choose"; }} control={{ role: "button", label: "Sign in" }}
+          : <Pressable id="account" onClick={() => { if (phone) state.signInWithBrowser(); else state.signIn = "choose"; }} control={{ role: "button", label: "Sign in" }}
             style={{ height: 30, padding: { left: 10, right: 12 }, gap: 6, direction: "row", align: "center", radius: 15, cursor: "pointer", background: c.raised, hover: { background: c.selected } }}>
             <Glyph d={icons.user} size={14} color={c.muted} />
-            <Text size={12} color={c.text}>Sign in</Text>
+            <Text size={12} color={c.text} style={{ whiteSpace: "nowrap" }}>Sign in</Text>
           </Pressable>}
       </Row>
     </TitleBar>
@@ -315,7 +316,7 @@ const SongRow = memo(({ song, index, list, source, isCurrent, playing }: { song:
       <Text size={13} color={isCurrent ? c.accent : c.text} style={{ ...ellipsis, flex: 1, minWidth: 0 }}>{song.title}</Text>
     </Row>
     <Text size={13} color={c.muted} style={{ ...ellipsis, width: "26%" }}>{song.artist}</Text>
-    <Text size={13} color={c.muted} style={{ ...ellipsis, width: "22%" }}>{song.album}</Text>
+    <Text size={13} color={c.muted} style={{ ...ellipsis, width: "22%", display: "none", sm: { display: "flex" } }}>{song.album}</Text>
     <Text size={12} color={c.muted} style={{ width: 52, textAlign: "end", shrink: 0 }}>{clock(song.duration)}</Text>
   </Pressable>
 ));
@@ -329,7 +330,7 @@ function TrackTable({ songs, source, list }: { songs: Song[]; source: string; li
         <Text size={11} color={c.muted} style={{ width: 24, textAlign: "center", shrink: 0 }}>#</Text>
         <Text size={11} color={c.muted} style={{ flex: 1 }}>TITLE</Text>
         <Text size={11} color={c.muted} style={{ width: "26%" }}>ARTIST</Text>
-        <Text size={11} color={c.muted} style={{ width: "22%" }}>ALBUM</Text>
+        <Text size={11} color={c.muted} style={{ width: "22%", display: "none", sm: { display: "flex" } }}>ALBUM</Text>
         <Text size={11} color={c.muted} style={{ width: 52, textAlign: "end", shrink: 0 }}>LENGTH</Text>
       </Row>
       <VirtualList id={list} items={songs} itemHeight={ROW} overscan={8} offset={state.listOffset}
@@ -550,7 +551,7 @@ function QueuePanel() {
 }
 
 /** Clicking the bar (outside its controls) opens the playing song as the main view; again, goes back. */
-function togglePlaying(): void {
+export function togglePlaying(): void {
   if (state.page.kind === "playing") state.goBack();
   else state.open({ kind: "playing" });
 }
@@ -620,7 +621,7 @@ function SignInDialog() {
       style={{ gap: 14, radius: 14, background: c.panel, borderColor: c.border }}>
     <Text size={18} weight={700}>Sign in to YouTube Music</Text>
       {state.signIn === "browser" ? <>
-        <Text size={13} color={c.muted}>Finish signing in in the browser window that opened. It closes on its own once YouTube Music has your account.</Text>
+        <Text size={13} color={c.muted}>{phone ? "Finish signing in on Google's page. It closes on its own once YouTube Music has your account." : "Finish signing in in the browser window that opened. It closes on its own once YouTube Music has your account."}</Text>
         <Row gap={8} justify="end">{button("sign-in-cancel", "Cancel", () => { state.signIn = "closed"; })}</Row>
       </> : state.signIn === "paste" ? <>
         <Text size={13} color={c.muted}>On music.youtube.com (signed in), open DevTools → Network, pick any request to music.youtube.com and copy its Cookie request header here.</Text>
@@ -629,11 +630,11 @@ function SignInDialog() {
         {state.signInError ? <Text size={12} color="#ff8a8a">{state.signInError}</Text> : null}
         <Row gap={8} justify="end">{button("paste-cancel", "Cancel", () => { state.signIn = "closed"; })}{button("paste-save", "Sign in", state.savePastedCookies, true)}</Row>
       </> : <>
-        <Text size={13} color={c.muted}>Sign in with your Google account in a browser window. Your Premium account gives 256 kbps audio and your library.</Text>
+        <Text size={13} color={c.muted}>Sign in with your Google account{phone ? "" : " in a browser window"}. Your Premium account gives 256 kbps audio and your library.</Text>
         {state.signInError ? <Text size={12} color="#ff8a8a">{state.signInError}</Text> : null}
         <Row gap={8} justify="end">
           {button("choose-cancel", "Cancel", () => { state.signIn = "closed"; })}
-          {button("choose-paste", "Paste cookies", () => { state.signIn = "paste"; state.signInError = null; })}
+          {phone ? null : button("choose-paste", "Paste cookies", () => { state.signIn = "paste"; state.signInError = null; })}
           {button("choose-browser", "Sign in with Google", state.signInWithBrowser, true)}
         </Row>
       </>}
@@ -647,7 +648,7 @@ export function YouTubeMusicView() {
   const synced = state.page.kind === "playing" && state.lyrics?.id === song?.id ? state.lyrics?.data?.lines : null;
   const lyricLine = synced ? lineAt(synced, state.time) : -1;
   return (
-    <Window onCloseRequest={event => { event.preventDefault(); state.hide(); }} title={state.playing && song ? `${song.title} • ${song.artist}` : "Music"} width={1320} height={820} minWidth={960} minHeight={580}
+    <Window onCloseRequest={event => { event.preventDefault(); state.hide(); }} title={state.playing && song ? `${song.title} • ${song.artist}` : "Music"} width={1320} height={820} minWidth={360} minHeight={520}
       position="center" theme={ytmTheme} style={{ background: c.window, foreground: c.text, fontFamily: "Inter", borderColor: c.border }}>
       <audio id={AUDIO_ID} src={state.path} autoPlay volume={state.volume} muted={state.muted} loop={state.repeat === "one"}
         onPlay={() => { state.playing = true; state.played(); }}
@@ -658,20 +659,20 @@ export function YouTubeMusicView() {
           if (info.duration !== null) state.duration = info.duration;
           if (state.resumeAt > 0) { state.media()?.seek(state.resumeAt); state.time = state.resumeAt; state.resumeAt = 0; }
         }}
-        onEnded={() => { state.playing = false; state.next(); }}
+        onEnded={() => state.mediaEnded()}
         onError={message => state.mediaFailed(message)} />
       <Column flex={1} style={{ minHeight: 0 }}>
         <TopBar />
         <Row flex={1} align="stretch" style={{ minHeight: 0 }}>
-          <SidebarRegion page={state.page} library={state.library} signedIn={state.signedIn} source={state.source} playing={state.playing} current={song?.id} />
+          {compact() ? null : <SidebarRegion page={state.page} library={state.library} signedIn={state.signedIn} source={state.source} playing={state.playing} current={song?.id} />}
           <Column flex={1} style={{ minHeight: 0, minWidth: 0 }}>
             <ContentRegion page={state.page} shelves={state.shelves} results={state.results} opened={state.opened} library={state.library} signedIn={state.signedIn}
               pageError={state.pageError} listOffset={state.listOffset} current={song?.id} playing={state.playing} source={state.source} stage={state.stage}
               lyrics={state.lyrics} lyricLine={lyricLine} />
           </Column>
-          {state.showQueue ? <QueueRegion queue={state.queue} index={state.index} source={state.source} /> : null}
+          {state.showQueue && !compact() ? <QueueRegion queue={state.queue} index={state.index} source={state.source} /> : null}
         </Row>
-        <PlayerBar />
+        {compact() ? <><MobilePlayerBar /><MobileNav /></> : <PlayerBar />}
       </Column>
       <SignInDialog />
     </Window>

@@ -20,6 +20,7 @@ import { encodePng } from "./png";
 import { loadHeadlessRuntime, type HeadlessRuntimeOptions } from "./runtime";
 
 export { HeadlessBridge, type HeadlessBridgeOptions } from "./bridge";
+export { SceneTreeMirror, type SceneNode } from "./tree";
 export { encodePng } from "./png";
 export {
   loadHeadlessRuntime,
@@ -113,6 +114,8 @@ export interface ImageSnapshotOptions extends PixelComparisonOptions {
  */
 export async function matchImageSnapshot(image: RgbaImage, file: string, options: ImageSnapshotOptions = {}): Promise<PixelComparison | undefined> {
   const update = options.update ?? process.env.TARVE_UPDATE_SNAPSHOTS === "1";
+  // encodePng deflates in the WebAssembly runtime: an image from elsewhere needs it loaded too.
+  await loadHeadlessRuntime();
   const write = (path: string) => {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, encodePng(image.rgba, image.width, image.height));

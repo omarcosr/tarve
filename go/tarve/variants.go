@@ -1,7 +1,9 @@
 package tarve
 
 // Style variants folded by the compiler, as @tarve/core foldVariants: first/last/odd/even by
-// position among element siblings, sm…2xl by window width, dark by the window theme.
+// position among element siblings, sm…2xl by window width, portrait/landscape by its shape,
+// pointerCoarse/pointerFine and motionReduce/motionSafe by the system (viewport.go), dark by
+// the window theme.
 
 type position struct{ index, count int }
 
@@ -73,6 +75,7 @@ func combineSides(base, variant S) S {
 type variantContext struct {
 	pos          *position
 	width        float64
+	height       float64
 	usedViewport *bool
 	usedPosition *bool
 }
@@ -84,7 +87,7 @@ func foldVariants(style S, t *Theme, ctx variantContext) S {
 	out := S{}
 	for k, v := range style {
 		switch k {
-		case "first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl", "dark":
+		case "first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl", "portrait", "landscape", "pointerCoarse", "pointerFine", "motionReduce", "motionSafe", "dark":
 		default:
 			out[k] = v
 		}
@@ -129,6 +132,34 @@ func foldVariants(style S, t *Theme, ctx variantContext) S {
 	for _, b := range breakpoints {
 		if ctx.width >= b.width {
 			apply(style[b.name])
+		}
+	}
+	used := func() {
+		if ctx.usedViewport != nil {
+			*ctx.usedViewport = true
+		}
+	}
+	if style["portrait"] != nil || style["landscape"] != nil {
+		used()
+		if ctx.height > ctx.width {
+			apply(style["portrait"])
+		} else {
+			apply(style["landscape"])
+		}
+	}
+	if style["pointerCoarse"] != nil || style["pointerFine"] != nil || style["motionReduce"] != nil || style["motionSafe"] != nil {
+		// Memoized subtrees key on the environment through the viewport (viewportKey).
+		used()
+		system := readEnvironment()
+		if system.pointer == "coarse" {
+			apply(style["pointerCoarse"])
+		} else {
+			apply(style["pointerFine"])
+		}
+		if system.reducedMotion {
+			apply(style["motionReduce"])
+		} else {
+			apply(style["motionSafe"])
 		}
 	}
 	if dark, ok := asMap(style["dark"]); ok {

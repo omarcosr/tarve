@@ -1,3 +1,4 @@
+use crate::accessibility_adapter::Adapter;
 use crate::{
     protocol::{Command, Control, Node as TarveNode},
     tree::Tree,
@@ -7,7 +8,6 @@ use accesskit::{
     SortDirection, TextDirection, TextPosition, TextSelection, Toggled, TreeId, TreeInfo,
     TreeUpdate,
 };
-use accesskit_winit::Adapter;
 use std::collections::HashMap;
 use unicode_segmentation::UnicodeSegmentation;
 use winit::{

@@ -5,6 +5,7 @@ native/bin-features/
 native/bin/
 native/win32-x64/
 native/linux-x64/
+native/android/
 dist/
 work/
 *.log
@@ -12,6 +13,26 @@ plan.md
 .omo
 .empryo
 .bun-cache
+# Cargo output anywhere (vendored crates, plugin crates)
+target/
+*.pdb
+# Android / signing artifacts
+*.apk
+*.aab
+*.idsig
+*.keystore
+*.jks
+*.p12
+*.pfx
 # update signing keys (tarve keygen)
 tarve-update.key
 *.exe
+# visual test failures
+__snapshots__/*.actual.png
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.env
+.env.*

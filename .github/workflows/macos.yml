@@ -1,0 +1,340 @@
+name: macOS
+
+# macOS port gate (reports/gap/apple.md, reports/gap/macos-ts.md, reports/gap/macos-ci.md):
+# native lint/tests on darwin, the release .dylib, the darwin TS tests, an example .app and its
+# app-zip. Signing/notarization runs only when the Apple secrets exist.
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: tarve-macos-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast compile gate from a non-Mac host: cargo check for aarch64/x86_64-apple-darwin with
+  # `zig cc` as the C compiler (no Xcode SDK). The same command runs on a Windows workstation.
+  apple-cross-check:
+    name: Apple cross-compile gate (zig)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: "0.17.0"
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native -> target-apple
+          shared-key: apple-cross-check
+          cache-on-failure: true
+
+      - name: cargo check (aarch64/x86_64-apple-darwin)
+        run: bun scripts/check-apple.ts
+
+  macos:
+    name: macOS ${{ matrix.arch }} (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            arch: arm64
+            target: darwin-arm64
+          # GitHub is retiring the Intel macos-13 image; if this job stays queued, switch to
+          # macos-15-intel (see reports/gap/macos-ci.md).
+          - os: macos-13
+            arch: x64
+            target: darwin-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+      APP_NAME: TarveBasic
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+          shared-key: macos-${{ matrix.arch }}
+          cache-on-failure: true
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install example dependencies
+        run: bun run install:examples
+
+      # Warnings do not fail this step yet: native/src/tray.rs still has two imports unused on
+      # macOS (reports/gap/apple.md). The strict variant below reports them.
+      - name: Clippy (darwin)
+        run: cargo clippy --manifest-path native/Cargo.toml --locked --lib
+
+      - name: Clippy -D warnings (informational)
+        continue-on-error: true
+        run: cargo clippy --manifest-path native/Cargo.toml --locked --lib -- -D warnings
+
+      - name: Native unit tests (darwin)
+        run: cargo test --manifest-path native/Cargo.toml --locked --lib
+
+      # scripts/package.ts --native-only -> scripts/native.ts buildNative(): release
+      # libtarve_native.dylib + runtime.json in native/darwin-<arch>/.
+      - name: Build native dylib
+        run: bun scripts/package.ts --native-only --no-variants
+
+      - name: Check the dylib
+        run: |
+          lib="native/${{ matrix.target }}/libtarve_native.dylib"
+          file "$lib"
+          lipo -archs "$lib"
+          otool -l "$lib" | grep -A4 -E "LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX" | head -n 12
+          test -f "native/${{ matrix.target }}/runtime.json"
+
+      - name: Darwin TypeScript tests
+        run: >-
+          bun test
+          packages/core/targets.test.ts
+          packages/core/macos-bundle.test.ts
+          packages/core/macos-sign.test.ts
+          packages/core/package-installer.test.ts
+          packages/core/node-target.test.ts
+          packages/core/native-runtime.test.ts
+          packages/core/updates.test.ts
+          packages/core/src/macho.test.ts
+          packages/core/src/bridge/runtime.test.ts
+
+      # Whole packages/core suite on a Mac: some tests still assume win32/linux hosts.
+      - name: Full packages/core tests (informational)
+        continue-on-error: true
+        timeout-minutes: 20
+        run: bun test packages/core
+
+      - name: Build example .app
+        run: >-
+          bun packages/core/cli.ts build examples/basic/basic.tsx
+          --target ${{ matrix.target }}
+          --native-features all
+          --name "$APP_NAME"
+          --outfile "dist/macos/$APP_NAME.app"
+
+      - name: Package app-zip
+        run: bun packages/core/cli.ts package "dist/macos/$APP_NAME.app" --format app-zip --out dist/macos/pkg
+
+      - name: Inspect the bundle
+        run: |
+          app="dist/macos/$APP_NAME.app"
+          plutil -lint "$app/Contents/Info.plist"
+          exe=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$app/Contents/Info.plist")
+          file "$app/Contents/MacOS/$exe" "$app/Contents/Frameworks/libtarve_native.dylib"
+          codesign --verify --deep --verbose=2 "$app" || echo "::warning::bundle is not (ad hoc) signed"
+          ls -la dist/macos/pkg
+
+      - name: Upload .app zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: tarve-macos-${{ matrix.arch }}-app
+          if-no-files-found: error
+          retention-days: 7
+          path: dist/macos/pkg/*.zip
+
+      - name: Upload native runtime
+        uses: actions/upload-artifact@v7
+        with:
+          name: tarve-macos-${{ matrix.arch }}-native
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            native/${{ matrix.target }}/libtarve_native.dylib
+            native/${{ matrix.target }}/runtime.json
+
+      # OPTIONAL SMOKE (does not fail the job): hosted runners have a logged-in GUI session but
+      # a virtual GPU; a crash here is a signal to investigate, not yet a gate.
+      - name: "[optional smoke] launch the .app for 8 s"
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          app="dist/macos/$APP_NAME.app"
+          exe=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$app/Contents/Info.plist")
+          mkdir -p work
+          "$app/Contents/MacOS/$exe" > work/macos-app.log 2>&1 &
+          pid=$!
+          sleep 8
+          screencapture -x work/macos-app-${{ matrix.arch }}.png || true
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "app alive after 8 s"
+            kill "$pid"; wait "$pid" 2>/dev/null || true
+          else
+            wait "$pid"; code=$?
+            cat work/macos-app.log
+            echo "::error::app exited early with code $code"
+            exit 1
+          fi
+          cat work/macos-app.log
+
+      # scripts/smoke.ts: real window, Vello frame, layout and synthetic input via the debug channel.
+      - name: "[optional smoke] bun run smoke"
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          TARVE_SMOKE_OS_INPUT: "0"
+        run: bun run smoke
+
+      - name: Upload smoke output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tarve-macos-${{ matrix.arch }}-smoke-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            work/*.png
+            work/*.log
+
+  # Developer ID signing + notarization of the arm64 .app. Runs only when the secrets exist
+  # (never on pull requests from forks, which do not receive secrets).
+  macos-sign:
+    name: macOS sign + notarize (secrets)
+    needs: macos
+    if: github.event_name != 'pull_request'
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      TARVE_MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      TARVE_UPDATE_PRIVATE_KEY: ${{ secrets.TARVE_UPDATE_PRIVATE_KEY }}
+
+    steps:
+      - name: Check signing secrets
+        id: secrets
+        run: |
+          if [ -n "$MACOS_CERTIFICATE_P12" ] && [ -n "$MACOS_CERTIFICATE_PASSWORD" ] && [ -n "$TARVE_MACOS_SIGN_IDENTITY" ]; then
+            echo "sign=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sign=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::MACOS_CERTIFICATE_P12 / MACOS_CERTIFICATE_PASSWORD / MACOS_SIGN_IDENTITY not set: skipping signing."
+          fi
+          if [ -n "$APPLE_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APPLE_APP_PASSWORD" ]; then
+            echo "notarize=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "notarize=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.secrets.outputs.sign == 'true'
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        if: steps.secrets.outputs.sign == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Install JS dependencies
+        if: steps.secrets.outputs.sign == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Download .app zip
+        if: steps.secrets.outputs.sign == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: tarve-macos-arm64-app
+          path: dist/unsigned
+
+      - name: Import certificate into a temporary keychain
+        if: steps.secrets.outputs.sign == 'true'
+        run: |
+          keychain="$RUNNER_TEMP/tarve-signing.keychain-db"
+          keychain_password=$(uuidgen)
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security find-identity -v -p codesigning "$keychain"
+
+      - name: Sign (and notarize) with tarve release
+        if: steps.secrets.outputs.sign == 'true'
+        run: |
+          ditto -x -k dist/unsigned/*.zip dist/app
+          app=$(ls -d dist/app/*.app | head -n 1)
+          if [ -z "$TARVE_UPDATE_PRIVATE_KEY" ]; then
+            # Throwaway update key: this job checks signing, it does not publish updates.
+            bun packages/core/cli.ts keygen --out "$RUNNER_TEMP"
+            export TARVE_UPDATE_PRIVATE_KEY="$RUNNER_TEMP/tarve-update.key"
+          fi
+          version=$(bun -e 'console.log(require("./package.json").version)')
+          notarize=""
+          if [ "${{ steps.secrets.outputs.notarize }}" = "true" ]; then notarize="--notarize"; fi
+          bun packages/core/cli.ts release --version "$version" \
+            --artifact "darwin-arm64=$app" --sign "$TARVE_MACOS_SIGN_IDENTITY" $notarize \
+            --out dist/signed
+          ls -la dist/signed
+
+      - name: Verify signature
+        if: steps.secrets.outputs.sign == 'true'
+        run: |
+          mkdir -p dist/verify
+          ditto -x -k dist/signed/*.zip dist/verify
+          app=$(ls -d dist/verify/*.app | head -n 1)
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv --verbose=4 "$app" 2>&1 | grep -E "Authority|TeamIdentifier|flags"
+          if [ "${{ steps.secrets.outputs.notarize }}" = "true" ]; then
+            xcrun stapler validate "$app"
+            spctl --assess --type execute -vv "$app"
+          fi
+
+      - name: Upload signed .app
+        if: steps.secrets.outputs.sign == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tarve-macos-arm64-app-signed
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            dist/signed/*.zip
+            dist/signed/latest.json
+
+      - name: Remove the temporary keychain
+        if: always() && steps.secrets.outputs.sign == 'true'
+        run: security delete-keychain "$RUNNER_TEMP/tarve-signing.keychain-db" || true

@@ -35,7 +35,7 @@ const REQUIRED: Record<string, Record<string, unknown>> = {
   VirtualList: { id: "virtual", items: [1, 2, 3], itemHeight: 20, height: 100, offset: 0, renderItem: (item: number) => <core.Text>{String(item)}</core.Text> },
 };
 /** SVG shapes only render inside <Svg>; classes and test helpers are not components. */
-const NOT_RENDERABLE = new Set(["BunFfiBridge", "CanvasGradient", "CanvasRenderingContext2D", "Locator", "TestRenderer", "Circle", "Ellipse", "Line", "Path", "Polygon", "Polyline", "SvgRect"]);
+const NOT_RENDERABLE = new Set(["BunFfiBridge", "PluginFfiUnsupportedError", "CanvasGradient", "CanvasRenderingContext2D", "Locator", "TestRenderer", "Circle", "Ellipse", "Line", "Path", "Polygon", "Polyline", "SvgRect"]);
 
 function propsFor(variant: number, calls: string[], name = ""): object {
   const values: Record<string, unknown> = {

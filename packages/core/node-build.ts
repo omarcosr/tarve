@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { nativePath } from "#tarve/runtime";
 import { fileImportAttributes } from "./esbuild-file-imports";
 import { frameworkPlugins } from "./framework-plugins";
@@ -11,6 +12,7 @@ import { metadataOverrides, smolExecArgv, type BuildOptions } from "./build";
 import { buildMetadata, writeLinuxDesktopEntry } from "./package-metadata";
 import { NATIVE_COMPATIBILITY_MANIFEST_NAME, assertNativeRuntimeCompatible, readNativeCompatibilityManifest, createNativeCompatibilityManifest } from "./native-runtime";
 import { assertNodeVersion, targetNodeExecutable } from "./node-target";
+import { pluginNativeModule, pluginNativesForBuild } from "./plugins-build";
 
 export interface NodeBuildOptions extends BuildOptions {
   /** Node.js 26.10+ executable used to build the SEA. Defaults to the installed Node. */
@@ -54,6 +56,8 @@ export async function buildNode(options: NodeBuildOptions): Promise<string> {
     if (!executable && target !== hostBuildTarget()) {
       executable = await targetNodeExecutable(target, version.slice(1));
     }
+    // Plugins' native libraries ride along as SEA assets, registered in #tarve/runtime.
+    const plugins = pluginNativeModule(pluginNativesForBuild(options.entrypoint, target).embeds, fileURLToPath(import.meta.resolve("#tarve/assets")));
     // Build-time tools load lazily and stay external, so an app that imports
     // @tarve/core/build (e.g. Studio) still starts inside a Node single executable.
     const { build: bundle } = await import("esbuild");
@@ -88,8 +92,9 @@ export async function buildNode(options: NodeBuildOptions): Promise<string> {
           }
           build.onResolve({ filter: /^#tarve\/runtime$/ }, () => ({ path: "native-runtime", namespace: "tarve-node" }));
           build.onLoad({ filter: /.*/, namespace: "tarve-node" }, () => ({
-            contents: `import { join } from "node:path"; export function nativePath() { return join(import.meta.dirname, ${JSON.stringify(config.nativeName)}); }`,
+            contents: `import { join } from "node:path"; export function nativePath() { return join(import.meta.dirname, ${JSON.stringify(config.nativeName)}); }\n${plugins}`,
             loader: "js",
+              resolveDir: root,
           }));
         },
       }],

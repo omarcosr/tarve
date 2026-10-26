@@ -26,6 +26,12 @@ export interface TitleBarProps extends ViewProps {
   glass?: boolean | GlassVariant;
   /** Light or dark glass; sets the ink of the title and controls. Default `light`. */
   appearance?: "light" | "dark";
+  /** Before the title: a menu button, an avatar. Replaces the back button `onBack` draws. */
+  leading?: Child;
+  /** After the title (before the window controls on desktop): icon buttons, a search field. */
+  actions?: Child;
+  /** Draws a back arrow before the title that calls this: the usual top bar of a pushed screen. */
+  onBack?: () => void;
 }
 
 /** `#rgb`/`#rrggbb` at `alpha` (0–255); other colors are returned unchanged. */
@@ -58,15 +64,21 @@ function titleBarButton(action: "minimize" | "toggleMaximize" | "close", child: 
   });
 }
 
+/** Android has no window to minimize, maximize or close: TitleBar is the app's top bar there. */
+const MOBILE = typeof process !== "undefined" && (process.platform as string) === "android";
+
 export function TitleBar({
   title,
-  height = 40,
-  showMinimize = true,
-  showMaximize = true,
-  showClose = true,
+  height = MOBILE ? 56 : 40,
+  showMinimize = !MOBILE,
+  showMaximize = !MOBILE,
+  showClose = !MOBILE,
   buttonStyle,
   glass,
   appearance = "light",
+  leading,
+  actions,
+  onBack,
   children,
   style,
   ...props
@@ -99,15 +111,34 @@ export function TitleBar({
       showClose ? titleBarButton("close", closeIcon, ink, controlStyle) : null,
     ],
   });
-  const content = children ?? (title ? jsx(Text, { size: 13, weight: glass ? 600 : 500, color: glass ? ink : undefined, children: title }) : null);
+  const content = children ?? (title ? jsx(Text, { size: MOBILE ? 18 : 13, weight: glass || MOBILE ? 600 : 500, color: glass ? ink : undefined, children: title }) : null);
+  // A 48 dp touch target on a phone, a compact square on desktop.
+  const target = MOBILE ? 48 : 32;
+  const back = leading ?? (onBack ? jsx(Pressable, {
+    onClick: onBack,
+    control: { role: "button", label: "Back" },
+    style: {
+      width: target, height: target, radius: target / 2, align: "center", justify: "center", shrink: 0,
+      background: "#00000000",
+      hover: { background: translucent(ink, 0x1f) },
+      active: { background: translucent(ink, 0x33) },
+    },
+    children: jsx(Icon, { iconNode: [["path", { d: "M19 12H5M12 19l-7-7 7-7" }]], size: MOBILE ? 24 : 16, strokeWidth: 2, color: ink }),
+  }) : null);
+  const start = back
+    ? jsx(Row, { style: { grow: 1, shrink: 1, align: "center", gap: MOBILE ? 8 : 6, height: "100%" }, children: [back, content] })
+    : content;
+  const end = actions ? jsx(Row, { style: { height: "100%", shrink: 0, align: "center", gap: MOBILE ? 4 : 2 }, children: [actions, controls] }) : controls;
   return container("titlebar", {
     ...props,
-    dragRegion: true,
+    // No window to move on a phone: the bar is plain layout there.
+    dragRegion: !MOBILE,
     style: {
       direction: "row",
       height,
       shrink: 0,
-      padding: { left: 12 },
+      // A back button sits 4 dp from the edge (its own 48 dp circle supplies the rest).
+      padding: { left: MOBILE ? (back ? 4 : 16) : back ? 6 : 12, right: MOBILE && actions ? 4 : 0 },
       background: theme.colors.card,
       borderWidth: { bottom: 1 },
       borderColor: theme.colors.border,
@@ -118,6 +149,6 @@ export function TitleBar({
       ...surface,
       ...style,
     },
-    children: [content, controls],
+    children: [start, end],
   });
 }

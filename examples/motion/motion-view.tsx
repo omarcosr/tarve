@@ -56,10 +56,12 @@ function Section({
 function EasingRow({ easing }: { easing: MotionEasing }) {
   return (
     <Row gap={14} align="center">
-      <Text size={12} color={c.mutedForeground} style={{ width: 76 }}>{easing}</Text>
+      <Text size={12} color={c.mutedForeground} style={{ width: 76, shrink: 0 }}>{easing}</Text>
       <View
         style={{
           width: easingForward ? 360 : 120,
+          shrink: 1,
+          minWidth: 0,
           height: 12,
           radius: 6,
           background: c.primary,
@@ -81,8 +83,8 @@ export function App() {
       title="Tarve — Native motion"
       width={940}
       height={820}
-      minWidth={760}
-      minHeight={620}
+      minWidth={360}
+      minHeight={520}
       position="center"
     >
       <TitleBar title="Tarve — Native motion" />
@@ -108,6 +110,7 @@ export function App() {
               }}
               style={{
                 width: 430,
+                maxWidth: "100%",
                 height: 76,
                 opacity: 1,
                 radius: 18,
@@ -150,6 +153,7 @@ export function App() {
               }}
               style={{
                 width: expanded ? 420 : 220,
+                maxWidth: "100%",
                 height: expanded ? 110 : 72,
                 opacity: expanded ? 1 : 0.62,
                 radius: expanded ? 24 : 8,
@@ -202,6 +206,7 @@ export function App() {
               id="retarget-demo"
               style={{
                 width: retargetWidth,
+                maxWidth: "100%",
                 height: 54,
                 radius: 12,
                 background: c.success,
@@ -241,6 +246,7 @@ export function App() {
                   id="presence-card"
                   style={{
                     width: 430,
+                maxWidth: "100%",
                     height: 92,
                     opacity: 1,
                     radius: 16,

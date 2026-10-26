@@ -33,6 +33,10 @@
       "types": "./dist/types/core/node-build.d.ts",
       "default": "./dist/npm/node-build.js"
     },
+    "./package": {
+      "types": "./dist/types/core/package-installer.d.ts",
+      "default": "./dist/npm/package-installer.js"
+    },
     "./protocol": {
       "types": "./dist/types/protocol/src/index.d.ts",
       "default": "./dist/npm/protocol.js"
@@ -62,6 +66,7 @@
     "dist/types",
     "native/win32-x64",
     "native/linux-x64",
+    "native/android",
     "README.md",
     "LICENSE"
   ],
@@ -100,6 +105,9 @@
     "build:exe": "bun scripts/build.ts --exe",
     "build:example": "bun scripts/build.ts --exe --entry examples/basic/basic.tsx",
     "build:native": "bun scripts/build.ts",
+    "build:native:android": "bun scripts/build-android.ts",
+    "check:apple": "bun scripts/check-apple.ts",
+    "android:emulator": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android-emulator.ps1",
     "build:wasm": "bun packages/headless/scripts/build-wasm.ts",
     "package": "bun scripts/package.ts",
     "package:local": "bun scripts/package.ts --local",
@@ -118,7 +126,7 @@
     "version:check": "bun scripts/version-policy.ts --check",
     "version:set": "bun scripts/version-policy.ts --set",
     "test": "bun test packages/core packages/svelte scripts/playground.test.ts && cargo test --manifest-path native/Cargo.toml",
-    "test:headless": "bun test packages/headless",
+    "test:headless": "bun test packages/headless packages/test",
     "test:package-clean": "bun test scripts/package-output.test.ts",
     "test:release-policy": "bun test scripts/version-policy.test.ts scripts/release-policy.test.ts",
     "test:visual": "bun run setup:examples && bun scripts/visual-regression.tsx",
@@ -129,11 +137,13 @@
     "smoke:motion": "bun run build:native && bun scripts/smoke-motion.tsx",
     "smoke:editor": "bun run build:native && bun scripts/smoke-editor.tsx",
     "smoke:steady-frames": "bun run build:native && bun scripts/smoke-steady-frames.tsx",
+    "smoke:idle": "bun run build:native && bun scripts/smoke-idle.tsx",
     "bench:compare": "bun scripts/bench-compare.ts",
     "test:renderer-parity": "bun run build:native && bun scripts/renderer-parity.tsx",
     "check:lines": "bun scripts/check-lines.ts",
     "smoke:devtools": "bun run build:native && bun scripts/smoke-devtools.ts",
     "smoke:tray": "bun run build:native && bun scripts/smoke-tray.tsx",
+    "smoke:notify": "bun run build:native && bun scripts/smoke-notify.tsx",
     "smoke:hidden": "bun run build:native && bun scripts/smoke-hidden.tsx",
     "smoke:minimized": "bun run build:native && bun scripts/smoke-minimized.tsx",
     "smoke:glass": "bun run build:native && bun scripts/smoke-glass.tsx",
@@ -159,9 +169,11 @@
     "smoke:update": "bun scripts/smoke-update.ts",
     "smoke:exe:txiki": "bun scripts/smoke-exe.ts --runtime txiki",
     "smoke:txiki-shims": "bun scripts/smoke-txiki-shims.ts",
+    "smoke:headless-runtimes": "bun run build:native && bun run build:wasm && bun scripts/smoke-headless-runtimes.ts",
     "smoke:txiki-apps": "bun run build:native && bun run setup:examples && bun scripts/smoke-txiki-apps.ts",
     "smoke:runtime-parity": "bun run build:native && bun run setup:examples && bun scripts/smoke-runtime-parity.ts",
     "smoke:package": "bun scripts/smoke-package.ts",
+    "smoke:node-cli-package": "bun scripts/smoke-node-cli-package.ts",
     "smoke:svelte": "bun scripts/smoke-svelte.ts",
     "smoke:svelte-input": "bun scripts/smoke-svelte-input.ts",
     "bench": "bun scripts/benchmark.tsx",

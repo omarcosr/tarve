@@ -137,7 +137,7 @@ impl TextEngine {
     }
     /// The advance of a space in the node's font, for tab widths.
     pub(super) fn space_advance(&mut self, node: &Node) -> f32 {
-        let size = node.number("fontSize", 14.0);
+        let size = node.font_size(14.0);
         let mut builder = self.context.ranged_builder(&mut self.fonts, " ", 1.0, true);
         builder.push_default(StyleProperty::FontSize(size));
         builder.push_default(StyleProperty::FontFamily(node_font_family(
@@ -162,10 +162,10 @@ pub(super) fn shape_text(
     tabs: Option<(f32, Vec<usize>)>,
 ) -> Layout<TextBrush> {
     let mut builder = context.ranged_builder(fonts, content, 1.0, true);
-    builder.push_default(StyleProperty::FontSize(node.number("fontSize", 14.0)));
+    builder.push_default(StyleProperty::FontSize(node.font_size(14.0)));
     // CSS `font-optical-sizing: auto`: a variable font's `opsz` axis follows
     // the font size. Fonts without the axis ignore it.
-    builder.push_default(optical_size(node.number("fontSize", 14.0)));
+    builder.push_default(optical_size(node.font_size(14.0)));
     builder.push_default(StyleProperty::FontWeight(FontWeight::new(
         node.number("fontWeight", 400.0),
     )));
@@ -194,7 +194,7 @@ pub(super) fn shape_text(
         && let RichContent::Text { spans, .. } = rich.as_ref()
     {
         for span in spans {
-            push_span(&mut builder, span, node, node.number("fontSize", 14.0));
+            push_span(&mut builder, span, node, node.font_size(14.0));
         }
     }
     for run in text_runs(node, run_limit.min(content.len()), content) {
@@ -202,10 +202,7 @@ pub(super) fn shape_text(
             &mut builder,
             run.style,
             run.start..run.end,
-            (
-                node.number("fontSize", 14.0),
-                node.number("lineHeight", 1.5),
-            ),
+            (node.font_size(14.0), node.number("lineHeight", 1.5)),
         );
     }
     if let Some((spacing, tabs)) = tabs {

@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { connect, createServer, type Server, type Socket } from "node:net";
-import { chmodSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir, userInfo } from "node:os";
+import { chmodSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { tmpdir, userInfo } from "node:os";
 import { basename, join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { runtimeAppMetadata } from "./app-metadata";
+import { urlsOf } from "./associations";
 import { openLibrary } from "./bridge/binding";
 import { nativePath } from "#tarve/runtime";
 
@@ -53,16 +53,37 @@ function compiled(): boolean {
   return !RUNTIMES.test(basename(process.execPath));
 }
 
-const URL_ARGUMENT = /^([a-z][a-z0-9+.-]+):/i;
+export { desktopQuote, quote, urlsOf } from "./associations";
 
-export function urlsOf(args: readonly string[], schemes?: readonly string[]): string[] {
-  const wanted = schemes?.map(scheme => scheme.toLowerCase());
-  return args.filter(arg => {
-    const scheme = URL_ARGUMENT.exec(arg)?.[1]?.toLowerCase();
-    // One letter is a Windows drive (C:\…), `file:` a path.
-    if (!scheme || scheme === "file") return false;
-    return wanted ? wanted.includes(scheme) : arg.includes("://");
-  });
+type LaunchListener = (launch: InstanceLaunch) => void;
+const FORWARDED_KEY = Symbol.for("tarve.forwardedLaunches");
+
+/** Every launch a primary instance of this process hears (what `app.onOpenUrl`/`onOpenFiles` follow). */
+function forwardedListeners(): Set<LaunchListener> {
+  const registry = globalThis as { [FORWARDED_KEY]?: Set<LaunchListener> };
+  return registry[FORWARDED_KEY] ??= new Set();
+}
+
+const RELEASE_KEY = Symbol.for("tarve.singleInstanceRelease");
+
+/** The `release` of each first instance this process holds. */
+function heldInstances(): Set<() => void> {
+  const registry = globalThis as { [RELEASE_KEY]?: Set<() => void> };
+  return registry[RELEASE_KEY] ??= new Set();
+}
+
+/**
+ * Stops answering later launches: what the app does when it closes, so its listener does not
+ * keep the process alive (the same in every runtime; txiki.js cannot unref a listener).
+ */
+export function releaseSingleInstance(): void {
+  for (const release of [...heldInstances()]) release();
+}
+
+/** Hears launches forwarded to this process by `requestSingleInstance`, whoever asked for it. */
+export function onForwardedLaunch(listener: LaunchListener): () => void {
+  forwardedListeners().add(listener);
+  return () => { forwardedListeners().delete(listener); };
 }
 
 function appId(id?: string): string {
@@ -138,6 +159,7 @@ function listen(address: string, onLaunch: (launch: InstanceLaunch) => void): Pr
           return;
         }
         // The pid first, so the launcher can let this process take the foreground.
+        socket.removeAllListeners("data");
         socket.end(`${process.pid}\n`);
         try {
           const launch = JSON.parse(data.slice(0, line)) as Partial<InstanceLaunch>;
@@ -147,10 +169,7 @@ function listen(address: string, onLaunch: (launch: InstanceLaunch) => void): Pr
       });
     });
     server.on("error", () => resolve(undefined));
-    server.listen(address, () => {
-      server.unref();
-      resolve(server);
-    });
+    server.listen(address, () => resolve(server));
   });
 }
 
@@ -158,7 +177,9 @@ function listen(address: string, onLaunch: (launch: InstanceLaunch) => void): Pr
  * Keeps the app to one process per user, like a desktop app: the first launch gets
  * `primary: true` and hears later ones through `onSecondInstance`; a later launch
  * hands its arguments (files, links) to the first and gets `primary: false`, and
- * should exit. Call it before `createApp`.
+ * should exit. Call it before `createApp`. The first instance answers until `release()`,
+ * until the app (`createApp`/`render`, not a window it opened) closes, or until the process
+ * exits; while it answers, it keeps the process alive.
  *
  * ```ts
  * const instance = await requestSingleInstance({ schemes: ["myapp"] });
@@ -170,11 +191,13 @@ function listen(address: string, onLaunch: (launch: InstanceLaunch) => void): Pr
 export async function requestSingleInstance(options: SingleInstanceOptions = {}): Promise<SingleInstance> {
   const args = launchArgs();
   const launch: InstanceLaunch = { args, cwd: process.cwd(), urls: urlsOf(args, options.schemes) };
+  // Android starts one process per app and brings its activity back on a later launch.
+  if ((process.platform as string) === "android") return { primary: true, launch, onSecondInstance: () => () => {}, release() {} };
   const address = instanceAddress(appId(options.id));
   const listeners = new Set<(launch: InstanceLaunch) => void>();
   const deliver = (next: InstanceLaunch) => {
     const urls = urlsOf(next.args, options.schemes);
-    for (const listener of [...listeners]) {
+    for (const listener of [...listeners, ...forwardedListeners()]) {
       try { listener({ ...next, urls }); } catch (error) { console.error("[tarve] onSecondInstance", error); }
     }
   };
@@ -192,9 +215,11 @@ export async function requestSingleInstance(options: SingleInstanceOptions = {})
       const release = () => {
         if (released) return;
         released = true;
+        heldInstances().delete(release);
         server.close();
-        if (process.platform !== "win32") rmSync(address, { force: true });
+          if (process.platform !== "win32") rmSync(address, { force: true });
       };
+      heldInstances().add(release);
       process.once("exit", release);
       return {
         primary: true,
@@ -208,75 +233,7 @@ export async function requestSingleInstance(options: SingleInstanceOptions = {})
   throw new Error("Could not reach or become the app's first instance");
 }
 
-export interface UrlSchemeOptions {
-  /** Shown by the system for the scheme (Windows), the handler's name (Linux). Default the app name. */
-  name?: string;
-  /** The command the system runs with the URL appended; default this executable (and script under `bun`). */
-  command?: string[];
-}
-
-function launchCommand(): string[] {
-  return compiled() ? [process.execPath] : [process.execPath, process.argv[1] ?? ""];
-}
-
-const SCHEME = /^[a-z][a-z0-9+.-]*$/i;
-
-/** A Windows command-line argument, quoted for `CommandLineToArgvW`. */
-export function quote(part: string): string {
-  return `"${part.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
-}
-
-/** A desktop entry `Exec` argument: quoted, with `"`, `\``, `$` and `\\` escaped, `%` doubled. */
-export function desktopQuote(part: string): string {
-  return `"${part.replace(/(["\`$\\])/g, "\\$1").replace(/%/g, "%%")}"`;
-}
-
-function reg(args: string[]): void {
-  const result = spawnSync("reg.exe", args, { encoding: "utf8", windowsHide: true });
-  if (result.status !== 0) throw new Error(`reg ${args[0]} failed: ${(result.stderr || result.stdout).trim()}`);
-}
-
-function desktopFile(scheme: string): string {
-  return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "applications", `tarve-${scheme.toLowerCase()}-handler.desktop`);
-}
-
-/**
- * Makes links `scheme://…` open this app, for the current user: Windows registers
- * the scheme under HKCU, Linux writes a desktop entry and makes it the default
- * handler (`xdg-mime`). The link arrives as an argument: `requestSingleInstance`'s
- * `launch.urls`, or `onSecondInstance` when the app is already running. macOS reads
- * URL schemes from the app bundle's Info.plist and delivers links as Apple events,
- * which Tarve does not handle yet: this throws there.
- */
-export function registerUrlScheme(scheme: string, options: UrlSchemeOptions = {}): void {
-  if (!SCHEME.test(scheme) || scheme.length < 2) throw new TypeError(`Invalid URL scheme: ${scheme}`);
-  const command = options.command ?? launchCommand();
-  const name = options.name ?? runtimeAppMetadata().name ?? scheme;
-  if (process.platform === "win32") {
-    const key = `HKCU\\Software\\Classes\\${scheme}`;
-    reg(["add", key, "/ve", "/d", `URL:${name}`, "/f"]);
-    reg(["add", key, "/v", "URL Protocol", "/d", "", "/f"]);
-    reg(["add", `${key}\\shell\\open\\command`, "/ve", "/d", [...command.map(quote), '"%1"'].join(" "), "/f"]);
-    return;
-  }
-  if (process.platform === "linux") {
-    const file = desktopFile(scheme);
-    mkdirSync(join(file, ".."), { recursive: true });
-    const exec = [...command.map(desktopQuote), "%u"].join(" ");
-    writeFileSync(file, `[Desktop Entry]\nType=Application\nName=${name}\nExec=${exec}\nNoDisplay=true\nMimeType=x-scheme-handler/${scheme};\n`);
-    const result = spawnSync("xdg-mime", ["default", basename(file), `x-scheme-handler/${scheme}`], { encoding: "utf8" });
-    if (result.error || result.status !== 0) throw new Error(`xdg-mime failed: ${result.error?.message ?? result.stderr.trim()}`);
-    return;
-  }
-  throw new Error(`URL schemes are not supported on ${process.platform} yet`);
-}
-
-/** Removes what `registerUrlScheme` registered for `scheme`. */
-export function unregisterUrlScheme(scheme: string): void {
-  if (!SCHEME.test(scheme) || scheme.length < 2) throw new TypeError(`Invalid URL scheme: ${scheme}`);
-  if (process.platform === "win32") {
-    spawnSync("reg.exe", ["delete", `HKCU\\Software\\Classes\\${scheme}`, "/f"], { windowsHide: true });
-    return;
-  }
-  if (process.platform === "linux") rmSync(desktopFile(scheme), { force: true });
-}
+/** Options of `registerUrlScheme` (the same as `registerProtocol`'s). */
+export type { RegistrationOptions as UrlSchemeOptions } from "./associations";
+/** The earlier names of `registerProtocol` / `unregisterProtocol` (see associations.ts). */
+export { registerProtocol as registerUrlScheme, unregisterProtocol as unregisterUrlScheme } from "./associations";

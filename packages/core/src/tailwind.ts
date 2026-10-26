@@ -71,8 +71,8 @@ const STATE_VARIANTS: Record<string, "hover" | "focus" | "focusVisible" | "activ
   hover: "hover", focus: "focus", "focus-visible": "focusVisible", active: "active", disabled: "disabled",
   "group-hover": "groupHover", "focus-within": "focusWithin",
 };
-/** Variants the reconciler folds (theme, position among siblings, window width): each nests a full style. */
-const WRAPPER_VARIANTS = new Set(["dark", "first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl"]);
+/** Variants the reconciler folds (theme, position among siblings, window size, system): each nests a full style, under its Style key. */
+const WRAPPER_VARIANTS: Record<string, string> = { dark: "dark", first: "first", last: "last", odd: "odd", even: "even", sm: "sm", md: "md", lg: "lg", xl: "xl", "2xl": "2xl", portrait: "portrait", landscape: "landscape", "pointer-coarse": "pointerCoarse", "pointer-fine": "pointerFine", "motion-reduce": "motionReduce", "motion-safe": "motionSafe" };
 
 const STATIC: Record<string, Out> = {
   flex: { display: "flex" }, "inline-flex": { display: "flex" }, grid: { display: "grid" }, "inline-grid": { display: "grid" },
@@ -547,8 +547,8 @@ function compile(classes: string): Out {
     let state: (typeof STATE_VARIANTS)[string] | undefined;
     let supported = true;
     for (const variant of parts) {
-      if (WRAPPER_VARIANTS.has(variant)) {
-        const next = (target[variant] as Out | undefined) ?? (target[variant] = {});
+      if (Object.hasOwn(WRAPPER_VARIANTS, variant)) {
+        const key = WRAPPER_VARIANTS[variant]!, next = (target[key] as Out | undefined) ?? (target[key] = {});
         if (!wrappers.includes(next)) wrappers.push(next);
         target = next;
       } else if (STATE_VARIANTS[variant]) state = STATE_VARIANTS[variant];
@@ -591,7 +591,7 @@ export function styleWithClassName(className: string, style: Record<string, unkn
   if (!style) return compiled;
   for (const alias of Object.keys(ALIASES)) if (style[alias] !== undefined) delete compiled[ALIASES[alias]];
   const merged: Out = { ...compiled, ...style };
-  for (const state of ["hover", "focus", "focusVisible", "active", "disabled", "groupHover", "focusWithin", "dark", "first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl"] as const) {
+  for (const state of ["hover", "focus", "focusVisible", "active", "disabled", "groupHover", "focusWithin", "dark", "first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl", "portrait", "landscape", "pointerCoarse", "pointerFine", "motionReduce", "motionSafe"] as const) {
     if (compiled[state] && style[state]) merged[state] = { ...(compiled[state] as Out), ...(style[state] as Out) };
   }
   return merged;

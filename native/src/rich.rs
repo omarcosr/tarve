@@ -753,8 +753,19 @@ fn emphasize_pairs(rows: &mut [DiffRow]) {
                     .unwrap_or(&rows[added.start + offset].text)
                     .to_string();
                 let (old_ranges, new_ranges) = word_diff(&old_body, &new_body);
-                rows[removed.start + offset].emphasis = old_ranges;
-                rows[added.start + offset].emphasis = new_ranges;
+                // The ranges are relative to the bodies; `emphasis` indexes `text`,
+                // marker included, so painting does not start one column early.
+                let shift = |row: &DiffRow, body: &str, ranges: Vec<Range<usize>>| {
+                    let marker = row.text.len() - body.len();
+                    ranges
+                        .into_iter()
+                        .map(|range| range.start + marker..range.end + marker)
+                        .collect()
+                };
+                rows[removed.start + offset].emphasis =
+                    shift(&rows[removed.start + offset], &old_body, old_ranges);
+                rows[added.start + offset].emphasis =
+                    shift(&rows[added.start + offset], &new_body, new_ranges);
             }
         }
     }
@@ -1844,6 +1855,13 @@ mod tests {
             .find(|row| row.kind == DiffRowKind::Removed)
             .unwrap();
         assert!(!removed.emphasis.is_empty());
+        // Ranges index the row text, marker included: the painter slices it so.
+        assert_eq!(&removed.text[removed.emphasis[0].clone()], "gone");
+        let added = rows
+            .iter()
+            .find(|row| row.kind == DiffRowKind::Added)
+            .unwrap();
+        assert_eq!(&added.text[added.emphasis[0].clone()], "new");
     }
 
     #[test]

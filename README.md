@@ -4,9 +4,9 @@ Native desktop UI for **Bun + TypeScript/TSX**.
 
 Tarve turns a TSX tree into a retained native interface. It does not use a browser, DOM, or React runtime. Layout is handled by **Taffy**, text shaping and editing by **Parley**, and rendering is selectable between GPU and low-memory CPU paths.
 
-> **Current supported targets:** Windows x64 and Linux x64
+> **Current supported targets:** Windows x64, Linux x64 and Android (arm64, x86_64)
 >
-> **Runtime:** Bun 1.4+ or Node.js 26.10+
+> **Runtimes:** Bun 1.4+, Node.js 26.10+, txiki.js / QuickJS-ng and Go (see [Runtimes](#runtimes))
 >
 > **Package:** [`@tarve/core`](https://www.npmjs.com/package/@tarve/core) (CLI: `tarve`)
 >
@@ -21,7 +21,7 @@ Tarve turns a TSX tree into a retained native interface. It does not use a brows
 - shadcn-inspired components and semantic light/dark theme tokens.
 - Native Markdown, syntax-highlighted Code, and Diff leaves designed for large documents.
 - Fixed-height, measured variable-height, and externally windowed `VirtualList` modes.
-- Accessibility through AccessKit: UI Automation on Windows and AT-SPI on Linux.
+- Accessibility through AccessKit: UI Automation on Windows, AT-SPI on Linux and TalkBack on Android; the system text size and reduced-motion setting apply natively.
 - Global hotkeys, native file dialogs, custom title bars, window positioning, and standalone Windows/Linux builds.
 - Event-driven Bun/native bridge with no continuous idle polling: an idle window presents zero frames.
 - Development mode with in-window runtime error overlay, same-window remount under `bun --hot`, and a native frame-time graph.
@@ -85,6 +85,16 @@ bunx tarve dev app.tsx      # hot reload into the same window (npx tarve dev on 
 
 `tarve` uses the runtime that launched it: `bunx`/`bun run` pick Bun, `npx`/`npm run` pick Node (Bun, as before, when Node is older than 26.10). `--runtime bun|node` overrides it. With Bun you can still run the source directly with `bun app.tsx`.
 
+## New packages
+
+| Package | What |
+| --- | --- |
+| `create-tarve` | `bun create tarve my-app` / `npm create tarve my-app` — templates `basic`, `tailwind`, `svelte`, `tray` |
+| `@tarve/router` | Stack and tab navigation with typed params (`route("/users/:id", …)`), `<RouterView>`, `<TabBar>`, `<Link to>` |
+| `@tarve/test` | Testing Library–style `render`, queries, `fireEvent`, `waitFor` and PNG snapshots over `@tarve/headless` |
+
+App-level additions: `app.onOpenUrl` / `app.onOpenFiles` with `protocols` / `fileTypes` (deep links and file associations), `app.share`, `app.getCurrentPosition` and `app.authenticate` (Android and Windows), and `definePlugin` (see [Plugins](#plugins)).
+
 ## Build a standalone executable
 
 The package CLI compiles a Tarve application into a standalone executable and embeds the native runtime. Windows produces a `.exe`; Linux produces an ELF executable with no required extension. The target defaults to the current host. Published Tarve packages contain both Windows x64 and Linux x64 native runtimes, so `--target` can switch between those targets without rebuilding Tarve's Rust runtime.
@@ -120,6 +130,24 @@ await build({
 });
 ```
 
+### Installers and portable archives
+
+`tarve package` wraps a built executable (or builds `app.tsx` first, one build per target OS) into distributable packages, written in pure TypeScript with no external tools:
+
+```bash
+bunx tarve package dist/App --format deb,tar --version 1.2.0 --categories "Utility;Office"
+bunx tarve package app.tsx --format zip,msix --version 1.2.0 --publisher "Acme Inc." --out dist/packages
+```
+
+| Format | Output |
+| --- | --- |
+| `deb` | `<app>_<version>_amd64.deb`: `/opt/<app>/<exe>`, `/usr/bin/<app>` symlink, `.desktop` entry and hicolor icon |
+| `tar` | `<app>-<version>-linux-x64.tar.gz`: executable, `.desktop`, icon and `install.sh` (per-user install into `~/.local`) |
+| `zip` | `<App>-<version>-windows-x64.zip`: portable folder with the `.exe` |
+| `msix` | MSIX folder with `AppxManifest.xml` and logos; packed into an unsigned `.msix` when `makeappx` (Windows SDK, `TARVE_MAKEAPPX`) is found |
+
+Name, version, icon, description and publisher come from the same `package.json` `"tarve"` metadata as `tarve build` (flags override them). Sign `.msix` files with `signtool` using a certificate whose subject matches `CN=<publisher>`. AppImage is not produced (it needs the AppImage runtime and squashfs); use `tar`. The API is `packageApp({ executable, format })` from `@tarve/core/package`.
+
 ## Auto-updates
 
 Built apps can update themselves from signed releases hosted on any HTTPS server (GitHub Releases, S3/R2, a CDN). The full guide is at [tarve.dev/docs/updates](https://tarve.dev/docs/updates).
@@ -141,6 +169,19 @@ if (update && canInstallUpdate()) installUpdate(await downloadUpdate(update, { o
 
 `latest.json` is signed with Ed25519 and lists the size and SHA-256 of each platform's executable; the app checks the signature, only accepts newer versions, HTTPS URLs and a matching app name, and verifies the download before `installUpdate` swaps the executable and restarts. `--sign` (or `TARVE_SIGN_COMMAND`) runs your Authenticode tool on each Windows executable before it is hashed. Self-updating needs a writable install folder (per-user or portable); `canInstallUpdate()` is false under `Program Files` or a package manager. txiki.js builds are not supported yet.
 
+## Runtimes
+
+Tarve supports four runtimes. Each one keeps its own strengths and limits: there is no promise of feature parity between them, and choosing one means accepting what it offers. The native runtime, components and the app API (`AppHandle`, or `App` in Go) are the same underneath.
+
+| Runtime | Windows x64 | Linux x64 | Android | What it gives you |
+| --- | --- | --- | --- | --- |
+| **Bun** 1.4+ | `run`, `dev`, `build` | `run`, `dev`, `build` | `build --target android --runtime bun`: the app runs as a Bun executable on the device | the fastest dev loop, `bun:ffi`, `bun:sqlite`, single-file executables; on Android the full Bun API at ~45 MB more download per ABI |
+| **Node.js** 26.10+ | `run`, `dev`, `build` | `run`, `dev`, `build` | builds the APK/AAB (the app runs on QuickJS-ng or Bun); Node.js itself publishes no Android build | the npm ecosystem, Node single-executable apps (FFI and SEA are experimental in Node 26) |
+| **txiki.js / QuickJS-ng** | `build --runtime txiki` | `build --runtime txiki` | the default engine on the device (`tarve build --target android`), inside the runtime | small executables and APKs (a few MB); a subset of Node's APIs through shims (`fs`, `path`, `os`, `crypto` hashes, `fetch`, `zlib`/gzip sync; on the desktop also `child_process` `spawn`/`spawnSync`, `net` pipes, and plugin FFI through `tjs:ffi`; on Android no child processes or sockets) |
+| **Go** | `go run`, `go build` | `go run`, `go build` | `tarve build <go package> --target android` | no JS at all; the Go toolchain and its libraries ([go/README.md](go/README.md)) |
+
+On Android a TSX app runs on QuickJS-ng by default, or on Bun with `--runtime bun` (Bun 1.4 ships Android builds: `bun-linux-arm64-android`, `bun-linux-x64-android`). Node.js has no official Android build, so a Node.js project builds its APK with either engine. txiki.js has no `tarve run`/`dev`; develop on Bun or Node.js and build with `--runtime txiki`. macOS is not a supported target yet.
+
 ## Node.js runtime
 
 The same TSX components, desktop APIs, renderer modes and native bridge run on Node.js 26.10+ with the same `tarve run|dev|build` commands; a Node-only project needs neither Bun nor Rust:
@@ -154,6 +195,45 @@ npx tarve build app.tsx --outfile dist/App.exe
 `dev` rebuilds TSX and remounts into the same native window when the entry uses `await render(App)`, as with Bun's hot mode. Node builds compile TSX with esbuild and embed the app and native library in a Node.js single-executable application. Node's FFI and single-executable APIs are experimental in Node 26.
 
 The shared build API also accepts `build({ entrypoint: "app.tsx", runtime: "node" })` from `@tarve/core/build`, and Node-only tooling can call `buildNode` from `@tarve/core/build-node`. Cross-compiling works as with Bun: `npx tarve build app.tsx --target linux-x64 --outfile dist/App`. The first build for a target downloads the official Node.js binary of the same version as the Node running the build from nodejs.org (or `NODEJS_ORG_MIRROR`), checks it against the release `SHASUMS256.txt` and caches it (`TARVE_CACHE_DIR`, by default `%LOCALAPPDATA%\tarve\cache` or `~/.cache/tarve`). Offline or with a custom Node build, pass it with `--target-executable path/to/node`; it must be the same Node.js version. As with Bun, the packaged native runtime for that target must match the current protocol.
+
+## Android
+
+`tarve build --target android` packs an app into a signed APK, or an Android App Bundle for Google Play (arm64-v8a and x86_64; `android-arm64` or `android-x64` for one). It works from Bun and from Node.js, for TSX apps and for Go apps:
+
+```powershell
+bun run build:native:android                      # once: native/android/<abi>/libtarve_native.so (cargo-ndk + NDK)
+tarve build app.tsx --target android              # dist/App.apk
+tarve build go/examples/counter --target android  # a Go main package
+adb install dist/App.apk
+tarve build app.tsx --target android --format aab --keystore upload.jks   # dist/App.aab for Google Play
+```
+
+**Bun on the device.** `--runtime bun` compiles the app with `bun build --compile --target=bun-linux-<arch>-android` (run the build with Bun: `bunx tarve build …`) and packs the executable as `lib/<abi>/libtarvebun.so`, which the package manager extracts (`extractNativeLibs="true"`). The activity starts it as a child process and keeps the window, GPU surface and system services; the app calls the native runtime over a socket pair (`native/src/android/bun_host.rs`, `packages/core/src/bridge/remote.ts`) and wakes on the same event socket as on Linux. The app gets Bun's own APIs (`Bun.file`, `bun:sqlite`, `fetch`, `Worker`, `Bun.spawn` of system binaries such as `/system/bin/toybox`) and `process.platform === "android"`; `Bun.$` fails inside the app sandbox. The cost is size: about 45 MB more per ABI in the download (~100 MB installed) against a few MB for QuickJS-ng. `scripts/android-bun-smoke.tsx` checks it on a device.
+
+```powershell
+bunx tarve build app.tsx --target android --runtime bun           # dist/App.apk with Bun inside
+```
+
+**App Bundle.** `--format aab` (or an `--outfile` ending in `.aab`) links the manifest and resources in protobuf form, lays the module out for bundletool (`manifest/`, `dex/`, `lib/`, `assets/`, `res/`, `resources.pb`), runs `bundletool build-bundle` (native libraries uncompressed and 16 KB aligned in the APKs Play generates) and signs the bundle with `jarsigner` using the same key options as an APK. bundletool comes from `--bundletool path.jar`, `TARVE_BUNDLETOOL`, or a pinned release downloaded once into the Tarve cache (`TARVE_CACHE_DIR`). Google Play rejects bundles signed with the debug key: pass your upload key with `--keystore`. Play also requires a recent `targetSdkVersion` for new apps and updates; Tarve targets API 34 for now (API 35 forces edge-to-edge, which NativeActivity cannot inset yet), so check Play's current requirement before uploading.
+
+**Permissions.** Every APK declares `INTERNET`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, `POST_NOTIFICATIONS` and `WAKE_LOCK`. An app adds its own in package.json (per entry under `tarve.apps["<entry>"].android` too) or with `--permission` (repeatable); a name without a dot is an `android.permission.` one:
+
+```json
+{ "tarve": { "android": { "permissions": ["CAMERA", "RECORD_AUDIO", "ACCESS_FINE_LOCATION"] } } }
+```
+
+Dangerous permissions also need the user's consent at run time:
+
+```ts
+const states = await app.requestPermissions(["CAMERA", "RECORD_AUDIO"]); // { CAMERA: "granted", RECORD_AUDIO: "denied" }
+const now = await app.checkPermissions(["CAMERA"]);                     // no dialog: "granted", "prompt" (never answered) or "denied"
+```
+
+`requestPermissions` shows the system prompt for the ones not granted yet and resolves once the user answers; a permission missing from the manifest is denied at once. Go apps call `app.RequestPermissions("CAMERA")` / `app.CheckPermissions(...)`. On Windows and Linux there is no per-app permission prompt, so both resolve every name as `"granted"`.
+
+The runtime runs as a NativeActivity. A TSX app is bundled like a txiki.js build and runs on the QuickJS-ng engine embedded in the runtime (`native/src/android/qjs.rs`). Its prelude provides timers, `fetch` (rustls), `TextEncoder`, `URL`, `crypto`, `Intl`, `Buffer`, and `node:fs`/`path`/`os`/`crypto` over the app's private storage (`os.homedir()` is the files directory, `os.tmpdir()` the cache). A Go app is built as `libtarveapp.so` with the NDK and called through `TarveAndroidMain`. Touch acts as the pointer: tap to click, hold and drag, swipe to scroll. The soft keyboard opens for focused inputs, Back requests a close, and the clipboard and `openExternal` go through the system, and `app.webSignIn({ url, cookieUrl, cookies })` opens a sign-in page (Google, OAuth) in the system WebView inside the app and resolves with the cookies of `cookieUrl` once signed in (the youtube-music example signs in to Google this way). Layout stays inside the system bars and the keyboard. While `<audio>`/`<video>` plays, the runtime keeps the app running in the background (a foreground service with a media notification, lock-screen and headset controls, and a wake lock): play and pause work on their own, and `app.systemMedia(...)` adds the title, artist, artwork and next/previous, which arrive as `systemMedia` events as on Windows.
+
+Without a phone, `bun run android:emulator` starts a headless Android 15 emulator in Docker (google/android-emulator-container-scripts; WSL2 with KVM) at `localhost:5555`. Needs the Android SDK (build-tools and a platform, from `ANDROID_HOME`) and a JDK to sign. Go apps also need the NDK. APKs are signed with the debug keystore unless `--keystore` or `TARVE_ANDROID_KEYSTORE` (`TARVE_ANDROID_KEYSTORE_PASSWORD`, `TARVE_ANDROID_KEY_ALIAS`) names one. Node.js and txiki.js themselves do not run on the device; Bun does with `--runtime bun` (below). `<video>` plays through the platform's MediaPlayer, and the file dialogs open the system document picker (an opened document is copied into the app's cache; folders report an error, since Android hands apps documents, not paths). `app.notify` posts to the notification shade (see [Notifications](#notifications)). The tray is a no-op; desktop widgets, native menus and several windows are not available on Android.
 
 ## Renderers
 
@@ -241,7 +321,7 @@ Both shadows also accept CSS syntax: `boxShadow: "inset 0 1px 2px rgba(0,0,0,.2)
 
 Create derived themes with `createTheme` or `Theme.create`. Theme tokens cover surfaces, foregrounds, borders, focus outlines, selection, caret, scrollbars, modal overlays, rich-content colors, and control states.
 
-Besides `hover`, `focus`, `focusVisible`, `active` and `disabled`, a style can carry `groupHover` (applied while an ancestor with `group: true` is hovered), `focusWithin` (while the box or a descendant has focus), `dark` (under a dark window theme), `first`/`last`/`odd`/`even` (by position among the parent's element children) and `sm`/`md`/`lg`/`xl`/`2xl` (window at least 640/768/1024/1280/1536 px wide; the app re-renders when the width crosses a breakpoint). The last three groups are folded by the reconciler, so the native tree never sees them.
+Besides `hover`, `focus`, `focusVisible`, `active` and `disabled`, a style can carry `groupHover` (applied while an ancestor with `group: true` is hovered), `focusWithin` (while the box or a descendant has focus), `dark` (under a dark window theme), `first`/`last`/`odd`/`even` (by position among the parent's element children) , `sm`/`md`/`lg`/`xl`/`2xl` (window at least 640/768/1024/1280/1536 px wide; the app re-renders when the width crosses a breakpoint), `portrait`/`landscape` (the window's shape), `pointerCoarse`/`pointerFine` (a finger on Android, a mouse elsewhere) and `motionReduce`/`motionSafe` (the system's animation setting). These are folded by the reconciler, so the native tree never sees them. For layout decisions in code, `viewport()` returns `{ width, height, orientation, pointer, fontScale, reducedMotion }`; a view that reads it renders again when any of them changes.
 
 ## Tailwind classes
 
@@ -267,7 +347,7 @@ function Card({ active }: { active: boolean }) {
 }
 ```
 
-The vocabulary follows Tailwind CSS 4 and is checked class by class against the real compiler (`packages/core/src/tailwind-parity.test.tsx`): layout (`flex`, `grid`, `items-*`, `self-*`, `content-*`, `justify-*`, `place-*`, `gap-*`, `gap-x/y-*`, `space-x/y-*`, `inset-*`, `start-*`/`end-*`, `z-*`), spacing and sizing (the 4 px scale, fractions, `full`, the container scale on `w-*`/`min-w-*`/`max-w-*`, `mx-auto`, arbitrary `[12px]`/`[50%]`), the full colour palette (Tailwind 4's OKLCH colours mapped into sRGB) with `/opacity` modifiers, theme tokens (`bg-primary`, `text-muted-foreground`, `border-border`, also with `/opacity`), typography (`text-sm/6`, `font-*`, `leading-*`, `tracking-*`, `text-justify`, `truncate`, `line-clamp-*`, decorations), borders and radii per side and corner, `shadow-*` and `inset-shadow-*` with colours, `text-shadow-*`, `ring-*`, `outline-*`, `opacity-*`, `cursor-*`, `select-*`, `pointer-events-*`, `overflow-*`, `object-*`, `aspect-*`, transforms (`scale-*`, `translate-*`, `rotate-*`, `skew-*`, `origin-*`), transitions (`transition`, `duration-*`, `delay-*`, `ease-*`), `animate-spin`, gradients (`bg-linear-to-r`, `bg-linear-45`, `bg-radial`, `bg-conic`, `from-*`/`via-*`/`to-*` with positions), `backdrop-blur-*`/`backdrop-saturate-*` (as the Liquid Glass material) and the variants `hover:`, `focus:`, `focus-visible:`, `focus-within:`, `active:`, `disabled:`, `group-hover:` (with `group`), `dark:`, `first:`/`last:`/`odd:`/`even:` and `sm:`…`2xl:`.
+The vocabulary follows Tailwind CSS 4 and is checked class by class against the real compiler (`packages/core/src/tailwind-parity.test.tsx`): layout (`flex`, `grid`, `items-*`, `self-*`, `content-*`, `justify-*`, `place-*`, `gap-*`, `gap-x/y-*`, `space-x/y-*`, `inset-*`, `start-*`/`end-*`, `z-*`), spacing and sizing (the 4 px scale, fractions, `full`, the container scale on `w-*`/`min-w-*`/`max-w-*`, `mx-auto`, arbitrary `[12px]`/`[50%]`), the full colour palette (Tailwind 4's OKLCH colours mapped into sRGB) with `/opacity` modifiers, theme tokens (`bg-primary`, `text-muted-foreground`, `border-border`, also with `/opacity`), typography (`text-sm/6`, `font-*`, `leading-*`, `tracking-*`, `text-justify`, `truncate`, `line-clamp-*`, decorations), borders and radii per side and corner, `shadow-*` and `inset-shadow-*` with colours, `text-shadow-*`, `ring-*`, `outline-*`, `opacity-*`, `cursor-*`, `select-*`, `pointer-events-*`, `overflow-*`, `object-*`, `aspect-*`, transforms (`scale-*`, `translate-*`, `rotate-*`, `skew-*`, `origin-*`), transitions (`transition`, `duration-*`, `delay-*`, `ease-*`), `animate-spin`, gradients (`bg-linear-to-r`, `bg-linear-45`, `bg-radial`, `bg-conic`, `from-*`/`via-*`/`to-*` with positions), `backdrop-blur-*`/`backdrop-saturate-*` (as the Liquid Glass material) and the variants `hover:`, `focus:`, `focus-visible:`, `focus-within:`, `active:`, `disabled:`, `group-hover:` (with `group`), `dark:`, `first:`/`last:`/`odd:`/`even:`, `sm:`…`2xl:`, `portrait:`/`landscape:`, `pointer-coarse:`/`pointer-fine:` and `motion-reduce:`/`motion-safe:`.
 
 What has no native counterpart is dropped rather than approximated: `inline`/`table`/`float` layouts, `fixed`/`sticky`, min/max-content widths, viewport units, CSS filters (`blur`, `grayscale`, `drop-shadow`), blend modes, lists, columns, pseudo-elements (`before:`, `placeholder:`, `selection:`), `print:`/`motion-*:`/`rtl:`, `peer-*`, `has-[]`, arbitrary properties (`[mask-type:luminance]`) and `calc()` lengths. A few classes map to the closest native notion: `inline-flex` is `flex`, `static` is `relative`, `space-x/y-*` is a flex gap, `ring-*`/`outline-*` are both the outline, `backdrop-*` needs the D3D11 renderer (others paint the tint), and `ease-*`/`delay-*` animate nothing without a duration, as CSS does. The `tailwind` example is a live playground.
 
@@ -496,7 +576,79 @@ unregisterSave();
 
 Other `AppHandle` APIs include `update`, `close`, `focus`, `scrollToItem`, event listeners, debug inspection, and deterministic screen capture.
 
+### Notifications
+
+`app.notify` shows a system notification with the same call and behavior on every platform. No tray icon is needed:
+
+```ts
+app.notify({ title: "Export finished", body: "report.pdf is ready", onClick: () => openReport() });
+```
+
+| Platform | Shown through | Notes |
+| --- | --- | --- |
+| Windows | a toast (`ToastNotificationManager`) | under `appIdentity` (or package.json `tarve.appId`); without one, Tarve registers `Tarve.<window title>` for the current user so the toast shows the app's name |
+| Linux | `org.freedesktop.Notifications` | any notification daemon (GNOME, KDE, dunst, mako…) |
+| Android | the notification shade (`dev.tarve.TarveNotifications`) | asks for `POST_NOTIFICATIONS` the first time on Android 13+; notifications sent while the prompt is open show once it is allowed and are dropped if the user denies it |
+
+Clicking a notification brings the window forward and runs that notification's `onClick` (each notification keeps its own). If the user turned the app's notifications off, nothing shows and no error is raised, the same on every platform. On Windows, a toast that cannot be shown falls back to the tray balloon when `app.tray` is active. Go apps call `app.Notify(title, body, onClick)`. On Android the small icon is a white bell; set package.json `tarve.android.notificationIcon` to a white-on-transparent PNG to replace it.
+
+`app.checkPermissions(names)` and `app.requestPermissions(names)` handle runtime permissions (see [Android](#android)); on Windows and Linux they report every name as `"granted"`.
+
 `Window.onCloseRequest` can cancel a user-initiated close with `event.preventDefault()`. `Window.position` accepts centered/edge/corner presets or explicit logical desktop coordinates.
+
+## Plugins
+
+A plugin is an npm package that adds JavaScript commands, optionally over a native library of its own (Rust, C, Zig… anything with a C ABI), like Flutter plugins or React Native Turbo Modules. The app installs it and passes it to `createApp`:
+
+```tsx
+import hello from "tarve-plugin-hello";
+
+const app = createApp(View, { plugins: [hello] });
+await hello.client(app).add(2, 3);    // typed: Promise<number>
+await app.invoke("hello.add", 2, 3);  // the same command by id
+```
+
+**Writing one.** `definePlugin` takes the package name, its semver `version` and `setup(ctx)`, which runs once per app before the window opens. The functions `setup` returns become commands (`<namespace>.<name>`); `ctx.registerCommand` adds more.
+
+```ts
+import { definePlugin } from "@tarve/core";
+
+export default definePlugin({
+  name: "tarve-plugin-hello",
+  version: "0.1.0",
+  namespace: "hello",
+  tarvePluginApi: 1,
+  root: import.meta.dirname,
+  setup(ctx) {
+    const lib = ctx.loadLibrary({ hello_add: { args: ["i32", "i32"], returns: "i32" } });
+    ctx.onReady(() => { /* window is up */ });
+    ctx.onClosed(() => { /* release resources; loaded libraries close after this */ });
+    ctx.onOpenUrl(url => { /* the app's protocols, as app.onOpenUrl */ });
+    return { add: (a: number, b: number) => lib.symbols.hello_add(a, b) };
+  },
+});
+```
+
+`ctx.request(command, { expect })` sends a protocol request to the Tarve runtime and checks the answer type (what `app`'s own dialogs and permissions use). `ctx.loadLibrary(symbols)` or `ctx.loadLibrary({ "win32-x64": "…", "linux-x64": "…" }, symbols)` opens the library with the runtime's FFI: `bun:ffi` on Bun, `node:ffi` on Node.js 26.10+, `tjs:ffi` on txiki.js; elsewhere it throws `PluginFfiUnsupportedError`. Symbol types are `i8`…`u64`, `f32`, `f64`, `bool`, `ptr`, `buffer` (arguments) and `void`; the returned `symbols` are typed from the declaration.
+
+**package.json.** The `tarve` field makes a package discoverable (`discoverPlugins`, `loadPlugins`) and tells `tarve build` which library to embed per target:
+
+```json
+"tarve": {
+  "tarvePluginApi": 1,
+  "plugin": "./dist/plugin.js",
+  "native": {
+    "win32-x64": "./native/hello.dll",
+    "linux-x64": "./native/libhello.so",
+    "darwin-arm64": "./native/libhello.dylib",
+    "android-arm64": "./native/android/libhello.so"
+  }
+}
+```
+
+`tarve build` and `tarve package` (`--runtime bun`, `node` and `txiki` alike) embed the target's library of every plugin among the app's `dependencies` and extract it once on first use, like Tarve's own runtime; macOS bundles get it in `Contents/Frameworks`. Android builds do not embed plugin libraries yet: ship them beside the app and pass paths to `loadLibrary`. A declared library missing for the build target fails the build.
+
+**Versioning.** `tarvePluginApi` is the major version of this plugin API (`PLUGIN_API_VERSION`, currently `1`). Additions keep the number; a breaking change to `definePlugin`, the context or the manifest raises it, and Tarve refuses plugins asking for a newer one. The plugin's own `version` is its semver; declare `@tarve/core` as a peer dependency. The native library's C ABI is the plugin's own contract (export a version function, as the sample does). See [examples/plugin-hello](examples/plugin-hello) for a Rust cdylib plugin with tests and a demo app.
 
 ## Automation and visual regression
 
@@ -617,6 +769,15 @@ app.setFrameOverlay(false);
 
 Neither tool schedules frames on its own, so an idle window still presents zero frames. The graph refreshes on the next repaint.
 
+### Inspector
+
+```bash
+bunx tarve dev app.tsx --inspect   # or npx tarve dev / tarve run --inspect
+```
+
+`createApp(App, { dev: { inspector: true } })` or `TARVE_INSPECTOR=1` do the same. A second window shows the live tree of components and native nodes (×N = renders), the selected node's props, resolved style and computed layout box, and an event log. **Pick node** highlights the node under the pointer in the app window; **Expand all** / **Collapse** fold the tree. (`TARVE_INSPECT=<file>` is the unrelated automation switch that writes the tree to a file and exits.)
+
+
 ## Examples
 
 The [`examples/`](https://github.com/omarcosr/tarve/tree/main/examples) directory in the repository is an independent Bun consumer project using only public Tarve APIs. From a clone:
@@ -657,7 +818,7 @@ Building Tarve from source, the test and smoke-test gates, and the release proce
 
 ## Current scope
 
-Tarve is pre-1.0 and currently targets **Windows x64 and Linux x64**. The current application bootstrap model uses one native app/window lifetime per process; multi-window support is not yet part of the public runtime model.
+Tarve is pre-1.0 and currently targets **Windows x64 and Linux x64**, with Android (arm64, x86_64) APKs and App Bundles from `tarve build --target android`. The current application bootstrap model uses one native app/window lifetime per process; multi-window support is not yet part of the public runtime model.
 
 ## License
 

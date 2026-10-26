@@ -251,11 +251,11 @@ fn file_dialog_protocol_and_hotkey_names_are_explicit() {
     }))
     .unwrap();
     match command {
-        protocol::Command::FileDialog {
+        protocol::Command::FileDialog(protocol::requests::FileDialog {
             mode,
             options,
             request_id,
-        } => {
+        }) => {
             assert_eq!(mode, "openFiles");
             assert_eq!(request_id, "files-1");
             assert_eq!(options.title.as_deref(), Some("Choose files"));

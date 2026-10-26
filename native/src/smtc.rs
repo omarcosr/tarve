@@ -107,22 +107,18 @@ fn write_start_menu_shortcut(identity: &crate::protocol::AppIdentity) -> Result<
     result.map_err(|error| format!("could not write the Start menu shortcut: {error}"))
 }
 
-pub(crate) fn register_app_identity(identity: &crate::protocol::AppIdentity) -> Result<(), String> {
+/// Registers DisplayName (and IconUri) under HKCU\Software\Classes\AppUserModelId\<id>: all
+/// an unpackaged process needs for its toasts to show under that name (notification.rs).
+pub(crate) fn register_app_user_model_id(
+    id: &str,
+    name: &str,
+    icon: Option<&str>,
+) -> Result<(), String> {
     use windows_sys::Win32::System::Registry::{
         HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
         RegCreateKeyExW, RegSetValueExW,
     };
-    use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
-    if !valid_app_id(&identity.id) {
-        return Err("appIdentity.id must be 1-128 characters without spaces or backslashes".into());
-    }
-    if identity.name.trim().is_empty() {
-        return Err("appIdentity.name must not be empty".into());
-    }
-    let path = wide(&format!(
-        "Software\\Classes\\AppUserModelId\\{}",
-        identity.id
-    ));
+    let path = wide(&format!("Software\\Classes\\AppUserModelId\\{id}"));
     let mut key: HKEY = std::ptr::null_mut();
     let status = unsafe {
         RegCreateKeyExW(
@@ -156,12 +152,9 @@ pub(crate) fn register_app_identity(identity: &crate::protocol::AppIdentity) -> 
             )
         }
     };
-    let mut status = set("DisplayName", identity.name.trim());
+    let mut status = set("DisplayName", name);
     if status == 0
-        && let Some(icon) = identity
-            .icon
-            .as_deref()
-            .filter(|icon| std::path::Path::new(icon).is_file())
+        && let Some(icon) = icon.filter(|icon| std::path::Path::new(icon).is_file())
     {
         status = set("IconUri", icon);
     }
@@ -171,6 +164,18 @@ pub(crate) fn register_app_identity(identity: &crate::protocol::AppIdentity) -> 
             "could not register the app identity (error {status})"
         ));
     }
+    Ok(())
+}
+
+pub(crate) fn register_app_identity(identity: &crate::protocol::AppIdentity) -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+    if !valid_app_id(&identity.id) {
+        return Err("appIdentity.id must be 1-128 characters without spaces or backslashes".into());
+    }
+    if identity.name.trim().is_empty() {
+        return Err("appIdentity.name must not be empty".into());
+    }
+    register_app_user_model_id(&identity.id, identity.name.trim(), identity.icon.as_deref())?;
     write_start_menu_shortcut(identity)?;
     let id = wide(&identity.id);
     let result = unsafe { SetCurrentProcessExplicitAppUserModelID(id.as_ptr()) };

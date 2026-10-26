@@ -24,10 +24,14 @@ use std::{
 use taffy::prelude::*;
 use unicode_segmentation::UnicodeSegmentation;
 use vello::{
-    Scene,
     kurbo::{Affine, Cap, Rect as BoxRect, RoundedRect, Stroke, Vec2},
     peniko::{Blob, Color, Fill, ImageAlphaType, ImageData, ImageFormat},
 };
+mod css_layout;
+mod overscroll;
+mod touch_target;
+mod wheel;
+use css_layout::{apply_css_flex, grid_line, grid_template};
 
 /// Frame-time samples kept by the native debug overlay.
 pub const FRAME_OVERLAY_SAMPLES: usize = 120;
@@ -139,8 +143,9 @@ impl MotionTrack {
         state_driven: bool,
     ) -> Option<Self> {
         let (from, to) = pad_motion_layers(property, from, to);
-        if (matches!(property, "background" | "foreground" | "borderColor")
-            && !gradient_shapes_match(&from, &to))
+        if crate::environment::reduced_motion()
+            || (matches!(property, "background" | "foreground" | "borderColor")
+                && !gradient_shapes_match(&from, &to))
             || from.len() != to.len()
             || from
                 .iter()
@@ -1726,6 +1731,11 @@ pub struct Tree {
     released_images: HashSet<String>,
     /// Smooth `scrollToItem` requests in flight, by list id.
     scroll_animations: HashMap<String, ScrollAnimation>,
+    /// The scroll areas a pixel-scroll gesture (a swipe and its fling) moves, per axis, fixed
+    /// by its first event: content sliding under a still finger never takes the scroll over.
+    pub(crate) wheel_latch: Option<[Option<String>; 2]>,
+    wheel_latch_at: Option<std::time::Instant>,
+    overscroll: overscroll::State,
     /// Remote (`http(s)://`) image sources being fetched, or that failed.
     remote_images: HashMap<String, RemoteImageState>,
     /// Remote sources painted since the last request batch that still need fetching.
@@ -1760,6 +1770,8 @@ pub struct Tree {
     /// Ids with a `spin` style: rotated by the clock, so they need a frame every tick.
     spinning: HashSet<String>,
     window_chrome_suppressed: bool,
+    /// Where the root sits in the window and its size (Android: inside the system bars).
+    pub viewport: (f32, f32, f32, f32),
     pub dirty: Dirty,
     pub hovered: Option<String>,
     /// Every node under the pointer that has a `hover` style, ancestors
@@ -2029,6 +2041,9 @@ impl Tree {
             video_painted: HashSet::default(),
             released_images: HashSet::default(),
             scroll_animations: HashMap::default(),
+            wheel_latch: None,
+            wheel_latch_at: None,
+            overscroll: overscroll::State::default(),
             remote_images: HashMap::default(),
             remote_requests: Vec::new(),
             image_last_used: HashMap::default(),
@@ -2052,6 +2067,7 @@ impl Tree {
             transformed: HashSet::default(),
             spinning: HashSet::default(),
             window_chrome_suppressed: false,
+            viewport: (0.0, 0.0, 0.0, 0.0),
             dirty: Dirty::all(),
             hovered: None,
             hover_styled: Vec::new(),
@@ -2161,6 +2177,7 @@ impl Tree {
                 .push(json!({"type":"motionComplete", "id":id, "property":property}));
         }
         self.advance_scroll_animations();
+        self.advance_overscroll();
     }
     fn advance_scroll_animations(&mut self) {
         if self.scroll_animations.is_empty() {
@@ -2301,6 +2318,7 @@ impl Tree {
             .map(|entry| entry.motions.len())
             .sum::<usize>()
             + self.scroll_animations.len()
+            + usize::from(self.overscroll_animating())
     }
     pub fn next_motion_tick_ms(&self) -> Option<f64> {
         self.animating
@@ -2314,7 +2332,10 @@ impl Tree {
                     self.next_frame_ms().min(track.end_ms())
                 }
             })
-            .chain((!self.scroll_animations.is_empty()).then(|| self.next_frame_ms()))
+            .chain(
+                (!self.scroll_animations.is_empty() || self.overscroll_animating())
+                    .then(|| self.next_frame_ms()),
+            )
             .min_by(f64::total_cmp)
     }
     pub fn take_motion_events(&mut self) -> Vec<Value> {
@@ -3658,7 +3679,10 @@ impl Tree {
                 },
             )
             .map_err(|e| e.to_string())?;
-        self.positions(&self.root.clone(), (0.0, 0.0))?;
+        self.positions(
+            &self.root.clone(),
+            (f64::from(self.viewport.0), f64::from(self.viewport.1)),
+        )?;
         self.restore_virtual_anchors();
         self.measure_virtual_rows();
         self.refresh_virtual_anchors();
@@ -3845,11 +3869,6 @@ impl Tree {
         }
         self.entries.get_mut(id).unwrap().bounds = bounds;
         Ok(bounds)
-    }
-    pub fn scene(&mut self, scale: f64) -> Scene {
-        let mut scene = Scene::new();
-        self.paint(scale, &mut scene);
-        scene
     }
     fn resolve_highlights(&mut self) {
         self.highlight_ranges.clear();
@@ -4069,7 +4088,7 @@ impl Tree {
                 return;
             };
             let line_height =
-                (node.number("fontSize", 13.0) * node.number("lineHeight", 1.5)).max(1.0) as f64;
+                (node.font_size(13.0) * node.number("lineHeight", 1.5)).max(1.0) as f64;
             (
                 0.0,
                 row as f64 * line_height,
@@ -4158,6 +4177,7 @@ impl Tree {
         let target = &mut crate::paint::TransformTarget::new(target);
         let root_rect = self.entries[&self.root].rect;
         self.paint_node(&self.root.clone(), Vec2::ZERO, scale, root_rect, target);
+        self.paint_status_bar_strip(scale, target);
         let mut portals = self.portal_roots();
         portals.sort_by(|a, b| {
             self.stacking
@@ -4173,6 +4193,35 @@ impl Tree {
         self.paint_frame_overlay(scale, root_rect, target);
         self.paints += 1;
         self.dirty.paint = false;
+    }
+    /// The solid background of a TitleBar laid out at the top of the viewport, if there is one:
+    /// on Android the app's top bar, which the status bar above it takes the colour of.
+    pub(crate) fn top_bar_background(&self) -> Option<&str> {
+        if self.viewport.1 <= 0.0 {
+            return None;
+        }
+        let top = f64::from(self.viewport.1);
+        self.entries
+            .values()
+            .filter(|entry| entry.node.kind == "titlebar" && (entry.rect.y0 - top).abs() < 0.5)
+            .map(|entry| entry.node.string("background", ""))
+            .find(|background| background.starts_with('#'))
+    }
+    /// The strip above the viewport (Android's status bar) in the top bar's colour, so the bar
+    /// runs up under the system's icons instead of stopping at a band of window background.
+    fn paint_status_bar_strip<P: PaintTarget>(&self, scale: f64, target: &mut P) {
+        let Some(background) = self.top_bar_background() else {
+            return;
+        };
+        let right = f64::from(self.viewport.0 + self.viewport.2);
+        // One logical pixel under the bar (which paints over it): the bar's top edge lands
+        // between device pixels and would otherwise antialias into a light seam.
+        target.fill(
+            Fill::NonZero,
+            Affine::scale(scale),
+            color(background),
+            &BoxRect::new(0.0, 0.0, right, f64::from(self.viewport.1) + 1.0),
+        );
     }
     /// Toggles the frame-time overlay. Returns true when a repaint is needed.
     pub fn set_frame_overlay(&mut self, enabled: bool) -> bool {
@@ -4515,6 +4564,7 @@ impl Tree {
         let scroll = entry.scroll;
         let scroll_max_x = entry.scroll_max_x;
         let scroll_max = entry.scroll_max;
+        let overscroll = self.overscroll_of(id);
         let mut children = entry.children.clone();
         children.sort_by(|a, b| {
             self.stacking
@@ -4968,8 +5018,7 @@ impl Tree {
                 if !display_text.is_empty() {
                     let wrap_width = matches!(node.kind.as_str(), "text" | "markdown" | "textarea")
                         .then_some(available_width);
-                    let thickness =
-                        f64::from((node.number("fontSize", 14.0) * 0.06).clamp(1.0, 2.0));
+                    let thickness = f64::from((node.font_size(14.0) * 0.06).clamp(1.0, 2.0));
                     for line in
                         self.text
                             .range_rects(&render_node.id, 0, display_text.len(), wrap_width)
@@ -5170,7 +5219,9 @@ impl Tree {
             }
         }
         let clips_children = clips_overflow(&node);
-        if clips_children {
+        // A square box holding all its ancestors' clip lets through needs no layer of its own.
+        let clip_layer = clips_children && !(radii == [0.0; 4] && rect.union(clip) == rect);
+        if clip_layer {
             target.push_clip(Fill::NonZero, transform, &shape);
         }
         let child_clip = if clips_children {
@@ -5184,13 +5235,13 @@ impl Tree {
             }
             self.paint_node(
                 child,
-                offset + Vec2::new(scroll_x, scroll),
+                offset + Vec2::new(scroll_x, scroll) + overscroll,
                 scale,
                 child_clip,
                 target,
             );
         }
-        if clips_children {
+        if clip_layer {
             target.pop_layer();
         }
         if node.kind == "diff" {
@@ -6187,6 +6238,10 @@ impl Tree {
         }
     }
     pub fn pointer_move(&mut self, x: f64, y: f64) -> Vec<Value> {
+        // A mouse or touchpad moved: the next wheel event picks its area afresh.
+        if self.mouse != (x, y) {
+            self.wheel_latch = None;
+        }
         self.mouse = (x, y);
         if self.text_dragging
             && let Some(id) = self.focused.clone()
@@ -6513,76 +6568,11 @@ impl Tree {
     pub fn wheel(&mut self, delta: f64) -> Vec<Value> {
         self.wheel_2d(0.0, delta)
     }
-    /// A mouse wheel notch (a line delta, not a touchpad's pixels): the vertical
-    /// scroll area under the pointer eases to its new offset over a few frames
-    /// instead of jumping, and notches that follow extend the trip from where
-    /// the last one was headed. Everything else scrolls as `wheel_2d`.
-    pub fn wheel_notch(&mut self, delta_x: f64, delta_y: f64) -> Vec<Value> {
-        let over_markdown = self
-            .hit_root(false)
-            .and_then(|id| self.entries.get(&id))
-            .is_some_and(|entry| entry.node.kind == "markdown");
-        if delta_x.abs() <= f64::EPSILON
-            && delta_y.abs() > f64::EPSILON
-            && !over_markdown
-            && let Some(id) = self.hit_root(true)
-            && let Some(entry) = self.entries.get(&id)
-            && (entry.node.kind == "textarea"
-                || (entry.node.kind == "scroll" && entry.node.scroll_orientation != "horizontal"))
-        {
-            // A text area eases through wheel notches like a scroll view (its speed is 1).
-            let speed = if entry.node.kind == "scroll" {
-                entry.node.scroll_speed
-            } else {
-                1.0
-            };
-            let base = self
-                .scroll_animations
-                .get(&id)
-                .filter(|animation| animation.wheel)
-                .map_or(entry.scroll, |animation| animation.to);
-            let to = (base + delta_y * speed).clamp(0.0, entry.scroll_max.max(0.0));
-            let from = entry.scroll;
-            self.scroll_animations.clear();
-            if (to - from).abs() > 1e-6 {
-                self.scroll_animations.insert(
-                    id,
-                    ScrollAnimation {
-                        from,
-                        to,
-                        start_ms: f64::NAN,
-                        duration_ms: WHEEL_EASE_MS,
-                        wheel: true,
-                    },
-                );
-                self.dirty.paint = true;
-            }
-            return vec![];
-        }
-        self.wheel_2d(delta_x, delta_y)
-    }
     pub fn wheel_2d(&mut self, delta_x: f64, delta_y: f64) -> Vec<Value> {
         // The user's own scrolling takes over from a smooth scrollToItem.
         self.scroll_animations.clear();
-        if let Some(id) = self.hit_root(false)
-            && let Some(entry) = self.entries.get(&id)
-            && entry.node.kind == "markdown"
-            && let Some(rect) = self.visible_rect(&id)
-        {
-            let pad = entry.node.insets("padding");
-            let border = entry.node.insets("borderWidth");
-            let width =
-                (rect.width() - f64::from(pad[1] + pad[3] + border[1] + border[3])).max(0.0) as f32;
-            let y = (self.mouse.1 - rect.y0 - f64::from(pad[0] + border[0])) as f32;
-            let delta = if delta_x.abs() > f64::EPSILON {
-                delta_x
-            } else {
-                delta_y
-            };
-            if self.text.scroll_markdown_block(&id, y, width, delta as f32) {
-                self.dirty.paint = true;
-                return vec![];
-            }
+        if self.wheel_markdown(delta_x, delta_y) {
+            return vec![];
         }
         if let Some(id) = self.hit_root(true) {
             let entry = &self.entries[&id];
@@ -8369,9 +8359,8 @@ impl Tree {
         if y < 0.0 {
             return None;
         }
-        let line_height = f64::from(
-            (entry.node.number("fontSize", 13.0) * entry.node.number("lineHeight", 1.5)).max(1.0),
-        );
+        let line_height =
+            f64::from((entry.node.font_size(13.0) * entry.node.number("lineHeight", 1.5)).max(1.0));
         let index = (y / line_height).floor() as usize;
         let RichContent::Diff { rows, .. } = entry.node.rich.as_ref()?.as_ref() else {
             return None;
@@ -8943,28 +8932,28 @@ fn paint_outer_shadow<P: PaintTarget>(
         .inflate(sigma * 3.0 + 1.0, sigma * 3.0 + 1.0)
         .union(rect);
     // An outer shadow is never visible through its own box, even when the
-    // background is translucent: clip to the area minus the border box.
-    let mut outside = vello::kurbo::Shape::to_path(&area, 0.1);
-    outside.extend(vello::kurbo::Shape::to_path(&shape, 0.1));
-    target.push_clip(Fill::EvenOdd, transform, &outside);
-    if sigma < 0.01 {
-        target.fill(
-            Fill::NonZero,
-            transform,
-            shadow.color,
-            &RoundedRect::from_rect(casting, casting_radius),
-        );
-    } else {
-        target.box_shadow(
+    // background is translucent: it covers the area minus the border box.
+    if sigma >= 0.01 {
+        target.outer_box_shadow(
             transform,
             area,
             casting,
             shadow.color,
             casting_radius,
             sigma,
-            false,
+            &shape,
         );
+        return;
     }
+    let mut outside = vello::kurbo::Shape::to_path(&area, 0.1);
+    outside.extend(vello::kurbo::Shape::to_path(&shape, 0.1));
+    target.push_clip(Fill::EvenOdd, transform, &outside);
+    target.fill(
+        Fill::NonZero,
+        transform,
+        shadow.color,
+        &RoundedRect::from_rect(casting, casting_radius),
+    );
     target.pop_layer();
 }
 
@@ -9638,148 +9627,6 @@ fn scrollbar_width(node: &Node) -> f64 {
         "thin" => 3.0,
         _ => 4.0,
     }
-}
-
-fn apply_css_flex(node: &Node, style: &mut Style) {
-    let shorthand = match &node.style["flex"] {
-        serde_json::Value::Number(number) => number
-            .as_f64()
-            .filter(|n| n.is_finite() && *n >= 0.0)
-            .map(|n| (n as f32, 1.0, length(0.0))),
-        serde_json::Value::String(text) => css_flex_shorthand(text),
-        _ => None,
-    };
-    let grow = node.style["grow"].as_f64();
-    let basis = css_basis(&node.style["basis"]);
-    if shorthand.is_none() && grow.is_none() && basis.is_none() {
-        return;
-    }
-    let (mut flex_grow, mut flex_shrink, mut flex_basis) =
-        shorthand.unwrap_or((0.0, 1.0, Dimension::auto()));
-    if let Some(grow) = grow {
-        flex_grow = grow as f32;
-    }
-    if let Some(shrink) = node.style["shrink"].as_f64() {
-        flex_shrink = shrink as f32;
-    }
-    if let Some(basis) = basis {
-        flex_basis = basis;
-    }
-    style.flex_grow = flex_grow.max(0.0);
-    style.flex_shrink = flex_shrink.max(0.0);
-    style.flex_basis = flex_basis;
-}
-
-/// `flex` shorthand as CSS defines it: none | auto | initial | <grow> [<shrink>]? || <basis>.
-pub(crate) fn css_flex_shorthand(value: &str) -> Option<(f32, f32, Dimension)> {
-    match value.trim() {
-        "none" => return Some((0.0, 0.0, Dimension::auto())),
-        "auto" => return Some((1.0, 1.0, Dimension::auto())),
-        "initial" => return Some((0.0, 1.0, Dimension::auto())),
-        _ => {}
-    }
-    let mut numbers = Vec::new();
-    let mut basis = None;
-    for token in value.split_whitespace() {
-        match token.parse::<f32>() {
-            Ok(number) if number.is_finite() && number >= 0.0 && token != "0px" => {
-                numbers.push(number)
-            }
-            _ if basis.is_none() => basis = Some(css_dimension(token)?),
-            _ => return None,
-        }
-    }
-    if numbers.is_empty() && basis.is_none() || numbers.len() > 2 {
-        return None;
-    }
-    let grow = numbers.first().copied().unwrap_or(1.0);
-    let shrink = numbers.get(1).copied().unwrap_or(1.0);
-    // A bare number sets the basis to 0, as in `flex: 1` = `1 1 0%`.
-    Some((grow, shrink, basis.unwrap_or_else(|| length(0.0))))
-}
-
-fn css_dimension(token: &str) -> Option<Dimension> {
-    if token == "0" {
-        return Some(length(0.0));
-    }
-    token.parse::<Dimension>().ok()
-}
-
-fn css_basis(value: &serde_json::Value) -> Option<Dimension> {
-    match value {
-        serde_json::Value::Number(number) => number.as_f64().map(|n| length(n as f32)),
-        serde_json::Value::String(text) => css_dimension(text.trim()),
-        _ => None,
-    }
-}
-
-pub(crate) fn grid_line(
-    value: &serde_json::Value,
-) -> Option<taffy::Line<taffy::GridPlacement<String>>> {
-    let text = match value {
-        serde_json::Value::Number(number) => number.to_string(),
-        serde_json::Value::String(text) => text.trim().to_string(),
-        _ => return None,
-    };
-    let mut parts = text.splitn(2, '/');
-    let start = parts
-        .next()?
-        .trim()
-        .parse::<taffy::GridPlacement<String>>()
-        .ok()?;
-    let end = match parts.next() {
-        Some(end) => end.trim().parse::<taffy::GridPlacement<String>>().ok()?,
-        None => taffy::GridPlacement::Auto,
-    };
-    Some(taffy::Line { start, end })
-}
-
-/// `columns`/`rows`: a count of equal tracks, or a CSS track list such as
-/// `repeat(auto-fill, minmax(176px, 1fr))` or `200px 1fr auto`.
-pub(crate) fn grid_template(
-    value: &serde_json::Value,
-    default_count: usize,
-) -> Vec<GridTemplateComponent<String>> {
-    if let Some(text) = value.as_str()
-        && let Some(tracks) = css_track_list(text)
-    {
-        return tracks;
-    }
-    let count = value
-        .as_f64()
-        .map(|n| n.clamp(1.0, 24.0) as usize)
-        .unwrap_or(default_count);
-    vec![flex(1.0); count]
-}
-
-pub(crate) fn css_track_list(text: &str) -> Option<Vec<GridTemplateComponent<String>>> {
-    let mut tracks = Vec::new();
-    let mut depth = 0usize;
-    let mut start = 0usize;
-    let bytes = text.as_bytes();
-    let mut push = |piece: &str| -> Option<()> {
-        let piece = piece.trim();
-        if !piece.is_empty() {
-            tracks.push(piece.parse::<GridTemplateComponent<String>>().ok()?);
-        }
-        Some(())
-    };
-    for (index, byte) in bytes.iter().enumerate() {
-        match byte {
-            b'(' => depth += 1,
-            b')' => depth = depth.checked_sub(1)?,
-            b' ' | b'\t' | b'\n' if depth == 0 => {
-                push(&text[start..index])?;
-                start = index + 1;
-            }
-            _ => {}
-        }
-    }
-    if depth != 0 {
-        return None;
-    }
-    push(&text[start..])?;
-    (!tracks.is_empty()).then_some(tracks)
 }
 
 /// Moves styled runs across an edit from `old` to `new` (UTF-8 offsets), as a

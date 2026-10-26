@@ -1,12 +1,12 @@
-//! System tray icon, native menu and desktop notifications.
+//! System tray icon and native menu. Notifications live in notification.rs; the Windows
+//! tray balloon is only their fallback.
 //!
 //! Windows talks to the shell directly (`Shell_NotifyIconW`, `TrackPopupMenu`) so the
 //! feature costs no extra crates. The hidden owner window lives on the event-loop
 //! thread, so winit's message pump already dispatches its messages.
 //!
 //! Linux publishes a StatusNotifierItem with a dbusmenu over D-Bus (`ksni`, pure
-//! Rust zbus, already in the tree for AT-SPI) and notifications through
-//! org.freedesktop.Notifications (`notify-rust`). GNOME shows SNI icons only with
+//! Rust zbus, already in the tree for AT-SPI). GNOME shows SNI icons only with
 //! the AppIndicator extension; KDE, XFCE, Cinnamon, MATE, Budgie and most
 //! wlroots bars show them natively.
 //!
@@ -417,12 +417,9 @@ impl Tray {
     }
     pub fn apply(&mut self, options: Option<TrayOptions>) -> Result<(), String> {
         match options {
-            None => Ok(()),
-            Some(_) => Err("the system tray is not supported on this platform".into()),
+            _ if options.is_none() || cfg!(target_os = "android") => Ok(()),
+            _ => Err("the system tray is not supported on this platform".into()),
         }
-    }
-    pub fn notify(&mut self, _title: &str, _body: &str) -> Result<(), String> {
-        Err("notifications are not supported on this platform".into())
     }
 }
 
@@ -562,12 +559,6 @@ mod linux_impl {
             }
         }
 
-        pub fn is_active(&self) -> bool {
-            self.handle
-                .as_ref()
-                .is_some_and(|handle| !handle.is_closed())
-        }
-
         pub fn apply(&mut self, options: Option<TrayOptions>) -> Result<(), String> {
             let Some(options) = options else {
                 if let Some(handle) = self.handle.take() {
@@ -606,37 +597,6 @@ mod linux_impl {
             })?;
             self.handle = Some(handle);
             Ok(())
-        }
-
-        pub fn notify(&mut self, title: &str, body: &str) -> Result<(), String> {
-            if !self.is_active() {
-                return Err("notifications need an active tray icon (call app.tray first)".into());
-            }
-            let (title, body, proxy) = (title.to_owned(), body.to_owned(), self.proxy.clone());
-            // Showing blocks on D-Bus and waiting for the click blocks until the
-            // notification closes, so neither may run on the event-loop thread.
-            std::thread::Builder::new()
-                .name("tarve-notification".into())
-                .spawn(move || {
-                    let shown = notify_rust::Notification::new()
-                        .summary(&title)
-                        .body(&body)
-                        .action("default", "Open")
-                        .show();
-                    match shown {
-                        Ok(handle) => handle.wait_for_action(|action| {
-                            if action == "default" {
-                                send(&proxy, json!({"type":"notificationClick"}));
-                            }
-                        }),
-                        Err(error) => send(
-                            &proxy,
-                            json!({"type":"error", "message":format!("notification: {error}")}),
-                        ),
-                    }
-                })
-                .map(|_| ())
-                .map_err(|error| error.to_string())
         }
     }
 

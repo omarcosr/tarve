@@ -16,14 +16,17 @@ interface Connection {
   close(): void;
 }
 
-async function open(url: URL): Promise<Connection> {
+/** `track` gets the socket's closer as soon as it exists, before it connects (an abort must reach it then). */
+async function open(url: URL, track: (close: () => void) => void): Promise<Connection> {
   const secure = url.protocol === "https:";
   const port = Number(url.port || (secure ? 443 : 80));
   const host = url.hostname.replace(/^\[|\]$/g, "");
   const socket = await (tjs as unknown as { connect(transport: string, host: string, port: number): Promise<{ opened: Promise<{ readable: ReadableStream<Uint8Array>; writable: WritableStream<Uint8Array> }>; close(): void }> })
     .connect(secure ? "tls" : "tcp", host, port);
+  const close = () => { try { socket.close(); } catch { /* closed */ } };
+  track(close);
   const { readable, writable } = await socket.opened;
-  return { readable, writable, close: () => { try { socket.close(); } catch { /* closed */ } } };
+  return { readable, writable, close };
 }
 
 async function bodyBytes(body: unknown): Promise<Uint8Array | undefined> {
@@ -95,15 +98,16 @@ function abortError(signal: AbortSignal | null | undefined): unknown {
 async function request(url: URL, method: string, headers: Headers, body: Uint8Array | undefined, signal: AbortSignal | null | undefined): Promise<Response> {
   if (signal?.aborted) throw abortError(signal);
   // Closing the socket does not settle a pending read: race every wait against the abort.
-  let connection: Connection | undefined;
-  const onAbort = () => connection?.close();
+  let closeSocket: (() => void) | undefined;
+  const onAbort = () => closeSocket?.();
   let rejectAbort = () => {};
   const abortion = signal ? new Promise<never>((_, reject) => { rejectAbort = () => reject(abortError(signal)); signal.addEventListener("abort", rejectAbort, { once: true }); }) : undefined;
   abortion?.catch(() => {});
   const race = <T>(promise: Promise<T>): Promise<T> => abortion ? Promise.race([promise, abortion]) : promise;
   signal?.addEventListener("abort", onAbort, { once: true });
   try {
-    const socket = connection = await race(open(url));
+    // A socket that only appears after an abort (still connecting) is closed then.
+    const socket = await race(open(url, close => { closeSocket = close; if (signal?.aborted) close(); }));
     const lines = [`${method} ${url.pathname || "/"}${url.search} HTTP/1.1`];
     if (!headers.has("host")) lines.push(`host: ${url.host}`);
     if (!headers.has("accept")) lines.push("accept: */*");
@@ -186,7 +190,7 @@ async function request(url: URL, method: string, headers: Headers, body: Uint8Ar
   } catch (error) {
     signal?.removeEventListener("abort", onAbort);
     signal?.removeEventListener("abort", rejectAbort);
-    connection?.close();
+    closeSocket?.();
     throw signal?.aborted ? abortError(signal) : error;
   }
 }

@@ -18,7 +18,6 @@ const fillEstimate = 800
 
 type variableListState struct {
 	heights         map[string]float64
-	order           []string
 	effectiveOffset float64
 	lastExternal    *float64
 	anchorKey       string

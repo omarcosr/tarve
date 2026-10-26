@@ -20,6 +20,7 @@ const allSteps = [
   "smoke:motion",
   "smoke:editor",
   "smoke:steady-frames",
+  "smoke:idle",
   "smoke:devtools",
   "smoke:tray",
   "smoke:hidden",
@@ -36,7 +37,9 @@ const allSteps = [
   "pack",
   "smoke:package",
   "smoke:exe",
+  "smoke:node-cli-package",
   "smoke:txiki-shims",
+  "smoke:headless-runtimes",
   "smoke:runtime-parity",
   "test:visual",
 ];

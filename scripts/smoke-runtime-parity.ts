@@ -3,94 +3,46 @@
  * under Bun (the reference), then as a Node.js SEA and a txiki.js executable, plain and
  * with --compile-jsx, through the packaged CLI. Every run drives the same input: hover,
  * clicks, focusing an input, typing, Tab and a wheel scroll. The node tree (ids,
- * geometry, text) and the captures must match the Bun run exactly.
+ * geometry, text) and the captures must match the Bun run exactly. Feature scenarios
+ * (scripts/runtime-parity-scenarios.ts: router, deep links, device APIs, a native plugin,
+ * the inspector) drive their feature instead and their `result` must match Bun's too.
  *
- *   bun run smoke:runtime-parity [example ...]     (RUNTIME_PARITY_VARIANTS=node,txiki,txiki-c)
+ *   bun run smoke:runtime-parity [example|scenario ...]     (RUNTIME_PARITY_VARIANTS=node,txiki,txiki-c)
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { readPngRgba } from "../packages/core/src/index";
+import { PROLOGUE, SCENARIOS, viewEntry, type Scenario } from "./runtime-parity-scenarios";
 
 const root = resolve(import.meta.dir, "..");
 const examples = join(root, "examples");
 // The repository CLI, as examples run it (scripts/setup-examples.ts).
 const cli = join(root, "packages/core/cli.ts");
 const VIEWS = ["basic","components","diff","drag-and-drop","forms","glass","gradients","html","intrinsics","large-list","liquid","motion","performance","rich-content","tailwind","text"];
-const views = process.argv.slice(2).length ? process.argv.slice(2) : VIEWS;
+const views = process.argv.slice(2).length ? process.argv.slice(2) : [...VIEWS, ...Object.keys(SCENARIOS)];
 const variants = (process.env.RUNTIME_PARITY_VARIANTS ?? "node,node-c,txiki,txiki-c,bun-c").split(",");
-const entries = join(examples, "_runtime-parity");
 const out = join(root, "work/runtime-parity");
-rmSync(entries, { recursive: true, force: true });
-mkdirSync(entries, { recursive: true });
+const scenarioOf = (view: string): Scenario => SCENARIOS[view] ?? { source: viewEntry(view) };
+const entryDirectories = [...new Set(views.map(view => join(examples, scenarioOf(view).dir ?? "_runtime-parity")))];
+for (const directory of entryDirectories) {
+  rmSync(directory, { recursive: true, force: true });
+  mkdirSync(directory, { recursive: true });
+}
 mkdirSync(out, { recursive: true });
 
-// Runs inside each app: settle, capture, then drive input and capture again.
-const entry = (view: string) => `import { writeFileSync } from "node:fs";
-import { createApp } from "@tarve/core";
-import { lucideReactAdapter, phosphorReactAdapter, reactSvgAdapter } from "@tarve/react-icons";
-import { App } from "../${view}/${view}-view";
-const out = process.argv[process.argv.length - 1]!;
-const errors: string[] = [];
-const app = createApp(App as any, { renderer: "cpu", debug: true, componentAdapters: [reactSvgAdapter, lucideReactAdapter, phosphorReactAdapter] });
-app.onEvent(event => { if (event.type === "error") errors.push(event.message); });
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-const nodes = (snapshot: any) => snapshot.nodes.map((n: any) => [n.id, Math.round(n.x), Math.round(n.y), Math.round(n.width), Math.round(n.height), n.text ?? ""]);
-const centre = (n: any) => ({ x: n.x + n.width / 2, y: n.y + n.height / 2 });
-const visible = (snapshot: any, kinds: string[]) => snapshot.nodes.filter((n: any) => kinds.includes(n.kind) && n.width > 0 && n.height > 0 && n.y >= 0 && n.y + n.height <= snapshot.height);
-let code = 0;
-try {
-  await app.ready;
-  let snapshot = await app.inspect();
-  for (let i = 0; i < 100 && snapshot.frames === 0; i++) { await wait(20); snapshot = await app.inspect(); }
-  await wait(600);
-  snapshot = await app.inspect();
-  await app.capture(out + "-initial.png");
-  const buttons = visible(snapshot, ["button", "pressable"]).slice(0, 3);
-  if (buttons[0]) { app.debug({ type: "input", action: "move", ...centre(buttons[0]) }); await wait(250); }
-  const hover = await app.inspect();
-  await app.capture(out + "-hover.png");
-  for (const button of buttons) {
-    app.debug({ type: "input", action: "move", ...centre(button) });
-    app.debug({ type: "input", action: "down" });
-    app.debug({ type: "input", action: "up" });
-    await wait(150);
-  }
-  const input = visible(await app.inspect(), ["input", "textarea"])[0];
-  if (input) {
-    app.debug({ type: "input", action: "move", ...centre(input) });
-    app.debug({ type: "input", action: "down" });
-    app.debug({ type: "input", action: "up" });
-    await wait(100);
-    app.debug({ type: "input", action: "text", text: "tarve 123" });
-    app.debug({ type: "input", action: "key", text: "Tab" });
-    await wait(150);
-  }
-  app.debug({ type: "input", action: "move", x: snapshot.width / 2, y: snapshot.height / 2 });
-  app.debug({ type: "input", action: "wheel", deltaX: 0, deltaY: 240 });
-  await wait(300);
-  app.debug({ type: "input", action: "move", x: -1, y: -1 });
-  await wait(400);
-  const after = await app.inspect();
-  await app.capture(out + "-after.png");
-  writeFileSync(out + ".json", JSON.stringify({ errors, initial: nodes(snapshot), hover: nodes(hover), after: nodes(after), driven: { buttons: buttons.length, input: !!input } }));
-} catch (error) {
-  code = 1;
-  writeFileSync(out + ".json", JSON.stringify({ crash: String((error as Error)?.stack ?? error), errors }));
-}
-app.close();
-await app.closed;
-process.exit(code);
-`;
-
-async function run(command: string[]) {
+/** Runs an app whose last argument is its report path (a stale report must not count). */
+async function run(command: string[], env: Record<string, string> = {}) {
+  rmSync(command.at(-1) + ".json", { force: true });
   // Every app here uses the CPU renderer: check each partial redraw against a full one.
-  const child = Bun.spawn(command, { cwd: examples, stdout: "pipe", stderr: "pipe", env: { ...process.env, TARVE_CPU_DAMAGE_CHECK: "1" } });
+  const child = Bun.spawn(command, { cwd: examples, stdout: "pipe", stderr: "pipe", env: { ...process.env, TARVE_CPU_DAMAGE_CHECK: "1", ...env } });
   const timer = setTimeout(() => child.kill(), 60_000);
   const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
   clearTimeout(timer);
   return { code, stderr: stderr.trim().split(/\r?\n/).filter(line => !/^\s+at /.test(line)).slice(0, 4).join(" | ") };
 }
-const report = (name: string) => existsSync(join(out, name + ".json")) ? JSON.parse(readFileSync(join(out, name + ".json"), "utf8")) : undefined;
+/** A crashed run's report has only `crash` and `errors`. */
+interface Report { errors: string[]; stages: Record<string, unknown[][]>; result: Record<string, unknown> | null; crash?: string }
+const report = (name: string): Report | undefined => existsSync(join(out, name + ".json")) ? JSON.parse(readFileSync(join(out, name + ".json"), "utf8")) : undefined;
 async function pixelDiff(a: string, b: string): Promise<number> {
   const left = await readPngRgba(join(out, a)), right = await readPngRgba(join(out, b));
   if (left.width !== right.width || left.height !== right.height) return 100;
@@ -107,23 +59,41 @@ function nodeDiffs(a: unknown[][], b: unknown[][]): string[] {
   return diffs;
 }
 
+/** Per-runtime fields (`result.runtime`) are checked against the scenario, not against Bun. */
+const comparable = (got: Report) => JSON.stringify({ ...got.result, runtime: undefined });
+
 const failures: string[] = [];
+const prepared = new Set<Scenario>();
 try {
   for (const view of views) {
-    writeFileSync(join(entries, view + ".tsx"), entry(view));
-    const source = `_runtime-parity/${view}.tsx`;
-    const bun = await run(["bun", source, join(out, view + "-bun")]);
+    const scenario = scenarioOf(view);
+    if (scenario.prepare && !prepared.has(scenario)) { scenario.prepare(root); prepared.add(scenario); }
+    const source = `${scenario.dir ?? "_runtime-parity"}/${view}.tsx`;
+    writeFileSync(join(examples, source), PROLOGUE + scenario.source);
+    const args = scenario.args ?? [];
+    const env = scenario.env ?? {};
+    const bun = await run(["bun", source, ...args, join(out, view + "-bun")], env);
     let reference = report(view + "-bun");
-    if (!reference?.initial) { failures.push(`${view} bun: ${reference?.crash ?? bun.stderr}`); continue; }
+    if (!reference?.stages) { failures.push(`${view} bun: ${reference?.crash ?? bun.stderr}`); continue; }
     if (reference.errors.length) failures.push(`${view} bun reported errors: ${reference.errors.join("; ")}`);
-    const compare = async (variant: string, got: NonNullable<ReturnType<typeof report>>): Promise<string[]> => {
+    const runtimeProblems = (variant: string, got: Report): string[] => {
+      if (!scenario.runtime) return [];
+      const expected = JSON.stringify(scenario.runtime(variant)), actual = JSON.stringify(got.result?.runtime);
+      return expected === actual ? [] : [`runtime: expected ${expected}, got ${actual}`];
+    };
+    const referenceProblems = runtimeProblems("bun", reference);
+    if (referenceProblems.length) failures.push(`${view} bun: ${referenceProblems.join(" | ")}`);
+    const compare = async (variant: string, got: Report): Promise<string[]> => {
       const problems: string[] = [];
-      for (const stage of ["initial", "hover", "after"] as const) {
-        const diffs = nodeDiffs(reference![stage], got[stage]);
+      for (const stage of Object.keys(reference!.stages)) {
+        if (!got.stages[stage]) { problems.push(`${stage}: missing`); continue; }
+        const diffs = nodeDiffs(reference!.stages[stage]!, got.stages[stage]!);
         if (diffs.length) problems.push(`${stage}: ${diffs.length} nodes differ, e.g. ${diffs[0]}`);
         const pixels = await pixelDiff(`${view}-bun-${stage}.png`, `${view}-${variant}-${stage}.png`);
         if (pixels > 0) problems.push(`${stage}: ${pixels.toFixed(3)}% pixels differ`);
       }
+      if (comparable(got) !== comparable(reference!)) problems.push(`result: ${comparable(got)} (Bun: ${comparable(reference!)})`);
+      problems.push(...runtimeProblems(variant, got));
       if (got.errors.length) problems.push(`errors: ${got.errors.join("; ")}`);
       return problems;
     };
@@ -140,9 +110,9 @@ try {
       let problems: string[] = [];
       let crashed = "";
       for (let attempt = 0; attempt < 2; attempt++) {
-        const result = await run([executable, join(out, `${view}-${variant}`)]);
+        const result = await run([executable, ...args, join(out, `${view}-${variant}`)], env);
         const got = report(`${view}-${variant}`);
-        if (!got?.initial) { crashed = got?.crash ?? result.stderr; break; }
+        if (!got?.stages) { crashed = got?.crash ?? result.stderr; break; }
         problems = await compare(variant, got);
         if (!problems.length) break;
       }
@@ -154,9 +124,9 @@ try {
     // odd one (a caret mid-blink at a capture): take a second Bun reference and compare
     // the captures the variants already made against it.
     if (compared > 1 && mismatched.size === compared) {
-      await run(["bun", source, join(out, view + "-bun")]);
+      await run(["bun", source, ...args, join(out, view + "-bun")], env);
       const again = report(view + "-bun");
-      if (again?.initial) {
+      if (again?.stages) {
         reference = again;
         for (const variant of [...mismatched.keys()]) {
           const problems = await compare(variant, report(`${view}-${variant}`)!);
@@ -170,10 +140,10 @@ try {
       if (problems) failures.push(`${view} ${variant}: ${problems.join(" | ")}`);
       line.push(`${variant}=${problems ? "FAIL" : "ok"}`);
     }
-    console.log(`${view.padEnd(14)} ${JSON.stringify(reference.driven)} ${line.join(" ")}`);
+    console.log(`${view.padEnd(14)} ${JSON.stringify(reference.result)} ${line.join(" ")}`);
   }
 } finally {
-  rmSync(entries, { recursive: true, force: true });
+  for (const directory of entryDirectories) rmSync(directory, { recursive: true, force: true });
 }
 if (failures.length) {
   console.error(failures.join("\n"));

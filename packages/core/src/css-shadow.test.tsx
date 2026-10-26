@@ -12,6 +12,8 @@ describe("CSS shadow syntax", () => {
     expect(cssColor("rgba(0, 0, 0, 0.2)")).toBe("#00000033");
     expect(cssColor("rgb(255 128 0 / 50%)")).toBe("#ff800080");
     expect(cssColor("hsl(0, 100%, 50%)")).toBe("#ff0000ff");
+    expect(cssColor("hsl(0.5turn 100% 50%)")).toBe("#00ffffff");
+    expect(cssColor("hsl(-120 100% 50%)")).toBe("#0000ffff");
     expect(cssColor("transparent")).toBe("#00000000");
     expect(cssColor("var(--ring)")).toBe("var(--ring)");
     expect(() => cssColor("constructor")).toThrow("Unsupported colour");

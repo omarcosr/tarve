@@ -3,6 +3,7 @@ package tarve
 import (
 	"fmt"
 	"math"
+	"runtime"
 	"strings"
 )
 
@@ -75,11 +76,13 @@ func TitleBar(p Props, kids ...Child) *VNode {
 			"style": merge(S{"width": 46, "height": "100%", "radius": 0, "align": "center", "justify": "center", "background": "#00000000",
 				"hover": S{"background": hover}, "active": S{"background": active}}, buttonStyle), "children": child})
 	}
+	// Android has no window to minimize, maximize or close: TitleBar is the app's top bar there.
+	mobile := runtime.GOOS == "android"
 	flag := func(k string) bool {
 		if v, ok := p[k].(bool); ok {
 			return v
 		}
-		return true
+		return !mobile
 	}
 	var minimize, maximize, closeB Child
 	if flag("showMinimize") {
@@ -95,6 +98,9 @@ func TitleBar(p Props, kids ...Child) *VNode {
 	content := p["children"]
 	if content == nil && str(p, "title") != "" {
 		tp := Props{"size": 13, "weight": 500, "children": p["title"]}
+		if mobile {
+			tp["size"], tp["weight"] = 18, 600
+		}
 		if glass != "" {
 			tp["weight"], tp["color"] = 600, ink
 		}
@@ -109,7 +115,11 @@ func TitleBar(p Props, kids ...Child) *VNode {
 		}
 	}
 	rest["dragRegion"] = true
-	base := S{"direction": "row", "height": numOr(p, "height", 40), "shrink": 0, "padding": S{"left": 12}, "background": T.Card,
+	height, padding := 40.0, 12
+	if mobile {
+		height, padding = 56, 16
+	}
+	base := S{"direction": "row", "height": numOr(p, "height", height), "shrink": 0, "padding": S{"left": padding}, "background": T.Card,
 		"borderWidth": S{"bottom": 1}, "borderColor": T.Border, "justify": "between", "align": "center", "pointerEvents": "block"}
 	if glass != "" {
 		base["gap"], base["padding"] = 4, S{"left": 14, "right": 4}

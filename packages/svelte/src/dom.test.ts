@@ -57,6 +57,12 @@ describe("Svelte DOM shim", () => {
     expect(((host.firstChild as TElement).firstChild as TText).data).toBe("a & ");
   });
 
+  test("out-of-range numeric entities decode to U+FFFD instead of throwing", () => {
+    const host = document.createElement("div");
+    parseHtml("&#99999999;&#xD800;&#0;&#x41;", host);
+    expect(host.textContent).toBe("\ufffd\ufffd\ufffdA");
+  });
+
   test("style, classList and form properties", () => {
     const input = document.createElement("input");
     input.style.cssText = "font-size: 14px; color: red";

@@ -1,0 +1,48 @@
+{
+  "name": "@tarve/test",
+  "version": "0.7.0",
+  "description": "Testing Library-style queries, events and image snapshots for Tarve apps, rendered headless on any platform",
+  "license": "Apache-2.0",
+  "keywords": [
+    "tarve",
+    "testing",
+    "testing-library",
+    "headless",
+    "snapshot",
+    "visual-regression"
+  ],
+  "homepage": "https://github.com/omarcosr/tarve/tree/main/packages/test#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/omarcosr/tarve.git",
+    "directory": "packages/test"
+  },
+  "bugs": {
+    "url": "https://github.com/omarcosr/tarve/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.tsx",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "smoke:runtimes": "bun ../../scripts/smoke-headless-runtimes.ts"
+  },
+  "peerDependencies": {
+    "@tarve/core": "^0.7.0",
+    "@tarve/headless": "^0.7.0"
+  },
+  "engines": {
+    "bun": ">=1.4.0",
+    "node": ">=26.10.0"
+  }
+}

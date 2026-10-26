@@ -49,6 +49,10 @@ impl Media {
         None
     }
 
+    pub(crate) fn playing(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     pub fn tick(&mut self, _now: Instant) -> Vec<Value> {
         Vec::new()
     }

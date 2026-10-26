@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { remoteLibrary } from "./remote";
 
 type NativeSymbols = Record<"tarve_start" | "tarve_send" | "tarve_event_pipe_name" | "tarve_poll_event" | "tarve_open_external" | "tarve_last_error", (buffer: Uint8Array, length: number) => number> & { tarve_abi_version(): number; tarve_join(): number; tarve_allow_foreground(pid: number): number };
 
@@ -17,6 +18,11 @@ export function openLibrary(path: string): NativeLibrary {
     tarve_join: { args: [], returns: "i32" },
     tarve_allow_foreground: { args: ["u32"], returns: "i32" },
   } as const;
+  // Bun on Android: the activity process holds the library and answers over a socket.
+  const remoteFd = process.platform === "android" ? Number(process.env.TARVE_ANDROID_BRIDGE_FD) : NaN;
+  if (Number.isInteger(remoteFd) && remoteFd >= 0) {
+    return remoteLibrary(remoteFd);
+  }
   // txiki.js: the executable's prelude exposes tjs:ffi, whose dlopen matches bun:ffi.
   const txikiFfi = (globalThis as { __tarveTxikiFfi?: { dlopen(path: string, symbols: typeof definitions): NativeLibrary } }).__tarveTxikiFfi;
   if (txikiFfi) return txikiFfi.dlopen(path, definitions);

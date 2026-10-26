@@ -180,7 +180,7 @@ func parallelSafe(list []Child) bool {
 func (c *compiler) worker() *compiler {
 	return &compiler{debug: c.debug, visible: c.visible, scope: c.scope, handlers: map[string]Handlers{}, nodes: map[string]*NNode{},
 		media: map[string]*MediaRequest{}, window: c.window, theme: c.theme, font: c.font, memoSeen: map[string]bool{},
-		width: c.width, t: newTables(c.theme), base: c.t, memoDepth: c.memoDepth, focusRing: c.focusRing, initialFont: c.initialFont, prev: c.prev}
+		width: c.width, height: c.height, t: newTables(c.theme), base: c.t, memoDepth: c.memoDepth, focusRing: c.focusRing, initialFont: c.initialFont, prev: c.prev}
 }
 
 func (c *compiler) visitParallel(v []Child, path, group string, out []*NNode) []*NNode {

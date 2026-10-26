@@ -5,7 +5,7 @@ import { Button, Column, Text, Window, createApp, readPngRgba, type AppHandle, t
 
 // Real-window smoke for the development runtime tooling: dev error overlay,
 // native frame-time overlay (and its zero-idle guarantee) and same-window
-// remount under `bun --hot`.
+// remount under `bun --hot`, and the visual inspector (smoke-inspector.ts).
 const root = resolve(import.meta.dir, "..");
 const work = resolve(root, "work");
 await mkdir(work, { recursive: true });
@@ -116,6 +116,12 @@ setTimeout(async () => {
     await child.exited;
     await rm(entry, { force: true });
   }
+}
+
+{
+  // The visual inspector needs a native app of its own (one per process).
+  const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "smoke-inspector.ts")], { cwd: root, stdout: "inherit", stderr: "inherit" });
+  assert.equal(await child.exited, 0, "smoke-inspector.ts passes");
 }
 
 console.log("[tarve smoke:devtools] PASS");

@@ -361,10 +361,22 @@ describe("controlled native reconciliation", () => {
     tray.update({ tooltip: "2 new" });
     expect((bridge.commands.at(-1) as { tray: { tooltip: string } }).tray.tooltip).toBe("2 new");
     let clicked = 0;
+    let other = 0;
     app.notify({ title: "Hi", onClick: () => clicked++ });
-    expect(bridge.commands.at(-1)).toEqual({ type: "notify", title: "Hi", body: "" });
+    expect(bridge.commands.at(-1)).toEqual({ type: "notify", title: "Hi", body: "", id: "n1" });
+    app.notify({ title: "Other", body: "b", onClick: () => other++ });
+    expect(bridge.commands.at(-1)).toEqual({ type: "notify", title: "Other", body: "b", id: "n2" });
+    // Each notification's click runs its own onClick; a click without an id runs the newest.
+    bridge.emit({ type: "notificationClick", id: "n1" });
+    expect([clicked, other]).toEqual([1, 0]);
     bridge.emit({ type: "notificationClick" });
-    expect(clicked).toBe(1);
+    expect([clicked, other]).toEqual([1, 1]);
+    const asked = app.requestPermissions(["CAMERA", "android.permission.RECORD_AUDIO"]);
+    const command = bridge.commands.at(-1) as { type: string; action: string; permissions: string[]; requestId: string };
+    expect([command.type, command.action, command.permissions]).toEqual(["permissions", "request", ["CAMERA", "android.permission.RECORD_AUDIO"]]);
+    bridge.emit({ type: "permissions", requestId: command.requestId, results: { CAMERA: "granted", "android.permission.RECORD_AUDIO": "denied" } });
+    expect(await asked).toEqual({ CAMERA: "granted", "android.permission.RECORD_AUDIO": "denied" });
+    await expect(app.checkPermissions(["no spaces allowed"])).rejects.toThrow(TypeError);
     bridge.commands.length = 0;
     bridge.emit({ type: "closeRequest" });
     expect(bridge.commands).toEqual([{ type: "window", action: "hide" }, { type: "cancelCloseRequest" }]);

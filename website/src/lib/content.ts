@@ -40,15 +40,16 @@ bun run tarve build app.tsx --target linux-x64 --outfile dist/App`,
 export const componentCount = orderedNames.length;
 
 export const spec = [
-  { label: "Runtime", value: "Bun 1.4+", note: "TypeScript and TSX run directly, no build step in development" },
-  { label: "Platforms", value: "Windows x64, Linux x64", note: "both runtimes ship inside the npm package" },
+  { label: "Runtime", value: "Bun 1.4+, Node.js 26.10+, txiki.js, Go", note: "TypeScript and TSX run directly, no build step in development" },
+  { label: "Platforms", value: "Windows x64, Linux x64, Android", note: "desktop runtimes ship inside the npm package; APK and AAB from tarve build" },
   { label: "Layout", value: "Taffy", note: "retained Flexbox and Grid, updated incrementally" },
   { label: "Text", value: "Parley", note: "shaping, selection, IME composition, Unicode editing" },
   { label: "Rendering", value: "D3D11 / DXGI, Vello / WGPU, vello_cpu", note: "chosen per machine, with fallbacks" },
-  { label: "Accessibility", value: "AccessKit", note: "UI Automation on Windows, AT-SPI on Linux" },
+  { label: "Accessibility", value: "AccessKit", note: "UI Automation on Windows, AT-SPI on Linux, TalkBack on Android" },
   { label: "Components", value: String(componentCount), note: "each with a reference page and a live example" },
   { label: "Frames while idle", value: "0", note: "nothing is presented until something changes" },
-  { label: "Output", value: "One executable", note: "per target, runtime embedded, cross-compiled" },
+  { label: "Output", value: "One executable", note: "per target, runtime embedded, cross-compiled; deb, tar.gz, zip and MSIX via tarve package" },
+  { label: "Tooling", value: "create-tarve, @tarve/router, @tarve/test", note: "scaffolding, navigation, headless tests and a visual inspector" },
   { label: "Not included", value: "Chromium, the DOM, a CSS engine, React", note: "" },
   { label: "License", value: "Apache-2.0", note: "" },
 ];

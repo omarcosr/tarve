@@ -25,6 +25,9 @@ impl App {
             let _ = transparent;
             false
         };
+        // Android draws on the GPU too: Vello's pipelines come from a disk cache after the first
+        // launch (renderer/pipeline_cache.rs), so the first frame takes ~0.15 s, and the CPU
+        // renderer cannot hand the surface over to Vulkan (Android keeps it connected to the CPU).
         if cpu_first {
             self.document.renderer = crate::protocol::RendererPreference::Cpu;
         }
@@ -34,6 +37,16 @@ impl App {
             self.gpu_upgrade = created.is_ok();
         }
         created
+    }
+    /// GPU frames are checked against Vello's buffer sizes a frame late (renderer.rs): true when
+    /// the last one overflowed and must be drawn again. Polls again shortly while one is pending.
+    pub(super) fn poll_gpu_check(&mut self) -> bool {
+        let check = match &mut self.graphics {
+            GraphicsState::Ready(graphics) => graphics.poll_gpu_check(),
+            _ => None,
+        };
+        self.gpu_check_pending = check == Some(false);
+        check == Some(true)
     }
     /// Hands the window from the CPU renderer of the first frames to the GPU, once its device exists.
     pub(super) fn upgrade_graphics(&mut self) {

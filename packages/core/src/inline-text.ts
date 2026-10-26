@@ -154,11 +154,6 @@ function collect(child: Child, style: RunStyle, id: string | undefined, ctx: Inl
   collect(props.children, computeStyle(style, ctx.resolve(own)), runId, ctx, out);
 }
 
-export function hasInlineElements(children: Child): boolean {
-  if (Array.isArray(children)) return children.some(hasInlineElements);
-  return children != null && typeof children === "object";
-}
-
 const WHITE_SPACE_RUN = /[\t\n\f]| {2}/;
 
 /** The text of children that hold no elements (strings and numbers only); undefined otherwise. */

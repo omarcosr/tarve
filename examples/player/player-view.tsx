@@ -133,7 +133,7 @@ function Sidebar() {
     </Pressable>
   );
   return (
-    <Column gap={8} style={{ width: 280, shrink: 0 }}>
+    <Column gap={8} style={{ width: 280, shrink: 0, display: "none", md: { display: "flex" } }}>
       <Column style={{ background: surface, radius: 8, padding: { top: 8, bottom: 8, left: 12, right: 12 } }}>
         {nav("nav-home", icons.home, "Home", state.view === "all" && !state.query, () => { state.view = "all"; state.query = ""; })}
         {nav("nav-search", icons.search, "Search", !!state.query, () => { state.view = "all"; })}
@@ -170,7 +170,7 @@ function TrackRow({ track, index, position }: { track: Track; index: number; pos
           <Text size={15} color={current ? green : "#fff"} style={{ whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{track.title}</Text>
           <Text size={13} color={muted}>{track.artist}</Text>
         </Column>
-        <Text size={13} color={muted} style={{ width: 180, shrink: 0, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{track.album}</Text>
+        <Text size={13} color={muted} style={{ width: 180, shrink: 0, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden", display: "none", sm: { display: "flex" } }}>{track.album}</Text>
         <IconButton id={`like-${index}`} d={icons.heart} label={liked ? "Remove from Liked Songs" : "Save to Liked Songs"} active={liked} fill={liked}
           onClick={() => { if (liked) state.liked.delete(track.id); else state.liked.add(track.id); }} />
         <Text size={13} color={muted} style={{ width: 48, shrink: 0, textAlign: "end" }}>{clock(track.duration)}</Text>
@@ -195,13 +195,13 @@ function Main() {
       <Scroll id="main-scroll" flex={1}>
         <Column gap={24} style={{ padding: 24 }}>
           <Row gap={24} align="end">
-            <View style={{ width: 200, height: 200, shrink: 0, radius: 6, align: "center", justify: "center", boxShadow: { y: 8, blur: 40, color: "#00000080" },
+            <View style={{ width: 112, height: 112, sm: { width: 200, height: 200 }, shrink: 0, radius: 6, align: "center", justify: "center", boxShadow: { y: 8, blur: 40, color: "#00000080" },
               background: state.view === "liked" ? "linear-gradient(135deg, #450af5, #c4efd9)" : `linear-gradient(135deg, ${hero?.colors[0] ?? "#333"}, #121212)` }}>
               <Glyph d={state.view === "liked" ? icons.heart : "M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"} size={72} color="#fff" fill={state.view === "liked"} />
             </View>
             <Column gap={8} style={{ minWidth: 0 }}>
               <Text size={13} weight={600}>Playlist</Text>
-              <Text size={72} weight={900} style={{ letterSpacing: -2, lineHeight: 1.1 }}>{title}</Text>
+              <Text weight={900} style={{ fontSize: 36, sm: { fontSize: 72 }, letterSpacing: -2, lineHeight: 1.1 }}>{title}</Text>
               <Row gap={4} align="center">
                 <Text size={14} weight={700}>Tarve</Text>
                 <Text size={14} color="#ffffffb3">• {rows.length} songs, {clock(total)}</Text>
@@ -217,13 +217,13 @@ function Main() {
             <IconButton id="hero-shuffle" d={icons.shuffle} label="Shuffle" size={28} fill={false} active={state.shuffle} onClick={() => { state.shuffle = !state.shuffle; }} />
             <View flex={1} />
             <Input id="search" type="search" placeholder="What do you want to play?" value={state.query} onChange={value => { state.query = value; }}
-              style={{ width: 260, height: 36, radius: 999, background: "#ffffff1a", borderColor: "transparent", foreground: "#fff", padding: { left: 16, right: 16 } }} />
+              style={{ width: 150, sm: { width: 260 }, minWidth: 0, shrink: 1, height: 36, radius: 999, background: "#ffffff1a", borderColor: "transparent", foreground: "#fff", padding: { left: 16, right: 16 } }} />
           </Row>
           <Column>
             <Row gap={16} align="center" style={{ height: 36, padding: { left: 16, right: 16 } }}>
               <Text size={13} color={muted} style={{ width: 20, shrink: 0, textAlign: "center" }}>#</Text>
               <Text size={13} color={muted} style={{ flex: 1 }}>Title</Text>
-              <Text size={13} color={muted} style={{ width: 180, shrink: 0 }}>Album</Text>
+              <Text size={13} color={muted} style={{ width: 180, shrink: 0, display: "none", sm: { display: "flex" } }}>Album</Text>
               <View style={{ width: 32, shrink: 0 }} />
               <View style={{ width: 48, shrink: 0, align: "end" }}><Glyph d={icons.clock} size={16} color={muted} fill={false} /></View>
             </Row>
@@ -245,7 +245,7 @@ function NowPlaying() {
   const volume = state.muted ? 0 : state.volume;
   return (
     <Row align="center" style={{ height: 80, padding: { left: 8, right: 16 }, gap: 16 }}>
-      <Row gap={14} align="center" style={{ width: "30%", minWidth: 180 }}>
+      <Row gap={14} align="center" style={{ width: "30%", minWidth: 0, md: { minWidth: 180 } }}>
         {state.autoPlay && track ? <>
           <Cover track={track} size={56} />
           <Column gap={4} style={{ minWidth: 0 }}>
@@ -278,7 +278,7 @@ function NowPlaying() {
           <Text size={12} color={muted} style={{ width: 40, shrink: 0 }}>{clock(state.autoPlay ? duration : null)}</Text>
         </Row>
       </Column>
-      <Row gap={8} align="center" justify="end" style={{ width: "30%", minWidth: 180 }}>
+      <Row gap={8} align="center" justify="end" style={{ width: "30%", minWidth: 180, display: "none", md: { display: "flex" } }}>
         <IconButton id="mute" d={volume === 0 ? icons.mute : icons.volume} label={state.muted ? "Unmute" : "Mute"} fill={false} onClick={() => { state.muted = !state.muted; }} />
         <Slider id="volume" label="Volume" value={Math.round(volume * 100)} min={0} max={100} step={1}
           onValueChange={value => { state.volume = value / 100; state.muted = value === 0; }}
@@ -291,7 +291,7 @@ function NowPlaying() {
 export function PlayerView() {
   const track = state.tracks[state.current];
   return (
-    <Window title={state.playing && track ? `${track.title} • ${track.artist}` : "Tarve Music"} width={1180} height={760} minWidth={820} minHeight={560}
+    <Window title={state.playing && track ? `${track.title} • ${track.artist}` : "Tarve Music"} width={1180} height={760} minWidth={360} minHeight={520}
       position="center" style={{ background: "#000", foreground: "#fff", fontFamily: "Inter" }}>
       <audio id={AUDIO_ID} src={track?.path} autoPlay={state.autoPlay} volume={state.volume} muted={state.muted} loop={state.repeat === "one"}
         onPlay={() => { state.playing = true; }}

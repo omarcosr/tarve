@@ -2,9 +2,11 @@ package tarve
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"math"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -261,10 +263,64 @@ func (a *App) SystemMedia(session *SystemMediaSession) {
 	a.sendPublic(S{"type": "systemMedia", "session": s})
 }
 
-// Notify shows a system notification.
+// Notify shows a system notification: a toast on Windows, org.freedesktop.Notifications on
+// Linux, the notification shade on Android (which asks for POST_NOTIFICATIONS the first time on
+// Android 13+). No tray icon is needed. A click brings the window forward and runs onClick.
 func (a *App) Notify(title, body string, onClick func()) {
-	a.notifyClick = onClick
-	a.sendPublic(S{"type": "notify", "title": title, "body": body})
+	a.notifyCount++
+	id := "n" + strconv.Itoa(a.notifyCount)
+	a.lastNotify = onClick
+	if onClick != nil {
+		if a.notifyClicks == nil {
+			a.notifyClicks = map[string]func(){}
+		}
+		a.notifyClicks[id] = onClick
+		// Unclicked notifications are dismissed eventually: drop the handler 100 notifications on.
+		delete(a.notifyClicks, "n"+strconv.Itoa(a.notifyCount-100))
+	}
+	a.sendPublic(S{"type": "notify", "title": title, "body": body, "id": id})
+}
+
+// CheckPermissions reports each runtime permission ("CAMERA" or "android.permission.CAMERA") as
+// "granted", "prompt" (never answered on Android) or "denied". Desktops have no per-app permission prompt: every name is granted.
+func (a *App) CheckPermissions(names ...string) (map[string]string, error) {
+	return a.permissions("check", names)
+}
+
+// RequestPermissions shows Android's prompt for the permissions not granted yet (each must be in
+// the manifest: package.json tarve.android.permissions or tarve build --permission) and returns
+// every state. It blocks until the user answers: call it from a goroutine, then Post the result.
+func (a *App) RequestPermissions(names ...string) (map[string]string, error) {
+	return a.permissions("request", names)
+}
+
+func (a *App) permissions(action string, names []string) (map[string]string, error) {
+	results := map[string]string{}
+	if len(names) == 0 {
+		return results, nil
+	}
+	list := make([]any, len(names))
+	for i, name := range names {
+		list[i] = name
+	}
+	var timeout time.Duration
+	if action == "check" {
+		timeout = 10 * time.Second
+	}
+	ev, err := a.Request(S{"type": "permissions", "action": action, "permissions": list}, timeout)
+	if err != nil {
+		return nil, err
+	}
+	if msg, _ := ev["error"].(string); msg != "" {
+		return nil, errors.New(msg)
+	}
+	states, _ := ev["results"].(map[string]any)
+	for name, state := range states {
+		if s, ok := state.(string); ok {
+			results[name] = s
+		}
+	}
+	return results, nil
 }
 
 // fastDiff diffs only what can differ: the nodes compiled anew and the ones native edited.

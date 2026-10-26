@@ -1,6 +1,9 @@
 import type { NativeCommand, NativeTrayMenuItem } from "../protocol";
 import type { HotkeyHandler } from "../hotkeys";
 import { accessKey, type MenuBarItem } from "../menu-bar";
+import { TitleBar } from "../components/titlebar";
+import { Window } from "../components/window";
+import type { Child, VNode } from "../jsx-runtime";
 
 export type { MenuBarItem } from "../menu-bar";
 
@@ -99,4 +102,20 @@ function toNative(list: readonly MenuBarItem[]): NativeTrayMenuItem[] {
       ...(item.disabled ? { disabled: true } : {}),
     };
   });
+}
+
+/** The view with the app's drawn menu bar at the top of its window, after a TitleBar. */
+export function withMenuBar(view: VNode, bar: VNode): VNode {
+  // The view is often a component that returns the Window (`() => <App />`): expand it.
+  for (let depth = 0; typeof view.type === "function" && view.type !== Window && depth < 32; depth++) {
+    const expanded = (view.type as (props: Record<string, unknown>) => unknown)(view.props);
+    if (!expanded || typeof expanded !== "object" || Array.isArray(expanded)) return view;
+    view = expanded as VNode;
+  }
+  if (view.type !== Window) return view;
+  const raw = view.props.children;
+  const children: Child[] = Array.isArray(raw) ? [...raw] : raw === undefined ? [] : [raw];
+  const titleBar = children.findIndex(child => !!child && typeof child === "object" && !Array.isArray(child) && (child as VNode).type === TitleBar);
+  children.splice(titleBar + 1, 0, bar);
+  return { ...view, props: { ...view.props, children } };
 }

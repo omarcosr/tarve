@@ -1,12 +1,15 @@
 // Connects the YouTube Music view to the data source, the sign-in window and the app.
 import type { createApp } from "@tarve/core";
 import { signInWithBrowser } from "./youtube-music-login";
+import { phone } from "./youtube-music-mobile";
 import { lineAt, lyricsFor, type Lyrics } from "./youtube-music-lyrics";
 import * as source from "./youtube-music-source";
 import { AUDIO_ID, LYRICS_LIST, lyricsShown, state, type Page } from "./youtube-music-view";
 
 /** Waits before retrying a song the bot check refused (VPN exits change; the block often lifts). */
 const BLOCKED_RETRIES = [20_000, 60_000, 180_000];
+/** Fresh stream URLs tried for one song when playback stops without advancing in between. */
+const RESUME_RETRIES = 2;
 
 export function connect(app: ReturnType<typeof createApp>): void {
   // One system-media sync per burst of state changes; app.update() batches the render itself.
@@ -152,8 +155,10 @@ export function connect(app: ReturnType<typeof createApp>): void {
   state.goBack = () => { const page = state.back.pop(); if (page) show(page); };
 
   let playToken = 0;
-  /** The play whose stream was already re-resolved once after an error. */
+  /** The play whose stream was re-resolved after an error, how often without progress, and where. */
   let retriedToken = -1;
+  let retries = 0;
+  let retriedAt = 0;
   /** Songs skipped in a row because they would not play; stops a run of failures from looping. */
   let skipped = 0;
   /** Retries of the current song after YouTube's bot check refused the network. */
@@ -205,11 +210,15 @@ export function connect(app: ReturnType<typeof createApp>): void {
   state.mediaFailed = failure => {
     const song = state.queue[state.index];
     const token = playToken;
-    if (!song || retriedToken === token) {
+    if (retriedToken !== token) { retriedToken = token; retries = 0; retriedAt = -Infinity; }
+    // A long song can lose its stream more than once; it gives up only when retries make no progress.
+    if (state.time > retriedAt + 5) retries = 0;
+    if (!song || retries >= RESUME_RETRIES) {
       skipUnplayable(failure);
       return;
     }
-    retriedToken = token;
+    retries++;
+    retriedAt = state.time;
     const resumeAt = state.time;
     source.forgetStreamUrl(song.id);
     state.path = undefined;
@@ -226,6 +235,14 @@ export function connect(app: ReturnType<typeof createApp>): void {
       state.loading = null;
       skipUnplayable(message(error));
     });
+  };
+  // A stream cut short (a CDN closing the connection, a decode error) ends without an
+  // error event: far from its duration it resumes instead of skipping the rest of the song.
+  state.mediaEnded = () => {
+    const duration = state.duration || state.queue[state.index]?.duration || 0;
+    if (duration > 0 && state.time < duration - 5) { state.mediaFailed("the stream ended early"); return; }
+    state.playing = false;
+    state.next();
   };
   /** The song whose stream is loaded in <audio>. */
   let loadedId: string | null = null;
@@ -322,12 +339,22 @@ export function connect(app: ReturnType<typeof createApp>): void {
     if (state.signedIn) void source.library().then(list => { state.library = list; refresh(); }, () => undefined);
   }
   let signInAbort: AbortController | null = null;
+  const ANDROID_SIGN_IN = "https://accounts.google.com/ServiceLogin?ltmpl=music&service=youtube&passive=true&continue=" + encodeURIComponent("https://www.youtube.com/signin?action_handle_signin=true&next=https://music.youtube.com/");
   state.signInWithBrowser = () => {
     signInAbort?.abort();
     const abort = signInAbort = new AbortController();
     state.signIn = "browser";
     state.signInError = null;
-    signInWithBrowser(abort.signal).then(cookies => { source.useCookies(cookies); signedIn(); }, error => {
+    // Android: Google's sign-in in the app's WebView (Tarve's webSignIn); desktops: a browser window.
+    const signIn = phone
+      ? app.webSignIn({ url: ANDROID_SIGN_IN, cookieUrl: "https://music.youtube.com", cookies: ["SAPISID", "__Secure-3PAPISID"] })
+      : signInWithBrowser(abort.signal);
+    signIn.then(cookies => {
+      // Backed out of Google's page: nothing to report.
+      if (!cookies) { state.signIn = "closed"; refresh(); return; }
+      source.useCookies(cookies);
+      signedIn();
+    }, error => {
       if (abort.signal.aborted && state.signIn === "closed") return;
       state.signIn = "choose";
       state.signInError = message(error);

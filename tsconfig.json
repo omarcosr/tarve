@@ -5,7 +5,7 @@
     "noUnusedLocals": true, "noUnusedParameters": true, "noImplicitOverride": true, "noFallthroughCasesInSwitch": true,
     "jsx": "react-jsx", "jsxImportSource": "@tarve/core",
     "types": ["bun"], "allowImportingTsExtensions": true,
-    "paths": { "@tarve/core": ["./packages/core/src/index.ts"], "@tarve/core/*": ["./packages/core/src/*"], "@tarve/core-internal": ["./packages/core/src/index.ts"], "@tarve/core-internal/*": ["./packages/core/src/*"], "@tarve/protocol": ["./packages/protocol/src/index.ts"], "@tarve/react-icons": ["./packages/react-icons/src/index.ts"], "@tarve/react-icons/*": ["./packages/react-icons/src/*"], "@tarve/headless": ["./packages/headless/src/index.ts"], "@tarve/svelte": ["./packages/svelte/src/index.ts"], "@tarve/svelte/*": ["./packages/svelte/src/*"] }
+    "paths": { "@tarve/core": ["./packages/core/src/index.ts"], "@tarve/core/*": ["./packages/core/src/*"], "@tarve/core-internal": ["./packages/core/src/index.ts"], "@tarve/core-internal/*": ["./packages/core/src/*"], "@tarve/protocol": ["./packages/protocol/src/index.ts"], "@tarve/react-icons": ["./packages/react-icons/src/index.ts"], "@tarve/react-icons/*": ["./packages/react-icons/src/*"], "@tarve/headless": ["./packages/headless/src/index.ts"], "@tarve/test": ["./packages/test/src/index.ts"], "@tarve/router": ["./packages/router/src/index.ts"], "@tarve/svelte": ["./packages/svelte/src/index.ts"], "@tarve/svelte/*": ["./packages/svelte/src/*"] }
   },
   "include": ["packages", "scripts"]
 }

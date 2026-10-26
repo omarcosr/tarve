@@ -302,15 +302,8 @@ export function ruleState(selector: Selector): "hover" | "focus" | "focusVisible
   return undefined;
 }
 
-/** Whether a selector depends on anything but the element's own tag, classes and attributes. */
 /** Whether a selector reads an element's descendants or later siblings (`:has()`). */
 export function usesHas(selector: Selector): boolean {
   return selector.compounds.some(compound => compound.pseudos.some(pseudo => pseudo.kind === "has"
     || ((pseudo.kind === "not" || pseudo.kind === "is" || pseudo.kind === "where") && pseudo.list.some(usesHas))));
-}
-
-export function isContextual(selector: Selector): boolean {
-  if (selector.compounds.length > 1) return true;
-  return selector.compounds[0]!.pseudos.some(pseudo => pseudo.kind !== "state" && pseudo.kind !== "checked" && pseudo.kind !== "disabled" && pseudo.kind !== "enabled"
-    && pseudo.kind !== "required" && pseudo.kind !== "optional");
 }

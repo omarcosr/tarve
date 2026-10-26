@@ -1227,8 +1227,12 @@ impl Media {
         events
     }
 
-    /// Whether the output must be reopened: its device failed, or the default
-    /// output changed (headphones plugged in), which a browser follows too.
+    pub(crate) fn playing(&self) -> Vec<String> {
+        let on = |(i, t): (&String, &Track)| (!t.player.is_paused() && !t.ended).then(|| i.clone());
+        Vec::from_iter(self.tracks.iter().filter_map(on))
+    }
+
+    /// Whether the output must be reopened: its device failed or the default output changed.
     fn output_stale(&mut self, now: Instant) -> bool {
         if self.sink.is_none() {
             return false;
@@ -1236,10 +1240,7 @@ impl Media {
         if self.output_lost.load(Ordering::Relaxed) {
             return true;
         }
-        let playing = self
-            .tracks
-            .values()
-            .any(|track| !track.player.is_paused() && !track.ended);
+        let playing = !self.playing().is_empty();
         if !playing || self.device_id.is_none() || self.next_device_check.is_some_and(|at| at > now)
         {
             return false;
@@ -1305,10 +1306,7 @@ impl Media {
             }
             events.push(event(&id, "timeupdate", Some(track)));
         }
-        let playing = self
-            .tracks
-            .values()
-            .any(|track| !track.player.is_paused() && !track.ended);
+        let playing = !self.playing().is_empty();
         self.next_update = playing.then(|| now + TIME_UPDATE);
         events
     }

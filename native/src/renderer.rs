@@ -5,18 +5,33 @@ use crate::{
     paint::CpuCachedImage,
     protocol::RendererPreference,
 };
+#[cfg(not(target_os = "android"))]
 use softbuffer::{Context as SoftContext, Surface as SoftSurface};
 use std::{
     collections::HashMap,
     num::NonZeroU32,
-    num::NonZeroUsize,
     sync::{Arc, Mutex},
 };
 use vello::Scene;
 #[cfg(feature = "vello-gpu")]
-use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, wgpu};
+use vello::{AaConfig, RenderParams, Renderer, wgpu};
 use vello_cpu::{PixmapMut, RenderContext as CpuRenderContext, Resources as CpuResources};
 use winit::window::Window;
+mod cpu_raster;
+#[cfg(feature = "vello-gpu")]
+mod glass_gpu;
+#[cfg(feature = "vello-gpu")]
+mod gpu_report;
+#[cfg(feature = "vello-gpu")]
+mod pipeline_cache;
+mod pixels;
+mod resolution;
+use cpu_raster::{
+    CpuFrame, check_partial_redraw, cpu_damage_check, cpu_redraw_region, rasterize_cpu_region,
+};
+use pixels::{flatten_rgba_bytes, flatten_rgba_for_softbuffer, pack_premultiplied_for_softbuffer};
+use resolution::cpu_render_settings;
+pub(crate) use resolution::{render_scale, scaled_size};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PresentResult {
@@ -185,6 +200,7 @@ struct GpuGraphics {
     surface_failure_streak: u16,
     /// The surface composes alpha: the window shows what is behind it.
     transparent: bool,
+    glass: glass_gpu::GlassGpu,
 }
 
 #[cfg(feature = "vello-gpu")]
@@ -287,8 +303,12 @@ impl GpuGraphics {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
-            width: size.width.max(1),
-            height: size.height.max(1),
+            width: scaled_size(size.width, size.height, window.scale_factor())
+                .0
+                .max(1),
+            height: scaled_size(size.width, size.height, window.scale_factor())
+                .1
+                .max(1),
             present_mode: wgpu::PresentMode::AutoVsync,
             desired_maximum_frame_latency: 2,
             alpha_mode,
@@ -311,15 +331,7 @@ impl GpuGraphics {
             wgpu::util::TextureBlitter::new(&device, format)
         };
         surface.configure(&device, &config);
-        let renderer = Renderer::new(
-            &device,
-            RendererOptions {
-                antialiasing_support: AaSupport::area_only(),
-                num_init_threads: NonZeroUsize::new(1),
-                ..Default::default()
-            },
-        )
-        .map_err(|e| e.to_string())?;
+        let renderer = pipeline_cache::vello_renderer(&device, &adapter.get_info())?;
         Ok(Self {
             surface,
             config,
@@ -335,6 +347,7 @@ impl GpuGraphics {
             backend,
             surface_failure_streak: 0,
             transparent: alpha_mode != wgpu::CompositeAlphaMode::Auto,
+            glass: Default::default(),
         })
     }
     pub(crate) fn take_fault(&self) -> Option<GraphicsFault> {
@@ -386,6 +399,7 @@ impl GpuGraphics {
         }
     }
     pub fn resize(&mut self, width: u32, height: u32) -> bool {
+        let (width, height) = scaled_size(width, height, self.window.scale_factor());
         if width > 0 && height > 0 && (self.config.width != width || self.config.height != height) {
             (self.target_texture, self.target_view) = create_targets(width, height, &self.device);
             self.config.width = width;
@@ -398,6 +412,7 @@ impl GpuGraphics {
     pub fn render(
         &mut self,
         scene: &Scene,
+        glass: Option<&crate::glass::GlassFrame>,
         background: vello::peniko::Color,
     ) -> Result<PresentResult, RenderError> {
         let (frame, suboptimal) = match self.surface.get_current_texture() {
@@ -419,18 +434,30 @@ impl GpuGraphics {
                 return self.recover_surface_issue(SurfaceIssue::Validation);
             }
         };
-        if let Err(error) = self.renderer.render_to_texture(
-            &self.device,
-            &self.queue,
-            scene,
-            &self.target_view,
-            &RenderParams {
-                base_color: background,
-                width: self.config.width,
-                height: self.config.height,
-                antialiasing_method: AaConfig::Area,
-            },
-        ) {
+        if let Err(error) = self
+            .glass
+            .prepare(
+                &self.device,
+                &self.queue,
+                &mut self.renderer,
+                glass,
+                background,
+            )
+            .and_then(|()| {
+                self.renderer.render_to_texture(
+                    &self.device,
+                    &self.queue,
+                    scene,
+                    &self.target_view,
+                    &RenderParams {
+                        base_color: background,
+                        width: self.config.width,
+                        height: self.config.height,
+                        antialiasing_method: AaConfig::Area,
+                    },
+                )
+            })
+        {
             return Err(classify_vello_error(error));
         }
         let view = frame
@@ -442,6 +469,7 @@ impl GpuGraphics {
         self.queue.submit([encoder.finish()]);
         frame.present();
         self.surface_failure_streak = 0;
+        gpu_report::log(&self.device);
         if suboptimal {
             self.reconfigure_surface();
         }
@@ -451,9 +479,19 @@ impl GpuGraphics {
     pub fn capture(
         &mut self,
         scene: &Scene,
+        glass: Option<&crate::glass::GlassFrame>,
         background: vello::peniko::Color,
         path: &str,
     ) -> Result<(), CaptureError> {
+        self.glass
+            .prepare(
+                &self.device,
+                &self.queue,
+                &mut self.renderer,
+                glass,
+                background,
+            )
+            .map_err(|error| CaptureError::Request(error.to_string()))?;
         let (width, height) = (self.config.width, self.config.height);
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("tarve-capture"),
@@ -649,8 +687,12 @@ fn softbuffer_alpha(window: &Window) -> bool {
 }
 
 struct CpuGraphics {
+    #[cfg(not(target_os = "android"))]
     _soft_context: SoftContext<Arc<Window>>,
+    #[cfg(not(target_os = "android"))]
     surface: SoftSurface<Arc<Window>, Arc<Window>>,
+    #[cfg(target_os = "android")]
+    surface: crate::android::cpu_surface::CpuSurface,
     context: CpuRenderContext,
     resources: CpuResources,
     images: HashMap<String, CpuCachedImage>,
@@ -667,6 +709,8 @@ struct CpuGraphics {
     shadows: ShadowCache,
     /// Pixels carry premultiplied alpha for a transparent window.
     alpha: bool,
+    /// Device pixels per CSS px of the prepared frame (for the glass backdrop's resolution).
+    scale: f64,
 }
 
 /// What of the retained frame must be rasterized again.
@@ -687,157 +731,6 @@ impl CpuDamage {
     }
 }
 
-/// A damaged rectangle grown to whole 16-pixel tiles inside the frame, or the whole
-/// frame when the damage covers most of it (one pass is then cheaper than two copies).
-/// Tile-aligned origins keep the rasterizer's tiling, so pixels match a full redraw.
-fn cpu_redraw_region(damage: vello::kurbo::Rect, width: u32, height: u32) -> vello::kurbo::Rect {
-    let full = vello::kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
-    let x0 = ((damage.x0 / 16.0).floor() * 16.0).clamp(0.0, full.x1);
-    let y0 = ((damage.y0 / 16.0).floor() * 16.0).clamp(0.0, full.y1);
-    let x1 = ((damage.x1 / 16.0).ceil() * 16.0).clamp(0.0, full.x1);
-    let y1 = ((damage.y1 / 16.0).ceil() * 16.0).clamp(0.0, full.y1);
-    let region = vello::kurbo::Rect::new(x0, y0, x1, y1);
-    if region.area() >= full.area() * 0.6 {
-        full
-    } else {
-        region
-    }
-}
-
-/// TARVE_CPU_DAMAGE_CHECK=1: after each partial redraw, redraw the whole frame and
-/// fail if a pixel differs by more than rounding. For tests; it doubles every frame's work.
-#[allow(clippy::too_many_arguments)]
-fn check_partial_redraw(
-    context: &mut CpuRenderContext,
-    resources: &mut CpuResources,
-    list: &DisplayList,
-    frame: &[u32],
-    width: usize,
-    height: usize,
-    region: vello::kurbo::Rect,
-    background: vello::peniko::Color,
-    alpha: bool,
-) -> Result<(), RenderError> {
-    let mut expected = vec![0_u32; width * height];
-    rasterize_cpu_region(
-        context,
-        resources,
-        list,
-        CpuFrame {
-            pixels: &mut expected,
-            width,
-            height,
-            alpha,
-        },
-        &mut Vec::new(),
-        None,
-        vello::kurbo::Rect::new(0.0, 0.0, width as f64, height as f64),
-        background,
-    );
-    let mut wrong = 0;
-    let (mut x0, mut y0, mut x1, mut y1, mut worst) = (usize::MAX, usize::MAX, 0, 0, 0_i32);
-    for (index, (a, b)) in expected.iter().zip(frame).enumerate() {
-        // The region is rasterized in its own coordinates: f32 rounding can shift a
-        // near-tangent edge pixel by a few steps of 255. A missed damage differs by
-        // whole shapes, far more than that.
-        let delta = [0, 8, 16]
-            .iter()
-            .map(|shift| (((a >> shift) & 255) as i32 - ((b >> shift) & 255) as i32).abs())
-            .max()
-            .unwrap_or(0);
-        if delta > 3 {
-            wrong += 1;
-            let (x, y) = (index % width, index / width);
-            (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
-            worst = worst.max(delta);
-        }
-    }
-    if wrong > 0 {
-        return Err(RenderError::Fatal(format!(
-            "CPU partial redraw of {region:?} differs from a full redraw in {wrong} pixels within {x0},{y0}..{x1},{y1} (by up to {worst})"
-        )));
-    }
-    Ok(())
-}
-
-fn cpu_damage_check() -> bool {
-    static CHECK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *CHECK.get_or_init(|| {
-        std::env::var_os("TARVE_CPU_DAMAGE_CHECK").is_some_and(|value| value == "1")
-    })
-}
-
-/// The retained frame: composited pixels packed for softbuffer.
-struct CpuFrame<'a> {
-    pixels: &'a mut [u32],
-    width: usize,
-    height: usize,
-    /// Premultiplied ARGB (a transparent window) instead of opaque XRGB.
-    alpha: bool,
-}
-
-/// Rasterizes `region` (tile-aligned, inside the frame) of `list` into `frame`.
-#[allow(clippy::too_many_arguments)]
-fn rasterize_cpu_region(
-    context: &mut CpuRenderContext,
-    resources: &mut CpuResources,
-    list: &DisplayList,
-    frame: CpuFrame<'_>,
-    scratch: &mut Vec<u8>,
-    shadows: Option<&mut ShadowCache>,
-    region: vello::kurbo::Rect,
-    color: vello::peniko::Color,
-) {
-    let (width, height) = (frame.width, frame.height);
-    let pack = if frame.alpha {
-        pack_premultiplied_for_softbuffer
-    } else {
-        flatten_rgba_for_softbuffer
-    };
-
-    let (x0, y0) = (region.x0 as usize, region.y0 as usize);
-    let (region_width, region_height) = (
-        (region.x1 - region.x0) as usize,
-        (region.y1 - region.y0) as usize,
-    );
-    if region_width == 0 || region_height == 0 {
-        return;
-    }
-    let full = region_width == width && region_height == height;
-    // Geometry entering from the left of the viewport accumulates its coverage
-    // differently in the first tile column (one step of rounding): rasterize a
-    // margin there and keep only the region, so pixels match a full redraw.
-    let margin = if full { 0 } else { x0.min(16) };
-    let raster =
-        vello::kurbo::Rect::new(region.x0 - margin as f64, region.y0, region.x1, region.y1);
-    let raster_width = region_width + margin;
-    context.reset_and_resize(raster_width as u16, region_height as u16);
-    list.replay(context, resources, raster, shadows);
-    context.flush();
-    if full {
-        let bytes = bytemuck::cast_slice_mut::<u32, u8>(frame.pixels);
-        if let Some(pixmap) = PixmapMut::new(region_width as u16, region_height as u16, bytes) {
-            context.render(pixmap, resources);
-        }
-        pack(frame.pixels, color);
-    } else {
-        scratch.clear();
-        scratch.resize(raster_width * region_height * 4, 0);
-        if let Some(pixmap) = PixmapMut::new(raster_width as u16, region_height as u16, scratch) {
-            context.render(pixmap, resources);
-        }
-        for row in 0..region_height {
-            let source = &scratch[(row * raster_width + margin) * 4..(row + 1) * raster_width * 4];
-            let start = (y0 + row) * width + x0;
-            let target = &mut frame.pixels[start..start + region_width];
-            for (pixel, rgba) in target.iter_mut().zip(source.as_chunks::<4>().0) {
-                *pixel = u32::from_ne_bytes(*rgba);
-            }
-            pack(target, color);
-        }
-    }
-}
-
 impl CpuGraphics {
     fn dimensions(width: u32, height: u32) -> Result<(u16, u16), String> {
         let width = u16::try_from(width.max(1))
@@ -851,12 +744,17 @@ impl CpuGraphics {
         let size = window.inner_size();
         let (width, height) = Self::dimensions(size.width, size.height)?;
         let alpha = transparent && softbuffer_alpha(&window);
+        #[cfg(not(target_os = "android"))]
         let soft_context = SoftContext::new(window.clone()).map_err(|error| error.to_string())?;
+        #[cfg(not(target_os = "android"))]
         let surface = SoftSurface::new(&soft_context, window).map_err(|error| error.to_string())?;
+        #[cfg(target_os = "android")]
+        let surface = crate::android::cpu_surface::CpuSurface::new(&window)?;
         Ok(Self {
+            #[cfg(not(target_os = "android"))]
             _soft_context: soft_context,
             surface,
-            context: CpuRenderContext::new(width, height),
+            context: CpuRenderContext::new_with(width, height, cpu_render_settings()),
             resources: CpuResources::new(),
             images: HashMap::new(),
             width: u32::from(width),
@@ -869,6 +767,7 @@ impl CpuGraphics {
             scratch: Vec::new(),
             shadows: ShadowCache::new(),
             alpha,
+            scale: 1.0,
         })
     }
 
@@ -876,8 +775,10 @@ impl CpuGraphics {
         &mut self,
         width: u32,
         height: u32,
+        scale: f64,
         paint: impl FnOnce(&mut CpuRecorder<'_>),
     ) -> Result<(), String> {
+        self.scale = scale;
         let (cpu_width, cpu_height) = Self::dimensions(width, height)?;
         let resized = self.width != u32::from(cpu_width) || self.height != u32::from(cpu_height);
         self.width = u32::from(cpu_width);
@@ -946,6 +847,14 @@ impl CpuGraphics {
             CpuDamage::Full => Some(full),
             CpuDamage::Region(rect) => Some(cpu_redraw_region(rect, self.width, self.height)),
         };
+        // Glass reads what lies under it: a frame with glass is drawn whole.
+        let region = region.map(|region| {
+            if self.list.as_ref().is_some_and(DisplayList::has_glass) {
+                full
+            } else {
+                region
+            }
+        });
         if let (Some(region), Some(list)) = (region, &self.list) {
             let (frame_width, frame_height) = (usize::from(width), usize::from(height));
             rasterize_cpu_region(
@@ -962,6 +871,7 @@ impl CpuGraphics {
                 Some(&mut self.shadows),
                 region,
                 background,
+                Some(self.scale),
             );
             if region != full && cpu_damage_check() {
                 check_partial_redraw(
@@ -1013,7 +923,20 @@ impl CpuGraphics {
         let (width, height) =
             Self::dimensions(self.width, self.height).map_err(CaptureError::Request)?;
         let mut pixels = vec![0_u8; usize::from(width) * usize::from(height) * 4];
-        if let Some(list) = &self.list {
+        if let Some(list) = &self.list
+            && !crate::glass::cpu::rasterize(
+                &mut self.context,
+                &mut self.resources,
+                list,
+                &mut pixels,
+                (width, height),
+                Some(&mut self.shadows),
+                background,
+                false,
+                self.scale,
+                &mut self.scratch,
+            )
+        {
             self.context.reset_and_resize(width, height);
             list.replay(
                 &mut self.context,
@@ -1037,58 +960,6 @@ impl CpuGraphics {
             image::ColorType::Rgba8,
         )
         .map_err(|error| CaptureError::Request(error.to_string()))
-    }
-}
-
-fn flatten_rgba_bytes(pixels: &mut [u8], background: vello::peniko::Color) {
-    let background = background.to_rgba8();
-    for pixel in pixels.as_chunks_mut::<4>().0 {
-        let alpha = u16::from(pixel[3]);
-        let inverse = 255_u16.saturating_sub(alpha);
-        pixel[0] =
-            (u16::from(pixel[0]) + (u16::from(background.r) * inverse + 127) / 255).min(255) as u8;
-        pixel[1] =
-            (u16::from(pixel[1]) + (u16::from(background.g) * inverse + 127) / 255).min(255) as u8;
-        pixel[2] =
-            (u16::from(pixel[2]) + (u16::from(background.b) * inverse + 127) / 255).min(255) as u8;
-        pixel[3] = 255;
-    }
-}
-
-fn flatten_rgba_for_softbuffer(pixels: &mut [u32], background: vello::peniko::Color) {
-    let background = background.to_rgba8();
-    for pixel in pixels {
-        let [r, g, b, a] = pixel.to_ne_bytes();
-        let alpha = u16::from(a);
-        let inverse = 255_u16.saturating_sub(alpha);
-        let r = (u16::from(r) + (u16::from(background.r) * inverse + 127) / 255).min(255) as u32;
-        let g = (u16::from(g) + (u16::from(background.g) * inverse + 127) / 255).min(255) as u32;
-        let b = (u16::from(b) + (u16::from(background.b) * inverse + 127) / 255).min(255) as u32;
-        *pixel = b | (g << 8) | (r << 16);
-    }
-}
-
-/// Premultiplied ARGB for a window that composes alpha: the frame's premultiplied
-/// pixels over the (possibly translucent) background.
-fn pack_premultiplied_for_softbuffer(pixels: &mut [u32], background: vello::peniko::Color) {
-    let background = background.to_rgba8();
-    let premultiply = |channel: u8| (u16::from(channel) * u16::from(background.a) + 127) / 255;
-    let under = [
-        premultiply(background.r),
-        premultiply(background.g),
-        premultiply(background.b),
-        u16::from(background.a),
-    ];
-    for pixel in pixels {
-        let [r, g, b, a] = pixel.to_ne_bytes();
-        let inverse = 255_u16.saturating_sub(u16::from(a));
-        let over = |channel: u8, under: u16| {
-            (u16::from(channel) + (under * inverse + 127) / 255).min(255) as u32
-        };
-        *pixel = over(b, under[2])
-            | (over(g, under[1]) << 8)
-            | (over(r, under[0]) << 16)
-            | (over(a, under[3]) << 24);
     }
 }
 
@@ -1306,13 +1177,33 @@ impl Graphics {
         &mut self,
         width: u32,
         height: u32,
+        scale: f64,
         paint: impl FnOnce(&mut CpuRecorder<'_>),
     ) -> Result<bool, String> {
         let GraphicsImpl::Cpu(graphics) = &mut self.backend else {
             return Ok(false);
         };
-        graphics.prepare(width, height, paint)?;
+        graphics.prepare(width, height, scale, paint)?;
         Ok(true)
+    }
+
+    /// GPU frames are checked against Vello's buffer sizes a frame late: `Some(true)` when the
+    /// last one must be drawn again, `Some(false)` while a check is still on the GPU.
+    pub(crate) fn poll_gpu_check(&mut self) -> Option<bool> {
+        match &mut self.backend {
+            #[cfg(feature = "vello-gpu")]
+            GraphicsImpl::Gpu(graphics) => match graphics.renderer.poll_bump(&graphics.device) {
+                vello::BumpStatus::Redraw => Some(true),
+                vello::BumpStatus::Pending => Some(false),
+                vello::BumpStatus::Settled => None,
+            },
+            _ => None,
+        }
+    }
+
+    #[cfg(target_os = "android")]
+    pub(crate) fn is_cpu(&self) -> bool {
+        matches!(self.backend, GraphicsImpl::Cpu(_))
     }
 
     pub(crate) fn take_fault(&self) -> Option<GraphicsFault> {
@@ -1360,6 +1251,7 @@ impl Graphics {
     pub fn render(
         &mut self,
         scene: &Scene,
+        glass: Option<&crate::glass::GlassFrame>,
         background: vello::peniko::Color,
         content_changed: bool,
     ) -> Result<PresentResult, RenderError> {
@@ -1371,7 +1263,7 @@ impl Graphics {
                 .map(|()| PresentResult::Presented)
                 .map_err(classify_d3d11_render_error),
             #[cfg(feature = "vello-gpu")]
-            GraphicsImpl::Gpu(graphics) => graphics.render(scene, background),
+            GraphicsImpl::Gpu(graphics) => graphics.render(scene, glass, background),
             GraphicsImpl::Cpu(graphics) => {
                 let _ = content_changed;
                 graphics.render(background)
@@ -1386,6 +1278,7 @@ impl Graphics {
     pub fn capture(
         &mut self,
         scene: &Scene,
+        glass: Option<&crate::glass::GlassFrame>,
         background: vello::peniko::Color,
         path: &str,
     ) -> Result<(), CaptureError> {
@@ -1396,7 +1289,7 @@ impl Graphics {
                 .capture(background, path)
                 .map_err(classify_d3d11_capture_error),
             #[cfg(feature = "vello-gpu")]
-            GraphicsImpl::Gpu(graphics) => graphics.capture(scene, background, path),
+            GraphicsImpl::Gpu(graphics) => graphics.capture(scene, glass, background, path),
             GraphicsImpl::Cpu(graphics) => graphics.capture(background, path),
         }
     }
@@ -1406,7 +1299,7 @@ impl Graphics {
 /// both walk an ordered list of these (see `startup_attempts` and
 /// `recovery_attempts`), so the fallback order lives in one place:
 ///
-/// - Windows, `auto`/`gpu`: D3D11 → Vello/DX12 → CPU (CPU only for `auto`
+/// - Windows, `auto`/`gpu`: D3D11 → Vello/Vulkan → Vello/DX12 → CPU (CPU only for `auto`
 ///   without `TARVE_RENDERER`, or `gpu` on an adapter Vello cannot run).
 /// - Windows with `WGPU_BACKEND`: that Vello backend only (diagnostics).
 /// - Linux: Vello over wgpu's default backends → CPU (same CPU rule).
@@ -1462,9 +1355,13 @@ fn startup_attempts(
         ResolvedRenderer::Cpu => vec![BackendAttempt::Cpu],
         #[cfg(feature = "vello-gpu")]
         ResolvedRenderer::Gpu if wgpu_backend_explicit => vec![BackendAttempt::Vello(None)],
+        // Vulkan before DX12: wgpu caches pipelines on disk only for Vulkan
+        // (renderer/pipeline_cache.rs), so Vello/DX12 recompiles its shaders on
+        // every launch (~2.5 s and ~280 MB more against ~0.2 s cached on Vulkan).
         #[cfg(all(target_os = "windows", feature = "vello-gpu"))]
         ResolvedRenderer::Gpu => vec![
             BackendAttempt::D3d11,
+            BackendAttempt::Vello(Some(wgpu::Backends::VULKAN)),
             BackendAttempt::Vello(Some(wgpu::Backends::DX12)),
         ],
         #[cfg(all(target_os = "windows", not(feature = "vello-gpu")))]
@@ -1607,7 +1504,11 @@ mod tests {
         );
         #[cfg(target_os = "windows")]
         {
-            let default_gpu = [D3d11, Vello(Some(wgpu::Backends::DX12))];
+            let default_gpu = [
+                D3d11,
+                Vello(Some(wgpu::Backends::VULKAN)),
+                Vello(Some(wgpu::Backends::DX12)),
+            ];
             assert_eq!(startup_attempts(ResolvedRenderer::Gpu, false), default_gpu);
             assert_eq!(
                 recovery_attempts(RendererBackend::D3d11, false),
@@ -1751,6 +1652,7 @@ mod tests {
             None,
             Rect::new(0.0, 0.0, W as f64, H as f64),
             Color::from_rgb8(250, 250, 250),
+            None,
         );
         frame
     }
@@ -1777,6 +1679,7 @@ mod tests {
                 None,
                 region,
                 Color::from_rgb8(250, 250, 250),
+                None,
             );
         }
         let expected = full_frame(after);
@@ -1952,6 +1855,7 @@ mod tests {
                 Some(&mut cache),
                 Rect::new(0.0, 0.0, W as f64, H as f64),
                 Color::from_rgb8(250, 250, 250),
+                None,
             );
             cache.next_frame();
             let worst = frame

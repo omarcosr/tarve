@@ -1,0 +1,21 @@
+[package]
+name = "tarve_plugin_hello"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Sample native library of the tarve-plugin-hello Tarve plugin"
+license = "Apache-2.0"
+
+# Standalone crate: not a member of native/'s workspace (or of any parent workspace).
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

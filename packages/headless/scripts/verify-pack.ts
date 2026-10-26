@@ -18,6 +18,8 @@ const REQUIRED = [
   "src/png.ts",
   "wasm/tarve_web.js",
   "wasm/tarve_web_bg.wasm",
+  "wasm/baseline/tarve_web.js",
+  "wasm/baseline/tarve_web_bg.wasm",
   "fonts/InterVariable.ttf",
   "fonts/JetBrainsMono.ttf",
   "fonts/OFL-Inter.txt",

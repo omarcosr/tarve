@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { BUILD_TARGETS, hostBuildTarget, nativeDirectoryForBuildTarget, nativeRelativePath } from "./build";
+import { hostBuildTarget, nativeDirectoryForBuildTarget, nativeRelativePath } from "./build";
+import { PACKAGED_TARGETS } from "./targets";
 
 test("public build targets map to packaged native runtime directories", () => {
   expect(nativeDirectoryForBuildTarget("windows-x64")).toBe("win32-x64");
@@ -9,13 +10,15 @@ test("public build targets map to packaged native runtime directories", () => {
   expect(nativeRelativePath("linux-x64")).toBe("native/linux-x64/libtarve_native.so");
   expect(hostBuildTarget("win32", "x64")).toBe("windows-x64");
   expect(hostBuildTarget("linux", "x64")).toBe("linux-x64");
-  expect(hostBuildTarget("darwin", "arm64")).toBeUndefined();
+  expect(hostBuildTarget("darwin", "arm64")).toBe("darwin-arm64");
+  expect(nativeRelativePath("darwin-arm64")).toBe("native/darwin-arm64/libtarve_native.dylib");
+  expect(hostBuildTarget("freebsd", "x64")).toBeUndefined();
 });
 
 test("npm package includes every supported native target directory", async () => {
   const metadata = await Bun.file(resolve(import.meta.dir, "../../package.json")).json() as { files?: string[] };
   const files = new Set(metadata.files ?? []);
-  for (const target of BUILD_TARGETS) {
+  for (const target of PACKAGED_TARGETS) {
     expect(files.has(`native/${nativeDirectoryForBuildTarget(target)}`)).toBe(true);
   }
 });

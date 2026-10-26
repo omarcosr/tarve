@@ -1,0 +1,8 @@
+{
+  "name": "Tray",
+  "description": "a system tray app with menu and notifications",
+  "entry": "app.tsx",
+  "tarve": {
+    "icon": "assets/icon.png"
+  }
+}

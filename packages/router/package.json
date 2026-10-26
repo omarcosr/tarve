@@ -1,0 +1,43 @@
+{
+  "name": "@tarve/router",
+  "version": "0.7.0",
+  "description": "Stack and tab navigation for Tarve apps: typed path params, <RouterView>, <Link>, back keys and native screen transitions",
+  "license": "Apache-2.0",
+  "keywords": [
+    "tarve",
+    "router",
+    "navigation",
+    "stack",
+    "tabs"
+  ],
+  "homepage": "https://github.com/omarcosr/tarve/tree/main/packages/router#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/omarcosr/tarve.git",
+    "directory": "packages/router"
+  },
+  "bugs": {
+    "url": "https://github.com/omarcosr/tarve/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts",
+    "!src/**/*.test.tsx",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@tarve/core": "^0.7.0"
+  },
+  "engines": {
+    "bun": ">=1.4.0",
+    "node": ">=26.10.0"
+  }
+}

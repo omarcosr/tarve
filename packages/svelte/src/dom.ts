@@ -1303,7 +1303,11 @@ export const windowInstance = new TWindow();
 const VOID = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"]);
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: "\u00a0" };
 const decode = (text: string) => text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
-  if (entity[0] === "#") return String.fromCodePoint(entity[1]?.toLowerCase() === "x" ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10));
+  if (entity[0] === "#") {
+    const code = entity[1]?.toLowerCase() === "x" ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
+    // As HTML: NUL, surrogates and values past U+10FFFF become U+FFFD.
+    return String.fromCodePoint(code > 0 && code <= 0x10ffff && (code < 0xd800 || code > 0xdfff) ? code : 0xfffd);
+  }
   return ENTITIES[entity.toLowerCase()] ?? match;
 });
 const escape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

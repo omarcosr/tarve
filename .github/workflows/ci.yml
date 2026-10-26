@@ -163,11 +163,13 @@ jobs:
         with:
           node-version: "26.10.0"
 
+      # wasm32 + wasm-bindgen: the release gate's smoke:headless-runtimes builds @tarve/headless.
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
@@ -175,6 +177,10 @@ jobs:
           workspaces: native
           shared-key: windows-x64
           cache-on-failure: true
+
+      # Must match the wasm-bindgen crate version in native/Cargo.lock.
+      - name: Install wasm-bindgen
+        run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
 
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
@@ -284,6 +290,9 @@ jobs:
 
       - name: Node-only package and executable smoke
         run: bun scripts/smoke-node-package.ts
+
+      - name: Node-only tarve package smoke (deb, tar, zip, app-zip)
+        run: bun run smoke:node-cli-package
 
   # @tarve/headless renders with the WebAssembly build: no window, GPU or native library. Running
   # it on every OS (macOS on ARM included) checks that the stored image snapshots are byte-identical

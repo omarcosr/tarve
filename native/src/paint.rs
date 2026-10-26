@@ -3,13 +3,15 @@ use std::{
     sync::Arc,
 };
 
+mod inset_shadow;
+
 use vello::kurbo::Point;
 use vello::{
     Glyph, Scene,
     kurbo::{Affine, Rect, RoundedRect, Shape, Stroke},
     peniko::{
-        BlendMode, Blob, Color, ColorStop, Compose, Extend, Fill, FontData, Gradient,
-        ImageAlphaType, ImageBrush, ImageData, ImageFormat, Mix, color::DynamicColor,
+        Blob, Color, ColorStop, Extend, Fill, FontData, Gradient, ImageAlphaType, ImageBrush,
+        ImageData, ImageFormat, color::DynamicColor,
     },
 };
 
@@ -217,6 +219,25 @@ pub(crate) fn inner_corner_radii(radii: [f64; 4], border: [f64; 4]) -> (f64, f64
     )
 }
 
+/// `PaintTarget::outer_box_shadow` through a clip: the shadow's area minus `shape`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn clipped_outer_box_shadow<P: PaintTarget + ?Sized>(
+    target: &mut P,
+    transform: Affine,
+    area: Rect,
+    rect: Rect,
+    color: Color,
+    radius: f64,
+    std_dev: f64,
+    shape: &RoundedRect,
+) {
+    let mut outside = area.to_path(0.1);
+    outside.extend(shape.to_path(0.1));
+    target.push_clip(Fill::EvenOdd, transform, &outside);
+    target.box_shadow(transform, area, rect, color, radius, std_dev, false);
+    target.pop_layer();
+}
+
 pub(crate) trait PaintTarget {
     fn fill<S: Shape>(&mut self, fill: Fill, transform: Affine, color: Color, shape: &S);
     /// Fills `shape` with a gradient. Targets without gradient support paint
@@ -284,6 +305,21 @@ pub(crate) trait PaintTarget {
         std_dev: f64,
         invert: bool,
     );
+    /// An outer shadow: `box_shadow` outside `shape` (the box casting it), which it
+    /// never shows through. Renderers that can cut the box out in the shader override it.
+    #[allow(clippy::too_many_arguments)]
+    fn outer_box_shadow(
+        &mut self,
+        transform: Affine,
+        area: Rect,
+        rect: Rect,
+        color: Color,
+        radius: f64,
+        std_dev: f64,
+        shape: &RoundedRect,
+    ) {
+        clipped_outer_box_shadow(self, transform, area, rect, color, radius, std_dev, shape);
+    }
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine);
     /// A `<video>` picture with `transform` mapping its pixels into place.
     /// Renderers that sample the decoder's texture (D3D11) draw it directly;
@@ -417,6 +453,27 @@ impl<P: PaintTarget> PaintTarget for TransformTarget<'_, P> {
         );
     }
 
+    fn outer_box_shadow(
+        &mut self,
+        transform: Affine,
+        area: Rect,
+        rect: Rect,
+        color: Color,
+        radius: f64,
+        std_dev: f64,
+        shape: &RoundedRect,
+    ) {
+        self.inner.outer_box_shadow(
+            self.map(transform),
+            area,
+            rect,
+            color,
+            radius,
+            std_dev,
+            shape,
+        );
+    }
+
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine) {
         self.inner.draw_image(key, image, self.map(transform));
     }
@@ -487,19 +544,7 @@ impl PaintTarget for Scene {
             self.draw_blurred_rounded_rect_in(&area, transform, rect, color, radius, std_dev);
             return;
         }
-        // Inset: flood the area, then erase the blurred rectangle out of it.
-        self.push_layer(Fill::NonZero, BlendMode::default(), 1.0, transform, &area);
-        self.fill(Fill::NonZero, transform, color, None, &area);
-        self.push_layer(
-            Fill::NonZero,
-            BlendMode::new(Mix::Normal, Compose::DestOut),
-            1.0,
-            transform,
-            &area,
-        );
-        self.draw_blurred_rounded_rect_in(&area, transform, rect, Color::BLACK, radius, std_dev);
-        self.pop_layer();
-        self.pop_layer();
+        inset_shadow::draw(self, transform, area, rect, color, radius, std_dev);
     }
 
     fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S) {

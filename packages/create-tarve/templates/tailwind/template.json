@@ -1,0 +1,5 @@
+{
+  "name": "Tailwind",
+  "description": "a counter styled with Tailwind CSS 4 classes",
+  "entry": "app.tsx"
+}

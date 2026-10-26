@@ -133,7 +133,7 @@ export function NotesView({ notes }: { notes: Notes }) {
   const dirty = !!note && note.text !== note.saved;
   const appTheme = Theme.create(darkMode ? darkTheme : lightTheme);
   return (
-    <Window title={note ? `${dirty ? "● " : ""}${basename(note.path)} — Notes` : "Notes"} width={820} height={520} minWidth={520} minHeight={320}
+    <Window title={note ? `${dirty ? "● " : ""}${basename(note.path)} — Notes` : "Notes"} width={820} height={520} minWidth={360} minHeight={320}
       onFileDragEnter={() => { notes.dropping = true; }} onFileDragLeave={() => { notes.dropping = false; }}
       onFileDrop={event => { notes.dropping = false; for (const path of event.paths) notes.open(path); }} theme={appTheme}>
       <TitleBar>
@@ -149,7 +149,7 @@ export function NotesView({ notes }: { notes: Notes }) {
         </Row>
       </TitleBar>
       <Row style={{ flex: 1, minHeight: 0, align: "stretch", borderWidth: { top: 1 }, borderColor: c.border }}>
-        <Column style={{ width: 230, padding: 8, gap: 4, background: c.card, borderWidth: { right: 1 }, borderColor: c.border }}>
+        <Column style={{ width: 140, sm: { width: 230 }, shrink: 0, padding: 8, gap: 4, background: c.card, borderWidth: { right: 1 }, borderColor: c.border }}>
           <Text style={{ fontSize: 11, fontWeight: 600, foreground: c.mutedForeground, padding: { left: 6, top: 4, bottom: 4 } }}>OPEN NOTES</Text>
           <Scroll id="note-list" style={{ flex: 1 }} gap={2}>
             {notes.notes.length
@@ -162,7 +162,7 @@ export function NotesView({ notes }: { notes: Notes }) {
             ? <TextArea id="editor" value={note.text} onChange={value => { note.text = value; }} style={{ flex: 1, height: "auto", minHeight: 0, fontFamily: "Cascadia Mono, Consolas, monospace", fontSize: 13 }} />
             : <DropZone notes={notes} />}
           <Row style={{ justify: "between", gap: 12 }}>
-            <Text style={{ fontSize: 12, foreground: c.mutedForeground }}>{notes.dropping && note ? "Release to open" : notes.status}</Text>
+            <Text style={{ flex: 1, minWidth: 0, fontSize: 12, foreground: c.mutedForeground }}>{notes.dropping && note ? "Release to open" : notes.status}</Text>
             <Button size="sm" disabled={!dirty} onClick={() => notes.save()}>Save</Button>
           </Row>
         </Column>

@@ -26,6 +26,19 @@ pub fn register_font(bytes: Vec<u8>, generics: &str) {
     web_fonts::register(bytes, generics);
 }
 
+/// A zlib-wrapped deflate stream of `data` at `level` (0–9): @tarve/headless's PNG encoder,
+/// the same miniz_oxide the native library gives txiki.js and Android (src/zlib.rs).
+#[wasm_bindgen]
+pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
+    crate::zlib::deflate(data, level)
+}
+
+/// The bytes of a zlib stream; throws when `data` is not one.
+#[wasm_bindgen]
+pub fn inflate(data: &[u8]) -> Result<Vec<u8>, JsError> {
+    crate::zlib::inflate(data).map_err(|message| JsError::new(&message))
+}
+
 #[wasm_bindgen]
 pub struct WebTree {
     tree: Tree,

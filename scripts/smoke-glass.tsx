@@ -1,6 +1,6 @@
-// Liquid glass: a Glass box over sharp stripes shows them blurred (the D3D11 renderer),
-// while a plain translucent box the same size shows them sharp. On renderers without a
-// backdrop (wgpu, CPU) the glass box paints its tint only, and this smoke reports that.
+// Liquid glass: a Glass box over sharp stripes shows them blurred while a plain translucent
+// box the same size shows them sharp, and merged drops bridge their gap. Every renderer draws
+// the backdrop: D3D11, Vello (WGPU_BACKEND=dx12|vulkan|metal) and the CPU (TARVE_RENDERER=cpu).
 import { createApp, Glass, readPngRgba, View, Window } from "@tarve/core";
 import { strict as assert } from "node:assert";
 import { mkdirSync } from "node:fs";
@@ -59,8 +59,6 @@ try {
   const stripes = roughness(50, 160, 150, 190);
   assert.ok(stripes > 30, `stripes are sharp outside both boxes (${stripes.toFixed(1)})`);
   assert.ok(plain > 30, `a plain translucent box keeps the stripes sharp (${plain.toFixed(1)})`);
-  // D3D11 (Windows GPU) has a glyph atlas and the backdrop; wgpu and the CPU renderer paint the tint only.
-  const backdrop = process.platform === "win32" && typeof (await app.inspect()).glyphRasterizations === "number" && process.env.TARVE_RENDERER !== "cpu";
   // The darkest channel around the midpoint of each pair's gap: a bare stripe is saturated
   // (one channel near 0), under the merged pair's veil it is whitened.
   const whiteness = (x: number, y: number) => {
@@ -72,13 +70,9 @@ try {
   const apart = whiteness(270, 220);
   // The fused pair is one surface, so no edge light crosses the midpoint between them.
   assert.ok(apart < 40, `unmerged drops leave the gap between them bare (${apart})`);
-  if (backdrop) {
-    assert.ok(glass < 4, `the glass box blurs the stripes (${glass.toFixed(1)})`);
-    assert.ok(joined > 120, `merged drops bridge the gap between them (${joined})`);
-    console.log(`[smoke-glass] PASS: blurred backdrop ${glass.toFixed(1)} vs sharp ${plain.toFixed(1)}; merged gap ${joined} vs ${apart}`);
-  } else {
-    console.log(`[smoke-glass] PASS (no backdrop on this renderer: tint only, roughness ${glass.toFixed(1)})`);
-  }
+  assert.ok(glass < 4, `the glass box blurs the stripes (${glass.toFixed(1)})`);
+  assert.ok(joined > 120, `merged drops bridge the gap between them (${joined})`);
+  console.log(`[smoke-glass] PASS: blurred backdrop ${glass.toFixed(1)} vs sharp ${plain.toFixed(1)}; merged gap ${joined} vs ${apart}`);
   assert.ok((await app.inspect()).activeMotions > 0, "the capture happened during the motion");
   assert.deepEqual(errors, []);
 } finally {

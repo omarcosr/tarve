@@ -1,6 +1,9 @@
-/** node:child_process spawn over tjs.spawn: exit/error events and stream-like stdio. */
+/** node:child_process spawn over tjs.spawn: exit/error events and stream-like stdio. spawnSync: child-process-sync.ts. */
 import { Buffer } from "./buffer";
+import { spawnSync } from "./child-process-sync";
 import { EventEmitter } from "./events";
+
+export { spawnSync };
 
 type Stdio = "pipe" | "ignore" | "inherit";
 
@@ -148,4 +151,4 @@ export function spawn(command: string, args: readonly string[] | SpawnOptions = 
   return Array.isArray(args) ? new ChildProcess(command, args, options) : new ChildProcess(command, [], args as SpawnOptions);
 }
 
-export default { ChildProcess, spawn };
+export default { ChildProcess, spawn, spawnSync };
