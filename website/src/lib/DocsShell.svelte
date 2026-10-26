@@ -75,25 +75,29 @@
     </button>
     <nav class="docs-nav" aria-label="Documentation" bind:this={nav}>
       {#if !needle}
-        <p class="docs-group">Guides</p>
+        <p class="docs-group">Getting started</p>
         <a href="/docs" class:active={!name}>Overview</a>
-        <a href="/docs#getting-started">Getting started</a>
+        <a href="/docs#getting-started">Install and first window</a>
         <a href="/docs#rendering">How rendering works</a>
+        <a href="/docs/runtimes" class:active={name === "Runtimes"} aria-current={name === "Runtimes" ? "page" : undefined}>Runtimes</a>
+        <a href="/docs/tooling" class:active={name === "Tooling"} aria-current={name === "Tooling" ? "page" : undefined}>Project and dev tools</a>
+        <p class="docs-group">Building UI</p>
         <a href="/docs#common-props">Common props</a>
         <a href="/docs/tailwind" class:active={name === "Tailwind"} aria-current={name === "Tailwind" ? "page" : undefined}>Tailwind classes</a>
-        <a href="/docs/desktop" class:active={name === "Desktop"} aria-current={name === "Desktop" ? "page" : undefined}>Desktop integration</a>
-        <a href="/docs/system" class:active={name === "System"} aria-current={name === "System" ? "page" : undefined}>System integration</a>
-        <a href="/docs/media" class:active={name === "Media"} aria-current={name === "Media" ? "page" : undefined}>Audio and video</a>
         <a href="/docs/motion" class:active={name === "Motion"} aria-current={name === "Motion" ? "page" : undefined}>Motion</a>
-        <a href="/docs/updates" class:active={name === "Updates"} aria-current={name === "Updates" ? "page" : undefined}>Auto-updates</a>
-        <a href="/docs/tooling" class:active={name === "Tooling"} aria-current={name === "Tooling" ? "page" : undefined}>Project and dev tools</a>
-        <a href="/docs/runtimes" class:active={name === "Runtimes"} aria-current={name === "Runtimes" ? "page" : undefined}>Runtimes</a>
-        <a href="/docs/shipping" class:active={name === "Shipping"} aria-current={name === "Shipping" ? "page" : undefined}>Build and package</a>
-        <a href="/docs/platform" class:active={name === "Platform"} aria-current={name === "Platform" ? "page" : undefined}>Platform APIs</a>
+        <a href="/docs/media" class:active={name === "Media"} aria-current={name === "Media" ? "page" : undefined}>Audio and video</a>
         <a href="/docs/router" class:active={name === "Router"} aria-current={name === "Router" ? "page" : undefined}>Navigation</a>
+        <p class="docs-group">App and OS</p>
+        <a href="/docs/desktop" class:active={name === "Desktop"} aria-current={name === "Desktop" ? "page" : undefined}>Windows and links</a>
+        <a href="/docs/system" class:active={name === "System"} aria-current={name === "System" ? "page" : undefined}>System integration</a>
+        <a href="/docs/platform" class:active={name === "Platform"} aria-current={name === "Platform" ? "page" : undefined}>Platform APIs</a>
+        <a href="/docs/plugins" class:active={name === "Plugins"} aria-current={name === "Plugins" ? "page" : undefined}>Plugins</a>
+        <p class="docs-group">Testing</p>
         <a href="/docs/testing" class:active={name === "Testing"} aria-current={name === "Testing" ? "page" : undefined}>Testing</a>
         <a href="/docs/automation" class:active={name === "Automation"} aria-current={name === "Automation" ? "page" : undefined}>Automation and errors</a>
-        <a href="/docs/plugins" class:active={name === "Plugins"} aria-current={name === "Plugins" ? "page" : undefined}>Plugins</a>
+        <p class="docs-group">Shipping</p>
+        <a href="/docs/shipping" class:active={name === "Shipping"} aria-current={name === "Shipping" ? "page" : undefined}>Build and package</a>
+        <a href="/docs/updates" class:active={name === "Updates"} aria-current={name === "Updates" ? "page" : undefined}>Auto-updates</a>
       {/if}
       {#each groups as group (group.id)}
         <p class="docs-group">{group.title}</p>
