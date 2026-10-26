@@ -397,6 +397,17 @@ Use `AnimatePresence` when a node must stay mounted long enough to finish an exi
 
 Base numeric style targets participate in native motion. Interactive `hover`, `focus`, `focusVisible`, `active`, and `disabled` overrides are still applied immediately rather than creating state-transition tracks.
 
+## Audio and video
+
+`<audio>` and `<video>` work like HTMLMediaElements, played by the native runtime: `src` (path, `file://`, `data:` or a streamed `http(s)://` URL), `autoPlay`, `loop`, `muted`, `volume`, `controls` (a default control bar) and, on `<video>`, `fit` (`contain`, `cover`, `fill`, `none`). Events: `onLoadedMetadata`, `onPlay`, `onPause`, `onTimeUpdate`, `onSeeked`, `onEnded` (`{ currentTime, duration, paused, videoWidth, videoHeight }`) and `onError(message)`. `app.media(id)` gives `play`, `pause`, `seek`, `setVolume` and `setMuted`.
+
+```tsx
+<video id="film" src="https://example.com/film.mp4" autoPlay muted loop controls fit="cover" style={{ width: "100%", height: 400 }} />
+<audio id="song" src={track.url} autoPlay onEnded={next} onError={reload} />
+```
+
+Video uses the platform decoder: Media Foundation on Windows (GPU textures sampled directly by the D3D11 renderer, on their own composition layer), GStreamer on Linux, MediaPlayer on Android; macOS is not supported yet. Audio is decoded by Symphonia and follows output-device changes. Remote files stream with HTTP range requests and retries. `app.systemMedia({ title, artist, artwork, playing, duration, position, onAction })` connects the system media controls and media keys; on Android playback continues in the background with a media notification.
+
 ## Rich content
 
 `Markdown`, `Code`, and `Diff` are native leaf nodes, so large documents do not expand into thousands of TSX children.

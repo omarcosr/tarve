@@ -147,6 +147,42 @@ app.get("/docs/platform", (c) => {
   });
 });
 
+app.get("/docs/media", (c) => {
+  const title = "Audio and video — Tarve docs";
+  return c.render("docs/media", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/media", title, "<audio> and <video> in Tarve: native decoders, streaming, events, controls, media keys and background playback."),
+  });
+});
+
+app.get("/docs/system", (c) => {
+  const title = "System integration — Tarve docs";
+  return c.render("docs/system", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/system", title, "Tray icons, global hotkeys, file dialogs, desktop widgets, clipboard paste, app icon and metadata, custom title bars and icons in Tarve."),
+  });
+});
+
+app.get("/docs/motion", (c) => {
+  const title = "Motion — Tarve docs";
+  return c.render("docs/motion", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/motion", title, "Native transitions in Tarve: interpolated in Rust, retargetable, with motionFrom, AnimatePresence and onTransitionEnd."),
+  });
+});
+
+app.get("/docs/automation", (c) => {
+  const title = "Automation and errors — Tarve docs";
+  return c.render("docs/automation", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/automation", title, "TestRenderer on the real renderer, @tarve/headless in WebAssembly, pixel regression helpers and the onError handler in Tarve."),
+  });
+});
+
 app.get("/docs/components/:name", (c) => {
   const doc = buildComponentDoc(c.req.param("name"));
   if (!doc) return c.notFound();
