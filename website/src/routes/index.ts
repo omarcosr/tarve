@@ -84,6 +84,69 @@ app.get("/docs/desktop", (c) => {
   });
 });
 
+app.get("/docs/tooling", (c) => {
+  const title = "Project and dev tools — Tarve docs";
+  return c.render("docs/tooling", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/tooling", title, "create-tarve templates, tarve dev hot reload, the error overlay, the frame-time graph and the visual inspector."),
+  });
+});
+
+app.get("/docs/router", (c) => {
+  const title = "Navigation — Tarve docs";
+  return c.render("docs/router", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/router", title, "@tarve/router: stack and tab navigation with typed params, transitions and back gestures for Tarve apps."),
+  });
+});
+
+app.get("/docs/testing", (c) => {
+  const title = "Testing — Tarve docs";
+  return c.render("docs/testing", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/testing", title, "@tarve/test: Testing Library–style tests, queries, events and image snapshots on the WebAssembly runtime."),
+  });
+});
+
+app.get("/docs/plugins", (c) => {
+  const title = "Plugins — Tarve docs";
+  return c.render("docs/plugins", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/plugins", title, "Tarve plugins: definePlugin, typed commands, lifecycle hooks and native libraries through FFI."),
+  });
+});
+
+app.get("/docs/shipping", (c) => {
+  const title = "Build and package — Tarve docs";
+  return c.render("docs/shipping", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/shipping", title, "tarve build, tarve package (deb, tar.gz, zip, MSIX), Android APK and App Bundle builds, and macOS status."),
+  });
+});
+
+app.get("/docs/runtimes", (c) => {
+  const title = "Runtimes — Tarve docs";
+  return c.render("docs/runtimes", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/runtimes", title, "Bun, Node.js, txiki.js/QuickJS-ng and Go: what each Tarve runtime supports."),
+  });
+});
+
+app.get("/docs/platform", (c) => {
+  const title = "Platform APIs — Tarve docs";
+  return c.render("docs/platform", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/platform", title, "Deep links, file associations, notifications, permissions, share sheet, location and biometrics in Tarve."),
+  });
+});
+
 app.get("/docs/components/:name", (c) => {
   const doc = buildComponentDoc(c.req.param("name"));
   if (!doc) return c.notFound();
