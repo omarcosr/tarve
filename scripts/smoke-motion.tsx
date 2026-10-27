@@ -15,6 +15,8 @@ if (!requestedRenderer) {
       ...process.env,
       TARVE_SMOKE_RENDERER: mode.renderer,
       TARVE_SMOKE_LABEL: mode.label,
+      // Transitions are what is tested: the machine's reduced-motion setting would skip them.
+      TARVE_REDUCED_MOTION: "0",
     };
     if (mode.wgpuBackend) env.WGPU_BACKEND = mode.wgpuBackend;
     else delete env.WGPU_BACKEND;

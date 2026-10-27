@@ -48,8 +48,9 @@ if (unknown.length > 0) throw new Error(`TARVE_VERIFY_SKIP names unknown steps: 
 const steps = allSteps.filter(step => !skipped.has(step));
 // Test windows open off screen without taking the foreground (someone may be
 // working beside the run), and every D3D11 partial redraw is checked against a
-// full one. Either can be turned off by setting it to 0.
-const stepEnvironment = { TARVE_BACKGROUND: "1", TARVE_GPU_DAMAGE_CHECK: "1", ...process.env };
+// full one. Either can be turned off by setting it to 0. Motion runs whatever the
+// machine's reduced-motion setting (CI runners turn animations off).
+const stepEnvironment = { TARVE_BACKGROUND: "1", TARVE_GPU_DAMAGE_CHECK: "1", TARVE_REDUCED_MOTION: "0", ...process.env };
 // Steps that need the keyboard focus (UI Automation focus checks): run only with TARVE_BACKGROUND=0.
 const foregroundOnly = new Set(["smoke:accessibility"]);
 const background = stepEnvironment.TARVE_BACKGROUND !== "0";
