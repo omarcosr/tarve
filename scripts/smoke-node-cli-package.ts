@@ -132,8 +132,11 @@ try {
   mkdirSync(join(directory, "assets"));
   writeFileSync(join(directory, "app.tsx"), readFileSync(join(root, "examples/node-smoke/node-smoke.tsx"), "utf8").replaceAll("../assets/", "./assets/"));
   copyFileSync(join(root, "examples/assets/studio.png"), join(directory, "assets/studio.png"));
-  if (process.env.TARVE_NODE_TARBALL) {
-    run(npm, ["install", "--ignore-scripts", "--no-audit", "--no-fund", resolve(process.env.TARVE_NODE_TARBALL)], 240_000);
+  // The tarball `bun run pack` left in dist/ (verify runs it first) when no staging is linked.
+  const packed = process.env.TARVE_NODE_TARBALL ?? (existsSync(join(root, "dist/npm/cli.js")) ? undefined
+    : readdirSync(join(root, "dist")).filter(name => /^tarve-core-.*\.tgz$/.test(name)).map(name => join(root, "dist", name)).at(-1));
+  if (packed) {
+    run(npm, ["install", "--ignore-scripts", "--no-audit", "--no-fund", resolve(packed)], 240_000);
   } else {
     // The local staging (dist/npm + native/) has the published layout; link it as the installed package.
     if (!existsSync(join(root, "dist/npm/cli.js"))) throw new Error("dist/npm/cli.js is missing: run `bun run package:local` first.");
