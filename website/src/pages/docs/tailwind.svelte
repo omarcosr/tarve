@@ -30,10 +30,10 @@
     ["Spacing & size", "p-*, px/py/pt/pr/pb/pl-*, m-*, mx-auto, w-*, h-*, size-*, min/max-w-*, min/max-h-*: the 4 px scale, fractions (w-1/2), full, the container scale (max-w-md) and arbitrary values (w-[320px], h-[50%])"],
     ["Colour", "bg-*, text-*, border-*, ring-*, outline-*, from/via/to-*: the full Tailwind 4 palette, white/black/transparent, theme tokens (bg-primary, text-muted-foreground, border-border…) and /opacity modifiers (bg-primary/10)"],
     ["Typography", "text-xs…9xl and text-sm/6, font-thin…black, font-sans/serif/mono, leading-*, tracking-*, text-left/center/right/justify, truncate, line-clamp-*, underline, line-through, uppercase/lowercase/capitalize, italic"],
-    ["Borders & effects", "border, border-x/t/…-*, rounded-*, rounded-t/tl/…-*, shadow-*, inset-shadow-*, text-shadow-*, ring-*, outline-*, opacity-*, backdrop-blur-*, backdrop-saturate-* (Liquid Glass material)"],
+    ["Borders & effects", "border, border-x/t/…-*, rounded-*, rounded-t/tl/…-*, shadow-*, inset-shadow-*, text-shadow-*, ring-*, outline-*, opacity-*, blur-* (CSS filter), backdrop-blur-*, backdrop-saturate-* (backdrop blur)"],
     ["Gradients", "bg-linear-to-r, bg-linear-45, bg-radial, bg-conic, bg-gradient-to-* with from-*, via-*, to-* and their positions (from-10%)"],
     ["Motion", "transition, transition-*, duration-*, delay-*, ease-*, animate-spin, scale-*, translate-x/y-*, rotate-*, skew-*, origin-*"],
-    ["Interaction", "cursor-*, select-none/text/all, pointer-events-none/auto, object-*, aspect-*"],
+    ["Interaction", "cursor-* (cursor-none hides it), select-none/text/all, pointer-events-none/auto, object-*, aspect-*"],
   ];
 
   const variants = [

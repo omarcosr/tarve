@@ -42,7 +42,11 @@ impl DisplayList {
         let paints = self.ops[range.clone()].iter().any(|op| {
             !matches!(
                 op.op,
-                Op::PushClip { .. } | Op::PushOpacity { .. } | Op::Pop | Op::Glass { .. }
+                Op::PushClip { .. }
+                    | Op::PushOpacity { .. }
+                    | Op::PushMask { .. }
+                    | Op::Pop
+                    | Op::Glass { .. }
             ) && op.bounds.intersect(frame).area() > 0.0
         });
         if !paints {
@@ -87,7 +91,9 @@ impl DisplayList {
             let recorded = &self.ops[index];
             let visible = recorded.bounds.intersect(region).area() > 0.0;
             match &recorded.op {
-                Op::PushClip { close, .. } | Op::PushOpacity { close, .. }
+                Op::PushClip { close, .. }
+                | Op::PushOpacity { close, .. }
+                | Op::PushMask { close, .. }
                     if *close < range.start || !visible =>
                 {
                     index = close + 1;
@@ -113,6 +119,14 @@ impl DisplayList {
                     context.set_fill_rule(Fill::NonZero);
                     context.set_transform(origin * *transform);
                     context.push_layer(Some(path), None, Some(*alpha), None, None);
+                    depth += 1;
+                }
+                Op::PushMask {
+                    transform, path, ..
+                } => {
+                    context.set_fill_rule(Fill::NonZero);
+                    context.set_transform(origin * *transform);
+                    context.push_layer(Some(path), Some(mask_blend()), None, None, None);
                     depth += 1;
                 }
                 _ => {}
@@ -152,6 +166,20 @@ impl DisplayList {
                     context.set_fill_rule(Fill::NonZero);
                     context.set_transform(origin * *transform);
                     context.push_layer(Some(path), None, Some(*alpha), None, None);
+                    depth += 1;
+                }
+                Op::PushMask {
+                    transform,
+                    path,
+                    close,
+                } => {
+                    if !visible {
+                        index = close + 1;
+                        continue;
+                    }
+                    context.set_fill_rule(Fill::NonZero);
+                    context.set_transform(origin * *transform);
+                    context.push_layer(Some(path), Some(mask_blend()), None, None, None);
                     depth += 1;
                 }
                 Op::Pop => {
@@ -319,4 +347,12 @@ fn draw_glass_tint(context: &mut RenderContext, origin: Affine, call: &GlassCall
         context.set_fill_rule(Fill::NonZero);
         context.fill_path(&shape.to_path(0.1));
     }
+}
+
+/// DestIn: a mask layer keeps what lies under it by the alpha it draws.
+fn mask_blend() -> vello_cpu::peniko::BlendMode {
+    vello_cpu::peniko::BlendMode::new(
+        vello_cpu::peniko::Mix::Normal,
+        vello_cpu::peniko::Compose::DestIn,
+    )
 }

@@ -7,7 +7,8 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
-export const VERSION = "0.7.0";
+/** The release of create-tarve, which is also the Tarve release its templates depend on. */
+export const VERSION = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
 export const TEMPLATES_DIR = join(dirname(fileURLToPath(import.meta.url)), "templates");
 export const RUNTIMES = /** @type {const} */ (["bun", "node"]);
 
@@ -162,7 +163,7 @@ export function packageJson(template, name, title, runtime) {
       typecheck: "tsc --noEmit",
     },
     tarve: { name: title, ...(template.tarve ?? {}) },
-    dependencies: { "@tarve/core": `^${VERSION}`, ...(template.dependencies ?? {}) },
+    dependencies: { "@tarve/core": `^${VERSION}`, ...Object.fromEntries(Object.entries(template.dependencies ?? {}).map(([name, range]) => [name, range.replaceAll("__TARVE_VERSION__", VERSION)])) },
     devDependencies: {
       ...(runtime === "bun" ? { "@types/bun": "^1.4.2" } : { "@types/node": ">=24" }),
       typescript: "^7.0.2",

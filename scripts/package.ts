@@ -93,6 +93,7 @@ const entries = [
   ["packages/core/src/jsx-dev-runtime.ts", "jsx-dev-runtime.js"],
   ["packages/core/src/bridge/runtime.ts", "runtime.js"],
   ["packages/core/src/embedded-assets.ts", "embedded-assets.js"],
+  ["packages/core/src/pack-host.ts", "pack-host.js"],
   ["packages/core/build.ts", "build.js"],
   ["packages/core/cli.ts", "cli.js"],
   ["packages/core/node-build.ts", "node-build.js"],

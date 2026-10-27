@@ -85,6 +85,7 @@
         <a href="/docs#common-props">Common props</a>
         <a href="/docs/tailwind" class:active={name === "Tailwind"} aria-current={name === "Tailwind" ? "page" : undefined}>Tailwind classes</a>
         <a href="/docs/motion" class:active={name === "Motion"} aria-current={name === "Motion" ? "page" : undefined}>Motion</a>
+        <a href="/docs/effects" class:active={name === "Effects"} aria-current={name === "Effects" ? "page" : undefined}>Visual effects</a>
         <a href="/docs/media" class:active={name === "Media"} aria-current={name === "Media" ? "page" : undefined}>Audio and video</a>
         <a href="/docs/router" class:active={name === "Router"} aria-current={name === "Router" ? "page" : undefined}>Navigation</a>
         <p class="docs-group">App and OS</p>

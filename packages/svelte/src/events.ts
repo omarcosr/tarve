@@ -13,7 +13,10 @@ export function connectNativeEvents(app: AppHandle): () => void {
   setFocusHook(element => { if (element) app.focus(nativeIdOf(element)); });
   setMediaHook((element, action, value) => {
     const media = app.media(nativeIdOf(element));
-    if (action === "seek") media.seek(value ?? 0); else media[action]();
+    if (action === "seek") media.seek(value ?? 0);
+    else if (action === "audioTrack") media.setAudioTrack(value ?? 0);
+    else if (action === "textTrack") media.setTextTrack(value ?? null);
+    else media[action]();
   });
   const off = app.onEvent((event: NativeEvent) => {
     switch (event.type) {

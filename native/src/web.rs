@@ -430,7 +430,7 @@ impl WebTree {
         }
     }
 
-    /// The `windowAction` (`minimize`, `toggleMaximize`, `close`) of a node, if it has one.
+    /// The `windowAction` (`minimize`, `toggleMaximize`, `toggleFullscreen`, `close`) of a node, if it has one.
     #[wasm_bindgen(js_name = windowAction)]
     pub fn window_action(&self, id: &str) -> Option<String> {
         self.tree

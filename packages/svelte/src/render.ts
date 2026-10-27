@@ -167,7 +167,13 @@ function addMedia(element: THTMLMediaElement, out: Record<string, any>): void {
   out.onTimeUpdate = (info: object) => element._media("timeupdate", info);
   out.onSeeked = (info: object) => element._media("seeked", info);
   out.onEnded = (info: object) => element._media("ended", info);
-  out.onError = (message: string) => element._media("error", { message });
+  out.onWaiting = (info: object) => element._media("waiting", info);
+  out.onCanPlay = (info: object) => element._media("canplay", info);
+  out.onProgress = (info: object) => element._media("progress", info);
+  out.onAudioTracksChange = (info: object) => element._media("audiotracks", info);
+  out.onTextTracksChange = (info: object) => element._media("texttracks", info);
+  out.onCueChange = (info: object) => element._media("cuechange", info);
+  out.onError = (message: string, error: { code: string }) => element._media("error", { message, code: error?.code });
 }
 
 function addEvents(element: TElement, tag: string, out: Record<string, any>): void {
@@ -335,7 +341,7 @@ function withGenerated(content: Child, generated: { before?: GeneratedContent; a
 /**
  * `<titlebar>`: Tarve's custom title bar (the window drops its native frame). With
  * children they are its content; otherwise it shows `title`. Any element can be a
- * window control with `window-action="minimize|toggleMaximize|close"` and a drag handle with `drag-region`.
+ * window control with `window-action="minimize|toggleMaximize|toggleFullscreen|close"` and a drag handle with `drag-region`.
  */
 function titleBar(element: TElement, out: Record<string, any>): VNode {
   const flag = (name: string) => { const value = element.getAttribute(name); return value === null ? undefined : value !== "false"; };
@@ -388,13 +394,13 @@ export function build(element: TElement): VNode {
   if (tag === "audio") {
     const media = element as THTMLMediaElement;
     settle(element);
-    return jsx("audio", { ...out, volume: media.volume, muted: media.muted, autoPlay: element.hasAttribute("autoplay"), loop: element.hasAttribute("loop"), controls: element.hasAttribute("controls") });
+    return jsx("audio", { ...out, volume: media.volume, muted: media.muted, playbackRate: media.playbackRate, autoPlay: element.hasAttribute("autoplay"), loop: element.hasAttribute("loop"), controls: element.hasAttribute("controls") });
   }
   if (tag === "video") {
     // The platform decoder draws the picture; CSS object-fit picks how it fills the box.
     const media = element as THTMLMediaElement;
     settle(element);
-    return jsx("video", { ...out, volume: media.volume, muted: media.muted, autoPlay: element.hasAttribute("autoplay"), loop: element.hasAttribute("loop"), controls: element.hasAttribute("controls") });
+    return jsx("video", { ...out, volume: media.volume, muted: media.muted, playbackRate: media.playbackRate, autoPlay: element.hasAttribute("autoplay"), loop: element.hasAttribute("loop"), controls: element.hasAttribute("controls") });
   }
   if (tag === "input") {
     const type = element.type;

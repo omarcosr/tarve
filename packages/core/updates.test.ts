@@ -126,7 +126,7 @@ test("release → check → download → install", async () => {
 
 test("downloadUpdate rejects tampered, short, oversized and non-executable files and leaves nothing behind", async () => {
   const body = native("payload");
-  const update: Update = { url: "https://cdn.test/a.bin", sha256: sha(body), size: body.length, version: "2.0.0", currentVersion: "1.0.0", pubDate: "", platform: host };
+  const update: Update = { kind: "executable", url: "https://cdn.test/a.bin", sha256: sha(body), size: body.length, version: "2.0.0", currentVersion: "1.0.0", pubDate: "", platform: host };
   const target = join(dir, "dl");
   const attempt = (data: string, headers?: Record<string, string>, extra: Partial<Update> = {}) =>
     downloadUpdate({ ...update, ...extra }, { path: target, fetch: serve({ "a.bin": data }, headers) });

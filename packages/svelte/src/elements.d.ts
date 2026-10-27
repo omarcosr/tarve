@@ -21,7 +21,7 @@ declare module "svelte/elements" {
     /** Drag the window by this element (a custom title bar, a widget body). */
     "drag-region"?: Flag;
     /** Make this element a window control. */
-    "window-action"?: "minimize" | "toggleMaximize" | "close" | undefined | null;
+    "window-action"?: "minimize" | "toggleMaximize" | "toggleFullscreen" | "close" | undefined | null;
   }
 
   export interface SvelteHTMLElements {

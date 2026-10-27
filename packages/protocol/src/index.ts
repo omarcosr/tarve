@@ -1,8 +1,9 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 6;
-export const PROTOCOL_VERSION = 60;
+export const PROTOCOL_VERSION = 61;
+export * from "./values";
+import type { Length, NodeKind, Insets, Margins, CornerRadius, OutlineStyle, BorderStyle, TextShadow, Transform, BoxShadow, Gradient, UserSelect, TextDecoration, SyntaxTheme, TextHighlight } from "./values";
 export type Renderer = "auto" | "gpu" | "cpu";
-export type Length = number | `${number}%` | "auto";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
 export type NumericMotionProperty = "width" | "height" | "top" | "right" | "bottom" | "left" | "opacity" | "radius";
 /** Colour and shadow properties also transition on hover/active/focus/disabled changes. */
@@ -15,99 +16,31 @@ export interface MotionTransition {
   delay?: number;
   easing?: MotionEasing;
 }
+/** Values an animation moves between: numbers, colours/gradients, shadows and a transform. */
+export type AnimationValues = MotionValues & Pick<StateStyle, "background" | "foreground" | "borderColor" | "boxShadow" | "textShadow">;
+/**
+ * CSS `animation` over two keyframes. `from` names the animated properties; `to` defaults to the
+ * style's own value for each. `iterations` (1 by default) may be `"infinite"`; `direction:
+ * "alternate"` plays every other run backwards. A changed animation starts over, an unchanged one
+ * runs on through re-renders, removing it stops it (the style's own values show again).
+ */
+export interface StyleAnimation {
+  from: AnimationValues;
+  to?: AnimationValues;
+  /** One run, in milliseconds (1000 by default). */
+  duration?: number;
+  delay?: number;
+  easing?: MotionEasing;
+  iterations?: number | "infinite";
+  direction?: "normal" | "alternate";
+}
 export type MotionTransitions = Partial<Record<MotionProperty | "all", MotionTransition>>;
-export type MotionValues = Partial<Record<NumericMotionProperty, number>>;
-export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "markdown" | "code" | "diff" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter" | "video";
-export type SvgElementName = "path" | "circle" | "ellipse" | "g" | "line" | "polygon" | "polyline" | "rect";
-export type SvgAttributeValue = string | number;
-export type SvgAttributes = Record<string, SvgAttributeValue>;
-export type SvgNode =
-  | readonly [SvgElementName, SvgAttributes]
-  | readonly [SvgElementName, SvgAttributes, readonly SvgNode[]];
-export type Insets = number | { top?: number; right?: number; bottom?: number; left?: number };
-/** A margin side: px, a percentage of the container, or `"auto"` (CSS auto margins centre a box or push it aside). */
-export type MarginSide = number | `${number}%` | "auto";
-export type Margins = MarginSide | { top?: MarginSide; right?: MarginSide; bottom?: MarginSide; left?: MarginSide };
-/** Corner radii: a number rounds every corner; an object names each (missing corners are square). */
-export type CornerRadius = number | { topLeft?: number; topRight?: number; bottomRight?: number; bottomLeft?: number };
-export type OutlineStyle = "dotted" | "dashed" | "solid" | "double" | "groove" | "ridge" | "inset" | "outset" | "none" | "hidden";
-/** Same values as OutlineStyle. Non-solid styles apply when all four border widths are equal. */
-export type BorderStyle = OutlineStyle;
-/** Offset copy of the text; `blur` is the CSS blur radius (sigma = blur / 2, max 200), 0 for a solid copy. */
-export interface TextShadow { x?: number; y?: number; blur?: number; color: string }
-/** CSS-like box shadow. `blur` is the CSS blur radius (sigma = blur / 2); `inset` paints inside the padding box. */
-/** Paint-time translate/scale about the box centre. Hit testing follows it; layout does not. */
-/**
- * Paint-time transform about the box's origin (its centre unless `originX`/`originY`, fractions
- * of the box, say otherwise): translate, scale, `rotate` and `skewX`/`skewY` in degrees.
- */
-export interface Transform {
-  x?: number; y?: number; scale?: number; scaleX?: number; scaleY?: number;
-  rotate?: number; skewX?: number; skewY?: number; originX?: number; originY?: number;
-}
-export interface BoxShadow { x?: number; y?: number; blur?: number; spread?: number; color: string; inset?: boolean }
-/** Gradient length: a number is px; strings take `px` or `%`. */
-export type GradientLength = number | `${number}px` | `${number}%`;
-/**
- * A colour stop. A number `offset` is a fraction 0..1 of the gradient line (or radial ray);
- * strings take `px` or `%`. Omitted offsets are spread evenly and positions never go back, as in CSS.
- */
-export interface GradientStop { color: string; offset?: number | `${number}px` | `${number}%` }
-export type GradientSide = "top" | "bottom" | "left" | "right" | "top left" | "top right" | "bottom left" | "bottom right";
-/** CSS `linear-gradient`: `angle` in CSS degrees (0 = to top, 90 = to right, default 180), or `to` a side/corner. */
-export interface LinearGradient { type: "linear"; angle?: number; to?: GradientSide; repeating?: boolean; stops: readonly (GradientStop | string)[] }
-/**
- * Radial centre. A number is a fraction of the box; strings take `px` or `%`.
- * `xEdge: "right"` / `yEdge: "bottom"` measure from the far edge (CSS `right 10px bottom 20%`).
- */
-export interface GradientCentre {
-  x?: number | `${number}px` | `${number}%`; y?: number | `${number}px` | `${number}%`;
-  xEdge?: "left" | "right"; yEdge?: "top" | "bottom";
-}
-export type RadialExtent = "closest-side" | "closest-corner" | "farthest-side" | "farthest-corner";
-/**
- * CSS `radial-gradient`. `at` is the centre as fractions of the box (default 0.5, 0.5).
- * `size` is an extent keyword (default `farthest-corner`), one length (circle radius) or two (ellipse radii).
- */
-export interface RadialGradient {
-  type: "radial"; shape?: "ellipse" | "circle"; at?: GradientCentre;
-  size?: RadialExtent | GradientLength | readonly [GradientLength, GradientLength];
-  repeating?: boolean; stops: readonly (GradientStop | string)[];
-}
-/** A conic colour stop: a number is a fraction of a turn; strings take `%`, `deg`, `turn`, `rad` or `grad`. */
-export interface ConicGradientStop { color: string; offset?: number | `${number}%` | `${number}deg` | `${number}turn` | `${number}rad` | `${number}grad` }
-/**
- * CSS `conic-gradient`: `from` in CSS degrees (0 points up, clockwise; default 0) and `at` the centre
- * (default the box centre). Stops sweep one turn clockwise from `from`.
- */
-export interface ConicGradient {
-  type: "conic"; from?: number; at?: GradientCentre;
-  repeating?: boolean; stops: readonly (ConicGradientStop | string)[];
-}
-export type Gradient = LinearGradient | RadialGradient | ConicGradient;
-export type UserSelect = "auto" | "text" | "none" | "all";
-export type TextDecoration = "none" | "underline" | "overline" | "line-through";
-export interface SyntaxTheme {
-  comment: string; keyword: string; string: string; stringSpecial: string; escape: string;
-  number: string; boolean: string; typeName: string; typeBuiltin: string; constructor: string;
-  function: string; functionBuiltin: string; macro: string; property: string; constant: string;
-  variable: string; variableSpecial: string; parameter: string; operator: string; punctuation: string;
-  tag: string; attribute: string; label: string; embedded: string; invalid: string;
-}
-export interface TextHighlightRange { start: number; end: number }
-export interface TextHighlight {
-  query?: string;
-  ranges?: TextHighlightRange[];
-  activeIndex?: number;
-  caseSensitive?: boolean;
-  wholeWord?: boolean;
-  color?: string;
-  activeColor?: string;
-}
+/** Starting (`motionFrom`, `enter`) or ending (`exit`) values: numbers, and a `transform` (object or CSS string). */
+export type MotionValues = Partial<Record<NumericMotionProperty, number>> & { transform?: Transform | string };
 /**
  * Liquid-glass material: what is behind the box shows through blurred and bent at the
- * edges, under the box's `background` colour as a tint. The D3D11 renderer paints it;
- * other renderers paint the tint alone.
+ * edges, under the box's `background` colour as a tint. Every renderer paints it
+ * (D3D11, Vello and the CPU renderer); with only `blur` it is a plain backdrop blur.
  */
 export interface GlassMaterial {
   /** Blur radius in px of what is behind the box (CSS `backdrop-filter: blur()`), 0–64. */
@@ -131,6 +64,24 @@ export interface GlassMaterial {
 export interface StateStyle {
   /** Liquid-glass material behind the box; `background` is its tint. */
   glass?: GlassMaterial;
+  /** CSS `backdrop-filter: blur(n)`: what lies behind the box, blurred (a glass without lens or rim). */
+  backdropBlur?: number;
+  /** CSS `backdrop-filter` with `blur()` and `saturate()`. */
+  backdropFilter?: string;
+  /**
+   * CSS `filter`: `"blur(12px)"`, `"drop-shadow(0 2px 6px #0008)"` or both, or the object form. A solid
+   * childless box blurs as it paints; anything else (children, text, images, an icon's shadow)
+   * is rasterized on the CPU through the filter and drawn as an image.
+   */
+  filter?: string | { blur?: number; dropShadow?: { x: number; y: number; blur?: number; color: string } };
+  /**
+   * CSS `mask-image` with a gradient (`"linear-gradient(to bottom, black 60%, transparent)"`):
+   * the box and its content keep the gradient's alpha and nothing outside the box. The D3D11
+   * renderer applies a linear gradient's first-to-last stop ramp (radial masks: Vello and CPU).
+   */
+  maskImage?: string | Gradient;
+  /** CSS multiple backgrounds over `background`, the first on top. A comma list of gradients in `background` does the same. */
+  backgroundLayers?: (string | Gradient)[];
   /** Colour, gradient object, or CSS `linear-gradient(…)` / `radial-gradient(…)` string. */
   background?: string | Gradient; foreground?: string | Gradient; borderColor?: string | Gradient; borderStyle?: BorderStyle; radius?: CornerRadius;
   opacity?: number;
@@ -173,8 +124,8 @@ export interface Style extends StateStyle {
   columns?: number | string;
   /** CSS `grid-column` / `grid-row` placement: `"span 2"`, `2`, `"1 / 3"`. */
   gridColumn?: number | string; gridRow?: number | string;
-  /** CSS `cursor` keyword; inherited by descendants. */
-  cursor?: "auto" | "default" | "pointer" | "text" | "vertical-text" | "move" | "grab" | "grabbing" | "not-allowed" | "no-drop" | "wait" | "progress" | "help" | "crosshair" | "copy" | "alias" | "context-menu" | "cell" | "zoom-in" | "zoom-out" | "col-resize" | "row-resize" | "ew-resize" | "ns-resize" | "nesw-resize" | "nwse-resize" | "all-scroll";
+  /** CSS `cursor` keyword; inherited by descendants. `none` hides the pointer over the box. */
+  cursor?: "auto" | "none" | "default" | "pointer" | "text" | "vertical-text" | "move" | "grab" | "grabbing" | "not-allowed" | "no-drop" | "wait" | "progress" | "help" | "crosshair" | "copy" | "alias" | "context-menu" | "cell" | "zoom-in" | "zoom-out" | "col-resize" | "row-resize" | "ew-resize" | "ns-resize" | "nesw-resize" | "nwse-resize" | "all-scroll";
   /** Grid row tracks as a CSS track list (`"auto 1fr"`); rows are implicit when omitted. */
   rows?: number | string;
   zIndex?: number;
@@ -184,6 +135,8 @@ export interface Style extends StateStyle {
   transition?: MotionTransitions;
   /** Continuous rotation about the centre, one turn per `spin` milliseconds. Rust drives the frames. */
   spin?: number;
+  /** CSS `animation` with `@keyframes { from {…} to {…} }`: looped shimmer, pulse, slow zoom. Rust drives the frames. */
+  animation?: StyleAnimation;
   /** CSS text: `font-style`, `letter-spacing`, `word-spacing`, `text-transform`, `white-space`, `text-overflow` and `line-clamp`. */
   fontStyle?: "normal" | "italic" | "oblique"; letterSpacing?: number; wordSpacing?: number;
   /** Width of a tab in spaces (CSS `tab-size`); default 8. */
@@ -316,7 +269,7 @@ export interface NativeNode {
   reportSize?: boolean;
   /** Native sends `pointerMove` events with the pointer's position inside the node while it is over it. */
   reportPointer?: boolean;
-  windowAction?: "minimize" | "toggleMaximize" | "close";
+  windowAction?: "minimize" | "toggleMaximize" | "toggleFullscreen" | "close";
   /** Optional initial numeric values used only when the native node is first mounted. */
   motionFrom?: MotionValues;
 }
@@ -399,7 +352,13 @@ export interface FileDialogOptions {
   filters?: FileDialogFilter[];
 }
 export type FileDialogMode = "openFile" | "openFiles" | "openFolder" | "saveFile";
-export type WindowAction = "show" | "hide" | "minimize" | "focus" | "activate";
+/**
+ * Why media failed, as HTMLMediaElement `MediaError.code`: `network` (the download: an HTTP
+ * status, host, timeout), `format` (a format or codec the system does not play), `decode`
+ * (anything else), `aborted`.
+ */
+export type MediaErrorCode = "aborted" | "network" | "decode" | "format";
+export type WindowAction = "show" | "hide" | "minimize" | "focus" | "activate" | "maximize" | "unmaximize" | "fullscreen" | "exitFullscreen" | "toggleFullscreen";
 export interface NativeTrayMenuItem {
   id?: string; label?: string; /** Shown next to the label in a menu bar (`Ctrl+S`). */ accelerator?: string; separator?: boolean; checked?: boolean; disabled?: boolean; items?: NativeTrayMenuItem[];
 }
@@ -423,7 +382,7 @@ export type NativeCommand =
   | { type: "systemMedia"; session: NativeSystemMediaSession | null }
   /** A system notification; its `notificationClick` carries the same `id`. */
   | { type: "notify"; title: string; body: string; id?: string }
-  | { type: "media"; id: string; action: "load" | "unload" | "play" | "pause" | "seek" | "set"; src?: string; time?: number; volume?: number; muted?: boolean; loop?: boolean; /** `"video"` on a load: the platform video decoder plays it. */ kind?: "video" }
+  | { type: "media"; id: string; action: "load" | "unload" | "play" | "pause" | "seek" | "set" | "rate" | "audioTrack" | "textTrack"; /** The `audioTracks` id with the `audioTrack` action. */ track?: number; src?: string; time?: number; volume?: number; muted?: boolean; loop?: boolean; /** `playbackRate` with the `rate` action: the sound keeps its pitch. */ rate?: number; /** `"video"` on a load: the platform video decoder plays it. */ kind?: "video" }
   | { type: "frameOverlay"; enabled: boolean }
   | { type: "frameRate"; maxFps: number | null }
   | { type: "focus"; id: string }
@@ -499,7 +458,7 @@ export type NativeEvent =
   | { type: "notificationClick"; id?: string }
   /** Windows "Transparency effects" changed while the window has a `mica`, `acrylic` or `blur` backdrop. */
   | { type: "transparencyEffects"; enabled: boolean }
-  | { type: "media"; id: string; event: "loadedmetadata" | "play" | "pause" | "timeupdate" | "seeked" | "ended" | "error"; time?: number; duration?: number | null; paused?: boolean; message?: string; videoWidth?: number; videoHeight?: number }
+  | { type: "media"; id: string; event: "loadedmetadata" | "canplay" | "waiting" | "progress" | "audiotracks" | "texttracks" | "cuechange" | "play" | "pause" | "timeupdate" | "seeked" | "ended" | "error"; time?: number; duration?: number | null; paused?: boolean; message?: string; code?: MediaErrorCode; /** End (s) of the buffered range holding the current time. */ buffered?: number; /** `loadedmetadata`: the served file's name (after redirects). */ filename?: string; /** `audiotracks`: the media's audio streams. */ audioTracks?: { id: number; label: string; language: string; enabled: boolean }[]; /** `texttracks`: subtitle streams in the file. */ textTracks?: { id: number; label: string; language: string; enabled: boolean }[]; /** `cuechange`: the subtitle text shown now. */ cueText?: string; videoWidth?: number; videoHeight?: number }
   | { type: "escape" }
   | { type: "click"; id: string }
   | { type: "context"; id: string; x: number; y: number }
@@ -542,6 +501,8 @@ export type NativeEvent =
   | { type: "pointer"; phase: "down" | "up" | "wheel"; id: string | null; x: number; y: number; button?: number; deltaX?: number; deltaY?: number; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }
   | { type: "keyboard"; phase: "down" | "up"; id: string | null; key: string; code: string; repeat: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }
   | { type: "blur"; id: string }
+  /** An `image` node's source failed to load or decode. */
+  | { type: "imageError"; id: string; src: string; message: string }
   | { type: "shortcut"; shortcut: string }
   | { type: "error"; message: string }
   | { type: "inspect"; requestId: string; snapshot: Snapshot }

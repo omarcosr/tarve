@@ -186,7 +186,7 @@
       "name": "AnimatePresence",
       "summary": "Keeps one native child alive while its exit targets are animated by the Rust renderer.\nKeep the boundary itself mounted and toggle `present` so Tarve can retain native identity.",
       "source": "packages/core/src/motion.ts",
-      "line": 120,
+      "line": 128,
       "generic": false,
       "propsType": "AnimatePresenceProps",
       "props": [
@@ -808,7 +808,7 @@
         },
         {
           "name": "windowAction",
-          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
           "from": "ViewProps"
         }
@@ -1215,7 +1215,7 @@
         },
         {
           "name": "windowAction",
-          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true
         }
       ],
@@ -2535,7 +2535,7 @@
         },
         {
           "name": "windowAction",
-          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
           "from": "ViewProps"
         }
@@ -2687,7 +2687,7 @@
     {
       "name": "Image",
       "source": "packages/core/src/components/image.ts",
-      "line": 280,
+      "line": 294,
       "generic": false,
       "propsType": "ImageProps",
       "props": [
@@ -2696,6 +2696,12 @@
           "type": "ImageSource",
           "optional": false,
           "doc": "Local path, `http(s)://` URL, data URL, encoded bytes, or raw RGBA8 pixels.\nA URL is fetched and decoded natively, off the UI thread, the first time the\nimage is on screen (like `loading=\"lazy\"`); until then it shows its placeholder."
+        },
+        {
+          "name": "fallbackSrc",
+          "type": "ImageSource",
+          "optional": true,
+          "doc": "Shown instead of a string `src` once it fails (an `onerror` swap to a placeholder), until `clearImageSourceCache()`."
         },
         {
           "name": "fit",
@@ -2707,6 +2713,12 @@
           "name": "height",
           "type": "number",
           "optional": true
+        },
+        {
+          "name": "onError",
+          "type": "(event: ImageErrorEvent) => void",
+          "optional": true,
+          "doc": "The source failed to load or decode (HTML `onerror`): a missing file, a bad image, an HTTP error."
         },
         {
           "name": "width",
@@ -2732,6 +2744,7 @@
         "style"
       ],
       "types": [
+        "ImageErrorEvent",
         "ImageSource"
       ]
     },
@@ -3203,7 +3216,7 @@
         },
         {
           "name": "windowAction",
-          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
           "from": "ViewProps"
         }
@@ -3348,7 +3361,7 @@
         },
         {
           "name": "windowAction",
-          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
           "from": "ViewProps"
         }
@@ -4065,7 +4078,7 @@
         },
         {
           "name": "windowAction",
-          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
           "from": "ViewProps"
         }
@@ -4211,7 +4224,7 @@
         },
         {
           "name": "windowAction",
-          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
           "from": "ViewProps"
         }
@@ -4565,7 +4578,7 @@
         },
         {
           "name": "windowAction",
-          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true
         }
       ],
@@ -4688,7 +4701,7 @@
         },
         {
           "name": "windowAction",
-          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
           "from": "ViewProps"
         }
@@ -4817,7 +4830,7 @@
         },
         {
           "name": "windowAction",
-          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
           "from": "ViewProps"
         }
@@ -5800,7 +5813,7 @@
         },
         {
           "name": "windowAction",
-          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
           "from": "ViewProps"
         }
@@ -6295,7 +6308,7 @@
         },
         {
           "name": "windowAction",
-          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true
         }
       ],
@@ -6440,7 +6453,7 @@
     {
       "name": "Window",
       "source": "packages/core/src/components/window.ts",
-      "line": 59,
+      "line": 61,
       "generic": false,
       "propsType": "WindowProps",
       "props": [
@@ -6517,6 +6530,12 @@
           "doc": "Stacking order; `alwaysOnBottom` keeps the window under every other one, even\nwhen clicked or shown. Can change while the app runs."
         },
         {
+          "name": "maximized",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Opens maximized; `width`/`height`/`position` are the bounds it restores to. A remembered window state wins."
+        },
+        {
           "name": "minHeight",
           "type": "number",
           "optional": true
@@ -6582,7 +6601,7 @@
         },
         {
           "name": "windowAction",
-          "type": "\"minimize\" | \"toggleMaximize\" | \"close\"",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
           "from": "ViewProps"
         }
@@ -6818,6 +6837,7 @@
     "HoverCardSide": "type HoverCardSide = \"top\" | \"right\" | \"bottom\" | \"left\";",
     "IconName": "type IconName =\n  | \"check\" | \"x\" | \"plus\" | \"minus\"\n  | \"chevron-down\" | \"chevron-up\" | \"chevron-right\" | \"chevron-left\"\n  | \"search\" | \"info\"\n  | \"house\" | \"settings\" | \"user\" | \"bell\" | \"heart\" | \"star\"\n  | \"download\" | \"trash-2\" | \"folder\" | \"mail\"\n  | \"play\" | \"pause\" | \"skip-back\" | \"skip-forward\";",
     "ImageBytesSource": "interface ImageBytesSource {\n  /** Encoded PNG, JPEG, WebP or SVG bytes. */\n  bytes: Uint8Array;\n  mediaType?: string;\n  /** Stable key can reduce GPU cache churn when pixels are updated in place. */\n  cacheKey?: string;\n}",
+    "ImageErrorEvent": "interface ImageErrorEvent {\n  /** The source that failed (a path or URL; empty for bytes and pixels). */\n  src: string;\n  message: string;\n}",
     "ImageRgbaSource": "interface ImageRgbaSource {\n  /** Raw RGBA8 pixels in row-major order. */\n  rgba: Uint8Array;\n  width: number;\n  height: number;\n  premultiplied?: boolean;\n  cacheKey?: string;\n}",
     "ImageSource": "type ImageSource = string | Uint8Array | ImageBytesSource | ImageRgbaSource;",
     "InputType": "type InputType = \"text\" | \"password\" | \"email\" | \"number\" | \"search\" | \"tel\" | \"url\";",
@@ -6827,7 +6847,7 @@
     "MotionProperty": "type MotionProperty = NumericMotionProperty | \"background\" | \"foreground\" | \"borderColor\" | \"boxShadow\" | \"textShadow\" | \"transform\";",
     "MotionTransition": "interface MotionTransition {\n  /** Duration in milliseconds. Defaults to 200 when omitted. */\n  duration?: number;\n  /** Delay in milliseconds. Defaults to 0. */\n  delay?: number;\n  easing?: MotionEasing;\n}",
     "MotionTransitions": "type MotionTransitions = Partial<Record<MotionProperty | \"all\", MotionTransition>>;",
-    "MotionValues": "type MotionValues = Partial<Record<NumericMotionProperty, number>>;",
+    "MotionValues": "type MotionValues = Partial<Record<NumericMotionProperty, number>> & { transform?: Transform | string };",
     "NavigationMenuItem": "interface NavigationMenuItem {\n  value: string;\n  label: string;\n  disabled?: boolean;\n  links?: readonly NavigationMenuLink[];\n}",
     "NavigationMenuLink": "interface NavigationMenuLink {\n  value: string;\n  label: string;\n  description?: string;\n  disabled?: boolean;\n}",
     "NumericMotionProperty": "type NumericMotionProperty = \"width\" | \"height\" | \"top\" | \"right\" | \"bottom\" | \"left\" | \"opacity\" | \"radius\";",
@@ -6851,6 +6871,7 @@
     "ToastVariant": "type ToastVariant = \"default\" | \"success\" | \"destructive\";",
     "ToasterPosition": "type ToasterPosition = \"top-left\" | \"top-right\" | \"bottom-left\" | \"bottom-right\";",
     "ToggleGroupItem": "interface ToggleGroupItem {\n  value: string;\n  label: string;\n  content?: Child;\n  disabled?: boolean;\n}",
+    "Transform": "interface Transform {\n  x?: number; y?: number; scale?: number; scaleX?: number; scaleY?: number;\n  rotate?: number; skewX?: number; skewY?: number; originX?: number; originY?: number;\n}",
     "TreeNode": "interface TreeNode<T = unknown> {\n  id: string;\n  label: string;\n  children?: readonly TreeNode<T>[];\n  disabled?: boolean;\n  icon?: IconName;\n  data?: T;\n}",
     "TypographyVariant": "type TypographyVariant = \"h1\" | \"h2\" | \"h3\" | \"h4\" | \"p\" | \"lead\" | \"large\" | \"small\" | \"muted\" | \"code\" | \"blockquote\";",
     "WindowBackdrop": "type WindowBackdrop = \"none\" | \"transparent\" | \"blur\" | \"mica\" | \"acrylic\";",

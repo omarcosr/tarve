@@ -1,8 +1,7 @@
 // Needs the host library: cargo build --release --manifest-path examples/plugin-hello/native/Cargo.toml
 import { describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { Text, Window, createApp, hostPluginTarget, readPluginManifest, type NativeBridge } from "@tarve/core";
-import { openPluginLibrary } from "@tarve/core/plugins/ffi";
+import { Text, Window, createApp, hostPluginTarget, openPluginLibrary, readPluginManifest, type NativeBridge } from "@tarve/core";
 import hello, { HELLO_SYMBOLS } from "./plugin";
 
 const manifest = readPluginManifest(import.meta.dirname)!;

@@ -1,5 +1,5 @@
 import type { NativeCommand } from "../protocol";
-import type { MediaController, MediaRequest } from "../media-element";
+import { clampRate, type MediaController, type MediaRequest } from "../media-element";
 import type { CompiledTree } from "../reconciler";
 import { isAbsolute } from "node:path";
 import { nativeAssetPath } from "#tarve/assets";
@@ -38,9 +38,13 @@ export function createMediaSync(send: (command: MediaCommand, event: string, tar
       const src = resolveMediaPath(request.src);
       if (!previous || resolveMediaPath(previous.src!) !== src || previous.video !== request.video) {
         send({ type: "media", id, action: "load", src, loop: request.loop, muted: request.muted, volume: request.volume, ...(request.video ? { kind: "video" as const } : {}) }, "media:load", id);
+        if (request.rate !== 1) send({ type: "media", id, action: "rate", rate: request.rate }, "media:rate", id);
         if (request.autoPlay) send({ type: "media", id, action: "play" }, "media:play", id);
-      } else if (previous.loop !== request.loop || previous.muted !== request.muted || previous.volume !== request.volume) {
-        send({ type: "media", id, action: "set", loop: request.loop, muted: request.muted, volume: request.volume }, "media:set", id);
+      } else {
+        if (previous.loop !== request.loop || previous.muted !== request.muted || previous.volume !== request.volume) {
+          send({ type: "media", id, action: "set", loop: request.loop, muted: request.muted, volume: request.volume }, "media:set", id);
+        }
+        if (previous.rate !== request.rate) send({ type: "media", id, action: "rate", rate: request.rate }, "media:rate", id);
       }
       loaded.set(id, request);
     }
@@ -56,5 +60,8 @@ export function mediaController(id: string, send: (command: MediaCommand) => voi
     seek: seconds => command({ action: "seek", time: Math.max(0, seconds) }),
     setVolume: volume => command({ action: "set", volume: Math.min(1, Math.max(0, volume)) }),
     setMuted: muted => command({ action: "set", muted }),
+    setPlaybackRate: rate => command({ action: "rate", rate: clampRate(rate) }),
+    setAudioTrack: track => command({ action: "audioTrack", track }),
+    setTextTrack: track => command(track === null ? { action: "textTrack" } : { action: "textTrack", track }),
   };
 }

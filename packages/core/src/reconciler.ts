@@ -1,12 +1,12 @@
-import { PROTOCOL_VERSION, type MotionProperty, type NativeNode, type Renderer, type SceneDocument, type ScrollInfo, type ScrollPosition, type VirtualListMeasurement, type WindowOptions } from "./protocol";
-import { Fragment, _isNativeVNode, type Child, type Component, type DragEndEvent, type DragMoveEvent, type DragPosition, type DropEvent, type FileDropEvent, type PastePayload, type VNode } from "./jsx-runtime";
+import { PROTOCOL_VERSION, type NativeNode, type Renderer, type SceneDocument, type WindowOptions } from "./protocol";
+import { Fragment, _isNativeVNode, type Child, type Component, type VNode } from "./jsx-runtime";
 import { lightTheme, resolveStyleString, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
-import type { WindowCloseRequestEvent } from "./components";
 import type { ComponentAdapter } from "./component-adapter";
 import { canonicalizeIntrinsicStyle } from "./intrinsic-style";
 import { Text } from "./components/text";
 import { serializeImageSource } from "./components/image";
+import { parseTransform } from "./css-shadow";
 import { withRenderScope } from "./render-scope";
 import { MEMO, type MemoInfo } from "./memo";
 import { openExternal } from "./bridge";
@@ -23,29 +23,10 @@ const isPrimitive = (child: Child): child is string | number => typeof child ===
 
 
 
-/** The handler name the app dispatches each `on*` prop under. Most nodes have none: no object is made for them. */
-const HANDLER_BY_PROP = new Map<string, keyof Handlers>([
-  ["onClick", "onClick"], ["onMarkdownLink", "onMarkdownLink"], ["onToggleFile", "onDiffToggleFile"], ["onShowMore", "onDiffShowMore"], ["onLineClick", "onDiffLineClick"],
-  ["onHighlight", "onHighlight"], ["onContextMenu", "onContextMenu"], ["onOutsideClick", "onOutsideClick"], ["onChange", "onChange"], ["onSubmit", "onSubmit"],
-  ["onPaste", "onPaste"], ["onValueChange", "onValueChange"], ["onScroll", "onScroll"], ["onScrollPosition", "onScrollPosition"], ["onVirtualListLayout", "onVirtualListLayout"],
-  ["onVirtualListScrollToItem", "onVirtualListScrollToItem"], ["onVirtualListFocus", "onVirtualListFocus"], ["onEscape", "onEscape"], ["onKeyDown", "onKeyDown"], ["onBlur", "onBlur"],
-  ["onCloseRequest", "onCloseRequest"], ["onTransitionEnd", "onTransitionEnd"], ["onDragStart", "onDragStart"], ["onDragMove", "onDragMove"], ["onDragEnd", "onDragEnd"],
-  ["onDragEnter", "onDragEnter"], ["onDragLeave", "onDragLeave"], ["onDrop", "onDrop"], ["onFileDragEnter", "onFileDragEnter"], ["onFileDragLeave", "onFileDragLeave"], ["onFileDrop", "onFileDrop"], ["onSize", "onSize"], ["onPointerMove", "onPointerMove"], ["onPointerLeave", "onPointerLeave"],
-]);
-
-function handlersOf(p: Record<string, any>, onHover: ((entered: boolean) => void) | undefined): Handlers | undefined {
-  let result: Handlers | undefined;
-  for (const prop in p) {
-    if (prop.charCodeAt(0) !== 111 /* o */ || prop.charCodeAt(1) !== 110 /* n */) continue;
-    const name = HANDLER_BY_PROP.get(prop);
-    if (name !== undefined && p[prop] !== undefined) (result ??= {})[name] = p[prop];
-  }
-  if (onHover !== undefined) (result ??= {}).onHover = onHover;
-  return result;
-}
+import { handlersOf, type Handlers } from "./reconciler/handlers";
 
 export { diffTrees, diffTreeMutations } from "./reconciler/diff";
-export interface Handlers { onClick?: () => void; onMarkdownLink?: (href: string) => void; onDiffToggleFile?: (path: string) => void; onDiffShowMore?: (hidden: number, path?: string) => void; onDiffLineClick?: (event: { text: string; path?: string; oldLine?: number; newLine?: number }) => void; onHighlight?: (event: { matchCount: number }) => void; onContextMenu?: (position: { x: number; y: number }) => void; onOutsideClick?: () => void; onHover?: (value: boolean) => void; onChange?: (value: string) => void; onSubmit?: (value: string) => void; onPaste?: (payload: PastePayload) => void; onValueChange?: (value: number) => void; onScroll?: (offset: number, max: number, info: ScrollInfo) => void; onScrollPosition?: (position: ScrollPosition) => void; onVirtualListLayout?: (items: VirtualListMeasurement[]) => void; onVirtualListScrollToItem?: (index: number, offset: number, smooth?: boolean) => void; onVirtualListFocus?: (key: string | null) => void; onEscape?: () => void; onKeyDown?: (key: string) => void; onBlur?: () => void; onCloseRequest?: (event: WindowCloseRequestEvent) => void; onTransitionEnd?: (event: { property: MotionProperty }) => void; onDragStart?: (position: DragPosition) => void; onDragMove?: (event: DragMoveEvent) => void; onDragEnd?: (event: DragEndEvent) => void; onDragEnter?: (source: string) => void; onDragLeave?: (source: string) => void; onDrop?: (event: DropEvent) => void; onFileDragEnter?: (paths: string[]) => void; onFileDragLeave?: () => void; onFileDrop?: (event: FileDropEvent) => void; onSize?: (size: { width: number; height: number }) => void; onPointerMove?: (point: { x: number; y: number }) => void; onPointerLeave?: () => void }
+export type { Handlers } from "./reconciler/handlers";
 
 function windowBorder(background: string, selected: ThemeDefinition): string {
   const own = luminance(background), themed = luminance(selected.colors.background);
@@ -425,6 +406,7 @@ export function compileTree(
         background: resolveStyleString("background", p.style?.background ?? theme.colors.background, selectedTheme),
         decorations: !p.frameless, resizable: p.resizable ?? true, position: p.position ?? "center", debug, visible };
       if (p.level && p.level !== "normal") windowOptions.level = p.level;
+      if (p.maximized) windowOptions.maximized = true;
       if (p.skipTaskbar) windowOptions.skipTaskbar = true;
       if (p.backdrop && p.backdrop !== "none") windowOptions.backdrop = p.backdrop;
       if (p.desktopWidget) {
@@ -573,7 +555,11 @@ export function compileTree(
     if (p.submitOnEnter !== undefined) node.submitOnEnter = p.submitOnEnter === true;
     if (rovingGroup) node.rovingGroup = rovingGroup;
     if (nativeType === "window" && p.onCloseRequest !== undefined) node.closeIntercept = true;
-    if (p.motionFrom !== undefined) node.motionFrom = { ...p.motionFrom };
+    if (p.motionFrom !== undefined) {
+      node.motionFrom = typeof p.motionFrom.transform === "string"
+        ? { ...p.motionFrom, transform: parseTransform(p.motionFrom.transform) }
+        : { ...p.motionFrom };
+    }
     if (nativeType === "input" || nativeType === "textarea") labelableTargets.set(id, id);
     nodes.set(id, node);
     return [node];

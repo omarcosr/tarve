@@ -27,6 +27,11 @@ describe("createMediaSync", () => {
     sent.length = 0;
     sync(tree({ song: { src: "c.mp3", muted: true } }));
     expect(sent).toEqual([]);
+    sync(tree({ song: { src: "c.mp3", muted: true, playbackRate: 1.5 } }));
+    expect(sent).toEqual([[{ type: "media", id: "song", action: "rate", rate: 1.5 }, "media:rate"]]);
+    sent.length = 0;
+    sync(tree({ song: { src: "d.mp3", playbackRate: 2 } }));
+    expect(sent.map(([command]) => `${command.action}:${command.rate ?? ""}`)).toEqual(["load:", "rate:2"]);
   });
 
   test("a file URL loads by path and an element without src is unloaded", () => {
@@ -43,13 +48,16 @@ describe("mediaController", () => {
   test("maps HTMLMediaElement methods to clamped native commands", () => {
     const sent: MediaCommand[] = [];
     const media = mediaController("song", command => { sent.push(command); });
-    media.play(); media.pause(); media.seek(-5); media.setVolume(2); media.setMuted(true);
+    media.play(); media.pause(); media.seek(-5); media.setVolume(2); media.setMuted(true); media.setPlaybackRate(99); media.setPlaybackRate(Number.NaN); media.setAudioTrack(2);
     expect(sent).toEqual([
       { type: "media", id: "song", action: "play" },
       { type: "media", id: "song", action: "pause" },
       { type: "media", id: "song", action: "seek", time: 0 },
       { type: "media", id: "song", action: "set", volume: 1 },
       { type: "media", id: "song", action: "set", muted: true },
+      { type: "media", id: "song", action: "rate", rate: 16 },
+      { type: "media", id: "song", action: "rate", rate: 1 },
+      { type: "media", id: "song", action: "audioTrack", track: 2 },
     ]);
   });
 });

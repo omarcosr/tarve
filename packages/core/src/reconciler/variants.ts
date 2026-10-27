@@ -40,7 +40,57 @@ export interface VariantContext { position?: Position; viewportWidth: number; vi
  */
 const VARIANT_KEYS = new Set(["first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl", "portrait", "landscape", "pointerCoarse", "pointerFine", "motionReduce", "motionSafe", "dark"]);
 
+/** `50vh`, `100vw`, `10vmin`, `10vmax` (and the `dvh`/`svh`/`lvh` forms): CSS viewport units. */
+const VIEWPORT_UNIT = /^(-?\d*\.?\d+)(d|s|l)?(vh|vw|vmin|vmax)$/;
+
+function viewportLength(value: unknown, context: VariantContext): unknown {
+  if (typeof value !== "string") return value;
+  const match = VIEWPORT_UNIT.exec(value.trim());
+  if (!match) return value;
+  context.usedViewport();
+  const { viewportWidth: width, viewportHeight: height } = context;
+  const base = match[3] === "vh" ? height : match[3] === "vw" ? width : match[3] === "vmin" ? Math.min(width, height) : Math.max(width, height);
+  return Number(match[1]) * base / 100;
+}
+
+/** Viewport units become px for the window the tree renders for; reading them re-renders on resize. */
+function resolveViewportUnits(style: Record<string, unknown>, context: VariantContext): Record<string, unknown> {
+  let out: Record<string, unknown> | undefined;
+  for (const key in style) {
+    const value = style[key];
+    let next = value;
+    if (typeof value === "string") next = viewportLength(value, context);
+    else if ((key === "padding" || key === "margin" || key === "inset" || key === "borderWidth") && value && typeof value === "object") {
+      let sides: Record<string, unknown> | undefined;
+      for (const side in value as Record<string, unknown>) {
+        const raw = (value as Record<string, unknown>)[side];
+        const resolved = viewportLength(raw, context);
+        if (resolved !== raw) (sides ??= { ...(value as Record<string, unknown>) })[side] = resolved;
+      }
+      if (sides) next = sides;
+    }
+    if (next !== value) (out ??= { ...style })[key] = next;
+  }
+  return out ?? style;
+}
+
+function hasViewportUnit(style: Record<string, unknown>): boolean {
+  for (const key in style) {
+    const value = style[key];
+    if (typeof value === "string" && value.includes("v") && VIEWPORT_UNIT.test(value.trim())) return true;
+    if ((key === "padding" || key === "margin" || key === "inset" || key === "borderWidth") && value && typeof value === "object") {
+      for (const side of Object.values(value)) if (typeof side === "string" && VIEWPORT_UNIT.test(side.trim())) return true;
+    }
+  }
+  return false;
+}
+
 export function foldVariants(style: Record<string, unknown>, selected: ThemeDefinition, context: VariantContext): Record<string, unknown> {
+  const folded = foldStyleVariants(style, selected, context);
+  return hasViewportUnit(folded) ? resolveViewportUnits(folded, context) : folded;
+}
+
+function foldStyleVariants(style: Record<string, unknown>, selected: ThemeDefinition, context: VariantContext): Record<string, unknown> {
   // Most styles have no variants: skip the rest-destructuring copy and the variant objects.
   let variant = false;
   for (const key in style) if (VARIANT_KEYS.has(key)) { variant = true; break; }
@@ -76,7 +126,7 @@ export function foldVariants(style: Record<string, unknown>, selected: ThemeDefi
   }
   if (dark && typeof dark === "object") {
     const themed = luminance(selected.colors.background);
-    if (themed !== null && themed < 0.5) out = foldVariants(Style.merge(out, dark as Style) as Record<string, unknown>, selected, context) as Style;
+    if (themed !== null && themed < 0.5) out = foldStyleVariants(Style.merge(out, dark as Style) as Record<string, unknown>, selected, context) as Style;
   }
   return out as Record<string, unknown>;
 }

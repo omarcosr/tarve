@@ -1,9 +1,11 @@
 /** node:child_process spawn over tjs.spawn: exit/error events and stream-like stdio. spawnSync: child-process-sync.ts. */
 import { Buffer } from "./buffer";
-import { spawnSync } from "./child-process-sync";
+import { spawnDetachedWindows, spawnSync } from "./child-process-sync";
 import { EventEmitter } from "./events";
 
 export { spawnSync };
+
+declare const TARVE_TXIKI_PLATFORM: "win32" | "linux";
 
 type Stdio = "pipe" | "ignore" | "inherit";
 
@@ -12,6 +14,8 @@ export interface SpawnOptions {
   env?: Record<string, string | undefined>;
   stdio?: Stdio | Stdio[];
   windowsHide?: boolean;
+  /** The child outlives this process (on Windows, outside the job libuv puts children in). */
+  detached?: boolean;
 }
 
 /** A Node-style readable over a web stream: "data"/"end" events or async iteration. */
@@ -108,6 +112,14 @@ export class ChildProcess extends EventEmitter {
 
   constructor(command: string, args: readonly string[], options: SpawnOptions = {}) {
     super();
+    if (options.detached && TARVE_TXIKI_PLATFORM === "win32") {
+      try {
+        this.pid = spawnDetachedWindows(command, args, options);
+      } catch (error) {
+        queueMicrotask(() => this.emit("error", error));
+      }
+      return;
+    }
     const stdio = typeof options.stdio === "string" || options.stdio === undefined
       ? [options.stdio ?? "pipe", options.stdio ?? "pipe", options.stdio ?? "pipe"]
       : options.stdio;
@@ -133,6 +145,15 @@ export class ChildProcess extends EventEmitter {
       this.emit("exit", this.exitCode, this.signalCode);
       this.emit("close", this.exitCode, this.signalCode);
     }, error => this.emit("error", error));
+  }
+
+  /** tjs.spawn has no unref: a child it runs keeps the event loop alive. Detached children are not tracked. */
+  unref(): this {
+    return this;
+  }
+
+  ref(): this {
+    return this;
   }
 
   kill(signal: string = "SIGTERM"): boolean {

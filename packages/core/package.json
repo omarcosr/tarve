@@ -1,6 +1,6 @@
 {
   "name": "@tarve/core-internal",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -11,7 +11,8 @@
   },
   "imports": {
     "#tarve/runtime": "./src/bridge/runtime.ts",
-    "#tarve/assets": "./src/embedded-assets.ts"
+    "#tarve/assets": "./src/embedded-assets.ts",
+    "#tarve/pack-host": "./src/pack-host.ts"
   },
   "dependencies": {
     "@tarve/protocol": "workspace:*"

@@ -326,8 +326,8 @@ func isStateKey(k string) bool {
 	return false
 }
 
-// resolveThemeStyle returns a theme-resolved copy (top level and state styles copied).
 func resolveThemeStyle(style S, t *Theme) S {
+	style = resolveCssLayers(style, t)
 	out := make(S, len(style))
 	for k, v := range style {
 		if v == nil {
@@ -350,24 +350,61 @@ func resolveThemeStyle(style S, t *Theme) S {
 						next[sk] = sv
 					}
 				}
-				resolvePaint(next)
+				resolvePaint(next, t)
+				out[k] = next
+				continue
+			}
+		}
+		if k == "animation" {
+			if m, ok := asMap(v); ok {
+				// style.animation keyframes resolve like a state style.
+				next := merge(m)
+				for _, frame := range []string{"from", "to"} {
+					if f, ok := asMap(m[frame]); ok {
+						resolved := make(S, len(f))
+						for fk, fv := range f {
+							if s, ok := fv.(string); ok {
+								resolved[fk] = resolveStyleString(fk, s, t)
+							} else {
+								resolved[fk] = fv
+							}
+						}
+						resolvePaint(resolved, t)
+						next[frame] = resolved
+					}
+				}
 				out[k] = next
 				continue
 			}
 		}
 		out[k] = v
 	}
-	resolvePaint(out)
+	resolvePaint(out, t)
 	return out
 }
 
-func resolvePaint(style S) {
+func resolvePaint(style S, t *Theme) {
 	if s, ok := style["transform"].(string); ok {
 		style["transform"] = parseTransform(s)
 	}
-	for _, k := range []string{"textShadow", "boxShadow"} {
-		if _, ok := style[k].(string); ok {
-			panic("tarve: CSS " + k + " strings are not supported by the Go host yet; pass the protocol object")
+	resolveGradients(style, t)
+	if v, ok := style["textShadow"].(string); ok {
+		if layers := parseShadow(v, false, t); len(layers) > 0 {
+			style["textShadow"] = layers[0]
+		} else {
+			delete(style, "textShadow")
+		}
+	}
+	if v, ok := style["boxShadow"].(string); ok {
+		layers := parseShadow(v, true, t)
+		if len(layers) == 0 {
+			delete(style, "boxShadow")
+		} else {
+			list := make([]any, len(layers))
+			for i, layer := range layers {
+				list[i] = layer
+			}
+			style["boxShadow"] = list
 		}
 	}
 }

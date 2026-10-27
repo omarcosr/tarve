@@ -56,6 +56,11 @@ export interface BuildOptions {
    * a Tarve checkout with Cargo; otherwise the full library is used. Also TARVE_NATIVE_FEATURES.
    */
   nativeFeatures?: string | readonly string[];
+  /**
+   * Update private key (base64, or a file holding it; `tarve keygen`): the executable then runs
+   * signed app packs (`tarve pack`) newer than the app it embeds. Bun, Node.js and txiki.js.
+   */
+  updateKey?: string;
 }
 
 /** Flags a `smol` executable starts with, per runtime. */
@@ -94,18 +99,22 @@ function resolveNativeLibrary(target: BuildTarget, override?: string): string {
 
 /** Compile an ordinary Tarve app. No production entrypoint or app-side bridge setup is needed. */
 export async function build(options: BuildOptions): Promise<string> {
-  options = await withTrimmedNative(options);
+  const trimmed = await withTrimmedNative(options);
+  options = trimmed.options;
+  const packHost = options.updateKey
+    ? await (await import("./pack-build")).hostPackConfig(options, options.runtime ?? "bun", trimmed.features)
+    : undefined;
   const requested = options.target ?? hostBuildTarget();
   if (requested && isBuildTarget(requested) && isMacTarget(requested) && options.runtime && options.runtime !== "bun") {
     throw new Error(`--runtime ${options.runtime} cannot build a macOS app yet; use --runtime bun.`);
   }
   if (options.runtime === "txiki") {
     const { buildTxiki } = await import("./txiki-build");
-    return buildTxiki(options);
+    return buildTxiki(options, packHost);
   }
   if (options.runtime === "node") {
     const { buildNode } = await import("./node-build");
-    return buildNode(options);
+    return buildNode(options, packHost);
   }
   const target = options.target ?? hostBuildTarget();
   if (!target) throw new Error(`Tarve executable distribution is not supported for ${process.platform}-${process.arch}. Pass an explicit supported target when cross-compiling.`);
@@ -191,7 +200,7 @@ export async function build(options: BuildOptions): Promise<string> {
   if (icoPath) writeFileSync(icoPath, images!.ico);
   try {
     const result = await Bun.build({
-      entrypoints: [entrypoint],
+      entrypoints: [packHost ? (await import("./pack-build")).writeHostEntry(packDirectory, entrypoint, packHost) : entrypoint],
       target: "bun",
       plugins: [runtime, ...await frameworkPlugins<BunPlugin>(entrypoint)],
       define: { "process.env.NODE_ENV": JSON.stringify("production"), ...define },
@@ -271,13 +280,13 @@ export function metadataOverrides(options: BuildOptions) {
  * Points `nativeLibrary` at a library with only the native features the app uses: compiled
  * from a Tarve checkout with Cargo, otherwise the smallest prebuilt variant that covers them.
  */
-async function withTrimmedNative(options: BuildOptions): Promise<BuildOptions> {
-  if (options.nativeLibrary) return options;
+async function withTrimmedNative(options: BuildOptions): Promise<{ options: BuildOptions; features?: NativeFeature[] }> {
+  if (options.nativeLibrary) return { options };
   const features = await import("./native-features");
   const requested = features.parseNativeFeatures(options.nativeFeatures ?? process.env.TARVE_NATIVE_FEATURES);
-  if (requested === "all") return options;
+  if (requested === "all") return { options };
   const target = options.target ?? hostBuildTarget();
-  if (!target || !isBuildTarget(target)) return options;
+  if (!target || !isBuildTarget(target)) return { options };
   const platform = targetConfig(target).platform;
   let required: NativeFeature[];
   if (requested === "auto") {
@@ -288,7 +297,7 @@ async function withTrimmedNative(options: BuildOptions): Promise<BuildOptions> {
       console.log(`Native features: ${listed.length ? listed.join(", ") : "core only"}`);
     } catch (error) {
       console.warn(`Tarve: could not detect native features (${(error as Error).message}); using the full library.`);
-      return options;
+      return { options };
     }
   } else {
     required = requested;
@@ -296,7 +305,7 @@ async function withTrimmedNative(options: BuildOptions): Promise<BuildOptions> {
   }
   // TARVE_NATIVE_COMPILE=0: use the prebuilt variants even in a checkout with Cargo.
   if (process.env.TARVE_NATIVE_COMPILE !== "0" && features.canTrimNative(target)) {
-    return { ...options, nativeLibrary: await features.buildTrimmedNative(target, required) };
+    return { options: { ...options, nativeLibrary: await features.buildTrimmedNative(target, required) }, features: required };
   }
   // Trimming is an optimization: any failure here builds with the full library.
   const variant = await prebuiltVariant(target, required).catch((error: Error) => {
@@ -305,17 +314,17 @@ async function withTrimmedNative(options: BuildOptions): Promise<BuildOptions> {
   });
   if (variant) {
     console.log(`Native library: prebuilt "${variant.name}" variant`);
-    return { ...options, nativeLibrary: variant.path };
+    return { options: { ...options, nativeLibrary: variant.path }, features: variant.features };
   }
-  return options;
+  return { options };
 }
 
 /**
  * The smallest prebuilt variant library covering `required`, checked against this Tarve version.
  * Runs before the runtime split, so under Node.js too: no Bun APIs here.
  */
-async function prebuiltVariant(target: BuildTarget, required: readonly NativeFeature[]): Promise<{ name: string; path: string } | undefined> {
-  const { nativeVariantPath, pickNativeVariant } = await import("./native-features");
+async function prebuiltVariant(target: BuildTarget, required: readonly NativeFeature[]): Promise<{ name: string; path: string; features: NativeFeature[] } | undefined> {
+  const { nativeVariantPath, pickNativeVariant, variantFeatures } = await import("./native-features");
   const config = targetConfig(target);
   const variant = pickNativeVariant(required, config.platform);
   if (!variant) return undefined;
@@ -341,5 +350,5 @@ async function prebuiltVariant(target: BuildTarget, required: readonly NativeFea
     console.warn(`Tarve: prebuilt "${variant.name}" native variant is unusable (${(error as Error).message}); using the full library.`);
     return undefined;
   }
-  return { name: variant.name, path };
+  return { name: variant.name, path, features: variantFeatures(variant, config.platform) };
 }

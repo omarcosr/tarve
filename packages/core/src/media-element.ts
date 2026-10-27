@@ -6,6 +6,9 @@ import { Circle, Path, Svg } from "./components/svg";
 import { Slider } from "./controls";
 import { canonicalizeIntrinsicStyle } from "./intrinsic-style";
 import { theme } from "./theme";
+import type { MediaErrorCode } from "./protocol";
+import { cueAt, loadSubtitles, nextCueChange, scheduleCueRender, type SubtitleTrack } from "./subtitles";
+export type { SubtitleTrack } from "./subtitles";
 import { scopedState, currentRenderScope } from "./render-scope";
 
 /**
@@ -25,6 +28,8 @@ export interface MediaElementProps {
   muted?: boolean;
   /** 0–1, HTMLMediaElement.volume. */
   volume?: number;
+  /** HTMLMediaElement.playbackRate (0.0625–16, 1 by default): faster or slower at the same pitch. */
+  playbackRate?: number;
   style?: Record<string, unknown>;
   /** Tailwind utilities, folded into `style` (`object-cover` on a video). */
   className?: string;
@@ -36,16 +41,75 @@ export interface MediaElementProps {
   onTimeUpdate?: (event: MediaEventInfo) => void;
   onSeeked?: (event: MediaEventInfo) => void;
   onEnded?: (event: MediaEventInfo) => void;
-  onError?: (message: string) => void;
+  /** Playback stopped for want of data (a stalled download): show a buffering state. */
+  onWaiting?: (event: MediaEventInfo) => void;
+  /** Enough data to play: after the load, and again when a `waiting` ends. */
+  onCanPlay?: (event: MediaEventInfo) => void;
+  /** The download moved on: `event.buffered` is the new end of the buffered range. */
+  onProgress?: (event: MediaEventInfo) => void;
+  /** The audio streams became known, or another one plays: `event.audioTracks`. */
+  onAudioTracksChange?: (event: MediaEventInfo) => void;
+  /** The file's subtitle streams became known, or another one shows: `event.textTracks`. */
+  onTextTracksChange?: (event: MediaEventInfo) => void;
+  /** The embedded subtitle shown changed: `event.cueText`. */
+  onCueChange?: (event: MediaEventInfo) => void;
+  /** `error.code` says why (`network`, `format`, `decode`, `aborted`): skip to another source at once on `network`/`format`. */
+  onError?: (message: string, error: MediaErrorInfo) => void;
 }
+
+export interface MediaErrorInfo { code: MediaErrorCode; message: string }
 
 /** `<video>`: the platform decoder plays picture and sound; the picture fills the box like an image. */
 export interface VideoElementProps extends MediaElementProps {
   /** CSS object-fit; `contain` by default, as in HTML. */
   fit?: "contain" | "cover" | "fill" | "none";
+  /**
+   * Subtitle files (WebVTT `.vtt` or SubRip `.srt`: a path, `file://` or `http(s)://` URL), as
+   * HTML `<track kind="subtitles">`. Loaded once, cues drawn over the bottom of the picture.
+   */
+  subtitles?: SubtitleTrack[];
+  /** Index into `subtitles` of the track shown; `null`/absent shows none ("Sem legenda"). */
+  subtitle?: number | null;
+  /** Style of the cue box (font size, colours, offset from the bottom). */
+  subtitleStyle?: Record<string, unknown>;
 }
 
-export interface MediaEventInfo { currentTime: number; duration: number | null; paused: boolean; videoWidth: number; videoHeight: number }
+/** An audio stream of the media, as `HTMLMediaElement.audioTracks`. */
+export interface MediaAudioTrack {
+  /** Pass to `MediaController.setAudioTrack`. */
+  id: number;
+  label: string;
+  /** BCP 47 / ISO 639 code from the file (`"por"`, `"en"`), empty when unknown. */
+  language: string;
+  /** The one playing. */
+  enabled: boolean;
+}
+
+/** A text (subtitle) stream inside the media file, as `HTMLMediaElement.textTracks`. */
+export interface MediaTextTrack {
+  /** Pass to `MediaController.setTextTrack`. */
+  id: number;
+  label: string;
+  language: string;
+  /** The one shown. */
+  enabled: boolean;
+}
+
+export interface MediaEventInfo {
+  /** The audio streams, known from `onAudioTracksChange` (empty before, and for one-stream files on some platforms). */
+  audioTracks: MediaAudioTrack[];
+  /** Subtitle streams inside the file, known from `onTextTracksChange`. */
+  textTracks: MediaTextTrack[];
+  /** The text of the embedded subtitle cue showing now (the default player draws it); empty when none. */
+  cueText: string;
+  currentTime: number; duration: number | null; paused: boolean; videoWidth: number; videoHeight: number;
+  /** End (s) of the buffered range holding the current time (`buffered.end()`); 0 before it is known. */
+  buffered: number;
+  /** The served file's name (after redirects, as mpv's `filename`), known from `loadedmetadata`. */
+  filename?: string;
+  /** Out of data while playing (between `waiting` and `canplay`). */
+  waiting: boolean;
+}
 
 /** What a render asks of one media element. */
 export interface MediaRequest {
@@ -53,6 +117,8 @@ export interface MediaRequest {
   loop: boolean;
   muted: boolean;
   volume: number;
+  /** playbackRate; 1 unless the element sets one. */
+  rate: number;
   autoPlay: boolean;
   /** Played by the platform video decoder (picture and sound). */
   video?: boolean;
@@ -61,6 +127,11 @@ export interface MediaRequest {
 
 interface MediaState {
   paused: boolean; time: number; duration: number | null; ended: boolean; error?: string; videoWidth?: number; videoHeight?: number;
+  buffered?: number; filename?: string; audioTracks?: MediaAudioTrack[]; textTracks?: MediaTextTrack[]; cueText?: string;
+  /** `performance.now()` when `time` was reported, and the rate it then runs at: the time between events. */
+  timeAt?: number; rate?: number;
+  /** `waiting` arrived and no `canplay` since: the download stalled. */
+  stalled?: boolean;
   /** `loadedmetadata` arrived: the media opened. */
   loaded?: boolean;
   /** A seek from the controls is in flight (until `seeked`). */
@@ -101,6 +172,15 @@ export interface MediaController {
   seek(seconds: number): void;
   setVolume(volume: number): void;
   setMuted(muted: boolean): void;
+  /** HTMLMediaElement.playbackRate = rate (0.0625–16): the sound keeps its pitch. A new source starts at 1 (or the `playbackRate` prop). */
+  setPlaybackRate(rate: number): void;
+  /** Plays audio stream `id` (from `MediaEventInfo.audioTracks`) alone. */
+  setAudioTrack(id: number): void;
+  /**
+   * Shows subtitle stream `id` inside the file (from `MediaEventInfo.textTracks`), `null` none.
+   * Windows and Android report its cues (`cueText`, drawn by `<video>`); GStreamer draws it in the picture.
+   */
+  setTextTrack(id: number | null): void;
 }
 const ACTIVE_APP = Symbol.for("tarve.activeApp");
 function controller(id: string): MediaController | undefined {
@@ -114,12 +194,18 @@ function clock(seconds: number | null): string {
   return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
 }
 
+/** Browsers' playbackRate range; anything else (NaN, 0, negative) is the normal rate. */
+export function clampRate(rate: number): number {
+  return Number.isFinite(rate) && rate > 0 ? Math.min(16, Math.max(0.0625, rate)) : 1;
+}
+
 export function mediaRequest(props: MediaElementProps): MediaRequest {
   return {
     ...(props.src ? { src: props.src } : {}),
     loop: props.loop === true,
     muted: props.muted === true,
     volume: Math.min(1, Math.max(0, props.volume ?? 1)),
+    rate: clampRate(props.playbackRate ?? 1),
     autoPlay: props.autoPlay === true,
     handlers: props,
   };
@@ -186,15 +272,47 @@ export function expandVideo(props: VideoElementProps, id: string): VNode {
   const objectFit = (props.style as { objectFit?: string } | undefined)?.objectFit;
   const fit = props.fit ?? (objectFit === "scale-down" ? "contain" : objectFit as VideoElementProps["fit"]) ?? "contain";
   const label = props.ariaLabel ?? "Video";
-  if (!props.controls) return _nativeJsx("video", { id, fit, control: { role: "group", label }, style });
+  // Subtitles need the player box: an external file chosen, or embedded cues ever shown.
+  const cue = (props.subtitles && props.subtitle != null) || mediaState(id).cueText !== undefined;
+  if (!props.controls && !cue) return _nativeJsx("video", { id, fit, control: { role: "group", label }, style });
   // The player box takes the element's placement and size; the picture fills it.
   const { position, top, right, bottom, left, margin, flex, grow, shrink, alignSelf, width, height, ...picture } = style;
   const placement: Record<string, unknown> = { position: position ?? "relative", top, right, bottom, left, margin, flex, grow, shrink, alignSelf, width, height };
   for (const key of Object.keys(placement)) if (placement[key] === undefined) delete placement[key];
   return View({ id: `${id}-player`, style: placement, children: [
     _nativeJsx("video", { id, fit, control: { role: "group", label }, style: { ...picture, ...(width !== undefined ? { width: "100%" } : {}), ...(height !== undefined ? { height: "100%" } : {}) } }),
-    centerOverlay(props, id),
-    controlBar(props, id, `${id}-controls`, label, { position: "absolute", left: 8, right: 8, bottom: 8, background: "rgba(24, 24, 27, 0.72)", foreground: "#fafafa" }),
+    props.controls ? centerOverlay(props, id) : null,
+    subtitleOverlay(props, id, props.controls ? 56 : 16),
+    props.controls ? controlBar(props, id, `${id}-controls`, label, { position: "absolute", left: 8, right: 8, bottom: 8, background: "rgba(24, 24, 27, 0.72)", foreground: "#fafafa" }) : null,
+  ] } as never);
+}
+
+/** The current cue of the shown subtitle track, over the bottom of the picture. */
+function subtitleOverlay(props: VideoElementProps, id: string, bottom: number): VNode | null {
+  const track = props.subtitle != null ? props.subtitles?.[props.subtitle] : undefined;
+  if (!track) {
+    const embedded = shownState(props, id, currentRenderScope()).cueText;
+    return embedded ? cueBox(props, id, bottom, embedded) : null;
+  }
+  const cues = loadSubtitles(track.src);
+  if (!cues) return null;
+  // Between `timeupdate`s the time runs on at the playback rate; the next cue change renders again.
+  const state = shownState(props, id, currentRenderScope());
+  const playing = !state.paused && !state.ended && !state.stalled && state.timeAt !== undefined;
+  const rate = state.rate ?? 1;
+  const time = playing ? state.time + (performance.now() - state.timeAt!) / 1000 * rate : state.time;
+  const next = playing ? nextCueChange(cues, time) : undefined;
+  scheduleCueRender(id, next === undefined ? undefined : (next - time) * 1000 / rate + 5);
+  const text = cueAt(cues, time);
+  return text ? cueBox(props, id, bottom, text) : null;
+}
+
+function cueBox(props: VideoElementProps, id: string, bottom: number, text: string): VNode {
+  const { fontSize = 20, ...box } = props.subtitleStyle ?? {};
+  return View({ id: `${id}-subtitle`, style: { position: "absolute", left: 16, right: 16, bottom, align: "center", pointerEvents: "none" }, children: [
+    View({ style: { background: "rgba(0, 0, 0, 0.72)", radius: 6, padding: { top: 4, bottom: 4, left: 10, right: 10 }, ...box }, children: [
+      Text({ style: { fontSize, foreground: "#ffffff", textAlign: "center", whiteSpace: "pre-wrap" } as never, children: text } as never),
+    ] } as never),
   ] } as never);
 }
 
@@ -205,7 +323,7 @@ export function expandVideo(props: VideoElementProps, id: string): VNode {
 function centerOverlay(props: VideoElementProps, id: string): VNode | null {
   const scope = currentRenderScope();
   const state = shownState(props, id, scope);
-  const loading = !state.error && ((props.src !== undefined && !state.loaded) || state.waiting === true);
+  const loading = !state.error && ((props.src !== undefined && !state.loaded) || state.waiting === true || state.stalled === true);
   const fill = { position: "absolute", left: 0, top: 0, right: 0, bottom: 0, align: "center", justify: "center" };
   if (loading) {
     // Before the first picture the box is black, as a browser's player: the spinner stands out.
@@ -226,20 +344,26 @@ function centerOverlay(props: VideoElementProps, id: string): VNode | null {
 }
 
 /** Applies a native media event to the element's state; returns the handler to call. */
-export function applyMediaEvent(event: { id: string; event: string; time?: number; duration?: number | null; paused?: boolean; message?: string; videoWidth?: number; videoHeight?: number }, request: MediaRequest | undefined, scope: object): (() => void) | undefined {
+export function applyMediaEvent(event: { id: string; event: string; time?: number; duration?: number | null; paused?: boolean; message?: string; code?: MediaErrorCode; videoWidth?: number; videoHeight?: number; buffered?: number; filename?: string; audioTracks?: MediaAudioTrack[]; textTracks?: MediaTextTrack[]; cueText?: string }, request: MediaRequest | undefined, scope: object): (() => void) | undefined {
   const known = mediaState(event.id, scope);
   // The first event of a new source: what was known is about the old one.
   const previous: MediaState = request?.src !== undefined && known.src !== undefined && known.src !== request.src
     ? { paused: true, time: 0, duration: null, ended: false, src: request.src } : { ...known, ...(request?.src !== undefined ? { src: request.src } : {}) };
   const next: MediaState = { ...previous, time: event.time ?? previous.time, duration: event.duration ?? previous.duration, paused: event.paused ?? previous.paused,
-    videoWidth: event.videoWidth ?? previous.videoWidth, videoHeight: event.videoHeight ?? previous.videoHeight };
+    videoWidth: event.videoWidth ?? previous.videoWidth, videoHeight: event.videoHeight ?? previous.videoHeight,
+    buffered: event.buffered ?? previous.buffered, filename: event.filename ?? previous.filename, audioTracks: event.audioTracks ?? previous.audioTracks,
+    textTracks: event.textTracks ?? previous.textTracks, cueText: event.cueText ?? previous.cueText,
+    timeAt: event.time !== undefined ? performance.now() : previous.timeAt, rate: request?.rate ?? previous.rate };
+  if (event.event === "waiting") next.stalled = true;
+  if (event.event === "canplay" || event.event === "loadedmetadata" || event.event === "error" || event.event === "ended") next.stalled = false;
   if (event.event === "ended") { next.ended = true; next.paused = true; }
   if (event.event === "play") next.ended = false;
   if (event.event === "error") { next.error = event.message; next.waiting = false; }
   if (event.event === "loadedmetadata") next.loaded = true;
   if (event.event === "seeked" || event.event === "ended" || event.event === "loadedmetadata") next.waiting = false;
   states(scope).set(event.id, next);
-  const info: MediaEventInfo = { currentTime: next.time, duration: next.duration, paused: next.paused, videoWidth: next.videoWidth ?? 0, videoHeight: next.videoHeight ?? 0 };
+  const info: MediaEventInfo = { audioTracks: next.audioTracks ?? [], textTracks: next.textTracks ?? [], cueText: next.cueText ?? "", currentTime: next.time, duration: next.duration, paused: next.paused, videoWidth: next.videoWidth ?? 0, videoHeight: next.videoHeight ?? 0,
+    buffered: next.buffered ?? 0, ...(next.filename !== undefined ? { filename: next.filename } : {}), waiting: next.stalled === true };
   const h = request?.handlers;
   switch (event.event) {
     case "loadedmetadata": return h?.onLoadedMetadata && (() => h.onLoadedMetadata!(info));
@@ -248,7 +372,16 @@ export function applyMediaEvent(event: { id: string; event: string; time?: numbe
     case "timeupdate": return h?.onTimeUpdate && (() => h.onTimeUpdate!(info));
     case "seeked": return h?.onSeeked && (() => h.onSeeked!(info));
     case "ended": return h?.onEnded && (() => h.onEnded!(info));
-    case "error": return h?.onError && (() => h.onError!(event.message ?? "media error"));
+    case "waiting": return h?.onWaiting && (() => h.onWaiting!(info));
+    case "canplay": return h?.onCanPlay && (() => h.onCanPlay!(info));
+    case "progress": return h?.onProgress && (() => h.onProgress!(info));
+    case "audiotracks": return h?.onAudioTracksChange && (() => h.onAudioTracksChange!(info));
+    case "texttracks": return h?.onTextTracksChange && (() => h.onTextTracksChange!(info));
+    case "cuechange": return h?.onCueChange && (() => h.onCueChange!(info));
+    case "error": {
+      const message = event.message ?? "media error";
+      return h?.onError && (() => h.onError!(message, { code: event.code ?? "decode", message }));
+    }
   }
   return undefined;
 }

@@ -19,6 +19,16 @@ describe("viewport", () => {
     expect(view(800, 400).nodes.get("box")!.style.width).toBe(20);
   });
 
+  test("viewport units resolve to px for the window and report its size", () => {
+    const view = (width: number, height: number) => compileTree(
+      <Window><View id="hero" style={{ height: "50vh", width: "100vw", minHeight: "10vmin", padding: { top: "5vh" as never, left: 8 }, lg: { maxWidth: "80vw" } }} /></Window>,
+      false, "auto", [], undefined, true, { width, height });
+    const wide = view(1200, 800);
+    expect(wide.nodes.get("hero")!.style).toMatchObject({ height: 400, width: 1200, minHeight: 80, padding: { top: 40, left: 8 }, maxWidth: 960 });
+    expect(wide.document.root.reportSize).toBe(true);
+    expect(view(600, 1000).nodes.get("hero")!.style).toMatchObject({ height: 500, width: 600, minHeight: 60 });
+  });
+
   test("pointer and motion variants fold by the system environment", () => {
     const style = { minHeight: 32, pointerCoarse: { minHeight: 48 }, motionReduce: { opacity: 1 }, motionSafe: { opacity: 0.5 } };
     const view = () => compileTree(<Window><View id="target" style={style} /></Window>).nodes.get("target")!.style;

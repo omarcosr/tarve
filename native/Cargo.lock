@@ -3989,7 +3989,7 @@ dependencies = [
 
 [[package]]
 name = "tarve_native"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "accesskit",
  "accesskit_android",
@@ -4030,6 +4030,7 @@ dependencies = [
  "unicode-width",
  "ureq",
  "vello",
+ "vello_common",
  "vello_cpu",
  "wasm-bindgen",
  "windows 0.61.3",

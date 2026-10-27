@@ -8,13 +8,14 @@
 //! chunk arrives, the rest downloads behind it with HTTP range requests, and a
 //! seek fetches the chunk it lands in first.
 
+use crate::stretch::Stretcher;
 use rodio::mixer::{Mixer, MixerSource};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read, Seek};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
@@ -24,488 +25,194 @@ const TIME_UPDATE: Duration = Duration::from_millis(250);
 const LOAD_POLL: Duration = Duration::from_millis(50);
 
 #[cfg_attr(not(feature = "net"), allow(dead_code))]
-pub(crate) mod remote {
-    use std::io::{self, Read, Seek, SeekFrom};
-    use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
-    use std::time::Duration;
+pub(crate) mod remote;
 
-    /// Download granularity: a seek waits for at most one chunk.
-    pub(super) const CHUNK: usize = 256 * 1024;
-    /// Chunks one range request asks for (4 MB: a whole song in one or two).
-    const RUN: usize = 16;
-    /// How far ahead of the download (in chunks, 8 MB) a seek starts a new pass there.
-    const JUMP: usize = 2 * RUN;
-    /// Windowed streams (video) keep a file up to this size whole (32 MB).
-    const KEEP_WHOLE: usize = 32 * 1024 * 1024;
-    /// Windowed streams (video) keep this many chunks behind the reader (4 MB);
-    /// older ones go and are fetched again if it seeks back.
-    const BEHIND: usize = 16;
-    /// A read gives up after the network has delivered nothing for this long.
-    const STALL: Duration = Duration::from_secs(30);
-    /// Consecutive failed requests before the stream reports an error: with the
-    /// backoff below, about 15 s of retrying.
-    const ATTEMPTS: u32 = 5;
+type Sound = Box<dyn Source + Send>;
 
-    use super::failure;
+/// `playbackRate` over a sound: at 1 it passes the samples through; otherwise a
+/// time stretch plays it that much faster at its own pitch (until a seek).
+struct Stretched {
+    inner: Sound,
+    rate: Arc<AtomicU64>,
+    gate: Option<Gate>,
+    /// Silent samples still to play while the gate waits for the network.
+    silence: usize,
+    /// Samples since the gate was last looked at.
+    since_check: usize,
+    stretch: Option<(Stretcher, rodio::ChannelCount, rodio::SampleRate)>,
+    /// Samples passed through in the current frame: a stretch starts on a frame boundary.
+    phase: usize,
+    done: bool,
+}
 
-    pub(crate) fn is_remote(src: &str) -> bool {
-        src.starts_with("http://") || src.starts_with("https://")
+/// A remote sound's guard against the network: when the bytes the decoder reads next
+/// have not arrived it plays silence instead of blocking the audio thread (which
+/// stalls every sound in the mix), and the silence is kept out of the media clock.
+#[derive(Clone)]
+struct Gate {
+    stream: Arc<remote::Stream>,
+    shared: Arc<GateState>,
+}
+
+#[derive(Default)]
+struct GateState {
+    /// Seconds of silence played for the network (f64 bits), in the player's time.
+    silence: AtomicU64,
+    /// Waiting for the network now.
+    starved: AtomicBool,
+}
+
+impl GateState {
+    fn silence(&self) -> f64 {
+        f64::from_bits(self.silence.load(Ordering::Relaxed))
     }
+}
 
-    #[cfg(feature = "net")]
-    fn agent() -> &'static ureq::Agent {
-        static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-        AGENT.get_or_init(|| {
-            ureq::Agent::config_builder()
-                .timeout_connect(Some(Duration::from_secs(15)))
-                .timeout_recv_response(Some(Duration::from_secs(20)))
-                .timeout_recv_body(Some(STALL))
-                .build()
-                .into()
-        })
-    }
+/// Bytes ahead of the decoder's last read that must have arrived before it reads on: its
+/// largest read (symphonia's source buffer), so the read that would block never starts.
+const GATE_MARGIN: u64 = 64 * 1024;
+/// Samples between looks at the network, and the silence played per look while it waits.
+const GATE_STEP: usize = 1024;
 
-    struct State {
-        chunks: Vec<Option<Arc<[u8]>>>,
-        /// The chunk the decoder is reading or waiting for.
-        want: usize,
-        error: Option<String>,
-    }
-
-    /// One remote file, downloaded into memory chunk by chunk as it plays.
-    pub(crate) struct Stream {
-        url: String,
-        pub(crate) len: u64,
-        pub(crate) mime: Option<String>,
-        state: Mutex<State>,
-        ready: Condvar,
-        /// Whether the server serves ranges (else one sequential download).
-        ranged: bool,
-        /// With ranges: download at most this many chunks ahead of the reader and
-        /// drop the ones far behind it (a video), instead of the whole file (a song).
-        window: Option<usize>,
-    }
-
-    #[cfg(feature = "net")]
-    fn header(response: &ureq::http::Response<ureq::Body>, name: &str) -> Option<String> {
-        response
-            .headers()
-            .get(name)
-            .and_then(|value| value.to_str().ok())
-            .map(|value| value.trim().to_string())
-    }
-
-    impl Stream {
-        /// Requests the first chunk, which also tells the size and whether the
-        /// server serves ranges, then downloads the rest in the background.
-        pub(super) fn open(url: &str) -> Result<Arc<Self>, String> {
-            Self::open_with(url, None)
+impl Stretched {
+    /// Whether to play silence now (at a frame boundary), checking the network every
+    /// `GATE_STEP` samples.
+    fn gated(&mut self) -> bool {
+        let Some(gate) = &self.gate else {
+            return false;
+        };
+        if self.silence == 0 && self.since_check < GATE_STEP {
+            self.since_check += 1;
+            return false;
         }
-
-        /// Like [`Stream::open`], keeping only `window` chunks ahead of the reader
-        /// (and `BEHIND` behind it) in memory when the server serves ranges.
-        #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-        pub(crate) fn open_windowed(url: &str, window: usize) -> Result<Arc<Self>, String> {
-            Self::open_with(url, Some(window.max(1)))
+        self.since_check = 0;
+        if self.silence == 0 {
+            let blocked = gate.stream.would_block(GATE_MARGIN);
+            gate.shared.starved.store(blocked, Ordering::Relaxed);
+            if !blocked {
+                return false;
+            }
+            let channels = usize::from(self.channels().get());
+            self.silence = GATE_STEP.div_ceil(channels) * channels;
+            // Look again as soon as this silence is played.
+            self.since_check = GATE_STEP;
         }
+        true
+    }
 
-        /// Built without the native "net" feature: remote media reports an error.
-        #[cfg(not(feature = "net"))]
-        fn open_with(url: &str, window: Option<usize>) -> Result<Arc<Self>, String> {
-            let _ = window;
-            Err(failure(
-                url,
-                "remote media needs the native \"net\" feature",
-            ))
+    fn silent_sample(&mut self) -> rodio::Sample {
+        self.silence -= 1;
+        if let Some(gate) = &self.gate {
+            let per =
+                1.0 / (f64::from(self.sample_rate().get()) * f64::from(self.channels().get()));
+            let total = gate.shared.silence() + per;
+            gate.shared
+                .silence
+                .store(total.to_bits(), Ordering::Relaxed);
         }
+        0.0
+    }
+}
 
-        #[cfg(feature = "net")]
-        fn open_with(url: &str, window: Option<usize>) -> Result<Arc<Self>, String> {
-            let mut attempt = 0;
-            let response = loop {
-                match agent()
-                    .get(url)
-                    .header("Range", format!("bytes=0-{}", CHUNK - 1))
-                    // As browsers fetch media: compressed replies drop the length and the ranges.
-                    .header("Accept-Encoding", "identity")
-                    .call()
-                {
-                    Ok(response) => break response,
-                    Err(error) => {
-                        attempt += 1;
-                        // Fewer tries than mid-song: a refused start is often an expired URL.
-                        if attempt >= ATTEMPTS - 1 || !transient(&error) || unreachable(&error) {
-                            return Err(failure(url, error));
-                        }
-                        std::thread::sleep(backoff(attempt));
-                    }
-                }
-            };
-            let total = header(&response, "content-range")
-                .and_then(|range| range.rsplit('/').next()?.parse::<u64>().ok());
-            let ranged = response.status().as_u16() == 206 && total.is_some();
-            let mime = header(&response, "content-type")
-                .and_then(|value| value.split(';').next().map(str::trim).map(str::to_string))
-                .filter(|mime| !mime.is_empty() && mime != "application/octet-stream");
-            let len = match total.filter(|_| ranged) {
-                Some(total) => total,
-                None => match header(&response, "content-length")
-                    .and_then(|length| length.parse::<u64>().ok())
-                {
-                    Some(len) => len,
-                    // No length (a chunked or compressed reply): the whole file, then from memory.
+fn stretched(inner: Sound, rate: &Arc<AtomicU64>, gate: Option<Gate>) -> Sound {
+    Box::new(Stretched {
+        inner,
+        rate: rate.clone(),
+        gate,
+        silence: 0,
+        since_check: 0,
+        stretch: None,
+        phase: 0,
+        done: false,
+    })
+}
+
+impl Iterator for Stretched {
+    type Item = rodio::Sample;
+    fn next(&mut self) -> Option<Self::Item> {
+        let rate = f64::from_bits(self.rate.load(Ordering::Relaxed));
+        if self.silence > 0 {
+            return Some(self.silent_sample());
+        }
+        if self.stretch.is_none() && ((rate - 1.0).abs() < 1e-6 || self.phase != 0) {
+            if self.phase == 0 && self.gated() {
+                return Some(self.silent_sample());
+            }
+            let sample = self.inner.next()?;
+            self.phase = (self.phase + 1) % usize::from(self.inner.channels().get());
+            return Some(sample);
+        }
+        let (channels, sample_rate) = (self.inner.channels(), self.inner.sample_rate());
+        if self.stretch.is_none() {
+            self.stretch = Some((
+                Stretcher::new(channels.get(), sample_rate.get()),
+                channels,
+                sample_rate,
+            ));
+        }
+        loop {
+            if let Some((stretch, ..)) = self.stretch.as_mut()
+                && let Some(sample) = stretch.pull(rate)
+            {
+                return Some(sample);
+            }
+            if self.done {
+                return None;
+            }
+            // Between stretch blocks: a frame boundary.
+            self.since_check = GATE_STEP;
+            if self.gated() {
+                return Some(self.silent_sample());
+            }
+            let mut chunk = Vec::with_capacity(2048);
+            while chunk.len() < 2048 {
+                match self.inner.next() {
+                    Some(sample) => chunk.push(sample),
                     None => {
-                        return Self::whole(url, mime, response.into_body().into_reader(), window);
-                    }
-                },
-            };
-            if len == 0 {
-                return Err(failure(url, "empty response"));
-            }
-            let count =
-                usize::try_from(len.div_ceil(CHUNK as u64)).map_err(|_| "media too large")?;
-            let stream = Arc::new(Self {
-                url: url.to_string(),
-                len,
-                mime,
-                state: Mutex::new(State {
-                    chunks: vec![None; count],
-                    want: 0,
-                    error: None,
-                }),
-                ready: Condvar::new(),
-                ranged,
-                window,
-            });
-            let mut body = response.into_body().into_reader();
-            if ranged {
-                stream
-                    .fill(&mut body, 0, 1)
-                    .map_err(|error| failure(url, error))?;
-                if count > 1 {
-                    let downloader = Arc::downgrade(&stream);
-                    std::thread::Builder::new()
-                        .name("tarve-media-download".into())
-                        .spawn(move || Self::download(&downloader))
-                        .map_err(|error| error.to_string())?;
-                }
-            } else {
-                // No ranges: one sequential download; a seek ahead waits for it.
-                let downloader = stream.clone();
-                std::thread::Builder::new()
-                    .name("tarve-media-download".into())
-                    .spawn(move || {
-                        if let Err(error) = downloader.fill(&mut body, 0, count) {
-                            downloader.fail(error.to_string());
-                        }
-                    })
-                    .map_err(|error| error.to_string())?;
-            }
-            Ok(stream)
-        }
-
-        /// A stream over a body of unknown length, read to its end first.
-        fn whole(
-            url: &str,
-            mime: Option<String>,
-            mut body: impl Read,
-            window: Option<usize>,
-        ) -> Result<Arc<Self>, String> {
-            let mut data = Vec::new();
-            body.read_to_end(&mut data)
-                .map_err(|error| failure(url, error))?;
-            if data.is_empty() {
-                return Err(failure(url, "empty response"));
-            }
-            let chunks = data
-                .chunks(CHUNK)
-                .map(|chunk| Some(Arc::<[u8]>::from(chunk)))
-                .collect();
-            Ok(Arc::new(Self {
-                url: url.to_string(),
-                len: data.len() as u64,
-                mime,
-                state: Mutex::new(State {
-                    chunks,
-                    want: 0,
-                    error: None,
-                }),
-                ready: Condvar::new(),
-                ranged: false,
-                window,
-            }))
-        }
-
-        fn lock(&self) -> MutexGuard<'_, State> {
-            self.state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-        }
-
-        fn chunk_len(&self, index: usize) -> usize {
-            let start = (index * CHUNK) as u64;
-            (self.len - start).min(CHUNK as u64) as usize
-        }
-
-        fn fail(&self, error: String) {
-            self.lock().error = Some(error);
-            self.ready.notify_all();
-        }
-
-        pub(crate) fn error(&self) -> Option<String> {
-            self.lock().error.clone()
-        }
-
-        /// Reads chunks `from..to` off `body` in order.
-        fn fill(&self, body: &mut impl Read, from: usize, to: usize) -> io::Result<()> {
-            for index in from..to {
-                let mut chunk = vec![0; self.chunk_len(index)];
-                body.read_exact(&mut chunk)?;
-                let mut state = self.lock();
-                state.chunks[index] = Some(chunk.into());
-                if let Some(window) = self.window.filter(|_| self.ranged) {
-                    // At most the window ahead plus a little behind stays in memory:
-                    // past that budget the chunks farthest from the reader go first (a
-                    // jump to the index at the end and back keeps the start it read).
-                    // A short file (up to `KEEP_WHOLE`) stays whole: a loop or a seek
-                    // back replays it without downloading it again.
-                    let budget = (window + 2 * BEHIND + RUN).max(KEEP_WHOLE / CHUNK);
-                    let want = state.want;
-                    let mut held = state.chunks.iter().filter(|chunk| chunk.is_some()).count();
-                    while held > budget {
-                        let farthest = state
-                            .chunks
-                            .iter()
-                            .enumerate()
-                            .filter(|(other, chunk)| {
-                                chunk.is_some()
-                                    && *other != index
-                                    && !(want..=want + window).contains(other)
-                            })
-                            .max_by_key(|(other, _)| other.abs_diff(want))
-                            .map(|(other, _)| other);
-                        let Some(farthest) = farthest else { break };
-                        state.chunks[farthest] = None;
-                        held -= 1;
-                    }
-                }
-                drop(state);
-                self.ready.notify_all();
-            }
-            Ok(())
-        }
-
-        /// A stream of `count` chunks with the first one downloaded and the
-        /// decoder waiting at `want`, for testing which run comes next.
-        #[cfg(test)]
-        pub(super) fn next_run_for(count: usize, want: usize) -> Option<(usize, usize)> {
-            let stream = Self {
-                url: String::new(),
-                len: (count * CHUNK) as u64,
-                mime: None,
-                state: Mutex::new(State {
-                    chunks: (0..count)
-                        .map(|index| (index == 0).then(|| Arc::from(vec![0u8; CHUNK])))
-                        .collect(),
-                    want,
-                    error: None,
-                }),
-                ready: Condvar::new(),
-                ranged: true,
-                window: None,
-            };
-            stream.next_run()
-        }
-
-        /// The next run to fetch: from the first missing chunk, in file order; or
-        /// from where playback waits, when a seek lands far beyond the download
-        /// (a long podcast), and the gap after that. Files the size of a song are
-        /// read in one forward pass, which every range-capable server handles.
-        fn next_run(&self) -> Option<(usize, usize)> {
-            let state = self.lock();
-            let count = state.chunks.len();
-            if let Some(window) = self.window {
-                // From the reader on, within the window; `None` while it is full.
-                let want = state.want.min(count - 1);
-                let limit = count.min(want + window + 1);
-                let start = (want..limit).find(|&index| state.chunks[index].is_none())?;
-                let mut end = start + 1;
-                while end < limit.min(start + RUN) && state.chunks[end].is_none() {
-                    end += 1;
-                }
-                return Some((start, end));
-            }
-            let first = (0..count).find(|&index| state.chunks[index].is_none())?;
-            let want = state.want.min(count - 1);
-            let start = if state.chunks[want].is_none() && want > first + JUMP {
-                want
-            } else {
-                first
-            };
-            let mut end = start + 1;
-            while end < count.min(start + RUN) && state.chunks[end].is_none() {
-                end += 1;
-            }
-            Some((start, end))
-        }
-
-        /// The download, one connection, start to end. Some media CDNs
-        /// refuse a second request to a file while one is in flight, or a range
-        /// behind what they already served, with 403; one forward pass is what every
-        /// server handles, and it is fast (a song in well under a second). A seek ahead
-        /// waits for the pass to get there. It holds the stream weakly, so it stops
-        /// once every reader (and the track) is gone.
-        #[cfg(feature = "net")]
-        fn download(stream: &Weak<Self>) {
-            let mut failures = 0;
-            while let Some(stream) = stream.upgrade() {
-                let Some((start, end)) = stream.next_run() else {
-                    if stream.window.is_none() {
-                        return;
-                    }
-                    // A window full (or the rest downloaded): wait for the reader to move.
-                    let state = stream.lock();
-                    drop(stream.ready.wait_timeout(state, Duration::from_millis(500)));
-                    continue;
-                };
-                let last = ((end * CHUNK) as u64).min(stream.len) - 1;
-                let mut lasting = false;
-                let result = agent()
-                    .get(&stream.url)
-                    .header("Range", format!("bytes={}-{last}", start * CHUNK))
-                    .header("Accept-Encoding", "identity")
-                    .call()
-                    .map_err(|error| {
-                        lasting = !transient(&error);
-                        error.to_string()
-                    })
-                    .and_then(|response| {
-                        if response.status().as_u16() != 206 {
-                            return Err(format!("range request answered {}", response.status()));
-                        }
-                        let mut body = response.into_body().into_reader();
-                        stream
-                            .fill(&mut body, start, end)
-                            .map_err(|error| error.to_string())
-                    });
-                match result {
-                    Ok(()) => failures = 0,
-                    Err(error) => {
-                        // A run cut short keeps the chunks it delivered; the next
-                        // request continues after them.
-                        failures += 1;
-                        if failures >= ATTEMPTS || lasting {
-                            stream.fail(failure(&stream.url, error));
-                            return;
-                        }
-                        std::thread::sleep(backoff(failures));
+                        self.done = true;
+                        break;
                     }
                 }
             }
-        }
-    }
-
-    /// Worth retrying: the network, a busy or throttling server (a CDN's
-    /// rate-limit 403 often lifts after a second or two). A 404 or 410 will not change.
-    #[cfg(feature = "net")]
-    fn transient(error: &ureq::Error) -> bool {
-        match error {
-            ureq::Error::StatusCode(code) => matches!(code, 403 | 408 | 429) || *code >= 500,
-            _ => true,
-        }
-    }
-
-    /// No server at that name or port: a browser reports it at once (retrying a
-    /// refused connection cost ~12 s on Windows, where each refusal takes ~2 s).
-    #[cfg(feature = "net")]
-    fn unreachable(error: &ureq::Error) -> bool {
-        match error {
-            ureq::Error::HostNotFound => true,
-            ureq::Error::Io(error) => error.kind() == std::io::ErrorKind::ConnectionRefused,
-            _ => false,
-        }
-    }
-
-    /// 0.5 s, 1 s, 2 s, 4 s…: enough for a throttling server to let go.
-    #[cfg(feature = "net")]
-    fn backoff(attempt: u32) -> Duration {
-        Duration::from_millis(250 << attempt.min(6))
-    }
-
-    /// A seekable reader over a [`Stream`]; reads block until their chunk arrives.
-    pub(crate) struct Reader {
-        stream: Arc<Stream>,
-        position: u64,
-    }
-
-    impl Reader {
-        pub(crate) fn new(stream: Arc<Stream>) -> Self {
-            Self {
-                stream,
-                position: 0,
-            }
-        }
-    }
-
-    impl Read for Reader {
-        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            if buf.is_empty() || self.position >= self.stream.len {
-                return Ok(0);
-            }
-            let index = (self.position / CHUNK as u64) as usize;
-            let offset = (self.position % CHUNK as u64) as usize;
-            let mut state = self.stream.lock();
-            if state.want != index {
-                state.want = index;
-                if state.chunks[index].is_none() {
-                    // A windowed download waits for the reader to move.
-                    self.stream.ready.notify_all();
+            if let Some((stretch, ..)) = self.stretch.as_mut() {
+                stretch.push(&chunk);
+                if self.done {
+                    stretch.finish();
                 }
             }
-            loop {
-                if let Some(chunk) = &state.chunks[index] {
-                    let count = buf.len().min(chunk.len() - offset);
-                    buf[..count].copy_from_slice(&chunk[offset..offset + count]);
-                    self.position += count as u64;
-                    return Ok(count);
-                }
-                if let Some(error) = &state.error {
-                    return Err(io::Error::other(error.clone()));
-                }
-                let (next, wait) = self
-                    .stream
-                    .ready
-                    .wait_timeout(state, STALL)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                state = next;
-                if wait.timed_out() && state.chunks[index].is_none() {
-                    // Recorded on the stream, so the track reports an error (the
-                    // page can reload it) instead of ending as if it were over.
-                    let message = super::failure(&self.stream.url, "the network stalled");
-                    state.error.get_or_insert(message.clone());
-                    drop(state);
-                    self.stream.ready.notify_all();
-                    return Err(io::Error::new(io::ErrorKind::TimedOut, message));
-                }
-            }
-        }
-    }
-
-    impl Seek for Reader {
-        fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
-            let target = match to {
-                SeekFrom::Start(offset) => Some(offset),
-                SeekFrom::End(delta) => self.stream.len.checked_add_signed(delta),
-                SeekFrom::Current(delta) => self.position.checked_add_signed(delta),
-            };
-            self.position = target
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "seek before start"))?;
-            Ok(self.position)
         }
     }
 }
 
-type Sound = Box<dyn Source + Send>;
+impl Source for Stretched {
+    fn current_span_len(&self) -> Option<usize> {
+        match self.stretch {
+            Some(_) => None,
+            None => self.inner.current_span_len(),
+        }
+    }
+    fn channels(&self) -> rodio::ChannelCount {
+        self.stretch
+            .as_ref()
+            .map_or_else(|| self.inner.channels(), |(_, channels, _)| *channels)
+    }
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.stretch
+            .as_ref()
+            .map_or_else(|| self.inner.sample_rate(), |(_, _, rate)| *rate)
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
+    fn try_seek(&mut self, position: Duration) -> Result<(), rodio::source::SeekError> {
+        self.inner.try_seek(position)?;
+        self.stretch = None;
+        self.silence = 0;
+        self.phase = 0;
+        self.done = false;
+        Ok(())
+    }
+}
 /// What a remote load hands back: the sound, its duration and the stream behind it.
 type Loaded = Result<(Sound, Option<f64>, Arc<remote::Stream>), String>;
 
@@ -524,6 +231,7 @@ struct Rebuild {
 /// A seek the audio thread has yet to perform, and the one asked for meanwhile.
 struct PendingSeek {
     done: mpsc::Receiver<Result<(), String>>,
+    target: f64,
     next: Option<f64>,
 }
 
@@ -544,6 +252,43 @@ struct Track {
     volume: f32,
     muted: bool,
     ended: bool,
+    /// `playbackRate` (f64 bits), read by the sound's time stretch.
+    rate: Arc<AtomicU64>,
+    /// The player's position and the media time it stood for when the rate last changed
+    /// (or the sound restarted): media time runs `rate` times the player's from there.
+    clock: (f64, f64),
+    /// `waiting` was reported (the download stalled); `canplay` ends it.
+    waiting: bool,
+    /// The network guard's state, shared with the sound (remote tracks).
+    gate: Arc<GateState>,
+}
+
+impl Track {
+    fn rate(&self) -> f64 {
+        f64::from_bits(self.rate.load(Ordering::Relaxed))
+    }
+
+    /// The media time now: the player counts played samples, `rate` media seconds each second.
+    fn time(&self) -> f64 {
+        (self.clock.1 + (self.played() - self.clock.0) * self.rate()).max(0.0)
+    }
+
+    /// The player's position without the silence played while the network stalled.
+    fn played(&self) -> f64 {
+        self.player.get_pos().as_secs_f64() - self.gate.silence()
+    }
+
+    /// The sound for this track's player: the rate, and the network guard when remote.
+    fn sound(&self, sound: Sound) -> Sound {
+        let gate = match &self.origin {
+            Origin::Remote(stream) => Some(Gate {
+                stream: stream.clone(),
+                shared: self.gate.clone(),
+            }),
+            Origin::File => None,
+        };
+        stretched(sound, &self.rate, gate)
+    }
 }
 
 /// A remote track still connecting, and what the page asked of it meanwhile.
@@ -687,19 +432,41 @@ pub struct Media {
     #[cfg(test)]
     unconsumed: bool,
     tracks: HashMap<String, Track>,
+    /// `playbackRate` of each element not at 1 (also for one still loading).
+    rates: HashMap<String, f64>,
     pending: HashMap<String, Pending>,
     next_update: Option<Instant>,
 }
 
 fn event(id: &str, name: &str, track: Option<&Track>) -> Value {
-    json!({
+    let mut event = json!({
         "type": "media",
         "id": id,
         "event": name,
-        "time": track.map_or(0.0, |track| track.player.get_pos().as_secs_f64()),
+        "time": track.map_or(0.0, Track::time),
         "duration": track.and_then(|track| track.duration),
         "paused": track.is_none_or(|track| track.player.is_paused()),
-    })
+    });
+    if let Some(track) = track {
+        if let Some(duration) = track.duration.filter(|duration| *duration > 0.0) {
+            event["buffered"] = json!(match &track.origin {
+                Origin::Remote(stream) => duration * stream.buffered_from(track.time() / duration),
+                Origin::File => duration,
+            });
+        }
+        if name == "loadedmetadata" {
+            event["filename"] = json!(match &track.origin {
+                Origin::Remote(stream) => stream.filename(),
+                Origin::File => track
+                    .src
+                    .rsplit(['/', '\\'])
+                    .next()
+                    .unwrap_or_default()
+                    .to_string(),
+            });
+        }
+    }
+    event
 }
 
 /// "<reason> (<source>)": the reason first, so a cut-off message still says it,
@@ -725,7 +492,7 @@ fn decoder_failure(src: &str, error: rodio::decoder::DecoderError) -> String {
 }
 
 fn error(id: &str, message: impl Into<String>) -> Value {
-    json!({"type":"media", "id":id, "event":"error", "message":message.into()})
+    crate::video::media_error(id, message)
 }
 
 fn decode<R: Read + Seek + Send + Sync + 'static>(
@@ -788,9 +555,11 @@ fn open_remote(src: &str) -> Loaded {
 fn replace_player(track: &mut Track, mixer: &Mixer, sound: Sound) {
     let player = Arc::new(Player::connect_new(mixer));
     player.pause();
-    player.append(sound);
+    track.gate = Arc::default();
+    player.append(track.sound(sound));
     track.player = player;
     track.seeking = None;
+    track.clock = (0.0, 0.0);
     Media::apply_volume(track);
 }
 
@@ -812,7 +581,11 @@ fn begin_seek(track: &mut Track, target: f64) -> Result<(), String> {
             let _ = sender.send(result);
         })
         .map_err(|error| error.to_string())?;
-    track.seeking = Some(PendingSeek { done, next: None });
+    track.seeking = Some(PendingSeek {
+        done,
+        target,
+        next: None,
+    });
     Ok(())
 }
 
@@ -913,12 +686,14 @@ impl Media {
     ) -> Result<(), String> {
         let mixer = self.mixer()?;
         let (sound, duration, origin) = loaded;
+        let rate = Arc::new(AtomicU64::new(
+            self.rates.get(id).copied().unwrap_or(1.0).to_bits(),
+        ));
         let player = Arc::new(Player::connect_new(&mixer));
         player.pause();
-        player.append(sound);
         let seekable = matches!(origin, Origin::File);
         let track = Track {
-            player,
+            player: player.clone(),
             src: src.to_string(),
             origin,
             seekable,
@@ -929,10 +704,30 @@ impl Media {
             volume,
             muted,
             ended: false,
+            rate,
+            clock: (0.0, 0.0),
+            waiting: false,
+            gate: Arc::default(),
         };
+        player.append(track.sound(sound));
         Self::apply_volume(&track);
         self.tracks.insert(id.to_string(), track);
         Ok(())
+    }
+
+    /// `playbackRate`: the sound plays this much faster at its own pitch.
+    pub fn set_rate(&mut self, id: &str, rate: f64) -> Vec<Value> {
+        let rate = rate.clamp(0.0625, 16.0);
+        if (rate - 1.0).abs() < 1e-9 {
+            self.rates.remove(id);
+        } else {
+            self.rates.insert(id.to_string(), rate);
+        }
+        if let Some(track) = self.tracks.get_mut(id) {
+            track.clock = (track.played(), track.time());
+            track.rate.store(rate.to_bits(), Ordering::Relaxed);
+        }
+        vec![]
     }
 
     /// One HTMLMediaElement operation; returns the events it fires.
@@ -963,6 +758,8 @@ impl Media {
                 }
                 self.tracks.remove(id);
                 self.pending.remove(id);
+                // A new source starts at the normal rate, as HTMLMediaElement.load() does.
+                self.rates.remove(id);
                 let (looped, volume, muted) = (
                     looped.unwrap_or(false),
                     volume.unwrap_or(1.0),
@@ -1005,7 +802,10 @@ impl Media {
                     )
                 });
                 match installed {
-                    Ok(()) => vec![event(id, "loadedmetadata", self.tracks.get(id))],
+                    Ok(()) => vec![
+                        event(id, "loadedmetadata", self.tracks.get(id)),
+                        event(id, "canplay", self.tracks.get(id)),
+                    ],
                     Err(message) => vec![error(id, message)],
                 }
             }
@@ -1150,6 +950,7 @@ impl Media {
                 continue;
             }
             events.push(event(&id, "loadedmetadata", self.tracks.get(&id)));
+            events.push(event(&id, "canplay", self.tracks.get(&id)));
             if let Some(time) = pending.seek {
                 events.extend(self.command(&id, "seek", None, Some(time), None, None, None));
             }
@@ -1212,7 +1013,10 @@ impl Media {
                 Err(mpsc::TryRecvError::Empty) => continue,
                 Err(mpsc::TryRecvError::Disconnected) => Err("seek: stopped".to_string()),
             };
-            let next = track.seeking.take().and_then(|seek| seek.next);
+            let (next, target) = track
+                .seeking
+                .take()
+                .map_or((None, 0.0), |seek| (seek.next, seek.target));
             if let Some(target) = next {
                 if let Err(message) = begin_seek(track, target) {
                     events.push(error(id, message));
@@ -1220,7 +1024,11 @@ impl Media {
                 continue;
             }
             match result {
-                Ok(()) => events.push(event(id, "seeked", Some(track))),
+                Ok(()) => {
+                    // The player's position is the target now: media time starts from it.
+                    track.clock = (track.played(), target);
+                    events.push(event(id, "seeked", Some(track)));
+                }
                 Err(message) => events.push(error(id, message)),
             }
         }
@@ -1278,6 +1086,16 @@ impl Media {
             if track.player.is_paused() || track.ended {
                 continue;
             }
+            // The download stalled under the decoder: `waiting`, then `canplay` once it moves.
+            let starved = track.gate.starved.load(Ordering::Relaxed);
+            if starved != track.waiting {
+                track.waiting = starved;
+                events.push(event(
+                    &id,
+                    if starved { "waiting" } else { "canplay" },
+                    Some(track),
+                ));
+            }
             if track.player.empty() {
                 // A stream that failed mid-way ends early: that is an error, not the end.
                 if let Origin::Remote(stream) = &track.origin
@@ -1291,7 +1109,9 @@ impl Media {
                 if track.looped
                     && let Ok(sound) = reopen(track)
                 {
-                    track.player.append(sound);
+                    // The loop's sound follows the first in the same player.
+                    track.clock = (track.played(), 0.0);
+                    track.player.append(track.sound(sound));
                     events.push(event(&id, "timeupdate", Some(track)));
                     continue;
                 }
@@ -1702,7 +1522,11 @@ mod tests {
             }
         }
         let names: Vec<&str> = events.iter().map(|(name, _)| name.as_str()).collect();
-        assert_eq!(&names[..2], ["loadedmetadata", "play"], "{events:?}");
+        assert_eq!(
+            &names[..3],
+            ["loadedmetadata", "canplay", "play"],
+            "{events:?}"
+        );
         let (_, time) = events
             .iter()
             .find(|(name, _)| name == "seeked")

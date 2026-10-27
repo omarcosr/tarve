@@ -55,11 +55,21 @@ export async function updateIfAvailable(onProgress: (percent: number) => void) {
   installUpdate(file); // swaps the executable, starts the new version and exits
 }`;
 
+  const packs = `# once: an executable that also runs app packs (keeps the private key out of it: only a derived key goes in)
+bunx tarve build app.tsx --version 1.2.0 --packs --outfile dist/win/App.exe
+
+# each release: the app's code and files, signed and encrypted (a few hundred KB)
+bunx tarve pack app.tsx --version 1.2.1
+bunx tarve release --version 1.2.1 \\
+  --pack dist/App-1.2.1-win32-x64-bun.tarve \\
+  --artifact win32-x64=dist/win/App.exe
+# executables built with --packs download the pack; older ones, and any that cannot run it, get the executable`;
+
   const api = [
-    ["checkForUpdate(options)", "Fetches latest.json, checks its signature and fields, and resolves the newer Update for this platform or null. Options: url, publicKey, currentVersion, platform, name, allowInsecure, fetch, signal."],
+    ["checkForUpdate(options)", "Fetches latest.json, checks its signature and fields, and resolves the newer Update for this platform or null. update.kind is \"pack\" when this executable can run the release's app pack, else \"executable\". Options: url, publicKey, currentVersion, platform, name, allowInsecure, fetch, signal."],
     ["downloadUpdate(update, options?)", "Streams the artifact next to the executable and checks its size, SHA-256 and executable format. Options: onProgress, path, allowInsecure, fetch, signal."],
-    ["installUpdate(file, options?)", "Replaces the executable and, by default, starts the new version with the same arguments and exits. Options: executable, restart, args."],
-    ["canInstallUpdate(executable?)", "Whether this process is a built app in a writable folder."],
+    ["installUpdate(file, options?)", "Replaces the executable (or installs the app pack in its per-user folder) and, by default, starts the new version with the same arguments and exits. Options: executable, restart, args."],
+    ["canInstallUpdate(update?)", "Whether this process can install the update: an app pack whenever the executable runs packs, an executable when it is a built app in a writable folder."],
     ["cleanupUpdate(executable?)", "Removes the previous executable left behind on Windows; checkForUpdate already calls it."],
     ["compareVersions(a, b)", "Semver ordering: 1.10.0 > 1.2.0, 1.0.0 > 1.0.0-rc.1, build metadata ignored."],
     ["verifyUpdateManifest(signed, publicKey)", "The signature and field checks of checkForUpdate, for custom transports."],
@@ -70,6 +80,7 @@ export async function updateIfAvailable(onProgress: (percent: number) => void) {
     ["--artifact platform=path", "Repeatable. platform is os-arch as in process.platform/process.arch: win32-x64, linux-x64."],
     ["--key path | base64", "Private key. Defaults to TARVE_UPDATE_PRIVATE_KEY, then ./tarve-update.key."],
     ["--public-key base64", "The key your app ships with. The release fails when the private key does not belong to it."],
+    ["--pack path", "Repeatable. An app pack from tarve pack; it is listed under the platform and runtime it was built for."],
     ["--sign command", "Authenticode command run on each Windows artifact before hashing; {file} is the quoted path. Defaults to TARVE_SIGN_COMMAND."],
     ["--base-url https://…/", "Absolute prefix for artifact URLs, for a CDN. Without it, URLs are relative to latest.json."],
     ["--name App", "Recorded in the manifest; apps built under another name reject it."],
@@ -83,6 +94,7 @@ export async function updateIfAvailable(onProgress: (percent: number) => void) {
     ["Identity", "A manifest whose name differs from the app's name is rejected, so one key can sign several apps safely."],
     ["Version", "Only strictly newer versions are offered: no downgrades, no reinstalling the same build."],
     ["Download", "Content-Length and byte count must equal the signed size, the SHA-256 must match, and the file must start like a Windows (MZ) or Linux (ELF) executable. A failed download is deleted."],
+    ["App pack", "On every launch: the Ed25519 signature over its header, the SHA-256 of each file it reads, AES-256-GCM, its name, version (newer than the embedded app), runtime, platform, Tarve native ABI, plugin libraries and native features. A pack that fails is skipped; one that throws or crashes while starting is marked bad and the previous pack, or the embedded app, runs instead."],
     ["Install", "Refuses to overwrite bun, node or txiki themselves, missing or non-executable files, and executables in read-only folders. On Windows the old executable is restored if the swap fails."],
     ["Release", "Version format, platform names, duplicate platforms, missing, empty or wrong-format artifacts, HTTP base URLs, a key that does not match --public-key, and a --sign command that fails, leaves the file unchanged or corrupts it."],
   ];
@@ -156,6 +168,32 @@ export async function updateIfAvailable(onProgress: (percent: number) => void) {
   </section>
 
   <section class="doc-section">
+    <h2 id="packs">App packs: updates without the runtime</h2>
+    <div class="doc-prose">
+      <p>
+        A built executable is mostly runtime: Bun, Node.js or txiki.js and the native library, about 100 MB. Between two
+        releases only your code and files change. An executable built with <code>--packs</code> also runs
+        <strong>app packs</strong>: <code>.tarve</code> files, like Electron's <code>app.asar</code>, holding the app's bundled
+        code and files. A release then downloads a few hundred kilobytes instead of the whole executable.
+      </p>
+      <p>
+        Unlike asar, a pack is signed with your update key (Ed25519 over a header that lists the SHA-256 of every file),
+        compressed and encrypted (AES-256-GCM, with a key derived from your private key). The executable verifies it on every
+        launch and decrypts the code in memory: it never reaches the disk in clear. Encryption keeps the code out of reach of
+        anyone who downloads the pack; the key is inside the executable, so it slows down, but cannot stop, someone who takes
+        that apart.
+      </p>
+      <p>
+        A pack runs only in executables of the same Tarve version, runtime and platform that provide its native features and
+        plugin libraries. When a release changes any of those, ship the executable as well: <code>checkForUpdate</code> picks
+        the executable for clients that cannot run the pack. Build the pack with the same name, app id and icon as the
+        executable (the <code>"tarve"</code> field of <code>package.json</code> keeps them in one place).
+      </p>
+    </div>
+    <CodeBlock code={packs} lang="sh" file="terminal" />
+  </section>
+
+  <section class="doc-section">
     <h2 id="authenticode">Windows code signing</h2>
     <div class="doc-prose">
       <p>
@@ -206,7 +244,7 @@ export async function updateIfAvailable(onProgress: (percent: number) => void) {
       </p>
       <p>
         On Windows the running executable is renamed to <code>App.exe.old</code>, the new one takes its place and the next
-        update check deletes the old file. Updates need Bun or Node built executables; txiki.js builds are not supported yet.
+        update check deletes the old file. App packs install in a per-user folder, so they work under <code>Program Files</code> too.
       </p>
     </div>
   </section>

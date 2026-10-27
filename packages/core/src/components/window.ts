@@ -10,6 +10,8 @@ export interface WindowProps extends ViewProps {
   minWidth?: number;
   minHeight?: number;
   resizable?: boolean;
+  /** Opens maximized; `width`/`height`/`position` are the bounds it restores to. A remembered window state wins. */
+  maximized?: boolean;
   position?: WindowPosition;
   /**
    * Stacking order; `alwaysOnBottom` keeps the window under every other one, even

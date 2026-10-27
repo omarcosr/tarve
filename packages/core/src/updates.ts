@@ -4,6 +4,11 @@ import { accessSync, chmodSync, closeSync, constants, copyFileSync, createWriteS
 import { basename, dirname, join } from "node:path";
 import { runtimeAppMetadata } from "./app-metadata";
 import { MACHO_MAGICS, ZIP_MAGIC, isZip, machOKind } from "./macho";
+import { compareVersions, isValidVersion } from "./version";
+import { PACK_EXTENSION, inspectPack, isPack, packCompatible, PackHeader, importPackPublicKey } from "./pack";
+import { openPackFile, packFile, packHost, packMarker, packMismatch } from "./pack-host";
+
+export { compareVersions, isValidVersion };
 
 /** One downloadable build of a release, keyed by `<platform>-<arch>` (e.g. `win32-x64`). */
 export interface UpdateArtifact {
@@ -12,13 +17,23 @@ export interface UpdateArtifact {
   size: number;
 }
 
-/** What `tarve release` signs: the release and one artifact per platform. */
+/** An app pack of a release (`tarve pack`), for executables built with `tarve build --packs`. */
+export interface UpdatePack extends UpdateArtifact {
+  /** Fingerprint of the executables the pack runs in (see PackRequirements). */
+  compat: string;
+  /** Native subsystems the pack needs. */
+  features: string[];
+}
+
+/** What `tarve release` signs: the release, one artifact per platform and app packs per platform and runtime. */
 export interface UpdateManifest {
   name?: string;
   version: string;
   notes?: string;
   pubDate: string;
   platforms: Record<string, UpdateArtifact>;
+  /** `<platform>` → `<runtime>` → pack. Executables that can run one download it instead of a whole executable. */
+  packs?: Record<string, Record<string, UpdatePack>>;
 }
 
 /** The file served at the update URL: the manifest as signed text plus its Ed25519 signature (base64). */
@@ -28,6 +43,8 @@ export interface SignedUpdateManifest {
 }
 
 export interface Update extends UpdateArtifact {
+  /** "pack": only the app's code and files (a few KB or MB); "executable": the whole executable. */
+  kind: "executable" | "pack";
   version: string;
   currentVersion: string;
   notes?: string;
@@ -72,16 +89,10 @@ export interface InstallUpdateOptions {
 /** DER prefix of an Ed25519 SubjectPublicKeyInfo; the raw 32-byte key follows. */
 const SPKI_ED25519 = "302a300506032b6570032100";
 const MAX_MANIFEST_BYTES = 1 << 20;
-const VERSION = /^v?\d+(\.\d+){0,3}(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/;
 const PLATFORM = /^[a-z0-9]+-[a-z0-9]+$/;
 
 export function updatePlatform(): string {
   return `${process.platform}-${process.arch}`;
-}
-
-/** `1.2.3`, `v1.2`, `1.0.0-beta.1+build.5`. */
-export function isValidVersion(version: string): boolean {
-  return typeof version === "string" && version.length <= 128 && VERSION.test(version);
 }
 
 /** `win32-x64` style: the OS (as in `process.platform`) and the architecture. */
@@ -110,6 +121,17 @@ function invalid(reason: string): never {
   throw new TypeError(`Invalid update manifest: ${reason}`);
 }
 
+function validateArtifact(value: unknown, at: string, pack: boolean): void {
+  const a = value as Record<string, unknown> | null;
+  if (!a || typeof a !== "object" || Array.isArray(a)) invalid(at);
+  if (typeof a.url !== "string" || !a.url) invalid(`${at}.url`);
+  if (typeof a.sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(a.sha256)) invalid(`${at}.sha256`);
+  if (typeof a.size !== "number" || !Number.isSafeInteger(a.size) || a.size <= 0) invalid(`${at}.size`);
+  if (!pack) return;
+  if (typeof a.compat !== "string" || !/^[0-9a-f]{64}$/.test(a.compat)) invalid(`${at}.compat`);
+  if (!Array.isArray(a.features) || !a.features.every(feature => typeof feature === "string")) invalid(`${at}.features`);
+}
+
 /** Checks the shape of a parsed manifest; throws a TypeError naming the bad field. */
 export function validateUpdateManifest(value: unknown): UpdateManifest {
   if (!value || typeof value !== "object" || Array.isArray(value)) invalid("not an object");
@@ -121,59 +143,59 @@ export function validateUpdateManifest(value: unknown): UpdateManifest {
   if (!m.platforms || typeof m.platforms !== "object" || Array.isArray(m.platforms)) invalid("platforms");
   for (const [platform, artifact] of Object.entries(m.platforms as Record<string, unknown>)) {
     if (!isValidPlatform(platform)) invalid(`platform ${platform}`);
-    const a = artifact as Record<string, unknown> | null;
-    if (!a || typeof a !== "object") invalid(`platforms.${platform}`);
-    if (typeof a.url !== "string" || !a.url) invalid(`platforms.${platform}.url`);
-    if (typeof a.sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(a.sha256)) invalid(`platforms.${platform}.sha256`);
-    if (typeof a.size !== "number" || !Number.isSafeInteger(a.size) || a.size <= 0) invalid(`platforms.${platform}.size`);
+    validateArtifact(artifact, `platforms.${platform}`, false);
+  }
+  if (m.packs !== undefined) {
+    if (!m.packs || typeof m.packs !== "object" || Array.isArray(m.packs)) invalid("packs");
+    for (const [platform, runtimes] of Object.entries(m.packs as Record<string, unknown>)) {
+      if (!isValidPlatform(platform)) invalid(`packs platform ${platform}`);
+      if (!runtimes || typeof runtimes !== "object" || Array.isArray(runtimes)) invalid(`packs.${platform}`);
+      for (const [runtime, pack] of Object.entries(runtimes as Record<string, unknown>)) {
+        if (!/^[a-z]+$/.test(runtime)) invalid(`packs.${platform} runtime ${runtime}`);
+        validateArtifact(pack, `packs.${platform}.${runtime}`, true);
+      }
+    }
   }
   return value as UpdateManifest;
 }
 
-/** Verifies `signed` against `publicKey` and returns the manifest; throws on a bad signature or shape. */
-export function verifyUpdateManifest(signed: SignedUpdateManifest, publicKey: string): UpdateManifest {
+function assertSignedShape(signed: SignedUpdateManifest): Uint8Array {
   if (typeof signed?.payload !== "string" || typeof signed.signature !== "string") invalid("expected { payload, signature }");
   if (Buffer.byteLength(signed.payload) > MAX_MANIFEST_BYTES) invalid("too large");
-  const raw = Buffer.from(publicKey.trim(), "base64");
-  if (raw.length !== 32) throw new TypeError("Update public key must be 32 bytes of base64 (tarve keygen)");
-  const signature = Buffer.from(signed.signature, "base64");
-  const key = createPublicKey({ key: Buffer.concat([Buffer.from(SPKI_ED25519, "hex"), raw]), format: "der", type: "spki" });
-  if (signature.length !== 64 || !verify(null, Buffer.from(signed.payload, "utf8"), key, signature)) {
-    throw new Error("Update manifest signature is invalid");
-  }
+  return new Uint8Array(Buffer.from(signed.signature, "base64"));
+}
+
+function parseManifest(payload: string): UpdateManifest {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(signed.payload);
+    parsed = JSON.parse(payload);
   } catch {
     invalid("payload is not JSON");
   }
   return validateUpdateManifest(parsed);
 }
 
-/** Semver-ish comparison: numeric core, a pre-release sorts before its release. */
-export function compareVersions(a: string, b: string): number {
-  const parse = (v: string) => {
-    const [core = "", pre] = v.trim().replace(/^v/, "").split("+")[0]!.split(/-(.*)/s);
-    return { core: core.split(".").map(n => Number.parseInt(n, 10) || 0), pre };
-  };
-  const x = parse(a), y = parse(b);
-  for (let i = 0; i < Math.max(x.core.length, y.core.length); i++) {
-    const d = (x.core[i] ?? 0) - (y.core[i] ?? 0);
-    if (d) return Math.sign(d);
+/** Verifies `signed` against `publicKey` and returns the manifest; throws on a bad signature or shape. */
+export function verifyUpdateManifest(signed: SignedUpdateManifest, publicKey: string): UpdateManifest {
+  const signature = assertSignedShape(signed);
+  const raw = Buffer.from(publicKey.trim(), "base64");
+  if (raw.length !== 32) throw new TypeError("Update public key must be 32 bytes of base64 (tarve keygen)");
+  const key = createPublicKey({ key: Buffer.concat([Buffer.from(SPKI_ED25519, "hex"), raw]), format: "der", type: "spki" });
+  if (signature.length !== 64 || !verify(null, Buffer.from(signed.payload, "utf8"), key, signature)) {
+    throw new Error("Update manifest signature is invalid");
   }
-  if (x.pre === y.pre) return 0;
-  if (x.pre === undefined) return 1;
-  if (y.pre === undefined) return -1;
-  const xp = x.pre.split("."), yp = y.pre.split(".");
-  for (let i = 0; i < Math.max(xp.length, yp.length); i++) {
-    const l = xp[i], r = yp[i];
-    if (l === undefined) return -1;
-    if (r === undefined) return 1;
-    const ln = /^\d+$/.test(l), rn = /^\d+$/.test(r);
-    const d = ln && rn ? Number(l) - Number(r) : ln ? -1 : rn ? 1 : l < r ? -1 : l > r ? 1 : 0;
-    if (d) return Math.sign(d);
+  return parseManifest(signed.payload);
+}
+
+/** verifyUpdateManifest through Web Crypto, which every runtime has (txiki.js has no node:crypto verify). */
+async function verifyManifest(signed: SignedUpdateManifest, publicKey: string): Promise<UpdateManifest> {
+  const signature = assertSignedShape(signed);
+  const key = await importPackPublicKey(publicKey);
+  const payload = new TextEncoder().encode(signed.payload);
+  if (signature.length !== 64 || !await crypto.subtle.verify({ name: "Ed25519" }, key, signature as Uint8Array<ArrayBuffer>, payload)) {
+    throw new Error("Update manifest signature is invalid");
   }
-  return 0;
+  return parseManifest(signed.payload);
 }
 
 /** Fetches and verifies the manifest; resolves the newer release for this platform, or null. */
@@ -194,16 +216,25 @@ export async function checkForUpdate(options: CheckForUpdateOptions): Promise<Up
   } catch {
     invalid("not JSON");
   }
-  const manifest = verifyUpdateManifest(signed, options.publicKey);
+  const manifest = await verifyManifest(signed, options.publicKey);
   const name = options.name ?? metadata.name;
   if (manifest.name && name && manifest.name !== name) throw new Error(`Update manifest is for ${manifest.name}, not ${name}`);
   if (compareVersions(manifest.version, currentVersion) <= 0) return null;
   const platform = options.platform ?? updatePlatform();
-  const artifact = manifest.platforms[platform];
+  // An executable built with --packs takes the release's pack when it can run it: a pack that
+  // failed to start here (<version>.bad) falls back to the whole executable.
+  const host = packHost();
+  const pack = host && host.platform === platform ? manifest.packs?.[platform]?.[host.runtime] : undefined;
+  const usePack = !!pack && packCompatible(pack, host!.compat, host!.features)
+    && !existsSync(packMarker(host!.directory, manifest.version, "bad"));
+  const artifact = usePack ? pack : manifest.platforms[platform];
   if (!artifact) return null;
   const url = new URL(artifact.url, response.url || options.url).href;
   assertUpdateUrl(url, options.allowInsecure);
-  return { ...artifact, url, version: manifest.version, currentVersion, notes: manifest.notes, pubDate: manifest.pubDate, platform };
+  return {
+    kind: usePack ? "pack" : "executable", url, sha256: artifact.sha256, size: artifact.size,
+    version: manifest.version, currentVersion, notes: manifest.notes, pubDate: manifest.pubDate, platform,
+  };
 }
 
 /**
@@ -302,9 +333,14 @@ export async function downloadUpdate(update: Update, options: DownloadUpdateOpti
   assertUpdateUrl(update.url, options.allowInsecure);
   // Inside a macOS bundle, download beside the .app: writing into it would break its sealed signature.
   const bundle = macBundleOf(process.execPath);
-  const path = options.path ?? (bundle
-    ? join(dirname(bundle), `.${basename(bundle)}.${update.version}.download`)
-    : join(dirname(process.execPath), `.${basename(process.execPath)}.${update.version}.download`));
+  const host = update.kind === "pack" ? packHost() : undefined;
+  if (update.kind === "pack" && !host) throw new Error("This executable does not run app packs: build it with tarve build --packs");
+  if (host) mkdirSync(host.directory, { recursive: true });
+  const path = options.path ?? (host
+    ? join(host.directory, `.${update.version}${PACK_EXTENSION}.download`)
+    : bundle
+      ? join(dirname(bundle), `.${basename(bundle)}.${update.version}.download`)
+      : join(dirname(process.execPath), `.${basename(process.execPath)}.${update.version}.download`));
   const response = await (options.fetch ?? fetch)(update.url, { signal: options.signal });
   if (!response.ok || !response.body) throw new Error(`Update download failed: HTTP ${response.status}`);
   const length = response.headers.get("content-length");
@@ -313,7 +349,7 @@ export async function downloadUpdate(update: Update, options: DownloadUpdateOpti
     throw new Error(`Update download is ${length} bytes, the manifest says ${update.size}`);
   }
   const hash = createHash("sha256");
-  const out = createWriteStream(path, { mode: 0o755 });
+  const out = createWriteStream(path, { mode: host ? 0o644 : 0o755 });
   let received = 0;
   try {
     const reader = response.body.getReader();
@@ -332,7 +368,9 @@ export async function downloadUpdate(update: Update, options: DownloadUpdateOpti
     await new Promise<void>((resolve, reject) => out.end((error?: Error | null) => error ? reject(error) : resolve()));
     if (received !== update.size) throw new Error("Update download is incomplete");
     if (hash.digest("hex") !== update.sha256.toLowerCase()) throw new Error("Update download failed its SHA-256 check");
-    if (!looksExecutable(head(path, 4), update.platform)) throw new Error(`Update download is not a ${update.platform} executable`);
+    if (host ? !isPack(head(path, 8)) : !looksExecutable(head(path, 4), update.platform)) {
+      throw new Error(`Update download is not ${host ? "an app pack" : `a ${update.platform} executable`}`);
+    }
   } catch (error) {
     out.destroy();
     rmSync(path, { force: true });
@@ -343,8 +381,23 @@ export async function downloadUpdate(update: Update, options: DownloadUpdateOpti
 
 const RUNTIMES = /^(bun|node|tjs|txiki)(\.exe)?$/i;
 
-/** Whether this process can replace its own executable (a built app in a writable folder). */
-export function canInstallUpdate(executable = process.execPath): boolean {
+/**
+ * Whether this process can install `update`: an app pack whenever the executable runs packs (they
+ * live in a per-user folder), an executable when it is a built app in a writable folder.
+ */
+export function canInstallUpdate(update: Update | string = process.execPath): boolean {
+  if (typeof update !== "string" && update.kind === "pack") {
+    const host = packHost();
+    if (!host) return false;
+    try {
+      mkdirSync(host.directory, { recursive: true });
+      accessSync(host.directory, constants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  const executable = typeof update === "string" ? update : process.execPath;
   if (RUNTIMES.test(basename(executable))) return false;
   const bundle = macBundleOf(executable);
   try {
@@ -375,8 +428,9 @@ function move(from: string, to: string): void {
  */
 export function installUpdate(file: string, options: InstallUpdateOptions = {}): void {
   const executable = options.executable ?? process.execPath;
-  if (RUNTIMES.test(basename(executable))) throw new Error("installUpdate only works in an executable built with tarve build");
+  if (RUNTIMES.test(basename(executable)) && !packHost()) throw new Error("installUpdate only works in an executable built with tarve build");
   if (!existsSync(file) || !statSync(file).isFile() || statSync(file).size === 0) throw new Error(`Update file not found or empty: ${file}`);
+  if (isPack(head(file, 8))) return installPack(file, options);
   if (!looksExecutable(head(file, 4), updatePlatform())) throw new Error(`${file} is not an executable for ${updatePlatform()}`);
   if (!canInstallUpdate(executable)) throw new Error(`Cannot write ${executable}: update it with the installer or package manager that installed it`);
   const plan = process.platform === "darwin" ? planMacBundleUpdate(executable) : undefined;
@@ -418,4 +472,31 @@ export function cleanupUpdate(executable = process.execPath): void {
   try {
     if (bundle && existsSync(`${bundle}.old`) && statSync(`${bundle}.old`).isDirectory()) rmSync(`${bundle}.old`, { recursive: true, force: true });
   } catch {}
+}
+
+/**
+ * Moves a downloaded pack into the executable's pack folder and, by default, restarts on it.
+ * The executable checks its signature and fit on every launch before running it.
+ */
+function installPack(file: string, options: InstallUpdateOptions): void {
+  const host = packHost();
+  if (!host) throw new Error("This executable does not run app packs: build it with tarve build --packs");
+  const pack = openPackFile(file);
+  let header: PackHeader;
+  try {
+    header = inspectPack(pack.read, pack.size).header;
+  } finally {
+    pack.close();
+  }
+  const mismatch = packMismatch(header, host);
+  if (mismatch) throw new Error(`Cannot install app pack ${header.version}: ${mismatch}`);
+  const current = host.active ?? host.version;
+  if (compareVersions(header.version, current) <= 0) throw new Error(`App pack ${header.version} is not newer than ${current}`);
+  mkdirSync(host.directory, { recursive: true });
+  rmSync(packMarker(host.directory, header.version, "bad"), { force: true });
+  rmSync(packMarker(host.directory, header.version, "boot"), { force: true });
+  move(file, packFile(host.directory, header.version));
+  if (options.restart === false) return;
+  spawn(process.execPath, options.args ?? process.argv.slice(2), { detached: true, stdio: "ignore" }).unref();
+  process.exit(0);
 }

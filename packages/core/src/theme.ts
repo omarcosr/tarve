@@ -1,4 +1,4 @@
-import type { BoxShadow, StateStyle, Style, SyntaxTheme } from "./protocol";
+import type { BoxShadow, Gradient, StateStyle, Style, StyleAnimation, SyntaxTheme } from "./protocol";
 import { cssColor, GRADIENT, normalizeGradient, parseBoxShadow, parseGradient, parseTextShadow, parseTransform } from "./css-shadow";
 
 export interface ThemeColors {
@@ -331,8 +331,138 @@ export function resolveThemeStyle(style: Style, selected: ThemeDefinition): Styl
   return { ...resolved };
 }
 
+/** Top-level comma split, ignoring commas inside parentheses (`rgb(1, 2, 3)`). */
+function splitLayers(value: string): string[] {
+  const parts: string[] = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < value.length; i++) {
+    const c = value[i];
+    if (c === "(") depth++;
+    else if (c === ")") depth--;
+    else if (c === "," && depth === 0) { parts.push(value.slice(start, i).trim()); start = i + 1; }
+  }
+  parts.push(value.slice(start).trim());
+  return parts.filter(Boolean);
+}
+
+const CSS_PX = /^(-?\d*\.?\d+)(px)?$/;
+function cssPx(value: string, what: string): number {
+  const match = CSS_PX.exec(value.trim());
+  if (!match || (match[2] === undefined && Number(match[1]) !== 0)) throw new TypeError(`${what} needs a px length, got "${value}"`);
+  return Number(match[1]);
+}
+
+/** `blur(12px) saturate(160%)` → { blur: 12, saturate: 1.6 }. */
+function cssFilterFunctions(value: string, allowed: readonly string[], what: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  const input = value.trim();
+  if (input === "none") return out;
+  let consumed = "";
+  for (const match of input.matchAll(/([a-z-]+)\(([^)]*)\)/g)) {
+    consumed += match[0];
+    const name = match[1]!;
+    if (!allowed.includes(name)) throw new TypeError(`${what} supports ${allowed.map(n => `${n}()`).join(" and ")} only, got ${name}()`);
+    const arg = match[2]!.trim();
+    out[name] = name === "blur" ? cssPx(arg, `${what} blur()`) : arg.endsWith("%") ? Number(arg.slice(0, -1)) / 100 : Number(arg);
+    if (!Number.isFinite(out[name])) throw new TypeError(`Invalid ${what}: ${value}`);
+  }
+  if (consumed.replace(/\s+/g, "") !== input.replace(/\s+/g, "")) throw new TypeError(`Invalid ${what}: ${value}`);
+  return out;
+}
+
+/** Top-level `name(args)` calls of a CSS function list, parentheses nested in args kept. */
+function cssCalls(value: string, what: string): [string, string][] {
+  const calls: [string, string][] = [];
+  let i = 0;
+  const input = value.trim();
+  while (i < input.length) {
+    while (input[i] === " ") i++;
+    if (i >= input.length) break;
+    const open = input.indexOf("(", i);
+    const name = open < 0 ? "" : input.slice(i, open).trim();
+    if (!/^[a-z-]+$/.test(name)) throw new TypeError(`Invalid ${what}: ${value}`);
+    let depth = 0, end = open;
+    for (; end < input.length; end++) {
+      if (input[end] === "(") depth++;
+      else if (input[end] === ")" && --depth === 0) break;
+    }
+    if (depth !== 0) throw new TypeError(`Invalid ${what}: ${value}`);
+    calls.push([name, input.slice(open + 1, end).trim()]);
+    i = end + 1;
+  }
+  return calls;
+}
+
+/** CSS `filter`: `blur(r)` and `drop-shadow(x y [blur] [colour])`, e.g. `"drop-shadow(0 2px 6px #0008)"`. */
+function parseCssFilter(value: string): { blur?: number; dropShadow?: { x: number; y: number; blur: number; color: string } } {
+  if (value.trim() === "none") return {};
+  const out: { blur?: number; dropShadow?: { x: number; y: number; blur: number; color: string } } = {};
+  for (const [name, args] of cssCalls(value, "filter")) {
+    if (name === "blur") out.blur = cssPx(args, "filter blur()");
+    else if (name === "drop-shadow") {
+      const tokens = splitLayers(args.replace(/\s+(?![^(]*\))/g, ","));
+      const lengths: number[] = [];
+      let color = "#000000";
+      for (const token of tokens) {
+        if (CSS_PX.test(token)) lengths.push(cssPx(token, "drop-shadow()"));
+        else color = token;
+      }
+      if (lengths.length < 2) throw new TypeError(`drop-shadow() needs an x and a y offset, got "${args}"`);
+      out.dropShadow = { x: lengths[0]!, y: lengths[1]!, blur: lengths[2] ?? 0, color };
+    } else throw new TypeError(`filter supports blur() and drop-shadow() only, got ${name}()`);
+  }
+  return out;
+}
+
+/**
+ * CSS conveniences with a native form: `backdropBlur`/`backdropFilter` become a plain
+ * glass blur (no lens, no rim), `filter: "blur(…)"` an object, and several backgrounds
+ * (`backgroundLayers`, or a comma list of gradients in `background`) a bottom
+ * `background` under resolved `backgroundLayers` (first on top, as in CSS).
+ */
+function resolveCssLayers(style: StateStyle, selected: ThemeDefinition): void {
+  if (style.backdropBlur !== undefined || style.backdropFilter !== undefined) {
+    const backdrop = typeof style.backdropFilter === "string" ? cssFilterFunctions(style.backdropFilter, ["blur", "saturate"], "backdropFilter") : {};
+    const blur = style.backdropBlur ?? backdrop.blur;
+    if (blur !== undefined || backdrop.saturate !== undefined) {
+      style.glass = { blur: blur ?? 0, ...(backdrop.saturate !== undefined ? { saturate: backdrop.saturate } : {}), ...style.glass };
+    }
+    delete style.backdropBlur;
+    delete style.backdropFilter;
+  }
+  if (typeof style.filter === "string") {
+    const filter = parseCssFilter(style.filter);
+    if (filter.blur || filter.dropShadow) style.filter = filter;
+    else delete style.filter;
+  }
+  if (style.filter && typeof style.filter === "object" && typeof style.filter.dropShadow?.color === "string") {
+    style.filter = { ...style.filter, dropShadow: { ...style.filter.dropShadow, color: resolveThemeColor(cssColor(style.filter.dropShadow.color), selected) } };
+  }
+  if (style.maskImage !== undefined) {
+    const value = style.maskImage;
+    const gradient = typeof value === "string" && GRADIENT.test(value) ? parseGradient(value) : value;
+    if (gradient && typeof gradient === "object") style.maskImage = normalizeGradient(gradient, value => resolveThemeColor(cssColor(value), selected));
+    else delete style.maskImage;
+  }
+  let layers: (string | Gradient)[] | undefined = style.backgroundLayers ? [...style.backgroundLayers] : undefined;
+  if (typeof style.background === "string" && style.background.includes("gradient(")) {
+    const parts = splitLayers(style.background);
+    if (parts.length > 1) {
+      style.background = parts.at(-1)!;
+      layers = [...(layers ?? []), ...parts.slice(0, -1)];
+    }
+  }
+  if (!layers) return;
+  const colour = (value: string) => resolveThemeColor(cssColor(value), selected);
+  style.backgroundLayers = layers.map(layer => {
+    const gradient = typeof layer === "string" && GRADIENT.test(layer) ? parseGradient(layer) : layer;
+    return gradient && typeof gradient === "object" ? normalizeGradient(gradient, colour) : colour(gradient as string);
+  });
+}
+
 function resolveThemeStyleUncached(style: Style, selected: ThemeDefinition): Style {
   const resolved: Style = { ...style };
+  resolveCssLayers(resolved, selected);
   for (const key of Object.keys(resolved) as (keyof Style)[]) {
     const value = resolved[key];
     if (typeof value === "string") (resolved as Record<string, unknown>)[key] = resolveStyleString(key, value, selected);
@@ -343,6 +473,7 @@ function resolveThemeStyleUncached(style: Style, selected: ThemeDefinition): Sty
     const value = style[state];
     if (!value) continue;
     const next = { ...value };
+    resolveCssLayers(next, selected);
     for (const key of Object.keys(next) as (keyof typeof next)[]) {
       const stateValue = next[key];
       if (typeof stateValue === "string") {
@@ -351,6 +482,20 @@ function resolveThemeStyleUncached(style: Style, selected: ThemeDefinition): Sty
     }
     resolveShadowColors(next, selected);
     resolved[state] = next;
+  }
+  if (style.animation) {
+    const frame = (values: StateStyle | undefined) => {
+      if (!values) return undefined;
+      const next = { ...values };
+      for (const key of Object.keys(next) as (keyof StateStyle)[]) {
+        const value = next[key];
+        if (typeof value === "string") (next as Record<string, unknown>)[key] = resolveStyleString(key, value, selected);
+      }
+      resolveShadowColors(next, selected);
+      return next;
+    };
+    const { from, to, ...timing } = style.animation;
+    resolved.animation = { ...timing, from: frame(from as StateStyle) as StyleAnimation["from"], ...(to ? { to: frame(to as StateStyle) as StyleAnimation["to"] } : {}) };
   }
   return resolved;
 }

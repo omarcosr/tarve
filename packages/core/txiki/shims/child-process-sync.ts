@@ -150,6 +150,35 @@ function wait(processInfo: Uint8Array, result: SpawnSyncReturns, command: string
   }
 }
 
+const DETACHED_PROCESS = 0x8;
+const CREATE_NEW_PROCESS_GROUP = 0x200;
+const CREATE_BREAKAWAY_FROM_JOB = 0x01000000;
+
+/**
+ * spawn(..., { detached: true }) on Windows: a process that outlives this one. libuv adds the
+ * children of tjs.spawn to a job object that ends them when this process exits; CreateProcessW
+ * leaves the job when the job allows it, and the child always gets its own process group.
+ */
+export function spawnDetachedWindows(command: string, args: readonly string[], options: SpawnSyncOptions = {}): number {
+  const k = (kernel ??= loadKernel());
+  const startup = new Uint8Array(104);
+  new DataView(startup.buffer).setUint32(0, 104, true);
+  const processInfo = new Uint8Array(24);
+  const block = wide(environment(options).map(([key, value]) => `${key}=${value}\0`).join("") + "\0");
+  const commandLine = [command, ...args].map(quote).join(" ");
+  const flags = CREATE_UNICODE_ENVIRONMENT | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+  const start = (extra: number) => k.CreateProcessW(0, wide(commandLine), 0, 0, 0, flags | extra, block, wide(options.cwd ?? tjs.cwd), startup, processInfo);
+  if (!start(CREATE_BREAKAWAY_FROM_JOB) && !start(0)) {
+    const code = k.GetLastError();
+    const missing = code === 2 || code === 3;
+    throw spawnFailure(command, args, missing ? "ENOENT" : "EIO", -code, missing ? "ENOENT" : `failed (Windows error ${code})`);
+  }
+  const info = new DataView(processInfo.buffer);
+  k.CloseHandle(Number(info.getBigInt64(0, true)));
+  k.CloseHandle(Number(info.getBigInt64(8, true)));
+  return info.getUint32(16, true);
+}
+
 // ---- Linux (glibc, x86-64 and arm64 alike) -------------------------------------------
 
 const O_RDONLY = 0;

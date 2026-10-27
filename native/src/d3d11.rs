@@ -106,6 +106,128 @@ struct Vertex {
     /// Ring mode (9): border widths top, right, bottom, left in device pixels;
     /// the ring is the box minus the box inset by them.
     inner: [f32; 4],
+    /// CSS `mask-image` (a linear gradient): start in device pixels and the axis over
+    /// its squared length, so t = dot(dev - start, axis).
+    mask: [f32; 4],
+    /// Its ramp: t0, t1, alpha at t0, alpha at t1.
+    mask_stops: [f32; 4],
+    /// x: 0 no mask, 1 linear (t = dot(dev - start, axis)), 2 radial (`mask` holds the
+    /// centre and the inverse radii, t = length((dev - centre) * inverse)), 3 conic (`mask`
+    /// holds the centre and the start angle; t is the fraction of a turn).
+    mask_mode: [f32; 4],
+}
+
+/// A linear alpha ramp the pixel shader applies to every draw (`mask-image`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct ShaderMask {
+    axis: [f32; 4],
+    stops: [f32; 4],
+    mode: f32,
+}
+
+const NO_MASK: ShaderMask = ShaderMask {
+    axis: [0.0; 4],
+    stops: [0.0; 4],
+    mode: 0.0,
+};
+
+impl ShaderMask {
+    /// A linear gradient's alpha as a ramp between its first and last stop, in device
+    /// pixels through `transform`; None for other gradients (left unmasked).
+    fn of(gradient: &PaintGradient, transform: Affine) -> Option<Self> {
+        let (first, last) = (gradient.stops.first()?, gradient.stops.last()?);
+        // Linear: t along the axis. Radial: t in ray units, mapped to the 0..1 offsets
+        // below by the ray's start and end (an axis-aligned transform scales the radii).
+        let (axis, mode, ray) = match gradient.geometry {
+            GradientGeometry::Linear { start, end } => {
+                let (start, end) = (transform * start, transform * end);
+                let axis = end - start;
+                let length2 = axis.hypot2();
+                if length2 < 1e-9 {
+                    return None;
+                }
+                (
+                    [
+                        start.x as f32,
+                        start.y as f32,
+                        (axis.x / length2) as f32,
+                        (axis.y / length2) as f32,
+                    ],
+                    1.0,
+                    (0.0, 1.0),
+                )
+            }
+            GradientGeometry::Radial {
+                center,
+                radius_x,
+                radius_y,
+                start,
+                end,
+            } => {
+                let coeffs = transform.as_coeffs();
+                let (sx, sy) = (coeffs[0].hypot(coeffs[1]), coeffs[2].hypot(coeffs[3]));
+                let (rx, ry) = (radius_x * sx, radius_y * sy);
+                if rx < 1e-6 || ry < 1e-6 || end <= start {
+                    return None;
+                }
+                let centre = transform * center;
+                (
+                    [
+                        centre.x as f32,
+                        centre.y as f32,
+                        (1.0 / rx) as f32,
+                        (1.0 / ry) as f32,
+                    ],
+                    2.0,
+                    (start, end),
+                )
+            }
+            GradientGeometry::Conic {
+                center,
+                from,
+                start,
+                end,
+            } => {
+                if end <= start {
+                    return None;
+                }
+                let centre = transform * center;
+                (
+                    [centre.x as f32, centre.y as f32, from as f32, 0.0],
+                    3.0,
+                    (start, end),
+                )
+            }
+        };
+        let in_ray = |offset: f32| (ray.0 + f64::from(offset) * (ray.1 - ray.0)) as f32;
+        // The ramp runs between the last stop still at the first alpha and the first
+        // stop already at the last one (`black 60%, transparent` fades over 60–100 %).
+        let alpha = |stop: &(f32, Color)| stop.1.components[3];
+        let t0 = gradient
+            .stops
+            .iter()
+            .take_while(|stop| (alpha(stop) - alpha(first)).abs() < 1e-4)
+            .last()
+            .map_or(first.0, |stop| stop.0);
+        let t1 = gradient
+            .stops
+            .iter()
+            .rev()
+            .take_while(|stop| (alpha(stop) - alpha(last)).abs() < 1e-4)
+            .last()
+            .map_or(last.0, |stop| stop.0);
+        let t1 = if t1 > t0 { t1 } else { t0 + 1e-4 };
+        Some(Self {
+            axis,
+            stops: [
+                in_ray(t0),
+                in_ray(t1),
+                first.1.components[3],
+                last.1.components[3],
+            ],
+            mode,
+        })
+    }
 }
 
 /// A clip the pixel shader applies: rectangle and radii in its own space, and
@@ -361,6 +483,8 @@ struct MsaaTile {
 pub(crate) struct D3d11Graphics {
     /// The innermost antialiased (shader-computed) rounded clip, stamped on vertices.
     clip: ShaderClip,
+    /// The innermost `mask-image` ramp, stamped on vertices.
+    mask: ShaderMask,
     /// No MSAA (the default, `msaa: 0`): shapes get a one-pixel coverage fringe
     /// instead, without multisampled targets (~30 MB less on Intel).
     analytic_aa: bool,
@@ -477,6 +601,8 @@ enum D3d11PaintLayer {
     AnalyticClip(ShaderClip, Option<(u32, u32)>),
     Clip(Option<(u32, u32)>),
     Opacity(f32),
+    /// A `mask-image` ramp; holds the one it replaced.
+    Mask(ShaderMask),
 }
 
 impl D3d11Graphics {
@@ -577,6 +703,7 @@ impl D3d11Graphics {
         let scissor_rasterizer = create_scissor_rasterizer(&device, &rasterizer)?;
         let mut graphics = Self {
             clip: NO_CLIP,
+            mask: NO_MASK,
             analytic_aa,
             transparent,
             _window: window,
@@ -671,6 +798,7 @@ impl D3d11Graphics {
         }
         self.vertices.clear();
         self.clip = NO_CLIP;
+        self.mask = NO_MASK;
         self.indices.clear();
         self.commands.clear();
         self.used_images.clear();
@@ -2455,6 +2583,7 @@ impl D3d11Graphics {
         }
         // The blur passes cover the region unclipped: the glass quad applies the clip.
         let clip = std::mem::replace(&mut self.clip, NO_CLIP);
+        let mask = std::mem::replace(&mut self.mask, NO_MASK);
         let mut pass = |mode: f32| {
             let first = self.indices.len() as u32;
             let base = self.vertices.len() as u32;
@@ -2475,6 +2604,7 @@ impl D3d11Graphics {
         let blur_h = pass(6.0);
         let blur_v = pass(7.0);
         self.clip = clip;
+        self.mask = mask;
         let first = self.indices.len() as u32;
         let base = self.vertices.len() as u32;
         let rgba = rgba(tint);
@@ -2549,6 +2679,9 @@ impl D3d11Graphics {
         vertex.clip_radii = self.clip.radii;
         vertex.clip_m0 = self.clip.m0;
         vertex.clip_m1 = self.clip.m1;
+        vertex.mask = self.mask.axis;
+        vertex.mask_stops = self.mask.stops;
+        vertex.mask_mode = [self.mask.mode, 0.0, 0.0, 0.0];
         self.vertices.push(vertex);
     }
 
@@ -3831,6 +3964,22 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             .push(D3d11PaintLayer::Clip(Some((first, count))));
     }
 
+    /// Without layers the mask applies per draw: a linear ramp in the pixel shader (the
+    /// innermost mask wins), with `rect` as a clip.
+    fn push_mask(&mut self, transform: Affine, rect: vello::kurbo::Rect, mask: &PaintGradient) {
+        self.push_clip(Fill::NonZero, transform, &rect);
+        let previous = self.graphics.mask;
+        self.layers.push(D3d11PaintLayer::Mask(previous));
+        if let Some(mask) = ShaderMask::of(mask, transform) {
+            self.graphics.mask = mask;
+        }
+    }
+
+    fn pop_mask(&mut self, _transform: Affine, _rect: vello::kurbo::Rect, _mask: &PaintGradient) {
+        self.pop_layer();
+        self.pop_layer();
+    }
+
     fn push_opacity<S: Shape>(&mut self, alpha: f32, _transform: Affine, _shape: &S) {
         let previous = self.opacity;
         self.layers.push(D3d11PaintLayer::Opacity(previous));
@@ -3851,6 +4000,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                 self.suppressed_clips = self.suppressed_clips.saturating_sub(1);
             }
             D3d11PaintLayer::Opacity(previous) => self.opacity = previous,
+            D3d11PaintLayer::Mask(previous) => self.graphics.mask = previous,
             D3d11PaintLayer::AnalyticClip(previous, stencil) => {
                 if let Some((first, count)) = stencil {
                     self.graphics
@@ -4093,9 +4243,12 @@ fn hwnd(window: &Window) -> Result<HWND, String> {
 mod cleartype;
 mod dwrite_glyphs;
 mod prewarm;
+mod resources;
 mod text_rendering;
 use prewarm::{create_device, driver_type};
 pub(crate) use prewarm::{prewarm_device, prewarm_pending};
+#[allow(unused_imports)]
+pub(crate) use resources::*;
 pub(crate) use text_rendering::set_text_rendering;
 fn create_device_now() -> Result<(ID3D11Device, ID3D11DeviceContext), String> {
     // Video support lets `<video>` decode on this device (no copy to draw it);
@@ -4468,6 +4621,33 @@ fn create_shaders(
             InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
             InstanceDataStepRate: 0,
         },
+        D3D11_INPUT_ELEMENT_DESC {
+            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
+            SemanticIndex: 10,
+            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+            InputSlot: 0,
+            AlignedByteOffset: 156,
+            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+            InstanceDataStepRate: 0,
+        },
+        D3D11_INPUT_ELEMENT_DESC {
+            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
+            SemanticIndex: 11,
+            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+            InputSlot: 0,
+            AlignedByteOffset: 172,
+            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+            InstanceDataStepRate: 0,
+        },
+        D3D11_INPUT_ELEMENT_DESC {
+            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
+            SemanticIndex: 12,
+            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+            InputSlot: 0,
+            AlignedByteOffset: 188,
+            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
+            InstanceDataStepRate: 0,
+        },
     ];
     let mut layout = None;
     unsafe { device.CreateInputLayout(&elements, vs_bytes, Some(&mut layout)) }
@@ -4516,301 +4696,6 @@ fn blob_bytes(blob: &windows::Win32::Graphics::Direct3D::ID3DBlob) -> &[u8] {
     unsafe {
         std::slice::from_raw_parts(blob.GetBufferPointer() as *const u8, blob.GetBufferSize())
     }
-}
-
-fn create_sampler(
-    device: &ID3D11Device,
-    filter: windows::Win32::Graphics::Direct3D11::D3D11_FILTER,
-) -> Result<ID3D11SamplerState, String> {
-    let desc = D3D11_SAMPLER_DESC {
-        Filter: filter,
-        AddressU: D3D11_TEXTURE_ADDRESS_CLAMP,
-        AddressV: D3D11_TEXTURE_ADDRESS_CLAMP,
-        AddressW: D3D11_TEXTURE_ADDRESS_CLAMP,
-        MipLODBias: 0.0,
-        MaxAnisotropy: 1,
-        ComparisonFunc: windows::Win32::Graphics::Direct3D11::D3D11_COMPARISON_ALWAYS,
-        BorderColor: [0.0; 4],
-        MinLOD: 0.0,
-        MaxLOD: f32::MAX,
-    };
-    let mut state = None;
-    unsafe { device.CreateSamplerState(&desc, Some(&mut state)) }.map_err(win_error)?;
-    state.ok_or_else(|| "D3D11 sampler was not created".into())
-}
-
-fn create_rasterizer(
-    device: &ID3D11Device,
-    multisampled: bool,
-) -> Result<ID3D11RasterizerState, String> {
-    let desc = D3D11_RASTERIZER_DESC {
-        FillMode: windows::Win32::Graphics::Direct3D11::D3D11_FILL_SOLID,
-        CullMode: D3D11_CULL_NONE,
-        FrontCounterClockwise: false.into(),
-        DepthBias: 0,
-        DepthBiasClamp: 0.0,
-        SlopeScaledDepthBias: 0.0,
-        DepthClipEnable: true.into(),
-        ScissorEnable: false.into(),
-        MultisampleEnable: multisampled.into(),
-        AntialiasedLineEnable: false.into(),
-    };
-    let mut state = None;
-    unsafe { device.CreateRasterizerState(&desc, Some(&mut state)) }.map_err(win_error)?;
-    state.ok_or_else(|| "D3D11 rasterizer state was not created".into())
-}
-
-/// Multiplies the target by `1 - coverage` (colour and alpha): where a video layer
-/// shows, the UI becomes transparent, with antialiased edges along its clip.
-fn create_punch_blend(device: &ID3D11Device) -> Result<ID3D11BlendState, String> {
-    let mut targets = [D3D11_RENDER_TARGET_BLEND_DESC::default(); 8];
-    targets[0] = D3D11_RENDER_TARGET_BLEND_DESC {
-        BlendEnable: true.into(),
-        SrcBlend: windows::Win32::Graphics::Direct3D11::D3D11_BLEND_ZERO,
-        DestBlend: D3D11_BLEND_INV_SRC_ALPHA,
-        BlendOp: D3D11_BLEND_OP_ADD,
-        SrcBlendAlpha: windows::Win32::Graphics::Direct3D11::D3D11_BLEND_ZERO,
-        DestBlendAlpha: D3D11_BLEND_INV_SRC_ALPHA,
-        BlendOpAlpha: D3D11_BLEND_OP_ADD,
-        RenderTargetWriteMask: D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8,
-    };
-    let desc = D3D11_BLEND_DESC {
-        AlphaToCoverageEnable: false.into(),
-        IndependentBlendEnable: false.into(),
-        RenderTarget: targets,
-    };
-    let mut state = None;
-    unsafe { device.CreateBlendState(&desc, Some(&mut state)) }.map_err(win_error)?;
-    state.ok_or_else(|| "D3D11 punch blend state was not created".into())
-}
-
-fn create_blend(device: &ID3D11Device, write_color: bool) -> Result<ID3D11BlendState, String> {
-    let mut targets = [D3D11_RENDER_TARGET_BLEND_DESC::default(); 8];
-    targets[0] = D3D11_RENDER_TARGET_BLEND_DESC {
-        BlendEnable: true.into(),
-        SrcBlend: D3D11_BLEND_SRC_ALPHA,
-        DestBlend: D3D11_BLEND_INV_SRC_ALPHA,
-        BlendOp: D3D11_BLEND_OP_ADD,
-        SrcBlendAlpha: D3D11_BLEND_ONE,
-        DestBlendAlpha: D3D11_BLEND_INV_SRC_ALPHA,
-        BlendOpAlpha: D3D11_BLEND_OP_ADD,
-        RenderTargetWriteMask: if write_color {
-            D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8
-        } else {
-            0
-        },
-    };
-    let desc = D3D11_BLEND_DESC {
-        AlphaToCoverageEnable: false.into(),
-        IndependentBlendEnable: false.into(),
-        RenderTarget: targets,
-    };
-    let mut state = None;
-    unsafe { device.CreateBlendState(&desc, Some(&mut state)) }.map_err(win_error)?;
-    state.ok_or_else(|| "D3D11 blend state was not created".into())
-}
-
-fn create_stencil(
-    device: &ID3D11Device,
-    pass: windows::Win32::Graphics::Direct3D11::D3D11_STENCIL_OP,
-) -> Result<ID3D11DepthStencilState, String> {
-    let face = windows::Win32::Graphics::Direct3D11::D3D11_DEPTH_STENCILOP_DESC {
-        StencilFailOp: D3D11_STENCIL_OP_KEEP,
-        StencilDepthFailOp: D3D11_STENCIL_OP_KEEP,
-        StencilPassOp: pass,
-        StencilFunc: D3D11_COMPARISON_EQUAL,
-    };
-    let desc = D3D11_DEPTH_STENCIL_DESC {
-        DepthEnable: false.into(),
-        DepthWriteMask: D3D11_DEPTH_WRITE_MASK_ZERO,
-        DepthFunc: windows::Win32::Graphics::Direct3D11::D3D11_COMPARISON_ALWAYS,
-        StencilEnable: true.into(),
-        StencilReadMask: 0xff,
-        StencilWriteMask: 0xff,
-        FrontFace: face,
-        BackFace: face,
-    };
-    let mut state = None;
-    unsafe { device.CreateDepthStencilState(&desc, Some(&mut state)) }.map_err(win_error)?;
-    state.ok_or_else(|| "D3D11 stencil state was not created".into())
-}
-
-fn create_backdrop(device: &ID3D11Device, width: u32, height: u32) -> Result<Backdrop, String> {
-    let desc = D3D11_TEXTURE2D_DESC {
-        Width: width.max(1),
-        Height: height.max(1),
-        MipLevels: 1,
-        ArraySize: 1,
-        Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-        SampleDesc: DXGI_SAMPLE_DESC {
-            Count: 1,
-            Quality: 0,
-        },
-        Usage: D3D11_USAGE_DEFAULT,
-        BindFlags: (D3D11_BIND_SHADER_RESOURCE.0
-            | windows::Win32::Graphics::Direct3D11::D3D11_BIND_RENDER_TARGET.0)
-            as u32,
-        CPUAccessFlags: 0,
-        MiscFlags: 0,
-    };
-    let make = || -> Result<(ID3D11Texture2D, ID3D11ShaderResourceView, ID3D11RenderTargetView), String> {
-        let mut texture = None;
-        unsafe { device.CreateTexture2D(&desc, None, Some(&mut texture)) }.map_err(win_error)?;
-        let texture = texture.ok_or("D3D11 backdrop texture was not created")?;
-        let mut view = None;
-        unsafe { device.CreateShaderResourceView(&texture, None, Some(&mut view)) }
-            .map_err(win_error)?;
-        let mut target = None;
-        unsafe { device.CreateRenderTargetView(&texture, None, Some(&mut target)) }
-            .map_err(win_error)?;
-        Ok((
-            texture,
-            view.ok_or("D3D11 backdrop view was not created")?,
-            target.ok_or("D3D11 backdrop target was not created")?,
-        ))
-    };
-    let (texture_a, view_a, target_a) = make()?;
-    let (texture_b, view_b, target_b) = make()?;
-    Ok(Backdrop {
-        textures: [texture_a, texture_b],
-        views: [view_a, view_b],
-        targets: [target_a, target_b],
-    })
-}
-
-fn create_glyph_atlas(device: &ID3D11Device) -> Result<GlyphAtlas, String> {
-    let zeros = vec![0_u8; (GLYPH_ATLAS_SIZE * GLYPH_ATLAS_SIZE) as usize];
-    let desc = D3D11_TEXTURE2D_DESC {
-        Width: GLYPH_ATLAS_SIZE,
-        Height: GLYPH_ATLAS_SIZE,
-        MipLevels: 1,
-        ArraySize: 1,
-        Format: DXGI_FORMAT_R8_UNORM,
-        SampleDesc: DXGI_SAMPLE_DESC {
-            Count: 1,
-            Quality: 0,
-        },
-        Usage: D3D11_USAGE_DEFAULT,
-        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
-        CPUAccessFlags: 0,
-        MiscFlags: 0,
-    };
-    let data = D3D11_SUBRESOURCE_DATA {
-        pSysMem: zeros.as_ptr().cast(),
-        SysMemPitch: GLYPH_ATLAS_SIZE,
-        SysMemSlicePitch: 0,
-    };
-    let mut texture = None;
-    unsafe { device.CreateTexture2D(&desc, Some(&data), Some(&mut texture)) }.map_err(win_error)?;
-    let texture = texture.ok_or("D3D11 glyph atlas texture was not created")?;
-    let mut view = None;
-    unsafe { device.CreateShaderResourceView(&texture, None, Some(&mut view)) }
-        .map_err(win_error)?;
-    Ok(GlyphAtlas {
-        _texture: texture,
-        view: view.ok_or("D3D11 glyph atlas view was not created")?,
-        x: 0,
-        y: 0,
-        row_height: 0,
-    })
-}
-
-fn create_r8_texture(
-    device: &ID3D11Device,
-    width: u32,
-    height: u32,
-    pixels: &[u8],
-) -> Result<ID3D11ShaderResourceView, String> {
-    if width == 0 || height == 0 || pixels.len() != width as usize * height as usize {
-        return Err("Invalid D3D11 glyph texture dimensions".into());
-    }
-    let desc = D3D11_TEXTURE2D_DESC {
-        Width: width,
-        Height: height,
-        MipLevels: 1,
-        ArraySize: 1,
-        Format: DXGI_FORMAT_R8_UNORM,
-        SampleDesc: DXGI_SAMPLE_DESC {
-            Count: 1,
-            Quality: 0,
-        },
-        Usage: D3D11_USAGE_IMMUTABLE,
-        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
-        CPUAccessFlags: 0,
-        MiscFlags: 0,
-    };
-    let data = D3D11_SUBRESOURCE_DATA {
-        pSysMem: pixels.as_ptr().cast(),
-        SysMemPitch: width,
-        SysMemSlicePitch: 0,
-    };
-    let mut texture = None;
-    unsafe { device.CreateTexture2D(&desc, Some(&data), Some(&mut texture)) }.map_err(win_error)?;
-    let texture = texture.ok_or("D3D11 glyph fallback texture was not created")?;
-    let mut view = None;
-    unsafe { device.CreateShaderResourceView(&texture, None, Some(&mut view)) }
-        .map_err(win_error)?;
-    view.ok_or_else(|| "D3D11 glyph fallback view was not created".into())
-}
-
-fn update_r8_texture(
-    context: &ID3D11DeviceContext,
-    texture: &ID3D11Texture2D,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-    data: &[u8],
-) {
-    let region = windows::Win32::Graphics::Direct3D11::D3D11_BOX {
-        left: x,
-        top: y,
-        front: 0,
-        right: x + width,
-        bottom: y + height,
-        back: 1,
-    };
-    unsafe { context.UpdateSubresource(texture, 0, Some(&region), data.as_ptr().cast(), width, 0) };
-}
-
-fn create_rgba_texture(
-    device: &ID3D11Device,
-    width: u32,
-    height: u32,
-    pixels: &[u8],
-    signature: (u64, u32, u32, ImageFormat, ImageAlphaType),
-) -> Result<CachedImage, String> {
-    let desc = D3D11_TEXTURE2D_DESC {
-        Width: width.max(1),
-        Height: height.max(1),
-        MipLevels: 1,
-        ArraySize: 1,
-        Format: DXGI_FORMAT_R8G8B8A8_UNORM,
-        SampleDesc: DXGI_SAMPLE_DESC {
-            Count: 1,
-            Quality: 0,
-        },
-        Usage: D3D11_USAGE_IMMUTABLE,
-        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
-        CPUAccessFlags: 0,
-        MiscFlags: 0,
-    };
-    let data = D3D11_SUBRESOURCE_DATA {
-        pSysMem: pixels.as_ptr().cast(),
-        SysMemPitch: width.max(1) * 4,
-        SysMemSlicePitch: 0,
-    };
-    let mut texture = None;
-    unsafe { device.CreateTexture2D(&desc, Some(&data), Some(&mut texture)) }.map_err(win_error)?;
-    let texture = texture.ok_or("D3D11 image texture was not created")?;
-    let mut view = None;
-    unsafe { device.CreateShaderResourceView(&texture, None, Some(&mut view)) }
-        .map_err(win_error)?;
-    Ok(CachedImage {
-        _texture: texture,
-        view: view.ok_or("D3D11 image view was not created")?,
-        signature,
-    })
 }
 
 fn image_rgba(image: &ImageData) -> Option<Vec<u8>> {

@@ -1,5 +1,5 @@
 export { Window, View, Row, Column, Portal, Glass, glassChrome, glassSurface, Pressable, Link, Icon, Svg, Path, Circle, Ellipse, Line, Polyline, Polygon, SvgRect, Text, Markdown, Code, Diff, Button, Image, clearImageSourceCache, loadImageSource, Scroll, ScrollArea, Input, TextArea, TitleBar, Modal, Dialog, over } from "./components";
-export type { WindowProps, WindowCloseRequestEvent, ViewProps, GlassProps, GlassVariant, PortalProps, PressableProps, LinkProps, IconName, IconProps, SvgProps, SvgNode, SvgAttributes, PathProps, CircleProps, EllipseProps, LineProps, PolylineProps, PolygonProps, RectProps, TextProps, MarkdownProps, CodeProps, DiffProps, ButtonProps, ImageBytesSource, ImageHttpCacheMode, ImageProps, ImageRgbaSource, ImageSource, LoadImageSourceOptions, ScrollProps, ScrollAreaProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
+export type { WindowProps, WindowCloseRequestEvent, ViewProps, GlassProps, GlassVariant, PortalProps, PressableProps, LinkProps, IconName, IconProps, SvgProps, SvgNode, SvgAttributes, PathProps, CircleProps, EllipseProps, LineProps, PolylineProps, PolygonProps, RectProps, TextProps, MarkdownProps, CodeProps, DiffProps, ButtonProps, ImageBytesSource, ImageErrorEvent, ImageHttpCacheMode, ImageProps, ImageRgbaSource, ImageSource, LoadImageSourceOptions, ScrollProps, ScrollAreaProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
 export { Checkbox, Switch, RadioGroup, Slider, Card, Badge, Separator, Progress, Tabs, Accordion } from "./controls";
 export type { CheckboxProps, SwitchProps, RadioOption, RadioGroupProps, SliderProps, CardProps, BadgeProps, SeparatorProps, ProgressProps, TabItem, TabsProps, AccordionItem, AccordionProps } from "./controls";
 export { VirtualList } from "./virtual-list";
@@ -38,7 +38,7 @@ export { AppMenuBar } from "./menu-bar";
 export type { AppMenuBarProps } from "./menu-bar";
 export type { InstanceLaunch, SingleInstance, SingleInstanceOptions, UrlSchemeOptions } from "./instance";
 export { checkForUpdate, downloadUpdate, installUpdate, canInstallUpdate, cleanupUpdate, compareVersions, verifyUpdateManifest, validateUpdateManifest, isValidVersion, assertUpdateUrl, updatePlatform } from "./updates";
-export type { Update, UpdateArtifact, UpdateManifest, SignedUpdateManifest, CheckForUpdateOptions, DownloadUpdateOptions, InstallUpdateOptions } from "./updates";
+export type { Update, UpdateArtifact, UpdatePack, UpdateManifest, SignedUpdateManifest, CheckForUpdateOptions, DownloadUpdateOptions, InstallUpdateOptions } from "./updates";
 export type { AppErrorEvent, AppErrorSource, AppHandle, AppJsStats, AppOptions, AppStats, MenuBarItem, MenuBarOptions, NotifyOptions, OpenEvent, OpenFilesListener, OpenUrlListener, OpenWindowOptions, SystemMediaSession, TrayHandle, TrayMenuItem, TrayOptions } from "./app";
 export type { WebSignInOptions } from "./app/requests";
 export { share, getCurrentPosition, watchPosition, authenticate } from "./device";
@@ -47,7 +47,7 @@ export { definePlugin, isTarvePlugin, loadPlugins, PLUGIN_API_VERSION, PLUGIN_TA
 export type { NativeLibrarySource, PluginClient, PluginCommand, PluginCommands, PluginContext, PluginDefinition, PluginRequest, PluginRequestOptions, TarvePlugin } from "./plugins";
 export { discoverPlugins, readPluginManifest } from "./plugins/discovery";
 export type { DiscoverPluginsOptions, DiscoveryProblem, PluginDiscovery, PluginManifest } from "./plugins/discovery";
-export { PluginFfiUnsupportedError } from "./plugins/ffi";
+export { openPluginLibrary, PluginFfiUnsupportedError } from "./plugins/ffi";
 export type { FfiBackend, FfiFunctions, FfiSymbol, FfiSymbols, FfiType, PluginLibrary } from "./plugins/ffi";
 export { hostPluginTarget, pluginTargetForBuild } from "./plugins/targets";
 export type { PluginTarget } from "./plugins/targets";
@@ -66,6 +66,7 @@ export type { VNode, Child, PastePayload, DragPosition, DragMoveEvent, DragEndEv
 export { BunFfiBridge, openExternal } from "./bridge";
 export type { NativeBridge, BunFfiBridgeOptions } from "./bridge";
 export { CanvasRenderingContext2D, CanvasGradient, parseCanvasFont } from "./canvas";
-export type { MediaController, MediaElementProps, MediaEventInfo } from "./media-element";
+export type { MediaAudioTrack, MediaTextTrack, MediaController, MediaElementProps, MediaErrorInfo, MediaEventInfo, SubtitleTrack } from "./media-element";
+export { parseSubtitles } from "./subtitles";
 export { tw } from "./tailwind";
 

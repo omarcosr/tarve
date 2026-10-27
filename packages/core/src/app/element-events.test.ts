@@ -21,6 +21,14 @@ describe("createElementDispatcher", () => {
     expect(calls).toEqual(["context@box"]);
   });
 
+  test("imageError runs onError with the source and message", () => {
+    const seen: unknown[] = [];
+    const { dispatch, calls } = harness({ img: { onError: event => { seen.push(event); } } });
+    expect(dispatch({ type: "imageError", id: "img", src: "a.png", message: "missing" })).toEqual({ handled: true, succeeded: true });
+    expect(calls).toEqual(["imageError@img"]);
+    expect(seen).toEqual([{ src: "a.png", message: "missing" }]);
+  });
+
   test("an event without a handler is not handled", () => {
     const { dispatch } = harness({ box: {} });
     expect(dispatch({ type: "click", id: "box" })).toEqual({ handled: false, succeeded: true });

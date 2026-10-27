@@ -39,6 +39,20 @@ describe("dynamic image sources", () => {
     )).toThrow("exactly 4 bytes");
   });
 
+  test("onError reaches the node and fallbackSrc replaces a failed source", () => {
+    const errors: string[] = [];
+    const view = () => <Window><Image id="cover" src="https://example.test/missing.png" fallbackSrc="placeholder.png" onError={event => errors.push(event.message)}/></Window>;
+    const first = compileTree(view());
+    expect(first.nodes.get("cover")?.src).toBe("https://example.test/missing.png");
+    first.handlers.get("cover")?.onError?.({ src: "https://example.test/missing.png", message: "HTTP 404" });
+    expect(errors).toEqual(["HTTP 404"]);
+    expect(compileTree(view()).nodes.get("cover")?.src).toEndWith("placeholder.png");
+    clearImageSourceCache();
+    expect(compileTree(view()).nodes.get("cover")?.src).toBe("https://example.test/missing.png");
+    const plain = compileTree(<Window><Image id="plain" src="a.png" onError={() => {}}/></Window>);
+    expect(plain.handlers.get("plain")?.onError).toBeFunction();
+  });
+
   test("passes HTTP(S) URLs to the native side, which fetches them once painted", () => {
     const tree = compileTree(<Window><Image id="remote" src="https://example.test/image.png"/></Window>);
     expect(tree.nodes.get("remote")?.src).toBe("https://example.test/image.png");

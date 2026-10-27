@@ -12,6 +12,26 @@ type MediaEventInfo struct {
 	Duration                *float64
 	Paused                  bool
 	VideoWidth, VideoHeight float64
+	// Buffered is the end (s) of the buffered range holding the current time; 0 before known.
+	Buffered float64
+	// Filename is the served file's name (after redirects), known from loadedmetadata.
+	Filename string
+	// Waiting: out of data while playing (between onWaiting and onCanPlay).
+	Waiting bool
+	// AudioTracks are the media's audio streams, known from onAudioTracksChange.
+	AudioTracks []MediaAudioTrack
+	// TextTracks are the subtitle streams inside the file, known from onTextTracksChange.
+	TextTracks []MediaAudioTrack
+	// CueText is the embedded subtitle shown now (onCueChange); empty when none.
+	CueText string
+}
+
+// MediaAudioTrack is an audio stream of the media; pass ID to MediaController.SetAudioTrack.
+type MediaAudioTrack struct {
+	ID       int
+	Label    string
+	Language string
+	Enabled  bool
 }
 
 // MediaRequest is an <audio>/<video> element's wanted native media.
@@ -19,8 +39,10 @@ type MediaRequest struct {
 	Src                   string
 	Loop, Muted, AutoPlay bool
 	Volume                float64
-	Video                 bool
-	Handlers              Props
+	// Rate is playbackRate (0.0625–16; 1 by default): faster or slower at the same pitch.
+	Rate     float64
+	Video    bool
+	Handlers Props
 }
 
 func mediaRequest(p Props) *MediaRequest {
@@ -28,12 +50,25 @@ func mediaRequest(p Props) *MediaRequest {
 	if f, ok := num(p["volume"]); ok {
 		volume = f
 	}
+	rate := 1.0
+	if f, ok := num(p["playbackRate"]); ok {
+		rate = clampRate(f)
+	}
 	return &MediaRequest{Src: str(p, "src"), Loop: p["loop"] == true, Muted: p["muted"] == true,
-		Volume: math.Min(1, math.Max(0, volume)), AutoPlay: p["autoPlay"] == true, Handlers: p}
+		Volume: math.Min(1, math.Max(0, volume)), Rate: rate, AutoPlay: p["autoPlay"] == true, Handlers: p}
+}
+
+// clampRate keeps playbackRate in browsers' range; NaN, 0 or less is the normal rate.
+func clampRate(rate float64) float64 {
+	if math.IsNaN(rate) || math.IsInf(rate, 0) || rate <= 0 {
+		return 1
+	}
+	return math.Min(16, math.Max(0.0625, rate))
 }
 
 // Audio is the <audio> element: props id, src, autoPlay, loop, muted, volume, onPlay, onPause, onTimeUpdate,
-// onSeeked, onLoadedMetadata, onEnded (func(MediaEventInfo)) and onError (func(string)).
+// onSeeked, onLoadedMetadata, onEnded, onWaiting, onCanPlay, onProgress (func(MediaEventInfo)) and
+// onError (func(string) or func(message, code string)).
 func Audio(p Props) *VNode { return jsx("audio", copyProps(p)) }
 
 func expandAudio(p Props, id string) *VNode {
@@ -163,6 +198,11 @@ type mediaState struct {
 	duration                        *float64
 	videoWidth, videoHeight         float64
 	err, src                        string
+	buffered                        float64
+	audioTracks, textTracks         []MediaAudioTrack
+	cueText                         string
+	filename                        string
+	stalled                         bool
 	hasSrc                          bool
 	muted, mutedAttribute, hasMuted bool
 }
@@ -203,8 +243,29 @@ func applyMediaEvent(ev map[string]any, request *MediaRequest) func() {
 	if f, ok := num(ev["videoHeight"]); ok {
 		next.videoHeight = f
 	}
+	if f, ok := num(ev["buffered"]); ok {
+		next.buffered = f
+	}
+	if f, ok := ev["filename"].(string); ok {
+		next.filename = f
+	}
+	if list, ok := ev["audioTracks"].([]any); ok {
+		next.audioTracks = parseTracks(list)
+	}
+	if list, ok := ev["textTracks"].([]any); ok {
+		next.textTracks = parseTracks(list)
+	}
+	if text, ok := ev["cueText"].(string); ok {
+		next.cueText = text
+	}
 	kind, _ := ev["event"].(string)
 	message, _ := ev["message"].(string)
+	switch kind {
+	case "waiting":
+		next.stalled = true
+	case "canplay", "loadedmetadata", "error", "ended":
+		next.stalled = false
+	}
 	switch kind {
 	case "ended":
 		next.ended, next.paused = true, true
@@ -222,14 +283,25 @@ func applyMediaEvent(ev map[string]any, request *MediaRequest) func() {
 	if request == nil {
 		return nil
 	}
-	info := MediaEventInfo{CurrentTime: next.time, Duration: next.duration, Paused: next.paused, VideoWidth: next.videoWidth, VideoHeight: next.videoHeight}
-	name := map[string]string{"loadedmetadata": "onLoadedMetadata", "play": "onPlay", "pause": "onPause", "timeupdate": "onTimeUpdate", "seeked": "onSeeked", "ended": "onEnded"}[kind]
+	info := MediaEventInfo{CurrentTime: next.time, Duration: next.duration, Paused: next.paused, VideoWidth: next.videoWidth, VideoHeight: next.videoHeight,
+		Buffered: next.buffered, Filename: next.filename, Waiting: next.stalled, AudioTracks: next.audioTracks, TextTracks: next.textTracks, CueText: next.cueText}
+	name := map[string]string{"loadedmetadata": "onLoadedMetadata", "play": "onPlay", "pause": "onPause", "timeupdate": "onTimeUpdate", "seeked": "onSeeked", "ended": "onEnded",
+		"waiting": "onWaiting", "canplay": "onCanPlay", "progress": "onProgress", "audiotracks": "onAudioTracksChange",
+		"texttracks": "onTextTracksChange", "cuechange": "onCueChange"}[kind]
 	if kind == "error" {
-		if h, ok := request.Handlers["onError"].(func(string)); ok {
-			if message == "" {
-				message = "media error"
-			}
+		if message == "" {
+			message = "media error"
+		}
+		code, _ := ev["code"].(string)
+		if code == "" {
+			code = "decode"
+		}
+		// func(message) or func(message, code): code is "network", "format", "decode" or "aborted".
+		switch h := request.Handlers["onError"].(type) {
+		case func(string):
 			return func() { h(message) }
+		case func(string, string):
+			return func() { h(message, code) }
 		}
 		return nil
 	}
@@ -258,3 +330,34 @@ func (m MediaController) SetVolume(v float64) {
 	m.command(S{"action": "set", "volume": math.Min(1, math.Max(0, v))})
 }
 func (m MediaController) SetMuted(muted bool) { m.command(S{"action": "set", "muted": muted}) }
+
+// SetTextTrack shows subtitle stream id inside the file (from MediaEventInfo.TextTracks); a
+// negative id shows none.
+func (m MediaController) SetTextTrack(id int) {
+	if id < 0 {
+		m.command(S{"action": "textTrack"})
+		return
+	}
+	m.command(S{"action": "textTrack", "track": id})
+}
+
+// parseTracks reads the protocol's audioTracks/textTracks list.
+func parseTracks(list []any) []MediaAudioTrack {
+	out := make([]MediaAudioTrack, 0, len(list))
+	for _, item := range list {
+		track, _ := item.(map[string]any)
+		id, _ := num(track["id"])
+		label, _ := track["label"].(string)
+		language, _ := track["language"].(string)
+		out = append(out, MediaAudioTrack{ID: int(id), Label: label, Language: language, Enabled: track["enabled"] == true})
+	}
+	return out
+}
+
+// SetAudioTrack plays audio stream id (from MediaEventInfo.AudioTracks) alone.
+func (m MediaController) SetAudioTrack(id int) { m.command(S{"action": "audioTrack", "track": id}) }
+
+// SetPlaybackRate is HTMLMediaElement.playbackRate = rate: the sound keeps its pitch.
+func (m MediaController) SetPlaybackRate(rate float64) {
+	m.command(S{"action": "rate", "rate": clampRate(rate)})
+}

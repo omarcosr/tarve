@@ -13,6 +13,7 @@ import { buildMetadata, writeLinuxDesktopEntry } from "./package-metadata";
 import { NATIVE_COMPATIBILITY_MANIFEST_NAME, assertNativeRuntimeCompatible, readNativeCompatibilityManifest, createNativeCompatibilityManifest } from "./native-runtime";
 import { assertNodeVersion, targetNodeExecutable } from "./node-target";
 import { pluginNativeModule, pluginNativesForBuild } from "./plugins-build";
+import type { PackHostConfig } from "./src/pack-host";
 
 export interface NodeBuildOptions extends BuildOptions {
   /** Node.js 26.10+ executable used to build the SEA. Defaults to the installed Node. */
@@ -20,7 +21,7 @@ export interface NodeBuildOptions extends BuildOptions {
 }
 
 /** Bundle a TSX app and its native runtime into a Node.js single executable. */
-export async function buildNode(options: NodeBuildOptions): Promise<string> {
+export async function buildNode(options: NodeBuildOptions, packHost?: PackHostConfig): Promise<string> {
   const target = options.target ?? hostBuildTarget();
   if (!target) throw new Error(`Unsupported Node.js build host: ${process.platform}-${process.arch}`);
   const config = targetConfig(target);
@@ -62,7 +63,7 @@ export async function buildNode(options: NodeBuildOptions): Promise<string> {
     // @tarve/core/build (e.g. Studio) still starts inside a Node single executable.
     const { build: bundle } = await import("esbuild");
     const result = await bundle({
-      entryPoints: [resolve(options.entrypoint)],
+      entryPoints: [packHost ? (await import("./pack-build")).writeHostEntry(temporary, options.entrypoint, packHost) : resolve(options.entrypoint)],
       outfile: join(temporary, "app.mjs"),
       bundle: true,
       platform: "node",

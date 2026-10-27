@@ -174,6 +174,15 @@ app.get("/docs/motion", (c) => {
   });
 });
 
+app.get("/docs/effects", (c) => {
+  const title = "Visual effects — Tarve docs";
+  return c.render("docs/effects", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/effects", title, "Backdrop blur, filter blur and drop-shadow, mask-image, multiple backgrounds and viewport units in Tarve, on every renderer."),
+  });
+});
+
 app.get("/docs/automation", (c) => {
   const title = "Automation and errors — Tarve docs";
   return c.render("docs/automation", {

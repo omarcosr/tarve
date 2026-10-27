@@ -53,25 +53,6 @@ type CompiledTree struct {
 	ownNodes bool
 }
 
-var nativeKinds = set("window", "titlebar", "view", "row", "column", "text", "markdown", "code", "diff", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter", "video")
-var interactiveKinds = set("button", "input", "textarea", "pressable", "slider", "splitter")
-var handlerProps = set("onClick", "onMarkdownLink", "onToggleFile", "onShowMore", "onLineClick", "onHighlight", "onContextMenu", "onOutsideClick", "onChange", "onSubmit",
-	"onPaste", "onValueChange", "onScroll", "onScrollPosition", "onVirtualListLayout", "onVirtualListScrollToItem", "onVirtualListFocus", "onEscape", "onKeyDown", "onBlur",
-	"onCloseRequest", "onTransitionEnd", "onDragStart", "onDragMove", "onDragEnd", "onDragEnter", "onDragLeave", "onDrop", "onFileDragEnter", "onFileDragLeave", "onFileDrop",
-	"onSize", "onPointerMove", "onPointerLeave", "onHover")
-var inheritedFont = []string{"fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "fontVariantNumeric", "fontFeatureSettings", "fontSize", "fontWeight", "lineHeight", "foreground", "textAlign", "textTransform", "whiteSpace"}
-var inheritedFontSet = set(inheritedFont...)
-var controlFont = []string{"fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "textTransform"}
-var variantKeys = []string{"first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl", "portrait", "landscape", "pointerCoarse", "pointerFine", "motionReduce", "motionSafe", "dark"}
-
-func set(keys ...string) map[string]bool {
-	m := make(map[string]bool, len(keys))
-	for _, k := range keys {
-		m[k] = true
-	}
-	return m
-}
-
 type memoEntry struct {
 	memo     *Memo
 	props    Props
@@ -526,9 +507,7 @@ func (c *compiler) visitNode(child *VNode, path, group string, out []*NNode) []*
 			delete(control, "group")
 		}
 	}
-	if hasVariants(style) {
-		style = foldVariants(style, c.theme, variantContext{pos: pos, width: c.viewportWidth(), height: c.viewportHeight(), usedViewport: &c.usesViewport})
-	}
+	style = foldVariants(style, c.theme, variantContext{pos: pos, width: c.viewportWidth(), height: c.viewportHeight(), usedViewport: &c.usesViewport})
 	if uaMargin != 0 && style["margin"] == nil {
 		size := numberOr(style["fontSize"], numberOr(c.font.style["fontSize"], FontSize))
 		vertical := math.Round(uaMargin*size*100) / 100
@@ -675,6 +654,9 @@ func (c *compiler) windowOptions(p Props, style S) {
 		"position": position, "debug": c.debug, "visible": c.visible}
 	if l := str(p, "level"); l != "" && l != "normal" {
 		c.window["level"] = l
+	}
+	if truthy(p["maximized"]) {
+		c.window["maximized"] = true
 	}
 	if truthy(p["skipTaskbar"]) {
 		c.window["skipTaskbar"] = true

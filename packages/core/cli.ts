@@ -20,14 +20,16 @@ function usage(target?: BuildTarget): string {
   return [
     "Usage: tarve <run|dev|build> <app.tsx> [options]",
     "       tarve keygen",
-    "       tarve release --version 1.2.0 --artifact win32-x64=dist/App.exe [...]",
+    "       tarve pack <app.tsx> --version 1.2.1 [--runtime bun|node|txiki] [--target ...]",
+    "       tarve release --version 1.2.0 --artifact win32-x64=dist/App.exe [--pack dist/App.tarve] [...]",
     "       tarve package <dist/App | dist/App.app | app.tsx> --format deb|tar|zip|msix|app-zip [options]",
     "",
     "  run      run the app",
     "  dev      run with hot reload into the same window (--inspect: open the visual inspector window)",
     "  build    compile a standalone executable (a .app bundle for darwin-* targets)",
     `  keygen   create an update signing key pair (writes ${KEY_FILE}, prints the public key)`,
-    "  release  copy built executables to --out and write the signed latest.json",
+    "  pack     build a signed, encrypted app pack (.tarve): the app's code and files, without the runtime",
+    "  release  copy built executables and packs to --out and write the signed latest.json",
     "  package  wrap a built executable (or build app.tsx first) into a .deb, .tar.gz, portable .zip, MSIX or zipped .app",
     "",
     "Options:",
@@ -39,7 +41,7 @@ function usage(target?: BuildTarget): string {
     "  --permission CAMERA             build (android): repeatable manifest permission, beside package.json tarve.android.permissions",
     "  --keystore release.jks          build (android): signing keystore (default: the debug keystore)",
     "  --bundletool path.jar           build (android aab): bundletool jar (default: TARVE_BUNDLETOOL, then downloaded once)",
-    `  --outfile ${output}              build: output path`,
+    `  --outfile ${output}              build, pack: output path`,
     "  --compile-jsx                   build: compile JSX into reusable templates (needs typescript 7)",
     "  --smol                          smaller JS heap, collected more often (bun, node)",
     "  --native-features auto|all|<list> build: native subsystems (vello-gpu, syntax, markdown, net, media); auto = what the app uses",
@@ -49,8 +51,10 @@ function usage(target?: BuildTarget): string {
     "  --description, --publisher, --copyright  build: executable details",
     "                                  each defaults to the \"tarve\" field of package.json",
     "  --target-executable path        build (node): target OS Node binary for offline cross-builds",
+    "  --packs                         build: the executable also runs app packs (tarve pack) newer than the app it embeds",
     "  --artifact platform=path        release: repeatable, platform is <os>-<arch> (win32-x64, linux-x64, darwin-arm64=dist/App.app)",
-    `  --key ${KEY_FILE}          release: private key file or base64 (default: TARVE_UPDATE_PRIVATE_KEY, then ./${KEY_FILE})`,
+    "  --pack dist/App.tarve           release: repeatable app pack; executables built with --packs download it instead",
+    `  --key ${KEY_FILE}          release, pack, build --packs: private key file or base64 (default: TARVE_UPDATE_PRIVATE_KEY, then ./${KEY_FILE})`,
     "  --public-key base64             release: verify the signed manifest before writing it",
     "  --out dist/updates              release: output directory; keygen: where the key goes",
     "  --base-url https://host/path/   release: artifact URL prefix (default: relative to latest.json)",
@@ -113,7 +117,7 @@ async function main(): Promise<number> {
       out: { type: "string" }, "base-url": { type: "string" }, notes: { type: "string" }, sign: { type: "string" },
       notarize: { type: "boolean" }, "notary-profile": { type: "string" }, entitlements: { type: "string" },
       categories: { type: "string" }, protocol: { type: "string", multiple: true }, "file-type": { type: "string", multiple: true },
-      inspect: { type: "boolean" },
+      inspect: { type: "boolean" }, packs: { type: "boolean" }, pack: { type: "string", multiple: true },
       help: { type: "boolean", short: "h" },
     },
   });
@@ -125,8 +129,7 @@ async function main(): Promise<number> {
   if (command === "keygen") return keygen(values.out);
   if (command === "release") {
     if (!values.version) throw new Error("tarve release needs --version.");
-    const privateKey = values.key ?? process.env.TARVE_UPDATE_PRIVATE_KEY ?? (existsSync(KEY_FILE) ? KEY_FILE : undefined);
-    if (!privateKey) throw new Error(`tarve release needs --key, TARVE_UPDATE_PRIVATE_KEY or ./${KEY_FILE} (tarve keygen).`);
+    const privateKey = updateKey(values.key, "tarve release");
     const artifacts = values.artifact ?? [];
       // --sign is the Authenticode command for Windows artifacts; with only macOS artifacts it is the codesign identity.
       const macOnly = artifacts.some(pair => pair.startsWith("darwin-")) && !artifacts.some(pair => pair.startsWith("win32-"));
@@ -135,13 +138,27 @@ async function main(): Promise<number> {
       ? macSignOptions({ identity: macOnly ? values.sign : undefined, entitlements: values.entitlements, notarize: values.notarize, notaryProfile: values["notary-profile"] })
       : undefined;
     console.log(release({
-      version: values.version, artifacts, privateKey, publicKey: values["public-key"],
+      version: values.version, artifacts, packs: values.pack, privateKey, publicKey: values["public-key"],
       outDir: values.out, baseUrl: values["base-url"], name: values.name, notes: values.notes,
       sign: values.sign ?? process.env.TARVE_SIGN_COMMAND, macSign,
     }));
     return 0;
   }
   if (command === "package") return packageCommand(entrypoint, positionals.length, values);
+  if (command === "pack") {
+    if (!entrypoint || positionals.length !== 2) throw new Error("Expected: tarve pack <app.tsx> --version 1.2.1. Use --help for options.");
+    if (values.target !== undefined && !isBuildTarget(values.target)) throw new Error(`Unsupported pack target: ${values.target}. Expected ${BUILD_TARGETS.join(", ")}.`);
+    const { buildPack } = await import("./pack-build");
+    console.log(await buildPack({
+      entrypoint, outfile: values.outfile, name: values.name, version: values.version, appId: values["app-id"],
+      description: values.description, publisher: values.publisher, copyright: values.copyright, icon: values.icon,
+      target: values.target as BuildTarget | undefined,
+      runtime: values.runtime === "txiki" ? "txiki" : selectRuntime(values.runtime),
+      compileJsx: values["compile-jsx"], nativeFeatures: values["native-features"],
+      updateKey: updateKey(values.key, "tarve pack"),
+    }));
+    return 0;
+  }
   if (!COMMANDS.includes(command as typeof COMMANDS[number]) || !entrypoint || positionals.length !== 2) {
     throw new Error("Expected: tarve <run|dev|build> <app.tsx>. Use --help for options.");
   }
@@ -180,7 +197,8 @@ async function main(): Promise<number> {
       compileJsx: values["compile-jsx"],
       smol: values.smol,
       targetExecutable: values["target-executable"],
-        nativeFeatures: values["native-features"],
+      nativeFeatures: values["native-features"],
+      updateKey: values.packs ? updateKey(values.key, "tarve build --packs") : undefined,
     }));
     return 0;
   }
@@ -271,4 +289,10 @@ function keygen(outDir = "."): number {
   console.log(`private key: ${path} (keep it secret and out of git)`);
   console.log(`public key:  ${keys.publicKey}`);
   return 0;
+}
+/** The update private key: --key, then TARVE_UPDATE_PRIVATE_KEY, then ./tarve-update.key. */
+function updateKey(flag: string | undefined, command: string): string {
+  const key = flag ?? process.env.TARVE_UPDATE_PRIVATE_KEY ?? (existsSync(KEY_FILE) ? KEY_FILE : undefined);
+  if (!key) throw new Error(`${command} needs --key, TARVE_UPDATE_PRIVATE_KEY or ./${KEY_FILE} (tarve keygen).`);
+  return key;
 }

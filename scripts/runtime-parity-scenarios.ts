@@ -36,12 +36,13 @@ const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const nodes = (snapshot: any) => snapshot.nodes.map((n: any) => [n.id, Math.round(n.x), Math.round(n.y), Math.round(n.width), Math.round(n.height), n.text ?? ""]);
 const centre = (n: any) => ({ x: n.x + n.width / 2, y: n.y + n.height / 2 });
 const visible = (snapshot: any, kinds: string[]) => snapshot.nodes.filter((n: any) => kinds.includes(n.kind) && n.width > 0 && n.height > 0 && n.y >= 0 && n.y + n.height <= snapshot.height);
-/** The window's first frames, then time for fonts, images and entry animations. */
+/** The window's first frames, then time for fonts, images and entry animations (the
+ * longest, the motion example's 650 ms enter, must have ended: a capture inside it races). */
 async function settle(window: any) {
   await window.ready;
   let snapshot = await window.inspect();
   for (let i = 0; i < 100 && snapshot.frames === 0; i++) { await wait(20); snapshot = await window.inspect(); }
-  await wait(600);
+  await wait(1000);
   return window.inspect();
 }
 /** One stage of the report: the window's node tree and a capture. */

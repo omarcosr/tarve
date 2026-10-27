@@ -14,6 +14,9 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use vello::peniko::{Blob, ImageAlphaType, ImageData, ImageFormat};
+mod jni_callbacks;
+#[allow(unused_imports)]
+pub(crate) use jni_callbacks::*;
 
 const TIME_UPDATE: Duration = Duration::from_millis(250);
 /// Larger pictures are subsampled while converting: the renderer scales them anyway.
@@ -25,6 +28,8 @@ const CLASS: &str = "dev.tarve.TarveVideo";
 struct Shared {
     picture: Option<(u32, u32, Vec<u8>)>,
     events: Vec<(String, f64)>,
+    /// Timed text MediaPlayer showed since the last tick (the newest wins).
+    cue: Option<String>,
 }
 
 static PLAYERS: Mutex<Option<HashMap<i64, Arc<Mutex<Shared>>>>> = Mutex::new(None);
@@ -43,161 +48,6 @@ fn shared(handle: i64) -> Option<Arc<Mutex<Shared>>> {
 fn wake() {
     if let Some(wake) = WAKE.get() {
         wake();
-    }
-}
-
-extern "system" fn native_event(
-    mut env: JNIEnv,
-    _: JClass,
-    handle: i64,
-    event: JString,
-    value: f64,
-) {
-    let Ok(event) = env.get_string(&event).map(String::from) else {
-        return;
-    };
-    if let Some(shared) = shared(handle) {
-        shared
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .events
-            .push((event, value));
-        wake();
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-extern "system" fn native_frame(
-    env: JNIEnv,
-    _: JClass,
-    handle: i64,
-    width: i32,
-    height: i32,
-    y: JByteBuffer,
-    u: JByteBuffer,
-    v: JByteBuffer,
-    y_row: i32,
-    uv_row: i32,
-    uv_pixel: i32,
-) {
-    let Some(shared) = shared(handle) else {
-        return;
-    };
-    let plane = |buffer: &JByteBuffer| -> Option<&[u8]> {
-        let address = env.get_direct_buffer_address(buffer).ok()?;
-        let length = env.get_direct_buffer_capacity(buffer).ok()?;
-        // SAFETY: the Image's plane stays mapped until onImageAvailable returns (after this call).
-        Some(unsafe { std::slice::from_raw_parts(address, length) })
-    };
-    let (Some(y), Some(u), Some(v)) = (plane(&y), plane(&u), plane(&v)) else {
-        return;
-    };
-    let source = Yuv {
-        width: width.max(0) as usize,
-        height: height.max(0) as usize,
-        y,
-        u,
-        v,
-        y_row: y_row.max(0) as usize,
-        uv_row: uv_row.max(0) as usize,
-        uv_pixel: uv_pixel.max(1) as usize,
-    };
-    if let Some(picture) = source.to_rgba() {
-        shared.lock().unwrap_or_else(|p| p.into_inner()).picture = Some(picture);
-        wake();
-    }
-}
-
-/// An RGBA picture from the GPU copy (TarveVideo.GpuCopy), already at most MAX_SIDE.
-extern "system" fn native_frame_rgba(
-    env: JNIEnv,
-    _: JClass,
-    handle: i64,
-    width: i32,
-    height: i32,
-    rgba: JByteBuffer,
-    row: i32,
-) {
-    let Some(shared) = shared(handle) else {
-        return;
-    };
-    let (Ok(address), Ok(length)) = (
-        env.get_direct_buffer_address(&rgba),
-        env.get_direct_buffer_capacity(&rgba),
-    ) else {
-        return;
-    };
-    // SAFETY: the Image's plane stays mapped until onImageAvailable returns (after this call).
-    let source = unsafe { std::slice::from_raw_parts(address, length) };
-    if let Some(picture) = copy_rgba(
-        source,
-        width.max(0) as usize,
-        height.max(0) as usize,
-        row.max(0) as usize,
-    ) {
-        shared.lock().unwrap_or_else(|p| p.into_inner()).picture = Some(picture);
-        wake();
-    }
-}
-
-/// Tightly packed opaque RGBA from rows `row` bytes apart.
-fn copy_rgba(
-    source: &[u8],
-    width: usize,
-    height: usize,
-    row: usize,
-) -> Option<(u32, u32, Vec<u8>)> {
-    let line = width * 4;
-    if width == 0 || height == 0 || row < line || source.len() < row * (height - 1) + line {
-        return None;
-    }
-    let mut out = Vec::with_capacity(line * height);
-    for y in 0..height {
-        out.extend_from_slice(&source[y * row..y * row + line]);
-    }
-    for pixel in out.chunks_exact_mut(4) {
-        pixel[3] = 255;
-    }
-    Some((width as u32, height as u32, out))
-}
-
-/// One YUV 4:2:0 picture as an ImageReader hands it over.
-struct Yuv<'a> {
-    width: usize,
-    height: usize,
-    y: &'a [u8],
-    u: &'a [u8],
-    v: &'a [u8],
-    y_row: usize,
-    uv_row: usize,
-    uv_pixel: usize,
-}
-
-impl Yuv<'_> {
-    /// RGBA (BT.601, limited range), every `step`th pixel so neither side passes MAX_SIDE.
-    fn to_rgba(&self) -> Option<(u32, u32, Vec<u8>)> {
-        if self.width == 0 || self.height == 0 {
-            return None;
-        }
-        let step = self.width.max(self.height).div_ceil(MAX_SIDE).max(1);
-        let (out_w, out_h) = (self.width.div_ceil(step), self.height.div_ceil(step));
-        let mut out = vec![255_u8; out_w * out_h * 4];
-        for row in 0..out_h {
-            let sy = row * step;
-            for column in 0..out_w {
-                let sx = column * step;
-                let luma = i32::from(*self.y.get(sy * self.y_row + sx)?) - 16;
-                let chroma = (sy / 2) * self.uv_row + (sx / 2) * self.uv_pixel;
-                let cb = i32::from(*self.u.get(chroma)?) - 128;
-                let cr = i32::from(*self.v.get(chroma)?) - 128;
-                let c = 298 * luma;
-                let at = (row * out_w + column) * 4;
-                out[at] = ((c + 409 * cr + 128) >> 8).clamp(0, 255) as u8;
-                out[at + 1] = ((c - 100 * cb - 208 * cr + 128) >> 8).clamp(0, 255) as u8;
-                out[at + 2] = ((c + 516 * cb + 128) >> 8).clamp(0, 255) as u8;
-            }
-        }
-        Some((out_w as u32, out_h as u32, out))
     }
 }
 
@@ -227,6 +77,11 @@ fn video_class<'local>(
                     name: "nativeEvent".into(),
                     sig: "(JLjava/lang/String;D)V".into(),
                     fn_ptr: native_event as *mut std::ffi::c_void,
+                },
+                jni::NativeMethod {
+                    name: "nativeCue".into(),
+                    sig: "(JLjava/lang/String;)V".into(),
+                    fn_ptr: native_cue as *mut std::ffi::c_void,
                 },
                 jni::NativeMethod {
                     name: "nativeFrame".into(),
@@ -261,6 +116,8 @@ struct Player {
     volume: f32,
     generation: u64,
     next_update: Option<Instant>,
+    /// MediaPlayer's buffering percentage of the whole file (100 for a local one).
+    buffered_percent: f64,
 }
 
 impl Player {
@@ -311,6 +168,7 @@ impl Player {
             volume: load.volume,
             generation: 0,
             next_update: None,
+            buffered_percent: if load.src.contains("://") { 0.0 } else { 100.0 },
         })
     }
 
@@ -330,6 +188,26 @@ impl Player {
             })
         })
         .ok()
+    }
+
+    /// MediaPlayer's audio tracks (`getTrackInfo`), as the protocol's `audioTracks`.
+    fn audio_tracks(&self) -> Value {
+        self.tracks_json("audioTracks")
+    }
+
+    /// A JSON track list the Java side builds (`audioTracks`, `textTracks`).
+    fn tracks_json(&self, method: &str) -> Value {
+        let text = crate::android::with_env(|env, _| {
+            let value = env
+                .call_method(self.object.as_obj(), method, "()Ljava/lang/String;", &[])?
+                .l()?;
+            let value = jni::objects::JString::from(value);
+            let text: String = env.get_string(&value)?.into();
+            Ok(text)
+        })
+        .ok();
+        text.and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_else(|| Value::Array(Vec::new()))
     }
 
     fn time(&self) -> f64 {
@@ -366,6 +244,14 @@ impl Player {
         self.call("seek", "(D)V", &[JValue::Double(time.max(0.0))]);
     }
 
+    fn set_rate(&mut self, rate: f64) {
+        self.call(
+            "rate",
+            "(F)V",
+            &[JValue::Float(rate.clamp(0.0625, 16.0) as f32)],
+        );
+    }
+
     fn set(&mut self, looped: Option<bool>, muted: Option<bool>, volume: Option<f64>) {
         self.looped = looped.unwrap_or(self.looped);
         self.muted = muted.unwrap_or(self.muted);
@@ -382,7 +268,7 @@ impl Player {
     }
 
     fn event(&self, id: &str, name: &str) -> Value {
-        json!({
+        let mut event = json!({
             "type": "media",
             "id": id,
             "event": name,
@@ -391,7 +277,15 @@ impl Player {
             "paused": !self.playing,
             "videoWidth": self.size.0,
             "videoHeight": self.size.1,
-        })
+        });
+        if let Some(duration) = self.duration {
+            event["buffered"] = json!(duration * (self.buffered_percent / 100.0).clamp(0.0, 1.0));
+        }
+        if name == "loadedmetadata" {
+            let path = self.src.split(['?', '#']).next().unwrap_or_default();
+            event["filename"] = json!(path.rsplit('/').next().unwrap_or_default());
+        }
+        event
     }
 }
 
@@ -445,6 +339,42 @@ impl Videos {
         }
     }
 
+    pub(crate) fn set_text_track(&mut self, id: &str, index: Option<u32>) -> Vec<Value> {
+        let Some(player) = self.players.get_mut(id) else {
+            return vec![media_error(id, "media not loaded")];
+        };
+        player.call(
+            "selectText",
+            "(I)V",
+            &[JValue::Int(index.map_or(-1, |i| i as i32))],
+        );
+        let mut event = player.event(id, "texttracks");
+        event["textTracks"] = player.tracks_json("textTracks");
+        let mut cleared = player.event(id, "cuechange");
+        cleared["cueText"] = json!("");
+        vec![event, cleared]
+    }
+
+    pub(crate) fn set_audio_track(&mut self, id: &str, index: u32) -> Vec<Value> {
+        let Some(player) = self.players.get_mut(id) else {
+            return vec![media_error(id, "media not loaded")];
+        };
+        player.call("selectAudio", "(I)V", &[JValue::Int(index as i32)]);
+        let mut event = player.event(id, "audiotracks");
+        event["audioTracks"] = player.audio_tracks();
+        vec![event]
+    }
+
+    pub(crate) fn set_rate(&mut self, id: &str, rate: f64) -> Vec<Value> {
+        match self.players.get_mut(id) {
+            Some(player) => {
+                player.set_rate(rate);
+                Vec::new()
+            }
+            None => vec![media_error(id, "media not loaded")],
+        }
+    }
+
     pub(crate) fn command(
         &mut self,
         id: &str,
@@ -485,10 +415,19 @@ impl Videos {
         let mut out = Vec::new();
         let mut failed = Vec::new();
         for (id, player) in &mut self.players {
-            let (picture, events) = {
+            let (picture, events, cue) = {
                 let mut shared = player.shared.lock().unwrap_or_else(|p| p.into_inner());
-                (shared.picture.take(), std::mem::take(&mut shared.events))
+                (
+                    shared.picture.take(),
+                    std::mem::take(&mut shared.events),
+                    shared.cue.take(),
+                )
             };
+            if let Some(text) = cue {
+                let mut event = player.event(id, "cuechange");
+                event["cueText"] = json!(crate::video::text_cues::clean(&text));
+                out.push(event);
+            }
             for (event, value) in events {
                 match event.as_str() {
                     "loadedmetadata" => {
@@ -504,6 +443,27 @@ impl Videos {
                             .unwrap_or(0);
                         player.size = (width.max(0) as u32, height.max(0) as u32);
                         out.push(player.event(id, "loadedmetadata"));
+                        out.push(player.event(id, "canplay"));
+                        let tracks = player.audio_tracks();
+                        if tracks.as_array().is_some_and(|tracks| !tracks.is_empty()) {
+                            let mut event = player.event(id, "audiotracks");
+                            event["audioTracks"] = tracks;
+                            out.push(event);
+                        }
+                        let texts = player.tracks_json("textTracks");
+                        if texts.as_array().is_some_and(|tracks| !tracks.is_empty()) {
+                            let mut event = player.event(id, "texttracks");
+                            event["textTracks"] = texts;
+                            out.push(event);
+                        }
+                    }
+                    "waiting" | "canplay" => out.push(player.event(id, &event)),
+                    "progress" => {
+                        let changed = (value - player.buffered_percent).abs() >= 1.0;
+                        player.buffered_percent = value;
+                        if changed {
+                            out.push(player.event(id, "progress"));
+                        }
                     }
                     "seeked" => out.push(player.event(id, "seeked")),
                     "ended" => {

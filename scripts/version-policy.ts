@@ -10,11 +10,17 @@ export interface ProductVersionState {
   reactIcons: string;
   headless: string;
   svelte: string;
+  router: string;
+  test: string;
+  createTarve: string;
   bunCore: string;
   bunProtocol: string;
   bunReactIcons: string;
   bunHeadless: string;
   bunSvelte: string;
+  bunRouter: string;
+  bunTest: string;
+  bunCreateTarve: string;
   native: string;
   cargoLock: string;
 }
@@ -81,34 +87,37 @@ export function assertValidSemver(version: string): void {
   if (!SEMVER_PATTERN.test(version)) throw new Error(`Invalid SemVer: ${version}`);
 }
 
+/** Every published manifest that carries the product version, with its ProductVersionState keys. */
+const MANIFESTS = [
+  { path: "packages/core", key: "core", lock: "bunCore" },
+  { path: "packages/protocol", key: "protocolPackage", lock: "bunProtocol" },
+  { path: "packages/react-icons", key: "reactIcons", lock: "bunReactIcons" },
+  { path: "packages/headless", key: "headless", lock: "bunHeadless" },
+  { path: "packages/svelte", key: "svelte", lock: "bunSvelte" },
+  { path: "packages/router", key: "router", lock: "bunRouter" },
+  { path: "packages/test", key: "test", lock: "bunTest" },
+  { path: "packages/create-tarve", key: "createTarve", lock: "bunCreateTarve" },
+] as const satisfies readonly { path: string; key: keyof ProductVersionState; lock: keyof ProductVersionState }[];
+
 export async function readProductVersions(root: string): Promise<ProductVersionState> {
-  const [rootPackage, corePackage, protocolPackage, reactIconsPackage, headlessPackage, sveltePackage, bunLock, cargoToml, cargoLock] = await Promise.all([
+  const [rootPackage, bunLock, cargoToml, cargoLock, ...manifests] = await Promise.all([
     Bun.file(join(root, "package.json")).json() as Promise<{ version?: string }>,
-    Bun.file(join(root, "packages/core/package.json")).json() as Promise<{ version?: string }>,
-    Bun.file(join(root, "packages/protocol/package.json")).json() as Promise<{ version?: string }>,
-    Bun.file(join(root, "packages/react-icons/package.json")).json() as Promise<{ version?: string }>,
-    Bun.file(join(root, "packages/headless/package.json")).json() as Promise<{ version?: string }>,
-    Bun.file(join(root, "packages/svelte/package.json")).json() as Promise<{ version?: string }>,
     readFile(join(root, "bun.lock"), "utf8"),
     readFile(join(root, "native/Cargo.toml"), "utf8"),
     readFile(join(root, "native/Cargo.lock"), "utf8"),
+    ...MANIFESTS.map(manifest => Bun.file(join(root, manifest.path, "package.json")).json() as Promise<{ version?: string }>),
   ]);
   const lock = cargoLock.match(/\[\[package\]\]\r?\nname = "tarve_native"\r?\nversion = "([^"]+)"/)?.[1];
-  return {
+  const state = {
     root: rootPackage.version ?? "",
-    core: corePackage.version ?? "",
-    protocolPackage: protocolPackage.version ?? "",
-    reactIcons: reactIconsPackage.version ?? "",
-    headless: headlessPackage.version ?? "",
-    svelte: sveltePackage.version ?? "",
-    bunCore: bunWorkspaceVersion(bunLock, "packages/core") ?? "",
-    bunProtocol: bunWorkspaceVersion(bunLock, "packages/protocol") ?? "",
-    bunReactIcons: bunWorkspaceVersion(bunLock, "packages/react-icons") ?? "",
-    bunHeadless: bunWorkspaceVersion(bunLock, "packages/headless") ?? "",
-    bunSvelte: bunWorkspaceVersion(bunLock, "packages/svelte") ?? "",
     native: cargoPackageValue(cargoToml, "version") ?? "",
     cargoLock: lock ?? "",
-  };
+  } as ProductVersionState;
+  MANIFESTS.forEach((manifest, index) => {
+    state[manifest.key] = manifests[index]!.version ?? "";
+    state[manifest.lock] = bunWorkspaceVersion(bunLock, manifest.path) ?? "";
+  });
+  return state;
 }
 
 export function assertVersionsSynchronized(state: ProductVersionState): string {
@@ -124,22 +133,18 @@ export function assertVersionsSynchronized(state: ProductVersionState): string {
 
 export async function setProductVersion(root: string, version: string): Promise<void> {
   assertValidSemver(version);
-  for (const relative of ["package.json", "packages/core/package.json", "packages/protocol/package.json", "packages/react-icons/package.json", "packages/headless/package.json", "packages/svelte/package.json"]) {
+  for (const relative of ["package.json", ...MANIFESTS.map(manifest => `${manifest.path}/package.json`)]) {
     const path = join(root, relative);
     const manifest = await Bun.file(path).json() as Record<string, unknown>;
     manifest.version = version;
-    // Published companions require the @tarve/core release they ship with.
+    // Published companions require the Tarve release they ship with.
     const peers = manifest.peerDependencies as Record<string, string> | undefined;
-    if (peers?.["@tarve/core"]) peers["@tarve/core"] = `^${version}`;
+    for (const name of ["@tarve/core", "@tarve/headless"]) if (peers?.[name]) peers[name] = `^${version}`;
     await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
   }
   const bunLockPath = join(root, "bun.lock");
   let bunLock = await readFile(bunLockPath, "utf8");
-  bunLock = replaceBunWorkspaceVersion(bunLock, "packages/core", version);
-  bunLock = replaceBunWorkspaceVersion(bunLock, "packages/protocol", version);
-  bunLock = replaceBunWorkspaceVersion(bunLock, "packages/react-icons", version);
-  bunLock = replaceBunWorkspaceVersion(bunLock, "packages/headless", version);
-  bunLock = replaceBunWorkspaceVersion(bunLock, "packages/svelte", version);
+  for (const manifest of MANIFESTS) bunLock = replaceBunWorkspaceVersion(bunLock, manifest.path, version);
   await writeFile(bunLockPath, bunLock);
   const cargoTomlPath = join(root, "native/Cargo.toml");
   await writeFile(cargoTomlPath, replaceCargoPackageValue(await readFile(cargoTomlPath, "utf8"), "version", version));

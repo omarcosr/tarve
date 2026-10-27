@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 const here = import.meta.dir;
 const repo = resolve(here, "../..");
 const cli = join(here, "index.js");
+const VERSION = (JSON.parse(readFileSync(join(here, "package.json"), "utf8")) as { version: string }).version;
 const templates: string[] = ["basic", "tailwind", "svelte", "tray"];
 const hasNode = spawnSync("node", ["--version"], { encoding: "utf8" }).status === 0;
 let root = "";
@@ -73,13 +74,13 @@ describe.each(templates)("template %s", template => {
     const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
     expect(pkg.name).toBe(`my-${template}-app`);
     expect(pkg.tarve.name).toBe(`My ${template[0].toUpperCase()}${template.slice(1)} App`);
-    expect(pkg.dependencies["@tarve/core"]).toBe("^0.7.0");
+    expect(pkg.dependencies["@tarve/core"]).toBe(`^${VERSION}`);
     expect(pkg.scripts).toMatchObject({
       dev: `tarve dev ${entry} --runtime bun`,
       start: `tarve run ${entry} --runtime bun`,
       build: `tarve build ${entry} --runtime bun`,
     });
-    if (template === "svelte") expect(pkg.dependencies["@tarve/svelte"]).toBe("^0.7.0");
+    if (template === "svelte") expect(pkg.dependencies["@tarve/svelte"]).toBe(`^${VERSION}`);
     if (template === "tray") expect(pkg.tarve.icon).toBe("assets/icon.png");
     const tsconfig = JSON.parse(readFileSync(join(dir, "tsconfig.json"), "utf8"));
     expect(tsconfig.compilerOptions).toMatchObject({ jsx: "react-jsx", jsxImportSource: "@tarve/core", moduleResolution: "Bundler", strict: true });
@@ -171,7 +172,7 @@ describe("cli", () => {
 
   test("help and version", () => {
     expect(run(["--help"]).stdout).toContain("--template");
-    expect(run(["--version"]).stdout.trim()).toBe("0.7.0");
+    expect(run(["--version"]).stdout.trim()).toBe(VERSION);
   });
 
   const node = spawnSync("node", ["--version"], { encoding: "utf8" });

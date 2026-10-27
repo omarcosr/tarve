@@ -3,7 +3,7 @@
   "description": "a Svelte 5 counter through @tarve/svelte",
   "entry": "app.ts",
   "dependencies": {
-    "@tarve/svelte": "^0.7.0",
+    "@tarve/svelte": "^__TARVE_VERSION__",
     "svelte": "^5.57.2"
   },
   "bunPreload": ["@tarve/svelte/bun-preload"],

@@ -35,6 +35,15 @@ impl Videos {
     ) -> Vec<Value> {
         Vec::new()
     }
+    pub(crate) fn set_text_track(&mut self, _id: &str, _index: Option<u32>) -> Vec<Value> {
+        Vec::new()
+    }
+    pub(crate) fn set_audio_track(&mut self, _id: &str, _index: u32) -> Vec<Value> {
+        Vec::new()
+    }
+    pub(crate) fn set_rate(&mut self, _id: &str, _rate: f64) -> Vec<Value> {
+        Vec::new()
+    }
     pub(crate) fn tick(&mut self, _now: Instant) -> Vec<Value> {
         Vec::new()
     }

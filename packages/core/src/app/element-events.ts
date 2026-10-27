@@ -116,6 +116,7 @@ export function createElementDispatcher(invoke: InvokeHandler, handlersOf: (id: 
       case "hover": run("hover", handlers?.onHover as never, event.entered); break;
       case "key": run("key", handlers?.onKeyDown as never, event.key); break;
       case "blur": run("blur", handlers?.onBlur); break;
+      case "imageError": run("imageError", handlers?.onError as never, { src: event.src, message: event.message }); break;
       case "motionComplete": run("motionComplete", handlers?.onTransitionEnd as never, { property: event.property }); break;
     }
     return { handled, succeeded };

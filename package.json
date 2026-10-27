@@ -1,6 +1,6 @@
 {
   "name": "@tarve/core",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/omarcosr/tarve.git"
@@ -73,7 +73,8 @@
   "homepage": "https://github.com/omarcosr/tarve#readme",
   "imports": {
     "#tarve/runtime": "./dist/npm/runtime.js",
-    "#tarve/assets": "./dist/npm/embedded-assets.js"
+    "#tarve/assets": "./dist/npm/embedded-assets.js",
+    "#tarve/pack-host": "./dist/npm/pack-host.js"
   },
   "keywords": [
     "gui",
@@ -167,6 +168,7 @@
     "smoke:accessibility": "bun run build:native && powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-accessibility.ps1",
     "smoke:exe": "bun scripts/smoke-exe.ts",
     "smoke:update": "bun scripts/smoke-update.ts",
+    "smoke:pack": "bun scripts/smoke-pack.ts",
     "smoke:exe:txiki": "bun scripts/smoke-exe.ts --runtime txiki",
     "smoke:txiki-shims": "bun scripts/smoke-txiki-shims.ts",
     "smoke:headless-runtimes": "bun run build:native && bun run build:wasm && bun scripts/smoke-headless-runtimes.ts",

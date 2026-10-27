@@ -1,5 +1,12 @@
 package tarve
 
+import (
+	"math"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
 // Style variants folded by the compiler, as @tarve/core foldVariants: first/last/odd/even by
 // position among element siblings, sm…2xl by window width, portrait/landscape by its shape,
 // pointerCoarse/pointerFine and motionReduce/motionSafe by the system (viewport.go), dark by
@@ -80,7 +87,83 @@ type variantContext struct {
 	usedPosition *bool
 }
 
+// viewportUnit is a CSS viewport length: 50vh, 100vw, 10vmin, 10vmax (and dvh/svh/lvh forms).
+var viewportUnit = regexp.MustCompile(`^(-?\d*\.?\d+)(?:d|s|l)?(vh|vw|vmin|vmax)$`)
+
+// viewportLength resolves a viewport unit to px for the window; other values pass.
+func viewportLength(v any, ctx variantContext) (any, bool) {
+	text, ok := v.(string)
+	if !ok {
+		return v, false
+	}
+	m := viewportUnit.FindStringSubmatch(strings.TrimSpace(text))
+	if m == nil {
+		return v, false
+	}
+	n, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return v, false
+	}
+	if ctx.usedViewport != nil {
+		*ctx.usedViewport = true
+	}
+	base := math.Max(ctx.width, ctx.height)
+	switch m[2] {
+	case "vh":
+		base = ctx.height
+	case "vw":
+		base = ctx.width
+	case "vmin":
+		base = math.Min(ctx.width, ctx.height)
+	}
+	return n * base / 100, true
+}
+
+// resolveViewportUnits turns viewport units into px (reading them re-renders on resize).
+func resolveViewportUnits(style S, ctx variantContext) S {
+	var out S
+	for k, v := range style {
+		if next, ok := viewportLength(v, ctx); ok {
+			if out == nil {
+				out = merge(style)
+			}
+			out[k] = next
+			continue
+		}
+		if k != "padding" && k != "margin" && k != "inset" && k != "borderWidth" {
+			continue
+		}
+		sides, ok := asMap(v)
+		if !ok {
+			continue
+		}
+		var resolved S
+		for side, raw := range sides {
+			if next, ok := viewportLength(raw, ctx); ok {
+				if resolved == nil {
+					resolved = merge(sides)
+				}
+				resolved[side] = next
+			}
+		}
+		if resolved != nil {
+			if out == nil {
+				out = merge(style)
+			}
+			out[k] = resolved
+		}
+	}
+	if out == nil {
+		return style
+	}
+	return out
+}
+
 func foldVariants(style S, t *Theme, ctx variantContext) S {
+	return resolveViewportUnits(foldStyleVariants(style, t, ctx), ctx)
+}
+
+func foldStyleVariants(style S, t *Theme, ctx variantContext) S {
 	if !hasVariants(style) {
 		return style
 	}
@@ -164,7 +247,7 @@ func foldVariants(style S, t *Theme, ctx variantContext) S {
 	}
 	if dark, ok := asMap(style["dark"]); ok {
 		if l := luminance(t.Colors["background"]); l >= 0 && l < 0.5 {
-			out = foldVariants(mergeStyle(out, dark), t, ctx)
+			out = foldStyleVariants(mergeStyle(out, dark), t, ctx)
 		}
 	}
 	return out

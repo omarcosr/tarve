@@ -39,10 +39,14 @@ impl Media {
     ) -> Vec<Value> {
         match src.filter(|src| action == "load" && !src.is_empty()) {
             Some(src) => vec![
-                json!({"type":"media", "id":id, "event":"error", "message":failure(src, UNAVAILABLE)}),
+                json!({"type":"media", "id":id, "event":"error", "code":"format", "message":failure(src, UNAVAILABLE)}),
             ],
             None => Vec::new(),
         }
+    }
+
+    pub fn set_rate(&mut self, _id: &str, _rate: f64) -> Vec<Value> {
+        Vec::new()
     }
 
     pub fn deadline(&self) -> Option<Instant> {

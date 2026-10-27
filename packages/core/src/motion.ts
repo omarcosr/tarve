@@ -1,4 +1,7 @@
-import type { NumericMotionProperty as MotionProperty, MotionTransitions, MotionValues, Style } from "./protocol";
+import type { NumericMotionProperty, MotionTransitions, MotionValues, Style } from "./protocol";
+
+/** What AnimatePresence waits on: a numeric property or the transform. */
+type MotionProperty = NumericMotionProperty | "transform";
 import { currentRenderEpoch, currentRenderScope } from "./render-scope";
 import { Fragment, jsx, type VNode } from "./jsx-runtime";
 
@@ -30,7 +33,7 @@ interface PresenceStore {
 }
 
 const stores = new WeakMap<object, PresenceStore>();
-const properties: readonly MotionProperty[] = [
+const properties: readonly NumericMotionProperty[] = [
   "width", "height", "top", "right", "bottom", "left", "opacity", "radius",
 ];
 
@@ -71,7 +74,7 @@ function transitionFor(style: Style, property: MotionProperty) {
   return style.transition?.[property] ?? style.transition?.all;
 }
 
-function currentNumericValue(style: Style, property: MotionProperty): number | undefined {
+function currentNumericValue(style: Style, property: NumericMotionProperty): number | undefined {
   const value = style[property];
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (property === "opacity") return 1;
@@ -92,6 +95,11 @@ function exitingProperties(vnode: VNode, style: Style, exit: MotionValues): Set<
     if (Number.isFinite(duration) && duration > 0 && Number.isFinite(delay) && delay >= 0) {
       awaited.add(property);
     }
+  }
+  if (exit.transform !== undefined && JSON.stringify(exit.transform) !== JSON.stringify(vnode.props.style?.transform)) {
+    const transition = transitionFor(style, "transform");
+    const duration = transition?.duration ?? 200;
+    if (Number.isFinite(duration) && duration > 0) awaited.add("transform");
   }
   return awaited;
 }

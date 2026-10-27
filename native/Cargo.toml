@@ -1,6 +1,6 @@
 [package]
 name = "tarve_native"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
@@ -30,6 +30,8 @@ qjs-prototype = ["dep:rquickjs"]
 [dependencies]
 vello = { version = "=0.10.0", default-features = false }
 vello_cpu = { version = "=0.2.0", default-features = false, features = ["std", "text", "u8_pipeline"] }
+# vello_cpu's filter layers (CSS `filter: blur()` / `drop-shadow()`) take its `Filter`.
+vello_common = { version = "=0.2.0", default-features = false, features = ["std"] }
 parley = "=0.11.1"
 comrak = { version = "=0.55.0", default-features = false, optional = true }
 diffy = "=0.5.2"

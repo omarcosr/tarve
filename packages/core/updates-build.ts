@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
@@ -7,6 +7,7 @@ import { readMacAppBundle, zipMacApp } from "./macos-bundle";
 import { notarizeMacApp, runCommand, signMacApp, type CommandRunner, type MacSignOptions } from "./macos-sign";
 import { machOKind } from "./src/macho";
 import { assertUpdateUrl, isValidPlatform, isValidVersion, looksExecutable, verifyUpdateManifest, type SignedUpdateManifest, type UpdateManifest } from "./src/updates";
+import { PACK_EXTENSION, inspectPack } from "./src/pack";
 
 export interface UpdateKeys {
   /** Base64 raw Ed25519 public key: pass to checkForUpdate. */
@@ -24,7 +25,12 @@ export function generateUpdateKeys(): UpdateKeys {
   };
 }
 
-function privateKeyObject(privateKey: string) {
+/** The private key itself, or the contents of the file `value` names. */
+export function loadUpdatePrivateKey(value: string): string {
+  return existsSync(value) ? readFileSync(value, "utf8") : value;
+}
+
+export function privateKeyObject(privateKey: string) {
   try {
     return createPrivateKey({ key: Buffer.from(privateKey.trim(), "base64"), format: "der", type: "pkcs8" });
   } catch {
@@ -49,6 +55,8 @@ export interface ReleaseOptions {
   version: string;
   /** `platform=path` pairs, e.g. `win32-x64=dist/App.exe`. */
   artifacts: string[];
+  /** App packs from `tarve pack`; each is listed under the platform and runtime its header names. */
+  packs?: string[];
   /** Base64 PKCS#8 key, or a path to a file holding it. */
   privateKey: string;
   /** Public key the app ships with: release fails when the private key does not match it. */
@@ -122,10 +130,10 @@ export function signFile(command: string, file: string): void {
 
 /** Copies the artifacts into `outDir` and writes the signed `latest.json` beside them. */
 export function release(options: ReleaseOptions): string {
-  if (!options.artifacts.length) throw new Error("tarve release needs at least one --artifact platform=path");
+  if (!options.artifacts.length && !options.packs?.length) throw new Error("tarve release needs at least one --artifact platform=path or --pack App.tarve");
   if (!isValidVersion(options.version)) throw new Error(`Invalid --version ${options.version}: expected e.g. 1.2.3 or 1.2.3-beta.1`);
   if (options.baseUrl) assertUpdateUrl(options.baseUrl);
-  const key = existsSync(options.privateKey) ? readFileSync(options.privateKey, "utf8") : options.privateKey;
+  const key = loadUpdatePrivateKey(options.privateKey);
   const publicKey = updatePublicKey(key);
   if (options.publicKey && options.publicKey.trim() !== publicKey) {
     throw new Error(`The private key does not match --public-key: apps built with ${options.publicKey.trim()} would reject this release`);
@@ -152,6 +160,7 @@ export function release(options: ReleaseOptions): string {
   }
   const outDir = resolve(options.outDir ?? "dist/updates");
   mkdirSync(outDir, { recursive: true });
+  const url = (file: string) => options.baseUrl ? options.baseUrl.replace(/\/?$/, "/") + encodeURIComponent(file) : encodeURIComponent(file);
   const platforms: UpdateManifest["platforms"] = {};
   for (const { platform, source } of entries) {
     const stem = basename(source, extname(source));
@@ -172,21 +181,61 @@ export function release(options: ReleaseOptions): string {
     const bytes = readFileSync(target);
     if (!looksExecutable(bytes.subarray(0, 4), platform)) throw new Error(`The sign command broke ${file}: it is no longer an executable`);
     platforms[platform] = {
-      url: options.baseUrl ? options.baseUrl.replace(/\/?$/, "/") + encodeURIComponent(file) : encodeURIComponent(file),
+      url: url(file),
       sha256: createHash("sha256").update(bytes).digest("hex"),
       size: bytes.length,
     };
   }
+  const packs = releasePacks(options.packs ?? [], key, options, outDir, url);
   const manifest: UpdateManifest = {
     ...(options.name ? { name: options.name } : {}),
     version: options.version,
     ...(options.notes ? { notes: options.notes } : {}),
     pubDate: new Date().toISOString(),
     platforms,
+    ...Object.keys(packs).length ? { packs } : {},
   };
   const signed = signUpdateManifest(manifest, key);
   verifyUpdateManifest(signed, publicKey);
   const path = join(outDir, "latest.json");
   writeFileSync(path, JSON.stringify(signed, null, 2) + "\n");
   return path;
+}
+/** Checks each pack (signed with `key`, built for this release) and copies it into `outDir`. */
+function releasePacks(
+  sources: readonly string[],
+  key: string,
+  options: ReleaseOptions,
+  outDir: string,
+  url: (file: string) => string,
+): NonNullable<UpdateManifest["packs"]> {
+  const packs: NonNullable<UpdateManifest["packs"]> = {};
+  const publicKey = createPublicKey(privateKeyObject(key));
+  let name: string | undefined;
+  for (const source of sources) {
+    const path = resolve(source);
+    if (!existsSync(path) || !statSync(path).isFile()) throw new Error(`App pack not found: ${path}`);
+    const bytes = new Uint8Array(readFileSync(path));
+    const { header, signed, signature } = inspectPack((offset, length) => {
+      if (offset + length > bytes.length) throw new Error(`App pack is truncated: ${path}`);
+      return bytes.subarray(offset, offset + length);
+    }, bytes.length);
+    if (!verify(null, signed, publicKey, signature)) throw new Error(`${source} is not signed with this update key`);
+    if (header.version !== options.version) throw new Error(`${source} holds version ${header.version}, not ${options.version}`);
+    if (options.name && header.name !== options.name) throw new Error(`${source} belongs to ${header.name}, not ${options.name}`);
+    if (name !== undefined && header.name !== name) throw new Error(`Packs of two apps in one release: ${name} and ${header.name}`);
+    name = header.name;
+    if (packs[header.platform]?.[header.runtime]) throw new Error(`Two packs for ${header.runtime} on ${header.platform}`);
+    const file = `${header.name}-${header.version}-${header.platform}-${header.runtime}${PACK_EXTENSION}`;
+    const target = join(outDir, file);
+    if (resolve(target) !== path) copyFileSync(path, target);
+    (packs[header.platform] ??= {})[header.runtime] = {
+      url: url(file),
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      size: bytes.length,
+      compat: header.requires.compat,
+      features: header.requires.features,
+    };
+  }
+  return packs;
 }

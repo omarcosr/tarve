@@ -12,14 +12,17 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, dirname, join, relative, resolve } from "node:path";
-import { deflateRawSync } from "node:zlib";
+import { dirname, join, relative, resolve } from "node:path";
 import { metadataOverrides, type BuildOptions } from "./build";
 import { buildMetadata } from "./package-metadata";
 import { cacheRoot } from "./node-target";
 import { bundleQuickJs } from "./txiki-build";
 import { androidFileIntentFilters, androidIntentFilters, type FileTypeAssociation } from "./src/associations";
 import { resolveAppAssociations } from "./associations-config";
+import { type ZipEntry, readZip, zipEntry, writeZip } from "./android-zip";
+export { crc32, readZip, writeZip, zipEntry, type ZipEntry } from "./android-zip";
+import { MIN_SDK, windows, exe, androidSdk, buildTools, platformJar, androidNdk, jdk, androidPackageName, androidVersionCode, escapeXml } from "./android-sdk";
+export { androidNdk, androidPackageName, androidSdk, androidVersionCode } from "./android-sdk";
 
 export const ANDROID_ABIS = ["arm64-v8a", "x86_64"] as const;
 export type AndroidAbi = typeof ANDROID_ABIS[number];
@@ -111,7 +114,6 @@ const NOTIFICATION_ICON = `<?xml version="1.0" encoding="utf-8"?>
 </vector>
 `;
 
-const MIN_SDK = 26;
 /** 34, not 35: SDK 35 forces edge-to-edge, and NativeActivity reports no insets to draw around. */
 const TARGET_SDK = 34;
 
@@ -122,101 +124,6 @@ export function isAndroidTarget(value: string): value is AndroidTarget {
 export function abisOf(target: AndroidTarget = "android"): AndroidAbi[] {
   return target === "android-arm64" ? ["arm64-v8a"] : target === "android-x64" ? ["x86_64"] : [...ANDROID_ABIS];
 }
-
-const windows = process.platform === "win32";
-const exe = (name: string) => windows ? `${name}.exe` : name;
-
-function versionDirectories(directory: string): string[] {
-  if (!existsSync(directory)) return [];
-  const parts = (name: string) => name.split(/[.-]/).map(part => Number.parseInt(part, 10) || 0);
-  return readdirSync(directory)
-    .filter(name => statSync(join(directory, name)).isDirectory())
-    .sort((a, b) => {
-      const [x, y] = [parts(a), parts(b)];
-      for (let index = 0; index < Math.max(x.length, y.length); index++) {
-        const difference = (y[index] ?? 0) - (x[index] ?? 0);
-        if (difference) return difference;
-      }
-      return 0;
-    })
-    .map(name => join(directory, name));
-}
-
-export function androidSdk(): string {
-  const candidates = [
-    process.env.ANDROID_HOME,
-    process.env.ANDROID_SDK_ROOT,
-    windows && process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "Android", "Sdk") : undefined,
-    join(homedir(), "Library", "Android", "sdk"),
-    join(homedir(), "Android", "Sdk"),
-  ];
-  const sdk = candidates.find(candidate => candidate && existsSync(join(candidate, "build-tools")));
-  if (!sdk) throw new Error("Android SDK not found: install it (Android Studio, or sdkmanager \"build-tools;35.0.0\" \"platforms;android-35\") and set ANDROID_HOME.");
-  return sdk;
-}
-
-function buildTools(sdk: string): string {
-  const tools = versionDirectories(join(sdk, "build-tools")).find(directory => existsSync(join(directory, exe("aapt2"))));
-  if (!tools) throw new Error(`No build-tools with aapt2 in ${join(sdk, "build-tools")}: sdkmanager "build-tools;35.0.0"`);
-  return tools;
-}
-
-function platformJar(sdk: string): string {
-  const platforms = join(sdk, "platforms");
-  const jar = existsSync(platforms)
-    ? readdirSync(platforms)
-      .map(name => ({ name, level: Number(/^android-(\d+)$/.exec(name)?.[1] ?? 0) }))
-      .filter(({ level }) => level >= MIN_SDK)
-      .sort((a, b) => b.level - a.level)
-      .map(({ name }) => join(platforms, name, "android.jar"))
-      .find(path => existsSync(path))
-    : undefined;
-  if (!jar) throw new Error(`No Android platform (API ${MIN_SDK}+) in ${platforms}: sdkmanager "platforms;android-35"`);
-  return jar;
-}
-
-export function androidNdk(sdk = androidSdk()): string {
-  const explicit = process.env.ANDROID_NDK_HOME ?? process.env.ANDROID_NDK_ROOT ?? process.env.NDK_HOME;
-  if (explicit && existsSync(explicit)) return explicit;
-  const ndk = versionDirectories(join(sdk, "ndk"))[0] ?? (existsSync(join(sdk, "ndk-bundle")) ? join(sdk, "ndk-bundle") : undefined);
-  if (!ndk) throw new Error("Android NDK not found: sdkmanager \"ndk;27.2.12479018\", or set ANDROID_NDK_HOME.");
-  return ndk;
-}
-
-/** A JDK's java and keytool: JAVA_HOME, Android Studio's bundled JBR, then PATH. */
-function jdk(): { java: string; keytool: string; javac: string; jarsigner: string } {
-  const homes = [
-    process.env.JAVA_HOME,
-    ...windows ? [join(process.env.ProgramFiles ?? "C:\\Program Files", "Android", "Android Studio", "jbr")] : [],
-    "/Applications/Android Studio.app/Contents/jbr/Contents/Home",
-    "/opt/android-studio/jbr",
-    ...process.env.LOCALAPPDATA ? versionDirectories(join(process.env.LOCALAPPDATA, "Android", "jdk")) : [],
-  ];
-  const tools = (bin: string) => ({ java: join(bin, exe("java")), keytool: join(bin, exe("keytool")), javac: join(bin, exe("javac")), jarsigner: join(bin, exe("jarsigner")) });
-  const home = homes.find(candidate => candidate && existsSync(join(candidate, "bin", exe("java"))));
-  if (home) return tools(join(home, "bin"));
-  const onPath = (process.env.PATH ?? "").split(delimiter).find(directory => directory && existsSync(join(directory, exe("java"))));
-  if (onPath) return tools(onPath);
-  throw new Error("A JDK (17+) is needed to sign the APK: install one and set JAVA_HOME.");
-}
-
-/** A Java package name from the app id or name: `Acme.Notes` → `acme.notes`, `Counter` → `dev.tarve.counter`. */
-export function androidPackageName(appId: string | undefined, name: string): string {
-  const segment = (text: string) => {
-    const cleaned = text.toLowerCase().replace(/[^a-z0-9_]/g, "_").replace(/^_+|_+$/g, "");
-    return !cleaned ? "app" : /^[a-z]/.test(cleaned) ? cleaned : `app_${cleaned}`;
-  };
-  const parts = (appId ?? "").split(/[.\s/]+/).filter(Boolean).map(segment);
-  return parts.length >= 2 ? parts.join(".") : `dev.tarve.${parts[0] ?? segment(name)}`;
-}
-
-/** `1.2.3` → 10203; a missing version is 1. */
-export function androidVersionCode(version: string | undefined): number {
-  const [major = 0, minor = 0, patch = 0] = (version ?? "").split(/[.+-]/).map(part => Number.parseInt(part, 10) || 0);
-  return Math.max(1, Math.min(2_100_000_000, major * 10_000 + minor * 100 + patch));
-}
-
-const escapeXml = (value: string) => value.replace(/[<>&"']/g, character => `&#${character.charCodeAt(0)};`);
 
 export function androidManifest(options: { packageName: string; label: string; versionCode: number; versionName: string; icon: boolean; permissions?: readonly string[]; bundle?: boolean; extractNativeLibs?: boolean; protocols?: readonly string[]; fileTypes?: readonly FileTypeAssociation[] }): string {
   const permissions = [...new Set([...DEFAULT_ANDROID_PERMISSIONS, ...(options.permissions ?? []).map(androidPermissionName)])];
@@ -278,132 +185,6 @@ export function androidTheme(): string {
   </style>
 </resources>
 `;
-}
-
-// ZIP: aapt2 writes the manifest and resources; assets and libraries are added here, so that
-// shared libraries are stored uncompressed at page boundaries (loaded in place, never extracted).
-export interface ZipEntry { name: string; method: 0 | 8; crc: number; size: number; data: Uint8Array }
-
-const CRC_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let index = 0; index < 256; index++) {
-    let value = index;
-    for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-    table[index] = value >>> 0;
-  }
-  return table;
-})();
-
-export function crc32(bytes: Uint8Array): number {
-  let crc = 0xffffffff;
-  for (const byte of bytes) crc = CRC_TABLE[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-export function readZip(zip: Uint8Array): ZipEntry[] {
-  const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
-  let end = zip.length - 22;
-  while (end >= 0 && view.getUint32(end, true) !== 0x06054b50) end--;
-  if (end < 0) throw new Error("Not a ZIP archive");
-  const count = view.getUint16(end + 10, true);
-  let offset = view.getUint32(end + 16, true);
-  const entries: ZipEntry[] = [];
-  const decoder = new TextDecoder();
-  for (let index = 0; index < count; index++) {
-    if (view.getUint32(offset, true) !== 0x02014b50) throw new Error("Corrupt ZIP central directory");
-    const method = view.getUint16(offset + 10, true);
-    const crc = view.getUint32(offset + 16, true);
-    const compressed = view.getUint32(offset + 20, true);
-    const size = view.getUint32(offset + 24, true);
-    const nameLength = view.getUint16(offset + 28, true);
-    const extraLength = view.getUint16(offset + 30, true);
-    const commentLength = view.getUint16(offset + 32, true);
-    const local = view.getUint32(offset + 42, true);
-    const name = decoder.decode(zip.subarray(offset + 46, offset + 46 + nameLength));
-    if (method !== 0 && method !== 8) throw new Error(`Unsupported ZIP method ${method} for ${name}`);
-    const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
-    entries.push({ name, method: method as 0 | 8, crc, size, data: zip.subarray(start, start + compressed) });
-    offset += 46 + nameLength + extraLength + commentLength;
-  }
-  return entries;
-}
-
-export function zipEntry(name: string, data: Uint8Array, compress: boolean): ZipEntry {
-  const deflated = compress ? new Uint8Array(deflateRawSync(data, { level: 9 })) : undefined;
-  return deflated && deflated.length < data.length
-    ? { name, method: 8, crc: crc32(data), size: data.length, data: deflated }
-    : { name, method: 0, crc: crc32(data), size: data.length, data };
-}
-
-/** Stored entries start at a multiple of `alignment(name)`, padded with a zipalign extra field (0xd935). */
-export function writeZip(entries: readonly ZipEntry[], alignment: (name: string) => number): Uint8Array {
-  const encoder = new TextEncoder();
-  const parts: Uint8Array[] = [];
-  const central: Uint8Array[] = [];
-  let offset = 0;
-  // 1980-01-01 00:00, as reproducible builds use.
-  const time = 0;
-  const date = (0 << 9) | (1 << 5) | 1;
-  for (const entry of entries) {
-    const name = encoder.encode(entry.name);
-    const align = entry.method === 0 ? alignment(entry.name) : 1;
-    let extra = new Uint8Array(0);
-    if (align > 1) {
-      const base = offset + 30 + name.length + 6;
-      const padding = (align - (base % align)) % align;
-      extra = new Uint8Array(6 + padding);
-      const extraView = new DataView(extra.buffer);
-      extraView.setUint16(0, 0xd935, true);
-      extraView.setUint16(2, 2 + padding, true);
-      extraView.setUint16(4, align > 0xffff ? 0xffff : align, true);
-    }
-    const header = new Uint8Array(30);
-    const headerView = new DataView(header.buffer);
-    headerView.setUint32(0, 0x04034b50, true);
-    headerView.setUint16(4, entry.method === 8 ? 20 : 10, true);
-    headerView.setUint16(6, 0x0800, true);
-    headerView.setUint16(8, entry.method, true);
-    headerView.setUint16(10, time, true);
-    headerView.setUint16(12, date, true);
-    headerView.setUint32(14, entry.crc, true);
-    headerView.setUint32(18, entry.data.length, true);
-    headerView.setUint32(22, entry.size, true);
-    headerView.setUint16(26, name.length, true);
-    headerView.setUint16(28, extra.length, true);
-    const record = new Uint8Array(46 + name.length);
-    const recordView = new DataView(record.buffer);
-    recordView.setUint32(0, 0x02014b50, true);
-    recordView.setUint16(4, 20, true);
-    recordView.setUint16(6, entry.method === 8 ? 20 : 10, true);
-    recordView.setUint16(8, 0x0800, true);
-    recordView.setUint16(10, entry.method, true);
-    recordView.setUint16(12, time, true);
-    recordView.setUint16(14, date, true);
-    recordView.setUint32(16, entry.crc, true);
-    recordView.setUint32(20, entry.data.length, true);
-    recordView.setUint32(24, entry.size, true);
-    recordView.setUint16(28, name.length, true);
-    recordView.setUint32(42, offset, true);
-    record.set(name, 46);
-    central.push(record);
-    parts.push(header, name, extra, entry.data);
-    offset += header.length + name.length + extra.length + entry.data.length;
-  }
-  const centralSize = central.reduce((size, record) => size + record.length, 0);
-  const end = new Uint8Array(22);
-  const endView = new DataView(end.buffer);
-  endView.setUint32(0, 0x06054b50, true);
-  endView.setUint16(8, entries.length, true);
-  endView.setUint16(10, entries.length, true);
-  endView.setUint32(12, centralSize, true);
-  endView.setUint32(16, offset, true);
-  const out = new Uint8Array(offset + centralSize + end.length);
-  let position = 0;
-  for (const part of [...parts, ...central, end]) {
-    out.set(part, position);
-    position += part.length;
-  }
-  return out;
 }
 
 function isGoApp(entrypoint: string): boolean {

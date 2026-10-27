@@ -62,6 +62,12 @@ enum Op {
         path: BezPath,
         close: usize,
     },
+    /// A layer composited with DestIn: what it draws masks the group under it.
+    PushMask {
+        transform: Affine,
+        path: BezPath,
+        close: usize,
+    },
     Pop,
     Image {
         transform: Affine,
@@ -335,6 +341,31 @@ impl PaintTarget for CpuRecorder<'_> {
         );
     }
 
+    fn push_mask(&mut self, transform: Affine, rect: Rect, _mask: &PaintGradient) {
+        self.push_opacity(1.0, transform, &rect);
+    }
+
+    fn pop_mask(&mut self, transform: Affine, rect: Rect, mask: &PaintGradient) {
+        let path = rect.to_path(0.1);
+        let mut hasher = DefaultHasher::new();
+        11u8.hash(&mut hasher);
+        hash_affine(&mut hasher, transform);
+        hash_path(&mut hasher, &path);
+        let bounds = device(transform, path.bounding_box());
+        self.push_layer(
+            Op::PushMask {
+                transform,
+                path,
+                close: 0,
+            },
+            hasher,
+            bounds,
+        );
+        self.fill_gradient(transform, mask, &rect);
+        self.pop_layer();
+        self.pop_layer();
+    }
+
     fn pop_layer(&mut self) {
         let Some(start) = self.open.pop() else { return };
         self.opacity.pop();
@@ -346,7 +377,9 @@ impl PaintTarget for CpuRecorder<'_> {
         let layer = &mut self.ops[start];
         layer.bounds = extent;
         match &mut layer.op {
-            Op::PushClip { close: end, .. } | Op::PushOpacity { close: end, .. } => *end = close,
+            Op::PushClip { close: end, .. }
+            | Op::PushOpacity { close: end, .. }
+            | Op::PushMask { close: end, .. } => *end = close,
             _ => {}
         }
         let mut hasher = DefaultHasher::new();

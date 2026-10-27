@@ -65,6 +65,8 @@ mod smtc;
 mod startup_bench;
 #[cfg(not(target_arch = "wasm32"))]
 mod stats;
+#[cfg(all(not(target_arch = "wasm32"), feature = "media"))]
+mod stretch;
 mod svg;
 mod syntax;
 #[cfg(test)]

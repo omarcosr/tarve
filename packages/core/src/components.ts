@@ -28,7 +28,7 @@ export type { MarkdownProps, CodeProps, DiffProps } from "./components/rich-cont
 export { Button } from "./components/button";
 export type { ButtonProps } from "./components/button";
 export { Image, clearImageSourceCache, loadImageSource } from "./components/image";
-export type { ImageBytesSource, ImageHttpCacheMode, ImageProps, ImageRgbaSource, ImageSource, LoadImageSourceOptions } from "./components/image";
+export type { ImageBytesSource, ImageErrorEvent, ImageHttpCacheMode, ImageProps, ImageRgbaSource, ImageSource, LoadImageSourceOptions } from "./components/image";
 export { Scroll, ScrollArea } from "./components/scroll";
 export type { ScrollProps, ScrollAreaProps } from "./components/scroll";
 export { Input, TextArea } from "./components/input";

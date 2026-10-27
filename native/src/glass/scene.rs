@@ -287,6 +287,26 @@ impl PaintTarget for GlassScene {
         self.note(7, |_| {});
         self.both(|scene, _| PaintTarget::pop_layer(scene));
     }
+    fn push_mask(&mut self, transform: Affine, rect: Rect, mask: &PaintGradient) {
+        self.opacity.push(1.0);
+        if self.calls == 0 && self.base.is_some() {
+            self.base_depth += 1;
+        }
+        self.note(15, |h| {
+            hash_affine(h, transform);
+            hash_shape(h, &rect);
+            format!("{mask:?}").hash(h);
+        });
+        self.both(|scene, t| PaintTarget::push_mask(scene, t * transform, rect, mask));
+    }
+    fn pop_mask(&mut self, transform: Affine, rect: Rect, mask: &PaintGradient) {
+        self.opacity.pop();
+        if self.calls == 0 && self.base.is_some() {
+            self.base_depth = self.base_depth.saturating_sub(1);
+        }
+        self.note(16, |_| {});
+        self.both(|scene, t| PaintTarget::pop_mask(scene, t * transform, rect, mask));
+    }
     fn box_shadow(
         &mut self,
         transform: Affine,

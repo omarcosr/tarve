@@ -37,6 +37,19 @@ describe("applyMediaEvent", () => {
     applyMediaEvent({ id: "m", event: "error", message: "404" }, request, scope)?.();
     expect(mediaState("m", scope).error).toBe("404");
     expect(errors).toEqual(["404"]);
+    const codes: string[] = [];
+    const coded = mediaRequest({ onError: (_message, error) => { codes.push(error.code); } });
+    applyMediaEvent({ id: "n", event: "error", message: "HTTP 404", code: "network" }, coded, scope)?.();
+    applyMediaEvent({ id: "n", event: "error", message: "?" }, coded, scope)?.();
+    expect(codes).toEqual(["network", "decode"]);
+    const seen: string[] = [];
+    const buffering = mediaRequest({ onWaiting: info => { seen.push(`waiting:${info.waiting}`); }, onCanPlay: info => { seen.push(`canplay:${info.waiting}:${info.buffered}`); }, onProgress: info => { seen.push(`progress:${info.buffered}`); }, onLoadedMetadata: info => { seen.push(`meta:${info.filename}`); } });
+    applyMediaEvent({ id: "b", event: "loadedmetadata", filename: "ep 1.mp4", buffered: 4 }, buffering, scope)?.();
+    applyMediaEvent({ id: "b", event: "waiting" }, buffering, scope)?.();
+    expect(mediaState("b", scope).stalled).toBe(true);
+    applyMediaEvent({ id: "b", event: "progress", buffered: 9 }, buffering, scope)?.();
+    applyMediaEvent({ id: "b", event: "canplay" }, buffering, scope)?.();
+    expect(seen).toEqual(["meta:ep 1.mp4", "waiting:true", "progress:9", "canplay:false:9"]);
     // Without a handler nothing is returned.
     expect(applyMediaEvent({ id: "m", event: "pause" }, undefined, scope)).toBeUndefined();
   });

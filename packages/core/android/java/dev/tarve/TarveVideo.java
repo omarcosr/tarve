@@ -38,6 +38,7 @@ public final class TarveVideo {
         ByteBuffer v, int yRow, int uvRow, int uvPixel);
     static native void nativeFrameRgba(long handle, int width, int height, ByteBuffer rgba, int row);
     static native void nativeEvent(long handle, String event, double value);
+    static native void nativeCue(long handle, String text);
 
     private static final int MAX_SIDE = 1280;
 
@@ -64,6 +65,21 @@ public final class TarveVideo {
         });
         player.setOnSeekCompleteListener(new MediaPlayer.OnSeekCompleteListener() {
             @Override public void onSeekComplete(MediaPlayer mp) { nativeEvent(TarveVideo.this.handle, "seeked", 0); }
+        });
+        player.setOnInfoListener(new MediaPlayer.OnInfoListener() {
+            @Override public boolean onInfo(MediaPlayer mp, int what, int extra) {
+                if (what == MediaPlayer.MEDIA_INFO_BUFFERING_START) nativeEvent(TarveVideo.this.handle, "waiting", 0);
+                else if (what == MediaPlayer.MEDIA_INFO_BUFFERING_END) nativeEvent(TarveVideo.this.handle, "canplay", 0);
+                return false;
+            }
+        });
+        player.setOnBufferingUpdateListener(new MediaPlayer.OnBufferingUpdateListener() {
+            @Override public void onBufferingUpdate(MediaPlayer mp, int percent) { nativeEvent(TarveVideo.this.handle, "progress", percent); }
+        });
+        player.setOnTimedTextListener(new MediaPlayer.OnTimedTextListener() {
+            @Override public void onTimedText(MediaPlayer mp, android.media.TimedText text) {
+                nativeCue(TarveVideo.this.handle, text == null ? "" : text.getText());
+            }
         });
         player.setOnErrorListener(new MediaPlayer.OnErrorListener() {
             @Override public boolean onError(MediaPlayer mp, int what, int extra) {
@@ -105,7 +121,7 @@ public final class TarveVideo {
         }
         prepared = true;
         nativeEvent(handle, "loadedmetadata", player.getDuration() / 1000.0);
-        if (wantPlay) player.start();
+        if (wantPlay) start();
     }
 
     /** On the reader's thread: the decoder's pictures go through the GPU from now on. */
@@ -125,13 +141,63 @@ public final class TarveVideo {
         }
     }
 
-    public void play() { wantPlay = true; if (prepared) player.start(); }
+    public void play() { wantPlay = true; if (prepared) start(); }
+    /** playbackRate, at the sound's own pitch. Applied while playing: setting it on a paused player would start it. */
+    public void rate(float value) { rate = value; if (prepared && player.isPlaying()) applyRate(); }
+    private float rate = 1f;
+    private void start() { player.start(); if (rate != 1f) applyRate(); }
+    private void applyRate() {
+        if (Build.VERSION.SDK_INT < 23) return;
+        try { player.setPlaybackParams(player.getPlaybackParams().setSpeed(rate)); }
+        catch (RuntimeException error) { android.util.Log.w("tarve", "video: playback rate " + rate + " refused", error); }
+    }
     public void pause() { wantPlay = false; if (prepared) player.pause(); }
     public void seek(double seconds) { if (prepared) player.seekTo((long) (seconds * 1000), MediaPlayer.SEEK_CLOSEST); }
     public void set(boolean looped, boolean muted, float volume) {
         this.looped = looped;
         player.setLooping(looped);
         setVolume(muted, volume);
+    }
+    /** The audio tracks as JSON for the native side: getTrackInfo indices, language, the selected one. */
+    public String audioTracks() { return tracks(MediaPlayer.TrackInfo.MEDIA_TRACK_TYPE_AUDIO, "Audio"); }
+    /** Timed-text tracks (SRT and 3GPP text in the file); none shows until one is selected. */
+    public String textTracks() { return tracks(MediaPlayer.TrackInfo.MEDIA_TRACK_TYPE_TIMEDTEXT, "Subtitles"); }
+    private int textSelected = -1;
+    public void selectText(int index) {
+        if (!prepared) return;
+        try {
+            if (index < 0) { if (textSelected >= 0) player.deselectTrack(textSelected); }
+            else player.selectTrack(index);
+            textSelected = index;
+        } catch (RuntimeException error) { android.util.Log.w("tarve", "video: text track " + index + " refused", error); }
+    }
+    private String tracks(int type, String name) {
+        if (!prepared) return "[]";
+        StringBuilder out = new StringBuilder("[");
+        try {
+            MediaPlayer.TrackInfo[] tracks = player.getTrackInfo();
+            boolean audio = type == MediaPlayer.TrackInfo.MEDIA_TRACK_TYPE_AUDIO;
+            int selected = !audio ? textSelected : Build.VERSION.SDK_INT >= 21 ? player.getSelectedTrack(type) : -1;
+            int number = 0;
+            for (int i = 0; i < tracks.length; i++) {
+                if (tracks[i].getTrackType() != type) continue;
+                String language = tracks[i].getLanguage();
+                if (language == null || language.equals("und")) language = "";
+                if (out.length() > 1) out.append(',');
+                number++;
+                boolean enabled = selected >= 0 ? selected == i : audio && number == 1;
+                out.append("{\"id\":").append(i).append(",\"label\":\"").append(name).append(' ').append(number)
+                    .append("\",\"language\":\"").append(language.replace("\"", "")).append("\",\"enabled\":").append(enabled).append('}');
+            }
+        } catch (RuntimeException error) {
+            android.util.Log.w("tarve", "video: tracks unavailable", error);
+        }
+        return out.append(']').toString();
+    }
+    public void selectAudio(int index) {
+        if (!prepared) return;
+        try { player.selectTrack(index); }
+        catch (RuntimeException error) { android.util.Log.w("tarve", "video: audio track " + index + " refused", error); }
     }
     public double position() { return prepared ? player.getCurrentPosition() / 1000.0 : 0; }
     public int width() { return prepared ? player.getVideoWidth() : 0; }

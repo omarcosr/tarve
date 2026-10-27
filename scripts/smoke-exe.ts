@@ -5,10 +5,13 @@ import { join, resolve } from "node:path";
 import { build } from "../packages/core/build";
 import { hostBuildTarget, targetConfig } from "../packages/core/targets";
 import { buildNative } from "./native";
+import { buildPack } from "../packages/core/pack-build";
+import { generateUpdateKeys } from "../packages/core/updates-build";
 import { encodePng } from "../packages/core/src/png";
 
 const root = resolve(import.meta.dir, "..");
-const { values } = parseArgs({ args: process.argv.slice(2), options: { runtime: { type: "string" } } });
+const { values } = parseArgs({ args: process.argv.slice(2), options: { runtime: { type: "string" }, pack: { type: "boolean" } } });
+// --pack: the executable is built with --packs, and the same app runs from a signed v1.2.4 app pack.
 const runtime = values.runtime as "bun" | "node" | "txiki" | undefined;
 const hostTarget = hostBuildTarget();
 if (!hostTarget) throw new Error(`Standalone smoke is not supported for ${process.platform}-${process.arch}`);
@@ -17,6 +20,7 @@ await mkdir(join(root, "work"), { recursive: true });
 const directory = await mkdtemp(join(root, "work/exe smoke "));
 const executable = join(directory, `Tarve${hostConfig.executableSuffix}`);
 const nativeLibrary = await buildNative(true);
+const updateKey = values.pack ? generateUpdateKeys().privateKey : undefined;
 // App metadata: icon, version details and app id reach the executable (Windows) or a desktop entry (Linux).
 const iconDirectory = await mkdtemp(join(root, "work/exe smoke icon "));
 const icon = join(iconDirectory, "icon.png");
@@ -24,7 +28,7 @@ await writeFile(icon, encodePng(new Uint8Array(256 * 256 * 4).map((_, i) => (i %
 await build({
   entrypoint: join(root, "scripts/exe-smoke-entry.ts"), outfile: executable, nativeLibrary, name: "Tarve verification",
   version: "1.2.3", description: "Tarve smoke executable", publisher: "Tarve", copyright: "© Tarve", icon, appId: "Tarve.Verification",
-  runtime,
+  runtime, updateKey,
 });
 const expectedFiles = process.platform === "win32"
   ? [`Tarve${hostConfig.executableSuffix}`]
@@ -48,6 +52,14 @@ if (process.platform === "win32") {
   // Windows scales the 32 px entry, so allow rounding.
   assert.ok([220, 0, 220].every((value, index) => Math.abs(details.pixel[index]! - value) <= 3), `the executable's icon is the app icon (got ${details.pixel})`);
 }
+const packs = join(directory, "packs");
+if (updateKey) {
+  await buildPack({
+    entrypoint: join(root, "scripts/exe-smoke-entry.ts"), outfile: join(packs, "1.2.4.tarve"), nativeLibrary, name: "Tarve verification",
+    version: "1.2.4", description: "Tarve smoke executable", publisher: "Tarve", copyright: "© Tarve", icon, appId: "Tarve.Verification",
+    runtime, updateKey,
+  });
+}
 const reportPath = join(directory, "report.json");
 const cache = join(directory, "runtime-cache");
 await mkdir(cache);
@@ -55,6 +67,7 @@ const env: NodeJS.ProcessEnv = {
   ...process.env,
   TEMP: cache,
   TMP: cache,
+  TARVE_PACK_DIRECTORY: packs,
 };
 if (process.platform === "win32") env.PATH = join(process.env.SystemRoot ?? "C:/Windows", "System32");
 delete env.TARVE_NATIVE;
@@ -66,6 +79,7 @@ try {
   assert.equal(await child.exited, 0, "Standalone executable must exit successfully; inspect the runtime temp directory if it fails");
   const report = await Bun.file(reportPath).json();
   assert.equal(report.result, "PASS");
+  if (updateKey) assert.deepEqual(await readdir(packs), ["1.2.4.tarve"], "The app must have run from its pack, without a rollback");
   console.log(JSON.stringify({ ...report, standalone: true, runtime: runtime ?? "bun", reportPath }, null, 2));
 } finally {
   clearTimeout(timeout);

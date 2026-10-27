@@ -12,7 +12,7 @@ export interface ViewProps extends BaseProps, DropTargetProps, FileDropTargetPro
   dismissOnOutside?: boolean;
   onOutsideClick?: () => void;
   dragRegion?: boolean;
-  windowAction?: "minimize" | "toggleMaximize" | "close";
+  windowAction?: "minimize" | "toggleMaximize" | "toggleFullscreen" | "close";
   focusable?: boolean;
 }
 

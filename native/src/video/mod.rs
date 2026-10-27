@@ -23,6 +23,9 @@
 use vello::peniko::ImageData;
 
 #[cfg(all(target_os = "windows", feature = "media"))]
+mod embedded_subtitles;
+pub(crate) mod text_cues;
+#[cfg(all(target_os = "windows", feature = "media"))]
 mod windows;
 #[cfg(all(target_os = "windows", feature = "media"))]
 mod windows_reader;
@@ -30,6 +33,8 @@ mod windows_reader;
 mod windows_shared;
 #[cfg(all(target_os = "windows", feature = "media"))]
 mod windows_stream;
+#[cfg(all(target_os = "windows", feature = "media"))]
+mod windows_subtitles;
 #[cfg(all(target_os = "windows", feature = "media"))]
 pub(crate) use windows::Videos;
 
@@ -97,5 +102,73 @@ pub(crate) struct VideoLoad<'a> {
 }
 
 pub(crate) fn media_error(id: &str, message: impl Into<String>) -> serde_json::Value {
-    serde_json::json!({"type":"media", "id":id, "event":"error", "message":message.into()})
+    let message = message.into();
+    serde_json::json!({"type":"media", "id":id, "event":"error", "code":media_error_code(&message), "message":message})
+}
+
+/// The kind of a media failure, as HTMLMediaElement's `MediaError.code`:
+/// `network` (the download failed: HTTP status, host, timeout), `format` (the source
+/// is not a format or codec this system plays), `decode` (anything else while playing),
+/// `aborted`. A player can skip to another source at once on `network`/`format`.
+pub(crate) fn media_error_code(message: &str) -> &'static str {
+    let message = message.to_ascii_lowercase();
+    let has = |words: &[&str]| words.iter().any(|word| message.contains(word));
+    if has(&["aborted", "cancelled", "canceled"]) {
+        "aborted"
+    } else if has(&[
+        "unsupported",
+        "not supported",
+        "unknown format",
+        "unrecognized",
+        "no decoder",
+        "codec",
+        "invalid data",
+        "not a media",
+        "0xc00d36c4",
+        "0xc00d36b4",
+        "0xc00d5212",
+    ]) {
+        "format"
+    } else if has(&[
+        "http",
+        "not found",
+        "server",
+        "host",
+        "connect",
+        "connection",
+        "timed out",
+        "timeout",
+        "network",
+        "dns",
+        "refused",
+        "reset",
+        "access denied",
+        "download",
+        "range request",
+        "tls",
+        "certificate",
+    ]) {
+        "network"
+    } else {
+        "decode"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::media_error_code;
+
+    #[test]
+    fn media_errors_carry_an_html_like_code() {
+        assert_eq!(media_error_code("HTTP 404 (cdn.example)"), "network");
+        assert_eq!(media_error_code("not found (cdn.example)"), "network");
+        assert_eq!(media_error_code("connection timed out (a.test)"), "network");
+        assert_eq!(
+            media_error_code("unsupported video format (a.test)"),
+            "format"
+        );
+        assert_eq!(media_error_code("Unrecognized format"), "format");
+        assert_eq!(media_error_code("the decoder stopped"), "decode");
+        assert_eq!(media_error_code("load aborted"), "aborted");
+    }
 }

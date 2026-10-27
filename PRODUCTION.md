@@ -8,7 +8,7 @@ Objective: ship Tarve as a publishable native GUI toolkit for Bun/TypeScript wit
 - Rust lint gate: `cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings` passes.
 - Core/UI suite: **336 Bun tests** pass (`bun test packages/core`).
 - Native suite: **298 Rust `#[test]` functions** (some Windows-only), including deterministic AccessKit tree/action/TextPattern/scroll-alignment, horizontal/bidirectional scroll, bounded grid-track coverage and independent ABI/protocol mismatch handling.
-- JSON protocol is currently **v59** on both TypeScript and Rust sides (`PROTOCOL_VERSION` in `packages/protocol/src/index.ts` and `native/src/protocol.rs`); the native C ABI is independently versioned at **v5** (`ABI_VERSION` in `native/src/bridge.rs`) and checked before startup.
+- JSON protocol is currently **v61** on both TypeScript and Rust sides (`PROTOCOL_VERSION` in `packages/protocol/src/index.ts` and `native/src/protocol.rs`); the native C ABI is independently versioned at **v5** (`ABI_VERSION` in `native/src/bridge.rs`) and checked before startup.
 - The npm package `@tarve/core` includes JS, JSX runtime, declarations, the CLI and both the Windows x64 and Linux x64 native runtimes.
 - External-consumer and standalone-EXE smoke tests are part of `bun run verify`.
 - Real GPU visual regression is a mandatory release gate: `bun run verify` runs `test:visual` after package/EXE smoke validation, and `bun run release:check` is the CI/release entry point for the same gate.

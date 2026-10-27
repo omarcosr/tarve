@@ -5,6 +5,7 @@
  */
 
 import { matchesList, parseSelectorList, selectorMatches } from "./selectors";
+import { keyframesOf, interpolateFrames, easing } from "./dom-animation";
 
 export const ELEMENT_NODE = 1;
 export const TEXT_NODE = 3;
@@ -598,94 +599,6 @@ class TClassList {
 
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 
-type Keyframe = { offset: number; values: Record<string, string> };
-
-/** Keyframes with offsets (missing ones spread evenly, as Web Animations does). */
-function keyframesOf(input: Record<string, string | number | null | undefined>[]): Keyframe[] {
-  const frames = input.map(frame => {
-    const values: Record<string, string> = {};
-    for (const [key, value] of Object.entries(frame)) if (key !== "offset" && key !== "easing" && key !== "composite" && value != null) values[key] = String(value);
-    return { offset: typeof frame.offset === "number" ? frame.offset : NaN, values };
-  });
-  if (frames.length === 1) frames.unshift({ offset: 0, values: { ...frames[0]!.values } });
-  frames.forEach((frame, index) => { if (Number.isNaN(frame.offset)) frame.offset = frames.length > 1 ? index / (frames.length - 1) : 0; });
-  return frames.sort((a, b) => a.offset - b.offset);
-}
-
-const COLOR = /#([0-9a-f]{3,8})\b|rgba?\(([^)]*)\)/gi;
-/** Colours as `rgba(r, g, b, a)`, so they interpolate as numbers. */
-function normalizeColors(value: string): string {
-  return value.replace(COLOR, (_match, hex: string | undefined, rgb: string | undefined) => {
-    if (rgb !== undefined) {
-      const parts = rgb.split(/[\s,/]+/).filter(Boolean).map(Number);
-      return `rgba(${parts[0] ?? 0}, ${parts[1] ?? 0}, ${parts[2] ?? 0}, ${parts[3] ?? 1})`;
-    }
-    let digits = hex!;
-    if (digits.length <= 4) digits = [...digits].map(char => char + char).join("");
-    const value = (index: number) => parseInt(digits.slice(index, index + 2), 16);
-    return `rgba(${value(0)}, ${value(2)}, ${value(4)}, ${digits.length === 8 ? value(6) / 255 : 1})`;
-  });
-}
-
-const NUMBER = /-?\d*\.?\d+(?:e-?\d+)?/gi;
-/** Interpolates two CSS values number by number when they share a shape; else switches halfway. */
-function mix(from: string, to: string, t: number): string {
-  const a = normalizeColors(from), b = normalizeColors(to);
-  const shapeA = a.replace(NUMBER, "#"), shapeB = b.replace(NUMBER, "#");
-  if (shapeA !== shapeB) return t < 0.5 ? from : to;
-  const numbersB = b.match(NUMBER) ?? [];
-  let index = 0;
-  return a.replace(NUMBER, number => {
-    const start = Number(number), end = Number(numbersB[index++]);
-    const value = start + (end - start) * t;
-    return String(Math.round(value * 1000) / 1000);
-  });
-}
-
-function interpolateFrames(frames: Keyframe[], progress: number): Record<string, string> | undefined {
-  if (!frames.length) return undefined;
-  if (progress <= frames[0]!.offset) return frames[0]!.values;
-  for (let index = 1; index < frames.length; index++) {
-    const previous = frames[index - 1]!, next = frames[index]!;
-    if (progress > next.offset) continue;
-    const span = next.offset - previous.offset;
-    const t = span ? (progress - previous.offset) / span : 1;
-    const out: Record<string, string> = {};
-    for (const key of new Set([...Object.keys(previous.values), ...Object.keys(next.values)])) {
-      const from = previous.values[key], to = next.values[key];
-      out[key] = from === undefined ? to! : to === undefined ? from : mix(from, to, t);
-    }
-    return out;
-  }
-  return frames[frames.length - 1]!.values;
-}
-
-/** A CSS timing function as a function of progress. */
-function easing(name: string): (t: number) => number {
-  const bezier = (x1: number, y1: number, x2: number, y2: number) => (t: number) => {
-    // Solve x(u) = t by Newton's method, then return y(u).
-    let u = t;
-    for (let index = 0; index < 8; index++) {
-      const x = 3 * x1 * u * (1 - u) ** 2 + 3 * x2 * u ** 2 * (1 - u) + u ** 3 - t;
-      const slope = 3 * x1 * (1 - u) ** 2 + 6 * (x2 - x1) * u * (1 - u) + 3 * (1 - x2) * u ** 2;
-      if (Math.abs(x) < 1e-5 || !slope) break;
-      u = Math.min(1, Math.max(0, u - x / slope));
-    }
-    return 3 * y1 * u * (1 - u) ** 2 + 3 * y2 * u ** 2 * (1 - u) + u ** 3;
-  };
-  const value = name.trim();
-  if (value === "ease") return bezier(0.25, 0.1, 0.25, 1);
-  if (value === "ease-in") return bezier(0.42, 0, 1, 1);
-  if (value === "ease-out") return bezier(0, 0, 0.58, 1);
-  if (value === "ease-in-out") return bezier(0.42, 0, 0.58, 1);
-  const cubic = /^cubic-bezier\(([^)]*)\)$/.exec(value);
-  if (cubic) { const [a = 0, b = 0, c = 1, e = 1] = cubic[1]!.split(",").map(Number); return bezier(a, b, c, e); }
-  const steps = /^steps\(\s*(\d+)\s*(?:,\s*(start|end|jump-start|jump-end))?\s*\)$/.exec(value);
-  if (steps) { const count = Number(steps[1]); const start = steps[2]?.includes("start"); return t => Math.min(1, (start ? Math.ceil(t * count) : Math.floor(t * count)) / count); }
-  if (value === "step-start") return t => (t > 0 ? 1 : 0);
-  if (value === "step-end") return t => (t >= 1 ? 1 : 0);
-  return t => t;
-}
 const TAG_NAMES = new Map<string, [string, string]>();
 
 const BOOLEAN_PROPS = ["disabled", "checked", "selected", "required", "readOnly", "multiple", "hidden", "open", "autofocus"] as const;
@@ -1066,11 +979,12 @@ for (const name of ["placeholder", "name", "src", "href", "alt", "title", "min",
 
 export class THTMLElement extends TElement {}
 export class TSVGElement extends TElement {}
-let mediaHook: ((element: THTMLMediaElement, action: "play" | "pause" | "seek", value?: number) => void) | undefined;
+let mediaHook: ((element: THTMLMediaElement, action: "play" | "pause" | "seek" | "audioTrack" | "textTrack", value?: number) => void) | undefined;
 /** Native playback for `<audio>`: the mount sets this to the app's media controller. */
 export function setMediaHook(hook: typeof mediaHook): void { mediaHook = hook; }
 
 const emptyRanges = { length: 0, start: () => 0, end: () => 0 };
+const MEDIA_ERROR_CODES: Record<string, number> = { aborted: 1, network: 2, decode: 3, format: 4 };
 
 /** HTMLMediaElement over Tarve's native audio: state comes back as media events. */
 export class THTMLMediaElement extends THTMLElement {
@@ -1082,7 +996,6 @@ export class THTMLMediaElement extends THTMLElement {
   _mutedValue?: boolean;
   _seeking = false;
   readyState = 0;
-  playbackRate = 1;
   defaultPlaybackRate = 1;
   get paused(): boolean { return this._paused; }
   set paused(value: boolean) { if (value) this.pause(); else void this.play(); }
@@ -1094,6 +1007,17 @@ export class THTMLMediaElement extends THTMLElement {
     this._time = Number(seconds);
     this._seeking = true;
     mediaHook?.(this, "seek", this._time);
+  }
+  _playbackRate = 1;
+  /** HTMLMediaElement.playbackRate: faster or slower at the same pitch. */
+  get playbackRate(): number { return this._playbackRate; }
+  set playbackRate(value: number) {
+    const rate = Number(value);
+    if (!Number.isFinite(rate) || rate <= 0 || rate === this._playbackRate) return;
+    this._playbackRate = rate;
+    this._attrVersion++;
+    touch(this);
+    this.dispatchEvent(new TEvent("ratechange"));
   }
   get volume(): number { return this._volume; }
   set volume(value: number) {
@@ -1116,7 +1040,20 @@ export class THTMLMediaElement extends THTMLElement {
   /** `<video>`: the picture's own size, known from `loadedmetadata` (0 before, and for `<audio>`). */
   get videoWidth(): number { return this._videoWidth; }
   get videoHeight(): number { return this._videoHeight; }
-  get buffered() { return emptyRanges; }
+  _audioTracks: { id: number; label: string; language: string; enabled: boolean }[] = [];
+  /** HTMLMediaElement.audioTracks (Tarve: a plain list; `selectAudioTrack(id)` switches). */
+  get audioTracks() { return this._audioTracks; }
+  selectAudioTrack(id: number): void { mediaHook?.(this, "audioTrack", id); }
+  _textTracks: { id: number; label: string; language: string; enabled: boolean }[] = [];
+  _cueText = "";
+  /** The subtitle streams inside the file (Tarve: a plain list; `selectTextTrack(id | null)` shows one). */
+  get textTracks() { return this._textTracks; }
+  /** The embedded subtitle text shown now. */
+  get cueText(): string { return this._cueText; }
+  selectTextTrack(id: number | null): void { mediaHook?.(this, "textTrack", id ?? undefined); }
+  _buffered = 0;
+  /** One range, from 0 to the end of what is downloaded ahead of the current time. */
+  get buffered() { return this._buffered > 0 ? { length: 1, start: () => 0, end: () => this._buffered } : emptyRanges; }
   get played() { return emptyRanges; }
   get seekable() { return this._duration > 0 ? { length: 1, start: () => 0, end: () => this._duration } : emptyRanges; }
   play(): Promise<void> { mediaHook?.(this, "play"); return Promise.resolve(); }
@@ -1127,8 +1064,12 @@ export class THTMLMediaElement extends THTMLElement {
     return /audio\/(mpeg|mp3|wav|ogg|flac|aac|mp4)/.test(type) ? "maybe" : "";
   }
   /** A native media event: update the state and fire the DOM events a browser would. */
-  _media(event: "loadedmetadata" | "play" | "pause" | "timeupdate" | "seeked" | "ended" | "error", info: { currentTime?: number; duration?: number | null; paused?: boolean; message?: string; videoWidth?: number; videoHeight?: number }): void {
+  _media(event: "loadedmetadata" | "canplay" | "waiting" | "progress" | "audiotracks" | "texttracks" | "cuechange" | "play" | "pause" | "timeupdate" | "seeked" | "ended" | "error", info: { currentTime?: number; duration?: number | null; paused?: boolean; message?: string; code?: string; videoWidth?: number; videoHeight?: number; buffered?: number; audioTracks?: { id: number; label: string; language: string; enabled: boolean }[]; textTracks?: { id: number; label: string; language: string; enabled: boolean }[]; cueText?: string }): void {
+    if (info.audioTracks) this._audioTracks = info.audioTracks;
+    if (info.textTracks) this._textTracks = info.textTracks;
+    if (info.cueText !== undefined) this._cueText = info.cueText;
     if (info.currentTime !== undefined) this._time = info.currentTime;
+    if (info.buffered !== undefined) this._buffered = info.buffered;
     const resized = (info.videoWidth ?? this._videoWidth) !== this._videoWidth || (info.videoHeight ?? this._videoHeight) !== this._videoHeight;
     if (info.videoWidth) this._videoWidth = info.videoWidth;
     if (info.videoHeight) this._videoHeight = info.videoHeight;
@@ -1141,13 +1082,23 @@ export class THTMLMediaElement extends THTMLElement {
       case "play": this._paused = false; this._ended = false; fire("play"); fire("playing"); break;
       case "pause": this._paused = true; fire("pause"); break;
       case "timeupdate": fire("timeupdate"); break;
+      case "waiting": this.readyState = 2; fire("waiting"); break;
+      case "canplay": { const was = this.readyState; this.readyState = 4; if (was < 3) { fire("canplay"); if (!this._paused) fire("playing"); } break; }
+      case "progress": fire("progress"); break;
+      case "audiotracks": fire("audiotrackschange"); break;
+      case "texttracks": fire("texttrackschange"); break;
+      case "cuechange": fire("cuechange"); break;
       case "seeked": this._seeking = false; fire("seeked"); fire("timeupdate"); break;
       // A browser fires `pause` at the end only if no `pause` came before (the native
       // engines may send one just ahead of `ended`).
       case "ended": this._ended = true; this._paused = true; if (!wasPaused) fire("pause"); fire("ended"); break;
-      case "error": fire("error"); break;
+      case "error": this._error = { code: MEDIA_ERROR_CODES[info.code ?? "decode"] ?? 3, message: info.message ?? "" }; fire("error"); break;
     }
+    if (event === "loadedmetadata") this._error = null;
   }
+  _error: { code: number; message: string } | null = null;
+  /** HTMLMediaElement.error: `code` 1 aborted, 2 network, 3 decode, 4 source not supported. */
+  get error(): { code: number; message: string } | null { return this._error; }
 }
 
 /** DataTransfer for HTML drag and drop between elements of the app. */

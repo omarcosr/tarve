@@ -109,7 +109,7 @@ export interface DivProps extends Omit<BaseProps, "style">, DropTargetProps, Fil
   dismissOnOutside?: boolean;
   onOutsideClick?: () => void;
   dragRegion?: boolean;
-  windowAction?: "minimize" | "toggleMaximize" | "close";
+  windowAction?: "minimize" | "toggleMaximize" | "toggleFullscreen" | "close";
   focusable?: boolean;
   onClick?: () => void;
   onContextMenu?: (position: { x: number; y: number }) => void;

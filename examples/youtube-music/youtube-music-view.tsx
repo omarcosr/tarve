@@ -2,6 +2,8 @@ import { Column, darkTheme, DropdownMenu, Image, Input, memo, Modal, Path, Press
 import { lineAt, type Lyrics } from "./youtube-music-lyrics";
 import { compact, MobileNav, MobilePlayerBar, phone } from "./youtube-music-mobile";
 import type { Collection, Item, Shelf, Song } from "./youtube-music-source";
+import { clock } from "./youtube-music-format";
+export { clock };
 export const AUDIO_ID = "ytm-audio";
 export type Page = { kind: "home" } | { kind: "search"; query: string } | { kind: "library" } | { kind: "collection"; entry: Collection } | { kind: "playing" };
 export type Repeat = "off" | "all" | "one";
@@ -98,14 +100,6 @@ const ytmTheme = Theme.create(darkTheme, {
     ring: "#ffffff59", ringSoft: "#ffffff33", primary: c.accent, primaryForeground: c.accentInk, sliderThumb: c.text, overlay: "#000000a8",
   },
 });
-
-export function clock(seconds: number | null | undefined): string {
-  if (seconds == null || !Number.isFinite(seconds)) return "-:--";
-  const s = Math.max(0, Math.floor(seconds));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor(s / 60) % 60;
-  return `${h ? `${h}:${String(m).padStart(2, "0")}` : m}:${String(s % 60).padStart(2, "0")}`;
-}
 
 export const icons = {
   play: "M7 4.8v14.4a1 1 0 0 0 1.5.86l11.9-7.2a1 1 0 0 0 0-1.72L8.5 3.94A1 1 0 0 0 7 4.8z",

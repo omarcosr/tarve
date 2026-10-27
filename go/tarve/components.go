@@ -503,20 +503,6 @@ func Icon(p Props) *VNode {
 	return Svg(q, nodes...)
 }
 
-// Image props: src (path or URL), width, height, fit, style.
-func Image(p Props) *VNode {
-	rest := Props{}
-	for k, v := range p {
-		if k != "width" && k != "height" && k != "style" {
-			rest[k] = v
-		}
-	}
-	rest["style"] = merge(S{"width": p["width"], "height": p["height"], "radius": RadiusMd, "placeholderBackground": T.ImagePlaceholder}, styleOf(p))
-	return jsx("image", rest)
-}
-
-var inputTypes = set("text", "password", "email", "number", "search", "tel", "url")
-
 // Input props: type, value, placeholder, disabled, onChange(string), onSubmit(string), style.
 func Input(p Props) *VNode {
 	t := orString(p["type"], "text")

@@ -1,12 +1,16 @@
 struct VSIn { float2 pos : POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; float4 params : TEXCOORD2;
     float2 dev : TEXCOORD3; float4 clip : TEXCOORD4; float4 clipRadii : TEXCOORD5; float4 clipM0 : TEXCOORD6; float4 clipM1 : TEXCOORD7;
-    float4 shape : TEXCOORD8; float4 inner : TEXCOORD9; };
+    float4 shape : TEXCOORD8; float4 inner : TEXCOORD9; float4 mask : TEXCOORD10; float4 maskStops : TEXCOORD11; float4 maskMode : TEXCOORD12; };
 struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; float4 params : TEXCOORD2;
     float2 dev : TEXCOORD3; nointerpolation float4 clip : TEXCOORD4; nointerpolation float4 clipRadii : TEXCOORD5;
     nointerpolation float4 clipM0 : TEXCOORD6; nointerpolation float4 clipM1 : TEXCOORD7;
     // Rounded-rect modes: per-corner radii (top-left, top-right, bottom-right, bottom-left);
     // ring mode: border widths (top, right, bottom, left). Device pixels.
-    nointerpolation float4 shape : TEXCOORD8; nointerpolation float4 inner : TEXCOORD9; };
+    nointerpolation float4 shape : TEXCOORD8; nointerpolation float4 inner : TEXCOORD9;
+    // mask-image: an alpha ramp (linear: start, axis / length^2; radial: centre, 1 / radii |
+    // t0, t1, alpha0, alpha1 | mode: 0 none, 1 linear, 2 radial, 3 conic: centre, start angle).
+    nointerpolation float4 mask : TEXCOORD10; nointerpolation float4 maskStops : TEXCOORD11;
+    nointerpolation float4 maskMode : TEXCOORD12; };
 // Window NDC -> render-target NDC: identity, or one tile of a tiled MSAA frame.
 cbuffer Target : register(b0) { float4 target; };
 // Liquid glass: sigma, saturate, refraction, highlight | backdrop width, height, blurred backdrop bound
@@ -16,7 +20,7 @@ cbuffer Glass : register(b1) { float4 glassA; float4 glassB; float4 glassRegion;
 // centre, half size | corner radius, opacity. Shape 0 is the quad's own box.
 cbuffer GlassShapes : register(b2) { float4 glassShapeInfo; float4 glassShapes[16]; };
 PSIn vs_main(VSIn i) { PSIn o; o.pos=float4(i.pos*target.xy+target.zw,0,1); o.uv=i.uv; o.color=i.color; o.mode=i.mode; o.params=i.params;
-    o.dev=i.dev; o.clip=i.clip; o.clipRadii=i.clipRadii; o.clipM0=i.clipM0; o.clipM1=i.clipM1; o.shape=i.shape; o.inner=i.inner; return o; }
+    o.dev=i.dev; o.clip=i.clip; o.clipRadii=i.clipRadii; o.clipM0=i.clipM0; o.clipM1=i.clipM1; o.shape=i.shape; o.inner=i.inner; o.mask=i.mask; o.maskStops=i.maskStops; o.maskMode=i.maskMode; return o; }
 // Signed distance to a rounded rectangle (x0,y0,x1,y1) with per-corner radii
 // (top-left, top-right, bottom-right, bottom-left); negative inside.
 float sdRoundRect(float2 p, float4 rect, float4 radii) {
@@ -31,6 +35,14 @@ float clipCoverage(PSIn i) {
     // Into the clip's own space (identity unless it is rotated); distances back in pixels.
     float2 p = float2(i.clipM0.x*i.dev.x + i.clipM0.z*i.dev.y + i.clipM1.x, i.clipM0.y*i.dev.x + i.clipM0.w*i.dev.y + i.clipM1.y);
     return saturate(0.5 - sdRoundRect(p, i.clip, i.clipRadii) * i.clipM1.z);
+}
+// mask-image alpha at the pixel; 1 without one.
+float maskCoverage(PSIn i) {
+    if (i.maskMode.x < 0.5) return 1.0;
+    float2 d = i.dev - i.mask.xy;
+    float t = i.maskMode.x > 2.5 ? frac((atan2(d.x, -d.y) - i.mask.z) / 6.2831853)
+        : i.maskMode.x > 1.5 ? length(d * i.mask.zw) : dot(d, i.mask.zw);
+    return lerp(i.maskStops.z, i.maskStops.w, saturate((t - i.maskStops.x) / (i.maskStops.y - i.maskStops.x)));
 }
 Texture2D tex0 : register(t0); SamplerState samp0 : register(s0);
 // A video picture in NV12 (as the decoder makes it): luma in tex0, chroma in tex1,
@@ -195,7 +207,7 @@ float4 shade(PSIn i) {
 struct ClearTypeOut { float4 color : SV_Target0; float4 coverage : SV_Target1; };
 ClearTypeOut ps_cleartype(PSIn i) {
     float3 coverage = tex0.Sample(samp0, i.uv).rgb;
-    float a = i.color.a * clipCoverage(i);
+    float a = i.color.a * clipCoverage(i) * maskCoverage(i);
     ClearTypeOut o;
     o.coverage = float4(coverage * a, dot(coverage, 1.0 / 3.0) * a);
     o.color = float4(i.color.rgb * o.coverage.rgb, o.coverage.a);
@@ -203,6 +215,6 @@ ClearTypeOut ps_cleartype(PSIn i) {
 }
 float4 ps_main(PSIn i) : SV_TARGET {
     float4 c = shade(i);
-    c.a *= clipCoverage(i);
+    c.a *= clipCoverage(i) * maskCoverage(i);
     return c;
 }

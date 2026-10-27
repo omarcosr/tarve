@@ -37,7 +37,20 @@ export interface ImageProps extends BaseProps {
   height?: number;
   /** CSS `object-fit`. */
   fit?: "cover" | "contain" | "fill";
+  /** The source failed to load or decode (HTML `onerror`): a missing file, a bad image, an HTTP error. */
+  onError?: (event: ImageErrorEvent) => void;
+  /** Shown instead of a string `src` once it fails (an `onerror` swap to a placeholder), until `clearImageSourceCache()`. */
+  fallbackSrc?: ImageSource;
 }
+
+export interface ImageErrorEvent {
+  /** The source that failed (a path or URL; empty for bytes and pixels). */
+  src: string;
+  message: string;
+}
+
+/** String sources that failed, for `fallbackSrc`. */
+const failedSources = new Set<string>();
 
 export type ImageHttpCacheMode = "default" | "reload" | "no-store";
 
@@ -275,11 +288,19 @@ export async function loadImageSource(url: string | URL, options: LoadImageSourc
 export function clearImageSourceCache(): void {
   httpImageCache.clear();
   httpImageCacheBytes = 0;
+  failedSources.clear();
 }
 
-export function Image({ width, height, style, ...props }: ImageProps): VNode {
+export function Image({ width, height, style, fallbackSrc, onError, ...props }: ImageProps): VNode {
+  const failed = fallbackSrc !== undefined && typeof props.src === "string" && failedSources.has(props.src);
+  const src = props.src;
   return jsx("image", {
     ...props,
+    ...(failed ? { src: fallbackSrc } : {}),
+    // With a fallback the handler always exists, so a failure re-renders with it.
+    ...(fallbackSrc !== undefined && !failed
+      ? { onError: (event: ImageErrorEvent) => { if (typeof src === "string") failedSources.add(src); onError?.(event); } }
+      : onError ? { onError } : {}),
     style: {
       width,
       height,

@@ -14,6 +14,7 @@ import { frameworkPlugins } from "./framework-plugins";
 import { buildMetadata, writeLinuxDesktopEntry } from "./package-metadata";
 import { hostBuildTarget, targetConfig } from "./targets";
 import { pluginNativeModule, pluginNativesForBuild } from "./plugins-build";
+import type { PackHostConfig } from "./src/pack-host";
 
 export interface TxikiBuildOptions extends BuildOptions {
   /** txiki.js (tjs) used to compile the bundle. Defaults to TARVE_TXIKI, then `tjs` on PATH. */
@@ -24,7 +25,7 @@ export interface TxikiBuildOptions extends BuildOptions {
 const TXIKI_MAGIC = "tx1k1.js";
 const BLOB_MAGIC = "TARVEBLB";
 /** node:* modules with a txiki.js implementation, and the shim file of each. */
-const NODE_SHIMS: Record<string, string> = {
+export const NODE_SHIMS: Record<string, string> = {
   fs: "fs", "fs/promises": "fs-promises", path: "path", os: "os", crypto: "crypto", net: "net", module: "module", zlib: "zlib",
   events: "events", child_process: "child-process", "timers/promises": "timers-promises",
 };
@@ -55,7 +56,7 @@ function txikiBinary(tjs: string): string {
  *
  * Layout: [txiki.js][files][index JSON][u32 index length][u32 0]["TARVEBLB"][tjs payload]["tx1k1.js"][u32 payload offset]
  */
-export async function buildTxiki(options: TxikiBuildOptions): Promise<string> {
+export async function buildTxiki(options: TxikiBuildOptions, packHost?: PackHostConfig): Promise<string> {
   const target = options.target ?? hostBuildTarget();
   if (!target) throw new Error(`Unsupported txiki.js build host: ${process.platform}-${process.arch}`);
   const config = targetConfig(target);
@@ -89,7 +90,7 @@ export async function buildTxiki(options: TxikiBuildOptions): Promise<string> {
         TARVE_TXIKI_PLATFORM: JSON.stringify(config.platform),
         TARVE_TXIKI_NATIVE_NAME: JSON.stringify(config.nativeName),
       },
-    }, temporary);
+    }, temporary, packHost ? (await import("./pack-build")).writeHostEntry(temporary, options.entrypoint, packHost) : undefined);
 
     // TARVE_TXIKI_DEBUG=<file>: keep a readable bundle there (and <file>.meta.json, the esbuild metafile);
     // `tjs run <file>` gives real stack lines.
@@ -129,7 +130,8 @@ export async function buildTxiki(options: TxikiBuildOptions): Promise<string> {
 export interface QuickJsFlavor {
   /** The runtime, as error messages name it. */
   label: string;
-  prelude: string;
+  /** First module of the bundle; none for an app pack, which runs after its executable's prelude. */
+  prelude?: string;
   runtimeModule: string;
   /** Source appended to `#tarve/runtime` (the registration of plugins' native libraries). */
   runtimeExtra?: string;
@@ -149,6 +151,8 @@ export async function bundleQuickJs(
   options: BuildOptions,
   flavor: QuickJsFlavor,
   temporary: string,
+  /** Module to import after the prelude; defaults to the app entry. */
+  main = resolve(options.entrypoint),
 ): Promise<{ bundle: string; assets: EmbeddedFile[] }> {
   const root = import.meta.dirname;
   const source = existsSync(join(root, "src/index.ts"));
@@ -223,8 +227,8 @@ export async function bundleQuickJs(
   };
   const entry = join(temporary, "entry.ts");
   writeFileSync(entry, [
-    `import ${JSON.stringify(flavor.prelude)};`,
-    `import ${JSON.stringify(resolve(options.entrypoint))};`,
+    ...flavor.prelude ? [`import ${JSON.stringify(flavor.prelude)};`] : [],
+    `import ${JSON.stringify(main)};`,
   ].join("\n"));
   const bundle = join(temporary, "app.js");
   const { build: esbuild } = await import("esbuild");

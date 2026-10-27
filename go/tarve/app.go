@@ -23,7 +23,7 @@ import (
 
 // ProtocolVersion is @tarve/protocol PROTOCOL_VERSION; NativeABIVersion is NATIVE_ABI_VERSION.
 const (
-	ProtocolVersion  = 60
+	ProtocolVersion  = 61
 	NativeABIVersion = 6
 )
 
@@ -620,40 +620,6 @@ func resolveMediaPath(src string) string {
 	return path
 }
 
-func (a *App) syncMedia() {
-	if a.ended || a.committed == nil {
-		return
-	}
-	wanted := a.committed.Media
-	for id := range a.loadedMedia {
-		if r := wanted[id]; r == nil || r.Src == "" {
-			delete(a.loadedMedia, id)
-			a.sendInternal(S{"type": "media", "id": id, "action": "unload"})
-		}
-	}
-	for _, id := range sortedKeys(wanted) {
-		r := wanted[id]
-		if r.Src == "" {
-			continue
-		}
-		prev := a.loadedMedia[id]
-		src := resolveMediaPath(r.Src)
-		if prev == nil || resolveMediaPath(prev.Src) != src || prev.Video != r.Video {
-			c := S{"type": "media", "id": id, "action": "load", "src": src, "loop": r.Loop, "muted": r.Muted, "volume": r.Volume}
-			if r.Video {
-				c["kind"] = "video"
-			}
-			a.sendInternal(c)
-			if r.AutoPlay {
-				a.sendInternal(S{"type": "media", "id": id, "action": "play"})
-			}
-		} else if prev.Loop != r.Loop || prev.Muted != r.Muted || prev.Volume != r.Volume {
-			a.sendInternal(S{"type": "media", "id": id, "action": "set", "loop": r.Loop, "muted": r.Muted, "volume": r.Volume})
-		}
-		a.loadedMedia[id] = r
-	}
-}
-
 func (a *App) finishClosed() {
 	if a.ended {
 		return
@@ -948,10 +914,6 @@ func (a *App) Close() {
 	a.sendPublic(S{"type": "close"})
 	a.closing = true
 }
-func (a *App) Show()           { a.sendPublic(S{"type": "window", "action": "show"}) }
-func (a *App) Hide()           { a.sendPublic(S{"type": "window", "action": "hide"}) }
-func (a *App) Minimize()       { a.sendPublic(S{"type": "window", "action": "minimize"}) }
-func (a *App) Activate()       { a.sendPublic(S{"type": "window", "action": "activate"}) }
 func (a *App) Focus(id string) { a.sendAfterRender(S{"type": "focus", "id": id}) }
 
 // ScrollToItem scrolls a VirtualList to item index (offset px from its top).
