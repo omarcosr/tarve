@@ -26,6 +26,7 @@ pub struct Permissions {
 /// (`supported: false` where the platform has none).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub struct Share {
     pub request_id: String,
     #[serde(default)]
@@ -42,6 +43,7 @@ pub struct Share {
 /// `position` events whose `watchId` is `request_id`) and its stop (`"clear"`, no answer).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub struct Location {
     pub action: String,
     pub request_id: String,
@@ -57,6 +59,7 @@ pub struct Location {
 /// `authenticate` event.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub struct Authenticate {
     pub request_id: String,
     pub reason: String,

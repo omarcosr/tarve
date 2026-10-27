@@ -3119,6 +3119,9 @@ impl ApplicationHandler<Command> for App {
             Command::Patch { .. } | Command::Mutate { .. } | Command::Update { .. }
         ) {
             self.input_hold = None;
+            // Transitions a patch starts begin now, not at the last painted frame: after
+            // an idle spell that frame is long gone and they would end at once.
+            self.sync_input_clock();
         }
         match command {
             Command::Patch { nodes } => {
