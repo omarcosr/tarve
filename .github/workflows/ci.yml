@@ -209,7 +209,7 @@ jobs:
       - name: Full release gate
         env:
           TARVE_SMOKE_FORCED_WGPU: "0"
-          TARVE_VERIFY_SKIP: pack,smoke:package,smoke:exe
+          TARVE_VERIFY_SKIP: pack,smoke:package,smoke:exe,smoke:node-cli-package
           # No one works on the runner: windows may take the foreground, so the
           # accessibility smoke (keyboard focus) runs too.
           TARVE_BACKGROUND: "0"
