@@ -64,11 +64,20 @@ if (!requestedRenderer) {
 
     width = 200;
     test.app.update();
-    await Bun.sleep(90);
-    const live = await test.inspect();
+    // A slow runner can take a while to answer an inspect: sample until one lands
+    // mid-transition rather than trusting a single 90 ms sleep.
+    let live = await test.inspect();
+    const seen: number[] = [];
+    for (let tries = 0; tries < 40; tries++) {
+      const width = live.nodes.find(node => node.id === "motion-panel")!.width;
+      seen.push(Math.round(width));
+      if (width > 105 && width < 195) break;
+      await Bun.sleep(10);
+      live = await test.inspect();
+    }
     const livePanel = live.nodes.find(node => node.id === "motion-panel")!;
     assert(livePanel.width > 105 && livePanel.width < 195,
-      `live scheduler did not produce an intermediate width: ${livePanel.width}`);
+      `live scheduler did not produce an intermediate width: ${seen.join(", ")} (frames ${initial.frames} -> ${live.frames}, motions ${live.activeMotions})`);
     assert(live.frames > initial.frames,
       `live scheduler did not present frames while motion was active: ${initial.frames} -> ${live.frames}`);
     assert.equal(live.activeMotions, 1);
