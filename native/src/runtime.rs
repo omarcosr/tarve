@@ -905,14 +905,6 @@ impl CommandProxy {
     }
 }
 
-/// Borderless full screen on the window's monitor, or back to the window it was.
-fn toggle_fullscreen(window: &Window) {
-    window.set_fullscreen(match window.fullscreen() {
-        Some(_) => None,
-        None => Some(Fullscreen::Borderless(None)),
-    });
-}
-
 /// winit's Android loop drops wake-ups while the activity is in the background and drains the
 /// app's commands only on a timeout, so a request sent then (`inspect`, `layout`, a notification)
 /// waited for the user to come back and timed out. In the background the loop polls: often for a

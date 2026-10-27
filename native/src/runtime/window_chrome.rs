@@ -285,3 +285,11 @@ pub(super) fn hide_from_task_switcher(window: &Window) {
 
 #[cfg(not(target_os = "windows"))]
 pub(super) fn hide_from_task_switcher(_: &Window) {}
+
+/// Borderless full screen on the window's monitor, or back to the window it was.
+pub(super) fn toggle_fullscreen(window: &Window) {
+    window.set_fullscreen(match window.fullscreen() {
+        Some(_) => None,
+        None => Some(Fullscreen::Borderless(None)),
+    });
+}
