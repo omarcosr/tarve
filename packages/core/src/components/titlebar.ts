@@ -1,6 +1,7 @@
 import type { Style } from "../protocol";
 import { jsx, type Child, type VNode } from "../jsx-runtime";
 import { theme } from "../theme";
+import { cssColor } from "../css-shadow";
 import { Icon } from "./icon";
 import type { SvgNode } from "./svg";
 import { container, Row, type ViewProps } from "./layout";
@@ -34,11 +35,17 @@ export interface TitleBarProps extends ViewProps {
   onBack?: () => void;
 }
 
-/** `#rgb`/`#rrggbb` at `alpha` (0–255); other colors are returned unchanged. */
+/**
+ * `color` at `alpha` (0–255): a hover wash of the bar's ink. Theme tokens (`var(--foreground)`,
+ * the default ink) take the token alpha form; CSS colours (rgba(), names) are normalized first.
+ * Returning the colour unchanged would paint the hover in the glyph's own colour and hide it.
+ */
 function translucent(color: string, alpha: number): string {
-  const hex = color.trim().replace(/^#/, "");
-  const full = hex.length === 3 ? [...hex].map(c => c + c).join("") : hex.slice(0, 6);
-  return /^[0-9a-f]{6}$/i.test(full) ? `#${full}${Math.round(alpha).toString(16).padStart(2, "0")}` : color;
+  const value = color.trim();
+  if (/^var\(--[\w-]+\)$/.test(value)) return `${value}/${Math.round((alpha / 255) * 100)}`;
+  const hex = cssColor(value).replace(/^#/, "");
+  const full = hex.length === 3 || hex.length === 4 ? [...hex.slice(0, 3)].map(c => c + c).join("") : hex.slice(0, 6);
+  return /^[0-9a-f]{6}$/i.test(full) ? `#${full}${Math.round(alpha).toString(16).padStart(2, "0")}` : `#808080${Math.round(alpha).toString(16).padStart(2, "0")}`;
 }
 
 function titleBarButton(action: "minimize" | "toggleMaximize" | "close", child: Child, ink: string, buttonStyle: Style | undefined): VNode {
@@ -55,6 +62,8 @@ function titleBarButton(action: "minimize" | "toggleMaximize" | "close", child: 
       align: "center",
       justify: "center",
       background: "#00000000",
+      // Close turns white over its red hover (as Windows draws it); the glyph follows the group.
+      group: close,
       // Over whatever the bar is painted with: a wash of its own ink, not a theme surface.
       hover: { background: close ? theme.colors.windowCloseHover : translucent(ink, 0x1f) },
       active: { background: close ? theme.colors.windowCloseActive : translucent(ink, 0x33) },
@@ -102,7 +111,7 @@ export function TitleBar({
   const glyph = (iconNode: SvgNode[]) => jsx(Icon, { iconNode, size: 12, strokeWidth: 2, color: ink });
   const minimizeIcon = glyph([["path", { d: "M3 12h18" }]]);
   const maximizeIcon = glyph([["rect", { x: 3, y: 3, width: 18, height: 18, rx: 2 }]]);
-  const closeIcon = glyph([["path", { d: "M4 4l16 16M20 4 4 20" }]]);
+  const closeIcon = jsx(Icon, { iconNode: [["path", { d: "M4 4l16 16M20 4 4 20" }]], size: 12, strokeWidth: 2, color: ink, style: { groupHover: { foreground: "#ffffff" } } });
   const controls = jsx(Row, {
     style: { height: "100%", shrink: 0 },
     children: [

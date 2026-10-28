@@ -169,6 +169,49 @@ type TrayOptions struct {
 	OnClick       func()
 	OnDoubleClick func()
 	OnMenu        func(id string)
+	// OnAvailability runs when the system answers whether the icon can be seen, and on every change.
+	OnAvailability func(TrayAvailability)
+}
+
+// TrayAvailability says whether the tray icon can be seen, as in the TypeScript API:
+// Supported is false where the platform has no system tray; Available is false while no
+// tray host runs (a Linux desktop without a StatusNotifierItem host, Windows before
+// Explorer started), and becomes true when one starts. Reason says why not.
+type TrayAvailability struct {
+	Supported, Available bool
+	Reason               string
+}
+
+// TrayAvailability is the system's last answer for the tray; nil until it answered.
+func (a *App) TrayAvailability() *TrayAvailability { return a.trayState }
+
+func (a *App) trayEvent(kind string, ev map[string]any, run func(string, func())) {
+	switch {
+	case kind == "tray" && a.tray != nil:
+		if ev["action"] == "click" {
+			run("trayClick", a.tray.OnClick)
+		} else {
+			run("trayDoubleClick", a.tray.OnDoubleClick)
+		}
+	case kind == "trayAvailability" && a.tray != nil:
+		state := TrayAvailability{}
+		state.Supported, _ = ev["supported"].(bool)
+		state.Available, _ = ev["available"].(bool)
+		state.Reason, _ = ev["reason"].(string)
+		if a.trayState != nil && *a.trayState == state {
+			return
+		}
+		a.trayState = &state
+		if on := a.tray.OnAvailability; on != nil {
+			run("trayAvailability", func() { on(state) })
+		}
+	case kind == "trayMenu":
+		id, _ := ev["id"].(string)
+		run("trayMenu", a.trayHandlers[id])
+		if a.tray != nil && a.tray.OnMenu != nil {
+			run("trayMenu", func() { a.tray.OnMenu(id) })
+		}
+	}
 }
 
 // Tray shows (or replaces) the system tray icon.
@@ -231,11 +274,15 @@ func (a *App) Tray(options TrayOptions) {
 		tray["tooltip"] = options.Tooltip
 	}
 	a.sendPublic(S{"type": "tray", "tray": tray})
+	// A replacing tray has no new answer coming (the native icon is updated in place).
+	if a.trayState != nil && options.OnAvailability != nil {
+		options.OnAvailability(*a.trayState)
+	}
 }
 
 // RemoveTray removes the tray icon.
 func (a *App) RemoveTray() {
-	a.tray, a.trayIconSent = nil, ""
+	a.tray, a.trayIconSent, a.trayState = nil, "", nil
 	a.sendPublic(S{"type": "tray", "tray": nil})
 }
 

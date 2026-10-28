@@ -41,8 +41,10 @@ Tarve is a framework, not an end-user application, so the Tarve release does **n
    - checks that the tag matches the product version and points to a commit on `main`;
    - requires a successful CI run for the tagged commit (CI runs the full gate on both platforms), waiting for it if it is still running;
    - builds the Linux runtime on Linux and the Windows runtime on Windows;
-   - packs the universal tarball, verifies it contains exactly the staged runtimes and the tagged version, and writes SHA-256 hashes to `dist/release-manifest.json`;
+   - packs the universal tarball, verifies it contains exactly the staged runtimes and the tagged version, packs the other packages and checks their versions and `@tarve/core`/`@tarve/headless` peers, and writes SHA-256 hashes of all of them to `dist/release-manifest.json`;
    - creates the GitHub release with those artifacts;
-   - publishes `@tarve/core` and `@tarve/react-icons` to npm from those same tarballs (never repacked), with provenance: stable versions as `latest`, prereleases (`v0.2.0-beta.1`) as `next` and as GitHub prereleases.
+   - publishes to npm from those same tarballs (never repacked), with provenance: `@tarve/core`, `@tarve/headless`, `@tarve/react-icons`, `@tarve/svelte`, `@tarve/router`, `@tarve/test` and `create-tarve`; stable versions as `latest`, prereleases (`v0.2.0-beta.1`) as `next` and as GitHub prereleases. A re-run skips the versions already published;
+   - deploys the site (tarve.dev, Cloudflare Workers) from the tagged sources: the `site` environment needs a `CLOUDFLARE_API_TOKEN` secret (Workers edit) and a `CLOUDFLARE_ACCOUNT_ID` variable. Without the token the job warns and stops; deploy by hand then from a clean checkout of the tag: `cd website && bun install && bun run deploy`.
+4. Check the result: `npm view @tarve/core dist-tags` shows the new `latest`, and https://tarve.dev shows the version.
 
 A published npm version cannot be reused: if a release fails after publishing, fix forward with a new patch version.

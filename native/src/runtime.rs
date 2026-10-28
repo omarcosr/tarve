@@ -1832,6 +1832,10 @@ impl App {
             GraphicsState::Recovering(recovery) => GraphicsState::Suspended(recovery.checkpoint),
             other => other,
         };
+        // Videos hold a reference to the renderer's device: without letting go, the device
+        // (and its driver allocations) outlives the renderer.
+        #[cfg(target_os = "windows")]
+        self.videos.attach_renderer(None);
         self.scene = vello::Scene::new();
         self.glass = None;
         self.presentation_retry_at = None;
@@ -3223,9 +3227,9 @@ impl ApplicationHandler<Command> for App {
                     .tray
                     .get_or_insert_with(|| crate::tray::Tray::new(proxy))
                     .apply(tray);
-                if let Err(message) = result {
-                    self.events.push(error(message));
-                }
+                // Ok carries the trayAvailability event (no tray host is a state, not an error).
+                let event = result.unwrap_or_else(|message| Some(error(message)));
+                event.into_iter().for_each(|event| self.events.push(event));
             }
             Command::Media {
                 id,
@@ -3395,10 +3399,9 @@ impl ApplicationHandler<Command> for App {
             Command::TrayEvent { event } => {
                 if event["type"] == "trayRecreate" {
                     #[cfg(target_os = "windows")]
-                    if let Some(tray) = self.tray.as_mut()
-                        && let Err(message) = tray.publish(true)
-                    {
-                        self.events.push(error(message));
+                    if let Some(tray) = self.tray.as_mut() {
+                        let event = tray.publish(true);
+                        event.into_iter().for_each(|event| self.events.push(event));
                     }
                 } else {
                     if event["type"] == "notificationClick"

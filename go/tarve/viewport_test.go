@@ -97,3 +97,12 @@ func TestCssShadowStrings(t *testing.T) {
 		t.Fatalf("shadows %v %v", box, style["textShadow"])
 	}
 }
+
+func TestTitleBarHoverIsAWashNotTheGlyphColour(t *testing.T) {
+	if got := translucent(T.Foreground, 0x1f); got != T.Foreground+"/12" {
+		t.Fatalf("token wash %q", got)
+	}
+	if got := translucent("rgba(255, 255, 255, 0.9)", 0x1f); got != "#ffffff1f" {
+		t.Fatalf("rgba wash %q", got)
+	}
+}

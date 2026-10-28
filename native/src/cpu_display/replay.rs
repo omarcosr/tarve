@@ -316,7 +316,7 @@ impl DisplayList {
                         .fill_glyphs(glyphs.iter().map(|glyph| vello_cpu::Glyph {
                             id: glyph.id,
                             x: glyph.x,
-                            y: glyph.y,
+                            y: hinted_baseline(*transform, glyph.y),
                         }));
                 }
             }
@@ -326,6 +326,24 @@ impl DisplayList {
         for _ in 0..depth {
             context.pop_layer();
         }
+    }
+}
+
+/// A glyph's `y` with its baseline snapped to a whole frame pixel when the run is hinted.
+/// Hinting (vello_cpu's default, for a translated uniform scale) snaps the baseline in the
+/// context's coordinates with `f64::round`, which takes a half-pixel tie away from zero: a
+/// baseline above a redrawn region is negative there and lands a pixel higher than in a
+/// full redraw, moving its descenders. Snapped in frame coordinates, every region agrees.
+fn hinted_baseline(transform: Affine, y: f32) -> f32 {
+    let [a, b, _, d, _, f] = transform.as_coeffs();
+    if b != 0.0 || a != d || d <= 0.0 {
+        return y;
+    }
+    let snapped = ((d * f64::from(y) + f).round() - f) / d;
+    if snapped.is_finite() {
+        snapped as f32
+    } else {
+        y
     }
 }
 
@@ -355,4 +373,68 @@ fn mask_blend() -> vello_cpu::peniko::BlendMode {
         vello_cpu::peniko::Mix::Normal,
         vello_cpu::peniko::Compose::DestIn,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::paint::PaintGlyph;
+
+    fn draw(list: &DisplayList, region: Rect) -> Vec<u8> {
+        let (width, height) = (region.width() as u16, region.height() as u16);
+        let mut context = RenderContext::new(width, height);
+        let mut resources = Resources::new();
+        list.replay(&mut context, &mut resources, region, None);
+        context.flush();
+        let mut bytes = vec![0_u8; usize::from(width) * usize::from(height) * 4];
+        if let Some(pixmap) = vello_cpu::PixmapMut::new(width, height, &mut bytes) {
+            context.render(pixmap, &mut resources);
+        }
+        bytes
+    }
+
+    /// A baseline on a half pixel above a redrawn region (fractional display scales put
+    /// text there) must not move a pixel: its descenders show in the region.
+    #[test]
+    fn descenders_below_a_half_pixel_baseline_match_a_full_redraw() {
+        let bytes = include_bytes!("../../../packages/headless/fonts/InterVariable.ttf").to_vec();
+        let charmap = swash::FontRef::from_index(&bytes, 0)
+            .expect("font")
+            .charmap();
+        let glyphs: Vec<PaintGlyph> = "gjpqy"
+            .chars()
+            .enumerate()
+            .map(|(index, c)| PaintGlyph {
+                id: u32::from(charmap.map(c)),
+                x: 4.0 + 14.0 * index as f32,
+                y: 30.5,
+            })
+            .collect();
+        let font = FontData::new(vello::peniko::Blob::new(Arc::new(bytes)), 0);
+        let list = DisplayList {
+            ops: vec![Recorded {
+                op: Op::Glyphs {
+                    font,
+                    size: 20.0,
+                    coords: Vec::new(),
+                    transform: Affine::IDENTITY,
+                    color: Color::BLACK,
+                    glyphs,
+                },
+                hash: 0,
+                bounds: EVERYWHERE,
+            }],
+            ..Default::default()
+        };
+        let full = draw(&list, Rect::new(0.0, 0.0, 80.0, 64.0));
+        let part = draw(&list, Rect::new(0.0, 32.0, 80.0, 64.0));
+        assert!(
+            part.iter().any(|&byte| byte != 0),
+            "descenders reach the region"
+        );
+        assert!(
+            full[32 * 80 * 4..] == part[..],
+            "the region matches a full redraw"
+        );
+    }
 }

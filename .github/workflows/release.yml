@@ -161,6 +161,9 @@ jobs:
             dist/tarve-react-icons-*.tgz
             dist/tarve-headless-*.tgz
             dist/tarve-svelte-*.tgz
+            dist/tarve-router-*.tgz
+            dist/tarve-test-*.tgz
+            dist/create-tarve-*.tgz
             dist/release-manifest.json
             native/win32-x64/tarve_native.dll
             native/win32-x64/runtime.json
@@ -180,6 +183,9 @@ jobs:
             (Get-ChildItem -LiteralPath dist -Filter "tarve-react-icons-*.tgz" -File | Select-Object -First 1).FullName,
             (Get-ChildItem -LiteralPath dist -Filter "tarve-headless-*.tgz" -File | Select-Object -First 1).FullName,
             (Get-ChildItem -LiteralPath dist -Filter "tarve-svelte-*.tgz" -File | Select-Object -First 1).FullName,
+            (Get-ChildItem -LiteralPath dist -Filter "tarve-router-*.tgz" -File | Select-Object -First 1).FullName,
+            (Get-ChildItem -LiteralPath dist -Filter "tarve-test-*.tgz" -File | Select-Object -First 1).FullName,
+            (Get-ChildItem -LiteralPath dist -Filter "create-tarve-*.tgz" -File | Select-Object -First 1).FullName,
             "dist/release-manifest.json",
             "native/win32-x64/tarve_native.dll",
             "native/linux-x64/libtarve_native.so",
@@ -227,8 +233,8 @@ jobs:
           version="${TAG#v}"
           dist_tag=latest
           case "${version}" in *-*) dist_tag=next ;; esac
-          # @tarve/core first: the other packages declare it as a peer.
-          for pair in "@tarve/core:tarve-core" "@tarve/react-icons:tarve-react-icons" "@tarve/headless:tarve-headless" "@tarve/svelte:tarve-svelte"; do
+          # @tarve/core first, then @tarve/headless: the other packages declare them as peers.
+          for pair in "@tarve/core:tarve-core" "@tarve/headless:tarve-headless" "@tarve/react-icons:tarve-react-icons" "@tarve/svelte:tarve-svelte" "@tarve/router:tarve-router" "@tarve/test:tarve-test" "create-tarve:create-tarve"; do
             name="${pair%%:*}"
             tarball="release/dist/${pair#*:}-${version}.tgz"
             if [ ! -f "${tarball}" ]; then
@@ -247,3 +253,66 @@ jobs:
             fi
             npm publish "${tarball}" --access public --provenance --tag "${dist_tag}"
           done
+
+  # The site documents the version just published: deploy it from the tagged sources.
+  # Needs the CLOUDFLARE_API_TOKEN secret (Workers edit) on the "site" environment;
+  # without it the job warns and stops, the release itself is not affected.
+  site-deploy:
+    name: Deploy tarve.dev
+    needs: npm-publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: site
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check Cloudflare credentials
+        id: credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "${CLOUDFLARE_API_TOKEN}" ]; then
+            echo "::warning::CLOUDFLARE_API_TOKEN is not configured for the site environment: deploy tarve.dev by hand (cd website && bun run deploy)."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.credentials.outputs.deploy == 'true'
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        if: steps.credentials.outputs.deploy == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        if: steps.credentials.outputs.deploy == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      # The site's playgrounds run the WebAssembly runtime.
+      - name: Install wasm-bindgen
+        if: steps.credentials.outputs.deploy == 'true'
+        run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
+
+      - name: Install dependencies
+        if: steps.credentials.outputs.deploy == 'true'
+        run: |
+          bun install --frozen-lockfile
+          cd website && bun install --frozen-lockfile
+
+      - name: Build and deploy
+        if: steps.credentials.outputs.deploy == 'true'
+        working-directory: website
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          bun run build:cf
+          bunx wrangler deploy

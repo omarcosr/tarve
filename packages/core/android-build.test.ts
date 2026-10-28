@@ -80,6 +80,9 @@ describe("Android APK metadata", () => {
     expect(androidManifest({ packageName: "a.b", label: "A", versionCode: 1, versionName: "1", icon: false, bundle: true })).not.toContain("extractNativeLibs");
     // A Bun app's executable must be extracted to run.
     expect(androidManifest({ packageName: "a.b", label: "A", versionCode: 1, versionName: "1", icon: false, extractNativeLibs: true })).toContain('android:extractNativeLibs="true"');
+    // Plain http:// (a LAN media server) only when the app asks for it in package.json.
+    expect(androidManifest({ packageName: "a.b", label: "A", versionCode: 1, versionName: "1", icon: false })).not.toContain("usesCleartextTraffic");
+    expect(androidManifest({ packageName: "a.b", label: "A", versionCode: 1, versionName: "1", icon: false, cleartextTraffic: true })).toContain('android:usesCleartextTraffic="true"');
   });
 });
 

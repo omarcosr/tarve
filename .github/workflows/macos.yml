@@ -60,9 +60,9 @@ jobs:
           - os: macos-14
             arch: arm64
             target: darwin-arm64
-          # GitHub is retiring the Intel macos-13 image; if this job stays queued, switch to
-          # macos-15-intel (see reports/gap/macos-ci.md).
-          - os: macos-13
+          # The Intel macos-13 image is retired (its jobs stayed queued and the run never
+          # finished): macos-15-intel is the Intel image now (reports/gap/macos-ci.md).
+          - os: macos-15-intel
             arch: x64
             target: darwin-x64
     runs-on: ${{ matrix.os }}

@@ -1,6 +1,6 @@
 {
   "name": "create-tarve",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Scaffold a new Tarve app: bun create tarve my-app / npm create tarve@latest my-app",
   "license": "Apache-2.0",
   "keywords": [

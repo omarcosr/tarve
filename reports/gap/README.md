@@ -59,6 +59,23 @@ Auditoria inicial: só `@tarve/router` e `create-tarve` declaram Node em `engine
 - `bun test packages examples/plugin-hello`: 653/654; a falha (`Node dev remounts the same window…`) passa isolada → instável sob carga, não regressão.
 - `bun run check` e `cargo clippy --all-targets -D warnings`: limpos.
 
+## Release 0.8.0
+
+Commit local `59d1ccb` (`chore(release): 0.8.0`) pela aba TARVE Gap Review, com o trabalho das ondas 1–4. Verify completo passou. Sem tag, push nem publish (aguardando o usuário). Correções para o `smoke:package`: `openPluginLibrary` exportado de `@tarve/core`, smoke instala `@tarve/router`, router/test/create-tarve em 0.8.0 e cobertos por `scripts/version-policy.ts`.
+
+## Onda 5 — pontos frágeis (concluída)
+
+| # | Frente | Status | Relatório |
+|---|--------|--------|-----------|
+| 17 | Cenário `device` determinístico (provedor fake no nativo; APIs reais em smoke manual) | ✅ `TARVE_DEVICE=fake` em `native/src/device/fake.rs`; paridade compara valores completos, 5/5 variantes; reais em `scripts/smoke-device-real.tsx` | [runtimes-parity.md](runtimes-parity.md) |
+| 18 | `smoke:txiki-apps` estrito | ✅ tray sem host vira estado (`trayAvailability`, `onAvailability()`, `availability()` → `{supported, available, reason?}`) em Bun/Node/txiki/Go; exemplos com fallback; smoke estrito passa no Windows e WSL | [txiki-apps-errors.md](txiki-apps-errors.md) |
+| 19 | Build Bun com identificadores minificados sem perder nomes de componente | ✅ pré-bundle esbuild `keepNames` (`packages/core/bun-prebundle.ts`) → `bun build --compile` minifica; JS −22% a −27%; inspetor 5/5 variantes | [bun-keepnames.md](bun-keepnames.md) |
+
+## Verificação final (onda 5)
+
+- `bun test packages examples/plugin-hello scripts`: 679 pass / 0 fail.
+- `bun run check`, `check:lines`, `cargo clippy --all-targets -D warnings`: limpos.
+
 ## Próximas ondas (não iniciadas)
 
 - Push (FCM/APNs): precisa de projeto Firebase e credenciais; plano em android-apis.md.

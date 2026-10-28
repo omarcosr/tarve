@@ -19,7 +19,7 @@ Rodar: `bun run smoke:runtime-parity router deep-link device plugin-hello inspec
 | --- | --- |
 | `router` | `examples/router` (view separada em `router-view.tsx`; `router.tsx` só cria o app): `<Link>` empilha `/people/1`, botão "Next" empilha `/people/2`, **Escape** volta, "All people" faz `popToRoot`, troca de aba (Settings), `<Link>` dentro da aba, `tabs.back()` por código. 8 etapas com captura. |
 | `deep-link` | App lançado com `tarvedemo://hello/world?x=1 note.tarvedemo` + `requestSingleInstance`: o argv chega a `onOpenUrl`/`onOpenFiles` (`initial: true`); depois o app relança a si mesmo (`process.execPath` + script quando é runtime) com outro link e arquivo → a segunda instância encaminha pelo pipe e sai (código 0), a primeira recebe `initial: false` e `onSecondInstance`. No Windows também `registerProtocol`/`registerFileType` de um esquema/tipo descartável, lidos de volta com `reg query` e removidos. |
-| `device` | `share`/`authenticate`/`getCurrentPosition` com argumentos inválidos (mesmos erros), depois `share` real, `getCurrentPosition({timeoutMs:3000})`, `watchPosition` (primeira resposta) e `authenticate` (limite de 3 s → `"pending"` se um prompt esperar o usuário). Compara o **formato** (chaves, `supported`, `code`, `success`; coordenadas e texto do SO variam). |
+| `device` | Desde a [rodada 3](#rodada-3-provedor-falso-de-device-apis), com `TARVE_DEVICE=fake` (provedor falso **nativo**): `share`/`authenticate`/`getCurrentPosition` com argumentos inválidos (mesmos erros), `share` (texto + arquivo, arquivo ausente), `getCurrentPosition` (alta/baixa precisão, `timeoutMs: 0`), `watchPosition` (3 fixes; outro parado no 1º), `authenticate` (sucesso, `[fake:canceled]`, `[fake:unsupported]`). Compara os **valores inteiros**. Os serviços reais ficaram no smoke manual `scripts/smoke-device-real.tsx`. |
 | `plugin-hello` | Entry escrita **dentro** de `examples/plugin-hello` (a descoberta acha o plugin pelo package.json): `hello.client(app).add(40, 2)` = 42, `add(i32 max, 1)` = −2147483648 (wrapping), `info()`; `runtime` confere a FFI (`bun`/`node`/`txiki`) e que nos executáveis a lib veio do registro embutido pelo `tarve build`. `prepare` roda `cargo build --release` da cdylib. |
 | `inspector` | `TARVE_INSPECTOR=1`: a janela do inspetor abre, árvore com `<Counter>`, contagem `×2`, nó selecionado (`h:bump`) com layout e "Style (resolved)"; captura das duas janelas. O log de eventos (horário de parede) é esvaziado antes da captura e comparado pela contagem. |
 
@@ -41,7 +41,7 @@ Windows x64. "ok" = árvore, pixels e `result` idênticos ao Bun (e `runtime` co
 
 1. Corrigido nesta frente: o shim `node:net` do txiki não tinha servidor. 2. Corrigido: o txiki não tinha `spawnSync`. 3. Novo: build Node/txiki embute. 4. Corrigido: templates do `--compile-jsx` apareciam como `<Template>`. 5. Corrigido: nomes de componentes minificados (`<He>`, `<Ee>`).
 
-Resultado observado nesta máquina (igual em todas as variantes): `share` → `{supported:true}`; posição e watch → `{supported:true, position:{…8 campos}}`; `authenticate` → `{supported:false, code:"unsupported"}` (sem dispositivo Windows Hello).
+Resultado observado nesta máquina na rodada 1 (igual em todas as variantes, serviços reais — o cenário não usa mais o SO, ver rodada 3): `share` → `{supported:true}`; posição e watch → `{supported:true, position:{…8 campos}}`; `authenticate` → `{supported:false, code:"unsupported"}` (sem dispositivo Windows Hello).
 
 ### Genuinamente não suportado / pendente (rodada 1 — superado pela rodada 2)
 
@@ -157,3 +157,52 @@ Cópia local no WSL (`~/tarve`, via `rsync` sem `node_modules`, `native/target*`
 | `bun run check` | limpo | — |
 
 8. Numa rodada inteira, a referência **Bun** de `intrinsics` caiu uma vez com "Native window is closed" (antes de qualquer variante; nada desta frente toca esse caminho); `intrinsics` e `deep-link` repetidos em seguida: 5/5 ok, e a rodada completa final (com todas as mudanças, inclusive `net`/`fetch`/`readFileSync`) passou inteira: "runtime parity: 21 examples x 5 variants match Bun".
+
+## Rodada 3: provedor falso de device APIs
+
+### Problema
+
+O cenário `device` chamava os serviços **reais** do SO: abria a UI de compartilhamento do Windows, pedia a localização real e o `authenticate` ficava esperando um prompt do Windows Hello (virava `"pending"` depois de 3 s). Por isso só dava para comparar o formato, e o resultado dependia da máquina (Hello cadastrado ou não, localização ligada, portal no Linux). No CI isso é não determinístico ou trava.
+
+### Solução (na raiz)
+
+Um provedor falso **no lado nativo**, escolhido explicitamente por `TARVE_DEVICE=fake` no ambiente do app. O caminho inteiro continua sendo exercitado: TS → protocolo → nativo → evento de volta. Só o serviço da plataforma é trocado. Por ser uma variável de ambiente lida pela lib nativa (`OnceLock`, na primeira requisição de device), funciona igual em Bun, Node e txiki, e também nos executáveis. Não depende de `process.env` do JS propagar para o ambiente do processo, o que varia por runtime. Valor desconhecido: aviso no stderr e serviços do sistema. `system` ou vazio: serviços do sistema.
+
+`native/src/device/fake.rs` (submódulo de `device.rs`, que só ganhou o desvio no início de `share`/`location`/`authenticate`):
+
+| Pedido | Resposta determinística |
+| --- | --- |
+| `share` | `{supported:true}`. Arquivo inexistente → `error: "cannot share <caminho>: no such file"`, como nas plataformas reais. |
+| `getCurrentPosition` | Fix fixo: -23.5505, -46.6333, altitude 760, `altitudeAccuracy` 4, `heading`/`speed` `null`, `timestamp` 1 700 000 000 000. `accuracy` 5 com `highAccuracy`, senão 50 (prova que a opção chega ao nativo). `timeoutMs: 0` → `code:"timeout"`. |
+| `watchPosition` | Os 3 fixes de `FIXES`, em ordem, com 50 ms de intervalo, numa thread. O `clear` tira o watch do conjunto sob o mesmo lock em que cada fix é enviado, então nada chega depois do `clear`. |
+| `authenticate` | `success: true`, a menos que o `reason` contenha `[fake:<code>]` com um `AuthErrorCode` (`not-enrolled`, `canceled`, `failed`, `lockout`, `busy`, `unsupported` → `supported:false`). |
+
+Documentado no JSDoc de `packages/core/src/device.ts`, no README (device APIs) e em `reports/gap/android-apis.md`. No Android as permissões de localização continuam passando pelo fluxo real (o fake só substitui o serviço).
+
+### Cenário `device` e smoke manual
+
+- `scripts/runtime-parity-scenarios.ts`: o `device` roda com `env: { TARVE_DEVICE: "fake" }` e compara os **valores completos** com o Bun (argumentos inválidos, share com arquivo e com arquivo ausente, posição em alta e baixa precisão, timeout, watch com 3 fixes, watch parado no primeiro, authenticate com sucesso, cancelado e não suportado). O primeiro pedido é `getCurrentPosition({timeoutMs:0})`, que não abre nada em nenhum SO. Se a resposta não for a do fake (lib nativa velha, variável perdida), o cenário falha na hora, em vez de abrir a UI do sistema.
+- `scripts/smoke-device-real.tsx` (**manual, fora do `verify` e do CI**): `bun scripts/smoke-device-real.tsx` abre o share real, pede um fix e a primeira resposta de um watch, e mostra o prompt biométrico. Precisa de uma pessoa (fechar o share, responder o prompt). Imprime as respostas e sai com 1 se alguma não tiver o formato documentado. Recusa rodar com `TARVE_DEVICE=fake`.
+
+### Arquivos (rodada 3)
+
+| Arquivo | Mudança |
+| --- | --- |
+| `native/src/device/fake.rs` (novo) | provedor falso + 6 testes (`cargo test --lib device::`) |
+| `native/src/device.rs` | `mod fake`, desvio quando `TARVE_DEVICE=fake`, `position_json` usado em toda plataforma |
+| `packages/core/src/device-fake.test.ts` (novo) | app headless real (lib nativa) num processo filho com `TARVE_DEVICE=fake`: todas as respostas comparadas por valor. Pulado sem a lib, como `node-dev.test.ts` |
+| `scripts/runtime-parity-scenarios.ts` | cenário `device` com o fake e valores completos |
+| `scripts/smoke-device-real.tsx` (novo) | smoke manual dos serviços reais |
+| `packages/core/src/device.ts`, `README.md`, `reports/gap/android-apis.md` | documentação |
+
+### Verificação (rodada 3, Windows x64)
+
+| Verificação | Resultado |
+| --- | --- |
+| `cargo clippy --manifest-path native/Cargo.toml --all-targets -- -D warnings` | limpo |
+| `cargo test --lib device::` | 8/8 (6 do fake + 2 antigos) |
+| `bun test packages/core` | 557 pass / 0 fail (inclui `device-fake.test.ts`) |
+| `bun run check` / `bun run check:lines` | limpo / nenhum arquivo novo acima de 600 linhas, nenhum legado cresceu |
+| `bun run smoke:runtime-parity device basic` | node, node-c, txiki, txiki-c, bun-c: "2 examples x 5 variants match Bun" |
+
+Não executado nesta rodada: Linux (o caminho do fake é o mesmo código em toda plataforma; o clippy para Linux não foi rodado) e o `smoke-device-real.tsx` interativo.

@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 6;
-export const PROTOCOL_VERSION = 61;
+export const PROTOCOL_VERSION = 62;
 export * from "./values";
 import type { Length, NodeKind, Insets, Margins, CornerRadius, OutlineStyle, BorderStyle, TextShadow, Transform, BoxShadow, Gradient, UserSelect, TextDecoration, SyntaxTheme, TextHighlight } from "./values";
 export type Renderer = "auto" | "gpu" | "cpu";
@@ -455,6 +455,8 @@ export type NativeEvent =
   | { type: "tray"; action: "click" | "doubleClick" }
   | { type: "systemMedia"; action: "play" | "pause" | "next" | "previous" | "seek"; time?: number }
   | { type: "trayMenu"; id: string }
+  /** Whether the tray icon can be seen: after the first `tray` command and on every change (a tray host starting or stopping). */
+  | { type: "trayAvailability"; supported: boolean; available: boolean; reason?: string }
   | { type: "notificationClick"; id?: string }
   /** Windows "Transparency effects" changed while the window has a `mica`, `acrylic` or `blur` backdrop. */
   | { type: "transparencyEffects"; enabled: boolean }

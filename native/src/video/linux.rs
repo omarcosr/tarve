@@ -34,11 +34,16 @@ const SEEK_ACCURATE: c_int = 2;
 const SEEK_TYPE_NONE: c_int = 0;
 /// playbin's `flags`: render subtitles.
 const PLAY_FLAG_TEXT: c_int = 1 << 2;
+/// playbin's `flags`: keep a network stream's download (`buffered`, quick seeks back).
+const PLAY_FLAG_DOWNLOAD: c_int = 1 << 7;
+/// The most of a download kept on disk (a ring buffer around where it plays).
+const DOWNLOAD_BYTES: u64 = 256 << 20;
 const SEEK_TYPE_SET: c_int = 1;
 const MESSAGE_EOS: c_uint = 1 << 0;
 const MESSAGE_ERROR: c_uint = 1 << 1;
 const MESSAGE_BUFFERING: c_uint = 1 << 5;
-const FORMAT_PERCENT: c_int = 2;
+/// `GST_FORMAT_PERCENT` (2 is `GST_FORMAT_BYTES`).
+const FORMAT_PERCENT: c_int = 5;
 /// `GST_FORMAT_PERCENT_MAX`: 100 % in a buffering range.
 const PERCENT_MAX: f64 = 1_000_000.0;
 const MESSAGE_DURATION_CHANGED: c_uint = 1 << 18;
@@ -158,6 +163,8 @@ gst_api! {
     gst_structure_get_int: fn(Ptr, *const c_char, *mut c_int) -> c_int;
     gst_buffer_map: fn(Ptr, *mut MapInfo, c_int) -> c_int;
     gst_buffer_unmap: fn(Ptr, *mut MapInfo);
+    gst_query_new_uri: fn() -> Ptr;
+    gst_query_parse_uri_redirection: fn(Ptr, *mut *mut c_char);
     g_error_free: fn(*mut GError);
     g_free: fn(Ptr);
 }
@@ -247,6 +254,11 @@ struct Player {
     next_update: Option<Instant>,
     /// Paused by a buffering message (a stream ran short): `waiting` until it refills.
     buffering: bool,
+    /// The audio stream asked for: playbin reports `current-audio` only once it switched.
+    audio_track: Option<c_int>,
+    /// The text stream shown. Applied once the pipeline is built: playbin only adds
+    /// the subtitle overlay when the text flag is on while it prerolls.
+    text_track: Option<u32>,
 }
 
 impl Drop for Player {
@@ -360,9 +372,15 @@ impl Videos {
             }
             _ => None,
         };
-        event
-            .map(|name| vec![player.event(id, name)])
-            .unwrap_or_default()
+        let mut events: Vec<Value> = event
+            .map(|name| player.event(id, name))
+            .into_iter()
+            .collect();
+        if action == "play" && player.buffering && player.playing {
+            // Still refilling: it plays once the buffering message says 100 % (`canplay`).
+            events.push(player.event(id, "waiting"));
+        }
+        events
     }
 
     pub(crate) fn tick(&mut self, now: Instant) -> Vec<Value> {
@@ -377,6 +395,7 @@ impl Videos {
                 self.changed.push((id.clone(), Some(frame)));
                 if !player.metadata {
                     player.metadata = true;
+                    player.select_text(player.text_track);
                     out.push(player.event(id, "loadedmetadata"));
                     out.push(player.event(id, "canplay"));
                     let tracks = player.audio_tracks();
@@ -427,6 +446,73 @@ impl Videos {
             .values()
             .filter_map(|player| player.next_update)
             .min()
+    }
+}
+
+impl Player {
+    fn remote(&self) -> bool {
+        let scheme = self.src.split_once("://").map_or("", |(scheme, _)| scheme);
+        !scheme.is_empty() && !scheme.eq_ignore_ascii_case("file")
+    }
+
+    /// The served file's name, as `<audio>`'s: the last segment of the URL the source
+    /// ended up at (after redirects, from its URI query), percent-decoded, no query.
+    fn filename(&self) -> String {
+        if !self.remote() {
+            return self.src.rsplit('/').next().unwrap_or_default().to_string();
+        }
+        let url = self.redirect().unwrap_or_else(|| self.src.clone());
+        let path = url.split(['?', '#']).next().unwrap_or_default();
+        let name = path.rsplit('/').next().unwrap_or_default().as_bytes();
+        let mut out = Vec::with_capacity(name.len());
+        let mut at = 0;
+        while at < name.len() {
+            let hex = name
+                .get(at + 1..at + 3)
+                .and_then(|hex| u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok());
+            if name[at] == b'%'
+                && let Some(byte) = hex
+            {
+                out.push(byte);
+                at += 3;
+            } else {
+                out.push(name[at]);
+                at += 1;
+            }
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    }
+
+    /// Where the HTTP source was redirected to, if it was.
+    fn redirect(&self) -> Option<String> {
+        let gst = self.gst;
+        let mut source: Ptr = std::ptr::null_mut();
+        let mut url = None;
+        unsafe {
+            (gst.g_object_get)(
+                self.pipeline,
+                c"source".as_ptr(),
+                &mut source as *mut Ptr,
+                std::ptr::null::<c_char>(),
+            );
+            if source.is_null() {
+                return None;
+            }
+            let query = (gst.gst_query_new_uri)();
+            if !query.is_null() {
+                let mut redirect: *mut c_char = std::ptr::null_mut();
+                if (gst.gst_element_query)(source, query) != 0 {
+                    (gst.gst_query_parse_uri_redirection)(query, &mut redirect);
+                }
+                if !redirect.is_null() {
+                    url = Some(CStr::from_ptr(redirect).to_string_lossy().into_owned());
+                    (gst.g_free)(redirect.cast());
+                }
+                (gst.gst_mini_object_unref)(query);
+            }
+            (gst.gst_object_unref)(source);
+        }
+        url
     }
 }
 

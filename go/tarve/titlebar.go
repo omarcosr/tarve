@@ -7,10 +7,17 @@ import (
 	"strings"
 )
 
+// translucent is color at alpha (0–255), a hover wash of the bar's ink. Theme tokens (T.Foreground,
+// the default ink) take the token alpha form and CSS colours are normalized first: returning the
+// colour unchanged would paint the hover in the glyph's own colour and hide it.
 func translucent(color string, alpha int) string {
-	h := strings.TrimPrefix(strings.TrimSpace(color), "#")
+	value := strings.TrimSpace(color)
+	if strings.HasPrefix(value, "var(--") && strings.HasSuffix(value, ")") {
+		return fmt.Sprintf("%s/%d", value, int(math.Round(float64(alpha)/255*100)))
+	}
+	h := strings.TrimPrefix(cssColor(value), "#")
 	full := h
-	if len(h) == 3 {
+	if len(h) == 3 || len(h) == 4 {
 		full = string([]byte{h[0], h[0], h[1], h[1], h[2], h[2]})
 	} else if len(h) >= 6 {
 		full = h[:6]
@@ -18,7 +25,7 @@ func translucent(color string, alpha int) string {
 	if len(full) == 6 && strings.Trim(strings.ToLower(full), "0123456789abcdef") == "" {
 		return fmt.Sprintf("#%s%02x", full, alpha)
 	}
-	return color
+	return fmt.Sprintf("#808080%02x", alpha)
 }
 
 // TitleBar props: title, height (40), showMinimize, showMaximize, showClose, buttonStyle, glass (bool or variant), appearance, style, children.
@@ -74,7 +81,7 @@ func TitleBar(p Props, kids ...Child) *VNode {
 		}
 		return Pressable(Props{"windowAction": action, "control": S{"role": "button", "label": label}, "focusable": false,
 			"style": merge(S{"width": 46, "height": "100%", "radius": 0, "align": "center", "justify": "center", "background": "#00000000",
-				"hover": S{"background": hover}, "active": S{"background": active}}, buttonStyle), "children": child})
+				"group": action == "close", "hover": S{"background": hover}, "active": S{"background": active}}, buttonStyle), "children": child})
 	}
 	// Android has no window to minimize, maximize or close: TitleBar is the app's top bar there.
 	mobile := runtime.GOOS == "android"
@@ -92,7 +99,9 @@ func TitleBar(p Props, kids ...Child) *VNode {
 		maximize = button("toggleMaximize", glyph(SvgEl("rect", "x", 3, "y", 3, "width", 18, "height", 18, "rx", 2)))
 	}
 	if flag("showClose") {
-		closeB = button("close", glyph(Path("M4 4l16 16M20 4 4 20")))
+		// Close turns white over its red hover (as Windows draws it): the glyph follows the group.
+		closeB = button("close", Icon(Props{"iconNode": []SvgElement{Path("M4 4l16 16M20 4 4 20")}, "size": 12, "strokeWidth": 2, "color": ink,
+			"style": S{"groupHover": S{"foreground": "#ffffff"}}}))
 	}
 	controls := Row(Props{"style": S{"height": "100%", "shrink": 0}, "children": []Child{minimize, maximize, closeB}})
 	content := p["children"]

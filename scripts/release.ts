@@ -49,6 +49,17 @@ const svelteName = `tarve-svelte-${policy.version}.tgz`;
 await run([bun, "pm", "pack", "--ignore-scripts", "--destination", join(root, "dist")], join(root, "packages/svelte"));
 const svelte = join(root, "dist", svelteName);
 
+// @tarve/router, @tarve/test and create-tarve ship their sources as-is too; the docs
+// tell users to install them, so every release publishes them with @tarve/core.
+const extras = [
+  { name: "@tarve/router", dir: "packages/router", file: `tarve-router-${policy.version}.tgz`, peers: ["@tarve/core"] },
+  { name: "@tarve/test", dir: "packages/test", file: `tarve-test-${policy.version}.tgz`, peers: ["@tarve/core", "@tarve/headless"] },
+  { name: "create-tarve", dir: "packages/create-tarve", file: `create-tarve-${policy.version}.tgz`, peers: [] },
+] as const;
+for (const extra of extras) {
+  await run([bun, "pm", "pack", "--ignore-scripts", "--destination", join(root, "dist")], join(root, extra.dir));
+}
+
 const library = fromRoot(windowsNativeRelative);
 const linuxLibrary = fromRoot(linuxNativeRelative);
 // bun pm pack names scoped packages <scope>-<name>-<version>.tgz.
@@ -77,6 +88,16 @@ try {
       throw new Error(`Packed ${name} is ${packed.name}@${packed.version} (peer @tarve/core ${packed.peerDependencies?.["@tarve/core"]}), expected ${name}@${policy.version} with ^${policy.version}.`);
     }
   }
+  for (const extra of extras) {
+    const directory = join(extraction, extra.name.replace(/^@tarve\//, "tarve-"));
+    await mkdir(directory, { recursive: true });
+    await run(["tar", "-xzf", join(root, "dist", extra.file), "-C", directory]);
+    const packed = await Bun.file(join(directory, "package", "package.json")).json() as { name: string; version: string; peerDependencies?: Record<string, string> };
+    const badPeer = extra.peers.find(peer => packed.peerDependencies?.[peer] !== `^${policy.version}`);
+    if (packed.name !== extra.name || packed.version !== policy.version || badPeer) {
+      throw new Error(`Packed ${extra.name} is ${packed.name}@${packed.version}${badPeer ? ` (peer ${badPeer} ${packed.peerDependencies?.[badPeer]})` : ""}, expected ${extra.name}@${policy.version}.`);
+    }
+  }
   const manifest = {
     product: "@tarve/core",
     version: policy.version,
@@ -94,6 +115,7 @@ try {
       { file: iconsName, sha256: await sha256(icons) },
       { file: headlessName, sha256: await sha256(headless) },
       { file: svelteName, sha256: await sha256(svelte) },
+      ...await Promise.all(extras.map(async extra => ({ file: extra.file, sha256: await sha256(join(root, "dist", extra.file)) }))),
     ],
   };
   await writeFile(join(root, "dist/release-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);

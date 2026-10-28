@@ -50,7 +50,7 @@
   <section class="doc-section">
     <h2 id="permissions">Permissions</h2>
     <CodeBlock code={c3} file="app.tsx" />
-    <div class="doc-prose"><p>On Android, <code>requestPermissions</code> shows the system prompt and resolves once the user answers; a permission missing from the manifest is denied at once. Desktops have no per-app prompt and report every name as <code>"granted"</code>.</p></div>
+    <div class="doc-prose"><p>On Android, <code>requestPermissions</code> shows the system prompt and resolves once the user answers; a permission missing from the manifest is denied at once. Desktops have no per-app prompt and report every name as <code>"granted"</code>.</p><p>Android also blocks plain <code>http://</code> by default, media playback included; set <code>tarve.android.cleartextTraffic: true</code> in package.json for an app that must reach an <code>http://</code> server (a media server on the LAN).</p></div>
   </section>
 
   <section class="doc-section">

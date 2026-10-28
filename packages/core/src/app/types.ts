@@ -190,7 +190,7 @@ export interface AppHandle {
   /** Borderless full screen on the window's monitor (`true`), or back to the window it was (`false`). */
   setFullscreen(fullscreen: boolean): void;
   toggleFullscreen(): void;
-  /** Shows a system tray icon (Windows). A second call replaces the first tray. */
+  /** Shows a system tray icon (Windows, Linux); `onAvailability` / `availability()` say whether it can be seen. A second call replaces the first tray. */
   tray(options: TrayOptions): TrayHandle;
   /**
    * The window's menu bar, replaced as a whole on each call; `null` removes it. Drawn in

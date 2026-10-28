@@ -118,6 +118,8 @@ struct Player {
     next_update: Option<Instant>,
     /// MediaPlayer's buffering percentage of the whole file (100 for a local one).
     buffered_percent: f64,
+    /// Where `src` led after redirects (`filename`), known from `loadedmetadata`.
+    url: Option<String>,
 }
 
 impl Player {
@@ -169,6 +171,7 @@ impl Player {
             generation: 0,
             next_update: None,
             buffered_percent: if load.src.contains("://") { 0.0 } else { 100.0 },
+            url: None,
         })
     }
 
@@ -197,16 +200,8 @@ impl Player {
 
     /// A JSON track list the Java side builds (`audioTracks`, `textTracks`).
     fn tracks_json(&self, method: &str) -> Value {
-        let text = crate::android::with_env(|env, _| {
-            let value = env
-                .call_method(self.object.as_obj(), method, "()Ljava/lang/String;", &[])?
-                .l()?;
-            let value = jni::objects::JString::from(value);
-            let text: String = env.get_string(&value)?.into();
-            Ok(text)
-        })
-        .ok();
-        text.and_then(|text| serde_json::from_str(&text).ok())
+        self.string(method)
+            .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_else(|| Value::Array(Vec::new()))
     }
 
@@ -282,8 +277,7 @@ impl Player {
             event["buffered"] = json!(duration * (self.buffered_percent / 100.0).clamp(0.0, 1.0));
         }
         if name == "loadedmetadata" {
-            let path = self.src.split(['?', '#']).next().unwrap_or_default();
-            event["filename"] = json!(path.rsplit('/').next().unwrap_or_default());
+            event["filename"] = json!(filename(self.url.as_deref().unwrap_or(&self.src)));
         }
         event
     }
@@ -442,6 +436,7 @@ impl Videos {
                             .and_then(|v| v.i().ok())
                             .unwrap_or(0);
                         player.size = (width.max(0) as u32, height.max(0) as u32);
+                        player.url = player.string("url");
                         out.push(player.event(id, "loadedmetadata"));
                         out.push(player.event(id, "canplay"));
                         let tracks = player.audio_tracks();
@@ -473,13 +468,14 @@ impl Videos {
                         out.push(player.event(id, "pause"));
                         out.push(player.event(id, "ended"));
                     }
-                    "error" => failed.push((
-                        id.clone(),
-                        failure(
-                            &player.src,
-                            format!("the video could not be played (MediaPlayer error {value})"),
-                        ),
-                    )),
+                    // "error:<reason>": TarveVideo names it (an HTTP status, MediaPlayer's codes).
+                    error if error.starts_with("error") => {
+                        let reason = error.strip_prefix("error:").map_or_else(
+                            || format!("the video could not be played (MediaPlayer error {value})"),
+                            str::to_string,
+                        );
+                        failed.push((id.clone(), failure(&player.src, reason)));
+                    }
                     _ => {}
                 }
             }

@@ -1,6 +1,6 @@
 {
   "name": "@tarve/react-icons",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "React icon-library adapters for Tarve",
   "license": "Apache-2.0",
   "keywords": [
@@ -36,7 +36,7 @@
     "README.md"
   ],
   "peerDependencies": {
-    "@tarve/core": "^0.8.0"
+    "@tarve/core": "^0.9.0"
   },
   "peerDependenciesMeta": {
     "@tarve/core": {

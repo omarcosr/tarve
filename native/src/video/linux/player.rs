@@ -58,6 +58,8 @@ impl Player {
             rate: 1.0,
             next_update: None,
             buffering: false,
+            audio_track: None,
+            text_track: None,
         };
         let sink = make("appsink")?;
         player.sink = sink;
@@ -118,9 +120,30 @@ impl Player {
             player.bus = (gst.gst_element_get_bus)(pipeline);
             (gst.gst_bus_set_sync_handler)(player.bus, Some(on_message), data, None);
         }
+        if player.remote() {
+            // A network stream goes to a file on disk as it downloads: its buffering
+            // range answers `buffered` (a plain stream answers nothing).
+            let mut flags: c_int = 0;
+            unsafe {
+                (gst.g_object_get)(
+                    pipeline,
+                    c"flags".as_ptr(),
+                    &mut flags as *mut c_int,
+                    std::ptr::null::<c_char>(),
+                );
+                (gst.g_object_set)(
+                    pipeline,
+                    c"flags".as_ptr(),
+                    flags | PLAY_FLAG_DOWNLOAD,
+                    c"ring-buffer-max-size".as_ptr(),
+                    DOWNLOAD_BYTES,
+                    std::ptr::null::<c_char>(),
+                );
+            }
+        }
         player.set(None, Some(load.muted), Some(f64::from(load.volume)));
-        // No subtitles until one is chosen (`textTracks`), as a browser's element.
-        player.select_text(None);
+        // The text flag stays on while it prerolls (playbin builds the subtitle overlay
+        // then); no subtitles show until one is chosen (`textTracks`), as in a browser.
         // Paused: the first picture and the metadata arrive without playing.
         unsafe { (gst.gst_element_set_state)(pipeline, STATE_PAUSED) };
         Ok(player)
@@ -245,8 +268,7 @@ impl Player {
             event["buffered"] = json!(buffered);
         }
         if name == "loadedmetadata" {
-            let path = self.src.split(['?', '#']).next().unwrap_or_default();
-            event["filename"] = json!(path.rsplit('/').next().unwrap_or_default());
+            event["filename"] = json!(self.filename());
         }
         event
     }
@@ -264,6 +286,10 @@ impl Player {
                 std::ptr::null::<c_char>(),
             );
         }
+        let current = self
+            .audio_track
+            .filter(|index| *index < count)
+            .unwrap_or(current);
         Value::Array(
             (0..count.max(0))
                 .map(|index| {
@@ -337,6 +363,10 @@ impl Player {
 
     /// Shows text stream `index` (playbin draws it over the picture) or none.
     pub(super) fn select_text(&mut self, index: Option<u32>) {
+        self.text_track = index;
+        if !self.metadata {
+            return;
+        }
         let mut flags: c_int = 0;
         unsafe {
             (self.gst.g_object_get)(
@@ -370,6 +400,7 @@ impl Player {
 
     /// `audioTracks[index].enabled = true`: playbin's `current-audio`.
     pub(super) fn select_audio(&mut self, index: u32) {
+        self.audio_track = Some(index as c_int);
         unsafe {
             (self.gst.g_object_set)(
                 self.pipeline,
@@ -382,6 +413,9 @@ impl Player {
 
     /// End of the buffered range (a network stream's download; a local file is whole).
     pub(super) fn buffered(&self, duration: f64) -> Option<f64> {
+        if !self.remote() {
+            return Some(duration);
+        }
         unsafe {
             let query = (self.gst.gst_query_new_buffering)(FORMAT_PERCENT);
             if query.is_null() {
@@ -440,7 +474,7 @@ impl Player {
                     out.push(self.event(id, "ended"));
                 }
                 // A network stream ran short: hold the pipeline until it refills (as
-                // playbin's applications do), `waiting` then `canplay`.
+                // playbin's applications do), `waiting` (while it plays) then `canplay`.
                 MESSAGE_BUFFERING => {
                     let mut percent = 100;
                     unsafe { (self.gst.gst_message_parse_buffering)(message, &mut percent) };
@@ -450,8 +484,8 @@ impl Player {
                             unsafe {
                                 (self.gst.gst_element_set_state)(self.pipeline, STATE_PAUSED)
                             };
+                            out.push(self.event(id, "waiting"));
                         }
-                        out.push(self.event(id, "waiting"));
                     } else if percent >= 100 && self.buffering {
                         self.buffering = false;
                         if self.playing {

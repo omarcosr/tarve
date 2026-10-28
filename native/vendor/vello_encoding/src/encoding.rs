@@ -273,7 +273,7 @@ impl Encoding {
     }
 
     /// Encodes a brush with an optional alpha modifier.
-    #[expect(
+    #[allow(
         single_use_lifetimes,
         reason = "False positive: https://github.com/rust-lang/rust/issues/129255"
     )]

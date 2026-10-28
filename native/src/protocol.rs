@@ -9,7 +9,7 @@ mod style_validation;
 #[allow(unused_imports)]
 pub(crate) use style_validation::*;
 
-pub const VERSION: u32 = 61;
+pub const VERSION: u32 = 62;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

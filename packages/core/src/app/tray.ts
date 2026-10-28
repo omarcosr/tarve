@@ -1,4 +1,4 @@
-import type { NativeCommand, NativeTrayMenuItem } from "../protocol";
+import type { NativeCommand, NativeEvent, NativeTrayMenuItem } from "../protocol";
 import { iconBytes } from "../app-metadata";
 
 export type TrayMenuItem =
@@ -14,21 +14,44 @@ export interface TrayOptions {
   onDoubleClick?: () => void;
   /** Called with the selected item id, after the item's own onSelect. */
   onMenu?: (id: string) => void;
+  /**
+   * Called when the system answers whether the icon can be seen (shortly after `app.tray()`)
+   * and on every change: a Linux tray host starting or stopping, Explorer restarting.
+   */
+  onAvailability?: (availability: TrayAvailability) => void;
+}
+
+/**
+ * Whether the tray icon can be seen, the same shape on every OS and runtime. Like the device
+ * APIs, `supported: false` where the platform has no system tray (macOS, Android). `supported`
+ * with `available: false` means no tray host is running now: a Linux desktop without a
+ * StatusNotifierItem host (GNOME without the AppIndicator extension, WSLg) or Windows before
+ * Explorer started. The icon stays registered and shows (`available: true`) once a host starts.
+ */
+export interface TrayAvailability {
+  supported: boolean;
+  available: boolean;
+  /** Why the icon cannot be seen, when `available` is false. */
+  reason?: string;
 }
 
 export interface TrayHandle {
   /** Merges and re-applies options; the shell icon is modified in place, not recreated. */
   update(options: Partial<TrayOptions>): void;
   remove(): void;
+  /** The system's last answer (see `onAvailability`); undefined until it answered. */
+  availability(): TrayAvailability | undefined;
 }
 
 export interface TrayController {
-  /** Shows a system tray icon (Windows). A second call replaces the first tray. */
+  /** Shows a system tray icon (Windows, Linux). A second call replaces the first tray. */
   tray(initial: TrayOptions): TrayHandle;
   /** Options of the tray currently shown. */
   options(): TrayOptions | undefined;
   /** `onSelect` of the menu item with this id. */
   menuHandler(id: string): (() => void) | undefined;
+  /** Runs the handlers a tray event asks for through `run`; true when one ran. */
+  dispatch(event: Extract<NativeEvent, { type: "tray" | "trayMenu" | "trayAvailability" }>, run: (name: string, handler: (() => void) | undefined) => boolean): boolean;
 }
 
 type TrayCommand = Extract<NativeCommand, { type: "tray" }>;
@@ -39,6 +62,8 @@ export function createTrayController(appIcon: () => string | undefined, send: (c
   let iconPath: string | undefined;
   let iconData: string | undefined;
   let iconSent = false;
+  // The native tray outlives a replaced TrayHandle (it is updated in place), so this does too.
+  let availability: TrayAvailability | undefined;
   const itemHandlers = new Map<string, () => void>();
 
   function apply(): void {
@@ -75,6 +100,9 @@ export function createTrayController(appIcon: () => string | undefined, send: (c
       options = { ...initial };
       iconSent = false;
       apply();
+      // A replacing tray has no new answer coming: tell it the current one.
+      const known = availability, onAvailability = initial.onAvailability;
+      if (known && onAvailability) queueMicrotask(() => { if (owner === token) onAvailability(known); });
       return {
         update(next) {
           if (owner !== token) return;
@@ -87,12 +115,27 @@ export function createTrayController(appIcon: () => string | undefined, send: (c
           options = undefined;
           iconPath = undefined;
           iconData = undefined;
+          availability = undefined;
           itemHandlers.clear();
           send({ type: "tray", tray: null });
         },
+        availability: () => owner === token ? availability : undefined,
       };
     },
     options: () => options,
     menuHandler: id => itemHandlers.get(id),
+    dispatch(event, run) {
+      if (event.type === "tray") return run(event.action === "click" ? "trayClick" : "trayDoubleClick", event.action === "click" ? options?.onClick : options?.onDoubleClick);
+      if (event.type === "trayAvailability") {
+        const next: TrayAvailability = { supported: event.supported, available: event.available, ...(event.reason ? { reason: event.reason } : {}) };
+        if (!options || (availability && JSON.stringify(availability) === JSON.stringify(next))) return false;
+        availability = next;
+        const onAvailability = options.onAvailability;
+        return run("trayAvailability", onAvailability && (() => onAvailability(next)));
+      }
+      const onMenu = options?.onMenu;
+      const ran = run("trayMenu", itemHandlers.get(event.id));
+      return (onMenu ? run("trayMenu", () => onMenu(event.id)) : false) || ran;
+    },
   };
 }

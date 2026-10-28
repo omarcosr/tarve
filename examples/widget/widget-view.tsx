@@ -12,6 +12,8 @@ export interface WidgetState {
   memory: Meter;
   /** Keep the widget under every window (on), or let it come forward like any window (off). */
   behind: boolean;
+  /** The tray icon can be seen, so ✕ hides the widget there; without one (or before the system answers) ✕ closes it. */
+  tray?: boolean;
 }
 
 const colors = darkTheme.colors;
@@ -66,7 +68,7 @@ export function WidgetView({ state, onToggleBehind, onHide }: {
           </Column>
           <Row style={{ gap: 4 }}>
             <IconButton id="behind" icon={behindIcon} label="Always behind windows" active={state.behind} onClick={onToggleBehind} />
-            <IconButton id="hide" icon={closeIcon} label="Hide widget" onClick={onHide} />
+            <IconButton id="hide" icon={closeIcon} label={state.tray ? "Hide widget" : "Close widget"} onClick={onHide} />
           </Row>
         </Row>
         <Column style={{ gap: 6 }}>

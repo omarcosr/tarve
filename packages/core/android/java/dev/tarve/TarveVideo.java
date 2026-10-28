@@ -83,13 +83,79 @@ public final class TarveVideo {
         });
         player.setOnErrorListener(new MediaPlayer.OnErrorListener() {
             @Override public boolean onError(MediaPlayer mp, int what, int extra) {
-                nativeEvent(TarveVideo.this.handle, "error", what);
+                nativeEvent(TarveVideo.this.handle, "error:" + describe(what, extra, remote), what);
                 return true;
             }
         });
-        if (src.contains("://")) player.setDataSource(context, Uri.parse(src));
-        else player.setDataSource(src);
-        player.prepareAsync();
+        url = src;
+        remote = src.startsWith("http://") || src.startsWith("https://");
+        if (!remote) {
+            if (src.contains("://")) player.setDataSource(context, Uri.parse(src));
+            else player.setDataSource(src);
+            player.prepareAsync();
+            return;
+        }
+        // Off the caller's thread: the redirects are followed first (`filename`, and an HTTP
+        // error is told as one; MediaPlayer reports a 404 as an unknown system error).
+        handler.post(new Runnable() {
+            @Override public void run() {
+                if (released) return;
+                String failure = null;
+                try {
+                    failure = follow(src);
+                    if (failure == null) {
+                        player.setDataSource(url);
+                        player.prepareAsync();
+                    }
+                } catch (Exception error) {
+                    failure = "network error: " + error.getMessage();
+                }
+                if (failure != null && !released) nativeEvent(TarveVideo.this.handle, "error:" + failure, 0);
+            }
+        });
+    }
+
+    private volatile String url;
+    private final boolean remote;
+
+    /** The URL the server finally serves (redirects followed), for the native side's `filename`. */
+    public String url() { return url; }
+
+    /** Follows `src`'s redirects into `url`; the failure (an HTTP status) or null. */
+    private String follow(String src) throws java.io.IOException {
+        java.net.URL at = new java.net.URL(src);
+        for (int hop = 0; hop < 10; hop++) {
+            java.net.HttpURLConnection connection = (java.net.HttpURLConnection) at.openConnection();
+            try {
+                connection.setInstanceFollowRedirects(false);
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(15000);
+                connection.setRequestProperty("Range", "bytes=0-0");
+                int status = connection.getResponseCode();
+                String location = connection.getHeaderField("Location");
+                if (status >= 300 && status < 400 && location != null) {
+                    at = new java.net.URL(at, location);
+                    continue;
+                }
+                url = at.toString();
+                return status >= 400 && status != 416 ? "HTTP " + status : null;
+            } finally {
+                connection.disconnect();
+            }
+        }
+        return "network error: too many redirects";
+    }
+
+    /** MediaPlayer's (what, extra) as a reason the native side sorts into `MediaError.code`. */
+    private static String describe(int what, int extra, boolean remote) {
+        String codes = " (MediaPlayer error " + what + ", " + extra + ")";
+        if (what == MediaPlayer.MEDIA_ERROR_NOT_VALID_FOR_PROGRESSIVE_PLAYBACK) return "unsupported for progressive playback" + codes;
+        switch (extra) {
+            case MediaPlayer.MEDIA_ERROR_IO: return (remote ? "network error" : "the file could not be read") + codes;
+            case MediaPlayer.MEDIA_ERROR_TIMED_OUT: return "timed out" + codes;
+            case MediaPlayer.MEDIA_ERROR_MALFORMED: case MediaPlayer.MEDIA_ERROR_UNSUPPORTED: return "unsupported or damaged media" + codes;
+            default: return "the video could not be played" + codes;
+        }
     }
 
     private void onReady() {
@@ -137,18 +203,19 @@ public final class TarveVideo {
             if (gpu != null) gpu.release();
             gpu = null;
             player.setSurface(null);
-            nativeEvent(handle, "error", -1);
+            nativeEvent(handle, "error:no readable picture path on this device", -1);
         }
     }
 
     public void play() { wantPlay = true; if (prepared) start(); }
     /** playbackRate, at the sound's own pitch. Applied while playing: setting it on a paused player would start it. */
     public void rate(float value) { rate = value; if (prepared && player.isPlaying()) applyRate(); }
-    private float rate = 1f;
-    private void start() { player.start(); if (rate != 1f) applyRate(); }
+    /** Asked for, and what the player runs at (kept while paused, so a change then waits for start). */
+    private float rate = 1f, applied = 1f;
+    private void start() { player.start(); if (rate != applied) applyRate(); }
     private void applyRate() {
         if (Build.VERSION.SDK_INT < 23) return;
-        try { player.setPlaybackParams(player.getPlaybackParams().setSpeed(rate)); }
+        try { player.setPlaybackParams(player.getPlaybackParams().setSpeed(rate)); applied = rate; }
         catch (RuntimeException error) { android.util.Log.w("tarve", "video: playback rate " + rate + " refused", error); }
     }
     public void pause() { wantPlay = false; if (prepared) player.pause(); }

@@ -1,12 +1,14 @@
 // Drives a real tray icon end to end: Windows posts the shell callback messages
 // and keyboard input to the native popup menu; Linux calls the StatusNotifierItem
 // and dbusmenu methods over the session bus, exactly as a panel host does.
-// Linux: run under `dbus-run-session` with TARVE_TRAY_ASSUME_SNI=1 when no tray host is present.
-import { Text, Window, createApp } from "@tarve/core";
+// Linux: run under `dbus-run-session`. Without a tray host the item still goes on the bus
+// and the tray reports `available: false` (checked below), never an error.
+import { Text, Window, createApp, type TrayAvailability } from "@tarve/core";
 import { strict as assert } from "node:assert";
 
 const errors: string[] = [];
 const seen: string[] = [];
+const availability: TrayAvailability[] = [];
 const app = createApp(() => <Window title="tray smoke"><Text>tray</Text></Window>, {
   headless: true,
   onError: event => errors.push(event.error.message),
@@ -20,6 +22,7 @@ const tray = app.tray({
   onClick: () => seen.push("click"),
   onDoubleClick: () => seen.push("secondary"),
   onMenu: id => seen.push(`menu:${id}`),
+  onAvailability: state => availability.push(state),
   menu: [
     { id: "open", label: "Open" },
     { type: "separator" },
@@ -83,6 +86,15 @@ if (process.platform === "win32") {
   await Bun.sleep(200);
   assert.ok(user32.symbols.FindWindowW(wide("#32768"), null) === null, "Escape dismisses the menu");
 } else if (process.platform === "linux") {
+  // A bare session bus has no tray host: the tray says so, shows once one starts and
+  // says so again when it stops (scripts/fake-sni-watcher.py plays the host).
+  await until("availability", () => availability.length > 0);
+  if (!availability[0]!.available) {
+    const watcher = Bun.spawn(["python3", new URL("fake-sni-watcher.py", import.meta.url).pathname], { stdout: "inherit", stderr: "inherit" });
+    await until("a tray host starting", () => availability.at(-1)!.available);
+    watcher.kill();
+    await until("the tray host stopping", () => !availability.at(-1)!.available);
+  }
   const gdbus = async (...args: string[]) => {
     const at = args.indexOf("--method") + 2;
     // "--" keeps negative method arguments such as -1 from parsing as options.
@@ -132,4 +144,5 @@ await Bun.sleep(150);
 app.close();
 await app.closed;
 assert.deepEqual(errors, []);
-console.log(`tray smoke OK (${process.platform}): ${seen.join(", ")}`);
+assert.ok(availability.length > 0, "the tray reported whether it can be seen");
+console.log(`tray smoke OK (${process.platform}): ${seen.join(", ")}; availability ${JSON.stringify(availability)}`);

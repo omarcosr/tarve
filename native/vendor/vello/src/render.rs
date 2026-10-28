@@ -83,6 +83,7 @@ impl CapturedBuffers {
 }
 
 #[cfg(feature = "wgpu")]
+#[allow(dead_code, reason = "Tarve renders through its own pipeline")]
 pub(crate) fn render_full(
     scene: &Scene,
     resolver: &mut Resolver,
@@ -98,6 +99,7 @@ pub(crate) fn render_full(
 ///
 /// This function is not recommended when the scene can be complex, as it does not
 /// implement robust dynamic memory.
+#[allow(dead_code, reason = "Tarve renders through its own pipeline")]
 pub(crate) fn render_encoding_full(
     encoding: &Encoding,
     resolver: &mut Resolver,

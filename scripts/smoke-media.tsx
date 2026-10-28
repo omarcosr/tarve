@@ -4,10 +4,16 @@
 // real-time clock, so it runs on CI machines without a sound card.
 import { createTestRenderer, Window } from "@tarve/core";
 import { strict as assert } from "node:assert";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-process.env.TARVE_AUDIO ??= "silent";
+// Setting process.env does not reach the native library's getenv (Bun keeps its own copy):
+// a child process gets TARVE_AUDIO in its real environment.
+if (process.env.TARVE_AUDIO === undefined) {
+  const run = spawnSync(process.execPath, process.argv.slice(1), { stdio: "inherit", env: { ...process.env, TARVE_AUDIO: "silent" } });
+  process.exit(run.status ?? 1);
+}
 const work = join(import.meta.dirname, "..", "work");
 mkdirSync(work, { recursive: true });
 const file = join(work, "smoke-tone.wav");
@@ -63,5 +69,14 @@ await until("seeked", () => events.includes("seeked"));
 renderer.app.media("tone").pause();
 await until("pause", () => events.includes("pause"));
 assert.ok(lastTime < seconds, "time stays inside the clip");
+// playbackRate 2 plays the clip in half the time.
+const endedBefore = events.filter(e => e === "ended").length;
+renderer.app.media("tone").setPlaybackRate(2);
+renderer.app.media("tone").seek(0);
+renderer.app.media("tone").play();
+const fastStart = Date.now();
+await until("ended at rate 2", () => events.filter(e => e === "ended").length > endedBefore);
+const fast = (Date.now() - fastStart) / 1000;
+assert.ok(fast > seconds / 2 - 0.3 && fast < seconds / 2 + 0.5, `rate 2 plays in half the time (${fast.toFixed(2)}s)`);
 renderer.app.close();
 console.log(`[tarve smoke:media] PASS (${events.length} events)`);

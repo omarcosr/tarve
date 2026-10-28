@@ -81,7 +81,7 @@ export function androidPermissionName(name: string): string {
  * package.json `tarve.android` (and `tarve.apps["<entry>"].android` for one entry of a
  * multi-app package): `{ "permissions": ["CAMERA", "RECORD_AUDIO"], "notificationIcon": "bell.png" }`.
  */
-export function androidConfig(entrypoint: string): { permissions: string[]; notificationIcon?: string } {
+export function androidConfig(entrypoint: string): { permissions: string[]; notificationIcon?: string; cleartextTraffic?: boolean } {
   const entry = resolve(entrypoint);
   for (let directory = dirname(entry); ; directory = dirname(directory)) {
     const path = join(directory, "package.json");
@@ -90,9 +90,14 @@ export function androidConfig(entrypoint: string): { permissions: string[]; noti
       const key = relative(directory, entry).replaceAll("\\", "/");
       const permissions: string[] = [];
       let notificationIcon: string | undefined;
+      let cleartextTraffic: boolean | undefined;
       for (const [where, android] of [["tarve.android", tarve?.android], [`tarve.apps["${key}"].android`, (tarve?.apps?.[key] ?? tarve?.apps?.["./" + key])?.android]] as const) {
         if (android === undefined) continue;
-        const { permissions: list, notificationIcon: icon } = android as { permissions?: unknown; notificationIcon?: unknown };
+        const { permissions: list, notificationIcon: icon, cleartextTraffic: cleartext } = android as { permissions?: unknown; notificationIcon?: unknown; cleartextTraffic?: unknown };
+        if (cleartext !== undefined) {
+          if (typeof cleartext !== "boolean") throw new TypeError(`package.json ${where}.cleartextTraffic must be a boolean`);
+          cleartextTraffic = cleartext;
+        }
         if (list !== undefined && (!Array.isArray(list) || list.some(item => typeof item !== "string"))) throw new TypeError(`package.json ${where}.permissions must be an array of strings`);
         permissions.push(...(list as string[] | undefined) ?? []);
         if (icon !== undefined) {
@@ -101,7 +106,7 @@ export function androidConfig(entrypoint: string): { permissions: string[]; noti
           if (!existsSync(notificationIcon)) throw new Error(`Notification icon not found: ${notificationIcon}`);
         }
       }
-      return { permissions, ...notificationIcon ? { notificationIcon } : {} };
+      return { permissions, ...notificationIcon ? { notificationIcon } : {}, ...cleartextTraffic ? { cleartextTraffic } : {} };
     }
     if (dirname(directory) === directory) return { permissions: [] };
   }
@@ -125,7 +130,7 @@ export function abisOf(target: AndroidTarget = "android"): AndroidAbi[] {
   return target === "android-arm64" ? ["arm64-v8a"] : target === "android-x64" ? ["x86_64"] : [...ANDROID_ABIS];
 }
 
-export function androidManifest(options: { packageName: string; label: string; versionCode: number; versionName: string; icon: boolean; permissions?: readonly string[]; bundle?: boolean; extractNativeLibs?: boolean; protocols?: readonly string[]; fileTypes?: readonly FileTypeAssociation[] }): string {
+export function androidManifest(options: { packageName: string; label: string; versionCode: number; versionName: string; icon: boolean; permissions?: readonly string[]; cleartextTraffic?: boolean; bundle?: boolean; extractNativeLibs?: boolean; protocols?: readonly string[]; fileTypes?: readonly FileTypeAssociation[] }): string {
   const permissions = [...new Set([...DEFAULT_ANDROID_PERMISSIONS, ...(options.permissions ?? []).map(androidPermissionName)])];
   return `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -137,7 +142,8 @@ ${permissions.map(name => `  <uses-permission android:name="${escapeXml(name)}"/
   <application
       android:label="${escapeXml(options.label)}"${options.icon ? `
       android:icon="@mipmap/ic_launcher"` : ""}
-      android:hasCode="true"${options.bundle ? "" : `
+      android:hasCode="true"${options.cleartextTraffic ? `
+      android:usesCleartextTraffic="true"` : ""}${options.bundle ? "" : `
       android:extractNativeLibs="${options.extractNativeLibs ? "true" : "false"}"`}>
     <activity
         android:name="dev.tarve.TarveActivity"
@@ -491,6 +497,7 @@ export async function buildAndroid(options: AndroidBuildOptions): Promise<string
       versionName: metadata.version ?? "1.0",
       icon: !!images?.png,
       permissions,
+      cleartextTraffic: config.cleartextTraffic,
       bundle,
       extractNativeLibs: bun,
       ...(({ protocols, fileTypes }) => ({ protocols, fileTypes }))(resolveAppAssociations(options.entrypoint, { protocols: options.protocols })),

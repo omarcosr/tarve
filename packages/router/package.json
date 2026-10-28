@@ -1,6 +1,6 @@
 {
   "name": "@tarve/router",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Stack and tab navigation for Tarve apps: typed path params, <RouterView>, <Link>, back keys and native screen transitions",
   "license": "Apache-2.0",
   "keywords": [
@@ -34,7 +34,7 @@
     "README.md"
   ],
   "peerDependencies": {
-    "@tarve/core": "^0.8.0"
+    "@tarve/core": "^0.9.0"
   },
   "engines": {
     "bun": ">=1.4.0",

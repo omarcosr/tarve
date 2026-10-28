@@ -39,7 +39,7 @@ export type { OpenEvent, OpenFilesListener, OpenUrlListener } from "./app/open-r
 /** The command-line automation (`--tarve-script`, `--tarve-snapshot`) drives the first app only. */
 let automationClaimed = false;
 
-export type { TrayMenuItem, TrayOptions, TrayHandle } from "./app/tray";
+export type { TrayAvailability, TrayMenuItem, TrayOptions, TrayHandle } from "./app/tray";
 export type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, NotifyOptions, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle } from "./app/types";
 import type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, NotifyOptions, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle } from "./app/types";
 const DEV_OVERLAY_SOURCES = new Set<AppErrorSource>(["render", "event-handler", "listener", "hotkey"]);
@@ -491,19 +491,14 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       }
     }
 
-    if (!ended && (event.type === "tray" || event.type === "trayMenu" || event.type === "notificationClick")) {
+    if (!ended && (event.type === "tray" || event.type === "trayMenu" || event.type === "trayAvailability" || event.type === "notificationClick")) {
       const run = (name: string, handler: (() => void) | undefined): boolean => {
         if (!handler) return false;
         try { handler(); return true; } catch (error) { reportError(error, { source: "event-handler", event: name }); return false; }
       };
-      let ran = false;
-      const tray = trays.options();
-      if (event.type === "tray") ran = run(event.action === "click" ? "trayClick" : "trayDoubleClick", event.action === "click" ? tray?.onClick : tray?.onDoubleClick);
-      else if (event.type === "trayMenu") {
-        ran = run("trayMenu", trays.menuHandler(event.id));
-        const onMenu = tray?.onMenu;
-        if (onMenu) ran = run("trayMenu", () => onMenu(event.id)) || ran;
-      } else {
+      let ran: boolean;
+      if (event.type !== "notificationClick") ran = trays.dispatch(event, run);
+      else {
         const handler = event.id === undefined ? lastNotificationClick : notificationClicks.get(event.id);
         if (event.id !== undefined) notificationClicks.delete(event.id);
         ran = run("notificationClick", handler);

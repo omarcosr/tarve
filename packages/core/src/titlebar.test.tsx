@@ -47,3 +47,18 @@ describe("TitleBar", () => {
     expect(order.indexOf("action")).toBeLessThan(order.indexOf(close.id));
   });
 });
+
+test("window control hovers are a wash, not the glyph colour; close turns its glyph white", () => {
+  const tree = compileTree(<Window><TitleBar title="x" /></Window>);
+  const nodes = [...tree.nodes.values()] as any[];
+  const buttons = nodes.filter(node => node.windowAction);
+  const glyphs = nodes.filter(node => node.kind === "svg");
+  expect(buttons).toHaveLength(3);
+  for (const [index, button] of buttons.entries()) {
+    expect(button.style.hover.background).not.toBe(glyphs[index].style.foreground);
+  }
+  expect(buttons[0].style.hover.background).toMatch(/^#[0-9a-f]{6}1f$/);
+  expect(glyphs[2].style.groupHover).toEqual({ foreground: "#ffffff" });
+  const rgba = [...compileTree(<Window><TitleBar title="x" style={{ foreground: "rgba(255, 255, 255, 0.9)" }} /></Window>).nodes.values()] as any[];
+  expect(rgba.find(node => node.windowAction === "minimize").style.hover.background).toBe("#ffffff1f");
+});

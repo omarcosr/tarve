@@ -1,5 +1,50 @@
 use super::*;
 
+impl Player {
+    /// A string the Java side returns (`audioTracks`, `textTracks`, `url`); None when null.
+    pub(super) fn string(&self, method: &str) -> Option<String> {
+        crate::android::with_env(|env, _| {
+            let value = env
+                .call_method(self.object.as_obj(), method, "()Ljava/lang/String;", &[])?
+                .l()?;
+            if value.is_null() {
+                return Ok(None);
+            }
+            let text: String = env.get_string(&JString::from(value))?.into();
+            Ok(Some(text))
+        })
+        .ok()
+        .flatten()
+    }
+}
+
+/// `filename`, as `<audio>`'s: the last path segment of the URL (percent-decoded, without
+/// the query) or of a file path.
+pub(super) fn filename(src: &str) -> String {
+    if !src.contains("://") {
+        return src.rsplit('/').next().unwrap_or_default().to_string();
+    }
+    let path = src.split(['?', '#']).next().unwrap_or_default();
+    let name = path.rsplit('/').next().unwrap_or_default().as_bytes();
+    let mut out = Vec::with_capacity(name.len());
+    let mut at = 0;
+    while at < name.len() {
+        let hex = name
+            .get(at + 1..at + 3)
+            .and_then(|hex| u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok());
+        if name[at] == b'%'
+            && let Some(byte) = hex
+        {
+            out.push(byte);
+            at += 3;
+        } else {
+            out.push(name[at]);
+            at += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 pub(super) extern "system" fn native_event(
     mut env: JNIEnv,
     _: JClass,
@@ -122,7 +167,7 @@ pub(super) fn copy_rgba(
     for y in 0..height {
         out.extend_from_slice(&source[y * row..y * row + line]);
     }
-    for pixel in out.chunks_exact_mut(4) {
+    for pixel in out.as_chunks_mut::<4>().0 {
         pixel[3] = 255;
     }
     Some((width as u32, height as u32, out))

@@ -72,11 +72,8 @@ pub(super) fn run(app: &AndroidApp) -> Result<(), String> {
     let mut seen = 0_u64;
     let mut module_settled = false;
     let mut closed_at: Option<Instant> = None;
-    loop {
-        run_jobs(&runtime);
-        deliver_fetches(&context);
-        run_jobs(&runtime);
-        let next = context.with(|ctx| {
+    let tick = |context: &Context| {
+        context.with(|ctx| {
             let tick = ctx.globals().get::<_, Function>("__tarveTick").ok()?;
             match tick.call::<_, f64>(()) {
                 Ok(ms) if ms >= 0.0 => Some(ms),
@@ -86,8 +83,19 @@ pub(super) fn run(app: &AndroidApp) -> Result<(), String> {
                     None
                 }
             }
-        });
+        })
+    };
+    loop {
         run_jobs(&runtime);
+        deliver_fetches(&context);
+        run_jobs(&runtime);
+        let mut next = tick(&context);
+        // Timers ran jobs (an `await` resuming); a timer one of them set is due later and
+        // must be in the wait below, or the loop sleeps until the next native event.
+        while runtime.is_job_pending() {
+            run_jobs(&runtime);
+            next = tick(&context);
+        }
         if !module_settled {
             module_settled = context.with(|ctx| {
                 let Ok(promise) = module.clone().restore(&ctx) else {

@@ -85,7 +85,7 @@ Estado: deep links, compartilhamento, localização e biometria foram implementa
   - Biometria: sem bloqueio de tela → `not-enrolled`. Com PIN (`locksettings set-pin`) e o PIN digitado no prompt → `{ supported: true, success: true }`. O PIN e o mock de localização foram removidos depois.
 
 ## Limitações
-- Windows: share, Geolocator e Hello **compilam e passam no clippy, mas não foram exercitados interativamente** (abririam UI do sistema na máquina). Em apps não empacotados, a localização depende de "Permitir que apps da área de trabalho acessem sua localização".
+- Windows: share, Geolocator e Hello **compilam e passam no clippy, mas não foram exercitados interativamente** (abririam UI do sistema na máquina). Em apps não empacotados, a localização depende de "Permitir que apps da área de trabalho acessem sua localização". O teste manual desses serviços reais é `bun scripts/smoke-device-real.tsx`; testes e CI usam o provedor falso nativo `TARVE_DEVICE=fake` (`native/src/device/fake.rs`, ver [runtimes-parity.md](runtimes-parity.md#rodada-3-provedor-falso-de-device-apis)).
 - `share` resolve quando a folha aparece. Ele não informa se o usuário concluiu nem qual app escolheu, nem no Android nem no Windows.
 - O caminho `restart_process` (activity recriada num processo já usado) reabre pelo intent do launcher, e um link que chegue exatamente nesse caso se perde. O caso comum (processo novo, ou app vivo via `onNewIntent`) funciona.
 - Filtros de arquivo sem `mime` usam `pathPattern`, que só casa quando o URI termina no nome do arquivo. Muitos gerenciadores mandam `application/octet-stream` sem nome no caminho. Declarar `mime` é o recomendado.

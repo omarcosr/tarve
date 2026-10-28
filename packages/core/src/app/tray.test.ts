@@ -65,6 +65,28 @@ describe("createTrayController", () => {
     expect(trays.menuHandler("anything")).toBeUndefined();
   });
 
+  test("availability is a state: onAvailability on each change, kept for a replacing tray, cleared by remove", async () => {
+    const { trays } = harness();
+    const seen: unknown[] = [];
+    const run = (_name: string, handler: (() => void) | undefined) => { handler?.(); return !!handler; };
+    const first = trays.tray({ onAvailability: state => seen.push(state) });
+    expect(first.availability()).toBeUndefined();
+    const missing = { type: "trayAvailability", supported: true, available: false, reason: "no system tray host is running" } as const;
+    expect(trays.dispatch(missing, run)).toBe(true);
+    expect(trays.dispatch(missing, run)).toBe(false);
+    expect(first.availability()).toEqual({ supported: true, available: false, reason: "no system tray host is running" });
+    expect(trays.dispatch({ type: "trayAvailability", supported: true, available: true }, run)).toBe(true);
+    expect(seen).toEqual([{ supported: true, available: false, reason: "no system tray host is running" }, { supported: true, available: true }]);
+    const replaced: unknown[] = [];
+    const second = trays.tray({ onAvailability: state => replaced.push(state) });
+    await Promise.resolve();
+    expect(replaced).toEqual([{ supported: true, available: true }]);
+    expect(first.availability()).toBeUndefined();
+    second.remove();
+    expect(second.availability()).toBeUndefined();
+    expect(trays.tray({}).availability()).toBeUndefined();
+  });
+
   test("rejects menu items without an id or with a duplicate id", () => {
     const { trays } = harness();
     expect(() => trays.tray({ menu: [{ id: "", label: "x" }] })).toThrow(TypeError);

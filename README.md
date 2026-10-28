@@ -222,6 +222,8 @@ bunx tarve build app.tsx --target android --runtime bun           # dist/App.apk
 { "tarve": { "android": { "permissions": ["CAMERA", "RECORD_AUDIO", "ACCESS_FINE_LOCATION"] } } }
 ```
 
+Android blocks plain `http://` by default (media players included). An app that must reach an `http://` server, a media server on the LAN for instance, sets `"cleartextTraffic": true` in the same `tarve.android` object.
+
 Dangerous permissions also need the user's consent at run time:
 
 ```ts

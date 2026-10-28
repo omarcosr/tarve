@@ -1,6 +1,6 @@
 {
   "name": "@tarve/test",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Testing Library-style queries, events and image snapshots for Tarve apps, rendered headless on any platform",
   "license": "Apache-2.0",
   "keywords": [
@@ -38,8 +38,8 @@
     "smoke:runtimes": "bun ../../scripts/smoke-headless-runtimes.ts"
   },
   "peerDependencies": {
-    "@tarve/core": "^0.8.0",
-    "@tarve/headless": "^0.8.0"
+    "@tarve/core": "^0.9.0",
+    "@tarve/headless": "^0.9.0"
   },
   "engines": {
     "bun": ">=1.4.0",

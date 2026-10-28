@@ -6,12 +6,13 @@
 //! thread, so winit's message pump already dispatches its messages.
 //!
 //! Linux publishes a StatusNotifierItem with a dbusmenu over D-Bus (`ksni`, pure
-//! Rust zbus, already in the tree for AT-SPI). GNOME shows SNI icons only with
-//! the AppIndicator extension; KDE, XFCE, Cinnamon, MATE, Budgie and most
+//! Rust zbus, already in the tree for AT-SPI; tray/linux.rs). GNOME shows SNI icons
+//! only with the AppIndicator extension; KDE, XFCE, Cinnamon, MATE, Budgie and most
 //! wlroots bars show them natively.
 //!
 //! Tray input on every platform is forwarded to the runtime through the
-//! event-loop proxy as `Command::TrayEvent`.
+//! event-loop proxy as `Command::TrayEvent`. Whether the icon can be seen is the
+//! `trayAvailability` event (no tray host, no tray on the platform), never an error.
 
 use crate::protocol::{Command, TrayMenuItem, TrayOptions};
 use serde_json::{Value, json};
@@ -19,6 +20,17 @@ use winit::event_loop::EventLoopProxy;
 
 fn send(proxy: &EventLoopProxy<Command>, event: Value) {
     let _ = proxy.send_event(Command::TrayEvent { event });
+}
+
+/// The `trayAvailability` event: the icon can be seen, or why not.
+pub fn availability(supported: bool, reason: Option<String>) -> Value {
+    let available = supported && reason.is_none();
+    let mut event =
+        json!({"type":"trayAvailability", "supported":supported, "available":available});
+    if let Some(reason) = reason {
+        event["reason"] = json!(reason);
+    }
+    event
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -95,6 +107,8 @@ mod windows_impl {
         owns_icon: bool,
         tooltip: String,
         added: bool,
+        /// Whether the last publish showed the icon (the last `trayAvailability` sent).
+        shown: Option<bool>,
         proxy: EventLoopProxy<Command>,
     }
 
@@ -253,6 +267,7 @@ mod windows_impl {
                 owns_icon: false,
                 tooltip: String::new(),
                 added: false,
+                shown: None,
                 proxy,
             }
         }
@@ -322,20 +337,23 @@ mod windows_impl {
             self.owns_icon = false;
         }
 
-        pub fn apply(&mut self, options: Option<TrayOptions>) -> Result<(), String> {
+        /// Shows, updates (`Some`) or removes (`None`) the icon; returns the
+        /// `trayAvailability` event when whether it shows changed.
+        pub fn apply(&mut self, options: Option<TrayOptions>) -> Result<Option<Value>, String> {
             let Some(options) = options else {
                 if self.added {
                     let data = self.data(0);
                     unsafe { Shell_NotifyIconW(NIM_DELETE, &data) };
                     self.added = false;
                 }
+                self.shown = None;
                 self.release_icon();
                 SHARED.with(|s| {
                     if let Some(s) = s.borrow_mut().as_mut() {
                         s.visible = false
                     }
                 });
-                return Ok(());
+                return Ok(None);
             };
             self.ensure_window()?;
             if options.icon_data.is_some() || self.icon.is_null() {
@@ -357,13 +375,14 @@ mod windows_impl {
                     s.visible = true;
                 }
             });
-            self.publish(false)
+            Ok(self.publish(false))
         }
 
-        /// Adds or refreshes the shell icon. `force_add` re-adds after Explorer restarts.
-        pub fn publish(&mut self, force_add: bool) -> Result<(), String> {
+        /// Adds or refreshes the shell icon (`force_add` re-adds after Explorer restarts);
+        /// returns the `trayAvailability` event when whether it shows changed.
+        pub fn publish(&mut self, force_add: bool) -> Option<Value> {
             if self.hwnd.is_null() || self.icon.is_null() {
-                return Ok(());
+                return None;
             }
             let mut data = self.data(NIF_MESSAGE | NIF_ICON | NIF_TIP);
             data.uCallbackMessage = CALLBACK;
@@ -371,11 +390,15 @@ mod windows_impl {
             copy_into(&mut data.szTip, &self.tooltip);
             let add = force_add || !self.added;
             let ok = unsafe { Shell_NotifyIconW(if add { NIM_ADD } else { NIM_MODIFY }, &data) };
-            if ok == 0 {
-                return Err("Shell_NotifyIconW failed".into());
+            // It fails while no taskbar runs (Explorer not started or restarting); the
+            // TaskbarCreated broadcast publishes again (trayRecreate).
+            self.added = ok != 0;
+            if self.shown == Some(self.added) {
+                return None;
             }
-            self.added = true;
-            Ok(())
+            self.shown = Some(self.added);
+            let reason = "the taskbar notification area is not running (Explorer)";
+            Some(availability(true, (!self.added).then(|| reason.into())))
         }
 
         pub fn notify(&mut self, title: &str, body: &str) -> Result<(), String> {
@@ -405,7 +428,9 @@ mod windows_impl {
 }
 
 #[cfg(target_os = "linux")]
-pub use linux_impl::Tray;
+mod linux;
+#[cfg(target_os = "linux")]
+pub use linux::Tray;
 
 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
 pub struct Tray;
@@ -415,195 +440,14 @@ impl Tray {
     pub fn new(_proxy: EventLoopProxy<Command>) -> Self {
         Self
     }
-    pub fn apply(&mut self, options: Option<TrayOptions>) -> Result<(), String> {
-        match options {
-            _ if options.is_none() || cfg!(target_os = "android") => Ok(()),
-            _ => Err("the system tray is not supported on this platform".into()),
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
-mod linux_impl {
-    use super::*;
-    use ksni::blocking::TrayMethods as _;
-    use ksni::menu::{CheckmarkItem, StandardItem, SubMenu};
-
-    struct Sni {
-        id: String,
-        proxy: EventLoopProxy<Command>,
-        tooltip: String,
-        icon: Vec<ksni::Icon>,
-        menu: Vec<TrayMenuItem>,
-    }
-
-    fn convert(items: &[TrayMenuItem]) -> Vec<ksni::MenuItem<Sni>> {
-        items
-            .iter()
-            .map(|item| {
-                let label = item.label.clone().unwrap_or_default();
-                let enabled = !item.disabled;
-                if item.separator {
-                    return ksni::MenuItem::Separator;
-                }
-                if !item.items.is_empty() {
-                    return SubMenu {
-                        label,
-                        enabled,
-                        submenu: convert(&item.items),
-                        ..Default::default()
-                    }
-                    .into();
-                }
-                let id = item.id.clone().unwrap_or_default();
-                let activate = Box::new(move |tray: &mut Sni| {
-                    if !id.is_empty() {
-                        send(&tray.proxy, json!({"type":"trayMenu", "id":id}));
-                    }
-                });
-                match item.checked {
-                    Some(checked) => CheckmarkItem {
-                        label,
-                        enabled,
-                        checked,
-                        activate,
-                        ..Default::default()
-                    }
-                    .into(),
-                    None => StandardItem {
-                        label,
-                        enabled,
-                        activate,
-                        ..Default::default()
-                    }
-                    .into(),
-                }
-            })
-            .collect()
-    }
-
-    impl ksni::Tray for Sni {
-        fn id(&self) -> String {
-            self.id.clone()
-        }
-        fn title(&self) -> String {
-            self.tooltip.clone()
-        }
-        fn icon_name(&self) -> String {
-            if self.icon.is_empty() {
-                "application-x-executable".into()
-            } else {
-                String::new()
-            }
-        }
-        fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-            self.icon.clone()
-        }
-        fn tool_tip(&self) -> ksni::ToolTip {
-            ksni::ToolTip {
-                title: self.tooltip.clone(),
-                ..Default::default()
-            }
-        }
-        fn activate(&mut self, _x: i32, _y: i32) {
-            send(&self.proxy, json!({"type":"tray", "action":"click"}));
-        }
-        fn secondary_activate(&mut self, _x: i32, _y: i32) {
-            send(&self.proxy, json!({"type":"tray", "action":"doubleClick"}));
-        }
-        fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
-            convert(&self.menu)
-        }
-        fn watcher_offline(&self, _reason: ksni::OfflineReason) -> bool {
-            // Keep the item alive: the host comes back after a shell restart.
-            true
-        }
-    }
-
-    /// SNI hosts scale pixmaps themselves; offer the common panel sizes.
-    fn pixmaps(image: &image::RgbaImage) -> Vec<ksni::Icon> {
-        [16u32, 22, 24, 32, 48, 64]
-            .into_iter()
-            .map(|size| {
-                let mut data = image::imageops::resize(
-                    image,
-                    size,
-                    size,
-                    image::imageops::FilterType::Lanczos3,
-                )
-                .into_raw();
-                for pixel in data.as_chunks_mut::<4>().0 {
-                    pixel.rotate_right(1);
-                }
-                ksni::Icon {
-                    width: size as i32,
-                    height: size as i32,
-                    data,
-                }
-            })
-            .collect()
-    }
-
-    pub struct Tray {
-        proxy: EventLoopProxy<Command>,
-        handle: Option<ksni::blocking::Handle<Sni>>,
-        icon: Vec<ksni::Icon>,
-    }
-
-    impl Tray {
-        pub fn new(proxy: EventLoopProxy<Command>) -> Self {
-            Self {
-                proxy,
-                handle: None,
-                icon: vec![],
-            }
-        }
-
-        pub fn apply(&mut self, options: Option<TrayOptions>) -> Result<(), String> {
-            let Some(options) = options else {
-                if let Some(handle) = self.handle.take() {
-                    handle.shutdown().wait();
-                }
-                return Ok(());
-            };
-            if let Some(data) = options.icon_data.as_deref().filter(|data| !data.is_empty()) {
-                self.icon = pixmaps(&decode_icon(data)?);
-            }
-            let tooltip = options.tooltip.unwrap_or_default();
-            let menu = options.menu;
-            if let Some(handle) = self.handle.as_ref().filter(|handle| !handle.is_closed()) {
-                let icon = self.icon.clone();
-                handle.update(move |tray| {
-                    tray.tooltip = tooltip;
-                    tray.menu = menu;
-                    tray.icon = icon;
-                });
-                return Ok(());
-            }
-            let tray = Sni {
-                id: format!("tarve-{}", std::process::id()),
-                proxy: self.proxy.clone(),
-                tooltip,
-                icon: self.icon.clone(),
-                menu,
-            };
-            let assume =
-                std::env::var_os("TARVE_TRAY_ASSUME_SNI").is_some_and(|value| value == "1");
-            let handle = tray.disable_dbus_name(false).assume_sni_available(assume).spawn().map_err(|error| match error {
-                ksni::Error::Watcher(_) | ksni::Error::WontShow => format!(
-                    "no system tray host is running ({error}); on GNOME install the AppIndicator extension"
-                ),
-                other => format!("system tray: {other}"),
-            })?;
-            self.handle = Some(handle);
-            Ok(())
-        }
-    }
-
-    impl Drop for Tray {
-        fn drop(&mut self) {
-            let _ = self.apply(None);
-        }
+    /// No tray here: every shown tray answers `supported: false`, as the device APIs do.
+    pub fn apply(&mut self, options: Option<TrayOptions>) -> Result<Option<Value>, String> {
+        let reason = if cfg!(target_os = "android") {
+            "Android has no system tray"
+        } else {
+            "no system tray icon on this platform yet"
+        };
+        Ok(options.map(|_| availability(false, Some(reason.into()))))
     }
 }
 

@@ -10,7 +10,6 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { readPng } from "./video-layers/png";
 
-process.env.TARVE_AUDIO ??= "silent";
 const work = join(import.meta.dirname, "..", "work", "smoke-video");
 mkdirSync(work, { recursive: true });
 const clip = join(work, "clip.mp4");
@@ -31,9 +30,11 @@ if (!existsSync(quad)) {
 }
 
 const index = process.argv.indexOf("--renderer");
-if (index < 0) {
-  for (const renderer of ["auto", "cpu"]) {
-    const run = spawnSync(process.execPath, [import.meta.filename, "--renderer", renderer], { stdio: "inherit" });
+// Each renderer in its own process, with TARVE_AUDIO in its real environment: setting
+// process.env does not reach the native library's getenv.
+if (index < 0 || process.env.TARVE_AUDIO === undefined) {
+  for (const renderer of index < 0 ? ["auto", "cpu"] : [process.argv[index + 1]!]) {
+    const run = spawnSync(process.execPath, [import.meta.filename, "--renderer", renderer], { stdio: "inherit", env: { TARVE_AUDIO: "silent", ...process.env } });
     if (run.status !== 0) process.exit(run.status ?? 1);
   }
   process.exit(0);
@@ -143,5 +144,14 @@ assert.ok(early.colors > 12, `the seeked picture is drawn (${early.colors} colou
 assert.ok(differ(early.pixels, atEnd.pixels) > 50, "seeking while paused replaces the last picture");
 assert.ok(differ(early.pixels, late.pixels) > 50, "different times show different pictures");
 assert.ok(differ(early.pixels, again.pixels) < early.pixels.length / 50, `the same time shows the same picture (${differ(early.pixels, again.pixels)} pixels differ)`);
+// playbackRate 2: the 2 s clip plays in about a second.
+const endedBefore = events.filter(e => e === "ended").length;
+app.app.media("clip").setPlaybackRate(2);
+app.app.media("clip").seek(0);
+app.app.media("clip").play();
+const fastStart = Date.now();
+await until("ended at rate 2", () => events.filter(e => e === "ended").length > endedBefore);
+const fast = (Date.now() - fastStart) / 1000;
+assert.ok(fast > 0.6 && fast < 1.6, `rate 2 plays the 2 s clip in about 1 s (${fast.toFixed(2)}s)`);
 app.app.close();
 console.log(`[tarve smoke:video] ${renderer} PASS (${events.filter(e => e === "timeupdate").length} timeupdates, ${first.colors} colours; playing 320×240@30: ${cpuPercent.toFixed(1)}% of one core, frame p50 ${stats.native.phases?.frame.p50.toFixed(2)} ms, paint p50 ${stats.native.phases?.paint.p50.toFixed(2)} ms)`);

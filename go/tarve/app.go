@@ -23,7 +23,7 @@ import (
 
 // ProtocolVersion is @tarve/protocol PROTOCOL_VERSION; NativeABIVersion is NATIVE_ABI_VERSION.
 const (
-	ProtocolVersion  = 61
+	ProtocolVersion  = 62
 	NativeABIVersion = 6
 )
 
@@ -99,6 +99,7 @@ type App struct {
 	tray         *TrayOptions
 	trayHandlers map[string]func()
 	trayIconSent string
+	trayState    *TrayAvailability
 	mediaAction  func(action string, time *float64)
 	notifyClicks map[string]func()
 	lastNotify   func()
@@ -664,26 +665,16 @@ func (a *App) dispatchNativeEvent(ev map[string]any) {
 		}
 	case "closeRequest":
 		a.closeRequest()
-	case "tray", "trayMenu", "notificationClick":
+	case "tray", "trayMenu", "trayAvailability", "notificationClick":
 		ran := false
 		run := func(name string, fn func()) {
 			if fn != nil && a.invoke(name, "", fn) {
 				ran = true
 			}
 		}
-		if kind == "tray" && a.tray != nil {
-			if ev["action"] == "click" {
-				run("trayClick", a.tray.OnClick)
-			} else {
-				run("trayDoubleClick", a.tray.OnDoubleClick)
-			}
-		} else if kind == "trayMenu" {
-			id, _ := ev["id"].(string)
-			run("trayMenu", a.trayHandlers[id])
-			if a.tray != nil && a.tray.OnMenu != nil {
-				run("trayMenu", func() { a.tray.OnMenu(id) })
-			}
-		} else if kind == "notificationClick" {
+		if kind != "notificationClick" {
+			a.trayEvent(kind, ev, run)
+		} else {
 			// Each notification runs its own onClick; a click without an id (the Windows tray balloon) the newest.
 			handler := a.lastNotify
 			if id, ok := ev["id"].(string); ok {

@@ -9,20 +9,25 @@
 import { createApp } from "@tarve/core";
 import { connect } from "./youtube-music-actions";
 import { phone } from "./youtube-music-mobile";
-import { YouTubeMusicView } from "./youtube-music-view";
+import { YouTubeMusicView, state } from "./youtube-music-view";
 
 // Name, icon and app id (media controls, taskbar) come from examples/package.json "tarve".
 const app = createApp(() => <YouTubeMusicView />, { closeBehavior: "hide", textRendering: "cleartype" });
 connect(app);
 await app.ready;
 // Android has no system tray; Back sends the app to the background, still playing.
-if (!phone) app.tray({
-  tooltip: "YouTube Music",
-  onDoubleClick: () => app.show(),
-  menu: [
-    { id: "show", label: "Open", onSelect: () => app.show() },
-    { type: "separator" },
-    { id: "quit", label: "Quit", onSelect: () => app.close() },
-  ],
-});
+if (!phone) {
+  const tray = app.tray({
+    tooltip: "YouTube Music",
+    onDoubleClick: () => app.show(),
+    menu: [
+      { id: "show", label: "Open", onSelect: () => app.show() },
+      { type: "separator" },
+      { id: "quit", label: "Quit", onSelect: () => app.close() },
+    ],
+  });
+  // Closing hides the window to the tray; with no tray icon to bring it back from (no tray
+  // host on this Linux desktop) it minimizes to the taskbar instead, still playing.
+  state.hide = () => (tray.availability()?.available ? app.hide() : app.minimize());
+}
 await app.closed;

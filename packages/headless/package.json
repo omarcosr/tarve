@@ -1,6 +1,6 @@
 {
   "name": "@tarve/headless",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Render Tarve UIs to pixels without a window or GPU: tests, visual snapshots and image generation on any platform",
   "license": "Apache-2.0",
   "keywords": [
@@ -40,7 +40,7 @@
     "verify:pack": "bun scripts/verify-pack.ts"
   },
   "peerDependencies": {
-    "@tarve/core": "^0.8.0"
+    "@tarve/core": "^0.9.0"
   },
   "engines": {
     "bun": ">=1.4.0",

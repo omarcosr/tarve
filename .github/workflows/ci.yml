@@ -130,7 +130,6 @@ jobs:
       # a panel host drives it, with a fake notification server that clicks.
       - name: Tray and notification smoke
         env:
-          TARVE_TRAY_ASSUME_SNI: "1"
           TARVE_SMOKE_NOTIFY: "1"
         run: |
           dbus-run-session -- bash -c 'python3 scripts/fake-notification-server.py & sleep 1; xvfb-run -a -s "-screen 0 1280x800x24" bun run smoke:tray'

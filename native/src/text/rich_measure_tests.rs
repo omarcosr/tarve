@@ -172,6 +172,26 @@ fn a_code_gutter_number_shares_its_lines_baseline() {
         );
     }
 
+    // Identical relative metrics hold when the gutter digits and the source letters
+    // resolve to the same face. Without the requested family (macOS has no Consolas)
+    // they can fall back to different faces; the painted baselines above still align.
+    let first_font = |layout: &parley::Layout<crate::text::TextBrush>| {
+        layout.lines().next().and_then(|line| {
+            line.items().find_map(|item| match item {
+                parley::PositionedLayoutItem::GlyphRun(run) => {
+                    let font = run.run().font();
+                    Some((font.data.id(), font.index))
+                }
+                _ => None,
+            })
+        })
+    };
+    if gutters
+        .iter()
+        .any(|gutter| first_font(gutter) != first_font(layout))
+    {
+        return;
+    }
     let source_first_baseline = source_baselines[0];
     for gutter in gutters {
         let gutter_baseline = f64::from(

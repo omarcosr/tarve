@@ -1,7 +1,8 @@
 import { createApp } from "@tarve/core";
 import { TrayView, state } from "./tray-view";
 
-const app = createApp(() => <TrayView />, { closeBehavior: "hide" });
+// Closing hides the window to the tray (TrayView's onCloseRequest) only while the icon can be seen.
+const app = createApp(() => <TrayView />);
 
 function menu() {
   return [
@@ -14,7 +15,11 @@ function menu() {
   ];
 }
 
-const tray = app.tray({ tooltip: "Tarve tray example", onClick: () => app.show(), menu: menu() });
+const tray = app.tray({
+  tooltip: "Tarve tray example", onClick: () => app.show(), menu: menu(),
+  // No tray host (GNOME without AppIndicator, WSLg): keep the window and say so; a host starting later shows the icon.
+  onAvailability: ({ available }) => { state.tray = available; },
+});
 
 function sync(): void {
   tray.update({ tooltip: state.muted ? "Tarve (muted)" : "Tarve tray example", menu: menu() });

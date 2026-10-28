@@ -6,7 +6,8 @@ import { WidgetView, type WidgetState } from "./widget-view";
 // desktop icon grid, off the taskbar. Drag it and it drops into the nearest
 // free cells; icons never stay under it. It lives in the system tray: the tray
 // icon shows it again after ✕ hides it, switches "always behind windows" (also
-// the stacked-sheets button) and quits.
+// the stacked-sheets button) and quits. Without a tray to come back from (no tray
+// host on this Linux desktop) ✕ closes it instead.
 
 function cpuTimes() {
   let idle = 0, total = 0;
@@ -51,12 +52,18 @@ function sync(): void {
 }
 
 function show(): void { shown = true; sample(); app.show(); sync(); }
-function hide(): void { shown = false; app.hide(); sync(); }
+function hide(): void {
+  if (!state.tray) { app.close(); return; }
+  shown = false; app.hide(); sync();
+}
 function toggleBehind(): void { state.behind = !state.behind; sync(); }
 
 sample();
 const app = createApp(() => <WidgetView state={state} onToggleBehind={toggleBehind} onHide={hide} />);
-const tray = app.tray({ tooltip: "Desktop widget", onClick: show, menu: trayMenu() });
+const tray = app.tray({
+  tooltip: "Desktop widget", onClick: show, menu: trayMenu(),
+  onAvailability: ({ available }) => { state.tray = available; if (!available && !shown) show(); },
+});
 // Tick on the second boundary so the clock never lags a minute change.
 const untilNextSecond = () => 1000 - (Date.now() % 1000);
 let timer = setTimeout(function tick() {
