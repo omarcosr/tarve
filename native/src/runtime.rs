@@ -142,7 +142,7 @@ mod cursor;
 mod graphics_startup;
 mod system_requests;
 mod viewport;
-use viewport::{forget_ime_allowed, layout_viewport, request_frame, set_ime_allowed};
+use viewport::{layout_viewport, request_frame, set_ime_allowed};
 #[cfg(target_os = "android")]
 mod android_input;
 pub(crate) use graphics_startup::{
@@ -3919,14 +3919,11 @@ impl ApplicationHandler<Command> for App {
                 ..
             } => {
                 if state == ElementState::Pressed {
-                    // After a window move loop (or a DPI change) Windows may not send a
-                    // move before the next press, leaving hover stale: the press would
-                    // miss the TitleBar and the window could not be dragged again.
+                    // After a window move loop (or a DPI change) Windows may skip the move
+                    // before the next press: stale hover would miss the TitleBar drag.
                     events = self.sync_pointer_from_os();
                     events.extend(self.tree.pointer_down());
-                    if self.ime_target.is_some() && self.tree.focused == self.ime_target {
-                        forget_ime_allowed();
-                    }
+                    self.reopen_ime_on_focused_press();
                     self.titlebar_pressed();
                 } else {
                     events = self.tree.pointer_up();

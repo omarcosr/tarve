@@ -68,15 +68,17 @@ pub(super) fn set_ime_allowed(window: &Window, allowed: bool) {
     window.set_ime_allowed(allowed);
 }
 
-/// Android: the user can hide the soft keyboard (Back, the keyboard's own hide key) while the
-/// editor keeps focus, which `set_ime_allowed`'s cache never hears about. A press on the
-/// focused editor forgets the cached value, so the next `sync_cursor` shows the keyboard again.
-pub(super) fn forget_ime_allowed() {
-    #[cfg(target_os = "android")]
-    IME_ALLOWED.store(2, std::sync::atomic::Ordering::Relaxed);
-}
-
 impl App {
+    /// Android: the user can hide the soft keyboard (Back, the keyboard's own hide key) while
+    /// the editor keeps focus, which `set_ime_allowed`'s cache never hears about. A press on
+    /// the focused editor forgets the cached value, so the next `sync_cursor` shows it again.
+    pub(super) fn reopen_ime_on_focused_press(&self) {
+        #[cfg(target_os = "android")]
+        if self.ime_target.is_some() && self.tree.focused == self.ime_target {
+            IME_ALLOWED.store(2, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     /// Sends the system environment (text size, motion, pointer) to the app: when the window
     /// opens (`force`) and whenever it changed since.
     pub(super) fn sync_environment(&mut self, force: bool) {
