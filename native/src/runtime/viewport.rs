@@ -52,17 +52,28 @@ pub(super) fn request_frame(window: &Arc<Window>) {
     window.request_redraw();
 }
 
+/// The last value `set_ime_allowed` sent on Android (0 hidden, 1 shown, 2 unknown).
+#[cfg(target_os = "android")]
+static IME_ALLOWED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+
 /// `Window::set_ime_allowed`, which on Android shows or hides the soft keyboard on every
 /// call (a binder call a frame from `sync_cursor`): there only when the value changes.
 pub(super) fn set_ime_allowed(window: &Window, allowed: bool) {
     #[cfg(target_os = "android")]
+    if IME_ALLOWED.swap(u8::from(allowed), std::sync::atomic::Ordering::Relaxed)
+        == u8::from(allowed)
     {
-        static LAST: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
-        if LAST.swap(u8::from(allowed), std::sync::atomic::Ordering::Relaxed) == u8::from(allowed) {
-            return;
-        }
+        return;
     }
     window.set_ime_allowed(allowed);
+}
+
+/// Android: the user can hide the soft keyboard (Back, the keyboard's own hide key) while the
+/// editor keeps focus, which `set_ime_allowed`'s cache never hears about. A press on the
+/// focused editor forgets the cached value, so the next `sync_cursor` shows the keyboard again.
+pub(super) fn forget_ime_allowed() {
+    #[cfg(target_os = "android")]
+    IME_ALLOWED.store(2, std::sync::atomic::Ordering::Relaxed);
 }
 
 impl App {
