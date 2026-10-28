@@ -4,7 +4,7 @@
 
   let { version }: { version: string } = $props();
 
-  const c0 = "const tray = app.tray({\n  tooltip: \"Pulse\",\n  menu: [\n    { id: \"show\", label: \"Show\", onSelect: () => app.activate() },\n    { id: \"pause\", label: \"Pause monitoring\", checked: paused, onSelect: togglePause },\n    { type: \"separator\" },\n    { id: \"quit\", label: \"Quit\", onSelect: () => app.close() },\n  ],\n  onClick: () => app.activate(),\n});\n\ntray.update({ tooltip: \"Pulse — paused\" }); // modified in place";
+  const c0 = "const tray = app.tray({\n  tooltip: \"Pulse\",\n  menu: [\n    { id: \"show\", label: \"Show\", onSelect: () => app.activate() },\n    { id: \"pause\", label: \"Pause monitoring\", checked: paused, onSelect: togglePause },\n    { type: \"separator\" },\n    { id: \"quit\", label: \"Quit\", onSelect: () => app.close() },\n  ],\n  onClick: () => app.activate(),\n  // No tray host (GNOME without AppIndicator, a restarting Explorer): keep the window.\n  onAvailability: ({ supported, available }) => { canHide = supported && available; },\n});\n\ntray.update({ tooltip: \"Pulse — paused\" }); // modified in place\ntray.availability(); // { supported, available, reason? }";
   const c1 = "const unregister = app.registerHotkey(\"Ctrl+Shift+Space\", () => app.activate());\n// later\nunregister();";
   const c2 = "const file = await app.openFileDialog({ title: \"Open project\", filters: [{ name: \"JSON\", extensions: [\"json\"] }] });\nconst files = await app.openFilesDialog();\nconst folder = await app.openFolderDialog();\nconst target = await app.saveFileDialog({ fileName: \"report.json\", directory: home });";
   const c3 = "<View focusable onPaste={payload => {\n  if (payload.kind === \"files\") attach(payload.files);\n  else if (payload.kind === \"image\") addImage(payload.width, payload.height, payload.rgba);\n}} />";
@@ -29,7 +29,7 @@
   <section class="doc-section">
     <h2 id="tray">Tray icon</h2>
     <CodeBlock code={c0} file="tray.tsx" />
-    <div class="doc-prose"><p>Windows only; a second <code>app.tray()</code> replaces the first. The icon defaults to the app icon. Combine it with <code>&lt;Window onCloseRequest=&#123;e => &#123; e.preventDefault(); app.hide(); &#125;&#125;></code> for hide-on-close apps. <code>app.show()</code>, <code>app.hide()</code>, <code>app.minimize()</code> and <code>app.activate()</code> (show, restore and bring to front) control the window.</p></div>
+    <div class="doc-prose"><p>Windows and Linux (a StatusNotifierItem, shown by KDE, most desktops and GNOME with the AppIndicator extension); other platforms answer <code>supported: false</code>. A missing host is a state, not an error: <code>onAvailability</code> and <code>tray.availability()</code> report <code>&#123; supported, available, reason? &#125;</code>, and the item turns <code>available</code> on when a host starts (Explorer restarting, an extension enabled). An app that hides to the tray should keep its window, or minimize instead, while <code>available</code> is false. A second <code>app.tray()</code> replaces the first. The icon defaults to the app icon. Combine it with <code>&lt;Window onCloseRequest=&#123;e => &#123; e.preventDefault(); app.hide(); &#125;&#125;></code> for hide-on-close apps. <code>app.show()</code>, <code>app.hide()</code>, <code>app.minimize()</code> and <code>app.activate()</code> (show, restore and bring to front) control the window.</p></div>
   </section>
 
   <section class="doc-section">
