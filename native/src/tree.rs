@@ -1321,6 +1321,8 @@ pub struct Tree {
     pub(crate) focus_visible: bool,
     pressed: Option<String>,
     pressed_link: Option<(String, String)>,
+    /// The node a pinch in progress reports to, and its scale so far.
+    pinch_target: Option<(String, f64)>,
     pressed_diff_row: Option<(String, usize)>,
     scroll_drag: Option<ScrollDrag>,
     pointer_drag: Option<PointerDrag>,
@@ -1607,6 +1609,7 @@ impl Tree {
             focused: None,
             focus_visible: false,
             pressed: None,
+            pinch_target: None,
             pressed_link: None,
             pressed_diff_row: None,
             scroll_drag: None,
@@ -5334,6 +5337,8 @@ impl Tree {
                 || entry.node.kind == "markdown"
                 || blocks_pointer
                 || entry.node.drag_region
+                // A pinch target (a map, a photo) takes the pointer like a pressable.
+                || entry.node.pinch
         };
         (eligible && rect.contains(mouse)).then(|| id.to_string())
     }
@@ -5970,6 +5975,43 @@ impl Tree {
     }
     /// Abandons an in-flight pointer drag (Escape, focus loss, source removed).
     /// A drag that never crossed the threshold ends silently.
+    /// A pinch step (`phase`: "start", "move", "end", "cancel"; `delta`: the scale change since
+    /// the last step) as a `pinch` event for the node with `pinch` under the pointer, which
+    /// keeps it for the whole gesture. `scale` is cumulative, 1 at the start.
+    pub fn pinch(&mut self, phase: &str, delta: f64) -> Vec<Value> {
+        if phase == "start" || self.pinch_target.is_none() {
+            let mut node = self.hit_root(false);
+            while let Some(id) = node.clone() {
+                let entry = &self.entries[&id];
+                if entry.node.pinch && !entry.node.disabled {
+                    break;
+                }
+                node = entry.parent.clone();
+            }
+            self.pinch_target = node.map(|id| (id, 1.0));
+            if phase != "start" && self.pinch_target.is_some() {
+                // Joined mid-gesture (no start seen): report one first.
+                let mut events = self.pinch_event("start");
+                events.extend(self.pinch(phase, delta));
+                return events;
+            }
+        } else if let Some((_, scale)) = self.pinch_target.as_mut() {
+            *scale = (*scale * (1.0 + delta)).clamp(0.01, 100.0);
+        }
+        let events = self.pinch_event(if phase == "cancel" { "end" } else { phase });
+        if matches!(phase, "end" | "cancel") {
+            self.pinch_target = None;
+        }
+        events
+    }
+    fn pinch_event(&self, phase: &str) -> Vec<Value> {
+        let Some((id, scale)) = &self.pinch_target else {
+            return vec![];
+        };
+        vec![
+            json!({"type":"pinch", "id":id, "phase":phase, "scale":scale, "x":self.mouse.0, "y":self.mouse.1}),
+        ]
+    }
     pub fn cancel_pointer_drag(&mut self) -> Vec<Value> {
         match self.pointer_drag.take() {
             Some(drag) if drag.active => {

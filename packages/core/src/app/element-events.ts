@@ -79,6 +79,7 @@ export function createElementDispatcher(invoke: InvokeHandler, handlersOf: (id: 
       case "diffLineClick": run("diffLineClick", handlers?.onDiffLineClick as never, { text: event.text, path: event.path ?? undefined, oldLine: event.oldLine ?? undefined, newLine: event.newLine ?? undefined }); break;
       case "highlight": run("highlight", handlers?.onHighlight as never, { matchCount: event.matchCount, query: event.query, caseSensitive: event.caseSensitive, wholeWord: event.wholeWord }); break;
       case "context": run("context", handlers?.onContextMenu as never, { x: event.x, y: event.y }); break;
+      case "pinch": run("pinch", handlers?.onPinch as never, { phase: event.phase, scale: event.scale, x: event.x, y: event.y }); break;
       case "outside": run("outside", handlers?.onOutsideClick); break;
       case "submit": run("submit", handlers?.onSubmit as never, event.value); break;
       case "paste": {

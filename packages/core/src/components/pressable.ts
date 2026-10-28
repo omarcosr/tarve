@@ -7,6 +7,8 @@ export interface PressableProps extends ViewProps, DraggableProps {
   disabled?: boolean;
   onClick?: () => void;
   onContextMenu?: (position: { x: number; y: number }) => void;
+  /** Two fingers pinching over this node (touch screen, macOS trackpad); `scale` is cumulative, 1 at "start". */
+  onPinch?: (event: import("../jsx-runtime").PinchEvent) => void;
   onHover?: (hovered: boolean) => void;
   control?: Control;
   focusable?: boolean;

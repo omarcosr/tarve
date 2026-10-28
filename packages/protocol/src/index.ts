@@ -267,6 +267,8 @@ export interface NativeNode {
   fileDropTarget?: boolean;
   /** Native sends a `size` event with the content-box size on first layout and on every change. */
   reportSize?: boolean;
+  /** Emit `pinch` events for two-finger pinches over this node. */
+  pinch?: boolean;
   /** Native sends `pointerMove` events with the pointer's position inside the node while it is over it. */
   reportPointer?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "toggleFullscreen" | "close";
@@ -464,6 +466,8 @@ export type NativeEvent =
   | { type: "escape" }
   | { type: "click"; id: string }
   | { type: "context"; id: string; x: number; y: number }
+  /** A two-finger pinch: `scale` is cumulative (1 at "start"); `x`, `y` the fingers' midpoint. */
+  | { type: "pinch"; id: string; phase: "start" | "move" | "end"; scale: number; x: number; y: number }
   | { type: "outside"; id: string }
   | { type: "change"; id: string; value: string }
   | { type: "submit"; id: string; value: string }

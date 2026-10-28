@@ -28,6 +28,10 @@ enum Mode {
     Pending,
     Pressed,
     Scrolling,
+    /// Two fingers: `PinchGesture` events, as a trackpad pinch on macOS.
+    Pinching,
+    /// A pinch ended while a finger stayed down: ignore it until it lifts.
+    Done,
 }
 
 struct Gesture {
@@ -43,6 +47,79 @@ struct Gesture {
     samples: Vec<(Instant, PhysicalPosition<f64>)>,
     /// The touch stopped a fling: lifting it does not click.
     caught_fling: bool,
+    /// Where this finger is now (`last` only follows it once it scrolls or drags).
+    finger: PhysicalPosition<f64>,
+    /// The second finger of a pinch, and the fingers' distance at the last pinch event.
+    second: Option<(u64, PhysicalPosition<f64>)>,
+    spread: f64,
+}
+
+fn pinch(device_id: DeviceId, delta: f64, phase: TouchPhase) -> WindowEvent {
+    WindowEvent::PinchGesture {
+        device_id,
+        delta,
+        phase,
+    }
+}
+
+fn midpoint(a: PhysicalPosition<f64>, b: PhysicalPosition<f64>) -> PhysicalPosition<f64> {
+    PhysicalPosition::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0)
+}
+
+/// The scale change since the last pinch event, as `PinchGesture.delta` (positive zooms in).
+fn spread_delta(g: &mut Gesture) -> Option<f64> {
+    let (_, second) = g.second?;
+    let spread = (g.finger.x - second.x).hypot(g.finger.y - second.y);
+    if g.spread <= 0.0 || spread <= 0.0 {
+        return None;
+    }
+    let delta = spread / g.spread - 1.0;
+    g.spread = spread;
+    Some(delta)
+}
+
+/// A finger other than the one that drives the pointer: the second one starts a pinch, which
+/// ends the press or scroll the first one was making.
+fn other_finger(g: &mut Gesture, touch: &Touch) -> Vec<WindowEvent> {
+    let device = touch.device_id;
+    let position = touch.location;
+    match touch.phase {
+        TouchPhase::Started if g.second.is_none() && g.mode != Mode::Done => {
+            let mut events = match g.mode {
+                Mode::Scrolling => {
+                    *ORIGIN.lock().unwrap_or_else(|p| p.into_inner()) = None;
+                    vec![scroll(device, 0.0, 0.0, TouchPhase::Ended)]
+                }
+                Mode::Pressed => vec![button(device, ElementState::Released)],
+                _ => vec![],
+            };
+            g.mode = Mode::Pinching;
+            g.second = Some((touch.id, position));
+            g.spread = (g.finger.x - position.x).hypot(g.finger.y - position.y);
+            events.push(moved(device, midpoint(g.finger, position)));
+            events.push(pinch(device, 0.0, TouchPhase::Started));
+            events
+        }
+        TouchPhase::Moved if g.second.is_some_and(|(id, _)| id == touch.id) => {
+            g.second = Some((touch.id, position));
+            spread_delta(g)
+                .map(|delta| {
+                    vec![
+                        moved(device, midpoint(g.finger, position)),
+                        pinch(device, delta, TouchPhase::Moved),
+                    ]
+                })
+                .unwrap_or_default()
+        }
+        TouchPhase::Ended | TouchPhase::Cancelled
+            if g.second.is_some_and(|(id, _)| id == touch.id) =>
+        {
+            g.second = None;
+            g.mode = Mode::Done;
+            vec![pinch(device, 0.0, TouchPhase::Ended)]
+        }
+        _ => vec![],
+    }
 }
 
 /// A fling: the platform's OverScroller (`android::fling`), or AOSP's curve without a JVM.
@@ -205,9 +282,11 @@ pub(crate) fn translate(
     let device = touch.device_id;
     let position = touch.location;
     let mut gesture = GESTURE.lock().unwrap_or_else(|p| p.into_inner());
-    // One finger drives the pointer; the others are ignored until it lifts.
-    if gesture.as_ref().is_some_and(|g| g.id != touch.id) {
-        return vec![];
+    // One finger drives the pointer; a second one pinches, any more are ignored.
+    if let Some(g) = gesture.as_mut()
+        && g.id != touch.id
+    {
+        return other_finger(g, touch);
     }
     match touch.phase {
         TouchPhase::Started => {
@@ -226,6 +305,9 @@ pub(crate) fn translate(
                 axes: (1.0, 1.0),
                 samples: vec![(Instant::now(), position)],
                 caught_fling,
+                finger: position,
+                second: None,
+                spread: 0.0,
             });
             vec![]
         }
@@ -233,6 +315,22 @@ pub(crate) fn translate(
             let Some(g) = gesture.as_mut() else {
                 return vec![];
             };
+            g.finger = position;
+            match g.mode {
+                Mode::Done => return vec![],
+                Mode::Pinching => {
+                    let second = g.second.map(|(_, at)| at).unwrap_or(position);
+                    return spread_delta(g)
+                        .map(|delta| {
+                            vec![
+                                moved(device, midpoint(position, second)),
+                                pinch(device, delta, TouchPhase::Moved),
+                            ]
+                        })
+                        .unwrap_or_default();
+                }
+                _ => {}
+            }
             let now = Instant::now();
             g.samples
                 .retain(|(at, _)| now.duration_since(*at) <= HORIZON * 2);
@@ -280,6 +378,8 @@ pub(crate) fn translate(
                         TouchPhase::Moved,
                     )]
                 }
+                // Handled before the samples (a pinch moves no pointer).
+                Mode::Pinching | Mode::Done => vec![],
             };
             if g.mode != Mode::Pending {
                 g.last = position;
@@ -292,6 +392,20 @@ pub(crate) fn translate(
             };
             let leave = WindowEvent::CursorLeft { device_id: device };
             match g.mode {
+                // The second finger stays down: it drives nothing until it lifts.
+                Mode::Pinching => {
+                    if let Some((id, at)) = g.second {
+                        *gesture = Some(Gesture {
+                            id,
+                            mode: Mode::Done,
+                            second: None,
+                            finger: at,
+                            ..g
+                        });
+                    }
+                    vec![pinch(device, 0.0, TouchPhase::Ended), leave]
+                }
+                Mode::Done => vec![leave],
                 Mode::Pending if g.caught_fling => vec![leave],
                 Mode::Pending => vec![
                     moved(device, position),
@@ -337,6 +451,10 @@ pub(crate) fn translate(
         TouchPhase::Cancelled => match gesture.take().map(|g| g.mode) {
             Some(Mode::Pressed) => vec![
                 button(device, ElementState::Released),
+                WindowEvent::CursorLeft { device_id: device },
+            ],
+            Some(Mode::Pinching) => vec![
+                pinch(device, 0.0, TouchPhase::Cancelled),
                 WindowEvent::CursorLeft { device_id: device },
             ],
             Some(_) => vec![WindowEvent::CursorLeft { device_id: device }],

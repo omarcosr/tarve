@@ -356,6 +356,9 @@ pub struct Node {
     /// Emit a `size` event with the inner (padding box minus padding) size whenever it changes.
     #[serde(default)]
     pub report_size: bool,
+    /// Emit `pinch` events for two-finger pinches (touch screens, trackpads) over this node.
+    #[serde(default)]
+    pub pinch: bool,
     /// Emit `pointerMove` events with the pointer's position inside this node
     /// while it is over the node or anything in it.
     #[serde(default)]

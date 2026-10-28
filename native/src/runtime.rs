@@ -3913,6 +3913,16 @@ impl ApplicationHandler<Command> for App {
                     });
             }
             WindowEvent::CursorLeft { .. } => events = self.tree.pointer_leave(),
+            // A trackpad pinch (macOS) or two fingers on a touch screen (android::touch).
+            WindowEvent::PinchGesture { delta, phase, .. } => {
+                let phase = match phase {
+                    winit::event::TouchPhase::Started => "start",
+                    winit::event::TouchPhase::Moved => "move",
+                    winit::event::TouchPhase::Ended => "end",
+                    winit::event::TouchPhase::Cancelled => "cancel",
+                };
+                events = self.tree.pinch(phase, delta);
+            }
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,
