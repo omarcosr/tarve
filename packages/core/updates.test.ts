@@ -14,7 +14,11 @@ const dir = mkdtempSync(join(tmpdir(), "tarve-updates-"));
 const PE = (text: string) => "MZ" + text;
 const ELF = (text: string) => "\x7fELF" + text;
 const host = updatePlatform();
-const native = host.startsWith("win32") ? PE : ELF;
+/** A stub executable for this platform: its magic number (Mach-O 64-bit on macOS), then `text`. */
+const native = (text: string): Buffer<ArrayBuffer> => Buffer.concat([
+  host.startsWith("win32") ? Buffer.from("MZ") : host.startsWith("darwin") ? Buffer.from([0xcf, 0xfa, 0xed, 0xfe]) : Buffer.from("\x7fELF", "latin1"),
+  Buffer.from(text),
+]);
 const sha = (data: string | Uint8Array) => createHash("sha256").update(data).digest("hex");
 const URL_ = "https://example.test/u/latest.json";
 
@@ -120,7 +124,7 @@ test("release → check → download → install", async () => {
   const installed = join(dir, "Installed.exe");
   writeFileSync(installed, native("old build"));
   installUpdate(file, { executable: installed, restart: false });
-  expect(readFileSync(installed, "utf8")).toBe(native("new build"));
+  expect(readFileSync(installed)).toEqual(native("new build"));
   expect(existsSync(file)).toBe(false);
 });
 
@@ -128,17 +132,17 @@ test("downloadUpdate rejects tampered, short, oversized and non-executable files
   const body = native("payload");
   const update: Update = { kind: "executable", url: "https://cdn.test/a.bin", sha256: sha(body), size: body.length, version: "2.0.0", currentVersion: "1.0.0", pubDate: "", platform: host };
   const target = join(dir, "dl");
-  const attempt = (data: string, headers?: Record<string, string>, extra: Partial<Update> = {}) =>
+  const attempt = (data: string | Uint8Array, headers?: Record<string, string>, extra: Partial<Update> = {}) =>
     downloadUpdate({ ...update, ...extra }, { path: target, fetch: serve({ "a.bin": data }, headers) });
-  await expect(attempt("tampered" + body.slice(8))).rejects.toThrow("SHA-256");
-  await expect(attempt(body.slice(0, 3))).rejects.toThrow("incomplete");
-  await expect(attempt(body + "extra")).rejects.toThrow("larger");
+  await expect(attempt(Buffer.concat([Buffer.from("tampered"), body.subarray(8)]))).rejects.toThrow("SHA-256");
+  await expect(attempt(body.subarray(0, 3))).rejects.toThrow("incomplete");
+  await expect(attempt(Buffer.concat([body, Buffer.from("extra")]))).rejects.toThrow("larger");
   await expect(attempt(body, { "content-length": "999" })).rejects.toThrow("999 bytes");
   await expect(attempt("plain text", undefined, { sha256: sha("plain text"), size: 10 })).rejects.toThrow("not a");
   await expect(attempt(body, undefined, { url: "http://cdn.test/a.bin" })).rejects.toThrow("HTTPS");
   await expect(attempt(body, undefined, { sha256: "nope" })).rejects.toThrow("Invalid update");
   expect(existsSync(target)).toBe(false);
-  expect(readFileSync(await attempt(body), "utf8")).toBe(body);
+  expect(readFileSync(await attempt(body))).toEqual(body);
 });
 
 test("installUpdate refuses runtimes, missing files and non-executables", () => {
@@ -149,7 +153,7 @@ test("installUpdate refuses runtimes, missing files and non-executables", () => 
   const text = join(dir, "text.bin");
   writeFileSync(text, "hello");
   expect(() => installUpdate(text, { executable: installed, restart: false })).toThrow("not an executable");
-  expect(readFileSync(installed, "utf8")).toBe(native("keep"));
+  expect(readFileSync(installed)).toEqual(native("keep"));
 });
 
 test("release validates its inputs before writing anything", () => {

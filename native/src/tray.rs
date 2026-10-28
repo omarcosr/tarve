@@ -14,7 +14,9 @@
 //! event-loop proxy as `Command::TrayEvent`. Whether the icon can be seen is the
 //! `trayAvailability` event (no tray host, no tray on the platform), never an error.
 
-use crate::protocol::{Command, TrayMenuItem, TrayOptions};
+#[cfg(any(target_os = "windows", target_os = "linux", test))]
+use crate::protocol::TrayMenuItem;
+use crate::protocol::{Command, TrayOptions};
 use serde_json::{Value, json};
 use winit::event_loop::EventLoopProxy;
 
