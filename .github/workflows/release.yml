@@ -61,9 +61,57 @@ jobs:
             native/linux-x64/runtime.json
             native/linux-x64/variants/
 
+  # `tarve build --target android` looks for native/android/<abi>/libtarve_native.so in the
+  # package (package.json "files" lists native/android); build both ABIs from the tag.
+  android-native:
+    name: Android native runtimes
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native -> target-android
+          shared-key: android-native
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      # The runner image ships the Android NDK (ANDROID_NDK_LATEST_HOME).
+      - name: Build Android runtimes
+        run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" bun run build:native:android
+
+      - name: Upload Android runtimes
+        uses: actions/upload-artifact@v7
+        with:
+          name: tarve-android-native
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            native/android/arm64-v8a/libtarve_native.so
+            native/android/x86_64/libtarve_native.so
+
   windows-x64-release:
     name: Windows x64 release
-    needs: linux-x64-native
+    needs: [linux-x64-native, android-native]
     runs-on: windows-latest
     timeout-minutes: 60
 
@@ -105,6 +153,12 @@ jobs:
         with:
           name: tarve-linux-x64-native
           path: native/linux-x64
+
+      - name: Download Android runtimes
+        uses: actions/download-artifact@v8
+        with:
+          name: tarve-android-native
+          path: native/android
 
       - name: Validate release ref and version policy
         shell: pwsh
@@ -169,12 +223,17 @@ jobs:
             native/win32-x64/runtime.json
             native/linux-x64/libtarve_native.so
             native/linux-x64/runtime.json
+            native/android/arm64-v8a/libtarve_native.so
+            native/android/x86_64/libtarve_native.so
 
       - name: Publish GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Release assets are flat: give the Android libraries names of their own.
+          Copy-Item native/android/arm64-v8a/libtarve_native.so dist/libtarve_native-android-arm64-v8a.so
+          Copy-Item native/android/x86_64/libtarve_native.so dist/libtarve_native-android-x86_64.so
           $tarball = (Get-ChildItem -LiteralPath dist -Filter "tarve-core-*.tgz" -File | Select-Object -First 1).FullName
           if (-not $tarball) { throw "Release tarball is missing." }
           $arguments = @(
@@ -189,6 +248,8 @@ jobs:
             "dist/release-manifest.json",
             "native/win32-x64/tarve_native.dll",
             "native/linux-x64/libtarve_native.so",
+            "dist/libtarve_native-android-arm64-v8a.so",
+            "dist/libtarve_native-android-x86_64.so",
             "--verify-tag",
             "--generate-notes",
             "--title", "Tarve $env:GITHUB_REF_NAME"
