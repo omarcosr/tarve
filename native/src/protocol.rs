@@ -356,6 +356,10 @@ pub struct Node {
     /// Emit a `size` event with the inner (padding box minus padding) size whenever it changes.
     #[serde(default)]
     pub report_size: bool,
+    /// Emit a `longPress` event when a press on this node (or a descendant) is held still for
+    /// `LONG_PRESS`; the release that ends it sends no `click`.
+    #[serde(default)]
+    pub long_press: bool,
     /// Emit `pointerMove` events with the pointer's position inside this node
     /// while it is over the node or anything in it.
     #[serde(default)]

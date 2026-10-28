@@ -484,6 +484,9 @@ fn is_search_word_char(ch: char) -> bool {
     ch.is_alphabetic() || ch.is_numeric() || ch == '_'
 }
 
+/// How far (logical px) a press may travel and still become a long press (Android's touch slop).
+const LONG_PRESS_SLOP: f64 = 8.0;
+
 fn reveal_delta(start: f64, end: f64, viewport_start: f64, viewport_end: f64, margin: f64) -> f64 {
     let margin = margin.min(((viewport_end - viewport_start) / 4.0).max(0.0));
     if start < viewport_start + margin {
@@ -1320,6 +1323,10 @@ pub struct Tree {
     pub focused: Option<String>,
     pub(crate) focus_visible: bool,
     pressed: Option<String>,
+    /// A press that may become a long press: the node that asked and where the press began.
+    long_press_pending: Option<(String, (f64, f64))>,
+    /// The long-pressed node, whose release must not click.
+    long_pressed: Option<String>,
     pressed_link: Option<(String, String)>,
     pressed_diff_row: Option<(String, usize)>,
     scroll_drag: Option<ScrollDrag>,
@@ -1607,6 +1614,8 @@ impl Tree {
             focused: None,
             focus_visible: false,
             pressed: None,
+            long_press_pending: None,
+            long_pressed: None,
             pressed_link: None,
             pressed_diff_row: None,
             scroll_drag: None,
@@ -5970,7 +5979,35 @@ impl Tree {
     }
     /// Abandons an in-flight pointer drag (Escape, focus loss, source removed).
     /// A drag that never crossed the threshold ends silently.
+    /// The node a press on `id` long-presses: `id` or its nearest ancestor with `long_press`.
+    fn long_press_target(&self, id: &str) -> Option<String> {
+        let mut current = Some(id.to_string());
+        while let Some(node) = current {
+            let entry = self.entries.get(&node)?;
+            if entry.node.long_press && !entry.node.disabled {
+                return Some(node);
+            }
+            current = entry.parent.clone();
+        }
+        None
+    }
+    /// Whether the current press can still become a long press.
+    pub fn long_press_pending(&self) -> bool {
+        self.long_press_pending.is_some()
+    }
+    /// The press was held long enough: a `longPress` event, and its release will not click.
+    pub fn fire_long_press(&mut self) -> Vec<Value> {
+        let Some((id, _)) = self.long_press_pending.take() else {
+            return vec![];
+        };
+        if self.pressed.is_none() || !self.entries.contains_key(&id) {
+            return vec![];
+        }
+        self.long_pressed = Some(id.clone());
+        vec![json!({"type":"longPress", "id":id})]
+    }
     pub fn cancel_pointer_drag(&mut self) -> Vec<Value> {
+        self.long_press_pending = None;
         match self.pointer_drag.take() {
             Some(drag) if drag.active => {
                 self.pressed = None;
@@ -5986,6 +6023,12 @@ impl Tree {
             self.wheel_latch = None;
         }
         self.mouse = (x, y);
+        // A finger or pointer that travels is a drag or a scroll, not a long press.
+        if let Some((_, origin)) = &self.long_press_pending
+            && (x - origin.0).hypot(y - origin.1) > LONG_PRESS_SLOP
+        {
+            self.long_press_pending = None;
+        }
         if self.text_dragging
             && let Some(id) = self.focused.clone()
             && matches!(self.entries[&id].node.kind.as_str(), "input" | "textarea")
@@ -6142,6 +6185,12 @@ impl Tree {
                 origin: self.mouse,
                 active: false,
             });
+        self.long_pressed = None;
+        self.long_press_pending = self
+            .pressed
+            .as_deref()
+            .and_then(|id| self.long_press_target(id))
+            .map(|id| (id, self.mouse));
         let mut events = vec![];
         if let Some(id) = self.hovered.clone() {
             if let Some(blurred) = self.focus_with_visibility(&id, false) {
@@ -6241,8 +6290,11 @@ impl Tree {
         self.hovered = self.hit_root(false);
         self.refresh_hover_chain();
         let mut out = vec![];
+        self.long_press_pending = None;
+        let long_pressed = self.long_pressed.take().is_some();
         if let Some(id) = self.pressed.take() {
-            if self.hovered.as_ref() == Some(&id)
+            if !long_pressed
+                && self.hovered.as_ref() == Some(&id)
                 && matches!(self.entries[&id].node.kind.as_str(), "button" | "pressable")
             {
                 out.push(json!({"type":"click", "id":id}));

@@ -113,6 +113,8 @@ export interface DivProps extends Omit<BaseProps, "style">, DropTargetProps, Fil
   focusable?: boolean;
   onClick?: () => void;
   onContextMenu?: (position: { x: number; y: number }) => void;
+  /** The press was held still for 500 ms (touch or mouse); its release sends no `onClick`. */
+  onLongPress?: () => void;
   onHover?: (entered: boolean) => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;

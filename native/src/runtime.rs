@@ -1178,6 +1178,7 @@ impl App {
             ready_emitted: false,
             presentation_retry_at: None,
             input_hold: None,
+            long_press_at: None,
             memory_dirty: std::cell::Cell::new(false),
             trim_at: std::cell::Cell::new(None),
             startup_trim_pending: std::cell::Cell::new(true),
@@ -1356,6 +1357,8 @@ struct App {
     /// After a click or key reaches JS: the frame waits (until this deadline at most)
     /// for the patch its handler sends, so release and update show in one frame.
     input_hold: Option<Instant>,
+    /// When the current press becomes a long press (`Tree::fire_long_press`).
+    long_press_at: Option<Instant>,
     motion_epoch: Instant,
     motion_test_clock: bool,
     graphics_recovery_episodes: usize,
@@ -1397,6 +1400,8 @@ const GRAPHICS_RECOVERY_WINDOW: Duration = Duration::from_secs(30);
 const PRESENT_RETRY_DELAY: Duration = Duration::from_millis(16);
 /// Longest a frame waits for the JS patch answering a click or key (under a 60 Hz frame).
 const INPUT_HOLD: Duration = Duration::from_millis(10);
+/// How long a press is held still before `longPress` (Android's default long-press timeout).
+const LONG_PRESS: Duration = Duration::from_millis(500);
 const MEMORY_RELEASE_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_PASTE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PASTE_IMAGE_DIMENSION: usize = 16_384;
@@ -2029,6 +2034,15 @@ impl App {
         }
     }
 
+    /// Starts the long-press clock on a press the tree may long-press (`pressed`), and stops it
+    /// once the tree no longer waits for one (a release, a press that travelled).
+    fn sync_long_press(&mut self, pressed: bool) {
+        if !self.tree.long_press_pending() {
+            self.long_press_at = None;
+        } else if pressed {
+            self.long_press_at = Some(Instant::now() + LONG_PRESS);
+        }
+    }
     fn sync_control_flow(&self, _event_loop: &ActiveEventLoop) {
         self.sync_power();
         let now = Instant::now();
@@ -2054,7 +2068,12 @@ impl App {
         let present_at = self
             .presentation_retry_at
             .filter(|deadline| *deadline > now);
-        let hold_at = self.input_hold.filter(|deadline| *deadline > now);
+        let hold_at = self
+            .input_hold
+            .filter(|deadline| *deadline > now)
+            .into_iter()
+            .chain(self.long_press_at)
+            .min();
         let motion_at = self.motion_deadline(now);
         let media_at = self.media.deadline();
         #[cfg(target_os = "android")]
@@ -3655,6 +3674,8 @@ impl ApplicationHandler<Command> for App {
                     "key" => self.tree.key(text.as_deref().unwrap_or("")),
                     _ => vec![],
                 };
+                // Automation presses time long presses like real ones.
+                self.sync_long_press(action == "down");
                 self.emit(events);
                 accessibility_changed = true;
             }
@@ -3732,6 +3753,14 @@ impl ApplicationHandler<Command> for App {
         if self.input_hold.is_some_and(|until| until <= now) {
             self.input_hold = None;
             self.redraw();
+        }
+        if self.long_press_at.is_some_and(|at| at <= now) {
+            self.long_press_at = None;
+            let events = self.tree.fire_long_press();
+            if !events.is_empty() {
+                self.emit(events);
+                self.redraw();
+            }
         }
         let media_events = self.media.tick(now);
         self.emit(media_events);
@@ -3907,6 +3936,7 @@ impl ApplicationHandler<Command> for App {
                 events = self
                     .tree
                     .pointer_move(position.x / scale, position.y / scale);
+                self.sync_long_press(false);
                 accessibility_changed = self.tree.accessibility_selection_dragging()
                     || events.iter().any(|event| {
                         matches!(event["type"].as_str(), Some("valueChange" | "scroll"))
@@ -3924,9 +3954,11 @@ impl ApplicationHandler<Command> for App {
                     // miss the TitleBar and the window could not be dragged again.
                     events = self.sync_pointer_from_os();
                     events.extend(self.tree.pointer_down());
+                    self.sync_long_press(true);
                     self.titlebar_pressed();
                 } else {
                     events = self.tree.pointer_up();
+                    self.sync_long_press(false);
                     self.handle_window_actions(event_loop, &events);
                 }
                 accessibility_changed = true;

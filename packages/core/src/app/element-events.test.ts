@@ -21,6 +21,14 @@ describe("createElementDispatcher", () => {
     expect(calls).toEqual(["context@box"]);
   });
 
+  test("longPress runs onLongPress", () => {
+    let held = 0;
+    const { dispatch, calls } = harness({ mic: { onLongPress: () => { held++; } } });
+    expect(dispatch({ type: "longPress", id: "mic" })).toEqual({ handled: true, succeeded: true });
+    expect(held).toBe(1);
+    expect(calls).toEqual(["longPress@mic"]);
+  });
+
   test("imageError runs onError with the source and message", () => {
     const seen: unknown[] = [];
     const { dispatch, calls } = harness({ img: { onError: event => { seen.push(event); } } });

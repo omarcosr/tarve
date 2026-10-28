@@ -267,6 +267,8 @@ export interface NativeNode {
   fileDropTarget?: boolean;
   /** Native sends a `size` event with the content-box size on first layout and on every change. */
   reportSize?: boolean;
+  /** Emit `longPress` when a press is held still for 500 ms; that press's release does not click. */
+  longPress?: boolean;
   /** Native sends `pointerMove` events with the pointer's position inside the node while it is over it. */
   reportPointer?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "toggleFullscreen" | "close";
@@ -464,6 +466,7 @@ export type NativeEvent =
   | { type: "escape" }
   | { type: "click"; id: string }
   | { type: "context"; id: string; x: number; y: number }
+  | { type: "longPress"; id: string }
   | { type: "outside"; id: string }
   | { type: "change"; id: string; value: string }
   | { type: "submit"; id: string; value: string }
