@@ -5,6 +5,7 @@ use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub(crate) mod requests;
+pub use requests::FileDialogOptions;
 mod style_validation;
 #[allow(unused_imports)]
 pub(crate) use style_validation::*;
@@ -600,25 +601,6 @@ pub enum TreeMutation {
     Patch { node: Box<Node> },
     Children { id: String, children: Vec<String> },
     Remove { id: String },
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileDialogFilter {
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub extensions: Vec<String>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileDialogOptions {
-    pub title: Option<String>,
-    pub directory: Option<String>,
-    pub file_name: Option<String>,
-    #[serde(default)]
-    pub filters: Vec<FileDialogFilter>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
