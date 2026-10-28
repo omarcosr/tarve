@@ -64,7 +64,8 @@ function machO(): Uint8Array {
 
 /** `tarve package` under Node; returns the artifact paths it printed, by format. */
 function tarvePackage(cli: string, input: string, format: string): Map<string, string> {
-  const output = run(node, [cli, "package", input, "--format", format]);
+  // Packaging compresses a whole app (deb, tar, zip): slow CI runners need more than 5 minutes.
+  const output = run(node, [cli, "package", input, "--format", format], 900_000);
   const artifacts = new Map([...output.matchAll(/^(deb|tar|zip|msix|app-zip): (.+)$/gm)].map(match => [match[1]!, match[2]!.trim()]));
   for (const wanted of format.split(",")) assert.ok(artifacts.has(wanted), `tarve package printed no ${wanted} artifact:\n${output}`);
   return artifacts;
