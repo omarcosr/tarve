@@ -1088,6 +1088,7 @@ impl ApplicationHandler<Command> for Host {
                 // The tray, notifications and the media session are the app's, not a window's.
                 command @ (Command::Tray { .. }
                 | Command::Notify { .. }
+                | Command::ScheduleNotification(_)
                 | Command::SystemMedia { .. }) => self.main.user_event(event_loop, command),
                 command => {
                     if let Some(app) = self.window_mut(&window) {
@@ -3388,6 +3389,15 @@ impl ApplicationHandler<Command> for App {
                 if let Err(message) = result {
                     self.events.push(error(message));
                 }
+            }
+            Command::ScheduleNotification(request) => {
+                // Desktops keep timed notifications in the app (TS); places are Android only.
+                #[cfg(target_os = "android")]
+                if let Err(message) = crate::android::notification::schedule(&request) {
+                    self.events.push(error(message));
+                }
+                #[cfg(not(target_os = "android"))]
+                let _ = request;
             }
             Command::RemoteImage { url, result } => {
                 self.tree.finish_remote_image(url, result);

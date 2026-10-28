@@ -53,7 +53,8 @@ public final class TarveNotifications {
         if (granted) for (String[] item : items) post(context, item[0], item[1], item[2]);
     }
 
-    private static void post(Context context, String id, String title, String body) {
+    /** Also posts timed and place notifications (TarveScheduledNotifications), app running or not. */
+    static void post(Context context, String id, String title, String body) {
         NotificationManager manager = context.getSystemService(NotificationManager.class);
         manager.createNotificationChannel(new NotificationChannel(CHANNEL, "Notifications", NotificationManager.IMPORTANCE_DEFAULT));
         int code;

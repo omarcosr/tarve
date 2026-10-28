@@ -40,8 +40,8 @@ export type { OpenEvent, OpenFilesListener, OpenUrlListener } from "./app/open-r
 let automationClaimed = false;
 
 export type { TrayAvailability, TrayMenuItem, TrayOptions, TrayHandle } from "./app/tray";
-export type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, NotifyOptions, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle } from "./app/types";
-import type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, NotifyOptions, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle } from "./app/types";
+export type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, NotifyOptions, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle, NotifyResult, NotificationPlace } from "./app/types";
+import type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, NotifyOptions, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle, NotifyResult } from "./app/types";
 const DEV_OVERLAY_SOURCES = new Set<AppErrorSource>(["render", "event-handler", "listener", "hotkey"]);
 const DEV_APP_KEY = Symbol.for("tarve.devApp");
 // <input type="file"> and <audio controls> reach the app that is rendering or
@@ -192,7 +192,12 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   void closed.then(() => opens.dispose({ appClosed: !childWindowBridges.has(bridge) }));
   // Share, location and biometrics: created with the bridge's requests (below).
   let device!: DeviceRequests;
-  void closed.then(() => device?.dispose());
+  void closed.then(() => {
+    device?.dispose();
+    // Desktop timers die with the app; Android alarms and proximity alerts stay armed.
+    for (const timer of scheduledNotifications.values()) clearTimeout(timer);
+    scheduledNotifications.clear();
+  });
   /** Plugin setups and commands; a window opened with `openWindow` reuses its opener's. */
   let pluginHost: PluginHost | undefined = options.bridge ? childPluginHosts.get(options.bridge) : undefined;
 
@@ -593,6 +598,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   const notificationClicks = new Map<string, () => void>();
   let lastNotificationClick: (() => void) | undefined;
   let notificationCount = 0;
+  const scheduledNotifications = new Map<string, ReturnType<typeof setTimeout>>();
 
   function syncMedia(): void {
     if (!ended && committed) syncLoadedMedia(committed);
@@ -715,16 +721,52 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         if (!ended) sendPublic({ type: "systemMedia", session: null });
       }
     },
-    notify({ title, body = "", onClick }: NotifyOptions): void {
+    notify({ title, body = "", onClick, id: name, at, place }: NotifyOptions): NotifyResult {
       if (!title) throw new TypeError("notify requires a title");
-      const id = `n${++notificationCount}`;
+      if (name !== undefined && (typeof name !== "string" || !name)) throw new TypeError("notify id must be a non-empty string");
+      const when = at instanceof Date ? at.getTime() : at;
+      if (when !== undefined && !Number.isFinite(when)) throw new RangeError("notify at must be a Date or epoch milliseconds");
+      if (place && (!Number.isFinite(place.latitude) || !Number.isFinite(place.longitude) || Math.abs(place.latitude) > 90 || Math.abs(place.longitude) > 180)) throw new RangeError("notify place needs a latitude and longitude");
+      const radius = place?.radius ?? 150;
+      if (place && (!Number.isFinite(radius) || radius <= 0)) throw new RangeError("notify place radius must be a positive number of metres");
+      const id = name ?? `n${++notificationCount}`;
       lastNotificationClick = onClick;
       if (onClick) {
         notificationClicks.set(id, onClick);
         // Unclicked notifications are dismissed eventually: keep the newest 100 handlers.
         if (notificationClicks.size > 100) notificationClicks.delete(notificationClicks.keys().next().value!);
       }
-      if (!ended) sendPublic({ type: "notify", title, body, id });
+      if (when === undefined && !place) {
+        if (!ended) sendPublic({ type: "notify", title, body, id });
+        return { supported: true };
+      }
+      clearTimeout(scheduledNotifications.get(id));
+      scheduledNotifications.delete(id);
+      if (process.platform === "android") {
+        const command: NativeCommand = { type: "scheduleNotification", action: "set", id, title, body, ...when !== undefined ? { at: when } : {}, ...place ? { place: { latitude: place.latitude, longitude: place.longitude, radius, leave: !!place.leave } } : {} };
+        const names = place ? ["POST_NOTIFICATIONS", "ACCESS_FINE_LOCATION", "ACCESS_BACKGROUND_LOCATION"] : ["POST_NOTIFICATIONS"];
+        // Ask first; the alarm or proximity alert is armed either way and shows once allowed.
+        void requests.permissions("request", names).catch(() => undefined).then(() => { if (!ended) sendPublic(command); });
+        return { supported: true };
+      }
+      if (place) return { supported: false };
+      // Desktops: a timer while the app runs (setTimeout caps at ~24.8 days, so wait in steps).
+      const arm = () => {
+        const left = when! - Date.now();
+        scheduledNotifications.set(id, setTimeout(() => {
+          if (left > 2_000_000_000) return arm();
+          scheduledNotifications.delete(id);
+          if (!ended) sendPublic({ type: "notify", title, body, id });
+        }, Math.max(0, Math.min(left, 2_000_000_000))));
+      };
+      arm();
+      return { supported: true };
+    },
+    cancelNotification(id: string): void {
+      clearTimeout(scheduledNotifications.get(id));
+      scheduledNotifications.delete(id);
+      notificationClicks.delete(id);
+      if (process.platform === "android" && !ended) sendPublic({ type: "scheduleNotification", action: "cancel", id });
     },
     checkPermissions: names => requests.permissions("check", names),
     requestPermissions: names => requests.permissions("request", names),
