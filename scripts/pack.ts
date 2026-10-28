@@ -8,6 +8,8 @@ import { join, resolve } from "node:path";
 const root = resolve(import.meta.dir, "..");
 const dist = join(root, "dist");
 const stage = join(dist, ".pack");
+/** `files` entries a pack may go without. */
+const OPTIONAL = new Set(["native/android"]);
 
 const PUBLISHED_FIELDS = [
   "name", "version", "description", "license", "keywords", "homepage", "repository", "bugs",
@@ -25,6 +27,11 @@ try {
   await writeFile(join(stage, "package.json"), `${JSON.stringify(published, null, 2)}\n`);
   for (const entry of manifest.files) {
     const source = join(root, entry);
+    // The Android runtime is built on a machine with the NDK; CI and release packs may lack it.
+    if (!existsSync(source) && OPTIONAL.has(entry)) {
+      console.warn(`pack: ${entry} not built, packed without it`);
+      continue;
+    }
     if (!existsSync(source)) throw new Error(`Packaged path is missing: ${entry}. Run \`bun run package\` first.`);
     await cp(source, join(stage, entry), { recursive: true });
   }

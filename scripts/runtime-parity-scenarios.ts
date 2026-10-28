@@ -240,9 +240,12 @@ await parity(app, async () => {
 `,
   },
 
-  // share / getCurrentPosition / watchPosition / authenticate: argument checks, then the real
-  // requests. The answers' shapes must match (a fix's coordinates and the OS's wording vary).
+  // share / getCurrentPosition / watchPosition / authenticate: argument checks, then every
+  // request through the native fake provider (TARVE_DEVICE=fake, native/src/device/fake.rs):
+  // no share UI, location source or Hello prompt, so the whole answers are compared. The real
+  // services: scripts/smoke-device-real.tsx (manual, not in verify).
   device: {
+    env: { TARVE_DEVICE: "fake" },
     source: String.raw`import { Column, Text, Window, authenticate, createApp, getCurrentPosition, share, watchPosition } from "@tarve/core";
 const lines: string[] = [];
 function View() {
@@ -256,28 +259,41 @@ function View() {
   );
 }
 const app = createApp(View, { renderer: "cpu", debug: true });
-const shape = (value: any): unknown => value && typeof value === "object"
-  ? Object.fromEntries(Object.entries(value).map(([key, field]) => [key, key === "position" ? Object.keys(field as object).sort() : key === "error" ? typeof field : field]))
-  : value;
 const rejected = (error: Error) => "rejects " + error.name + ": " + error.message;
-/** The answer's shape, or "pending" when it takes longer than ms (a prompt waits for the user). */
-const within = (promise: Promise<unknown>, ms: number) => Promise.race([promise.then(shape, rejected), wait(ms).then(() => "pending")]);
+/** The answer, or "pending" when the fake provider did not answer within 5 s. */
+const answer = (promise: Promise<unknown>) => Promise.race([promise.then(value => value, rejected), wait(5000).then(() => "pending")]);
+/** The first count answers of a watch, then 300 ms more (nothing may follow its stop). */
+const watch = (count: number, highAccuracy: boolean) => new Promise(resolve => {
+  const answers: unknown[] = [];
+  let stop = () => {};
+  const timer = setTimeout(() => { stop(); resolve({ pending: answers }); }, 5000);
+  stop = watchPosition(answer => {
+    answers.push(answer);
+    if (answers.length === count) { clearTimeout(timer); stop(); setTimeout(() => resolve(answers), 300); }
+  }, { highAccuracy });
+});
 await parity(app, async () => {
   await settle(app);
   await stage(app, "initial");
-  const result: Record<string, unknown> = {};
-  result.shareInvalid = await share({} as any).then(shape, rejected);
-  result.authenticateInvalid = await authenticate({ reason: " " }).then(shape, rejected);
-  result.positionInvalid = await getCurrentPosition({ timeoutMs: -1 }).then(shape, rejected);
-  result.share = await within(share({ title: "Tarve parity", text: "Tarve runtime parity" }), 10_000);
-  result.position = await within(getCurrentPosition({ timeoutMs: 3000 }), 15_000);
-  result.watch = await new Promise(resolve => {
-    let stop = () => {};
-    const timer = setTimeout(() => { stop(); resolve("no answer in 5 s"); }, 5000);
-    stop = watchPosition(answer => { clearTimeout(timer); stop(); resolve(shape(answer)); });
-  });
-  result.authenticate = await within(authenticate({ reason: "Tarve runtime parity" }), 3000);
-  for (const [name, value] of Object.entries(result)) lines.push(name + ": " + JSON.stringify(value));
+  const result: Record<string, any> = {};
+  // First a request that opens nothing on any OS: without the fake provider, stop here.
+  result.timeout = await answer(getCurrentPosition({ timeoutMs: 0 }));
+  if (result.timeout?.error !== "no fix within 0 ms") throw new Error("TARVE_DEVICE=fake did not reach the native library: " + JSON.stringify(result.timeout));
+  result.shareInvalid = await share({} as any).then(value => value, rejected);
+  result.authenticateInvalid = await authenticate({ reason: " " }).then(value => value, rejected);
+  result.positionInvalid = await getCurrentPosition({ timeoutMs: -1 }).then(value => value, rejected);
+  result.share = await answer(share({ title: "Tarve parity", text: "Tarve runtime parity", files: [out + "-initial.png"] }));
+  const missing = out + "-missing.txt";
+  const shareMissing: any = await answer(share({ files: [missing] }));
+  result.shareMissing = { ...shareMissing, error: shareMissing.error?.replace(missing, "<missing>") };
+  result.position = await answer(getCurrentPosition({ highAccuracy: true, timeoutMs: 3000 }));
+  result.positionLow = await answer(getCurrentPosition());
+  result.watch = await watch(3, true);
+  result.watchStopped = await watch(1, false);
+  result.authenticate = await answer(authenticate({ reason: "Tarve runtime parity" }));
+  result.authenticateCanceled = await answer(authenticate({ reason: "Tarve runtime parity [fake:canceled]" }));
+  result.authenticateUnsupported = await answer(authenticate({ reason: "[fake:unsupported]" }));
+  for (const [name, value] of Object.entries(result)) lines.push(name + ": " + JSON.stringify(value).slice(0, 90));
   app.update();
   await wait(300);
   await stage(app, "results");

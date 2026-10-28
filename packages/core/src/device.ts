@@ -3,6 +3,13 @@
  * handling an event, else the last created), like `app.share(...)` and the others on
  * `AppHandle`. The same call and result shape on every OS: `{ supported: false }` where the
  * platform has none (Linux: all three; location and biometrics need a fix source / Hello).
+ *
+ * Tests and CI: start the app with `TARVE_DEVICE=fake` in its environment and the native
+ * library answers every request deterministically (same on Bun, Node and txiki) instead of
+ * opening the share UI, a location source or a biometric prompt: `share` is shown (a missing
+ * file is an error); fixes at -23.5505, -46.6333 (accuracy 5 m with `highAccuracy`, else 50 m),
+ * a watch sends three fixes 50 ms apart; `timeoutMs: 0` times out; `authenticate` succeeds
+ * unless the reason contains `[fake:<code>]` (e.g. `[fake:canceled]`). See native/src/device/fake.rs.
  */
 import type { AppHandle } from "./app";
 import type { AuthenticateOptions, AuthenticateResult, PositionOptions, PositionResult, ShareOptions, ShareResult } from "./app/device";

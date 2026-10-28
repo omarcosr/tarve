@@ -2,6 +2,9 @@
 //! (`location`/`position`) and the biometric check (`authenticate`). Android answers through
 //! `android/device.rs` (Java in packages/core/android/java), Windows through WinRT (DataTransfer
 //! share UI, `Geolocator`, Windows Hello). Elsewhere each request answers `supported: false`.
+//! `TARVE_DEVICE=fake` swaps every platform for the deterministic `fake` provider (tests, CI).
+mod fake;
+
 use crate::protocol::requests::{Authenticate, Location, Share};
 use crate::runtime::EventSink;
 use serde_json::{Value, json};
@@ -35,10 +38,6 @@ pub(crate) fn location_event(
 
 /// A fix as `GeoPosition`: `[latitude, longitude, accuracy, altitude, altitudeAccuracy,
 /// heading, speed, timestamp ms]`, NaN where the source does not know.
-#[cfg_attr(
-    not(any(target_os = "android", target_os = "windows")),
-    allow(dead_code)
-)]
 pub(crate) fn position_json(fix: &[f64; 8]) -> Value {
     let known = |value: f64| {
         if value.is_finite() {
@@ -77,6 +76,9 @@ pub(crate) fn share(window: Option<&Window>, request: &Share) -> Result<bool, St
     if request.text.is_none() && request.url.is_none() && request.files.is_empty() {
         return Err("share needs text, a url or files".into());
     }
+    if fake::enabled() {
+        return fake::share(request);
+    }
     #[cfg(target_os = "android")]
     {
         let _ = window;
@@ -105,6 +107,9 @@ pub(crate) fn location(request: Location, events: EventSink) {
             Some(&format!("unknown location action {}", request.action)),
         ));
         return;
+    }
+    if fake::enabled() {
+        return fake::location(request, move |event| events.push(event));
     }
     #[cfg(target_os = "android")]
     if let Err(message) = crate::android::device::location(&request)
@@ -136,6 +141,9 @@ pub(crate) fn location(request: Location, events: EventSink) {
 
 /// Starts a biometric check; the answer goes to `events`.
 pub(crate) fn authenticate(window: Option<&Window>, request: Authenticate, events: EventSink) {
+    if fake::enabled() {
+        return events.push(fake::authenticate(&request));
+    }
     #[cfg(target_os = "android")]
     {
         let _ = window;
