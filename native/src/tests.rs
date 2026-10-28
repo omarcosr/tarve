@@ -5247,7 +5247,10 @@ fn schedule_notification_commands_deserialize() {
     let crate::protocol::Command::ScheduleNotification(request) = command else {
         panic!("not a scheduleNotification");
     };
-    assert_eq!((request.action.as_str(), request.id.as_str()), ("set", "home"));
+    assert_eq!(
+        (request.action.as_str(), request.id.as_str()),
+        ("set", "home")
+    );
     let place = request.place.unwrap();
     assert_eq!((place.radius, place.leave), (200.0, false));
     assert!(request.at.is_none() && request.body.is_empty());
@@ -5255,7 +5258,9 @@ fn schedule_notification_commands_deserialize() {
         json!({"type":"scheduleNotification", "action":"cancel", "id":"home"}),
     )
     .unwrap();
-    assert!(matches!(cancel, crate::protocol::Command::ScheduleNotification(request) if request.action == "cancel"));
+    assert!(
+        matches!(cancel, crate::protocol::Command::ScheduleNotification(request) if request.action == "cancel")
+    );
 }
 
 #[test]
