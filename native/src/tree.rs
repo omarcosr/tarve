@@ -31,6 +31,7 @@ mod css_layout;
 mod keyframes;
 mod overscroll;
 mod paint_values;
+mod popup;
 mod touch_target;
 mod wheel;
 use css_layout::{apply_css_flex, grid_line, grid_template};
@@ -482,54 +483,6 @@ pub(crate) fn find_literal(content: &str, query: &str, case_sensitive: bool) -> 
 
 fn is_search_word_char(ch: char) -> bool {
     ch.is_alphabetic() || ch.is_numeric() || ch == '_'
-}
-
-/// Where a popup (a portal that dismisses on outside presses: a menu, popover or select) sits
-/// so it stays inside the window, as Floating UI's `flip` and `shift`: one that runs past an
-/// edge moves to the other side of its anchor (below → above, start-aligned → end-aligned)
-/// when that side has room, else slides back inside by 8 px. A popup that already fits, or one
-/// as large as the window (an overlay), stays where layout put it.
-pub(crate) fn keep_popup_in_view(
-    origin: (f64, f64),
-    size: (f64, f64),
-    anchor: BoxRect,
-    view: BoxRect,
-) -> (f64, f64) {
-    const MARGIN: f64 = 8.0;
-    const EPSILON: f64 = 0.5;
-    let axis = |start: f64, len: f64, a0: f64, a1: f64, v0: f64, v1: f64| -> f64 {
-        if start >= v0 - EPSILON && start + len <= v1 + EPSILON {
-            return start;
-        }
-        let (lo, hi) = (v0 + MARGIN, v1 - MARGIN);
-        if len >= hi - lo {
-            return lo.min(v0.max(start));
-        }
-        if start + len > v1 {
-            if start >= a1 - EPSILON {
-                // After the anchor: mirror the gap to its other side.
-                let flipped = a0 - (start - a1) - len;
-                if flipped >= lo {
-                    return flipped;
-                }
-            } else if (start - a0).abs() <= EPSILON && a1 - len >= lo {
-                // Aligned to the anchor's start edge: align to its end edge.
-                return a1 - len;
-            }
-        } else if start + len <= a0 + EPSILON {
-            let flipped = a1 + (a0 - start - len);
-            if flipped + len <= hi {
-                return flipped;
-            }
-        } else if (start + len - a1).abs() <= EPSILON && a0 + len <= hi {
-            return a0;
-        }
-        start.clamp(lo, hi - len)
-    };
-    (
-        axis(origin.0, size.0, anchor.x0, anchor.x1, view.x0, view.x1),
-        axis(origin.1, size.1, anchor.y0, anchor.y1, view.y0, view.y1),
-    )
 }
 
 fn reveal_delta(start: f64, end: f64, viewport_start: f64, viewport_end: f64, margin: f64) -> f64 {
@@ -3426,38 +3379,12 @@ impl Tree {
         Ok(layout_id)
     }
     fn positions(&mut self, id: &str, parent: (f64, f64)) -> Result<BoxRect, String> {
-        // A popup's anchor (its parent, the trigger) and the window are laid out before it.
-        let popup_frame = {
-            let entry = &self.entries[id];
-            (entry.node.portal && entry.node.dismiss_on_outside && id != self.root)
-                .then(|| {
-                    let anchor = self.entries[entry.parent.as_ref()?].rect;
-                    Some((anchor, self.entries[&self.root].rect))
-                })
-                .flatten()
-        };
+        let origin = self.layout_origin(id, parent)?;
         let entry = self.entries.get_mut(id).unwrap();
         let layout = self
             .layout
             .layout(entry.layout_id.unwrap())
             .map_err(|e| e.to_string())?;
-        // Taffy rounds each location relative to its parent but each size from the absolute
-        // edges: summing rounded locations can put a child a pixel off its parent's edge (a
-        // bottom-aligned bar ending below its plot). Positions are snapped from the
-        // unrounded absolute origin instead, so every edge is round(absolute edge).
-        let unrounded = self.layout.unrounded_layout(entry.layout_id.unwrap());
-        let mut origin = (
-            parent.0 + unrounded.location.x as f64,
-            parent.1 + unrounded.location.y as f64,
-        );
-        if let Some((anchor, view)) = popup_frame {
-            origin = keep_popup_in_view(
-                origin,
-                (layout.size.width as f64, layout.size.height as f64),
-                anchor,
-                view,
-            );
-        }
         entry.rect = BoxRect::from_origin_size(
             (origin.0.round(), origin.1.round()),
             (layout.size.width as f64, layout.size.height as f64),
