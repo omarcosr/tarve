@@ -1,4 +1,4 @@
-import type { SceneDocument, FileDialogOptions, LayoutBox, NativeEvent, NativeCommand, Snapshot } from "./protocol";
+import type { SceneDocument, LayoutBox, NativeEvent, NativeCommand, Snapshot } from "./protocol";
 import { readFileSync } from "node:fs";
 import { environmentKey, initialViewport, setEnvironment, trackViewport } from "./viewport";
 import { applyMediaEvent, type MediaController } from "./media-element";
@@ -741,13 +741,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         if (handlers.size === 0) hotkeys.delete(canonical);
       };
     },
-    async openFileDialog(dialogOptions?: FileDialogOptions): Promise<string | undefined> {
-      return (await requests.fileDialog("openFile", dialogOptions))[0];
-    },
+    openFileDialog: async dialogOptions => (await requests.fileDialog("openFile", dialogOptions))[0],
     openFilesDialog: dialogOptions => requests.fileDialog("openFiles", dialogOptions),
-    async openFolderDialog(dialogOptions?: FileDialogOptions): Promise<string | undefined> {
-      return (await requests.fileDialog("openFolder", dialogOptions))[0];
-    },
+    openFolderDialog: async dialogOptions => (await requests.fileDialog("openFolder", dialogOptions))[0],
     saveFileDialog: async dialogOptions => (await requests.fileDialog("saveFile", dialogOptions))[0],
     webSignIn: options => requests.webSignIn(options),
     onOpenUrl: listener => opens.onOpenUrl(listener),
@@ -755,7 +751,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     share: shareOptions => device.share(shareOptions),
     getCurrentPosition: positionOptions => device.getCurrentPosition(positionOptions),
     watchPosition: (callback, positionOptions) => device.watchPosition(callback, positionOptions),
-    authenticate: authOptions => device.authenticate(authOptions), recognizeSpeech: speechOptions => device.recognizeSpeech(speechOptions),
+    authenticate: authOptions => device.authenticate(authOptions),
+    recognizeSpeech: speechOptions => device.recognizeSpeech(speechOptions),
     invoke<R = unknown>(command: string, ...args: unknown[]): Promise<R> {
       if (!pluginHost) return Promise.reject(new Error(`Unknown plugin command: ${command} (the app has no plugins)`));
       return pluginHost.invoke(command, args) as Promise<R>;
