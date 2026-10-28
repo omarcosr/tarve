@@ -540,8 +540,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
 
     requests.settle(event);
-    if (!ended && event.type === "position") device.position(event);
-    if (!ended && event.type === "speech") device.speech(event);
+    if (!ended && (event.type === "position" || event.type === "speech")) device[event.type](event);
     if (!ended && event.type === "open") opens.deliver(event, event.initial);
 
     if (event.type === "environment") {
@@ -756,8 +755,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     share: shareOptions => device.share(shareOptions),
     getCurrentPosition: positionOptions => device.getCurrentPosition(positionOptions),
     watchPosition: (callback, positionOptions) => device.watchPosition(callback, positionOptions),
-    authenticate: authOptions => device.authenticate(authOptions),
-    recognizeSpeech: speechOptions => device.recognizeSpeech(speechOptions),
+    authenticate: authOptions => device.authenticate(authOptions), recognizeSpeech: speechOptions => device.recognizeSpeech(speechOptions),
     invoke<R = unknown>(command: string, ...args: unknown[]): Promise<R> {
       if (!pluginHost) return Promise.reject(new Error(`Unknown plugin command: ${command} (the app has no plugins)`));
       return pluginHost.invoke(command, args) as Promise<R>;

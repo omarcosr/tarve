@@ -10,11 +10,10 @@ use crate::{
 };
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
-use crate::accessibility::AccessibilityBridge;
-#[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
-use accesskit::ActionRequest;
-#[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
-use accesskit_winit::WindowEvent as AccessKitWindowEvent;
+use {
+    crate::accessibility::AccessibilityBridge, accesskit::ActionRequest,
+    accesskit_winit::WindowEvent as AccessKitWindowEvent,
+};
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 fn run_file_dialog(
