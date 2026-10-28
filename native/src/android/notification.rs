@@ -78,7 +78,7 @@ pub(crate) fn show(id: &str, title: &str, body: &str) -> Result<(), String> {
 
 /// Arms (`set`) or drops (`cancel`) a timed or place notification.
 pub(crate) fn schedule(
-    request: &crate::protocol::requests::ScheduleNotification,
+    request: &crate::protocol::notifications::ScheduleNotification,
 ) -> Result<(), String> {
     with_env(|env, activity| {
         let class = load_class(env, activity, "dev.tarve.TarveScheduledNotifications")?;

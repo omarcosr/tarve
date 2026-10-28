@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
+pub(crate) mod notifications;
 pub(crate) mod requests;
 mod style_validation;
 #[allow(unused_imports)]
@@ -727,14 +728,7 @@ pub enum Command {
         action: String,
         time: Option<f64>,
     },
-    Notify {
-        /// Echoed by the `notificationClick` it raises.
-        #[serde(default)]
-        id: Option<String>,
-        title: String,
-        #[serde(default)]
-        body: String,
-    },
+    Notify(notifications::Notify),
     Media {
         id: String,
         action: String,
@@ -827,7 +821,7 @@ pub enum Command {
     Permissions(requests::Permissions),
     Share(requests::Share),
     Location(requests::Location),
-    ScheduleNotification(requests::ScheduleNotification),
+    ScheduleNotification(notifications::ScheduleNotification),
     Authenticate(requests::Authenticate),
     Input {
         action: String,

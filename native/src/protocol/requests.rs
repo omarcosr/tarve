@@ -55,38 +55,6 @@ pub struct Location {
     pub maximum_age_ms: Option<f64>,
 }
 
-/// `notify({ at | place })` on Android: `set` arms a notification that fires at an epoch time
-/// (`at`, ms) or on entering or leaving a circle (`place`), with the app closed too; `cancel`
-/// drops it. Nothing answers.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
-pub struct ScheduleNotification {
-    pub action: String,
-    pub id: String,
-    #[serde(default)]
-    pub title: String,
-    #[serde(default)]
-    pub body: String,
-    #[serde(default)]
-    pub at: Option<f64>,
-    #[serde(default)]
-    pub place: Option<NotificationPlace>,
-}
-
-/// A circle a notification waits for.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
-pub struct NotificationPlace {
-    pub latitude: f64,
-    pub longitude: f64,
-    pub radius: f64,
-    /// Fire on leaving instead of entering.
-    #[serde(default)]
-    pub leave: bool,
-}
-
 /// `authenticate({ reason })`: a biometric (or device credential) check; answered by an
 /// `authenticate` event.
 #[derive(Debug, Deserialize)]

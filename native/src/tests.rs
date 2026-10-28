@@ -5238,32 +5238,6 @@ fn dismissible_portal_emits_outside_without_clicking_through() {
 }
 
 #[test]
-fn schedule_notification_commands_deserialize() {
-    let command: crate::protocol::Command = serde_json::from_value(json!({
-        "type":"scheduleNotification", "action":"set", "id":"home", "title":"Chegou",
-        "place":{"latitude":-23.5, "longitude":-46.6, "radius":200}
-    }))
-    .unwrap();
-    let crate::protocol::Command::ScheduleNotification(request) = command else {
-        panic!("not a scheduleNotification");
-    };
-    assert_eq!(
-        (request.action.as_str(), request.id.as_str()),
-        ("set", "home")
-    );
-    let place = request.place.unwrap();
-    assert_eq!((place.radius, place.leave), (200.0, false));
-    assert!(request.at.is_none() && request.body.is_empty());
-    let cancel: crate::protocol::Command = serde_json::from_value(
-        json!({"type":"scheduleNotification", "action":"cancel", "id":"home"}),
-    )
-    .unwrap();
-    assert!(
-        matches!(cancel, crate::protocol::Command::ScheduleNotification(request) if request.action == "cancel")
-    );
-}
-
-#[test]
 fn right_click_emits_context_event_with_pointer_position() {
     let target = node(
         "target",
