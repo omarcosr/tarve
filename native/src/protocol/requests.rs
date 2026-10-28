@@ -55,6 +55,21 @@ pub struct Location {
     pub maximum_age_ms: Option<f64>,
 }
 
+/// `recognizeSpeech(...)`: `start` a dictation session, `stop` it (the result follows) or
+/// `cancel` it (no result). Answered by `speech` events carrying the same `session_id`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub struct Speech {
+    pub action: String,
+    pub session_id: String,
+    /// BCP 47 tag (`pt-BR`); the system language when absent.
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub partial_results: bool,
+}
+
 /// `authenticate({ reason })`: a biometric (or device credential) check; answered by an
 /// `authenticate` event.
 #[derive(Debug, Deserialize)]

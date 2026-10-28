@@ -12,8 +12,11 @@
 //! - In both, `accuracy` is 5 m with `highAccuracy`, else 50 m.
 //! - `authenticate`: success, unless the reason contains `[fake:<code>]` with an
 //!   `AuthErrorCode` (`not-enrolled`, `canceled`, `failed`, `lockout`, `busy`, `unsupported`).
-use super::{authenticate_event, location_event, position_json};
-use crate::protocol::requests::{Authenticate, Location, Share};
+//! - `recognizeSpeech`: `start` answers "ready", a "level" and, with `partialResults`, the
+//!   partials of `SPEECH`; `stop` answers "end" then the result `SPEECH`; `cancel` answers
+//!   nothing.
+use super::{authenticate_event, location_event, position_json, speech_event};
+use crate::protocol::requests::{Authenticate, Location, Share, Speech};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
@@ -43,6 +46,49 @@ const AUTH_CODES: [&str; 6] = [
     "busy",
     "unsupported",
 ];
+
+/// What the fake recogniser hears.
+pub(crate) const SPEECH: &str = "comprar pão amanhã";
+
+/// The running dictation sessions.
+static SPEECH_SESSIONS: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+/// `start`, `stop` or `cancel` (the action is already known to be one of them).
+pub(super) fn speech(request: Speech, push: impl Fn(Value)) {
+    let id = request.session_id;
+    let mut guard = SPEECH_SESSIONS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let sessions = guard.get_or_insert_with(HashSet::new);
+    match request.action.as_str() {
+        "start" => {
+            sessions.insert(id.clone());
+            push(speech_event(&id, "ready", None, None, None, None));
+            push(speech_event(&id, "level", None, Some(0.5), None, None));
+            if request.partial_results {
+                let words: Vec<&str> = SPEECH.split(' ').collect();
+                for count in 1..=words.len() {
+                    let partial = words[..count].join(" ");
+                    push(speech_event(
+                        &id,
+                        "partial",
+                        Some(&partial),
+                        None,
+                        None,
+                        None,
+                    ));
+                }
+            }
+        }
+        "stop" if sessions.remove(&id) => {
+            push(speech_event(&id, "end", None, None, None, None));
+            push(speech_event(&id, "result", Some(SPEECH), None, None, None));
+        }
+        _ => {
+            sessions.remove(&id);
+        }
+    }
+}
 
 /// The running watches; a fix is sent under this lock, so none follows `clear`.
 static WATCHES: Mutex<Option<HashSet<String>>> = Mutex::new(None);
@@ -272,6 +318,44 @@ mod tests {
         assert_eq!(
             authenticate(&request("[fake:nope]"))["success"],
             json!(true)
+        );
+    }
+
+    #[test]
+    fn speech_streams_partials_and_answers_on_stop() {
+        let request = |action: &str, id: &str| Speech {
+            action: action.into(),
+            session_id: id.into(),
+            language: Some("pt-BR".into()),
+            partial_results: true,
+        };
+        let events = std::cell::RefCell::new(Vec::new());
+        let push = |event: Value| events.borrow_mut().push(event);
+        speech(request("start", "s"), push);
+        speech(request("stop", "s"), push);
+        let phases: Vec<String> = events
+            .borrow()
+            .iter()
+            .map(|event| event["phase"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            phases,
+            [
+                "ready", "level", "partial", "partial", "partial", "end", "result"
+            ]
+        );
+        assert_eq!(
+            events.borrow().last().unwrap(),
+            &json!({"type":"speech", "sessionId":"s", "phase":"result", "supported":true, "text":SPEECH})
+        );
+        events.borrow_mut().clear();
+        speech(request("start", "c"), push);
+        events.borrow_mut().clear();
+        speech(request("cancel", "c"), push);
+        speech(request("stop", "c"), push);
+        assert!(
+            events.borrow().is_empty(),
+            "a canceled session answers nothing"
         );
     }
 

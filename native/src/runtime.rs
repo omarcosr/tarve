@@ -3626,6 +3626,7 @@ impl ApplicationHandler<Command> for App {
             Command::Permissions(request) => self.permissions(request),
             Command::Share(request) => self.share(request),
             Command::Location(request) => self.location(request),
+            Command::Speech(request) => self.speech(request),
             Command::Authenticate(request) => self.authenticate(request),
             Command::FileDialog(crate::protocol::requests::FileDialog {
                 mode,

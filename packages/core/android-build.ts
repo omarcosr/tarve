@@ -138,6 +138,7 @@ export function androidManifest(options: { packageName: string; label: string; v
     android:versionCode="${options.versionCode}"
     android:versionName="${escapeXml(options.versionName)}">
   <uses-sdk android:minSdkVersion="${MIN_SDK}" android:targetSdkVersion="${TARGET_SDK}"/>
+  <queries><intent><action android:name="android.speech.RecognitionService"/></intent></queries>
 ${permissions.map(name => `  <uses-permission android:name="${escapeXml(name)}"/>`).join("\n")}
   <application
       android:label="${escapeXml(options.label)}"${options.icon ? `

@@ -9,12 +9,13 @@
  * opening the share UI, a location source or a biometric prompt: `share` is shown (a missing
  * file is an error); fixes at -23.5505, -46.6333 (accuracy 5 m with `highAccuracy`, else 50 m),
  * a watch sends three fixes 50 ms apart; `timeoutMs: 0` times out; `authenticate` succeeds
- * unless the reason contains `[fake:<code>]` (e.g. `[fake:canceled]`). See native/src/device/fake.rs.
+ * unless the reason contains `[fake:<code>]` (e.g. `[fake:canceled]`); `recognizeSpeech` hears
+ * "comprar pão amanhã" (partials word by word) and answers once stopped. See native/src/device/fake.rs.
  */
 import type { AppHandle } from "./app";
-import type { AuthenticateOptions, AuthenticateResult, PositionOptions, PositionResult, ShareOptions, ShareResult } from "./app/device";
+import type { AuthenticateOptions, AuthenticateResult, PositionOptions, PositionResult, ShareOptions, ShareResult, SpeechOptions, SpeechSession } from "./app/device";
 
-export type { AuthenticateOptions, AuthenticateResult, AuthErrorCode, GeoErrorCode, GeoPosition, PositionOptions, PositionResult, ShareOptions, ShareResult } from "./app/device";
+export type { AuthenticateOptions, AuthenticateResult, AuthErrorCode, GeoErrorCode, GeoPosition, PositionOptions, PositionResult, ShareOptions, ShareResult, SpeechErrorCode, SpeechOptions, SpeechResult, SpeechSession } from "./app/device";
 
 const ACTIVE_APP_KEY = Symbol.for("tarve.activeApp");
 
@@ -37,6 +38,11 @@ export async function getCurrentPosition(options?: PositionOptions): Promise<Pos
 /** Location fixes about every second until the returned function is called. */
 export function watchPosition(callback: (result: PositionResult) => void, options?: Pick<PositionOptions, "highAccuracy">): () => void {
   return activeApp().watchPosition(callback, options);
+}
+
+/** Dictation: Android's SpeechRecognizer, with partial results and the microphone level. */
+export function recognizeSpeech(options?: SpeechOptions): SpeechSession {
+  return activeApp().recognizeSpeech(options);
 }
 
 /** A biometric (or device credential) check: Android BiometricPrompt, Windows Hello. */

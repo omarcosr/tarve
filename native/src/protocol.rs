@@ -827,6 +827,7 @@ pub enum Command {
     Permissions(requests::Permissions),
     Share(requests::Share),
     Location(requests::Location),
+    Speech(requests::Speech),
     Authenticate(requests::Authenticate),
     Input {
         action: String,
