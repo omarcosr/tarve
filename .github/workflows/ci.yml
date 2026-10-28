@@ -233,7 +233,7 @@ jobs:
     name: Universal package and executable
     needs: linux-x64-native
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
