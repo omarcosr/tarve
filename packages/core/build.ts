@@ -7,7 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { nativePath } from "#tarve/runtime";
 import { buildMetadata, writeLinuxDesktopEntry } from "./package-metadata";
-import { frameworkPlugins } from "./framework-plugins";
+import { prebundleForBun } from "./bun-prebundle";
 import { BUILD_TARGETS, hostBuildTarget, isBuildTarget, isMacTarget, targetConfig, type BuildTarget } from "./targets";
 import { bundleExecutableName, macAppPath, writeMacAppBundle } from "./macos-bundle";
 import type { NativeFeature } from "./native-features";
@@ -135,8 +135,7 @@ export async function build(options: BuildOptions): Promise<string> {
     : resolve(options.outfile ?? `dist/${name}${config.executableSuffix}`);
   const library = resolveNativeLibrary(target, options.nativeLibrary);
   const assetsModule = fileURLToPath(import.meta.resolve("#tarve/assets"));
-  const sourceDirectory = join(import.meta.dir, "src");
-  const repositorySource = existsSync(join(sourceDirectory, "index.ts"));
+  const repositorySource = existsSync(join(import.meta.dir, "src", "index.ts"));
   const expectedCompatibility = repositorySource
     ? await createNativeCompatibilityManifest(resolve(import.meta.dir, "../.."), packageMetadata.version)
     : await readNativeCompatibilityManifest(join(import.meta.dir, NATIVE_COMPATIBILITY_MANIFEST_NAME));
@@ -160,18 +159,6 @@ export async function build(options: BuildOptions): Promise<string> {
   const runtime: BunPlugin = {
     name: "tarve-native-runtime",
     setup(builder) {
-      if (repositorySource) {
-        builder.onResolve({ filter: /^tarve$/ }, () => ({ path: join(sourceDirectory, "index.ts") }));
-        builder.onResolve({ filter: /^tarve\/jsx-runtime$/ }, () => ({ path: join(sourceDirectory, "jsx-runtime.ts") }));
-        builder.onResolve({ filter: /^tarve\/jsx-dev-runtime$/ }, () => ({ path: join(sourceDirectory, "jsx-dev-runtime.ts") }));
-      }
-      if (options.compileJsx) {
-        builder.onLoad({ filter: /\.[jt]sx$/ }, async args => {
-          if (/[\\/]node_modules[\\/]/.test(args.path) || args.path.startsWith(join(import.meta.dir, "src"))) return undefined;
-          const { compileJsx } = await import("./jsx-compile");
-          return { contents: (await compileJsx(await Bun.file(args.path).text())).code, loader: args.path.endsWith(".jsx") ? "jsx" : "tsx" };
-        });
-      }
       builder.onResolve({ filter: /^#tarve\/runtime$/ }, () => ({ path: "runtime", namespace: "tarve" }));
       builder.onLoad({ filter: /^runtime$/, namespace: "tarve" }, () => (mac ? {
         loader: "ts",
@@ -199,14 +186,16 @@ export async function build(options: BuildOptions): Promise<string> {
   const icoPath = iconDirectory ? join(iconDirectory, "app.ico") : undefined;
   if (icoPath) writeFileSync(icoPath, images!.ico);
   try {
+    // esbuild bundles the app with keepNames (bun-prebundle.ts); Bun minifies and embeds the bundle.
+    const bundle = await prebundleForBun({
+      entry: packHost ? (await import("./pack-build")).writeHostEntry(packDirectory, entrypoint, packHost) : entrypoint,
+      appEntrypoint: entrypoint, directory: packDirectory, define, compileJsx: options.compileJsx,
+    });
     const result = await Bun.build({
-      entrypoints: [packHost ? (await import("./pack-build")).writeHostEntry(packDirectory, entrypoint, packHost) : entrypoint],
+      entrypoints: [bundle],
       target: "bun",
-      plugins: [runtime, ...await frameworkPlugins<BunPlugin>(entrypoint)],
-      define: { "process.env.NODE_ENV": JSON.stringify("production"), ...define },
-      // Identifiers keep their names: Function.name stays what the source says (component names in
-      // the inspector, errors), as in Node.js and txiki.js builds. Bun 1.4 ignores `keepNames`.
-      minify: { whitespace: true, syntax: true, identifiers: false },
+      plugins: [runtime],
+      minify: true,
       compile: {
         target: config.bunTarget,
         outfile: macExecutable ?? outfile,
