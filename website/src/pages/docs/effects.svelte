@@ -16,6 +16,9 @@
     ["<code>maskImage: \"linear-gradient(…)\"</code>", "CSS <code>mask-image</code> with a gradient: the box and its content keep the gradient's alpha. Linear, radial and conic gradients."],
     ["<code>background: \"g1, g2, …, base\"</code>, <code>backgroundLayers</code>", "CSS multiple backgrounds: layers over the bottom background, the first on top."],
     ["<code>\"50vh\"</code>, <code>\"100vw\"</code>, <code>\"10vmin\"</code>, <code>\"10vmax\"</code>", "Viewport units in lengths, insets and margins; resolved to px for the window and again on resize (<code>dvh</code>/<code>svh</code>/<code>lvh</code> are accepted)."],
+    ["<code>transform: \"translateX(-100%)\"</code>", "Percent translations are of the box's own width/height, as in CSS (a shimmer that sweeps its own width). Paint-time: hit testing follows, layout does not."],
+    ["<code>foreground: \"currentColor\"</code>", "The nearest ancestor's foreground, in its hover/group-hover state: <code>&lt;Svg color=\"currentColor\"&gt;</code> follows its button's colour."],
+    ["<code>pointerEvents: \"none\"</code>", "The pointer falls through the box. It inherits as in CSS: children without a value fall through too, a child with <code>\"auto\"</code> takes the pointer again."],
   ];
 </script>
 
@@ -28,7 +31,7 @@
   <header class="doc-head">
     <span class="eyebrow">Guide · v{version}</span>
     <h1>Visual effects</h1>
-    <p class="doc-lead">The CSS effects a web UI leans on, as style properties: backdrop blur, filters, masks, layered backgrounds and viewport units. Every renderer draws them alike (D3D11, Vello and the CPU renderer).</p>
+    <p class="doc-lead">The CSS effects a web UI leans on, as style properties: backdrop blur, filters, masks, layered backgrounds, viewport units, percent transforms, <code>currentColor</code> and inherited <code>pointer-events</code>. Every renderer draws them alike (D3D11, Vello and the CPU renderer).</p>
   </header>
 
   <section class="doc-section">

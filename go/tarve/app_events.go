@@ -144,6 +144,9 @@ func (a *App) elementEvent(kind, id string, ev map[string]any) {
 	case "imageError":
 		if f, ok := h("onError").(func(src, message string)); ok {
 			run(kind, func() { f(str("src"), str("message")) })
+		} else {
+			// No handler: the failure is the app's, as before nodes heard it.
+			a.reportError("native", fmt.Errorf("Image '%s': %s", str("src"), str("message")))
 		}
 	}
 	if !succeeded {

@@ -67,6 +67,9 @@ describe("CSS shadow syntax", () => {
     expect(parseTransform("scale(2) translateX(10px)")).toEqual({ x: 20, scale: 2 });
     expect(parseTransform("translate(4px, 0) scaleX(2) scaleY(0.5)")).toEqual({ x: 4, scaleX: 2, scaleY: 0.5 });
     expect(parseTransform("none")).toEqual({});
+    expect(parseTransform("translateX(-100%)")).toEqual({ xPercent: -100 });
+    expect(parseTransform("scale(2) translate(10px, 50%)")).toEqual({ x: 20, yPercent: 100, scale: 2 });
+    expect(parseTransform("translateY(.5%) translateY(2px)")).toEqual({ y: 2, yPercent: 0.5 });
     expect(() => parseTransform("rotate(10deg)")).toThrow("translate and scale only");
     expect(() => parseTransform("scale(0)")).toThrow("Invalid scale");
     expect(() => parseTransform("translateX(1em)")).toThrow("length");

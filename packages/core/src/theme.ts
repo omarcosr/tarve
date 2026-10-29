@@ -285,7 +285,10 @@ export function resolveStyleString(key: string, value: string, selected: ThemeDe
     }
     resolved = (PAINT_KEYS as readonly string[]).includes(key) && GRADIENT.test(value)
       ? value
-      : resolveThemeColor(COLOR_KEY.test(key) ? cssColor(value) : value, selected);
+      // The runtime takes the nearest ancestor's foreground, as CSS currentColor.
+      : key === "foreground" && /^\s*currentcolor\s*$/i.test(value)
+        ? "currentColor"
+        : resolveThemeColor(COLOR_KEY.test(key) ? cssColor(value) : value, selected);
     values.set(value, resolved);
   }
   return resolved;

@@ -9,7 +9,12 @@ export interface ViewProps extends BaseProps, DropTargetProps, FileDropTargetPro
   align?: Style["align"];
   justify?: Style["justify"];
   portal?: boolean;
+  /**
+   * A press outside the box fires `onOutsideClick` instead of reaching what is under it
+   * (light dismiss). Works on portals and in-flow boxes; an open portal wins.
+   */
   dismissOnOutside?: boolean;
+  /** With `dismissOnOutside`: a press (or right click) outside the box. */
   onOutsideClick?: () => void;
   dragRegion?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "toggleFullscreen" | "close";

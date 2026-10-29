@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Column, Window } from "./components";
+import { Column, Svg, Window } from "./components";
 import { compileTree } from "./reconciler";
 import { darkTheme, theme } from "./theme";
 
@@ -34,5 +34,12 @@ describe("shadow styles", () => {
     expect(style.hover).toMatchObject({ background: "#aabbcc", outlineColor: "#00000000" });
     expect(tree.document.window.background).toBe("#f0f0f0ff");
     expect(() => compileTree(<Window><Column style={{ background: "bogus" }} /></Window>)).toThrow("Unsupported colour");
+  });
+
+  test("currentColor foreground is left for the runtime to inherit", () => {
+    const tree = compileTree(<Window><Column id="button" style={{ foreground: "#fff", hover: { foreground: "#f00" } }}><Svg id="icon" color="currentColor" /><Column id="box" style={{ foreground: "CurrentColor", hover: { foreground: "currentcolor" } }} /></Column></Window>);
+    expect(tree.nodes.get("icon")!.style.foreground).toBe("currentColor");
+    expect(tree.nodes.get("box")!.style).toMatchObject({ foreground: "currentColor", hover: { foreground: "currentColor" } });
+    expect(() => compileTree(<Window><Column style={{ background: "currentColor" }} /></Window>)).toThrow("Unsupported colour");
   });
 });

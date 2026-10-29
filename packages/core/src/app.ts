@@ -574,6 +574,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       }
 
       const { handled, succeeded } = dispatchElementEvent(event, handlers);
+      // An image without `onError` fails loudly; one that handles it (a fallback) does not.
+      if (event.type === "imageError" && !handled) reportError(new Error(`Image '${event.src}': ${event.message}`), { source: "native", event: "imageError", targetId: event.id });
 
       if (!succeeded) {
         // Motion completion is a notification, not an optimistic native edit.

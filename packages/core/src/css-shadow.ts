@@ -123,7 +123,7 @@ export function parseTextShadow(value: string): TextShadow | undefined {
  * Functions compose left to right as in CSS; "none" is the identity.
  */
 export function parseTransform(value: string): Transform {
-  let [x, y, scaleX, scaleY] = [0, 0, 1, 1];
+  let [x, y, xPercent, yPercent, scaleX, scaleY] = [0, 0, 0, 0, 1, 1];
   const input = value.trim();
   if (input.toLowerCase() === "none") return {};
   const pattern = /([a-zA-Z]+)\(([^)]*)\)/g;
@@ -132,20 +132,25 @@ export function parseTransform(value: string): Transform {
     consumed += match[0];
     const name = match[1]!;
     const args = match[2]!.split(/[\s,]+/).filter(Boolean);
-    const px = (token: string | undefined) => {
+    // A translation: px, or % of the box's own size (as in CSS).
+    const shift = (token: string | undefined): [number, number] => {
+      const percent = token?.match(/^(-?(?:\d+\.?\d*|\.\d+))%$/);
+      if (percent) return [0, Number(percent[1])];
       const number = token === undefined ? 0 : length(token);
       if (number === undefined) throw new TypeError(`Unsupported transform length: ${token}`);
-      return number;
+      return [number, 0];
     };
+    const moveX = (token: string | undefined) => { const [px, pct] = shift(token); x += scaleX * px; xPercent += scaleX * pct; };
+    const moveY = (token: string | undefined) => { const [px, pct] = shift(token); y += scaleY * px; yPercent += scaleY * pct; };
     const factor = (token: string | undefined) => {
       const number = Number(token);
       if (token === undefined || !Number.isFinite(number) || number === 0) throw new TypeError(`Invalid scale: ${token}`);
       return number;
     };
     switch (name) {
-      case "translate": x += scaleX * px(args[0]); y += scaleY * px(args[1]); break;
-      case "translateX": x += scaleX * px(args[0]); break;
-      case "translateY": y += scaleY * px(args[0]); break;
+      case "translate": moveX(args[0]); moveY(args[1]); break;
+      case "translateX": moveX(args[0]); break;
+      case "translateY": moveY(args[0]); break;
       case "scale": { const sx = factor(args[0]); scaleX *= sx; scaleY *= args[1] === undefined ? sx : factor(args[1]); break; }
       case "scaleX": scaleX *= factor(args[0]); break;
       case "scaleY": scaleY *= factor(args[0]); break;
@@ -155,6 +160,7 @@ export function parseTransform(value: string): Transform {
   if (consumed.replace(/\s/g, "") !== input.replace(/\s/g, "")) throw new TypeError(`Invalid transform: ${value}`);
   return {
     ...(x !== 0 ? { x } : {}), ...(y !== 0 ? { y } : {}),
+    ...(xPercent !== 0 ? { xPercent } : {}), ...(yPercent !== 0 ? { yPercent } : {}),
     ...(scaleX === scaleY ? (scaleX !== 1 ? { scale: scaleX } : {}) : { scaleX, scaleY }),
   };
 }

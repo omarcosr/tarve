@@ -302,6 +302,9 @@ func resolveStyleString(key, value string, t *Theme) string {
 	}
 	if (key == "background" || key == "foreground" || key == "borderColor") && gradient.MatchString(value) {
 		r = value
+	} else if key == "foreground" && strings.EqualFold(strings.TrimSpace(value), "currentColor") {
+		// The runtime takes the nearest ancestor's foreground, as CSS currentColor.
+		r = "currentColor"
 	} else if colorKey.MatchString(key) {
 		r = resolveThemeColor(cssColor(value), t)
 	} else {
@@ -420,9 +423,17 @@ func transformLength(token string) float64 {
 	return v
 }
 
+func transformPercent(token string) float64 {
+	v, err := strconv.ParseFloat(strings.TrimSuffix(token, "%"), 64)
+	if err != nil || math.IsInf(v, 0) || math.IsNaN(v) {
+		panic("tarve: unsupported transform length: " + token)
+	}
+	return v
+}
+
 // parseTransform is @tarve/core parseTransform: translate and scale functions.
 func parseTransform(value string) S {
-	x, y, sx, sy := 0.0, 0.0, 1.0, 1.0
+	x, y, xp, yp, sx, sy := 0.0, 0.0, 0.0, 0.0, 1.0, 1.0
 	input := strings.TrimSpace(value)
 	if strings.EqualFold(input, "none") {
 		return S{}
@@ -449,20 +460,29 @@ func parseTransform(value string) S {
 			}
 			return ""
 		}
-		px := func(i int) float64 {
-			if i >= len(args) {
-				return 0
+		// A translation: px, or % of the box's own size (as in CSS).
+		moveX := func(i int) {
+			if i < len(args) && strings.HasSuffix(args[i], "%") {
+				xp += sx * transformPercent(args[i])
+			} else if i < len(args) {
+				x += sx * transformLength(args[i])
 			}
-			return transformLength(args[i])
+		}
+		moveY := func(i int) {
+			if i < len(args) && strings.HasSuffix(args[i], "%") {
+				yp += sy * transformPercent(args[i])
+			} else if i < len(args) {
+				y += sy * transformLength(args[i])
+			}
 		}
 		switch m[1] {
 		case "translate":
-			x += sx * px(0)
-			y += sy * px(1)
+			moveX(0)
+			moveY(1)
 		case "translateX":
-			x += sx * px(0)
+			moveX(0)
 		case "translateY":
-			y += sy * px(0)
+			moveY(0)
 		case "scale":
 			f := factor(arg(0))
 			sx *= f
@@ -488,6 +508,12 @@ func parseTransform(value string) S {
 	}
 	if y != 0 {
 		out["y"] = y
+	}
+	if xp != 0 {
+		out["xPercent"] = xp
+	}
+	if yp != 0 {
+		out["yPercent"] = yp
 	}
 	if sx == sy {
 		if sx != 1 {

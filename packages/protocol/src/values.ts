@@ -27,9 +27,11 @@ export interface TextShadow { x?: number; y?: number; blur?: number; color: stri
 /**
  * Paint-time transform about the box's origin (its centre unless `originX`/`originY`, fractions
  * of the box, say otherwise): translate, scale, `rotate` and `skewX`/`skewY` in degrees.
+ * `xPercent`/`yPercent` translate by percents of the box's own width/height (CSS `translateX(100%)`),
+ * added to `x`/`y`.
  */
 export interface Transform {
-  x?: number; y?: number; scale?: number; scaleX?: number; scaleY?: number;
+  x?: number; y?: number; xPercent?: number; yPercent?: number; scale?: number; scaleX?: number; scaleY?: number;
   rotate?: number; skewX?: number; skewY?: number; originX?: number; originY?: number;
 }
 export interface BoxShadow { x?: number; y?: number; blur?: number; spread?: number; color: string; inset?: boolean }
