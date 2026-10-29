@@ -559,6 +559,8 @@ Native text search and copy operate on the mounted logical window. A retained ed
 
 `Input` and `TextArea` use native text editing over Parley, including caret placement, selection, clipboard operations, grapheme-aware deletion, IME composition, wrapping, and scrolling. Password input remains masked in rendering and accessibility output.
 
+`onLongPress` on a `Pressable` (or a `<div>`) fires when a press is held still for 500 ms, by touch or mouse; a press that travels more than 8 px is a drag or a scroll instead, and the release that ends a long press sends no `onClick`.
+
 Editors keep a native per-field undo/redo history (`Ctrl+Z`, `Ctrl+Y` / `Ctrl+Shift+Z`) that coalesces continuous typing or deletion into word-sized steps and resets when a controlled value changes externally. `onSubmit(value)` fires on Enter for `Input`; `TextArea` submits on `Ctrl/Cmd+Enter`, or on Enter with `submitOnEnter` (Shift+Enter then inserts a newline). The caret blinks after activity and settles solid after 10 s idle, so a focused editor schedules no idle frames. When the clipboard holds no text, `Ctrl+V` delivers files or a bitmap to the focused element's `onPaste` as `{ kind: "files", files }` or `{ kind: "image", width, height, rgba }`.
 
 On Windows, Tarve projects the native tree through AccessKit/UI Automation with roles, names, values, states, actions, focus, text ranges, selection, scroll ranges, live regions, and field relationships. On Linux, the same AccessKit tree is exposed over AT-SPI (D-Bus) for screen readers such as Orca; it activates only when an assistive technology connects.

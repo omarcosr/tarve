@@ -13,6 +13,7 @@ use crate::{
 };
 use base64::Engine as _;
 mod input_and_scroll;
+mod long_press;
 mod popups;
 
 #[test]
@@ -266,7 +267,7 @@ fn file_dialog_protocol_and_hotkey_names_are_explicit() {
         _ => panic!("expected file dialog command"),
     }
     let invalid = protocol::FileDialogOptions {
-        filters: vec![protocol::FileDialogFilter {
+        filters: vec![protocol::requests::FileDialogFilter {
             name: "Bad".into(),
             extensions: vec!["*.exe".into()],
         }],
@@ -5202,24 +5203,6 @@ fn portal_escapes_scroll_clip_for_paint_and_hit_testing() {
     tree.scene(1.0);
     tree.pointer_move(20.0, 90.0);
     assert_eq!(tree.hovered.as_deref(), Some("portal-button"));
-}
-
-#[test]
-fn right_click_emits_context_event_with_pointer_position() {
-    let target = node(
-        "target",
-        "pressable",
-        json!({"width":100,"height":40}),
-        vec![],
-    );
-    let mut tree = Tree::new(root(vec![target]));
-    tree.compute(200.0, 100.0).unwrap();
-    tree.pointer_move(24.0, 16.0);
-    let events = tree.pointer_context();
-    assert_eq!(events[0]["type"], "context");
-    assert_eq!(events[0]["id"], "target");
-    assert_eq!(events[0]["x"], 24.0);
-    assert_eq!(events[0]["y"], 16.0);
 }
 
 #[test]

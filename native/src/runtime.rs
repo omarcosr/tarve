@@ -140,6 +140,7 @@ mod cursor;
 /// benchmarks run beside someone's work without touching their screen, mouse or
 /// keyboard. Rendering and keyboard focus inside the app are unaffected.
 mod graphics_startup;
+mod long_press;
 mod system_requests;
 mod viewport;
 use viewport::{layout_viewport, request_frame, set_ime_allowed};
@@ -1178,6 +1179,7 @@ impl App {
             ready_emitted: false,
             presentation_retry_at: None,
             input_hold: None,
+            long_press_at: None,
             memory_dirty: std::cell::Cell::new(false),
             trim_at: std::cell::Cell::new(None),
             startup_trim_pending: std::cell::Cell::new(true),
@@ -1356,6 +1358,8 @@ struct App {
     /// After a click or key reaches JS: the frame waits (until this deadline at most)
     /// for the patch its handler sends, so release and update show in one frame.
     input_hold: Option<Instant>,
+    /// When the current press becomes a long press (`Tree::fire_long_press`).
+    long_press_at: Option<Instant>,
     motion_epoch: Instant,
     motion_test_clock: bool,
     graphics_recovery_episodes: usize,
@@ -2054,7 +2058,7 @@ impl App {
         let present_at = self
             .presentation_retry_at
             .filter(|deadline| *deadline > now);
-        let hold_at = self.input_hold.filter(|deadline| *deadline > now);
+        let hold_at = self.input_deadline(now);
         let motion_at = self.motion_deadline(now);
         let media_at = self.media.deadline();
         #[cfg(target_os = "android")]
@@ -3655,6 +3659,7 @@ impl ApplicationHandler<Command> for App {
                     "key" => self.tree.key(text.as_deref().unwrap_or("")),
                     _ => vec![],
                 };
+                self.sync_long_press(action == "down");
                 self.emit(events);
                 accessibility_changed = true;
             }
@@ -3729,10 +3734,7 @@ impl ApplicationHandler<Command> for App {
         if present_due {
             self.presentation_retry_at = None;
         }
-        if self.input_hold.is_some_and(|until| until <= now) {
-            self.input_hold = None;
-            self.redraw();
-        }
+        self.tick_input_deadlines(now);
         let media_events = self.media.tick(now);
         self.emit(media_events);
         self.sync_file_drag();
@@ -3904,9 +3906,7 @@ impl ApplicationHandler<Command> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let scale = self.window.as_ref().unwrap().scale_factor();
-                events = self
-                    .tree
-                    .pointer_move(position.x / scale, position.y / scale);
+                events = self.tree_pointer_move(position.x / scale, position.y / scale);
                 accessibility_changed = self.tree.accessibility_selection_dragging()
                     || events.iter().any(|event| {
                         matches!(event["type"].as_str(), Some("valueChange" | "scroll"))
@@ -3922,11 +3922,11 @@ impl ApplicationHandler<Command> for App {
                     // After a window move loop (or a DPI change) Windows may skip the move
                     // before the next press: stale hover would miss the TitleBar drag.
                     events = self.sync_pointer_from_os();
-                    events.extend(self.tree.pointer_down());
+                    events.extend(self.tree_pointer_down());
                     self.reopen_ime_on_focused_press();
                     self.titlebar_pressed();
                 } else {
-                    events = self.tree.pointer_up();
+                    events = self.tree_pointer_up();
                     self.handle_window_actions(event_loop, &events);
                 }
                 accessibility_changed = true;

@@ -1,6 +1,24 @@
 //! Commands the runtime answers with an event carrying the same `requestId`.
-use super::FileDialogOptions;
 use serde::Deserialize;
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDialogFilter {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub extensions: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDialogOptions {
+    pub title: Option<String>,
+    pub directory: Option<String>,
+    pub file_name: Option<String>,
+    #[serde(default)]
+    pub filters: Vec<FileDialogFilter>,
+}
 
 /// A native open or save dialog; answered by a `fileDialog` event.
 #[derive(Debug, Deserialize)]

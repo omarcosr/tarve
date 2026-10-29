@@ -5,6 +5,7 @@ use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub(crate) mod requests;
+pub use requests::FileDialogOptions;
 mod style_validation;
 #[allow(unused_imports)]
 pub(crate) use style_validation::*;
@@ -356,6 +357,10 @@ pub struct Node {
     /// Emit a `size` event with the inner (padding box minus padding) size whenever it changes.
     #[serde(default)]
     pub report_size: bool,
+    /// Emit a `longPress` event when a press on this node (or a descendant) is held still for
+    /// `LONG_PRESS`; the release that ends it sends no `click`.
+    #[serde(default)]
+    pub long_press: bool,
     /// Emit `pointerMove` events with the pointer's position inside this node
     /// while it is over the node or anything in it.
     #[serde(default)]
@@ -596,25 +601,6 @@ pub enum TreeMutation {
     Patch { node: Box<Node> },
     Children { id: String, children: Vec<String> },
     Remove { id: String },
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileDialogFilter {
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub extensions: Vec<String>,
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct FileDialogOptions {
-    pub title: Option<String>,
-    pub directory: Option<String>,
-    pub file_name: Option<String>,
-    #[serde(default)]
-    pub filters: Vec<FileDialogFilter>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

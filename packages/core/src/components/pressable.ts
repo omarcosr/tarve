@@ -7,6 +7,8 @@ export interface PressableProps extends ViewProps, DraggableProps {
   disabled?: boolean;
   onClick?: () => void;
   onContextMenu?: (position: { x: number; y: number }) => void;
+  /** The press was held still for 500 ms (touch or mouse); its release sends no `onClick`. */
+  onLongPress?: () => void;
   onHover?: (hovered: boolean) => void;
   control?: Control;
   focusable?: boolean;

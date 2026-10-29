@@ -386,12 +386,12 @@ export function compileTree(
       }
     }
     const isIntrinsicDiv = child.type === "div";
-    const p = isIntrinsicDiv && child.props.onClick && child.props.focusable === undefined
+    const p = isIntrinsicDiv && (child.props.onClick || child.props.onLongPress) && child.props.focusable === undefined
       // HTML: a div with a click handler is clickable but not in the tab order.
       ? { ...child.props, focusable: false }
       : child.props;
-    // Only buttons and pressables receive native clicks: a div with `onClick` is one.
-    const nativeType = isIntrinsicDiv ? (p.onClick ? "pressable" : "view") : child.type;
+    // Only buttons and pressables receive native clicks: a div with `onClick` (or `onLongPress`) is one.
+    const nativeType = isIntrinsicDiv ? (p.onClick || p.onLongPress ? "pressable" : "view") : child.type;
     if (!kinds.has(nativeType)) throw new Error(`Unknown native component: ${child.type}`);
     const id = p.id ?? path;
     if (ids.has(id)) throw new Error(`Duplicate node id: ${id}`);
@@ -530,6 +530,7 @@ export function compileTree(
     if (p.dropTarget === undefined && (p.onDrop || p.onDragEnter || p.onDragLeave)) node.dropTarget = true;
     if (p.fileDropTarget === undefined && (p.onFileDrop || p.onFileDragEnter || p.onFileDragLeave)) node.fileDropTarget = true;
     if (p.onSize) node.reportSize = true;
+    if (p.onLongPress) node.longPress = true;
     if (p.onPointerMove || p.onPointerLeave) node.reportPointer = true;
     if (p.showLineNumbers !== undefined) node.showLineNumbers = p.showLineNumbers;
     if (p.wordDiff !== undefined) node.wordDiff = p.wordDiff;

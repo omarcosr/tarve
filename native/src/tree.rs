@@ -29,6 +29,7 @@ use vello::{
 };
 mod css_layout;
 mod keyframes;
+mod long_press;
 mod overscroll;
 mod paint_values;
 mod popup;
@@ -1321,6 +1322,7 @@ pub struct Tree {
     pub focused: Option<String>,
     pub(crate) focus_visible: bool,
     pressed: Option<String>,
+    long_press: long_press::LongPress,
     pressed_link: Option<(String, String)>,
     pressed_diff_row: Option<(String, usize)>,
     scroll_drag: Option<ScrollDrag>,
@@ -1608,6 +1610,7 @@ impl Tree {
             focused: None,
             focus_visible: false,
             pressed: None,
+            long_press: Default::default(),
             pressed_link: None,
             pressed_diff_row: None,
             scroll_drag: None,
@@ -5961,24 +5964,13 @@ impl Tree {
         events.push(json!({"type":"dragMove", "id":id, "x":x, "y":y, "over":over}));
         Some(events)
     }
-    /// Abandons an in-flight pointer drag (Escape, focus loss, source removed).
-    /// A drag that never crossed the threshold ends silently.
-    pub fn cancel_pointer_drag(&mut self) -> Vec<Value> {
-        match self.pointer_drag.take() {
-            Some(drag) if drag.active => {
-                self.pressed = None;
-                self.dirty.paint = true;
-                vec![json!({"type":"dragCancel", "id":drag.id})]
-            }
-            _ => vec![],
-        }
-    }
     pub fn pointer_move(&mut self, x: f64, y: f64) -> Vec<Value> {
         // A mouse or touchpad moved: the next wheel event picks its area afresh.
         if self.mouse != (x, y) {
             self.wheel_latch = None;
         }
         self.mouse = (x, y);
+        self.long_press_move(x, y);
         if self.text_dragging
             && let Some(id) = self.focused.clone()
             && matches!(self.entries[&id].node.kind.as_str(), "input" | "textarea")
@@ -6135,6 +6127,7 @@ impl Tree {
                 origin: self.mouse,
                 active: false,
             });
+        self.long_press_down();
         let mut events = vec![];
         if let Some(id) = self.hovered.clone() {
             if let Some(blurred) = self.focus_with_visibility(&id, false) {
@@ -6234,8 +6227,10 @@ impl Tree {
         self.hovered = self.hit_root(false);
         self.refresh_hover_chain();
         let mut out = vec![];
+        let long_pressed = self.long_press_up();
         if let Some(id) = self.pressed.take() {
-            if self.hovered.as_ref() == Some(&id)
+            if !long_pressed
+                && self.hovered.as_ref() == Some(&id)
                 && matches!(self.entries[&id].node.kind.as_str(), "button" | "pressable")
             {
                 out.push(json!({"type":"click", "id":id}));
