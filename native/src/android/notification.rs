@@ -1,6 +1,8 @@
 //! `app.notify` on Android: `dev.tarve.TarveNotifications` (packages/core/android/java) posts
 //! the notification, asking for POST_NOTIFICATIONS first on Android 13+; a tap opens the app
-//! through `dev.tarve.TarveNotificationOpen`, which reports `notificationClick` here.
+//! through `dev.tarve.TarveNotificationOpen`, which reports `notificationClick` here. Timed and
+//! place notifications (`schedule`) are armed in `dev.tarve.TarveScheduledNotifications`
+//! (AlarmManager, LocationManager proximity alerts) and fire with the app closed.
 
 use super::{LOG_WARN, log, with_env};
 use jni::JNIEnv;
@@ -71,5 +73,48 @@ pub(crate) fn show(id: &str, title: &str, body: &str) -> Result<(), String> {
     .map_err(|error| {
         log(LOG_WARN, &format!("tarve: notification: {error}"));
         format!("notification: {error}")
+    })
+}
+
+/// Arms (`set`) or drops (`cancel`) a timed or place notification.
+pub(crate) fn schedule(
+    request: &crate::protocol::notifications::ScheduleNotification,
+) -> Result<(), String> {
+    with_env(|env, activity| {
+        let class = load_class(env, activity, "dev.tarve.TarveScheduledNotifications")?;
+        let id = env.new_string(&request.id)?;
+        if request.action == "cancel" {
+            env.call_static_method(
+                &class,
+                "cancel",
+                "(Landroid/content/Context;Ljava/lang/String;)V",
+                &[JValue::Object(activity), JValue::Object(&id)],
+            )?;
+            return Ok(());
+        }
+        let (title, body) = (env.new_string(&request.title)?, env.new_string(&request.body)?);
+        let place = request.place.as_ref();
+        env.call_static_method(
+            &class,
+            "set",
+            "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;JZDDFZ)V",
+            &[
+                JValue::Object(activity),
+                JValue::Object(&id),
+                JValue::Object(&title),
+                JValue::Object(&body),
+                JValue::Long(request.at.map_or(-1, |at| at.max(0.0) as i64)),
+                JValue::Bool(place.is_some().into()),
+                JValue::Double(place.map_or(0.0, |p| p.latitude)),
+                JValue::Double(place.map_or(0.0, |p| p.longitude)),
+                JValue::Float(place.map_or(0.0, |p| p.radius as f32)),
+                JValue::Bool(place.is_some_and(|p| p.leave).into()),
+            ],
+        )?;
+        Ok(())
+    })
+    .map_err(|error| {
+        log(LOG_WARN, &format!("tarve: scheduled notification: {error}"));
+        format!("scheduled notification: {error}")
     })
 }

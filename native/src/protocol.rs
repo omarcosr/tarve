@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use std::{collections::HashSet, sync::Arc};
 use unicode_segmentation::UnicodeSegmentation;
 
+pub(crate) mod notifications;
 pub(crate) mod requests;
 pub use requests::FileDialogOptions;
 mod style_validation;
@@ -712,14 +713,7 @@ pub enum Command {
         action: String,
         time: Option<f64>,
     },
-    Notify {
-        /// Echoed by the `notificationClick` it raises.
-        #[serde(default)]
-        id: Option<String>,
-        title: String,
-        #[serde(default)]
-        body: String,
-    },
+    Notify(notifications::Notify),
     Media {
         id: String,
         action: String,
@@ -813,6 +807,7 @@ pub enum Command {
     Share(requests::Share),
     Location(requests::Location),
     Speech(requests::Speech),
+    ScheduleNotification(notifications::ScheduleNotification),
     Authenticate(requests::Authenticate),
     Input {
         action: String,

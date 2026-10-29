@@ -39,6 +39,8 @@ describe("Android APK metadata", () => {
     expect(manifest).toContain('android:foregroundServiceType="mediaPlayback"');
     expect(manifest).toContain('android:name="dev.tarve.TarvePermissions"');
     expect(manifest).toContain('android:name="dev.tarve.TarveNotificationOpen"');
+    // Timed and place notifications: re-armed after a reboot or an update.
+    expect(manifest).toMatch(/<receiver android:name="dev.tarve.TarveScheduledNotifications" android:exported="false">[\s\S]*BOOT_COMPLETED[\s\S]*MY_PACKAGE_REPLACED[\s\S]*<\/receiver>/);
     expect(manifest).toContain('android:extractNativeLibs="false"');
   });
 

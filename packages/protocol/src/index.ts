@@ -410,6 +410,8 @@ export type NativeCommand =
    */
   | { type: "location"; action: "get" | "watch" | "clear"; requestId: string; highAccuracy?: boolean; timeoutMs?: number; maximumAgeMs?: number }
   | { type: "speech"; action: "start" | "stop" | "cancel"; sessionId: string; language?: string; partialResults?: boolean }
+  /** Android: arm (`set`) or drop (`cancel`) a notification that fires at `at` (epoch ms) or on entering/leaving `place`, with the app closed too. */
+  | { type: "scheduleNotification"; action: "set" | "cancel"; id: string; title?: string; body?: string; at?: number; place?: { latitude: number; longitude: number; radius: number; leave?: boolean } }
   /** Biometric or device-credential check (Android BiometricPrompt, Windows Hello); answered by `authenticate`. */
   | { type: "authenticate"; requestId: string; reason: string }
   | { type: "input"; action: "move" | "down" | "up" | "wheel" | "text" | "key"; x?: number; y?: number; delta?: number; deltaX?: number; deltaY?: number; text?: string };

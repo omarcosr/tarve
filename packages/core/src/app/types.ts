@@ -125,7 +125,34 @@ export interface SystemMediaSession extends NativeSystemMediaSession {
  * notification shade on Android (which asks for POST_NOTIFICATIONS the first time on Android
  * 13+). No tray icon is needed. Clicking it brings the window forward and runs `onClick`.
  */
-export interface NotifyOptions { title: string; body?: string; onClick?: () => void }
+export interface NotifyOptions {
+  title: string;
+  body?: string;
+  onClick?: () => void;
+  /** Names the notification: a later `notify` with the same id replaces it, `cancelNotification(id)` drops it. */
+  id?: string;
+  /**
+   * Show it later (a `Date` or epoch ms). Android arms an alarm that fires with the app closed
+   * (declare RECEIVE_BOOT_COMPLETED to keep it across a reboot, SCHEDULE_EXACT_ALARM for exact
+   * timing); desktops keep a timer while the app runs.
+   */
+  at?: Date | number;
+  /**
+   * Android: show it on entering (or, with `leave`, leaving) a circle around a place, with the
+   * app closed too. Needs ACCESS_FINE_LOCATION, and ACCESS_BACKGROUND_LOCATION ("Allow all the
+   * time") to fire in the background; the app asks for them. `{ supported: false }` on desktops.
+   */
+  place?: NotificationPlace;
+}
+export interface NotificationPlace {
+  latitude: number;
+  longitude: number;
+  /** Metres; default 150. */
+  radius?: number;
+  leave?: boolean;
+}
+/** `supported: false` when the platform cannot honour `place`. */
+export interface NotifyResult { supported: boolean }
 
 export type DiagnosticInput = Extract<NativeCommand, { type: "input" | "resize" }>;
 /** JS update phases, each a summary in milliseconds. */
@@ -203,7 +230,9 @@ export interface AppHandle {
   menuBar(items: readonly MenuBarItem[] | null, options?: MenuBarOptions): void;
   systemMedia(session: SystemMediaSession | null): void;
   /** Shows a system notification (see `NotifyOptions`); the same call on every platform. */
-  notify(options: NotifyOptions): void;
+  notify(options: NotifyOptions): NotifyResult;
+  /** Drops a notification `notify({ id, at | place })` armed and has not shown yet. */
+  cancelNotification(id: string): void;
   /** Runtime permission states by name (`CAMERA` or `android.permission.CAMERA`); every name is "granted" on desktops. */
   checkPermissions(names: readonly string[]): Promise<Record<string, PermissionState>>;
   /**

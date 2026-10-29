@@ -167,6 +167,12 @@ ${androidIntentFilters(options.protocols)}${androidFileIntentFilters(options.fil
         android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|density|fontScale|uiMode"/>
     <activity android:name="dev.tarve.TarveNotificationOpen" android:exported="false" android:excludeFromRecents="true"
         android:theme="@android:style/Theme.Translucent.NoTitleBar"/>
+    <receiver android:name="dev.tarve.TarveScheduledNotifications" android:exported="false">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED"/>
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+      </intent-filter>
+    </receiver>
     <service android:name="dev.tarve.TarveMediaService" android:exported="false" android:foregroundServiceType="mediaPlayback"/>
     <provider android:name="dev.tarve.TarveFileProvider" android:authorities="${options.packageName}.tarve.files" android:exported="false" android:grantUriPermissions="true"/>
   </application>

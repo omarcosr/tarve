@@ -34,14 +34,15 @@ const childPluginHosts = new WeakMap<NativeBridge, PluginHost>();
 import { createPluginHost, type PluginHost } from "./plugins";
 import { createOpenRequests } from "./app/open-requests";
 import { createDeviceRequests, type DeviceRequests } from "./app/device";
+import { createNotifications } from "./app/notifications";
 export type { OpenEvent, OpenFilesListener, OpenUrlListener } from "./app/open-requests";
 
 /** The command-line automation (`--tarve-script`, `--tarve-snapshot`) drives the first app only. */
 let automationClaimed = false;
 
 export type { TrayAvailability, TrayMenuItem, TrayOptions, TrayHandle } from "./app/tray";
-export type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, NotifyOptions, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle } from "./app/types";
-import type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, NotifyOptions, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle } from "./app/types";
+export type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, NotifyOptions, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle, NotifyResult, NotificationPlace } from "./app/types";
+import type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle } from "./app/types";
 const DEV_OVERLAY_SOURCES = new Set<AppErrorSource>(["render", "event-handler", "listener", "hotkey"]);
 const DEV_APP_KEY = Symbol.for("tarve.devApp");
 // <input type="file"> and <audio controls> reach the app that is rendering or
@@ -192,7 +193,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   void closed.then(() => opens.dispose({ appClosed: !childWindowBridges.has(bridge) }));
   // Share, location and biometrics: created with the bridge's requests (below).
   let device!: DeviceRequests;
-  void closed.then(() => device?.dispose());
+  void closed.then(() => { device?.dispose(); notifications.dispose(); });
   /** Plugin setups and commands; a window opened with `openWindow` reuses its opener's. */
   let pluginHost: PluginHost | undefined = options.bridge ? childPluginHosts.get(options.bridge) : undefined;
 
@@ -276,6 +277,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     send: command => { if (!ended) sendPublic(command); },
     report: (error, event) => reportError(error, { source: "listener", event }),
   });
+  const notifications = createNotifications({ send: command => { if (!ended) sendPublic(command); }, permissions: (action, names) => requests.permissions(action, names) });
   const trays = createTrayController(appIcon, command => { if (!ended) sendPublic(command); });
   const menus = createMenuBarController({
     send: command => { if (!ended) sendPublic(command); },
@@ -498,11 +500,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       };
       let ran: boolean;
       if (event.type !== "notificationClick") ran = trays.dispatch(event, run);
-      else {
-        const handler = event.id === undefined ? lastNotificationClick : notificationClicks.get(event.id);
-        if (event.id !== undefined) notificationClicks.delete(event.id);
-        ran = run("notificationClick", handler);
-      }
+      else ran = run("notificationClick", notifications.click(event.id));
       if (ran) update();
     }
 
@@ -589,10 +587,6 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   }
 
   let systemMediaAction: SystemMediaSession["onAction"];
-  /** onClick by notification id; the newest one answers a click without an id (the Windows tray balloon). */
-  const notificationClicks = new Map<string, () => void>();
-  let lastNotificationClick: (() => void) | undefined;
-  let notificationCount = 0;
 
   function syncMedia(): void {
     if (!ended && committed) syncLoadedMedia(committed);
@@ -715,17 +709,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         if (!ended) sendPublic({ type: "systemMedia", session: null });
       }
     },
-    notify({ title, body = "", onClick }: NotifyOptions): void {
-      if (!title) throw new TypeError("notify requires a title");
-      const id = `n${++notificationCount}`;
-      lastNotificationClick = onClick;
-      if (onClick) {
-        notificationClicks.set(id, onClick);
-        // Unclicked notifications are dismissed eventually: keep the newest 100 handlers.
-        if (notificationClicks.size > 100) notificationClicks.delete(notificationClicks.keys().next().value!);
-      }
-      if (!ended) sendPublic({ type: "notify", title, body, id });
-    },
+    notify: options => notifications.notify(options),
+    cancelNotification: id => notifications.cancel(id),
     checkPermissions: names => requests.permissions("check", names),
     requestPermissions: names => requests.permissions("request", names),
     media(id: string): MediaController {
