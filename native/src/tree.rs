@@ -28,6 +28,7 @@ use vello::{
     peniko::{Blob, Color, Fill, ImageAlphaType, ImageData, ImageFormat},
 };
 mod css_layout;
+mod gestures;
 mod keyframes;
 mod long_press;
 mod overscroll;
@@ -1324,6 +1325,8 @@ pub struct Tree {
     pressed: Option<String>,
     long_press: long_press::LongPress,
     pressed_link: Option<(String, String)>,
+    /// The node a pinch in progress reports to, and its scale so far.
+    pinch_target: Option<(String, f64)>,
     pressed_diff_row: Option<(String, usize)>,
     scroll_drag: Option<ScrollDrag>,
     pointer_drag: Option<PointerDrag>,
@@ -1611,6 +1614,7 @@ impl Tree {
             focus_visible: false,
             pressed: None,
             long_press: Default::default(),
+            pinch_target: None,
             pressed_link: None,
             pressed_diff_row: None,
             scroll_drag: None,
@@ -5330,6 +5334,8 @@ impl Tree {
                 || entry.node.kind == "markdown"
                 || blocks_pointer
                 || entry.node.drag_region
+                // A pinch target (a map, a photo) takes the pointer like a pressable.
+                || entry.node.pinch
         };
         (eligible && rect.contains(mouse)).then(|| id.to_string())
     }

@@ -12,6 +12,7 @@ use crate::{
     tree::Tree,
 };
 use base64::Engine as _;
+mod gestures;
 mod input_and_scroll;
 mod long_press;
 mod popups;

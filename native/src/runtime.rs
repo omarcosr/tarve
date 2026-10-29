@@ -141,6 +141,7 @@ mod cursor;
 mod graphics_startup;
 mod long_press;
 mod notifications;
+mod pointer;
 mod system_requests;
 mod viewport;
 use viewport::{layout_viewport, request_frame, set_ime_allowed};
@@ -217,27 +218,6 @@ pub(crate) fn dom_keyboard_event(
         "shiftKey": modifiers.shift_key(),
         "metaKey": modifiers.super_key(),
     })
-}
-
-impl App {
-    /// A DOM-style `pointer` event at the pointer, on the deepest node under it.
-    fn dom_pointer_event(&self, phase: &str, extra: serde_json::Value) -> serde_json::Value {
-        let mut event = json!({
-            "type": "pointer",
-            "phase": phase,
-            "id": self.tree.hover_path().last(),
-            "x": self.tree.mouse.0,
-            "y": self.tree.mouse.1,
-            "ctrlKey": self.modifiers.control_key(),
-            "altKey": self.modifiers.alt_key(),
-            "shiftKey": self.modifiers.shift_key(),
-            "metaKey": self.modifiers.super_key(),
-        });
-        if let (Some(event), serde_json::Value::Object(extra)) = (event.as_object_mut(), extra) {
-            event.extend(extra);
-        }
-        event
-    }
 }
 
 pub(crate) fn word_modifier(modifiers: ModifiersState) -> bool {
@@ -3884,6 +3864,7 @@ impl ApplicationHandler<Command> for App {
                     });
             }
             WindowEvent::CursorLeft { .. } => events = self.tree.pointer_leave(),
+            WindowEvent::PinchGesture { delta, phase, .. } => events = self.pinch(phase, delta),
             WindowEvent::MouseInput {
                 state,
                 button: MouseButton::Left,

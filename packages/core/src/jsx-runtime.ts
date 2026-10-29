@@ -7,6 +7,13 @@ export type Child = VNode | string | number | boolean | null | undefined | Child
 export type PastePayload =
   | { kind: "files"; files: string[] }
   | { kind: "image"; width: number; height: number; rgba: Uint8Array };
+/** A pinch step: `scale` is cumulative (1 at "start"); `x`, `y` are the fingers' midpoint. */
+export interface PinchEvent {
+  phase: "start" | "move" | "end";
+  scale: number;
+  x: number;
+  y: number;
+}
 export interface DragPosition { x: number; y: number }
 /** Pointer position while dragging and the drop target currently under it. */
 export interface DragMoveEvent extends DragPosition { over: string | null }
@@ -115,6 +122,8 @@ export interface DivProps extends Omit<BaseProps, "style">, DropTargetProps, Fil
   onContextMenu?: (position: { x: number; y: number }) => void;
   /** The press was held still for 500 ms (touch or mouse); its release sends no `onClick`. */
   onLongPress?: () => void;
+  /** Two fingers pinching over this node (touch screen, macOS trackpad); `scale` is cumulative, 1 at "start". */
+  onPinch?: (event: PinchEvent) => void;
   onHover?: (entered: boolean) => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;

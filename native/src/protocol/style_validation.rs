@@ -1,5 +1,30 @@
 use super::*;
 
+/// Feeds a JSON value to `hasher`; numbers hash by their `f64` value, so
+/// `1` and `1.0` agree, as they do for every style reader.
+pub(crate) fn hash_value(value: &Value, hasher: &mut impl std::hash::Hasher) {
+    use std::hash::Hash;
+    match value {
+        Value::Null => 0u8.hash(hasher),
+        Value::Bool(value) => (1u8, value).hash(hasher),
+        Value::Number(value) => (2u8, value.as_f64().unwrap_or(f64::NAN).to_bits()).hash(hasher),
+        Value::String(value) => (3u8, value).hash(hasher),
+        Value::Array(values) => {
+            (4u8, values.len()).hash(hasher);
+            for value in values {
+                hash_value(value, hasher);
+            }
+        }
+        Value::Object(map) => {
+            (5u8, map.len()).hash(hasher);
+            for (key, value) in map {
+                key.hash(hasher);
+                hash_value(value, hasher);
+            }
+        }
+    }
+}
+
 pub(super) const NUMERIC_MOTION_PROPERTIES: &[&str] = &[
     "width", "height", "top", "right", "bottom", "left", "opacity", "radius",
 ];

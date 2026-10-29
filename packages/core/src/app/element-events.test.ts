@@ -29,6 +29,14 @@ describe("createElementDispatcher", () => {
     expect(calls).toEqual(["longPress@mic"]);
   });
 
+
+  test("pinch runs onPinch with its phase, scale and midpoint", () => {
+    const seen: unknown[] = [];
+    const { dispatch } = harness({ map: { onPinch: event => { seen.push(event); } } });
+    expect(dispatch({ type: "pinch", id: "map", phase: "move", scale: 1.5, x: 10, y: 20 })).toEqual({ handled: true, succeeded: true });
+    expect(seen).toEqual([{ phase: "move", scale: 1.5, x: 10, y: 20 }]);
+  });
+
   test("imageError runs onError with the source and message", () => {
     const seen: unknown[] = [];
     const { dispatch, calls } = harness({ img: { onError: event => { seen.push(event); } } });

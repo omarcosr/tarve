@@ -531,6 +531,7 @@ export function compileTree(
     if (p.fileDropTarget === undefined && (p.onFileDrop || p.onFileDragEnter || p.onFileDragLeave)) node.fileDropTarget = true;
     if (p.onSize) node.reportSize = true;
     if (p.onLongPress) node.longPress = true;
+    if (p.onPinch) node.pinch = true;
     if (p.onPointerMove || p.onPointerLeave) node.reportPointer = true;
     if (p.showLineNumbers !== undefined) node.showLineNumbers = p.showLineNumbers;
     if (p.wordDiff !== undefined) node.wordDiff = p.wordDiff;
