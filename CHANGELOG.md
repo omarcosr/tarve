@@ -2,7 +2,7 @@
 
 All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless` and `@tarve/svelte` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
-## 0.9.0 — 2026-10-28
+## 0.9.0 — 2026-10-30
 
 ### Added
 
