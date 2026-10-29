@@ -3919,11 +3919,11 @@ impl ApplicationHandler<Command> for App {
                 ..
             } => {
                 if state == ElementState::Pressed {
-                    // After a window move loop (or a DPI change) Windows may not send a
-                    // move before the next press, leaving hover stale: the press would
-                    // miss the TitleBar and the window could not be dragged again.
+                    // After a window move loop (or a DPI change) Windows may skip the move
+                    // before the next press: stale hover would miss the TitleBar drag.
                     events = self.sync_pointer_from_os();
                     events.extend(self.tree.pointer_down());
+                    self.reopen_ime_on_focused_press();
                     self.titlebar_pressed();
                 } else {
                     events = self.tree.pointer_up();
