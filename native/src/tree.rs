@@ -31,6 +31,7 @@ mod css_layout;
 mod keyframes;
 mod overscroll;
 mod paint_values;
+mod popup;
 mod touch_target;
 mod wheel;
 use css_layout::{apply_css_flex, grid_line, grid_template};
@@ -3378,20 +3379,12 @@ impl Tree {
         Ok(layout_id)
     }
     fn positions(&mut self, id: &str, parent: (f64, f64)) -> Result<BoxRect, String> {
+        let origin = self.layout_origin(id, parent)?;
         let entry = self.entries.get_mut(id).unwrap();
         let layout = self
             .layout
             .layout(entry.layout_id.unwrap())
             .map_err(|e| e.to_string())?;
-        // Taffy rounds each location relative to its parent but each size from the absolute
-        // edges: summing rounded locations can put a child a pixel off its parent's edge (a
-        // bottom-aligned bar ending below its plot). Positions are snapped from the
-        // unrounded absolute origin instead, so every edge is round(absolute edge).
-        let unrounded = self.layout.unrounded_layout(entry.layout_id.unwrap());
-        let origin = (
-            parent.0 + unrounded.location.x as f64,
-            parent.1 + unrounded.location.y as f64,
-        );
         entry.rect = BoxRect::from_origin_size(
             (origin.0.round(), origin.1.round()),
             (layout.size.width as f64, layout.size.height as f64),

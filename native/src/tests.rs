@@ -13,6 +13,7 @@ use crate::{
 };
 use base64::Engine as _;
 mod input_and_scroll;
+mod popups;
 
 #[test]
 fn abi_and_json_protocol_versions_fail_independently() {
@@ -5201,40 +5202,6 @@ fn portal_escapes_scroll_clip_for_paint_and_hit_testing() {
     tree.scene(1.0);
     tree.pointer_move(20.0, 90.0);
     assert_eq!(tree.hovered.as_deref(), Some("portal-button"));
-}
-
-#[test]
-fn dismissible_portal_emits_outside_without_clicking_through() {
-    let button = node(
-        "popup-button",
-        "button",
-        json!({"width":80,"height":30}),
-        vec![],
-    );
-    let mut popup = node(
-        "popup",
-        "column",
-        json!({"position":"absolute","top":40,"left":20,"width":80,"height":30,"zIndex":1000}),
-        vec![button],
-    );
-    popup.portal = true;
-    popup.dismiss_on_outside = true;
-    let background = node(
-        "background",
-        "button",
-        json!({"width":200,"height":120}),
-        vec![],
-    );
-    let mut tree = Tree::new(root(vec![background, popup]));
-    tree.compute(220.0, 140.0).unwrap();
-    tree.pointer_move(180.0, 100.0);
-    let down = tree.pointer_down();
-    assert_eq!(down[0]["type"], "outside");
-    assert_eq!(down[0]["id"], "popup");
-    assert!(
-        tree.pointer_up().is_empty(),
-        "outside dismissal must not click through"
-    );
 }
 
 #[test]
