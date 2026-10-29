@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -12,6 +13,9 @@ import { assertReleasePolicy } from "./release-policy";
 const root = resolve(import.meta.dir, "..");
 const windowsNativeRelative = nativeRelativePath("windows-x64");
 const linuxNativeRelative = nativeRelativePath("linux-x64");
+// Android runtimes ship in the same package (package.json "files": native/android) for
+// `tarve build --target android`; the release workflow builds them with cargo-ndk.
+const androidNativeRelatives = ["arm64-v8a", "x86_64"].map(abi => `native/android/${abi}/libtarve_native.so`);
 const fromRoot = (path: string) => join(root, ...path.split("/"));
 
 async function run(args: string[], cwd = root): Promise<void> {
@@ -62,6 +66,11 @@ for (const extra of extras) {
 
 const library = fromRoot(windowsNativeRelative);
 const linuxLibrary = fromRoot(linuxNativeRelative);
+const androidLibraries = androidNativeRelatives.map(fromRoot);
+const missingAndroid = androidNativeRelatives.filter((_, index) => !existsSync(androidLibraries[index]!));
+if (missingAndroid.length) {
+  throw new Error(`The release package must contain the Android runtimes. Missing: ${missingAndroid.join(", ")}. Build them with \`bun run build:native:android\`.`);
+}
 // bun pm pack names scoped packages <scope>-<name>-<version>.tgz.
 const tarballName = `tarve-core-${policy.version}.tgz`;
 const tarball = join(root, "dist", tarballName);
@@ -69,7 +78,12 @@ const tarball = join(root, "dist", tarballName);
 const extraction = await mkdtemp(join(tmpdir(), "tarve-release-verify-"));
 try {
   await run(["tar", "-xzf", tarball, "-C", extraction]);
-  for (const [relative, staged] of [[windowsNativeRelative, library], [linuxNativeRelative, linuxLibrary]] as const) {
+  const stagedRuntimes: [string, string][] = [
+    [windowsNativeRelative, library],
+    [linuxNativeRelative, linuxLibrary],
+    ...androidNativeRelatives.map((relative, index): [string, string] => [relative, androidLibraries[index]!]),
+  ];
+  for (const [relative, staged] of stagedRuntimes) {
     const packed = join(extraction, "package", ...relative.split("/"));
     if (await sha256(packed) !== await sha256(staged)) {
       throw new Error(`Packed native runtime ${relative} does not match the staged release artifact.`);
@@ -111,6 +125,7 @@ try {
     artifacts: [
       { file: windowsNativeRelative, sha256: await sha256(library) },
       { file: linuxNativeRelative, sha256: await sha256(linuxLibrary) },
+      ...await Promise.all(androidNativeRelatives.map(async (file, index) => ({ file, sha256: await sha256(androidLibraries[index]!) }))),
       { file: tarballName, sha256: await sha256(tarball) },
       { file: iconsName, sha256: await sha256(icons) },
       { file: headlessName, sha256: await sha256(headless) },

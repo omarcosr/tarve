@@ -201,12 +201,13 @@ The shared build API also accepts `build({ entrypoint: "app.tsx", runtime: "node
 `tarve build --target android` packs an app into a signed APK, or an Android App Bundle for Google Play (arm64-v8a and x86_64; `android-arm64` or `android-x64` for one). It works from Bun and from Node.js, for TSX apps and for Go apps:
 
 ```powershell
-bun run build:native:android                      # once: native/android/<abi>/libtarve_native.so (cargo-ndk + NDK)
 tarve build app.tsx --target android              # dist/App.apk
 tarve build go/examples/counter --target android  # a Go main package
 adb install dist/App.apk
 tarve build app.tsx --target android --format aab --keystore upload.jks   # dist/App.aab for Google Play
 ```
+
+The npm package ships the Android runtimes (`native/android/<abi>/libtarve_native.so`). From a source checkout, build them once with `bun run build:native:android` (cargo-ndk and the Android NDK).
 
 **Bun on the device.** `--runtime bun` compiles the app with `bun build --compile --target=bun-linux-<arch>-android` (run the build with Bun: `bunx tarve build …`) and packs the executable as `lib/<abi>/libtarvebun.so`, which the package manager extracts (`extractNativeLibs="true"`). The activity starts it as a child process and keeps the window, GPU surface and system services; the app calls the native runtime over a socket pair (`native/src/android/bun_host.rs`, `packages/core/src/bridge/remote.ts`) and wakes on the same event socket as on Linux. The app gets Bun's own APIs (`Bun.file`, `bun:sqlite`, `fetch`, `Worker`, `Bun.spawn` of system binaries such as `/system/bin/toybox`) and `process.platform === "android"`; `Bun.$` fails inside the app sandbox. The cost is size: about 45 MB more per ABI in the download (~100 MB installed) against a few MB for QuickJS-ng. `scripts/android-bun-smoke.tsx` checks it on a device.
 
