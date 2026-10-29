@@ -142,6 +142,7 @@ mod graphics_startup;
 mod long_press;
 mod notifications;
 mod pointer;
+mod remote_image;
 mod system_requests;
 mod viewport;
 use viewport::{layout_viewport, request_frame, set_ime_allowed};
@@ -3343,13 +3344,7 @@ impl ApplicationHandler<Command> for App {
             }
             Command::Notify(request) => self.notify(request),
             Command::ScheduleNotification(request) => self.schedule_notification(request),
-            Command::RemoteImage { url, result } => {
-                self.tree.finish_remote_image(url, result);
-                for message in self.tree.warnings.drain(..) {
-                    self.events.push(error(message));
-                }
-                self.redraw();
-            }
+            Command::RemoteImage { url, result } => self.finish_remote_image(url, result),
             Command::TrayEvent { event } => {
                 if event["type"] == "trayRecreate" {
                     #[cfg(target_os = "windows")]

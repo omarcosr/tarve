@@ -17,7 +17,7 @@
   "native/src/protocol.rs": 1199,
   "native/src/renderer.rs": 1976,
   "native/src/rich.rs": 1437,
-  "native/src/runtime.rs": 4107,
+  "native/src/runtime.rs": 4102,
   "native/src/svg.rs": 633,
   "native/src/tests.rs": 7767,
   "native/src/text.rs": 2926,
