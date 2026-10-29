@@ -1088,8 +1088,7 @@ export class THTMLMediaElement extends THTMLElement {
       case "audiotracks": fire("audiotrackschange"); break;
       case "texttracks": fire("texttrackschange"); break;
       case "cuechange": fire("cuechange"); break;
-      case "seeking": if (!this._seeking) { this._seeking = true; } fire("seeking"); break;
-      case "seeked": this._seeking = false; fire("seeked"); fire("timeupdate"); break;
+      case "seeking": this._seeking = true; fire("seeking"); break; case "seeked": this._seeking = false; fire("seeked"); fire("timeupdate"); break;
       // A browser fires `pause` at the end only if no `pause` came before (the native
       // engines may send one just ahead of `ended`).
       case "ended": this._ended = true; this._paused = true; if (!wasPaused) fire("pause"); fire("ended"); break;

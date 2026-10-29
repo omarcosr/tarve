@@ -16,6 +16,7 @@ mod gestures;
 mod input_and_scroll;
 mod long_press;
 mod popups;
+mod style_inheritance;
 
 #[test]
 fn abi_and_json_protocol_versions_fail_independently() {
@@ -605,64 +606,6 @@ fn group_hover_focus_within_and_pointer_events_none_follow_css() {
 }
 
 #[test]
-fn pointer_events_inherit_so_an_auto_child_of_a_none_parent_takes_the_pointer() {
-    let video = node(
-        "video",
-        "pressable",
-        json!({"width": 300, "height": 200}),
-        vec![],
-    );
-    let volume = node(
-        "volume",
-        "pressable",
-        json!({"width": 40, "height": 40, "pointerEvents": "auto"}),
-        vec![],
-    );
-    let label = node(
-        "label",
-        "pressable",
-        json!({"width": 40, "height": 40}),
-        vec![],
-    );
-    let bar = node(
-        "bar",
-        "row",
-        json!({"position": "absolute", "left": 0, "top": 0, "width": 300, "height": 40, "pointerEvents": "none"}),
-        vec![volume, label],
-    );
-    let stack = node(
-        "stack",
-        "view",
-        json!({"position": "relative", "width": 300, "height": 200}),
-        vec![video, bar],
-    );
-    let mut tree = Tree::new(root(vec![stack]));
-    tree.compute(400.0, 400.0).unwrap();
-    tree.pointer_move(20.0, 20.0);
-    assert_eq!(
-        tree.hovered.as_deref(),
-        Some("volume"),
-        "auto re-enables the child"
-    );
-    assert!(
-        tree.hover_path().contains(&"bar".to_string()),
-        "its muted parent is :hover too"
-    );
-    tree.pointer_move(60.0, 20.0);
-    assert_eq!(
-        tree.hovered.as_deref(),
-        Some("video"),
-        "a child without a value inherits none"
-    );
-    tree.pointer_move(200.0, 20.0);
-    assert_eq!(
-        tree.hovered.as_deref(),
-        Some("video"),
-        "the muted bar itself falls through"
-    );
-}
-
-#[test]
 fn rotate_skew_and_origin_join_the_transform_and_align_self_reaches_taffy() {
     let rotated = node(
         "rotated",
@@ -1118,33 +1061,6 @@ fn semantic_link_foreground_and_hover_inherit_into_nested_text() {
     assert_eq!(tree.resolved_text_foreground("label", "#18181b"), "#2563eb");
     tree.pointer_move(20.0, 18.0);
     assert_eq!(tree.resolved_text_foreground("label", "#18181b"), "#dc2626");
-}
-
-#[test]
-fn current_color_foreground_follows_the_nearest_ancestor_and_its_hover() {
-    let root: Node = serde_json::from_value(json!({
-        "id":"root","kind":"window","style":{},"children":[
-            {
-                "id":"button","kind":"pressable",
-                "style":{"width":180,"height":36,"foreground":"#71717a","hover":{"foreground":"#ffffff"}},
-                "children":[
-                    {"id":"row","kind":"row","style":{},"children":[
-                        {"id":"icon","kind":"svg","svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\"/>","style":{"width":24,"height":24,"foreground":"currentColor"},"children":[]},
-                        {"id":"label","kind":"text","text":"Play","style":{"foreground":"currentColor"},"children":[]}
-                    ]}
-                ]
-            }
-        ]
-    }))
-    .unwrap();
-    let mut tree = Tree::new(root);
-    tree.compute(300.0, 120.0).unwrap();
-    assert_eq!(tree.current_foreground("icon", "currentColor"), "#71717a");
-    assert_eq!(tree.resolved_text_foreground("label", "#18181b"), "#71717a");
-    assert_eq!(tree.current_foreground("icon", "#123456"), "#123456");
-    tree.pointer_move(20.0, 18.0);
-    assert_eq!(tree.current_foreground("icon", "currentColor"), "#ffffff");
-    assert_eq!(tree.resolved_text_foreground("label", "#18181b"), "#ffffff");
 }
 
 #[test]
@@ -5312,179 +5228,6 @@ fn portal_escapes_scroll_clip_for_paint_and_hit_testing() {
     assert_eq!(tree.hovered.as_deref(), Some("portal-button"));
 }
 
-fn corner_menu(left: f64, top: f64, fallbacks: &str) -> Tree {
-    let item = node(
-        "menu-item",
-        "button",
-        json!({"width":120,"height":80}),
-        vec![],
-    );
-    let mut menu = node(
-        "menu",
-        "column",
-        json!({"position":"absolute","top":"100%","left":0,"margin":{"top":6},
-            "width":120,"height":80,"zIndex":1000,"positionTryFallbacks":fallbacks}),
-        vec![item],
-    );
-    menu.portal = true;
-    let anchor = node(
-        "anchor",
-        "view",
-        json!({"position":"absolute","left":left,"top":top,"width":30,"height":20}),
-        vec![menu],
-    );
-    let mut tree = Tree::new(root(vec![anchor]));
-    tree.compute(300.0, 200.0).unwrap();
-    tree.scene(1.0);
-    tree
-}
-
-#[test]
-fn portal_position_try_flips_into_the_window_and_hit_tests_there() {
-    use vello_cpu::kurbo::Rect as BoxRect;
-    let tree = corner_menu(
-        260.0,
-        170.0,
-        "flip-block, flip-inline, flip-block flip-inline",
-    );
-    assert_eq!(
-        tree.visible_rect("menu"),
-        Some(BoxRect::new(170.0, 84.0, 290.0, 164.0)),
-        "right edge meets the anchor's right edge, and the menu sits 6px above it"
-    );
-    let mut tree = tree;
-    tree.pointer_move(180.0, 100.0);
-    assert_eq!(tree.hovered.as_deref(), Some("menu-item"));
-
-    let tree = corner_menu(
-        260.0,
-        20.0,
-        "flip-block, flip-inline, flip-block flip-inline",
-    );
-    assert_eq!(
-        tree.visible_rect("menu"),
-        Some(BoxRect::new(170.0, 46.0, 290.0, 126.0)),
-        "room below: only the inline axis flips"
-    );
-
-    let tree = corner_menu(
-        20.0,
-        20.0,
-        "flip-block, flip-inline, flip-block flip-inline",
-    );
-    assert_eq!(
-        tree.visible_rect("menu"),
-        Some(BoxRect::new(20.0, 46.0, 140.0, 126.0))
-    );
-
-    let tree = corner_menu(260.0, 170.0, "flip-block");
-    assert_eq!(
-        tree.visible_rect("menu"),
-        Some(BoxRect::new(260.0, 196.0, 380.0, 276.0)),
-        "no option fits: the base position stays, as in CSS"
-    );
-}
-
-#[test]
-fn tooltip_lane_flips_by_its_visible_box() {
-    use vello_cpu::kurbo::Rect as BoxRect;
-    let content = node(
-        "tip",
-        "view",
-        json!({"position":"relative","width":120,"height":30,
-            "positionTryFallbacks":"flip-block, flip-inline, flip-block flip-inline"}),
-        vec![],
-    );
-    let mut lane = node(
-        "lane",
-        "column",
-        json!({"position":"absolute","bottom":"100%","left":0,"right":-320,
-            "align":"start","margin":{"bottom":6},"zIndex":1000}),
-        vec![content],
-    );
-    lane.portal = true;
-    let anchor = node(
-        "anchor",
-        "view",
-        json!({"position":"absolute","left":260,"top":10,"width":30,"height":20}),
-        vec![lane],
-    );
-    let mut tree = Tree::new(root(vec![anchor]));
-    tree.compute(300.0, 200.0).unwrap();
-    tree.scene(1.0);
-    assert_eq!(
-        tree.visible_rect("tip"),
-        Some(BoxRect::new(170.0, 36.0, 290.0, 66.0)),
-        "no room above or to the right: the tooltip shows below, right-aligned to its trigger"
-    );
-}
-
-#[test]
-fn position_try_fallbacks_parse_like_css() {
-    use crate::protocol::{PositionTry, position_try_fallbacks};
-    assert_eq!(position_try_fallbacks(&json!("none")), Ok(vec![]));
-    assert_eq!(
-        position_try_fallbacks(&json!("flip-block, flip-inline flip-block")),
-        Ok(vec![
-            PositionTry {
-                block: true,
-                inline: false
-            },
-            PositionTry {
-                block: true,
-                inline: true
-            },
-        ])
-    );
-    for invalid in [
-        json!("flip-start"),
-        json!("flip-block,"),
-        json!("flip-block flip-block"),
-        json!(3),
-    ] {
-        assert!(position_try_fallbacks(&invalid).is_err(), "{invalid}");
-    }
-}
-
-#[test]
-fn an_in_flow_box_dismisses_on_outside_too() {
-    let item = node("item", "button", json!({"width":80,"height":30}), vec![]);
-    let mut menu = node(
-        "menu",
-        "column",
-        json!({"position":"absolute","top":40,"left":20,"width":80,"height":30}),
-        vec![item],
-    );
-    menu.dismiss_on_outside = true;
-    let mut hidden = node("hidden", "column", json!({"display":"none"}), vec![]);
-    let mut closed = node("closed", "column", json!({"width":10,"height":10}), vec![]);
-    closed.dismiss_on_outside = true;
-    hidden.children = vec![closed];
-    let background = node(
-        "background",
-        "button",
-        json!({"width":200,"height":120}),
-        vec![],
-    );
-    let mut tree = Tree::new(root(vec![background, menu, hidden]));
-    tree.compute(220.0, 140.0).unwrap();
-    tree.pointer_move(40.0, 50.0);
-    let inside = tree.pointer_down();
-    assert!(
-        inside.iter().all(|event| event["type"] != "outside"),
-        "{inside:?}"
-    );
-    tree.pointer_up();
-    tree.pointer_move(180.0, 100.0);
-    let down = tree.pointer_down();
-    assert_eq!(down[0]["type"], "outside");
-    assert_eq!(
-        down[0]["id"], "menu",
-        "a box under display:none is not open"
-    );
-    assert!(tree.pointer_up().is_empty());
-}
-
 #[test]
 fn native_motion_interpolates_layout_and_stops_scheduling_after_completion() {
     let panel: Node = serde_json::from_value(json!({
@@ -7297,25 +7040,6 @@ fn transform_is_applied_to_every_paint_call_in_the_subtree() {
             "device pixels"
         );
     }
-}
-
-#[test]
-fn percent_translation_is_of_the_box_own_size() {
-    let shimmer = node(
-        "shimmer",
-        "view",
-        json!({"width": 80, "height": 40, "transform": {"x": 4, "xPercent": -100, "yPercent": 50}}),
-        vec![],
-    );
-    let mut tree = Tree::new(root(vec![shimmer]));
-    tree.compute(400.0, 300.0).unwrap();
-    let transform = tree
-        .node_transform("shimmer", vello::kurbo::Vec2::ZERO)
-        .unwrap();
-    assert_eq!(
-        transform.translation(),
-        vello::kurbo::Vec2::new(-76.0, 20.0)
-    );
 }
 
 #[test]

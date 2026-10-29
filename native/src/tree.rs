@@ -29,6 +29,7 @@ use vello::{
 };
 mod css_layout;
 mod gestures;
+mod inherit;
 mod keyframes;
 mod long_press;
 mod overscroll;
@@ -1524,149 +1525,6 @@ impl Tree {
             })
             .cloned()
             .collect()
-    }
-
-    /// How far `id`'s layout position is from where it shows: the scroll of
-    /// every ancestor, less the shift a top-level portal on the chain takes
-    /// from its `positionTryFallbacks`.
-    fn ancestor_scroll_offset(&self, id: &str) -> Vec2 {
-        let mut offset = self.scroll_offset(id);
-        let mut node = Some(id);
-        while let Some(node_id) = node {
-            if self.entries[node_id].node.portal {
-                offset -= self.position_try_shift(node_id);
-            }
-            node = self.entries[node_id].parent.as_deref();
-        }
-        offset
-    }
-
-    fn scroll_offset(&self, id: &str) -> Vec2 {
-        let mut offset = Vec2::ZERO;
-        let mut parent = self.entries[id].parent.as_deref();
-        while let Some(parent_id) = parent {
-            let entry = &self.entries[parent_id];
-            offset += Vec2::new(entry.scroll_x, entry.scroll);
-            parent = entry.parent.as_deref();
-        }
-        offset
-    }
-
-    /// CSS `position-try-fallbacks` for a top-level portal: keep its laid-out
-    /// position when it fits the window, else take the first fallback that
-    /// does, mirroring it across its containing block (`flip-block` swaps
-    /// above/below, `flip-inline` left/right). None fitting keeps the base
-    /// position. Evaluated against the current scroll, so it follows scrolling.
-    ///
-    /// The style sits on the portal or on its first child: a portal that is a
-    /// wider positioning lane (a tooltip's, which lets its text wrap at its own
-    /// max width) fits and mirrors the visible box inside it, and moves with it.
-    fn position_try_shift(&self, id: &str) -> Vec2 {
-        let entry = &self.entries[id];
-        let key = "positionTryFallbacks";
-        let Some((value, rect)) = entry
-            .node
-            .style
-            .get(key)
-            .map(|value| (value, entry.rect))
-            .or_else(|| {
-                let child = &self.entries[entry.children.first()?];
-                Some((child.node.style.get(key)?, child.rect))
-            })
-        else {
-            return Vec2::ZERO;
-        };
-        let Ok(fallbacks) = crate::protocol::position_try_fallbacks(value) else {
-            return Vec2::ZERO;
-        };
-        let Some(parent) = entry.parent.as_deref() else {
-            return Vec2::ZERO;
-        };
-        let mut ancestor = Some(parent);
-        while let Some(ancestor_id) = ancestor {
-            if self.entries[ancestor_id].node.portal {
-                return Vec2::ZERO;
-            }
-            ancestor = self.entries[ancestor_id].parent.as_deref();
-        }
-        let anchor = self.entries[parent].rect;
-        let viewport = self.entries[&self.root].rect;
-        let scroll = self.scroll_offset(id);
-        let fits = |shift: Vec2| {
-            let shown = rect + shift - scroll;
-            const SLACK: f64 = 0.5;
-            shown.x0 >= viewport.x0 - SLACK
-                && shown.y0 >= viewport.y0 - SLACK
-                && shown.x1 <= viewport.x1 + SLACK
-                && shown.y1 <= viewport.y1 + SLACK
-        };
-        std::iter::once(crate::protocol::PositionTry {
-            block: false,
-            inline: false,
-        })
-        .chain(fallbacks)
-        .map(|tactic| {
-            Vec2::new(
-                if tactic.inline {
-                    anchor.x0 + anchor.x1 - rect.x1 - rect.x0
-                } else {
-                    0.0
-                },
-                if tactic.block {
-                    anchor.y0 + anchor.y1 - rect.y1 - rect.y0
-                } else {
-                    0.0
-                },
-            )
-        })
-        .find(|&shift| fits(shift))
-        .unwrap_or(Vec2::ZERO)
-    }
-
-    fn outside_dismissal_at_pointer(&self) -> Option<String> {
-        let mut portals: Vec<_> = self
-            .portal_roots()
-            .into_iter()
-            .filter(|id| self.entries[id].node.dismiss_on_outside)
-            .collect();
-        portals.sort_by(|a, b| {
-            self.stacking
-                .get(a)
-                .copied()
-                .unwrap_or(0.0)
-                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
-        });
-        let Some(portal) = portals.last() else {
-            // No open popup: an in-flow box (a menu inside the page) dismisses the same way.
-            return self
-                .order
-                .iter()
-                .rev()
-                .filter(|id| {
-                    let node = &self.entries[*id].node;
-                    if !node.dismiss_on_outside || node.portal {
-                        return false;
-                    }
-                    let mut current = Some(id.as_str());
-                    while let Some(key) = current {
-                        let entry = &self.entries[key];
-                        if entry.node.string("display", "flex") == "none" {
-                            return false;
-                        }
-                        current = entry.parent.as_deref();
-                    }
-                    true
-                })
-                .find(|id| {
-                    let offset = self.ancestor_scroll_offset(id);
-                    let bounds = self.entries[*id].bounds + Vec2::new(-offset.x, -offset.y);
-                    !bounds.contains(self.mouse)
-                })
-                .cloned();
-        };
-        let offset = self.ancestor_scroll_offset(portal);
-        let bounds = self.entries[portal].bounds + Vec2::new(-offset.x, -offset.y);
-        (!bounds.contains(self.mouse)).then(|| portal.clone())
     }
 
     pub fn new(root: Node) -> Self {
@@ -4097,30 +3955,6 @@ impl Tree {
         None
     }
 
-    /// `own`, the node's foreground; CSS `currentColor` takes the nearest ancestor's
-    /// (in its hover / group-hover state), so an icon follows its button.
-    pub(crate) fn current_foreground(&self, id: &str, own: &str) -> String {
-        if !own.eq_ignore_ascii_case("currentColor") {
-            return own.to_string();
-        }
-        let mut current = self
-            .entries
-            .get(id)
-            .and_then(|entry| entry.parent.as_deref());
-        while let Some(key) = current {
-            let Some(entry) = self.entries.get(key) else {
-                break;
-            };
-            let state = self.visual_state_for(key, &entry.node);
-            let value = visual_string(&entry.node, "foreground", "", state);
-            if !value.is_empty() && !value.eq_ignore_ascii_case("currentColor") {
-                return value.to_string();
-            }
-            current = entry.parent.as_deref();
-        }
-        "#18181b".to_string()
-    }
-
     pub(crate) fn resolved_text_foreground(&self, id: &str, fallback: &str) -> String {
         if let Some(link_foreground) = self.link_foreground_for(id) {
             return link_foreground;
@@ -5280,34 +5114,6 @@ impl Tree {
         }
         self.hover_path_in(&self.root, Vec2::ZERO, root_rect, self.mouse.into(), false)
             .unwrap_or_default()
-    }
-
-    /// CSS `pointer-events` inherits: a box without its own value takes its parent's, so
-    /// `none` mutes a subtree except descendants that set `auto` (or another value).
-    fn pointer_muted(node: &Node, inherited: bool) -> bool {
-        match node.style.get("pointerEvents").and_then(Value::as_str) {
-            Some(value) => value == "none",
-            None => inherited,
-        }
-    }
-
-    /// Whether `id`'s parent chain leaves it muted (a portal hit-tested on its own).
-    fn pointer_muted_above(&self, id: &str) -> bool {
-        let mut chain = Vec::new();
-        let mut current = self
-            .entries
-            .get(id)
-            .and_then(|entry| entry.parent.as_deref());
-        while let Some(key) = current {
-            chain.push(key);
-            current = self
-                .entries
-                .get(key)
-                .and_then(|entry| entry.parent.as_deref());
-        }
-        chain.iter().rev().fold(false, |muted, key| {
-            Self::pointer_muted(&self.entries[*key].node, muted)
-        })
     }
 
     fn hover_path_in(

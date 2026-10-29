@@ -39,8 +39,7 @@ function popupSurface(side: PopupSide, style?: Style): Style {
     borderWidth: 1,
     borderColor: c.border,
     radius: theme.radius.md,
-    pointerEvents: "block",
-    positionTryFallbacks: "flip-block, flip-inline, flip-block flip-inline",
+    pointerEvents: "block", positionTryFallbacks: "flip-block, flip-inline, flip-block flip-inline",
     ...popupPosition(side),
     ...style,
   };
