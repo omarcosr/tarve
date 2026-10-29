@@ -63,6 +63,10 @@ Auditoria inicial: só `@tarve/router` e `create-tarve` declaram Node em `engine
 
 Commit local `59d1ccb` (`chore(release): 0.8.0`) pela aba TARVE Gap Review, com o trabalho das ondas 1–4. Verify completo passou. Sem tag, push nem publish (aguardando o usuário). Correções para o `smoke:package`: `openPluginLibrary` exportado de `@tarve/core`, smoke instala `@tarve/router`, router/test/create-tarve em 0.8.0 e cobertos por `scripts/version-policy.ts`.
 
+## Release 0.9.0
+
+Commitado e enviado pela aba TARVE Gap Review: `d1682f3` (`perf(build)`: pré-bundle do Bun) e `f8c42f7` (`chore(release): 0.9.0`), com o tray availability, o pré-bundle e os relatórios da onda 5. Verify completo passou, inclusive `smoke:hidden` e `smoke:accessibility`. Tag `v0.9.0` aguardando a CI. `examples/1` ficou de fora (não é desta frente).
+
 ## Onda 5 — pontos frágeis (concluída)
 
 | # | Frente | Status | Relatório |
