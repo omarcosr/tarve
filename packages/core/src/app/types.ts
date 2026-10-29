@@ -10,7 +10,7 @@ import type { ComponentAdapter } from "../component-adapter";
 import { type DevOptions } from "../devtools/inspector";
 import { type TarvePlugin } from "../plugins";
 import { type OpenFilesListener, type OpenUrlListener } from "./open-requests";
-import { type AuthenticateOptions, type AuthenticateResult, type PositionOptions, type PositionResult, type ShareOptions, type ShareResult } from "./device";
+import { type AuthenticateOptions, type AuthenticateResult, type PositionOptions, type PositionResult, type ShareOptions, type ShareResult, type SpeechOptions, type SpeechSession } from "./device";
 import type { FileTypeAssociation } from "../associations";
 
 export type AppErrorSource =
@@ -234,6 +234,8 @@ export interface AppHandle {
   getCurrentPosition(options?: PositionOptions): Promise<PositionResult>;
   /** Location fixes about every second until the returned function is called; errors come to `callback` too. */
   watchPosition(callback: (result: PositionResult) => void, options?: Pick<PositionOptions, "highAccuracy">): () => void;
+  /** Dictation (Android SpeechRecognizer); asks for the microphone permission first. `{ supported: false }` on desktops for now. */
+  recognizeSpeech(options?: SpeechOptions): SpeechSession;
   /** A biometric (or device PIN) check: Android BiometricPrompt, Windows Hello. `{ supported: false }` on Linux. */
   authenticate(options: AuthenticateOptions): Promise<AuthenticateResult>;
   /**

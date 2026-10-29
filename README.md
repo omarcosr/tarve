@@ -93,7 +93,7 @@ bunx tarve dev app.tsx      # hot reload into the same window (npx tarve dev on 
 | `@tarve/router` | Stack and tab navigation with typed params (`route("/users/:id", …)`), `<RouterView>`, `<TabBar>`, `<Link to>` |
 | `@tarve/test` | Testing Library–style `render`, queries, `fireEvent`, `waitFor` and PNG snapshots over `@tarve/headless` |
 
-App-level additions: `app.onOpenUrl` / `app.onOpenFiles` with `protocols` / `fileTypes` (deep links and file associations), `app.share`, `app.getCurrentPosition` and `app.authenticate` (Android and Windows), and `definePlugin` (see [Plugins](#plugins)). For tests and CI, `TARVE_DEVICE=fake` in the app's environment makes the native library answer the device services deterministically (no share UI, location source or biometric prompt; same on Bun, Node and txiki; details in `packages/core/src/device.ts`).
+App-level additions: `app.onOpenUrl` / `app.onOpenFiles` with `protocols` / `fileTypes` (deep links and file associations), `app.share`, `app.getCurrentPosition` and `app.authenticate` (Android and Windows), `app.recognizeSpeech` (Android dictation with partial results and the microphone level; `{ supported: false }` on desktops for now), and `definePlugin` (see [Plugins](#plugins)). For tests and CI, `TARVE_DEVICE=fake` in the app's environment makes the native library answer the device services deterministically (no share UI, location source or biometric prompt; same on Bun, Node and txiki; details in `packages/core/src/device.ts`).
 
 ## Build a standalone executable
 

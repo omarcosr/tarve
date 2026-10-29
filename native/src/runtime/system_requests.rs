@@ -100,6 +100,11 @@ impl App {
         crate::device::location(request, self.events.clone());
     }
 
+    /// `recognizeSpeech` (crate::device): Android SpeechRecognizer; answers arrive later.
+    pub(super) fn speech(&mut self, request: crate::protocol::requests::Speech) {
+        crate::device::speech(request, self.events.clone());
+    }
+
     /// `authenticate` (crate::device): BiometricPrompt, Windows Hello; answers arrive later.
     pub(super) fn authenticate(&mut self, request: crate::protocol::requests::Authenticate) {
         crate::device::authenticate(self.window.as_deref(), request, self.events.clone());

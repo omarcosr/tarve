@@ -409,6 +409,7 @@ export type NativeCommand =
    * `watchId` is this `requestId`; "clear" stops the watch with that `requestId` (no answer).
    */
   | { type: "location"; action: "get" | "watch" | "clear"; requestId: string; highAccuracy?: boolean; timeoutMs?: number; maximumAgeMs?: number }
+  | { type: "speech"; action: "start" | "stop" | "cancel"; sessionId: string; language?: string; partialResults?: boolean }
   /** Biometric or device-credential check (Android BiometricPrompt, Windows Hello); answered by `authenticate`. */
   | { type: "authenticate"; requestId: string; reason: string }
   | { type: "input"; action: "move" | "down" | "up" | "wheel" | "text" | "key"; x?: number; y?: number; delta?: number; deltaX?: number; deltaY?: number; text?: string };
@@ -524,6 +525,8 @@ export type NativeEvent =
   | { type: "location"; requestId: string; supported: boolean; position?: GeoPosition; code?: GeoErrorCode; error?: string }
   /** A fix (or an error) of the watch started by the `location` command with `requestId` = `watchId`. */
   | { type: "position"; watchId: string; supported: boolean; position?: GeoPosition; code?: GeoErrorCode; error?: string }
+  /** A dictation session's progress; `phase: "result"` is the last one (`text`, or `code`). */
+  | { type: "speech"; sessionId: string; phase: "ready" | "partial" | "level" | "end" | "result"; supported?: boolean; text?: string; level?: number; code?: SpeechErrorCode; error?: string }
   | { type: "authenticate"; requestId: string; supported: boolean; success: boolean; code?: AuthErrorCode; error?: string }
   /** Links and files the OS asked the app to open (Android VIEW intents); `initial` for the launch's own. */
   | { type: "open"; urls: string[]; files: string[]; initial: boolean }
@@ -538,4 +541,6 @@ export interface GeoPosition {
 }
 export type GeoErrorCode = "unsupported" | "denied" | "unavailable" | "timeout";
 export type AuthErrorCode = "unsupported" | "not-enrolled" | "canceled" | "failed" | "lockout" | "busy";
+/** Why a dictation ended without text: no recogniser here, no microphone permission, silence, no connection to the service, it is busy, a microphone fault, or none available. */
+export type SpeechErrorCode = "unsupported" | "denied" | "no-speech" | "network" | "busy" | "audio" | "unavailable";
 export interface NativeSystemMediaSession { title: string; artist?: string; album?: string; artwork?: string; playing: boolean; duration?: number; position?: number; canSeek?: boolean; canNext?: boolean; canPrevious?: boolean; }

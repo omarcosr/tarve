@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub(crate) mod requests;
@@ -813,6 +812,7 @@ pub enum Command {
     Permissions(requests::Permissions),
     Share(requests::Share),
     Location(requests::Location),
+    Speech(requests::Speech),
     Authenticate(requests::Authenticate),
     Input {
         action: String,

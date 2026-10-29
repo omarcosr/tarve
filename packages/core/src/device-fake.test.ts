@@ -11,7 +11,7 @@ const root = resolve(import.meta.dirname, "../../..");
 // Unit-test jobs run before `build:native`; this test needs the built library.
 const hasNative = (() => { try { return existsSync(nativePath()); } catch { return false; } })();
 
-const entry = (core: string, missing: string) => `import { authenticate, createApp, getCurrentPosition, share, watchPosition, Window } from "${core}/index.ts";
+const entry = (core: string, missing: string) => `import { authenticate, createApp, getCurrentPosition, recognizeSpeech, share, watchPosition, Window } from "${core}/index.ts";
 import { jsx } from "${core}/jsx-runtime.ts";
 const app = createApp(() => jsx(Window, {}), { headless: true, renderer: "cpu" });
 await app.ready;
@@ -36,6 +36,13 @@ if ((result.timeout as { error?: string }).error === "no fix within 0 ms") {
   result.authenticate = await authenticate({ reason: "Unlock" });
   result.canceled = await authenticate({ reason: "Unlock [fake:canceled]" });
   result.unsupported = await authenticate({ reason: "[fake:unsupported]" });
+  const heard: unknown[] = [];
+  const session = recognizeSpeech({ language: "pt-BR", onReady: () => heard.push("ready"), onLevel: level => heard.push(level), onPartial: text => { heard.push(text); if (text === "comprar pão amanhã") session.stop(); }, onEnd: () => heard.push("end") });
+  result.speech = await session.result;
+  result.speechEvents = heard;
+  const canceled = recognizeSpeech();
+  canceled.cancel();
+  result.speechCanceled = await canceled.result;
 }
 console.log("RESULT " + JSON.stringify(result));
 app.close();
@@ -79,6 +86,9 @@ test.skipIf(!hasNative)("TARVE_DEVICE=fake answers every device request determin
       authenticate: { supported: true, success: true },
       canceled: { supported: true, success: false, code: "canceled", error: "fake authentication: canceled" },
       unsupported: { supported: false, success: false, code: "unsupported", error: "fake authentication: unsupported" },
+      speech: { supported: true, text: "comprar pão amanhã" },
+      speechEvents: ["ready", 0.5, "comprar", "comprar pão", "comprar pão amanhã", "end"],
+      speechCanceled: { supported: true, code: "canceled" },
     });
   } finally {
     rmSync(directory, { recursive: true, force: true });
