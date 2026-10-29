@@ -100,11 +100,17 @@ try {
     const line: string[] = [];
     const mismatched = new Map<string, string[]>();
     let compared = 0;
-    for (const variant of variants) {
+    // The builds are independent: run them together, then the executables one at a time.
+    const builds = await Promise.all(variants.map(async variant => {
       const [runtime, compiled] = variant.split("-");
+      const child = Bun.spawn(["bun", cli, "build", source, "--outfile", join(out, `${view}-${variant}.exe`), "--runtime", runtime!, ...(compiled ? ["--compile-jsx"] : [])], { cwd: examples, stdout: "pipe", stderr: "pipe", env: { ...process.env, TARVE_NATIVE_FEATURES: process.env.TARVE_NATIVE_FEATURES ?? "all" } });
+      const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+      return { code, output: stderr + stdout };
+    }));
+    for (const [index, variant] of variants.entries()) {
       const executable = join(out, `${view}-${variant}.exe`);
-      const build = Bun.spawnSync(["bun", cli, "build", source, "--outfile", executable, "--runtime", runtime!, ...(compiled ? ["--compile-jsx"] : [])], { cwd: examples, stdout: "pipe", stderr: "pipe", env: { ...process.env, TARVE_NATIVE_FEATURES: process.env.TARVE_NATIVE_FEATURES ?? "all" } });
-      if (build.exitCode !== 0) { failures.push(`${view} ${variant} build: ${(build.stderr.toString() + build.stdout.toString()).trim().split(/\r?\n/)[0]}`); line.push(`${variant}=BUILD`); continue; }
+      const build = builds[index]!;
+      if (build.code !== 0) { failures.push(`${view} ${variant} build: ${build.output.trim().split(/\r?\n/)[0]}`); line.push(`${variant}=BUILD`); continue; }
       // Animations finish in wall-clock time (the motion example reports which ended first):
       // a mismatch counts only when a second run reproduces it.
       let problems: string[] = [];

@@ -33,9 +33,11 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native
+          workspaces: |
+            native -> target
+            native -> target-variants
+          prefix-key: v1-rust
           shared-key: linux-x64-native
-          cache-on-failure: true
 
       - name: Install Linux native dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev libasound2-dev
@@ -86,7 +88,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
-          cache-on-failure: true
+          prefix-key: v1-rust
+          shared-key: linux-x64
 
       - name: Install Linux native and virtual display dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev libasound2-dev mesa-vulkan-drivers xvfb dbus python3-dbus python3-gi
@@ -174,8 +177,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
+          prefix-key: v1-rust
           shared-key: windows-x64
-          cache-on-failure: true
 
       # Must match the wasm-bindgen crate version in native/Cargo.lock.
       - name: Install wasm-bindgen
@@ -208,7 +211,8 @@ jobs:
       - name: Full release gate
         env:
           TARVE_SMOKE_FORCED_WGPU: "0"
-          TARVE_VERIFY_SKIP: pack,smoke:package,smoke:exe,smoke:node-cli-package
+          # smoke:headless-runtimes and smoke:runtime-parity (~15 min) run beside this job in windows-x64-runtimes.
+          TARVE_VERIFY_SKIP: pack,smoke:package,smoke:exe,smoke:node-cli-package,smoke:headless-runtimes,smoke:runtime-parity
           # No one works on the runner: windows may take the foreground, so the
           # accessibility smoke (keyboard focus) runs too.
           TARVE_BACKGROUND: "0"
@@ -226,6 +230,89 @@ jobs:
           path: |
             dist/*-real.png
             work/*.png
+          retention-days: 14
+
+  # The release gate's two longest steps, in parallel with it: the same app under every runtime
+  # (Bun, Node SEA, txiki.js) and the headless runtimes (native + WebAssembly).
+  windows-x64-runtimes:
+    name: Windows x64 runtime parity
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26.10.0"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      # The release gate saves this cache; it builds the same debug and release libraries.
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+          prefix-key: v1-rust
+          shared-key: windows-x64
+          save-if: false
+
+      # Must match the wasm-bindgen crate version in native/Cargo.lock.
+      - name: Install wasm-bindgen
+        run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install example dependencies
+        run: bun run install:examples
+
+      - name: Install txiki.js
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest https://github.com/saghul/txiki.js/releases/download/v26.6.0/txiki-windows-x86_64.zip -OutFile "$env:RUNNER_TEMP\txiki.zip"
+          Expand-Archive "$env:RUNNER_TEMP\txiki.zip" -DestinationPath "$env:RUNNER_TEMP\txiki"
+          $tjs = "$env:RUNNER_TEMP\txiki\txiki-windows-x86_64\tjs.exe"
+          & $tjs --version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          "TARVE_TXIKI=$tjs" >> $env:GITHUB_ENV
+
+      # The environment scripts/verify.ts gives its steps.
+      - name: Headless runtimes smoke
+        env:
+          TARVE_BACKGROUND: "0"
+          TARVE_GPU_DAMAGE_CHECK: "1"
+          TARVE_REDUCED_MOTION: "0"
+          TARVE_SMOKE_FORCED_WGPU: "0"
+        run: bun run smoke:headless-runtimes
+
+      - name: Runtime parity smoke
+        env:
+          TARVE_BACKGROUND: "0"
+          TARVE_GPU_DAMAGE_CHECK: "1"
+          TARVE_REDUCED_MOTION: "0"
+          TARVE_SMOKE_FORCED_WGPU: "0"
+        run: bun run smoke:runtime-parity
+
+      - name: Upload runtime parity captures
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tarve-runtime-parity-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: work/runtime-parity/*.png
           retention-days: 14
 
   windows-x64-package:
@@ -256,9 +343,11 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native
-          shared-key: windows-x64
-          save-if: false
+          workspaces: |
+            native -> target
+            native -> target-variants
+          prefix-key: v1-rust
+          shared-key: windows-x64-package
 
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
@@ -278,7 +367,10 @@ jobs:
       - name: Package
         run: bun run package
 
+      # `bun run package` just built the staging: skip prepack's second package build.
       - name: Pack
+        env:
+          TARVE_SKIP_PREPACK: "1"
         run: bun run pack
 
       - name: Package install smoke
@@ -324,8 +416,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
+          prefix-key: v1-rust
           shared-key: wasm-${{ matrix.os }}
-          cache-on-failure: true
 
       # Must match the wasm-bindgen crate version in native/Cargo.lock.
       - name: Install wasm-bindgen

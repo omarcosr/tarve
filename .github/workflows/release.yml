@@ -36,7 +36,10 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native
+          workspaces: |
+            native -> target
+            native -> target-variants
+          prefix-key: v1-rust
           shared-key: linux-x64-native
           save-if: false
 
@@ -131,12 +134,15 @@ jobs:
         with:
           toolchain: stable
 
-      # Reuse the Windows cache that CI builds on main (tag runs can read it).
+      # Reuse the Windows release cache that CI's package job builds on main (tag runs can read it).
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: native
-          shared-key: windows-x64
+          workspaces: |
+            native -> target
+            native -> target-variants
+          prefix-key: v1-rust
+          shared-key: windows-x64-package
           save-if: false
 
       # @tarve/headless ships the WebAssembly runtime built from the tagged sources.

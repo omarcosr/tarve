@@ -45,8 +45,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: native -> target-apple
+          prefix-key: v1-rust
           shared-key: apple-cross-check
-          cache-on-failure: true
 
       - name: cargo check (aarch64/x86_64-apple-darwin)
         run: bun scripts/check-apple.ts
@@ -90,8 +90,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: native
+          prefix-key: v1-rust
           shared-key: macos-${{ matrix.arch }}
-          cache-on-failure: true
 
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
