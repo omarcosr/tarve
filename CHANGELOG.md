@@ -10,6 +10,12 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless` an
 - Android: `tarve.android.cleartextTraffic: true` in package.json allows plain `http://` (a media server on the LAN); without it Android blocks it, media playback included.
 - Style `positionTryFallbacks` (CSS `position-try-fallbacks`: `none` or a comma-separated list of `flip-block` / `flip-inline` options) on `portal` roots: when the box does not fit the window, the first option that fits mirrors it across its containing block (above ↔ below, left ↔ right), re-evaluated on scroll; paint, hit testing and accessibility bounds follow. On a portal's first child, that child's box is fitted and mirrored and the portal moves with it.
 - Releases publish `@tarve/router`, `@tarve/test` and `create-tarve` with `@tarve/core` (the docs already told users to install them), and deploy tarve.dev when the `site` environment has a Cloudflare token.
+- `foreground: "currentColor"` (and `<Svg color="currentColor">`): the box takes its nearest ancestor's foreground, in that ancestor's hover / group-hover state, as CSS `currentColor` — an icon follows its button's colour on hover. Go host too.
+- Percent translations: `transform: "translateX(-100%)"` (and `translate(…, 50%)`, in `style`, state styles, `motionFrom` and `animation` keyframes) moves by a percent of the box's own size, as in CSS; the transform object carries it as `xPercent` / `yPercent`. Go host too.
+- Media `seeking`: `onSeeking` (Svelte `seeking` event, Go `onSeeking`) fires when a seek starts and `MediaEventInfo.seeking` holds until `seeked`, on every path. A seek still downloading its target while playing reports `waiting` (then `canplay`) on both Windows paths, as a browser does: a slow network no longer leaves 9–12 s with no event.
+- Audio tracks carry `codec` (`aac`, `ac3`, `eac3`, `dts`, `opus`…) on Windows and, with the D3D11 renderer, `playable`: `false` when this machine has no decoder for the stream (AC-3 without a Dolby decoder) and it would play silent. A first track that is not playable gives way to the first one that is, and a video whose only audio is not playable plays silent instead of failing with "request invalid in the current state". Go `MediaAudioTrack.Codec` / `Unplayable`.
+- HLS (`.m3u8`) on Windows with the D3D11 renderer: the Source Reader has no HLS parser, so the Media Engine plays it (it already did with the other renderers).
+- `dismissOnOutside` + `onOutsideClick` work on in-flow boxes too (a menu inside the page, not only `portal` popups): a press outside fires `onOutsideClick` instead of reaching what is under it. An open dismissible portal still wins.
 
 ### Changed
 
@@ -18,7 +24,10 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless` an
 
 ### Fixed
 
-- A hidden window gives its GPU memory back (36 → 0 MB): the swap chain and caches are released while hidden and recreated when shown.
+- Windows Media Engine path (non-D3D11 renderers): `buffered` of a remote file reported the whole duration; it now follows the app's download as the D3D11 path does.
+- `pointerEvents` inherits as in CSS: `none` no longer mutes a whole subtree regardless; a descendant with `pointerEvents: "auto"` (or `block` / `delegate`) takes the pointer again, while children without a value still fall through (a control bar over a video that lets clicks reach the video between its buttons).
+- An `<Image>` whose load fails (an HTTP 404) is reported to its own `onError` only; the app's `onError` hears it (`source: "native"`, `event: "imageError"`) only when the image has no handler, instead of always as a generic native error. Go host too.
+- A hidden window gives its GPU memory back (36 → 0 MB): the swap chain and caches are released while hidden and recreated when shown.
 - CPU renderer: text whose baseline sits on an exact half pixel (fractional display scales) was placed a pixel apart in partial redraws and full ones, leaving stray descenders; partial redraws now place glyphs where a full redraw does.
 - Media on Linux (GStreamer): embedded subtitles never showed (the text flag was cleared before playbin built its overlay); `buffered` read a byte count as a percentage and now follows the download (network videos use a 256 MiB disk cache); `filename` follows redirects; `audioTracks` reports the chosen track right after `setAudioTrack`; `waiting` fires only while playing.
 - Media on Android: an HTTP 404 was a `decode` error, now `network` with the status (redirects are followed before opening); `filename` follows redirects; setting the rate back to 1 while paused was ignored.

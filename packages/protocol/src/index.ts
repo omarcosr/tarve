@@ -208,7 +208,10 @@ export interface Style extends StateStyle {
    * like Tailwind's `dark:`. The reconciler folds them in; the native tree never sees the key.
    */
   dark?: Omit<Style, "dark">;
-  /** `none` lets the pointer fall through this box and its children, as CSS `pointer-events: none`. */
+  /**
+   * `none` lets the pointer fall through this box, as CSS `pointer-events: none`. It inherits:
+   * children without their own value fall through too, a child with `auto` takes the pointer again.
+   */
   strokeWidth?: number; pointerEvents?: "auto" | "block" | "delegate" | "none"; userSelect?: UserSelect;
 }
 export interface Control {
@@ -475,7 +478,7 @@ export type NativeEvent =
   | { type: "notificationClick"; id?: string }
   /** Windows "Transparency effects" changed while the window has a `mica`, `acrylic` or `blur` backdrop. */
   | { type: "transparencyEffects"; enabled: boolean }
-  | { type: "media"; id: string; event: "loadedmetadata" | "canplay" | "waiting" | "progress" | "audiotracks" | "texttracks" | "cuechange" | "play" | "pause" | "timeupdate" | "seeked" | "ended" | "error"; time?: number; duration?: number | null; paused?: boolean; message?: string; code?: MediaErrorCode; /** End (s) of the buffered range holding the current time. */ buffered?: number; /** `loadedmetadata`: the served file's name (after redirects). */ filename?: string; /** `audiotracks`: the media's audio streams. */ audioTracks?: { id: number; label: string; language: string; enabled: boolean }[]; /** `texttracks`: subtitle streams in the file. */ textTracks?: { id: number; label: string; language: string; enabled: boolean }[]; /** `cuechange`: the subtitle text shown now. */ cueText?: string; videoWidth?: number; videoHeight?: number }
+  | { type: "media"; id: string; event: "loadedmetadata" | "canplay" | "waiting" | "progress" | "audiotracks" | "texttracks" | "cuechange" | "play" | "pause" | "timeupdate" | "seeking" | "seeked" | "ended" | "error"; time?: number; duration?: number | null; paused?: boolean; message?: string; code?: MediaErrorCode; /** End (s) of the buffered range holding the current time. */ buffered?: number; /** `loadedmetadata`: the served file's name (after redirects). */ filename?: string; /** `audiotracks`: the media's audio streams; `playable: false` has no decoder here. */ audioTracks?: { id: number; label: string; language: string; enabled: boolean; codec?: string; playable?: boolean }[]; /** `texttracks`: subtitle streams in the file. */ textTracks?: { id: number; label: string; language: string; enabled: boolean }[]; /** `cuechange`: the subtitle text shown now. */ cueText?: string; videoWidth?: number; videoHeight?: number }
   | { type: "escape" }
   | { type: "click"; id: string }
   | { type: "context"; id: string; x: number; y: number }

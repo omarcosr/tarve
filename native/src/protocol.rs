@@ -1133,7 +1133,9 @@ fn validate_control(node: &Node) -> Result<(), String> {
             transform.iter().all(|(key, value)| {
                 let number = value.as_f64().filter(|value| value.is_finite());
                 match key.as_str() {
-                    "x" | "y" | "rotate" | "skewX" | "skewY" => number.is_some(),
+                    "x" | "y" | "xPercent" | "yPercent" | "rotate" | "skewX" | "skewY" => {
+                        number.is_some()
+                    }
                     "scale" | "scaleX" | "scaleY" => number.is_some_and(|value| value != 0.0),
                     "originX" | "originY" => number.is_some(),
                     _ => false,
@@ -1142,7 +1144,7 @@ fn validate_control(node: &Node) -> Result<(), String> {
         });
         if !valid {
             return Err(format!(
-                "Invalid transform on {}: expected {{ x?, y?, scale?, scaleX?, scaleY?, rotate?, skewX?, skewY?, originX?, originY? }} with non-zero scales",
+                "Invalid transform on {}: expected {{ x?, y?, xPercent?, yPercent?, scale?, scaleX?, scaleY?, rotate?, skewX?, skewY?, originX?, originY? }} with non-zero scales",
                 node.id
             ));
         }

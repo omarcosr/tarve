@@ -745,6 +745,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -787,6 +788,7 @@
           "name": "onOutsideClick",
           "type": "() => void",
           "optional": true,
+          "doc": "With `dismissOnOutside`: a press (or right click) outside the box.",
           "from": "ViewProps"
         },
         {
@@ -1158,7 +1160,7 @@
     {
       "name": "Column",
       "source": "packages/core/src/components/layout.ts",
-      "line": 40,
+      "line": 45,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
@@ -1170,7 +1172,8 @@
         {
           "name": "dismissOnOutside",
           "type": "boolean",
-          "optional": true
+          "optional": true,
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins."
         },
         {
           "name": "dragRegion",
@@ -1201,7 +1204,8 @@
         {
           "name": "onOutsideClick",
           "type": "() => void",
-          "optional": true
+          "optional": true,
+          "doc": "With `dismissOnOutside`: a press (or right click) outside the box."
         },
         {
           "name": "padding",
@@ -1249,7 +1253,7 @@
     {
       "name": "Combobox",
       "source": "packages/core/src/popups.ts",
-      "line": 501,
+      "line": 502,
       "generic": false,
       "propsType": "ComboboxProps",
       "props": [
@@ -1346,7 +1350,7 @@
     {
       "name": "Command",
       "source": "packages/core/src/popups.ts",
-      "line": 649,
+      "line": 650,
       "generic": false,
       "propsType": "CommandProps",
       "props": [
@@ -1426,7 +1430,7 @@
     {
       "name": "CommandPalette",
       "source": "packages/core/src/popups.ts",
-      "line": 772,
+      "line": 773,
       "generic": false,
       "propsType": "CommandPaletteProps",
       "props": [
@@ -1540,7 +1544,7 @@
     {
       "name": "ContextMenu",
       "source": "packages/core/src/popups.ts",
-      "line": 421,
+      "line": 422,
       "generic": false,
       "propsType": "ContextMenuProps",
       "props": [
@@ -2196,7 +2200,7 @@
     {
       "name": "DropdownMenu",
       "source": "packages/core/src/popups.ts",
-      "line": 351,
+      "line": 352,
       "generic": false,
       "propsType": "DropdownMenuProps",
       "props": [
@@ -2443,6 +2447,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -2492,6 +2497,7 @@
           "name": "onOutsideClick",
           "type": "() => void",
           "optional": true,
+          "doc": "With `dismissOnOutside`: a press (or right click) outside the box.",
           "from": "ViewProps"
         },
         {
@@ -2573,7 +2579,7 @@
     {
       "name": "HoverCard",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 1124,
+      "line": 1125,
       "generic": false,
       "propsType": "HoverCardProps",
       "props": [
@@ -3110,6 +3116,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -3195,6 +3202,7 @@
           "name": "onOutsideClick",
           "type": "() => void",
           "optional": true,
+          "doc": "With `dismissOnOutside`: a press (or right click) outside the box.",
           "from": "ViewProps"
         },
         {
@@ -3269,6 +3277,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -3316,6 +3325,7 @@
           "name": "onOutsideClick",
           "type": "() => void",
           "optional": true,
+          "doc": "With `dismissOnOutside`: a press (or right click) outside the box.",
           "from": "ViewProps"
         },
         {
@@ -3936,7 +3946,7 @@
     {
       "name": "Popover",
       "source": "packages/core/src/popups.ts",
-      "line": 243,
+      "line": 244,
       "generic": false,
       "propsType": "PopoverProps",
       "props": [
@@ -4011,7 +4021,7 @@
     {
       "name": "Portal",
       "source": "packages/core/src/components/layout.ts",
-      "line": 46,
+      "line": 51,
       "generic": false,
       "propsType": "PortalProps",
       "props": [
@@ -4025,6 +4035,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -4062,6 +4073,7 @@
           "name": "onOutsideClick",
           "type": "() => void",
           "optional": true,
+          "doc": "With `dismissOnOutside`: a press (or right click) outside the box.",
           "from": "ViewProps"
         },
         {
@@ -4137,6 +4149,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -4208,6 +4221,7 @@
           "name": "onOutsideClick",
           "type": "() => void",
           "optional": true,
+          "doc": "With `dismissOnOutside`: a press (or right click) outside the box.",
           "from": "ViewProps"
         },
         {
@@ -4306,7 +4320,7 @@
     {
       "name": "Questionnaire",
       "source": "packages/core/src/advanced-controls.ts",
-      "line": 329,
+      "line": 330,
       "generic": false,
       "propsType": "QuestionnaireProps",
       "props": [
@@ -4439,7 +4453,7 @@
     {
       "name": "Resizable",
       "source": "packages/core/src/advanced-controls.ts",
-      "line": 221,
+      "line": 222,
       "generic": false,
       "propsType": "ResizableProps",
       "props": [
@@ -4521,7 +4535,7 @@
     {
       "name": "Row",
       "source": "packages/core/src/components/layout.ts",
-      "line": 36,
+      "line": 41,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
@@ -4533,7 +4547,8 @@
         {
           "name": "dismissOnOutside",
           "type": "boolean",
-          "optional": true
+          "optional": true,
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins."
         },
         {
           "name": "dragRegion",
@@ -4564,7 +4579,8 @@
         {
           "name": "onOutsideClick",
           "type": "() => void",
-          "optional": true
+          "optional": true,
+          "doc": "With `dismissOnOutside`: a press (or right click) outside the box."
         },
         {
           "name": "padding",
@@ -4626,6 +4642,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -4663,6 +4680,7 @@
           "name": "onOutsideClick",
           "type": "() => void",
           "optional": true,
+          "doc": "With `dismissOnOutside`: a press (or right click) outside the box.",
           "from": "ViewProps"
         },
         {
@@ -4753,6 +4771,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -4790,6 +4809,7 @@
           "name": "onOutsideClick",
           "type": "() => void",
           "optional": true,
+          "doc": "With `dismissOnOutside`: a press (or right click) outside the box.",
           "from": "ViewProps"
         },
         {
@@ -5056,7 +5076,7 @@
     {
       "name": "Sidebar",
       "source": "packages/core/src/advanced-controls.ts",
-      "line": 269,
+      "line": 270,
       "generic": false,
       "propsType": "SidebarProps",
       "props": [
@@ -5713,6 +5733,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -5774,6 +5795,7 @@
           "name": "onOutsideClick",
           "type": "() => void",
           "optional": true,
+          "doc": "With `dismissOnOutside`: a press (or right click) outside the box.",
           "from": "ViewProps"
         },
         {
@@ -6073,7 +6095,7 @@
     {
       "name": "Tooltip",
       "source": "packages/core/src/popups.ts",
-      "line": 171,
+      "line": 172,
       "generic": false,
       "propsType": "TooltipProps",
       "props": [
@@ -6251,7 +6273,7 @@
     {
       "name": "View",
       "source": "packages/core/src/components/layout.ts",
-      "line": 32,
+      "line": 37,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
@@ -6263,7 +6285,8 @@
         {
           "name": "dismissOnOutside",
           "type": "boolean",
-          "optional": true
+          "optional": true,
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins."
         },
         {
           "name": "dragRegion",
@@ -6294,7 +6317,8 @@
         {
           "name": "onOutsideClick",
           "type": "() => void",
-          "optional": true
+          "optional": true,
+          "doc": "With `dismissOnOutside`: a press (or right click) outside the box."
         },
         {
           "name": "padding",
@@ -6479,6 +6503,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -6554,6 +6579,7 @@
           "name": "onOutsideClick",
           "type": "() => void",
           "optional": true,
+          "doc": "With `dismissOnOutside`: a press (or right click) outside the box.",
           "from": "ViewProps"
         },
         {
@@ -6871,7 +6897,7 @@
     "ToastVariant": "type ToastVariant = \"default\" | \"success\" | \"destructive\";",
     "ToasterPosition": "type ToasterPosition = \"top-left\" | \"top-right\" | \"bottom-left\" | \"bottom-right\";",
     "ToggleGroupItem": "interface ToggleGroupItem {\n  value: string;\n  label: string;\n  content?: Child;\n  disabled?: boolean;\n}",
-    "Transform": "interface Transform {\n  x?: number; y?: number; scale?: number; scaleX?: number; scaleY?: number;\n  rotate?: number; skewX?: number; skewY?: number; originX?: number; originY?: number;\n}",
+    "Transform": "interface Transform {\n  x?: number; y?: number; xPercent?: number; yPercent?: number; scale?: number; scaleX?: number; scaleY?: number;\n  rotate?: number; skewX?: number; skewY?: number; originX?: number; originY?: number;\n}",
     "TreeNode": "interface TreeNode<T = unknown> {\n  id: string;\n  label: string;\n  children?: readonly TreeNode<T>[];\n  disabled?: boolean;\n  icon?: IconName;\n  data?: T;\n}",
     "TypographyVariant": "type TypographyVariant = \"h1\" | \"h2\" | \"h3\" | \"h4\" | \"p\" | \"lead\" | \"large\" | \"small\" | \"muted\" | \"code\" | \"blockquote\";",
     "WindowBackdrop": "type WindowBackdrop = \"none\" | \"transparent\" | \"blur\" | \"mica\" | \"acrylic\";",

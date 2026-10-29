@@ -605,6 +605,64 @@ fn group_hover_focus_within_and_pointer_events_none_follow_css() {
 }
 
 #[test]
+fn pointer_events_inherit_so_an_auto_child_of_a_none_parent_takes_the_pointer() {
+    let video = node(
+        "video",
+        "pressable",
+        json!({"width": 300, "height": 200}),
+        vec![],
+    );
+    let volume = node(
+        "volume",
+        "pressable",
+        json!({"width": 40, "height": 40, "pointerEvents": "auto"}),
+        vec![],
+    );
+    let label = node(
+        "label",
+        "pressable",
+        json!({"width": 40, "height": 40}),
+        vec![],
+    );
+    let bar = node(
+        "bar",
+        "row",
+        json!({"position": "absolute", "left": 0, "top": 0, "width": 300, "height": 40, "pointerEvents": "none"}),
+        vec![volume, label],
+    );
+    let stack = node(
+        "stack",
+        "view",
+        json!({"position": "relative", "width": 300, "height": 200}),
+        vec![video, bar],
+    );
+    let mut tree = Tree::new(root(vec![stack]));
+    tree.compute(400.0, 400.0).unwrap();
+    tree.pointer_move(20.0, 20.0);
+    assert_eq!(
+        tree.hovered.as_deref(),
+        Some("volume"),
+        "auto re-enables the child"
+    );
+    assert!(
+        tree.hover_path().contains(&"bar".to_string()),
+        "its muted parent is :hover too"
+    );
+    tree.pointer_move(60.0, 20.0);
+    assert_eq!(
+        tree.hovered.as_deref(),
+        Some("video"),
+        "a child without a value inherits none"
+    );
+    tree.pointer_move(200.0, 20.0);
+    assert_eq!(
+        tree.hovered.as_deref(),
+        Some("video"),
+        "the muted bar itself falls through"
+    );
+}
+
+#[test]
 fn rotate_skew_and_origin_join_the_transform_and_align_self_reaches_taffy() {
     let rotated = node(
         "rotated",
@@ -1060,6 +1118,33 @@ fn semantic_link_foreground_and_hover_inherit_into_nested_text() {
     assert_eq!(tree.resolved_text_foreground("label", "#18181b"), "#2563eb");
     tree.pointer_move(20.0, 18.0);
     assert_eq!(tree.resolved_text_foreground("label", "#18181b"), "#dc2626");
+}
+
+#[test]
+fn current_color_foreground_follows_the_nearest_ancestor_and_its_hover() {
+    let root: Node = serde_json::from_value(json!({
+        "id":"root","kind":"window","style":{},"children":[
+            {
+                "id":"button","kind":"pressable",
+                "style":{"width":180,"height":36,"foreground":"#71717a","hover":{"foreground":"#ffffff"}},
+                "children":[
+                    {"id":"row","kind":"row","style":{},"children":[
+                        {"id":"icon","kind":"svg","svg":"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\"/>","style":{"width":24,"height":24,"foreground":"currentColor"},"children":[]},
+                        {"id":"label","kind":"text","text":"Play","style":{"foreground":"currentColor"},"children":[]}
+                    ]}
+                ]
+            }
+        ]
+    }))
+    .unwrap();
+    let mut tree = Tree::new(root);
+    tree.compute(300.0, 120.0).unwrap();
+    assert_eq!(tree.current_foreground("icon", "currentColor"), "#71717a");
+    assert_eq!(tree.resolved_text_foreground("label", "#18181b"), "#71717a");
+    assert_eq!(tree.current_foreground("icon", "#123456"), "#123456");
+    tree.pointer_move(20.0, 18.0);
+    assert_eq!(tree.current_foreground("icon", "currentColor"), "#ffffff");
+    assert_eq!(tree.resolved_text_foreground("label", "#18181b"), "#ffffff");
 }
 
 #[test]
@@ -4152,13 +4237,15 @@ fn dynamic_images_reject_oversized_dimensions_before_entering_the_cache() {
         }))
         .unwrap(),
     );
-    let tree = Tree::new(root(vec![oversized]));
+    let mut tree = Tree::new(root(vec![oversized]));
     assert_eq!(tree.image_cache_len(), 0);
-    assert!(
-        tree.warnings
-            .iter()
-            .any(|warning| warning.contains("dimensions"))
-    );
+    assert!(tree.take_layout_events().iter().any(|event| {
+        event["type"] == "imageError"
+            && event["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("dimensions")
+    }));
 }
 
 #[test]
@@ -4213,7 +4300,21 @@ fn remote_images_load_once_painted_and_lay_out_again() {
         "https://example.com/later.png".into(),
         Err("HTTP 404".into()),
     );
-    assert_eq!(tree.warnings.len(), 1);
+    assert!(
+        tree.warnings.is_empty(),
+        "the node hears it: {:?}",
+        tree.warnings
+    );
+    assert!(
+        tree.take_layout_events()
+            .iter()
+            .any(|event| event["type"] == "imageError" && event["id"] == "below")
+    );
+    tree.finish_remote_image(
+        "https://example.com/gone.png".into(),
+        Err("HTTP 404".into()),
+    );
+    assert_eq!(tree.warnings.len(), 1, "no node shows it: an app warning");
 }
 
 #[test]
@@ -4309,6 +4410,11 @@ fn image_failures_report_image_error_to_every_node_showing_the_source() {
         Err("HTTP 404".into()),
     );
     assert_eq!(errors(tree.take_layout_events()), vec!["a", "b"]);
+    assert!(
+        tree.warnings.is_empty(),
+        "a failure the nodes hear is not also an app error: {:?}",
+        tree.warnings
+    );
     let mut c = a.clone();
     c.id = "c".into();
     tree.update(root(vec![a, c]));
@@ -5338,6 +5444,45 @@ fn position_try_fallbacks_parse_like_css() {
     ] {
         assert!(position_try_fallbacks(&invalid).is_err(), "{invalid}");
     }
+}
+
+#[test]
+fn an_in_flow_box_dismisses_on_outside_too() {
+    let item = node("item", "button", json!({"width":80,"height":30}), vec![]);
+    let mut menu = node(
+        "menu",
+        "column",
+        json!({"position":"absolute","top":40,"left":20,"width":80,"height":30}),
+        vec![item],
+    );
+    menu.dismiss_on_outside = true;
+    let mut hidden = node("hidden", "column", json!({"display":"none"}), vec![]);
+    let mut closed = node("closed", "column", json!({"width":10,"height":10}), vec![]);
+    closed.dismiss_on_outside = true;
+    hidden.children = vec![closed];
+    let background = node(
+        "background",
+        "button",
+        json!({"width":200,"height":120}),
+        vec![],
+    );
+    let mut tree = Tree::new(root(vec![background, menu, hidden]));
+    tree.compute(220.0, 140.0).unwrap();
+    tree.pointer_move(40.0, 50.0);
+    let inside = tree.pointer_down();
+    assert!(
+        inside.iter().all(|event| event["type"] != "outside"),
+        "{inside:?}"
+    );
+    tree.pointer_up();
+    tree.pointer_move(180.0, 100.0);
+    let down = tree.pointer_down();
+    assert_eq!(down[0]["type"], "outside");
+    assert_eq!(
+        down[0]["id"], "menu",
+        "a box under display:none is not open"
+    );
+    assert!(tree.pointer_up().is_empty());
 }
 
 #[test]
@@ -7155,6 +7300,25 @@ fn transform_is_applied_to_every_paint_call_in_the_subtree() {
 }
 
 #[test]
+fn percent_translation_is_of_the_box_own_size() {
+    let shimmer = node(
+        "shimmer",
+        "view",
+        json!({"width": 80, "height": 40, "transform": {"x": 4, "xPercent": -100, "yPercent": 50}}),
+        vec![],
+    );
+    let mut tree = Tree::new(root(vec![shimmer]));
+    tree.compute(400.0, 300.0).unwrap();
+    let transform = tree
+        .node_transform("shimmer", vello::kurbo::Vec2::ZERO)
+        .unwrap();
+    assert_eq!(
+        transform.translation(),
+        vello::kurbo::Vec2::new(-76.0, 20.0)
+    );
+}
+
+#[test]
 fn per_side_border_on_a_rounded_box_paints_one_ring_that_keeps_the_corner_arcs() {
     // A tab: rounded top corners, no bottom border. Painting the sides as clipped
     // rectangles left the arc unpainted; the border is the ring between the
@@ -7261,7 +7425,9 @@ fn hover_transform_transitions_and_invalid_transforms_are_rejected() {
     tree.advance_motion(50.0);
     assert_eq!(
         tree.motion_values("card", "transform"),
-        Some(vec![0.0, -2.0, 1.25, 1.25, 0.0, 0.0, 0.0, 0.5, 0.5])
+        Some(vec![
+            0.0, -2.0, 1.25, 1.25, 0.0, 0.0, 0.0, 0.5, 0.5, 0.0, 0.0
+        ])
     );
 
     for transform in [
@@ -7414,7 +7580,9 @@ fn motion_from_transform_enters_from_an_offset_and_keeps_the_target_origin() {
     tree.advance_motion(50.0);
     assert_eq!(
         tree.motion_values("card", "transform"),
-        Some(vec![0.0, 10.0, 0.75, 0.75, 0.0, 0.0, 0.0, 0.0, 0.5])
+        Some(vec![
+            0.0, 10.0, 0.75, 0.75, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0
+        ])
     );
     let mut bad = node("bad", "view", json!({}), vec![]);
     bad.motion_from = json!({"transform": "translateY(4px)"});

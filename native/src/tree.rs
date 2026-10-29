@@ -281,7 +281,8 @@ pub(crate) fn corner_radii(value: &Value) -> Option<[f32; 4]> {
 }
 
 /// A transform as a motion vector: x, y, scaleX, scaleY, rotate (deg), skewX (deg),
-/// skewY (deg), originX, originY (fractions of the box); identity where unset.
+/// skewY (deg), originX, originY (fractions of the box), xPercent, yPercent (CSS
+/// `translate(%)`: percents of the box's own width / height); identity where unset.
 fn transform_vector(transform: Option<&serde_json::Map<String, Value>>) -> Vec<f32> {
     let number = |key: &str| {
         transform
@@ -299,6 +300,8 @@ fn transform_vector(transform: Option<&serde_json::Map<String, Value>>) -> Vec<f
         number("skewY").unwrap_or(0.0) as f32,
         number("originX").unwrap_or(0.5) as f32,
         number("originY").unwrap_or(0.5) as f32,
+        number("xPercent").unwrap_or(0.0) as f32,
+        number("yPercent").unwrap_or(0.0) as f32,
     ]
 }
 
@@ -334,7 +337,8 @@ fn motion_value(node: &Node, property: &str, state: VisualState) -> Option<Vec<f
                 })
                 .collect(),
         ),
-        // x, y, scaleX, scaleY, rotate (deg), skewX (deg), skewY (deg), originX, originY (fractions of the box).
+        // x, y, scaleX, scaleY, rotate (deg), skewX (deg), skewY (deg), originX, originY
+        // (fractions of the box), xPercent, yPercent.
         "transform" => Some(transform_vector(
             visual_value(node, "transform", state).as_object(),
         )),
@@ -1632,7 +1636,34 @@ impl Tree {
                 .unwrap_or(0.0)
                 .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
         });
-        let portal = portals.last()?;
+        let Some(portal) = portals.last() else {
+            // No open popup: an in-flow box (a menu inside the page) dismisses the same way.
+            return self
+                .order
+                .iter()
+                .rev()
+                .filter(|id| {
+                    let node = &self.entries[*id].node;
+                    if !node.dismiss_on_outside || node.portal {
+                        return false;
+                    }
+                    let mut current = Some(id.as_str());
+                    while let Some(key) = current {
+                        let entry = &self.entries[key];
+                        if entry.node.string("display", "flex") == "none" {
+                            return false;
+                        }
+                        current = entry.parent.as_deref();
+                    }
+                    true
+                })
+                .find(|id| {
+                    let offset = self.ancestor_scroll_offset(id);
+                    let bounds = self.entries[*id].bounds + Vec2::new(-offset.x, -offset.y);
+                    !bounds.contains(self.mouse)
+                })
+                .cloned();
+        };
         let offset = self.ancestor_scroll_offset(portal);
         let bounds = self.entries[portal].bounds + Vec2::new(-offset.x, -offset.y);
         (!bounds.contains(self.mouse)).then(|| portal.clone())
@@ -2284,12 +2315,15 @@ impl Tree {
                     }
                     Err(e) => {
                         self.images.remove(&key);
+                        // The node hears it (`onError`); the host reports it to the app only
+                        // when no handler takes it.
                         if previous.is_none() || source_changed {
                             self.pending_layout_events.push(json!({
                                 "type":"imageError", "id":node.id, "src":node.src, "message":e
                             }));
+                        } else {
+                            self.warnings.push(format!("Image '{}': {e}", node.id));
                         }
-                        self.warnings.push(format!("Image '{}': {e}", node.id));
                     }
                 }
             } else if is_remote_image(&node)
@@ -2725,7 +2759,8 @@ impl Tree {
         std::mem::take(&mut self.remote_requests)
     }
 
-    /// Tells every image node showing `url` that it failed (`imageError`, `onError` in JS).
+    /// Tells every image node showing `url` that it failed (`imageError`, `onError` in JS);
+    /// with no such node it is an app warning instead.
     fn image_failed(&mut self, url: &str, message: &str) {
         let ids: Vec<String> = self
             .entries
@@ -2735,6 +2770,9 @@ impl Tree {
             })
             .map(|entry| entry.node.id.clone())
             .collect();
+        if ids.is_empty() {
+            self.warnings.push(format!("Image '{url}': {message}"));
+        }
         for id in ids {
             self.pending_layout_events.push(json!({
                 "type":"imageError", "id":id, "src":url, "message":message
@@ -2754,7 +2792,6 @@ impl Tree {
                 self.remote_images
                     .insert(url.clone(), RemoteImageState::Failed);
                 self.image_failed(&url, &message);
-                self.warnings.push(format!("Image '{url}': {message}"));
                 return;
             }
         };
@@ -2771,7 +2808,6 @@ impl Tree {
             let message =
                 format!("decoded image cache would exceed the {MAX_IMAGE_CACHE_BYTES} byte limit");
             self.image_failed(&url, &message);
-            self.warnings.push(format!("Image '{url}': {message}"));
             return;
         }
         self.released_images.remove(&url);
@@ -4061,13 +4097,40 @@ impl Tree {
         None
     }
 
+    /// `own`, the node's foreground; CSS `currentColor` takes the nearest ancestor's
+    /// (in its hover / group-hover state), so an icon follows its button.
+    pub(crate) fn current_foreground(&self, id: &str, own: &str) -> String {
+        if !own.eq_ignore_ascii_case("currentColor") {
+            return own.to_string();
+        }
+        let mut current = self
+            .entries
+            .get(id)
+            .and_then(|entry| entry.parent.as_deref());
+        while let Some(key) = current {
+            let Some(entry) = self.entries.get(key) else {
+                break;
+            };
+            let state = self.visual_state_for(key, &entry.node);
+            let value = visual_string(&entry.node, "foreground", "", state);
+            if !value.is_empty() && !value.eq_ignore_ascii_case("currentColor") {
+                return value.to_string();
+            }
+            current = entry.parent.as_deref();
+        }
+        "#18181b".to_string()
+    }
+
     pub(crate) fn resolved_text_foreground(&self, id: &str, fallback: &str) -> String {
         if let Some(link_foreground) = self.link_foreground_for(id) {
             return link_foreground;
         }
         let entry = &self.entries[id];
         let state = self.visual_state_for(id, &entry.node);
-        visual_string(&entry.node, "foreground", fallback, state).to_string()
+        self.current_foreground(
+            id,
+            visual_string(&entry.node, "foreground", fallback, state),
+        )
     }
     /// Paints one node and its subtree, applying its `transform` (translate /
     /// scale about the box centre) to everything underneath. Layout, hit
@@ -4267,10 +4330,13 @@ impl Tree {
             })
             .map(|track| track.current.clone())
             .or_else(|| motion_value(&entry.node, "transform", state))
-            .unwrap_or_else(|| vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.5, 0.5]);
+            .unwrap_or_else(|| transform_vector(None));
         let at =
             |index: usize, fallback: f64| values.get(index).map_or(fallback, |v| f64::from(*v));
-        let (x, y, scale_x, scale_y) = (at(0, 0.0), at(1, 0.0), at(2, 1.0), at(3, 1.0));
+        // Percent translations are of the box's own size, as in CSS.
+        let x = at(0, 0.0) + at(9, 0.0) / 100.0 * entry.rect.width();
+        let y = at(1, 0.0) + at(10, 0.0) / 100.0 * entry.rect.height();
+        let (scale_x, scale_y) = (at(2, 1.0), at(3, 1.0));
         let (rotate, skew_x, skew_y) = (at(4, 0.0), at(5, 0.0), at(6, 0.0));
         let (origin_x, origin_y) = (at(7, 0.5), at(8, 0.5));
         let angle = rotate.to_radians()
@@ -4915,7 +4981,12 @@ impl Tree {
                 target,
                 &scene,
                 rect,
-                color(visual_string(&node, "foreground", "#18181b", state)),
+                color(
+                    &self.current_foreground(
+                        id,
+                        visual_string(&node, "foreground", "#18181b", state),
+                    ),
+                ),
                 scale,
             );
         }
@@ -5202,12 +5273,41 @@ impl Tree {
                 self.ancestor_scroll_offset(portal),
                 root_rect,
                 self.mouse.into(),
+                self.pointer_muted_above(portal),
             ) {
                 return path;
             }
         }
-        self.hover_path_in(&self.root, Vec2::ZERO, root_rect, self.mouse.into())
+        self.hover_path_in(&self.root, Vec2::ZERO, root_rect, self.mouse.into(), false)
             .unwrap_or_default()
+    }
+
+    /// CSS `pointer-events` inherits: a box without its own value takes its parent's, so
+    /// `none` mutes a subtree except descendants that set `auto` (or another value).
+    fn pointer_muted(node: &Node, inherited: bool) -> bool {
+        match node.style.get("pointerEvents").and_then(Value::as_str) {
+            Some(value) => value == "none",
+            None => inherited,
+        }
+    }
+
+    /// Whether `id`'s parent chain leaves it muted (a portal hit-tested on its own).
+    fn pointer_muted_above(&self, id: &str) -> bool {
+        let mut chain = Vec::new();
+        let mut current = self
+            .entries
+            .get(id)
+            .and_then(|entry| entry.parent.as_deref());
+        while let Some(key) = current {
+            chain.push(key);
+            current = self
+                .entries
+                .get(key)
+                .and_then(|entry| entry.parent.as_deref());
+        }
+        chain.iter().rev().fold(false, |muted, key| {
+            Self::pointer_muted(&self.entries[*key].node, muted)
+        })
     }
 
     fn hover_path_in(
@@ -5216,6 +5316,7 @@ impl Tree {
         offset: Vec2,
         clip: BoxRect,
         mouse: vello::kurbo::Point,
+        muted: bool,
     ) -> Option<Vec<String>> {
         let entry = self.entries.get(id)?;
         let (mouse, clip) = match self.node_transform(id, offset) {
@@ -5227,10 +5328,10 @@ impl Tree {
         };
         if !(entry.bounds + Vec2::new(-offset.x, -offset.y)).contains(mouse)
             || entry.node.string("display", "flex") == "none"
-            || entry.node.string("pointerEvents", "auto") == "none"
         {
             return None;
         }
+        let muted = Self::pointer_muted(&entry.node, muted);
         let rect = entry.rect + Vec2::new(-offset.x, -offset.y);
         let clip = if clips_overflow(&entry.node) {
             clip.intersect(rect)
@@ -5250,12 +5351,13 @@ impl Tree {
                 offset + Vec2::new(entry.scroll_x, entry.scroll),
                 clip,
                 mouse,
+                muted,
             ) {
                 path.insert(0, id.to_string());
                 return Some(path);
             }
         }
-        rect.contains(mouse).then(|| vec![id.to_string()])
+        (!muted && rect.contains(mouse)).then(|| vec![id.to_string()])
     }
 
     fn hit_root(&self, scroll_only: bool) -> Option<String> {
@@ -5268,6 +5370,7 @@ impl Tree {
                 root_rect,
                 scroll_only,
                 self.mouse.into(),
+                self.pointer_muted_above(portal),
             ) {
                 return Some(id);
             }
@@ -5278,6 +5381,7 @@ impl Tree {
             root_rect,
             scroll_only,
             self.mouse.into(),
+            false,
         )
     }
 
@@ -5358,6 +5462,7 @@ impl Tree {
         clip: BoxRect,
         scroll_only: bool,
         mouse: vello::kurbo::Point,
+        muted: bool,
     ) -> Option<String> {
         let entry = &self.entries[id];
         let (mouse, clip) = match self.node_transform(id, offset) {
@@ -5370,12 +5475,10 @@ impl Tree {
         if !(entry.bounds + Vec2::new(-offset.x, -offset.y)).contains(mouse) {
             return None;
         }
-        if entry.node.disabled
-            || entry.node.string("display", "flex") == "none"
-            || entry.node.string("pointerEvents", "auto") == "none"
-        {
+        if entry.node.disabled || entry.node.string("display", "flex") == "none" {
             return None;
         }
+        let muted = Self::pointer_muted(&entry.node, muted);
         let rect = entry.rect + Vec2::new(-offset.x, -offset.y);
         let clip = if clips_overflow(&entry.node) {
             clip.intersect(rect)
@@ -5396,9 +5499,13 @@ impl Tree {
                 clip,
                 scroll_only,
                 mouse,
+                muted,
             ) {
                 return Some(id);
             }
+        }
+        if muted {
+            return None;
         }
         let blocks_pointer = entry.node.string("pointerEvents", "auto") == "block";
         if !scroll_only
