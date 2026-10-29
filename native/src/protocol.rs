@@ -843,6 +843,7 @@ pub fn validate(root: &Node) -> Result<(), String> {
             }
         }
         validate_motion(n)?;
+        validate_position_try(n)?;
         Ok(())
     }
     fn walk(n: &Node, ids: &mut HashSet<String>, depth: usize) -> Result<(), String> {
@@ -965,6 +966,7 @@ pub fn validate_patch(nodes: &[Node]) -> Result<(), String> {
     for node in nodes {
         validate_control(node)?;
         validate_motion(node)?;
+        validate_position_try(node)?;
         if let Some(value) = node.style.get("userSelect") {
             let Some(value) = value.as_str() else {
                 return Err(format!("userSelect must be a string on {}", node.id));

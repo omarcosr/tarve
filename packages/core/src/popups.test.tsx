@@ -99,6 +99,24 @@ describe("popup and selection components", () => {
     expect(changes).toEqual([false]);
   });
 
+  test("popup surfaces flip back into the window like CSS position-try-fallbacks", () => {
+    const tree = compileTree(
+      <Window>
+        <DropdownMenu id="corner" open trigger={<Text>⋯</Text>} items={[{ value: "sort", label: "Ordenar" }]} />
+      </Window>,
+    );
+    expect(tree.nodes.get("corner-content")?.style?.positionTryFallbacks)
+      .toBe("flip-block, flip-inline, flip-block flip-inline");
+    const tip = compileTree(
+      <Window>
+        <Tooltip id="tip" open trigger={<Text>?</Text>} content="Ajuda" />
+      </Window>,
+    );
+    expect(tip.nodes.get("tip-lane")?.portal).toBe(true);
+    expect(tip.nodes.get("tip-content")?.style?.positionTryFallbacks)
+      .toBe("flip-block, flip-inline, flip-block flip-inline");
+  });
+
   test("DropdownMenu renders checked items and ignores disabled selections", () => {
     const selected: string[] = [];
     const openChanges: boolean[] = [];

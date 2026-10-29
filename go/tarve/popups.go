@@ -17,7 +17,8 @@ func popupPosition(side string) S {
 
 func popupSurface(side string, style S) S {
 	return merge(S{"position": "absolute", "zIndex": popupZ + 1, "minWidth": 180, "padding": 4, "background": T.Card, "borderWidth": 1,
-		"borderColor": T.Border, "radius": RadiusMd, "pointerEvents": "block"}, popupPosition(side), style)
+		"borderColor": T.Border, "radius": RadiusMd, "pointerEvents": "block",
+		"positionTryFallbacks": "flip-block, flip-inline, flip-block flip-inline"}, popupPosition(side), style)
 }
 
 func triggerLabel(label string, child Child) any {

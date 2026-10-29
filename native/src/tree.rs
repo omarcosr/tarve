@@ -1522,15 +1522,101 @@ impl Tree {
             .collect()
     }
 
+    /// How far `id`'s layout position is from where it shows: the scroll of
+    /// every ancestor, less the shift a top-level portal on the chain takes
+    /// from its `positionTryFallbacks`.
     fn ancestor_scroll_offset(&self, id: &str) -> Vec2 {
+        let mut offset = self.scroll_offset(id);
+        let mut node = Some(id);
+        while let Some(node_id) = node {
+            if self.entries[node_id].node.portal {
+                offset -= self.position_try_shift(node_id);
+            }
+            node = self.entries[node_id].parent.as_deref();
+        }
+        offset
+    }
+
+    fn scroll_offset(&self, id: &str) -> Vec2 {
         let mut offset = Vec2::ZERO;
         let mut parent = self.entries[id].parent.as_deref();
         while let Some(parent_id) = parent {
             let entry = &self.entries[parent_id];
             offset += Vec2::new(entry.scroll_x, entry.scroll);
-            parent = self.entries[parent_id].parent.as_deref();
+            parent = entry.parent.as_deref();
         }
         offset
+    }
+
+    /// CSS `position-try-fallbacks` for a top-level portal: keep its laid-out
+    /// position when it fits the window, else take the first fallback that
+    /// does, mirroring it across its containing block (`flip-block` swaps
+    /// above/below, `flip-inline` left/right). None fitting keeps the base
+    /// position. Evaluated against the current scroll, so it follows scrolling.
+    ///
+    /// The style sits on the portal or on its first child: a portal that is a
+    /// wider positioning lane (a tooltip's, which lets its text wrap at its own
+    /// max width) fits and mirrors the visible box inside it, and moves with it.
+    fn position_try_shift(&self, id: &str) -> Vec2 {
+        let entry = &self.entries[id];
+        let key = "positionTryFallbacks";
+        let Some((value, rect)) = entry
+            .node
+            .style
+            .get(key)
+            .map(|value| (value, entry.rect))
+            .or_else(|| {
+                let child = &self.entries[entry.children.first()?];
+                Some((child.node.style.get(key)?, child.rect))
+            })
+        else {
+            return Vec2::ZERO;
+        };
+        let Ok(fallbacks) = crate::protocol::position_try_fallbacks(value) else {
+            return Vec2::ZERO;
+        };
+        let Some(parent) = entry.parent.as_deref() else {
+            return Vec2::ZERO;
+        };
+        let mut ancestor = Some(parent);
+        while let Some(ancestor_id) = ancestor {
+            if self.entries[ancestor_id].node.portal {
+                return Vec2::ZERO;
+            }
+            ancestor = self.entries[ancestor_id].parent.as_deref();
+        }
+        let anchor = self.entries[parent].rect;
+        let viewport = self.entries[&self.root].rect;
+        let scroll = self.scroll_offset(id);
+        let fits = |shift: Vec2| {
+            let shown = rect + shift - scroll;
+            const SLACK: f64 = 0.5;
+            shown.x0 >= viewport.x0 - SLACK
+                && shown.y0 >= viewport.y0 - SLACK
+                && shown.x1 <= viewport.x1 + SLACK
+                && shown.y1 <= viewport.y1 + SLACK
+        };
+        std::iter::once(crate::protocol::PositionTry {
+            block: false,
+            inline: false,
+        })
+        .chain(fallbacks)
+        .map(|tactic| {
+            Vec2::new(
+                if tactic.inline {
+                    anchor.x0 + anchor.x1 - rect.x1 - rect.x0
+                } else {
+                    0.0
+                },
+                if tactic.block {
+                    anchor.y0 + anchor.y1 - rect.y1 - rect.y0
+                } else {
+                    0.0
+                },
+            )
+        })
+        .find(|&shift| fits(shift))
+        .unwrap_or(Vec2::ZERO)
     }
 
     fn outside_dismissal_at_pointer(&self) -> Option<String> {
@@ -5693,15 +5779,7 @@ impl Tree {
         selected
     }
     pub(crate) fn visible_rect(&self, id: &str) -> Option<BoxRect> {
-        let entry = self.entries.get(id)?;
-        let mut offset = Vec2::ZERO;
-        let mut current = entry.parent.as_deref();
-        while let Some(parent_id) = current {
-            let parent = self.entries.get(parent_id)?;
-            offset += Vec2::new(parent.scroll_x, parent.scroll);
-            current = parent.parent.as_deref();
-        }
-        Some(entry.rect + Vec2::new(-offset.x, -offset.y))
+        Some(self.entries.get(id)?.rect - self.ancestor_scroll_offset(id))
     }
     fn set_slider(&mut self, id: &str, value: f64) -> Vec<Value> {
         if !value.is_finite() {

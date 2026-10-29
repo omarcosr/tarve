@@ -70,7 +70,7 @@ export function Select({ id, value, options, placeholder = "Select an option", d
             dismissOnOutside: true, onOutsideClick: () => setOpen(false),
             style: { position: "absolute", top: 42, left: 0, width: "100%", height: popupHeight,
               padding: 4, background: theme.colors.card, borderWidth: 1, borderColor: theme.colors.border,
-              radius: theme.radius.md, pointerEvents: "block" },
+              radius: theme.radius.md, pointerEvents: "block", positionTryFallbacks: "flip-block" },
             children: jsx(Column, { gap: 2, style: { width: "100%" },
               children: options.map(option => jsx(Pressable, { id: `${id}-option-${option.value}`,
                 disabled: option.disabled, focusable: false,

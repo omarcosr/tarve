@@ -45,6 +45,62 @@ pub(super) const MOTION_PROPERTIES: &[&str] = &[
     "transform",
 ];
 
+/// One `positionTryFallbacks` option: mirror across the containing block on
+/// the block (vertical) and/or inline (horizontal) axis, as CSS `flip-block`
+/// and `flip-inline`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PositionTry {
+    pub block: bool,
+    pub inline: bool,
+}
+
+/// Parses CSS `position-try-fallbacks`: `none` or a comma-separated list of
+/// options, each a space-separated set of `flip-block` / `flip-inline`.
+pub(crate) fn position_try_fallbacks(value: &Value) -> Result<Vec<PositionTry>, String> {
+    let Some(value) = value.as_str() else {
+        return Err("positionTryFallbacks must be a string".into());
+    };
+    let value = value.trim();
+    if value == "none" {
+        return Ok(Vec::new());
+    }
+    value
+        .split(',')
+        .map(|option| {
+            let mut tactic = PositionTry {
+                block: false,
+                inline: false,
+            };
+            let mut tokens = 0;
+            for token in option.split_whitespace() {
+                let flag = match token {
+                    "flip-block" => &mut tactic.block,
+                    "flip-inline" => &mut tactic.inline,
+                    _ => return Err(format!("Unsupported positionTryFallbacks option: {token}")),
+                };
+                if *flag {
+                    return Err(format!("Repeated positionTryFallbacks option: {token}"));
+                }
+                *flag = true;
+                tokens += 1;
+            }
+            if tokens == 0 {
+                return Err("Empty positionTryFallbacks option".into());
+            }
+            Ok(tactic)
+        })
+        .collect()
+}
+
+pub(super) fn validate_position_try(node: &Node) -> Result<(), String> {
+    match node.style.get("positionTryFallbacks") {
+        Some(value) => position_try_fallbacks(value)
+            .map(drop)
+            .map_err(|error| format!("{error} on {}", node.id)),
+        None => Ok(()),
+    }
+}
+
 pub(super) fn validate_motion(node: &Node) -> Result<(), String> {
     if let Some(value) = node.style.get("transition") {
         let Some(transitions) = value.as_object() else {

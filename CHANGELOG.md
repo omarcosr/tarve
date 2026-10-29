@@ -8,6 +8,7 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless` an
 
 - Tray: a missing tray host is a state, not an error. `app.tray({ onAvailability })` and `TrayHandle.availability()` report `{ supported, available, reason? }` (native `trayAvailability` event; Go `TrayOptions.OnAvailability` / `App.TrayAvailability()`), like the device APIs' `{ supported: false }`: Linux without a StatusNotifierItem host (GNOME without AppIndicator, WSLg) keeps the item on the bus and turns `available` on when a host starts; Windows reports a missing taskbar until Explorer's TaskbarCreated; other platforms answer `supported: false`. `TARVE_TRAY_ASSUME_SNI` is gone (always on). The tray, widget and YouTube Music examples and the `tray` template fall back (the window stays, closing quits or minimizes) and `smoke:txiki-apps` now fails on any error event in either runtime.
 - Android: `tarve.android.cleartextTraffic: true` in package.json allows plain `http://` (a media server on the LAN); without it Android blocks it, media playback included.
+- Style `positionTryFallbacks` (CSS `position-try-fallbacks`: `none` or a comma-separated list of `flip-block` / `flip-inline` options) on `portal` roots: when the box does not fit the window, the first option that fits mirrors it across its containing block (above ↔ below, left ↔ right), re-evaluated on scroll; paint, hit testing and accessibility bounds follow. On a portal's first child, that child's box is fitted and mirrored and the portal moves with it.
 - Releases publish `@tarve/router`, `@tarve/test` and `create-tarve` with `@tarve/core` (the docs already told users to install them), and deploy tarve.dev when the `site` environment has a Cloudflare token.
 
 ### Changed
@@ -23,6 +24,7 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless` an
 - Media on Android: an HTTP 404 was a `decode` error, now `network` with the status (redirects are followed before opening); `filename` follows redirects; setting the rate back to 1 while paused was ignored.
 - Android (QuickJS): a timer set by code resuming after an `await` could wait for the next native event (up to an hour) before running.
 - `TitleBar`: the minimize/maximize/back hover painted the glyph's own colour (the default ink is a theme token, which the hover wash did not handle), hiding the icon; it is now a 12 % wash of the ink, also for `rgba()` foregrounds. The close glyph turns white over its red hover. Go host too.
+- `DropdownMenu`, `ContextMenu`, `Popover`, `Tooltip`, `Combobox`, `Select`, `Menubar`, `NavigationMenu` and `AppMenuBar` popups no longer open off-screen: a trigger near the right or bottom edge (a "⋯" in a phone's corner) clipped the menu; they now flip with `positionTryFallbacks`. Go host too.
 - macOS CI: the Intel job runs on `macos-15-intel` (`macos-13` is retired and its jobs never started); a text test no longer assumes Consolas.
 
 ## 0.8.0 — 2026-10-27

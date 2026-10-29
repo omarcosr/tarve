@@ -129,6 +129,14 @@ export interface Style extends StateStyle {
   /** Grid row tracks as a CSS track list (`"auto 1fr"`); rows are implicit when omitted. */
   rows?: number | string;
   zIndex?: number;
+  /**
+   * CSS `position-try-fallbacks` for a `portal` root: `"none"` or a comma-separated list of options,
+   * each `flip-block` and/or `flip-inline`. When the box doesn't fit the window, the first option that
+   * fits mirrors it across its containing block (above ↔ below, left ↔ right); none fitting keeps it as laid out.
+   * On the first child of a portal instead, that child's box is fitted and mirrored and the portal moves with it
+   * (a wider positioning lane around a tooltip).
+   */
+  positionTryFallbacks?: string;
   borderWidth?: Insets;
   radius?: CornerRadius; fontSize?: number; fontWeight?: number; fontFamily?: string;
   /** Native retained transitions. Bun sends the target once; Rust owns interpolation. */

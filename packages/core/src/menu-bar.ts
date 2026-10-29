@@ -187,7 +187,7 @@ export function AppMenuBar({ id = "menubar", items, onSelect, style, ...props }:
                 dismissOnOutside: true,
                 onOutsideClick: close,
                 onEscape: () => { close(); focus(`${id}-menu-${index}`); },
-                style: { position: "absolute", top: "100%", left: 0, zIndex: POPUP_Z_INDEX + 1 },
+                style: { position: "absolute", top: "100%", left: 0, zIndex: POPUP_Z_INDEX + 1, positionTryFallbacks: "flip-block, flip-inline, flip-block flip-inline" },
                 children: popup(`${id}-popup-${index}`, { top: 2, left: 0 }, menuEntries(item.items!, String(index), index, false)),
               })
             : null,

@@ -1036,6 +1036,7 @@ export function Menubar({ menus, openMenu, onOpenMenuChange, onSelect, style, id
                   borderColor: c.border,
                   radius: theme.radius.md,
                   zIndex: 100,
+                  positionTryFallbacks: "flip-block, flip-inline, flip-block flip-inline",
                 },
                 children: menu.items.map(item =>
                   jsx(Pressable, {

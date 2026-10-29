@@ -186,7 +186,8 @@ export function NavigationMenu({ items, value, openValue, onValueChange, onOpenV
             onEscape: () => onOpenValueChange?.(undefined),
             gap: 2,
             style: { position: "absolute", top: "100%", left: 0, margin: { top: 6 }, minWidth: 240, padding: 6, background: c.card,
-              borderWidth: 1, borderColor: c.border, radius: theme.radius.md, zIndex: 1000, pointerEvents: "block" },
+              borderWidth: 1, borderColor: c.border, radius: theme.radius.md, zIndex: 1000, pointerEvents: "block",
+              positionTryFallbacks: "flip-block, flip-inline, flip-block flip-inline" },
             children: item.links!.map(link => jsx(Pressable, {
               ...(id ? { id: `${id}-link-${link.value}` } : {}),
               disabled: link.disabled,
