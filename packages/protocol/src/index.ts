@@ -1,6 +1,6 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
 export const NATIVE_ABI_VERSION = 6;
-export const PROTOCOL_VERSION = 62;
+export const PROTOCOL_VERSION = 63;
 export * from "./values";
 import type { Length, NodeKind, Insets, Margins, CornerRadius, OutlineStyle, BorderStyle, TextShadow, Transform, BoxShadow, Gradient, UserSelect, TextDecoration, SyntaxTheme, TextHighlight } from "./values";
 export type Renderer = "auto" | "gpu" | "cpu";
