@@ -53,6 +53,27 @@ describe("applyMediaEvent", () => {
     // Without a handler nothing is returned.
     expect(applyMediaEvent({ id: "m", event: "pause" }, undefined, scope)).toBeUndefined();
   });
+
+  test("seeking runs onSeeking and info.seeking holds until seeked", () => {
+    const scope = {};
+    const seen: string[] = [];
+    const request = mediaRequest({ onSeeking: info => { seen.push(`seeking:${info.seeking}:${info.currentTime}`); }, onWaiting: info => { seen.push(`waiting:${info.seeking}`); }, onSeeked: info => { seen.push(`seeked:${info.seeking}`); } });
+    applyMediaEvent({ id: "v", event: "loadedmetadata", duration: 600 }, request, scope);
+    applyMediaEvent({ id: "v", event: "seeking", time: 300 }, request, scope)?.();
+    applyMediaEvent({ id: "v", event: "waiting" }, request, scope)?.();
+    applyMediaEvent({ id: "v", event: "seeked", time: 300 }, request, scope)?.();
+    expect(seen).toEqual(["seeking:true:300", "waiting:true", "seeked:false"]);
+    expect(mediaState("v", scope).seeking).toBe(false);
+  });
+
+  test("audio tracks carry codec and playable", () => {
+    const scope = {};
+    let tracks: unknown;
+    const request = mediaRequest({ onAudioTracksChange: info => { tracks = info.audioTracks; } });
+    const audioTracks = [{ id: 1, label: "Dublado", language: "pt", enabled: false, codec: "ac3", playable: false }, { id: 2, label: "", language: "en", enabled: true, codec: "aac", playable: true }];
+    applyMediaEvent({ id: "v", event: "audiotracks", audioTracks }, request, scope)?.();
+    expect(tracks).toEqual(audioTracks);
+  });
 });
 
 describe("<audio>", () => {

@@ -888,7 +888,7 @@ impl Media {
                                     sound: receiver,
                                     target,
                                 });
-                                vec![]
+                                vec![event(id, "seeking", Some(&*track))]
                             }
                             Err(message) => vec![error(id, message.to_string())],
                         }
@@ -896,7 +896,7 @@ impl Media {
                     "seek" => {
                         track.ended = false;
                         match begin_seek(track, time.unwrap_or(0.0).max(0.0)) {
-                            Ok(()) => vec![],
+                            Ok(()) => vec![event(id, "seeking", Some(&*track))],
                             Err(message) => vec![error(id, message)],
                         }
                     }

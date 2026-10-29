@@ -165,6 +165,7 @@ function addMedia(element: THTMLMediaElement, out: Record<string, any>): void {
   out.onPlay = (info: object) => element._media("play", info);
   out.onPause = (info: object) => element._media("pause", info);
   out.onTimeUpdate = (info: object) => element._media("timeupdate", info);
+  out.onSeeking = (info: object) => element._media("seeking", info);
   out.onSeeked = (info: object) => element._media("seeked", info);
   out.onEnded = (info: object) => element._media("ended", info);
   out.onWaiting = (info: object) => element._media("waiting", info);

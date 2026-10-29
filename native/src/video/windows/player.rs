@@ -73,6 +73,13 @@ impl Player {
 
     /// The end of the buffered range holding the current time (`HTMLMediaElement.buffered`).
     pub(super) fn buffered(&self) -> Option<f64> {
+        // A remote file the engine reads through the app's download: the engine counts the
+        // whole byte stream as buffered, the download knows what really arrived.
+        if let Some(stream) = &self.stream {
+            let duration = finite(unsafe { self.engine.GetDuration() })?;
+            let now = unsafe { self.engine.GetCurrentTime() };
+            return Some(duration * stream.buffered_from((now / duration).clamp(0.0, 1.0)));
+        }
         unsafe {
             let ranges = self.engine.GetBuffered().ok()?;
             let now = self.engine.GetCurrentTime();

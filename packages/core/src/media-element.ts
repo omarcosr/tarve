@@ -39,6 +39,8 @@ export interface MediaElementProps {
   onPlay?: (event: MediaEventInfo) => void;
   onPause?: (event: MediaEventInfo) => void;
   onTimeUpdate?: (event: MediaEventInfo) => void;
+  /** A seek started (`currentTime` is the target); `onSeeked` ends it. A seek past the download also reports `onWaiting` while playing. */
+  onSeeking?: (event: MediaEventInfo) => void;
   onSeeked?: (event: MediaEventInfo) => void;
   onEnded?: (event: MediaEventInfo) => void;
   /** Playback stopped for want of data (a stalled download): show a buffering state. */
@@ -83,6 +85,13 @@ export interface MediaAudioTrack {
   language: string;
   /** The one playing. */
   enabled: boolean;
+  /** The stream's codec (`aac`, `ac3`, `eac3`, `dts`, `opus`…), absent or empty when the platform does not say (Linux, Android). */
+  codec?: string;
+  /**
+   * `false`: this machine has no decoder for it, so it would play silent (AC-3 on a Windows without
+   * a Dolby decoder). Absent when unknown. A first track that is not playable gives way to one that is.
+   */
+  playable?: boolean;
 }
 
 /** A text (subtitle) stream inside the media file, as `HTMLMediaElement.textTracks`. */
@@ -109,6 +118,8 @@ export interface MediaEventInfo {
   filename?: string;
   /** Out of data while playing (between `waiting` and `canplay`). */
   waiting: boolean;
+  /** A seek is under way (between `seeking` and `seeked`), as `HTMLMediaElement.seeking`. */
+  seeking: boolean;
 }
 
 /** What a render asks of one media element. */
@@ -132,6 +143,8 @@ interface MediaState {
   timeAt?: number; rate?: number;
   /** `waiting` arrived and no `canplay` since: the download stalled. */
   stalled?: boolean;
+  /** `seeking` arrived and no `seeked` since. */
+  seeking?: boolean;
   /** `loadedmetadata` arrived: the media opened. */
   loaded?: boolean;
   /** A seek from the controls is in flight (until `seeked`). */
@@ -355,6 +368,8 @@ export function applyMediaEvent(event: { id: string; event: string; time?: numbe
     textTracks: event.textTracks ?? previous.textTracks, cueText: event.cueText ?? previous.cueText,
     timeAt: event.time !== undefined ? performance.now() : previous.timeAt, rate: request?.rate ?? previous.rate };
   if (event.event === "waiting") next.stalled = true;
+  if (event.event === "seeking") next.seeking = true;
+  if (event.event === "seeked" || event.event === "loadedmetadata" || event.event === "error" || event.event === "ended") next.seeking = false;
   if (event.event === "canplay" || event.event === "loadedmetadata" || event.event === "error" || event.event === "ended") next.stalled = false;
   if (event.event === "ended") { next.ended = true; next.paused = true; }
   if (event.event === "play") next.ended = false;
@@ -363,13 +378,14 @@ export function applyMediaEvent(event: { id: string; event: string; time?: numbe
   if (event.event === "seeked" || event.event === "ended" || event.event === "loadedmetadata") next.waiting = false;
   states(scope).set(event.id, next);
   const info: MediaEventInfo = { audioTracks: next.audioTracks ?? [], textTracks: next.textTracks ?? [], cueText: next.cueText ?? "", currentTime: next.time, duration: next.duration, paused: next.paused, videoWidth: next.videoWidth ?? 0, videoHeight: next.videoHeight ?? 0,
-    buffered: next.buffered ?? 0, ...(next.filename !== undefined ? { filename: next.filename } : {}), waiting: next.stalled === true };
+    buffered: next.buffered ?? 0, ...(next.filename !== undefined ? { filename: next.filename } : {}), waiting: next.stalled === true, seeking: next.seeking === true };
   const h = request?.handlers;
   switch (event.event) {
     case "loadedmetadata": return h?.onLoadedMetadata && (() => h.onLoadedMetadata!(info));
     case "play": return h?.onPlay && (() => h.onPlay!(info));
     case "pause": return h?.onPause && (() => h.onPause!(info));
     case "timeupdate": return h?.onTimeUpdate && (() => h.onTimeUpdate!(info));
+    case "seeking": return h?.onSeeking && (() => h.onSeeking!(info));
     case "seeked": return h?.onSeeked && (() => h.onSeeked!(info));
     case "ended": return h?.onEnded && (() => h.onEnded!(info));
     case "waiting": return h?.onWaiting && (() => h.onWaiting!(info));

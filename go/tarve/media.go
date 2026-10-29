@@ -18,6 +18,8 @@ type MediaEventInfo struct {
 	Filename string
 	// Waiting: out of data while playing (between onWaiting and onCanPlay).
 	Waiting bool
+	// Seeking: a seek is under way (between onSeeking and onSeeked).
+	Seeking bool
 	// AudioTracks are the media's audio streams, known from onAudioTracksChange.
 	AudioTracks []MediaAudioTrack
 	// TextTracks are the subtitle streams inside the file, known from onTextTracksChange.
@@ -32,6 +34,10 @@ type MediaAudioTrack struct {
 	Label    string
 	Language string
 	Enabled  bool
+	// Codec is the stream's codec ("aac", "ac3", "eac3", "dts"…), empty when unknown.
+	Codec string
+	// Unplayable: no decoder for it on this machine (it would play silent).
+	Unplayable bool
 }
 
 // MediaRequest is an <audio>/<video> element's wanted native media.
@@ -67,7 +73,7 @@ func clampRate(rate float64) float64 {
 }
 
 // Audio is the <audio> element: props id, src, autoPlay, loop, muted, volume, onPlay, onPause, onTimeUpdate,
-// onSeeked, onLoadedMetadata, onEnded, onWaiting, onCanPlay, onProgress (func(MediaEventInfo)) and
+// onSeeking, onSeeked, onLoadedMetadata, onEnded, onWaiting, onCanPlay, onProgress (func(MediaEventInfo)) and
 // onError (func(string) or func(message, code string)).
 func Audio(p Props) *VNode { return jsx("audio", copyProps(p)) }
 
@@ -202,7 +208,7 @@ type mediaState struct {
 	audioTracks, textTracks         []MediaAudioTrack
 	cueText                         string
 	filename                        string
-	stalled                         bool
+	stalled, seeking                bool
 	hasSrc                          bool
 	muted, mutedAttribute, hasMuted bool
 }
@@ -261,6 +267,12 @@ func applyMediaEvent(ev map[string]any, request *MediaRequest) func() {
 	kind, _ := ev["event"].(string)
 	message, _ := ev["message"].(string)
 	switch kind {
+	case "seeking":
+		next.seeking = true
+	case "seeked", "loadedmetadata", "error", "ended":
+		next.seeking = false
+	}
+	switch kind {
 	case "waiting":
 		next.stalled = true
 	case "canplay", "loadedmetadata", "error", "ended":
@@ -284,8 +296,8 @@ func applyMediaEvent(ev map[string]any, request *MediaRequest) func() {
 		return nil
 	}
 	info := MediaEventInfo{CurrentTime: next.time, Duration: next.duration, Paused: next.paused, VideoWidth: next.videoWidth, VideoHeight: next.videoHeight,
-		Buffered: next.buffered, Filename: next.filename, Waiting: next.stalled, AudioTracks: next.audioTracks, TextTracks: next.textTracks, CueText: next.cueText}
-	name := map[string]string{"loadedmetadata": "onLoadedMetadata", "play": "onPlay", "pause": "onPause", "timeupdate": "onTimeUpdate", "seeked": "onSeeked", "ended": "onEnded",
+		Buffered: next.buffered, Filename: next.filename, Waiting: next.stalled, Seeking: next.seeking, AudioTracks: next.audioTracks, TextTracks: next.textTracks, CueText: next.cueText}
+	name := map[string]string{"loadedmetadata": "onLoadedMetadata", "play": "onPlay", "pause": "onPause", "timeupdate": "onTimeUpdate", "seeking": "onSeeking", "seeked": "onSeeked", "ended": "onEnded",
 		"waiting": "onWaiting", "canplay": "onCanPlay", "progress": "onProgress", "audiotracks": "onAudioTracksChange",
 		"texttracks": "onTextTracksChange", "cuechange": "onCueChange"}[kind]
 	if kind == "error" {
@@ -349,7 +361,8 @@ func parseTracks(list []any) []MediaAudioTrack {
 		id, _ := num(track["id"])
 		label, _ := track["label"].(string)
 		language, _ := track["language"].(string)
-		out = append(out, MediaAudioTrack{ID: int(id), Label: label, Language: language, Enabled: track["enabled"] == true})
+		codec, _ := track["codec"].(string)
+		out = append(out, MediaAudioTrack{ID: int(id), Label: label, Language: language, Enabled: track["enabled"] == true, Codec: codec, Unplayable: track["playable"] == false})
 	}
 	return out
 }

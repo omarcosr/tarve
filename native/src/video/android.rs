@@ -392,7 +392,7 @@ impl Videos {
             "pause" => player.pause().then_some("pause"),
             "seek" => {
                 player.seek(time.unwrap_or(0.0));
-                None
+                Some("seeking")
             }
             "set" => {
                 player.set(looped, muted, volume);

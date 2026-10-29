@@ -5,7 +5,7 @@
 //! renderer's own device: no copy through memory. Other renderers get the
 //! picture read back into memory.
 
-use super::windows_reader::{AudioTrack, ReaderPlayer};
+use super::windows_reader::{AudioTrack, ReaderPlayer, audio_codec};
 use super::windows_shared::win;
 use super::windows_stream::{RemoteStream, VIDEO_WINDOW, content_type, streamable};
 use super::windows_subtitles::Subtitles;
@@ -52,6 +52,8 @@ const HIDDEN_POLL: Duration = Duration::from_millis(33);
 /// After a load or a seek, a paused video still gets its first picture.
 const SETTLE_POLL: Duration = Duration::from_millis(16);
 const SETTLE_FOR: Duration = Duration::from_secs(2);
+/// A seek still under way this long while playing reports `waiting` (the reader's threshold).
+const SEEK_WAITING_AFTER: Duration = Duration::from_millis(150);
 
 /// What the engine's callback thread hands the event loop.
 struct Shared {
@@ -133,6 +135,8 @@ struct Player {
     stream: Option<Arc<Stream>>,
     /// `waiting` was reported; playing again ends it with `canplay`.
     waiting: bool,
+    /// When a seek was asked and its `seeked` has not come: `waiting` while playing past it.
+    seek_started: Option<Instant>,
     /// The file's audio streams once known (`audioTracks`); ids are the engine's stream numbers.
     tracks: Vec<AudioTrack>,
     /// An audio track to play once the engine has opened the file.
@@ -177,11 +181,18 @@ fn engine_tracks(engine: &IMFMediaEngine) -> Vec<AudioTrack> {
         .filter(|&index| {
             engine_attribute(&engine, index, &MF_MT_MAJOR_TYPE).1 == Some(MFMediaType_Audio)
         })
-        .map(|index| AudioTrack {
-            index,
-            label: engine_attribute(&engine, index, &MF_SD_STREAM_NAME).0,
-            language: engine_attribute(&engine, index, &MF_SD_LANGUAGE).0,
-            enabled: unsafe { engine.GetStreamSelection(index) }.is_ok_and(|on| on.as_bool()),
+        .map(|index| {
+            let subtype = engine_attribute(&engine, index, &MF_MT_SUBTYPE).1;
+            AudioTrack {
+                index,
+                label: engine_attribute(&engine, index, &MF_SD_STREAM_NAME).0,
+                language: engine_attribute(&engine, index, &MF_SD_LANGUAGE).0,
+                enabled: unsafe { engine.GetStreamSelection(index) }.is_ok_and(|on| on.as_bool()),
+                codec: subtype.as_ref().map(audio_codec).unwrap_or_default(),
+                // The engine does not say whether its decoder plays the stream: an MFT
+                // can be registered for AC-3 and still not decode it.
+                playable: None,
+            }
         })
         .collect()
 }
@@ -529,6 +540,7 @@ impl Videos {
             opening,
             stream: None,
             waiting: false,
+            seek_started: None,
             tracks: Vec::new(),
             pending_track: None,
         })
@@ -754,7 +766,7 @@ impl Videos {
                 "pause" => reader.pause().then_some("pause"),
                 "seek" => {
                     reader.seek_to(time.unwrap_or(0.0), true);
-                    None
+                    Some("seeking")
                 }
                 "set" => {
                     reader.set(looped, muted, volume);
@@ -787,6 +799,7 @@ impl Videos {
                 "pause" => engine.Pause(),
                 "seek" => {
                     player.settle_until = Some(Instant::now() + SETTLE_FOR);
+                    player.seek_started = Some(Instant::now());
                     engine.SetCurrentTime(time.unwrap_or(0.0).max(0.0))
                 }
                 "set" => (|| {
@@ -805,6 +818,8 @@ impl Videos {
             }
         };
         match result {
+            // `seeking` at once, as HTMLMediaElement fires it when the seek starts.
+            Ok(()) if action == "seek" => vec![player.event(id, "seeking")],
             Ok(()) => Vec::new(),
             Err(error) => vec![media_error(id, failure(&player.src, win(error)))],
         }
@@ -868,7 +883,10 @@ impl Videos {
                     }
                     MF_MEDIA_ENGINE_EVENT_SEEKED => {
                         player.settle_until = Some(now + SETTLE_FOR);
-                        Some("seeked")
+                        player.seek_started = None;
+                        out.push(player.event(id, "seeked"));
+                        // A seek that waited for data: playing again.
+                        std::mem::take(&mut player.waiting).then_some("canplay")
                     }
                     MF_MEDIA_ENGINE_EVENT_TIMEUPDATE => Some("timeupdate"),
                     MF_MEDIA_ENGINE_EVENT_ENDED => {
@@ -908,6 +926,17 @@ impl Videos {
                 if let Some(name) = name {
                     out.push(player.event(id, name));
                 }
+            }
+            // The engine reports no `waiting` while a seek downloads its target: as a
+            // browser, a seek still under way while playing is a wait.
+            if player.playing
+                && !player.waiting
+                && player
+                    .seek_started
+                    .is_some_and(|started| now.duration_since(started) >= SEEK_WAITING_AFTER)
+            {
+                player.waiting = true;
+                out.push(player.event(id, "waiting"));
             }
         }
         // Embedded subtitles: the track list once known, then the cue under the current time.

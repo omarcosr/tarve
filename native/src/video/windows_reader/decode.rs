@@ -31,15 +31,27 @@ pub(super) fn reader_thread(
             .and_then(|stream| stream.error())
             .unwrap_or_else(|| win(error))
     };
-    let info = match describe(&reader) {
+    let mut info = match describe(&reader) {
         Ok(info) => info,
         Err(message) => return fail(message),
     };
+    let tracks = audio_tracks(&reader, None);
+    // The audio decoded: the first until another track is chosen. A first track this
+    // machine cannot decode (AC-3 without a Dolby decoder) gives way to one it can, as a
+    // browser skips the tracks it cannot play.
+    let mut audio_stream = AUDIO_STREAM;
+    if let (Some(first), Some(chosen)) = (tracks.first(), tracks.iter().find(|track| track.enabled))
+        && first.index != chosen.index
+        && let Ok(format) = select_audio_stream(&reader, AUDIO_STREAM, chosen.index, false)
+    {
+        audio_stream = chosen.index;
+        info.audio = format;
+    }
     {
         let mut state = shared.lock();
         state.info = Some(info);
         state.remote = remote.clone();
-        state.tracks = audio_tracks(&reader, None);
+        state.tracks = tracks;
     }
     (shared.wake)();
     let audio_ahead = info.audio.map_or(0, |(channels, rate)| {
@@ -57,9 +69,6 @@ pub(super) fn reader_thread(
     let mut pictured = false;
     // A seek made while no stream was selected.
     let mut deferred_seek: Option<f64> = None;
-    // The audio stream decoded: the first until another track is chosen.
-    let mut audio_stream = AUDIO_STREAM;
-    let mut info = info;
     loop {
         let stream = {
             let mut state = shared.lock();
@@ -313,6 +322,13 @@ pub(super) fn open(
     url: &str,
     manager: &IMFDXGIDeviceManager,
 ) -> Result<(IMFSourceReader, Option<Arc<Stream>>), Fallback> {
+    // An HLS/DASH manifest: the Source Reader has no parser for it, the Media Engine
+    // plays it (Windows 10+), pictures read back from it.
+    if is_remote(url) && !streamable(url) {
+        return Err(Fallback::Format(
+            "adaptive stream: played by the Media Engine".into(),
+        ));
+    }
     let remote = if is_remote(url) && streamable(url) {
         Some(Stream::open_windowed(url, VIDEO_WINDOW).map_err(Fallback::Other)?)
     } else {
@@ -415,9 +431,14 @@ pub(super) fn describe(reader: &IMFSourceReader) -> Result<Info, String> {
             width = area.Area.cx as u32;
             height = area.Area.cy as u32;
         }
+        // Only decoded sound: a stream left compressed (no decoder) plays nothing.
         let audio = reader
             .GetCurrentMediaType(AUDIO_STREAM)
             .ok()
+            .filter(|kind| {
+                kind.GetGUID(&MF_MT_SUBTYPE)
+                    .is_ok_and(|subtype| subtype == MFAudioFormat_Float)
+            })
             .and_then(|kind| {
                 let channels = kind.GetUINT32(&MF_MT_AUDIO_NUM_CHANNELS).ok()?;
                 let rate = kind.GetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND).ok()?;

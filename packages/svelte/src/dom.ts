@@ -1064,7 +1064,7 @@ export class THTMLMediaElement extends THTMLElement {
     return /audio\/(mpeg|mp3|wav|ogg|flac|aac|mp4)/.test(type) ? "maybe" : "";
   }
   /** A native media event: update the state and fire the DOM events a browser would. */
-  _media(event: "loadedmetadata" | "canplay" | "waiting" | "progress" | "audiotracks" | "texttracks" | "cuechange" | "play" | "pause" | "timeupdate" | "seeked" | "ended" | "error", info: { currentTime?: number; duration?: number | null; paused?: boolean; message?: string; code?: string; videoWidth?: number; videoHeight?: number; buffered?: number; audioTracks?: { id: number; label: string; language: string; enabled: boolean }[]; textTracks?: { id: number; label: string; language: string; enabled: boolean }[]; cueText?: string }): void {
+  _media(event: "loadedmetadata" | "canplay" | "waiting" | "progress" | "audiotracks" | "texttracks" | "cuechange" | "play" | "pause" | "timeupdate" | "seeking" | "seeked" | "ended" | "error", info: { currentTime?: number; duration?: number | null; paused?: boolean; message?: string; code?: string; videoWidth?: number; videoHeight?: number; buffered?: number; audioTracks?: { id: number; label: string; language: string; enabled: boolean; codec?: string; playable?: boolean }[]; textTracks?: { id: number; label: string; language: string; enabled: boolean }[]; cueText?: string }): void {
     if (info.audioTracks) this._audioTracks = info.audioTracks;
     if (info.textTracks) this._textTracks = info.textTracks;
     if (info.cueText !== undefined) this._cueText = info.cueText;
@@ -1088,6 +1088,7 @@ export class THTMLMediaElement extends THTMLElement {
       case "audiotracks": fire("audiotrackschange"); break;
       case "texttracks": fire("texttrackschange"); break;
       case "cuechange": fire("cuechange"); break;
+      case "seeking": if (!this._seeking) { this._seeking = true; } fire("seeking"); break;
       case "seeked": this._seeking = false; fire("seeked"); fire("timeupdate"); break;
       // A browser fires `pause` at the end only if no `pause` came before (the native
       // engines may send one just ahead of `ended`).
