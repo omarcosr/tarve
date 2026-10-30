@@ -1,7 +1,9 @@
 name: Android
 
 # Builds the x86_64 runtime and an APK, then runs scripts/smoke-android-ci.tsx on an
-# emulator: render, layout, a click, timers and storage on the device.
+# emulator: render, layout, a click and a long press, timers, storage, <video>/<audio> from
+# bundled files (scripts/assets), the Back key into onCloseRequest, and device APIs that
+# answer without a person (permission state, a notification, dictation).
 on:
   push:
     branches: [main]
@@ -11,6 +13,7 @@ on:
       - "packages/protocol/**"
       - "scripts/smoke-android-ci.tsx"
       - "scripts/android-ci-smoke.sh"
+      - "scripts/assets/**"
       - "scripts/build-android.ts"
       - ".github/workflows/android.yml"
   pull_request:
@@ -20,6 +23,7 @@ on:
       - "packages/protocol/**"
       - "scripts/smoke-android-ci.tsx"
       - "scripts/android-ci-smoke.sh"
+      - "scripts/assets/**"
       - "scripts/build-android.ts"
       - ".github/workflows/android.yml"
   workflow_dispatch:
