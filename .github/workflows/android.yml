@@ -1,0 +1,83 @@
+name: Android
+
+# Builds the x86_64 runtime and an APK, then runs scripts/smoke-android-ci.tsx on an
+# emulator: render, layout, a click, timers and storage on the device.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "native/**"
+      - "packages/core/**"
+      - "packages/protocol/**"
+      - "scripts/smoke-android-ci.tsx"
+      - "scripts/android-ci-smoke.sh"
+      - "scripts/build-android.ts"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "native/**"
+      - "packages/core/**"
+      - "packages/protocol/**"
+      - "scripts/smoke-android-ci.tsx"
+      - "scripts/android-ci-smoke.sh"
+      - "scripts/build-android.ts"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  emulator:
+    name: Android emulator smoke (x86_64, API 34)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-linux-android
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native -> target-android
+          shared-key: android-native
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build the x86_64 runtime
+        run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" bun run build:native:android --abi x86_64
+
+      - name: Build the smoke APK
+        run: bun packages/core/cli.ts build scripts/smoke-android-ci.tsx --target android-x64 --name CiSmoke --app-id dev.tarve.cismoke --outfile dist/CiSmoke.apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run on the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect
+          script: bash scripts/android-ci-smoke.sh

@@ -21,7 +21,7 @@
     ["Plugins", "A plugin's native library loads through <code>tjs:ffi</code> on QuickJS-ng; it needs an <code>android-arm64</code> / <code>android-x64</code> build in <code>tarve.native</code>."],
     ["Renderer", "Vello on the GPU (wgpu), with the CPU renderer as fallback; D3D11 is Windows only."],
     ["Target SDK", "API 34: API 35 forces edge-to-edge, which NativeActivity cannot inset yet. Check Google Play's current requirement before uploading."],
-    ["How it is tested", "Unit tests on the desktop, and the release workflow builds and ships both Android ABIs; the examples were checked by hand on a phone (Galaxy S23, Android 15) and on an emulator. There is no automated on-device test run yet, so a release can regress on Android without CI noticing."],
+    ["How it is tested", "Every change to the runtime runs an APK on an Android 14 emulator in CI (rendering, layout, a click, timers and storage, <code>scripts/smoke-android-ci.tsx</code>), and the release workflow builds and ships both ABIs. Device APIs, media and real touch gestures are still checked by hand on a phone (Galaxy S23, Android 15)."],
   ];
 </script>
 
