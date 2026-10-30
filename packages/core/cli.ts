@@ -25,7 +25,8 @@ function usage(target?: BuildTarget): string {
     "       tarve package <dist/App | dist/App.app | app.tsx> --format deb|tar|zip|msix|app-zip [options]",
     "",
     "  run      run the app",
-    "  dev      run with hot reload into the same window (--inspect: open the visual inspector window)",
+    "  dev      run with hot reload into the same window (--inspect: open the visual inspector window);",
+    "           --target android*: install a dev APK once, then push the rebundled JS on every save and restart the app",
     "  build    compile a standalone executable (a .app bundle for darwin-* targets)",
     `  keygen   create an update signing key pair (writes ${KEY_FILE}, prints the public key)`,
     "  pack     build a signed, encrypted app pack (.tarve): the app's code and files, without the runtime",
@@ -40,6 +41,7 @@ function usage(target?: BuildTarget): string {
     "  --format apk|aab                build (android): installable APK (default) or App Bundle for Google Play (.aab outfile picks aab)",
     "  --permission CAMERA             build (android): repeatable manifest permission, beside package.json tarve.android.permissions",
     "  --keystore release.jks          build (android): signing keystore (default: the debug keystore)",
+    "  --device <serial>               dev (android): the adb device (default: ANDROID_SERIAL, then the only one)",
     "  --bundletool path.jar           build (android aab): bundletool jar (default: TARVE_BUNDLETOOL, then downloaded once)",
     `  --outfile ${output}              build, pack: output path`,
     "  --compile-jsx                   build: compile JSX into reusable templates (needs typescript 7)",
@@ -117,7 +119,7 @@ async function main(): Promise<number> {
       out: { type: "string" }, "base-url": { type: "string" }, notes: { type: "string" }, sign: { type: "string" },
       notarize: { type: "boolean" }, "notary-profile": { type: "string" }, entitlements: { type: "string" },
       categories: { type: "string" }, protocol: { type: "string", multiple: true }, "file-type": { type: "string", multiple: true },
-      inspect: { type: "boolean" }, packs: { type: "boolean" }, pack: { type: "string", multiple: true },
+      inspect: { type: "boolean" }, packs: { type: "boolean" }, pack: { type: "string", multiple: true }, device: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
   });
@@ -163,17 +165,22 @@ async function main(): Promise<number> {
     throw new Error("Expected: tarve <run|dev|build> <app.tsx>. Use --help for options.");
   }
   if (values.target !== undefined && isAndroidTarget(values.target)) {
-    if (command !== "build") throw new Error("Android targets are only supported by tarve build.");
+    if (command === "run") throw new Error("Android targets are supported by tarve build and tarve dev.");
     // Bun or Node.js only bundles: on the device the app runs on the runtime's QuickJS-ng (or as Go).
-    const { buildAndroid } = await import("./android-build");
-    console.log(await buildAndroid({
+    const android = {
       entrypoint, outfile: values.outfile, name: values.name, version: values.version,
       icon: values.icon, appId: values["app-id"], description: values.description,
       publisher: values.publisher, copyright: values.copyright,
       target: values.target, compileJsx: values["compile-jsx"], keystore: values.keystore,
       format: values.format as "apk" | "aab" | undefined, permissions: values.permission, bundletool: values.bundletool,
       runtime: androidRuntime(values.runtime), protocols: values.protocol,
-    }));
+    };
+    if (command === "dev") {
+      if (android.runtime !== "quickjs") throw new Error("tarve dev --target android runs on QuickJS-ng: drop --runtime bun.");
+      return (await import("./android-dev")).devAndroid({ ...android, device: values.device });
+    }
+    const { buildAndroid } = await import("./android-build");
+    console.log(await buildAndroid(android));
     return 0;
   }
   if (values.target !== undefined && !isBuildTarget(values.target)) {

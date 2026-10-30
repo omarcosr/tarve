@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 use winit::platform::android::activity::AndroidApp;
 
 mod bytecode;
+mod dev;
 mod fetch;
 #[allow(unused_imports)]
 pub(crate) use bytecode::*;
@@ -36,13 +37,22 @@ struct State {
 }
 
 pub(super) fn run(app: &AndroidApp) -> Result<(), String> {
-    let bundle = read_asset(app, "tarve/app.js").ok_or(
-        "this APK carries no app: neither assets/tarve/app.js nor libtarveapp.so is present",
-    )?;
+    let dev = dev::dev_directory(app);
+    let bundle = match &dev {
+        Some(directory) => {
+            std::fs::read(directory.join("app.js")).map_err(|e| format!("dev/app.js: {e}"))?
+        }
+        None => read_asset(app, "tarve/app.js").ok_or(
+            "this APK carries no app: neither assets/tarve/app.js nor libtarveapp.so is present",
+        )?,
+    };
     let files_dir = app
         .internal_data_path()
         .ok_or("the activity has no internal data directory")?;
-    let assets = extract_assets(app, &files_dir)?;
+    let mut assets = extract_assets(app, &files_dir)?;
+    if let Some(directory) = &dev {
+        dev::add_dev_assets(directory, &mut assets);
+    }
     let runtime = Runtime::new().map_err(|e| e.to_string())?;
     // The app thread has a 32 MB stack (android_main).
     runtime.set_max_stack_size(24 << 20);
@@ -59,7 +69,11 @@ pub(super) fn run(app: &AndroidApp) -> Result<(), String> {
     context.with(|ctx| {
         install(&ctx, &state, &assets, &files_dir).map_err(|error| exception(&ctx, error))
     })?;
-    let cache = bytecode_cache(&files_dir, &bundle);
+    // A pushed bundle changes on every save: no bytecode cache for it.
+    let cache = dev
+        .is_none()
+        .then(|| bytecode_cache(&files_dir, &bundle))
+        .flatten();
     let module = context.with(|ctx| {
         let declared =
             declare_bundle(&ctx, bundle, cache.as_deref()).map_err(|e| exception(&ctx, e))?;
@@ -69,6 +83,10 @@ pub(super) fn run(app: &AndroidApp) -> Result<(), String> {
         }
     })?;
     crate::stats::trace("bundle");
+    if dev.is_some() {
+        // `tarve dev` times the reload by this line.
+        log(LOG_INFO, "tarve dev: pushed bundle evaluated");
+    }
     let mut seen = 0_u64;
     let mut module_settled = false;
     let mut closed_at: Option<Instant> = None;

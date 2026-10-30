@@ -16,12 +16,12 @@
     ["Not available", "Tray (a no-op that reports <code>supported: false</code>), desktop widgets, native menus, several windows, window position and size."],
   ];
   const differences: string[][] = [
-    ["Where you develop", "On Windows or Linux with <code>tarve dev</code>; there is no hot reload on the device. Build an APK to try it on a phone or an emulator."],
+    ["Where you develop", "On Windows or Linux with <code>tarve dev</code>, or on the device: <code>tarve dev app.tsx --target android</code> installs a dev APK once, then on every save rebundles only the JS, pushes it with adb and restarts the app (about 0.7 s on an emulator, no reinstall). The app's console and crashes print in the terminal; a bundling error leaves the last good app running. <code>--device &lt;serial&gt;</code> or <code>ANDROID_SERIAL</code> picks the device."],
     ["JavaScript engine", "QuickJS-ng inside the runtime (a few MB): timers, <code>fetch</code>, <code>TextEncoder</code>, <code>URL</code>, <code>crypto</code>, <code>Intl</code>, <code>Buffer</code>, <code>node:fs</code>/<code>path</code>/<code>os</code>/<code>crypto</code>, no child processes or sockets. <code>--runtime bun</code> ships Bun instead (its full API, about 45 MB more per ABI). Node.js has no Android build."],
     ["Plugins", "A plugin's native library loads through <code>tjs:ffi</code> on QuickJS-ng; it needs an <code>android-arm64</code> / <code>android-x64</code> build in <code>tarve.native</code>."],
     ["Renderer", "Vello on the GPU (wgpu), with the CPU renderer as fallback; D3D11 is Windows only."],
-    ["Target SDK", "API 34: API 35 forces edge-to-edge, which NativeActivity cannot inset yet. Check Google Play's current requirement before uploading."],
-    ["How it is tested", "Every change to the runtime runs an APK on an Android 14 emulator in CI (rendering, layout, a click, timers and storage, <code>scripts/smoke-android-ci.tsx</code>), and the release workflow builds and ships both ABIs. Device APIs, media and real touch gestures are still checked by hand on a phone (Galaxy S23, Android 15)."],
+    ["Target SDK", "API 35, edge-to-edge: the window background paints behind the status and navigation bars, and the UI is laid out inside them, the display cutout and the keyboard. Check Google Play's current requirement before uploading."],
+    ["How it is tested", "Every change to the runtime runs an APK on an Android 14 emulator in CI (<code>scripts/smoke-android-ci.tsx</code>): rendering, layout, a click and a long press, timers and storage, <code>&lt;video></code> (metadata, playback, seek) and <code>&lt;audio></code> from files bundled in the APK, the Back key reaching <code>onCloseRequest</code>, and the device APIs that answer without a person (<code>checkPermissions</code>, <code>notify</code> posting to the shade, <code>recognizeSpeech</code> answering). The release workflow builds and ships both ABIs. Pinch, the share sheet, location, biometrics, real dictation and playback on hardware decoders are still checked by hand on a phone (Galaxy S23, Android 15)."],
   ];
 </script>
 

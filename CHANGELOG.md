@@ -2,6 +2,20 @@
 
 All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless` and `@tarve/svelte` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
+## Unreleased
+
+### Added
+
+- `tarve dev app.tsx --target android` (`android-x64`, `android-arm64`): installs a dev APK once, then on every save rebundles only the JS, pushes it to the app's external files directory and restarts the app, without reinstalling (about 0.7 s from save to reload on an emulator). The app's logcat output and crashes print in the terminal, a bundling error keeps the last good app running, and `--device` / `ANDROID_SERIAL` picks the device.
+
+### Changed
+
+- Android builds target API 35 (was 34). API 35 draws edge-to-edge, so `TarveActivity` now reports the decor view's `WindowInsets` (system bars, display cutout, keyboard) to the runtime and the UI is laid out inside them: the window background still paints behind the status and navigation bars, while content stays clear of them and above the keyboard. Checked on the API 35 x86_64 emulator.
+
+### Fixed
+
+- Windows `<video>` with a remote src: a seek made while another was still loading waited for the older target's data first (the download finished its 4 MB range request, the decoder its blocked read): about 15 s on a 600 KB/s link. Now the newer seek cancels the pending one at once — the download drops the range under way, a read waiting for the old target gives up and the decoder starts at the newest one — so it lands as fast as a single seek (2.3 s there; 1.9 s on the Media Engine path, which coalesces too). `seeking` fires per seek with `currentTime` at its target, `seeked` once for the last.
+
 ## 0.9.0 — 2026-10-30
 
 ### Added

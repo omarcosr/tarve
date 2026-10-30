@@ -16,7 +16,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { metadataOverrides, type BuildOptions } from "./build";
 import { buildMetadata } from "./package-metadata";
 import { cacheRoot } from "./node-target";
-import { bundleQuickJs } from "./txiki-build";
+import { bundleAndroidJs, type AndroidBundle } from "./android-bundle";
 import { androidFileIntentFilters, androidIntentFilters, type FileTypeAssociation } from "./src/associations";
 import { resolveAppAssociations } from "./associations-config";
 import { type ZipEntry, readZip, zipEntry, writeZip } from "./android-zip";
@@ -50,6 +50,10 @@ export interface AndroidBuildOptions extends Omit<BuildOptions, "target" | "runt
   bundletool?: string;
   /** Deep-link schemes (`myapp` for `myapp://…`) the activity opens, beside package.json `tarve.protocols`. */
   protocols?: string[];
+  /** `tarve dev`: the APK runs the bundle pushed to <external files>/dev/app.js when there is one (assets/tarve/dev marks it). */
+  dev?: boolean;
+  /** The JS bundle, already built (`tarve dev` bundles first); bundled here when absent. */
+  bundled?: AndroidBundle;
 }
 
 export type AndroidFormat = "apk" | "aab";
@@ -119,8 +123,8 @@ const NOTIFICATION_ICON = `<?xml version="1.0" encoding="utf-8"?>
 </vector>
 `;
 
-/** 34, not 35: SDK 35 forces edge-to-edge, and NativeActivity reports no insets to draw around. */
-const TARGET_SDK = 34;
+/** 35 draws edge-to-edge: TarveActivity reports the window insets and the runtime lays out inside them. */
+const TARGET_SDK = 35;
 
 export function isAndroidTarget(value: string): value is AndroidTarget {
   return (ANDROID_TARGETS as readonly string[]).includes(value);
@@ -464,29 +468,8 @@ export async function buildAndroid(options: AndroidBuildOptions): Promise<string
         entries.push(zipEntry(`lib/${abi}/libtarvebun.so`, readFileSync(executable), true));
       }
     } else {
-      const root = import.meta.dirname;
-      const shims: Record<string, string> = {
-        fs: join(root, "android/shims/fs.ts"),
-        "fs/promises": join(root, "android/shims/fs-promises.ts"),
-        path: join(root, "android/shims/path.ts"),
-        os: join(root, "android/shims/os.ts"),
-        crypto: join(root, "android/shims/crypto.ts"),
-        net: join(root, "android/shims/net.ts"),
-        module: join(root, "txiki/shims/module.ts"),
-        zlib: join(root, "android/shims/zlib.ts"),
-        events: join(root, "txiki/shims/events.ts"),
-        child_process: join(root, "android/shims/child-process.ts"),
-        "timers/promises": join(root, "txiki/shims/timers-promises.ts"),
-      };
-      const { bundle, assets } = await bundleQuickJs(options as BuildOptions, {
-        label: "Android",
-        prelude: join(root, "android/prelude.ts"),
-        runtimeModule: join(root, "android/runtime.ts"),
-        shims,
-        tjs: { "tjs:ffi": join(root, "android/tjs-ffi.ts") },
-        // intl.ts reads LANG on "linux"; the host sets it from the device locale.
-        define: { ...define, TARVE_TXIKI_PLATFORM: JSON.stringify("linux"), TARVE_TXIKI_NATIVE_NAME: JSON.stringify("libtarve_native.so") },
-      }, temporary);
+      const { bundle, assets } = options.bundled ?? await bundleAndroidJs(options as BuildOptions, define, temporary);
+      if (options.dev) entries.push(zipEntry("assets/tarve/dev", new Uint8Array(), false));
       if (process.env.TARVE_ANDROID_DEBUG) writeFileSync(process.env.TARVE_ANDROID_DEBUG, readFileSync(bundle));
       entries.push(zipEntry("assets/tarve/app.js", readFileSync(bundle), true));
       entries.push(zipEntry("assets/tarve/files.json", new TextEncoder().encode(JSON.stringify(assets.map(asset => ({ name: asset.name, size: asset.data.length })))), true));
