@@ -55,6 +55,7 @@ fn android_main(app: AndroidApp) {
     forward_stdio();
     let _ = APP.set(app.clone());
     configure_environment(&app);
+    insets::attach();
     let (tx, rx) = mpsc::channel();
     let _ = MAIN.set(Mutex::new(tx.clone()));
     let guest = app.clone();
@@ -525,6 +526,7 @@ pub(crate) fn wait_host(seen: &mut u64, timeout: Duration) -> bool {
 }
 
 pub(crate) mod device;
+pub(crate) mod insets;
 pub(crate) mod keys;
 pub(crate) mod media;
 pub(crate) mod notification;

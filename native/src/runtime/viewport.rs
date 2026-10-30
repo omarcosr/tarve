@@ -2,8 +2,10 @@
 use super::*;
 
 /// The area the UI is laid out in (logical pixels), published to the tree as its viewport:
-/// the whole window, except on Android, where the status and navigation bars and the
-/// keyboard (`adjustResize`) cover the rest of the activity's surface.
+/// the whole window, except on Android, where the status and navigation bars, the display
+/// cutout and the keyboard cover the rest of the activity's surface. Edge-to-edge (API 35)
+/// the content rect is the whole window and the window insets (`android::insets`) say what
+/// covers it; before, the content rect excludes the bars and the keyboard (`adjustResize`).
 pub(super) fn layout_viewport(window: &Window, tree: &mut crate::tree::Tree) -> LogicalSize<f32> {
     let scale = window.scale_factor();
     let physical = window.inner_size();
@@ -11,11 +13,21 @@ pub(super) fn layout_viewport(window: &Window, tree: &mut crate::tree::Tree) -> 
     if let Some(app) = crate::android::app() {
         let rect = app.content_rect();
         let (width, height) = (physical.width as i32, physical.height as i32);
-        let (left, top) = (rect.left.clamp(0, width), rect.top.clamp(0, height));
-        let (right, bottom) = (
-            rect.right.clamp(left, width),
-            rect.bottom.clamp(top, height),
-        );
+        // An empty rect (none reported yet) covers nothing.
+        let covered = if rect.right > rect.left && rect.bottom > rect.top {
+            [
+                rect.left,
+                rect.top,
+                width - rect.right,
+                height - rect.bottom,
+            ]
+        } else {
+            [0; 4]
+        };
+        let insets = crate::android::insets::current();
+        let [l, t, r, b]: [i32; 4] = std::array::from_fn(|i| covered[i].max(insets[i]).max(0));
+        let (left, top) = (l.min(width), t.min(height));
+        let (right, bottom) = ((width - r).max(left), (height - b).max(top));
         if right > left && bottom > top {
             let scale = scale as f32;
             let size =

@@ -4,10 +4,14 @@ import android.app.NativeActivity;
 import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
+import android.graphics.Insets;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.util.Log;
+import android.view.View;
+import android.view.WindowInsets;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -22,9 +26,16 @@ import java.util.List;
  * (native/src/android/open_intent.rs), which become `app.onOpenUrl` / `app.onOpenFiles`. A
  * `content://` or `file://` document is copied into the app's cache and its path reported.
  * Opens that arrive before the runtime started wait here until it calls {@link #attach}.
+ * The window's insets (system bars, display cutout, keyboard) go to the runtime too
+ * (native/src/android/insets.rs): edge-to-edge, the native content rect no longer excludes them.
  */
 public class TarveActivity extends NativeActivity {
     static native void nativeOpen(String[] urls, String[] files, boolean initial);
+    static native void nativeInsets(int left, int top, int right, int bottom);
+
+    private static final Object insetsLock = new Object();
+    private static boolean insetsAttached;
+    private static int[] insets;
 
     private static final Object lock = new Object();
     private static boolean attached;
@@ -32,6 +43,7 @@ public class TarveActivity extends NativeActivity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        watchInsets();
         // A re-created activity already reported its intent.
         if (state == null) open(getIntent(), true);
     }
@@ -83,6 +95,34 @@ public class TarveActivity extends NativeActivity {
             pending.clear();
         }
         for (Object[] open : queued) nativeOpen((String[]) open[0], (String[]) open[1], (Boolean) open[2]);
+    }
+
+    /** Before API 30 the content rect already excludes the bars and the keyboard (no edge-to-edge). */
+    private void watchInsets() {
+        if (Build.VERSION.SDK_INT < 30) return;
+        getWindow().getDecorView().setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
+            @Override public WindowInsets onApplyWindowInsets(View view, WindowInsets windowInsets) {
+                Insets covered = windowInsets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
+                synchronized (insetsLock) {
+                    insets = new int[] { covered.left, covered.top, covered.right, covered.bottom };
+                    if (insetsAttached) sendInsets();
+                }
+                return view.onApplyWindowInsets(windowInsets);
+            }
+        });
+    }
+
+    /** Called by the runtime once `nativeInsets` is registered: the insets so far, then every change. */
+    static void attachInsets() {
+        synchronized (insetsLock) {
+            insetsAttached = true;
+            sendInsets();
+        }
+    }
+
+    private static void sendInsets() {
+        if (insets == null) return;
+        try { nativeInsets(insets[0], insets[1], insets[2], insets[3]); } catch (UnsatisfiedLinkError ignored) { }
     }
 
     /** A document's bytes in the app's cache (`opened/<hash>/<display name>`), as a path the app can read. */

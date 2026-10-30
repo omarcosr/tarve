@@ -28,6 +28,8 @@ describe("Android APK metadata", () => {
     const manifest = androidManifest({ packageName: "dev.tarve.app", label: "A & B", versionCode: 3, versionName: "0.0.3", icon: false });
     expect(manifest).toContain('android:name="dev.tarve.TarveActivity"');
     expect(manifest).toContain('android:launchMode="singleTask"');
+    // API 35 is edge-to-edge: TarveActivity reports the window insets the UI is laid out in.
+    expect(manifest).toContain('android:targetSdkVersion="35"');
     // share() hands files out through the app's own provider, not exported.
     expect(manifest).toContain('<provider android:name="dev.tarve.TarveFileProvider" android:authorities="dev.tarve.app.tarve.files" android:exported="false" android:grantUriPermissions="true"/>');
     expect(manifest).toContain('<uses-permission android:name="android.permission.USE_BIOMETRIC"/>');
