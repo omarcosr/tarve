@@ -15,13 +15,35 @@ impl Player {
         unsafe { self.engine.GetCurrentTime() }
     }
 
+    /// A seek. One still under way is dropped for this one (the engine seeks to the
+    /// newest target, one `seeked` follows), and the download stops fetching for it.
+    pub(super) fn seek(&mut self, time: f64) -> windows::core::Result<()> {
+        let time = time.max(0.0);
+        self.settle_until = Some(Instant::now() + SETTLE_FOR);
+        self.seek_started = Some((Instant::now(), time));
+        if let Some(stream) = &self.stream {
+            stream.seeking();
+        }
+        unsafe { self.engine.SetCurrentTime(time) }
+    }
+
+    /// `currentTime`: while seeking, the newest target (the engine tells the one it
+    /// is still finishing).
+    fn reported_time(&self) -> f64 {
+        self.seek_started.map_or_else(
+            || unsafe { self.engine.GetCurrentTime() },
+            |(_, target)| target,
+        )
+    }
+
     pub(super) fn event(&self, id: &str, name: &str) -> Value {
+        let time = self.reported_time();
         let mut event = unsafe {
             json!({
                 "type": "media",
                 "id": id,
                 "event": name,
-                "time": self.engine.GetCurrentTime(),
+                "time": time,
                 "duration": finite(self.engine.GetDuration()),
                 "paused": self.engine.IsPaused().as_bool(),
                 "videoWidth": self.size.0,
@@ -77,7 +99,7 @@ impl Player {
         // whole byte stream as buffered, the download knows what really arrived.
         if let Some(stream) = &self.stream {
             let duration = finite(unsafe { self.engine.GetDuration() })?;
-            let now = unsafe { self.engine.GetCurrentTime() };
+            let now = self.reported_time();
             return Some(duration * stream.buffered_from((now / duration).clamp(0.0, 1.0)));
         }
         unsafe {

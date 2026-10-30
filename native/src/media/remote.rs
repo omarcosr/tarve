@@ -1,4 +1,4 @@
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Read};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::Duration;
 
@@ -64,6 +64,30 @@ struct State {
     /// The chunk the decoder is reading or waiting for.
     want: usize,
     error: Option<String>,
+    /// Seeks so far: a run requested before the last one is dropped as soon as
+    /// the decoder reads outside it, instead of downloading the rest of it first.
+    seeks: u64,
+    /// A newer seek waits (`interrupt`): a read that would wait on the network gives
+    /// up at once, until the decoder takes the seek (`resume`).
+    interrupted: bool,
+    /// A read gave up for it: the demuxer that saw it fail is opened again.
+    cut: bool,
+    /// Readers made before the last cut fail every read: their demuxer is gone.
+    epoch: u64,
+}
+
+impl State {
+    fn new(chunks: Vec<Option<Arc<[u8]>>>) -> Self {
+        Self {
+            chunks,
+            want: 0,
+            error: None,
+            seeks: 0,
+            interrupted: false,
+            cut: false,
+            epoch: 0,
+        }
+    }
 }
 
 /// One remote file, downloaded into memory chunk by chunk as it plays.
@@ -178,11 +202,7 @@ impl Stream {
             read_at: Default::default(),
             len,
             mime,
-            state: Mutex::new(State {
-                chunks: vec![None; count],
-                want: 0,
-                error: None,
-            }),
+            state: Mutex::new(State::new(vec![None; count])),
             ready: Condvar::new(),
             ranged,
             window,
@@ -190,7 +210,7 @@ impl Stream {
         let mut body = response.into_body().into_reader();
         if ranged {
             stream
-                .fill(&mut body, 0, 1)
+                .fill(&mut body, 0, 1, None)
                 .map_err(|error| failure(url, error))?;
             if count > 1 {
                 let downloader = Arc::downgrade(&stream);
@@ -205,7 +225,7 @@ impl Stream {
             std::thread::Builder::new()
                 .name("tarve-media-download".into())
                 .spawn(move || {
-                    if let Err(error) = downloader.fill(&mut body, 0, count) {
+                    if let Err(error) = downloader.fill(&mut body, 0, count, None) {
                         downloader.fail(error.to_string());
                     }
                 })
@@ -237,11 +257,7 @@ impl Stream {
             read_at: Default::default(),
             len: data.len() as u64,
             mime,
-            state: Mutex::new(State {
-                chunks,
-                want: 0,
-                error: None,
-            }),
+            state: Mutex::new(State::new(chunks)),
             ready: Condvar::new(),
             ranged: false,
             window,
@@ -262,6 +278,51 @@ impl Stream {
     fn fail(&self, error: String) {
         self.lock().error = Some(error);
         self.ready.notify_all();
+    }
+
+    /// A seek: the run being downloaded is dropped once the decoder reads outside it.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) fn seeking(&self) {
+        self.lock().seeks += 1;
+    }
+
+    /// A seek while the decoder may wait on the network for an older target: that
+    /// read, and any read that would wait until [`Stream::resume`], fails at once.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) fn interrupt(&self) {
+        let mut state = self.lock();
+        state.seeks += 1;
+        state.interrupted = true;
+        drop(state);
+        self.ready.notify_all();
+    }
+
+    /// The decoder took the seek: reads wait again. True when a read was cut: the
+    /// demuxer that saw it fail is to be opened again (the readers made so far retire).
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) fn resume(&self) -> bool {
+        let mut state = self.lock();
+        state.interrupted = false;
+        // The seek the decoder makes now moves the reads: a run for the old target goes.
+        state.seeks += 1;
+        let cut = std::mem::take(&mut state.cut);
+        state.epoch += u64::from(cut);
+        cut
+    }
+
+    /// A read gave up for a newer seek since the last [`Stream::resume`].
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub(crate) fn cut(&self) -> bool {
+        self.lock().cut
+    }
+
+    /// A seek since the run began (`since`) and the decoder waits outside what is left
+    /// of it (`run`): the rest of the run is not worth waiting for.
+    fn superseded(&self, since: u64, run: std::ops::Range<usize>) -> bool {
+        let state = self.lock();
+        state.seeks != since
+            && !run.contains(&state.want)
+            && state.chunks.get(state.want).is_some_and(Option::is_none)
     }
 
     pub(crate) fn error(&self) -> Option<String> {
@@ -310,11 +371,30 @@ impl Stream {
         ((index * CHUNK) as f64 / self.len as f64).min(1.0)
     }
 
-    /// Reads chunks `from..to` off `body` in order.
-    fn fill(&self, body: &mut impl Read, from: usize, to: usize) -> io::Result<()> {
+    /// Reads chunks `from..to` off `body` in order. A run of the download started at
+    /// `since` seeks stops early once a later seek moved the decoder elsewhere.
+    fn fill(
+        &self,
+        body: &mut impl Read,
+        from: usize,
+        to: usize,
+        since: Option<u64>,
+    ) -> io::Result<()> {
         for index in from..to {
             let mut chunk = vec![0; self.chunk_len(index)];
-            body.read_exact(&mut chunk)?;
+            let mut filled = 0;
+            while filled < chunk.len() {
+                if since.is_some_and(|since| self.superseded(since, index..to)) {
+                    // Dropping the body closes the connection: the next run starts where it reads.
+                    return Ok(());
+                }
+                match body.read(&mut chunk[filled..]) {
+                    Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+                    Ok(count) => filled += count,
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                    Err(error) => return Err(error),
+                }
+            }
             let mut state = self.lock();
             state.chunks[index] = Some(chunk.into());
             if let Some(window) = self.window.filter(|_| self.ranged) {
@@ -360,11 +440,12 @@ impl Stream {
             len: (count * CHUNK) as u64,
             mime: None,
             state: Mutex::new(State {
-                chunks: (0..count)
-                    .map(|index| (index == 0).then(|| Arc::from(vec![0u8; CHUNK])))
-                    .collect(),
                 want,
-                error: None,
+                ..State::new(
+                    (0..count)
+                        .map(|index| (index == 0).then(|| Arc::from(vec![0u8; CHUNK])))
+                        .collect(),
+                )
             }),
             ready: Condvar::new(),
             ranged: true,
@@ -415,6 +496,7 @@ impl Stream {
     fn download(stream: &Weak<Self>) {
         let mut failures = 0;
         while let Some(stream) = stream.upgrade() {
+            let since = stream.lock().seeks;
             let Some((start, end)) = stream.next_run() else {
                 if stream.window.is_none() {
                     return;
@@ -441,7 +523,7 @@ impl Stream {
                     }
                     let mut body = response.into_body().into_reader();
                     stream
-                        .fill(&mut body, start, end)
+                        .fill(&mut body, start, end, Some(since))
                         .map_err(|error| error.to_string())
                 });
             match result {
@@ -488,77 +570,7 @@ fn backoff(attempt: u32) -> Duration {
     Duration::from_millis(250 << attempt.min(6))
 }
 
-/// A seekable reader over a [`Stream`]; reads block until their chunk arrives.
-pub(crate) struct Reader {
-    stream: Arc<Stream>,
-    position: u64,
-}
-
-impl Reader {
-    pub(crate) fn new(stream: Arc<Stream>) -> Self {
-        Self {
-            stream,
-            position: 0,
-        }
-    }
-}
-
-impl Read for Reader {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if buf.is_empty() || self.position >= self.stream.len {
-            return Ok(0);
-        }
-        self.stream
-            .read_at
-            .store(self.position, std::sync::atomic::Ordering::Relaxed);
-        let index = (self.position / CHUNK as u64) as usize;
-        let offset = (self.position % CHUNK as u64) as usize;
-        let mut state = self.stream.lock();
-        if state.want != index {
-            state.want = index;
-            if state.chunks[index].is_none() {
-                // A windowed download waits for the reader to move.
-                self.stream.ready.notify_all();
-            }
-        }
-        loop {
-            if let Some(chunk) = &state.chunks[index] {
-                let count = buf.len().min(chunk.len() - offset);
-                buf[..count].copy_from_slice(&chunk[offset..offset + count]);
-                self.position += count as u64;
-                return Ok(count);
-            }
-            if let Some(error) = &state.error {
-                return Err(io::Error::other(error.clone()));
-            }
-            let (next, wait) = self
-                .stream
-                .ready
-                .wait_timeout(state, STALL)
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            state = next;
-            if wait.timed_out() && state.chunks[index].is_none() {
-                // Recorded on the stream, so the track reports an error (the
-                // page can reload it) instead of ending as if it were over.
-                let message = super::failure(&self.stream.url, "the network stalled");
-                state.error.get_or_insert(message.clone());
-                drop(state);
-                self.stream.ready.notify_all();
-                return Err(io::Error::new(io::ErrorKind::TimedOut, message));
-            }
-        }
-    }
-}
-
-impl Seek for Reader {
-    fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
-        let target = match to {
-            SeekFrom::Start(offset) => Some(offset),
-            SeekFrom::End(delta) => self.stream.len.checked_add_signed(delta),
-            SeekFrom::Current(delta) => self.position.checked_add_signed(delta),
-        };
-        self.position = target
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "seek before start"))?;
-        Ok(self.position)
-    }
-}
+mod reader;
+pub(crate) use reader::Reader;
+#[cfg(all(test, feature = "net"))]
+mod tests;

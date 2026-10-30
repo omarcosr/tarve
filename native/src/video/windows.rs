@@ -137,8 +137,9 @@ struct Player {
     stream: Option<Arc<Stream>>,
     /// `waiting` was reported; playing again ends it with `canplay`.
     waiting: bool,
-    /// When a seek was asked and its `seeked` has not come: `waiting` while playing past it.
-    seek_started: Option<Instant>,
+    /// When a seek was asked and its `seeked` has not come (`waiting` while playing past
+    /// it), and its target: `currentTime` until then.
+    seek_started: Option<(Instant, f64)>,
     /// The file's audio streams once known (`audioTracks`); ids are the engine's stream numbers.
     tracks: Vec<AudioTrack>,
     /// An audio track to play once the engine has opened the file.
@@ -745,11 +746,7 @@ impl Videos {
             match action {
                 "play" => engine.Play(),
                 "pause" => engine.Pause(),
-                "seek" => {
-                    player.settle_until = Some(Instant::now() + SETTLE_FOR);
-                    player.seek_started = Some(Instant::now());
-                    engine.SetCurrentTime(time.unwrap_or(0.0).max(0.0))
-                }
+                "seek" => player.seek(time.unwrap_or(0.0)),
                 "set" => (|| {
                     if let Some(looped) = looped {
                         engine.SetLoop(looped)?;
@@ -881,7 +878,7 @@ impl Videos {
                 && !player.waiting
                 && player
                     .seek_started
-                    .is_some_and(|started| now.duration_since(started) >= SEEK_WAITING_AFTER)
+                    .is_some_and(|(started, _)| now.duration_since(started) >= SEEK_WAITING_AFTER)
             {
                 player.waiting = true;
                 out.push(player.event(id, "waiting"));

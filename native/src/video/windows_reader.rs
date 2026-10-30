@@ -758,10 +758,7 @@ impl ReaderPlayer {
         }
         self.seeking = Some((time, report));
         self.ended = false;
-        let mut state = self.shared.lock();
-        state.requests.push_back(Request::Seek(time));
-        drop(state);
-        self.shared.changed.notify_all();
+        request_seek(&self.shared, time);
     }
 
     /// The decoder texture slice as shader views (cached per surface).

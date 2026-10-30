@@ -19,7 +19,7 @@ pub(super) fn reader_thread(
         shared.lock().unsupported = true;
         fail(message)
     };
-    let (reader, remote) = match open(&url, &manager.0) {
+    let (mut reader, remote) = match open(&url, &manager.0) {
         Ok(opened) => opened,
         Err(Fallback::Format(message)) => return unsupported(message),
         Err(Fallback::Other(message)) => return fail(message),
@@ -127,6 +127,32 @@ pub(super) fn reader_thread(
                         }
                     }
                 }
+                if seek.is_some() && remote.as_ref().is_some_and(|stream| stream.resume()) {
+                    // A read for an older target gave up (`request_seek`): the demuxer that
+                    // saw it fail goes, and the file opens again (its index is usually still
+                    // downloaded): far sooner than waiting for the old target's bytes.
+                    drop(state);
+                    let reopened = reopen(
+                        &url,
+                        &manager.0,
+                        remote.as_ref(),
+                        audio_stream,
+                        video_off,
+                        audio_off,
+                    );
+                    state = shared.lock();
+                    match reopened {
+                        Ok(opened) => reader = opened,
+                        // A newer seek cut the opening short: it opens again for that one.
+                        Err(_) if remote.as_ref().is_some_and(|stream| stream.cut()) => continue,
+                        Err(message) => {
+                            state.error = Some(message);
+                            drop(state);
+                            (shared.wake)();
+                            return;
+                        }
+                    }
+                }
                 if let Some(time) = seek {
                     let mut position = PROPVARIANT::default();
                     unsafe {
@@ -195,6 +221,10 @@ pub(super) fn reader_thread(
                 Some(&mut sample),
             )
         };
+        // A newer seek cut a read short: whatever came back belongs to the older target.
+        if remote.as_ref().is_some_and(|stream| stream.cut()) {
+            continue;
+        }
         if let Err(error) = read {
             // A decoder that agreed to NV12 but hands out none (VP8).
             if !pictured && error.code() == MF_E_INVALIDMEDIATYPE {
@@ -284,6 +314,45 @@ pub(super) fn reader_thread(
             }
         }
     }
+}
+
+/// Queues a seek. A read still waiting on the network for an older target gives up at
+/// once (under the same lock: the reader takes the seek and the cut together), so the
+/// newest target starts without waiting for bytes no one will show.
+pub(super) fn request_seek(shared: &Shared, time: f64) {
+    let mut state = shared.lock();
+    if let Some(remote) = &state.remote {
+        remote.interrupt();
+    }
+    state.requests.push_back(Request::Seek(time));
+    drop(state);
+    shared.changed.notify_all();
+}
+
+/// The reader opened again on the same download (after a cut read), decoding the
+/// streams the old one did.
+fn reopen(
+    url: &str,
+    manager: &IMFDXGIDeviceManager,
+    remote: Option<&Arc<Stream>>,
+    audio_stream: u32,
+    video_off: bool,
+    audio_off: bool,
+) -> Result<IMFSourceReader, String> {
+    let reader = open_with(url, manager, remote)
+        .map_err(|(Fallback::Format(message) | Fallback::Other(message))| message)?;
+    if audio_stream != AUDIO_STREAM {
+        select_audio_stream(&reader, AUDIO_STREAM, audio_stream, audio_off)?;
+    }
+    unsafe {
+        if video_off {
+            let _ = reader.SetStreamSelection(VIDEO_STREAM, false);
+        }
+        if audio_off {
+            let _ = reader.SetStreamSelection(audio_stream, false);
+        }
+    }
+    Ok(reader)
 }
 
 /// Decodes audio stream `index` (as float) instead of `current`; selected unless muted.
