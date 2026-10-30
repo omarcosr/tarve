@@ -26,7 +26,7 @@
     <ol class="doc-steps">
       <li>
         <h3>Install</h3>
-        <p>Tarve needs Bun 1.4+ on Windows x64 or Linux x64.</p>
+        <p>Tarve needs Bun 1.4+ (or Node.js 26.10+) on Windows x64 or Linux x64. From there you also build for <a href="/docs/android">Android</a>.</p>
         <CodeBlock code={snippets.install} lang="sh" file="terminal" />
       </li>
       <li>

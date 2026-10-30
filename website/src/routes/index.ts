@@ -174,6 +174,15 @@ app.get("/docs/motion", (c) => {
   });
 });
 
+app.get("/docs/android", (c) => {
+  const title = "Android — Tarve docs";
+  return c.render("docs/android", {
+    title,
+    data: { version, section: "docs" },
+    head: meta("/docs/android", title, "Build a Tarve app into an APK or App Bundle: what works on Android, permissions, engines and the differences from the desktop."),
+  });
+});
+
 app.get("/docs/effects", (c) => {
   const title = "Visual effects — Tarve docs";
   return c.render("docs/effects", {

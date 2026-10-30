@@ -97,6 +97,7 @@
         <a href="/docs/testing" class:active={name === "Testing"} aria-current={name === "Testing" ? "page" : undefined}>Testing</a>
         <a href="/docs/automation" class:active={name === "Automation"} aria-current={name === "Automation" ? "page" : undefined}>Automation and errors</a>
         <p class="docs-group">Shipping</p>
+        <a href="/docs/android" class:active={name === "Android"} aria-current={name === "Android" ? "page" : undefined}>Android</a>
         <a href="/docs/shipping" class:active={name === "Shipping"} aria-current={name === "Shipping" ? "page" : undefined}>Build and package</a>
         <a href="/docs/updates" class:active={name === "Updates"} aria-current={name === "Updates" ? "page" : undefined}>Auto-updates</a>
       {/if}

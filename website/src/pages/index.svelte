@@ -12,7 +12,7 @@
 
 <main class="home">
   <section class="hero">
-    <p class="kicker"><span>@tarve/core {version}</span><span>Windows x64 · Linux x64</span><span>Apache-2.0</span></p>
+    <p class="kicker"><span>@tarve/core {version}</span><span>Windows x64 · Linux x64 · Android</span><span>Apache-2.0</span></p>
     <div class="headline">
       <h1>
         <span class="hl-row" style:--n="1"><span class="hl-tsx"><i aria-hidden="true">&lt;</i>TSX<i aria-hidden="true">/&gt;</i></span> in.</span>

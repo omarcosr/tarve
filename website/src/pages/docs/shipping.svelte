@@ -48,7 +48,7 @@
 
   <section class="doc-section">
     <h2 id="android">Android</h2>
-    <div class="doc-prose"><p><code>tarve build --target android</code> writes a signed APK (arm64-v8a and x86_64; <code>android-arm64</code> or <code>android-x64</code> for one ABI) from Bun or Node.js, for TSX and Go apps. A TSX app runs on QuickJS-ng embedded in the runtime, a few MB; <code>--runtime bun</code> ships Bun itself, with its full API, at about 45 MB more per ABI.</p></div>
+    <div class="doc-prose"><p><code>tarve build --target android</code> writes a signed APK (arm64-v8a and x86_64; <code>android-arm64</code> or <code>android-x64</code> for one ABI) from Bun or Node.js, for TSX and Go apps. A TSX app runs on QuickJS-ng embedded in the runtime, a few MB; <code>--runtime bun</code> ships Bun itself, with its full API, at about 45 MB more per ABI. What works on the device and how it differs from the desktop: <a href="/docs/android">Android</a>.</p></div>
     <CodeBlock code={c3} lang="sh" file="terminal" />
     <div class="props-wrap">
       <table class="props">
