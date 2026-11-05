@@ -1,7 +1,7 @@
 import type { AppHandle } from "@tarve/core";
 import type { NativeEvent } from "@tarve/core/protocol";
-import { documentInstance, isFocusable, moveFocus, layout, restyleAll, scheduleIntersections, setFocusHook, setMediaHook, TEvent, windowInstance, type TElement } from "./dom";
-import { resizeRestyles } from "./css";
+import { documentInstance, isFocusable, moveFocus, layout, restyleAll, scheduleIntersections, setFocusHook, setMediaHook, TEvent, windowInstance, windowToClient, capturedElement, releasePointerCapture, setPointerCaptureHook, type TElement } from "./dom";
+import { resizeRestyles, usesDisplayMode } from "./css";
 import { elementForNativeId, nativeIdOf, setPointerPosition } from "./render";
 
 const BUTTONS = [1, 4, 2, 8, 16];
@@ -11,12 +11,18 @@ let buttons = 0;
 /** Native events that are not one element's handler: keys, focus, the window size. */
 export function connectNativeEvents(app: AppHandle): () => void {
   setFocusHook(element => { if (element) app.focus(nativeIdOf(element)); });
+  setPointerCaptureHook(element => app.capturePointer(element ? nativeIdOf(element) : null));
   setMediaHook((element, action, value) => {
     const media = app.media(nativeIdOf(element));
     if (action === "seek") media.seek(value ?? 0);
     else if (action === "audioTrack") media.setAudioTrack(value ?? 0);
     else if (action === "textTrack") media.setTextTrack(value ?? null);
     else media[action]();
+  });
+  // `@media (display-mode: fullscreen)` follows the window.
+  const offFullscreen = app.onFullscreenChange(fullscreen => {
+    windowInstance._fullscreen = fullscreen;
+    if (usesDisplayMode()) restyleAll(documentInstance);
   });
   const off = app.onEvent((event: NativeEvent) => {
     switch (event.type) {
@@ -38,9 +44,12 @@ export function connectNativeEvents(app: AppHandle): () => void {
         break;
       }
       case "pointer": {
-        setPointerPosition(event.x, event.y);
-        const target: TElement = elementForNativeId(event.id) ?? documentInstance.body;
-        const position = { clientX: event.x, clientY: event.y, pageX: event.x, pageY: event.y, screenX: event.x, screenY: event.y, offsetX: event.x - (target._box?.x ?? 0), offsetY: event.y - (target._box?.y ?? 0) };
+        // Native gives window coordinates; client ones start under the title bar, as client rects do.
+        const client = windowToClient(event.x, event.y);
+        setPointerPosition(client.x, client.y);
+        // A captured pointer's events go to the element holding it.
+        const target: TElement = capturedElement() ?? elementForNativeId(event.id) ?? documentInstance.body;
+        const position = { clientX: client.x, clientY: client.y, pageX: client.x, pageY: client.y, screenX: event.x, screenY: event.y, offsetX: event.x - (target._box?.x ?? 0), offsetY: event.y - (target._box?.y ?? 0) };
         const modifiers = { ctrlKey: event.ctrlKey, altKey: event.altKey, shiftKey: event.shiftKey, metaKey: event.metaKey };
         if (event.phase === "wheel") {
           target.dispatchEvent(new TEvent("wheel", { bubbles: true, cancelable: true, ...position, ...modifiers, deltaX: event.deltaX ?? 0, deltaY: event.deltaY ?? 0, deltaZ: 0, deltaMode: 0, buttons }));
@@ -54,6 +63,8 @@ export function connectNativeEvents(app: AppHandle): () => void {
         target.dispatchEvent(new TEvent(`mouse${kind}`, init));
         // Other buttons click as auxclick; the primary click comes from native activation.
         if (kind === "up" && button === 1) target.dispatchEvent(new TEvent("auxclick", init));
+        // Releasing the last button releases capture, as browsers do after pointerup.
+        if (kind === "up" && buttons === 0) releasePointerCapture();
         break;
       }
       case "size": {
@@ -73,7 +84,7 @@ export function connectNativeEvents(app: AppHandle): () => void {
       }
     }
   });
-  return () => { off(); setFocusHook(undefined); setMediaHook(undefined); };
+  return () => { off(); offFullscreen(); setFocusHook(undefined); setPointerCaptureHook(undefined); setMediaHook(undefined); };
 }
 
 /** The window's content size changed: `window.innerWidth`, `bind:innerWidth`, `onresize`. */

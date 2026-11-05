@@ -26,4 +26,24 @@ describe("Button composed content", () => {
     expect(texts[0]?.style).toMatchObject({ fontSize: 14, fontWeight: 500 });
     expect(texts[0]?.style.foreground).toBeString();
   });
+
+  test("labels take the button's own font size and weight", () => {
+    const tree = compileTree(<Window><Button id="b" style={{ fontSize: 13, fontWeight: 700 }}><span id="l">Season 1</span></Button></Window>);
+    expect(tree.nodes.get("l")!.style).toMatchObject({ fontSize: 13, fontWeight: 700 });
+  });
+
+  test("a nested element's own colour and font reach the text inside it", () => {
+    const tree = compileTree(<Window><Button id="b">
+      <div id="card">
+        <h3 id="title" style={{ color: "#ffffff", fontSize: 17 }}>The Box</h3>
+        <div id="sized" style={{ fontSize: 12 }}>Small</div>
+      </div>
+    </Button></Window>);
+    const title = tree.nodes.get("title")!;
+    expect(title.style).toMatchObject({ foreground: "#ffffff", fontSize: 17 });
+    expect(title.runs).toBeUndefined();
+    const small = tree.nodes.get("sized")?.children?.[0];
+    expect(small?.style.fontSize).not.toBe(14);
+    expect(small?.style.foreground).toBeString();
+  });
 });

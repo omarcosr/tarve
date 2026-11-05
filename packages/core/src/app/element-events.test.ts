@@ -21,6 +21,15 @@ describe("createElementDispatcher", () => {
     expect(calls).toEqual(["context@box"]);
   });
 
+  test("surface events run onSurface with the panel handle and pixel size", () => {
+    const seen: unknown[] = [];
+    const { dispatch, calls } = harness({ player: { onSurface: event => { seen.push(event); } } });
+    dispatch({ type: "surface", id: "player", event: "ready", width: 640, height: 360, scale: 1.5, handle: "123456", handleType: "ISwapChainPanelNative" });
+    dispatch({ type: "surface", id: "player", event: "resize", width: 800, height: 450, scale: 1.5 });
+    expect(seen).toEqual([{ type: "ready", width: 640, height: 360, scale: 1.5, handle: "123456", handleType: "ISwapChainPanelNative" }, { type: "resize", width: 800, height: 450, scale: 1.5 }]);
+    expect(calls).toEqual(["surface@player", "surface@player"]);
+  });
+
   test("longPress runs onLongPress", () => {
     let held = 0;
     const { dispatch, calls } = harness({ mic: { onLongPress: () => { held++; } } });

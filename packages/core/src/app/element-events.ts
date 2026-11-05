@@ -1,6 +1,7 @@
 import type { NativeEvent } from "../protocol";
 import type { PastePayload } from "../jsx-runtime";
 import type { Handlers } from "../reconciler";
+import { surfaceEvent } from "../surface";
 
 /** Runs one user handler, reporting a throw; true when it returned normally. */
 export type InvokeHandler = (event: string, targetId: string | undefined, handler: (...args: never[]) => void, ...args: never[]) => boolean;
@@ -102,6 +103,7 @@ export function createElementDispatcher(invoke: InvokeHandler, handlersOf: (id: 
         break;
       case "virtualListLayout": run("virtualListLayout", handlers?.onVirtualListLayout as never, event.items); break;
       case "size": run("size", handlers?.onSize as never, { width: event.width, height: event.height }); break;
+      case "surface": run("surface", handlers?.onSurface as never, surfaceEvent(event)); break;
       case "pointerMove": run("pointerMove", handlers?.onPointerMove as never, { x: event.x, y: event.y }); break;
       case "pointerLeave": run("pointerLeave", handlers?.onPointerLeave as never); break;
       case "virtualListScrollToItem": run("virtualListScrollToItem", handlers?.onVirtualListScrollToItem as never, event.index, event.offset, event.smooth === true); break;

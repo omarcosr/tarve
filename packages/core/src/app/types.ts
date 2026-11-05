@@ -1,5 +1,6 @@
 import type { FileDialogOptions, LayoutBox, NativeEvent, NativeCommand, NativeStats, NativeSystemMediaSession, PermissionState, PhaseSummary, Renderer, Snapshot, TextRendering } from "../protocol";
 import { type MediaController } from "../media-element";
+import { type SurfaceController } from "../surface";
 import { type NativeBridge } from "../bridge";
 import { type HotkeyHandler } from "../hotkeys";
 import { type VNode } from "../jsx-runtime";
@@ -204,6 +205,11 @@ export interface AppHandle {
    */
   openWindow(view: () => VNode, options?: OpenWindowOptions): AppHandle;
   focus(id: string): void;
+  /**
+   * DOM `setPointerCapture`: pointer moves report to node `id` alone (`onPointerMove`), outside its
+   * box too, and presses name it, until `capturePointer(null)` releases it. A drag needs it.
+   */
+  capturePointer(id: string | null): void;
   /** Scrolls a variable VirtualList to an item; `smooth` eases there like CSS `scroll-behavior: smooth`. */
   scrollToItem(id: string, index: number, offset?: number, options?: { smooth?: boolean }): void;
   registerHotkey(shortcut: string, handler: HotkeyHandler): () => void;
@@ -217,6 +223,10 @@ export interface AppHandle {
   /** Borderless full screen on the window's monitor (`true`), or back to the window it was (`false`). */
   setFullscreen(fullscreen: boolean): void;
   toggleFullscreen(): void;
+  /** Whether the window is full screen now: the app's request, F11-style system shortcuts or the OS. */
+  isFullscreen(): boolean;
+  /** Called when the window enters or leaves full screen, however it happened. Returns the unsubscribe. */
+  onFullscreenChange(listener: (fullscreen: boolean) => void): () => void;
   /** Shows a system tray icon (Windows, Linux); `onAvailability` / `availability()` say whether it can be seen. A second call replaces the first tray. */
   tray(options: TrayOptions): TrayHandle;
   /**
@@ -243,6 +253,8 @@ export interface AppHandle {
   requestPermissions(names: readonly string[]): Promise<Record<string, PermissionState>>;
   /** HTMLMediaElement methods for an `<audio>` element by id. */
   media(id: string): MediaController;
+  /** Hands a producer's swap chain to a `<surface>` element by id. */
+  surface(id: string): SurfaceController;
   openFileDialog(options?: FileDialogOptions): Promise<string | undefined>;
   openFilesDialog(options?: FileDialogOptions): Promise<string[]>;
   openFolderDialog(options?: FileDialogOptions): Promise<string | undefined>;

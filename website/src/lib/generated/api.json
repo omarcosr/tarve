@@ -233,7 +233,7 @@
     },
     {
       "name": "AppMenuBar",
-      "summary": "A menu bar drawn by the app, in the theme: the same on every system, in a framed or\nframeless window, or inside a `TitleBar`. Arrow keys move along the bar and through a\nmenu, Enter/Space choose, Escape closes; menus open on click and follow the pointer\nwhile one is open, like a system menu bar. `app.menuBar(items)` places one at the top\nof the window (after a `TitleBar`) and adds Alt access keys, F10 and accelerators.",
+      "summary": "A menu bar drawn by the app, in the theme: the same on every system, in a framed or\r\nframeless window, or inside a `TitleBar`. Arrow keys move along the bar and through a\r\nmenu, Enter/Space choose, Escape closes; menus open on click and follow the pointer\r\nwhile one is open, like a system menu bar. `app.menuBar(items)` places one at the top\r\nof the window (after a `TitleBar`) and adds Alt access keys, F10 and accelerators.",
       "source": "packages/core/src/menu-bar.ts",
       "line": 72,
       "generic": false,
@@ -745,7 +745,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
-          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\r\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -1173,7 +1173,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
-          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins."
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\r\n(light dismiss). Works on portals and in-flow boxes; an open portal wins."
         },
         {
           "name": "dragRegion",
@@ -1253,7 +1253,7 @@
     {
       "name": "Combobox",
       "source": "packages/core/src/popups.ts",
-      "line": 502,
+      "line": 501,
       "generic": false,
       "propsType": "ComboboxProps",
       "props": [
@@ -1350,7 +1350,7 @@
     {
       "name": "Command",
       "source": "packages/core/src/popups.ts",
-      "line": 650,
+      "line": 649,
       "generic": false,
       "propsType": "CommandProps",
       "props": [
@@ -1430,7 +1430,7 @@
     {
       "name": "CommandPalette",
       "source": "packages/core/src/popups.ts",
-      "line": 773,
+      "line": 772,
       "generic": false,
       "propsType": "CommandPaletteProps",
       "props": [
@@ -1544,7 +1544,7 @@
     {
       "name": "ContextMenu",
       "source": "packages/core/src/popups.ts",
-      "line": 422,
+      "line": 421,
       "generic": false,
       "propsType": "ContextMenuProps",
       "props": [
@@ -2200,7 +2200,7 @@
     {
       "name": "DropdownMenu",
       "source": "packages/core/src/popups.ts",
-      "line": 352,
+      "line": 351,
       "generic": false,
       "propsType": "DropdownMenuProps",
       "props": [
@@ -2447,7 +2447,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
-          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\r\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -2579,7 +2579,7 @@
     {
       "name": "HoverCard",
       "source": "packages/core/src/extra-controls.ts",
-      "line": 1125,
+      "line": 1124,
       "generic": false,
       "propsType": "HoverCardProps",
       "props": [
@@ -3116,7 +3116,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
-          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\r\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -3199,11 +3199,25 @@
           "from": "PressableProps"
         },
         {
+          "name": "onLongPress",
+          "type": "() => void",
+          "optional": true,
+          "doc": "The press was held still for 500 ms (touch or mouse); its release sends no `onClick`.",
+          "from": "PressableProps"
+        },
+        {
           "name": "onOutsideClick",
           "type": "() => void",
           "optional": true,
           "doc": "With `dismissOnOutside`: a press (or right click) outside the box.",
           "from": "ViewProps"
+        },
+        {
+          "name": "onPinch",
+          "type": "(event: import(\"../jsx-runtime\").PinchEvent) => void",
+          "optional": true,
+          "doc": "Two fingers pinching over this node (touch screen, macOS trackpad); `scale` is cumulative, 1 at \"start\".",
+          "from": "PressableProps"
         },
         {
           "name": "padding",
@@ -3277,7 +3291,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
-          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\r\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -3946,7 +3960,7 @@
     {
       "name": "Popover",
       "source": "packages/core/src/popups.ts",
-      "line": 244,
+      "line": 243,
       "generic": false,
       "propsType": "PopoverProps",
       "props": [
@@ -4035,7 +4049,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
-          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\r\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -4125,7 +4139,7 @@
     {
       "name": "Pressable",
       "source": "packages/core/src/components/pressable.ts",
-      "line": 19,
+      "line": 23,
       "generic": false,
       "propsType": "PressableProps",
       "props": [
@@ -4149,7 +4163,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
-          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\r\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -4218,11 +4232,23 @@
           "optional": true
         },
         {
+          "name": "onLongPress",
+          "type": "() => void",
+          "optional": true,
+          "doc": "The press was held still for 500 ms (touch or mouse); its release sends no `onClick`."
+        },
+        {
           "name": "onOutsideClick",
           "type": "() => void",
           "optional": true,
           "doc": "With `dismissOnOutside`: a press (or right click) outside the box.",
           "from": "ViewProps"
+        },
+        {
+          "name": "onPinch",
+          "type": "(event: import(\"../jsx-runtime\").PinchEvent) => void",
+          "optional": true,
+          "doc": "Two fingers pinching over this node (touch screen, macOS trackpad); `scale` is cumulative, 1 at \"start\"."
         },
         {
           "name": "padding",
@@ -4548,7 +4574,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
-          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins."
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\r\n(light dismiss). Works on portals and in-flow boxes; an open portal wins."
         },
         {
           "name": "dragRegion",
@@ -4642,7 +4668,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
-          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\r\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -4771,7 +4797,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
-          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\r\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -5733,7 +5759,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
-          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\r\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {
@@ -6095,7 +6121,7 @@
     {
       "name": "Tooltip",
       "source": "packages/core/src/popups.ts",
-      "line": 172,
+      "line": 171,
       "generic": false,
       "propsType": "TooltipProps",
       "props": [
@@ -6286,7 +6312,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
-          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins."
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\r\n(light dismiss). Works on portals and in-flow boxes; an open portal wins."
         },
         {
           "name": "dragRegion",
@@ -6503,7 +6529,7 @@
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
-          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\r\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
           "from": "ViewProps"
         },
         {

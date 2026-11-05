@@ -251,39 +251,11 @@ pub(crate) trait PaintTarget {
     /// A border whose sides differ: the ring between `outer` and `outer` inset by
     /// `widths` (top, right, bottom, left), each inner corner shrunk by its
     /// adjacent widths as CSS does. Painted as one even-odd path by default.
-    fn fill_ring(
-        &mut self,
-        transform: Affine,
-        outer: &RoundedRect,
-        widths: [f64; 4],
-        color: Color,
-    ) {
-        let rect = outer.rect();
-        let [top, right, bottom, left] = widths;
-        let inner = Rect::new(
-            rect.x0 + left,
-            rect.y0 + top,
-            (rect.x1 - right).max(rect.x0 + left),
-            (rect.y1 - bottom).max(rect.y0 + top),
-        );
-        let radii = outer.radii();
-        let mut ring = outer.to_path(0.1);
-        ring.extend(
-            RoundedRect::from_rect(
-                inner,
-                inner_corner_radii(
-                    [
-                        radii.top_left,
-                        radii.top_right,
-                        radii.bottom_right,
-                        radii.bottom_left,
-                    ],
-                    widths,
-                ),
-            )
-            .path_elements(0.1),
-        );
-        self.fill(Fill::EvenOdd, transform, color, &ring);
+    fn fill_ring(&mut self, transform: Affine, outer: &RoundedRect, widths: [f64; 4], color: Color)
+    where
+        Self: Sized,
+    {
+        fill_ring_path(self, transform, outer, widths, color);
     }
     fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S);
     fn push_opacity<S: Shape>(&mut self, alpha: f32, transform: Affine, shape: &S);
@@ -301,6 +273,19 @@ pub(crate) trait PaintTarget {
     /// `pop_transform`. Only [`TransformTarget`] implements it.
     fn push_transform(&mut self, _transform: Affine) {}
     fn pop_transform(&mut self) {}
+    /// An inset shadow without blur: `area` minus the rounded `hole`, an even-odd ring.
+    fn sharp_inset_shadow(
+        &mut self,
+        transform: Affine,
+        area: Rect,
+        hole: Rect,
+        color: Color,
+        radius: f64,
+    ) {
+        let mut ring = area.to_path(0.1);
+        ring.extend(RoundedRect::from_rect(hole, radius).to_path(0.1));
+        self.fill(Fill::EvenOdd, transform, color, &ring);
+    }
     /// Gaussian-blurred rounded rectangle limited to `area`. With `invert`,
     /// paints `1 - coverage` over `area` (inset shadows); callers clip it.
     #[allow(clippy::too_many_arguments)]
@@ -342,6 +327,9 @@ pub(crate) trait PaintTarget {
             );
         }
     }
+    /// A `<surface>` of `size` (in the space `transform` maps): renderers that compose
+    /// a producer's swap chain under the UI (D3D11) cut a hole for it; others paint nothing.
+    fn draw_surface(&mut self, _id: &str, _transform: Affine, _size: (f64, f64)) {}
     /// Liquid glass over `rect`: what was painted under it shows through blurred and
     /// bent at the rounded edge, under `tint`. Targets without a backdrop paint the tint.
     fn glass(
@@ -470,6 +458,18 @@ impl<P: PaintTarget> PaintTarget for TransformTarget<'_, P> {
         );
     }
 
+    fn sharp_inset_shadow(
+        &mut self,
+        transform: Affine,
+        area: Rect,
+        hole: Rect,
+        color: Color,
+        radius: f64,
+    ) {
+        self.inner
+            .sharp_inset_shadow(self.map(transform), area, hole, color, radius);
+    }
+
     fn outer_box_shadow(
         &mut self,
         transform: Affine,
@@ -497,6 +497,10 @@ impl<P: PaintTarget> PaintTarget for TransformTarget<'_, P> {
 
     fn draw_video(&mut self, id: &str, frame: &crate::video::VideoFrame, transform: Affine) {
         self.inner.draw_video(id, frame, self.map(transform));
+    }
+
+    fn draw_surface(&mut self, id: &str, transform: Affine, size: (f64, f64)) {
+        self.inner.draw_surface(id, self.map(transform), size);
     }
 
     fn glass(
@@ -879,3 +883,60 @@ mod filter;
 mod tests;
 #[allow(unused_imports)]
 pub(crate) use filter::*;
+
+/// A border ring (the area between `outer` and the box inset by `widths`) filled as a path.
+/// A side without width (`border-right` and `border-bottom` only) must not leave the inner
+/// edge on top of the outer one: both would antialias and show a faint line where CSS paints
+/// nothing. There the inner box runs past the outer one and the outer shape clips the fill.
+pub(crate) fn fill_ring_path<P: PaintTarget>(
+    target: &mut P,
+    transform: Affine,
+    outer: &RoundedRect,
+    widths: [f64; 4],
+    color: Color,
+) {
+    let rect = outer.rect();
+    let [top, right, bottom, left] = widths;
+    let open = widths.iter().any(|width| *width <= 0.0);
+    let past = |width: f64| if width <= 0.0 { 2.0 } else { 0.0 };
+    let inner = Rect::new(
+        rect.x0 + left - past(left),
+        rect.y0 + top - past(top),
+        (rect.x1 - right).max(rect.x0 + left) + past(right),
+        (rect.y1 - bottom).max(rect.y0 + top) + past(bottom),
+    );
+    let radii = outer.radii();
+    let outer_radii = [
+        radii.top_left,
+        radii.top_right,
+        radii.bottom_right,
+        radii.bottom_left,
+    ];
+    let (a, b, c, d) = inner_corner_radii(outer_radii, widths);
+    let mut inner_radii = [a, b, c, d];
+    if open {
+        // A corner between two open sides lies outside the outer box: square it.
+        for (corner, (a, b)) in [(top, left), (top, right), (bottom, right), (bottom, left)]
+            .into_iter()
+            .enumerate()
+        {
+            if a <= 0.0 && b <= 0.0 {
+                inner_radii[corner] = 0.0;
+            }
+        }
+    }
+    let mut ring = if open {
+        RoundedRect::from_rect(rect.inflate(3.0, 3.0), 0.0).to_path(0.1)
+    } else {
+        outer.to_path(0.1)
+    };
+    let [a, b, c, d] = inner_radii;
+    ring.extend(RoundedRect::from_rect(inner, (a, b, c, d)).path_elements(0.1));
+    if open {
+        target.push_clip(Fill::NonZero, transform, outer);
+        target.fill(Fill::EvenOdd, transform, color, &ring);
+        target.pop_layer();
+    } else {
+        target.fill(Fill::EvenOdd, transform, color, &ring);
+    }
+}

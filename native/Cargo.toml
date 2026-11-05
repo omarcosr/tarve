@@ -121,6 +121,13 @@ ksni = { version = "=0.3.6", default-features = false, features = ["blocking", "
 notify-rust = { version = "=4.18.1", default-features = false, features = ["z"] }
 # EWMH window state (below, skip taskbar, sticky) for desktop widgets; winit already links it.
 x11rb = { version = "0.13.2", default-features = false }
+# This library is dlopen'd: mimalloc's default initial-exec TLS took glibc's small static TLS
+# surplus, so Mesa's EGL/GL drivers (static TLS too) failed to load afterwards in the same
+# process (libglvnd then has no vendor: no GL for `<surface>` producers such as libmpv).
+mimalloc = { version = "0.1", default-features = false, optional = true, features = ["local_dynamic_tls"] }
+# `<surface>` TarveGL (src/surface_gl.rs): Vulkan images exported to GL; both already in wgpu's tree.
+ash = "0.38"
+khronos-egl = { version = "6", features = ["dynamic"] }
 
 # Upstream accesskit_windows 0.35.0 does not expose AccessKit Invalid through
 # UIA_IsDataValidForFormPropertyId, so keep the Windows provider patch local.

@@ -156,14 +156,38 @@ export function setLayoutReader(next: ((elements: TElement[]) => boolean) | unde
 export function beginRender(): void { layout.rendering = true; layout.rendered = layout.epoch; }
 export function endRender(): void { layout.rendering = false; }
 
+/**
+ * The element standing for the browser viewport: the box the page lays out in, under any title bar.
+ * Client rects (`getBoundingClientRect`) are relative to it, as a page's are to its viewport.
+ */
+let viewportElement: TElement | undefined;
+export function setViewportElement(element: TElement | undefined): void { viewportElement = element; }
+
+/** A point in window coordinates (native pointer events) in the viewport's, as `clientX`/`clientY` are. */
+export function windowToClient(x: number, y: number): { x: number; y: number } {
+  const origin = viewportElement?._box;
+  return origin ? { x: x - origin.x, y: y - origin.y } : { x, y };
+}
+
+/**
+ * A point native reports relative to `element`'s border box (`pointerMove`) in client coordinates:
+ * the box's client rect plus the offset. Undefined until native has reported where the box is.
+ */
+export function elementToClient(element: TElement, x: number, y: number): { x: number; y: number } | undefined {
+  const box = clientBox(element);
+  return box ? { x: box.x + x, y: box.y + y } : undefined;
+}
+
 function readLayout(element: TElement, withParent: boolean): void {
   if (!layoutReader || layout.rendering || !element.isConnected) return;
   const stale = (item: TElement) => item._boxEpoch !== layout.epoch;
   const parent = withParent ? element.parentElement : null;
-  if (!stale(element) && !(parent && stale(parent))) return;
+  const viewport = viewportElement && viewportElement !== element && stale(viewportElement) ? viewportElement : undefined;
+  if (!stale(element) && !(parent && stale(parent)) && !viewport) return;
   // One round trip answers every element something reads: a loop of reads costs one layout.
   const wanted = new Set<TElement>([element]);
   if (parent) wanted.add(parent);
+  if (viewport) wanted.add(viewport);
   for (const item of measuredElements) {
     if (!item.isConnected) measuredElements.delete(item);
     else if (wanted.size < 512 && stale(item)) wanted.add(item);
@@ -833,6 +857,20 @@ export class TElement extends TNode {
     return domRect(clientBox(this) ?? { x: 0, y: 0, ...(this._size ?? { width: 0, height: 0 }) });
   }
   getClientRects() { return [this.getBoundingClientRect()]; }
+  // Pointer capture (a drag that keeps going outside the element): native reports to it alone.
+  setPointerCapture(_pointerId?: number): void {
+    if (!this.isConnected) throw new DOMException("setPointerCapture on a disconnected element", "InvalidStateError");
+    if (pointerCapture === this) return;
+    const previous = pointerCapture;
+    pointerCapture = this;
+    previous?.dispatchEvent(new TEvent("lostpointercapture", { bubbles: true, pointerId: 1 }));
+    pointerCaptureHook?.(this);
+    this.dispatchEvent(new TEvent("gotpointercapture", { bubbles: true, pointerId: 1 }));
+  }
+  releasePointerCapture(_pointerId?: number): void {
+    if (pointerCapture === this) releasePointerCapture();
+  }
+  hasPointerCapture(_pointerId?: number): boolean { return pointerCapture === this; }
   get clientWidth(): number { this._layout(); return this._size?.width ?? 0; }
   get clientHeight(): number { this._layout(); return this._size?.height ?? 0; }
   get offsetWidth(): number { this._layout(); return this._box?.width ?? this._size?.width ?? 0; }
@@ -899,7 +937,8 @@ export class TElement extends TNode {
     const iterations = timing.iterations === undefined ? 1 : Math.max(0, Number(timing.iterations));
     const direction = timing.direction ?? "normal";
     const ease = easing(timing.easing ?? "linear");
-    const frames = keyframesOf(keyframes ?? []);
+    // An implicit first/last keyframe takes the element's own (inline) value, else the neutral one.
+    const frames = keyframesOf(keyframes ?? [], key => this.style?.getPropertyValue(key.replace(/[A-Z]/g, char => "-" + char.toLowerCase())) || undefined);
     const element = this;
     let resolveFinished!: () => void;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1139,6 +1178,9 @@ export class TDocument extends TNode {
   readonly body: TElement;
   activeElement: TElement | null = null;
   readonly readyState = "complete";
+  /** The window is shown (a minimized or hidden one still runs its app, as a background tab does). */
+  visibilityState: "visible" | "hidden" = "visible";
+  get hidden(): boolean { return this.visibilityState === "hidden"; }
   _title = "";
   onTitle?: (title: string) => void;
   constructor() {
@@ -1181,12 +1223,38 @@ export class TDocument extends TNode {
   hasFocus(): boolean { return true; }
 }
 
+/** `sessionStorage`: string pairs that live as long as the app (one session, as a browser tab's). */
+export class TStorage {
+  private _items = new Map<string, string>();
+  get length(): number { return this._items.size; }
+  key(index: number): string | null { return [...this._items.keys()][index] ?? null; }
+  getItem(key: string): string | null { return this._items.get(String(key)) ?? null; }
+  setItem(key: string, value: string): void { this._items.set(String(key), String(value)); }
+  removeItem(key: string): void { this._items.delete(String(key)); }
+  clear(): void { this._items.clear(); }
+}
+
 export class TWindow extends TEventTarget {
   getSelection(): unknown { return documentInstance.getSelection(); }
+  // In a browser `window` is the global object: `window.setTimeout(…)` and friends work on it too.
+  setTimeout(handler: (...args: unknown[]) => void, timeout?: number, ...args: unknown[]) { return globalThis.setTimeout(handler, timeout, ...args); }
+  clearTimeout(id?: ReturnType<typeof setTimeout>) { globalThis.clearTimeout(id); }
+  setInterval(handler: (...args: unknown[]) => void, timeout?: number, ...args: unknown[]) { return globalThis.setInterval(handler, timeout, ...args); }
+  clearInterval(id?: ReturnType<typeof setInterval>) { globalThis.clearInterval(id); }
+  requestAnimationFrame(callback: (time: number) => void) { return (globalThis as unknown as { requestAnimationFrame(callback: (time: number) => void): unknown }).requestAnimationFrame(callback); }
+  cancelAnimationFrame(id: unknown) { (globalThis as unknown as { cancelAnimationFrame(id: unknown): void }).cancelAnimationFrame(id); }
+  queueMicrotask(callback: () => void) { globalThis.queueMicrotask(callback); }
+  get sessionStorage(): TStorage { return (globalThis as unknown as { sessionStorage: TStorage }).sessionStorage; }
+  get performance() { return globalThis.performance; }
+  get console() { return globalThis.console; }
+  get navigator() { return (globalThis as unknown as { navigator: unknown }).navigator; }
+  get location() { return locationInstance; }
   innerWidth = 1120;
   innerHeight = 820;
   /** `prefers-color-scheme: dark`. */
   _dark = false;
+  /** The window fills the screen (`@media (display-mode: fullscreen)`). */
+  _fullscreen = false;
   devicePixelRatio = 1;
   get document(): TDocument { return documentInstance; }
   /**
@@ -1320,6 +1388,24 @@ export function isFocusable(element: TElement): boolean {
   return tabindex !== null && Number.isFinite(Number(tabindex));
 }
 
+let pointerCapture: TElement | undefined;
+let pointerCaptureHook: ((element: TElement | null) => void) | undefined;
+/** Native pointer capture follows `setPointerCapture`; the mount sets this. */
+export function setPointerCaptureHook(hook: ((element: TElement | null) => void) | undefined): void { pointerCaptureHook = hook; }
+/** The element holding pointer capture: pointer events go to it. */
+export function capturedElement(): TElement | undefined {
+  if (pointerCapture && !pointerCapture.isConnected) releasePointerCapture();
+  return pointerCapture;
+}
+/** Ends pointer capture (`releasePointerCapture`, or a released button: implicit release). */
+export function releasePointerCapture(): void {
+  const previous = pointerCapture;
+  if (!previous) return;
+  pointerCapture = undefined;
+  pointerCaptureHook?.(null);
+  previous.dispatchEvent(new TEvent("lostpointercapture", { bubbles: true, pointerId: 1 }));
+}
+
 let focusHook: ((element: TElement | null) => void) | undefined;
 /** Native focus follows script focus (`element.focus()`); the mount sets this. */
 export function setFocusHook(hook: ((element: TElement | null) => void) | undefined): void { focusHook = hook; }
@@ -1402,6 +1488,9 @@ function clientBox(element: TElement): Rect | undefined {
   if (!box) return undefined;
   let { x, y } = box;
   for (let parent = element.parentElement; parent; parent = parent.parentElement) { x -= parent.scrollLeft; y -= parent.scrollTop; }
+  // Window coordinates → the viewport's (the title bar is not part of the page).
+  const origin = viewportElement !== element ? viewportElement?._box : undefined;
+  if (origin) { x -= origin.x; y -= origin.y; }
   return { x, y, width: box.width, height: box.height };
 }
 
@@ -1496,6 +1585,9 @@ class TIntersectionObserver {
   }
 }
 
+/** `location`: an app has one page; its URL is `app://local/`. */
+const locationInstance = { href: "app://local/", origin: "app://local", protocol: "app:", host: "local", hostname: "local", pathname: "/", search: "", hash: "", reload() {}, assign() {}, replace() {}, toString() { return this.href; } };
+
 /** Selection and editing commands, provided by the contenteditable module. */
 interface Editing {
   getSelection(): unknown;
@@ -1519,6 +1611,7 @@ export function installDom(): void {
     customElements: { get: () => undefined, define() {}, whenDefined: () => Promise.resolve() },
     DataTransfer: TDataTransfer, MutationObserver: TMutationObserver, ResizeObserver: TResizeObserver, IntersectionObserver: TIntersectionObserver,
     getComputedStyle: (element: TElement) => windowInstance.getComputedStyle(element),
+    sessionStorage: new TStorage(), Storage: TStorage, location: locationInstance,
     requestAnimationFrame: (callback: (time: number) => void) => setTimeout(() => callback(performance.now()), 16),
     cancelAnimationFrame: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
   };

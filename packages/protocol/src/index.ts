@@ -83,7 +83,7 @@ export interface StateStyle {
   /** CSS multiple backgrounds over `background`, the first on top. A comma list of gradients in `background` does the same. */
   backgroundLayers?: (string | Gradient)[];
   /** Colour, gradient object, or CSS `linear-gradient(…)` / `radial-gradient(…)` string. */
-  background?: string | Gradient; foreground?: string | Gradient; borderColor?: string | Gradient; borderStyle?: BorderStyle; radius?: CornerRadius;
+  background?: string | Gradient; foreground?: string | Gradient; borderColor?: string | Gradient; borderColors?: { top?: string; right?: string; bottom?: string; left?: string }; borderStyle?: BorderStyle; radius?: CornerRadius;
   opacity?: number;
   outlineWidth?: number; outlineColor?: string; outlineOffset?: number; outlineRadius?: number; outlineStyle?: OutlineStyle;
   placeholderColor?: string; selectionColor?: string; caretColor?: string;
@@ -106,6 +106,8 @@ export interface Style extends StateStyle {
    * unless `minWidth`/`minHeight` is 0.
    */
   flex?: number | string; grow?: number; basis?: Length | "auto"; shrink?: number; aspectRatio?: number;
+  /** CSS `box-sizing`: `width`/`height` size the border box (Tarve's default) or the content box. */
+  boxSizing?: "border-box" | "content-box";
   position?: "relative" | "absolute"; top?: Length; right?: Length; bottom?: Length; left?: Length;
   direction?: "row" | "row-reverse" | "column" | "column-reverse"; wrap?: boolean; gap?: number;
   /** CSS `row-gap` / `column-gap`; each falls back to `gap`. */
@@ -120,7 +122,10 @@ export interface Style extends StateStyle {
   justifySelf?: "start" | "center" | "end" | "stretch";
   /** `block` stacks children and collapses adjacent vertical margins, as CSS block flow does. */
   display?: "flex" | "grid" | "block" | "none";
-  /** Grid tracks: a count of equal columns, or a CSS track list such as `"repeat(auto-fill, minmax(176px, 1fr))"`. */
+  /**
+   * Grid tracks: a count of equal columns, or a CSS track list such as `"repeat(auto-fill, minmax(176px, 1fr))"`.
+   * Unset means 2 equal columns; `"none"` is CSS's initial value (one implicit auto column).
+   */
   columns?: number | string;
   /** CSS `grid-column` / `grid-row` placement: `"span 2"`, `2`, `"1 / 3"`. */
   gridColumn?: number | string; gridRow?: number | string;
@@ -256,6 +261,8 @@ export interface NativeNode {
   wordDiff?: boolean; collapsedPaths?: string[]; maxLines?: number;
   highlight?: TextHighlight;
   src?: string; image?: NativeImageSource; fit?: "cover" | "contain"; disabled?: boolean;
+  /** `<surface>`: a native view the producer draws into (an X11 child window) instead of frames the UI composes. */
+  native?: boolean;
   svg?: string;
   value?: string; placeholder?: string;
   inputType?: "text" | "password" | "email" | "number" | "search" | "tel" | "url";
@@ -398,9 +405,13 @@ export type NativeCommand =
   /** A system notification; its `notificationClick` carries the same `id`. */
   | { type: "notify"; title: string; body: string; id?: string }
   | { type: "media"; id: string; action: "load" | "unload" | "play" | "pause" | "seek" | "set" | "rate" | "audioTrack" | "textTrack"; /** The `audioTracks` id with the `audioTrack` action. */ track?: number; src?: string; time?: number; volume?: number; muted?: boolean; loop?: boolean; /** `playbackRate` with the `rate` action: the sound keeps its pitch. */ rate?: number; /** `"video"` on a load: the platform video decoder plays it. */ kind?: "video" }
+  /** `<surface>`: show (`attach`) a composition `IDXGISwapChain*` of this process (decimal or 0x hex) in it, or stop (`detach`). */
+  | { type: "surface"; id: string; action: "attach"; swapChain: string }
+  | { type: "surface"; id: string; action: "detach" }
   | { type: "frameOverlay"; enabled: boolean }
   | { type: "frameRate"; maxFps: number | null }
   | { type: "focus"; id: string }
+  | { type: "capturePointer"; id: string | null }
   | { type: "scrollToItem"; id: string; index: number; offset?: number; smooth?: boolean }
   | { type: "inspect"; requestId: string }
   /** The focused text field and its selection, as UTF-8 offsets (answered synchronously). */
@@ -467,6 +478,7 @@ export interface NativeStats {
   /** Memory after each startup stage (start, tree, window, graphics, firstFrame) and now. */
   memory: { stages: (MemoryReading & { label: string })[]; current: MemoryReading | null } | null;
 }
+export interface NativeSurfaceEvent { type: "surface"; id: string; event: "ready" | "resize" | "destroyed" | "unsupported"; width: number; height: number; scale: number; handle?: string; handleType?: "ISwapChainPanelNative" | "TarveGL" | "TarveFrames" | "X11Window"; /** Why an `unsupported` surface could not be made. */ message?: string }
 export type NativeEvent =
   | { type: "ready" | "closed" }
   | { type: "closeRequest" }
@@ -493,6 +505,12 @@ export type NativeEvent =
   | { type: "scroll"; id: string; offset: number; max: number; offsetX?: number; offsetY?: number; maxX?: number; maxY?: number; source?: ScrollSource }
   | { type: "virtualListLayout"; id: string; items: VirtualListMeasurement[] }
   | { type: "size"; id: string; width: number; height: number; x?: number; y?: number; borderWidth?: number; borderHeight?: number }
+  /**
+   * A `<surface>`: `ready` once laid out and again when its way of presenting changes (`handle`, a decimal string:
+   * an `ISwapChainPanelNative*` of this process on Windows with the D3D11 renderer, a `tarve_surface_present` frames
+   * handle, or a native child's XID on X11), `resize`, `destroyed`. `width`/`height` in device pixels.
+   */
+  | NativeSurfaceEvent
   /** The system text size, motion preference and pointer: when the window opens and when they change. */
   | { type: "environment"; fontScale: number; reducedMotion: boolean; pointer: "coarse" | "fine" }
   | { type: "pointerMove"; id: string; x: number; y: number }
@@ -514,6 +532,8 @@ export type NativeEvent =
   | { type: "fileDragLeave"; id: string }
   /** An item of the window's menu bar was chosen. */
   | { type: "menu"; id: string }
+  /** The window entered or left full screen, by the app, the user or the system. Always sent. */
+  | { type: "fullscreen"; fullscreen: boolean }
   /** The window's restored bounds (logical outer position, client size) and state changed (`reportWindowState`). */
   | { type: "windowState"; x: number; y: number; physical?: boolean; width: number; height: number; maximized: boolean; fullscreen: boolean }
   /** Files dropped from the system on the file drop target under the pointer. */

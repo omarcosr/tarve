@@ -1116,6 +1116,37 @@ impl Graphics {
         }
     }
 
+    /// The Vulkan device and queue `<surface>` GL interop exports images from (Linux).
+    #[cfg(all(target_os = "linux", feature = "vello-gpu"))]
+    pub(crate) fn vulkan(&self) -> Option<(wgpu::Device, wgpu::Queue)> {
+        match &self.backend {
+            GraphicsImpl::Gpu(graphics) if graphics.backend == wgpu::Backend::Vulkan => {
+                Some((graphics.device.clone(), graphics.queue.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    /// Draws `texture` wherever `image` is drawn (Vello copies it into its atlas on the GPU).
+    #[cfg(all(target_os = "linux", feature = "vello-gpu"))]
+    pub(crate) fn override_image(
+        &mut self,
+        image: &vello::peniko::ImageData,
+        texture: Option<wgpu::Texture>,
+    ) {
+        if let GraphicsImpl::Gpu(graphics) = &mut self.backend {
+            graphics.renderer.override_image(
+                image,
+                texture.map(|texture| wgpu::TexelCopyTextureInfoBase {
+                    texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                }),
+            );
+        }
+    }
+
     /// Whether video `id` shows in its own composition layer (D3D11 only).
     #[cfg(target_os = "windows")]
     pub(crate) fn video_layered(&self, id: &str) -> bool {
@@ -1154,6 +1185,16 @@ impl Graphics {
     pub(crate) fn set_video_views(&mut self, views: Vec<(String, crate::d3d11::VideoView)>) {
         if let GraphicsImpl::D3d11(graphics) = &mut self.backend {
             graphics.set_video_views(views);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn set_surface_chains(
+        &mut self,
+        chains: Vec<(String, windows::Win32::Graphics::Dxgi::IDXGISwapChain1)>,
+    ) {
+        if let GraphicsImpl::D3d11(graphics) = &mut self.backend {
+            graphics.set_surface_chains(chains);
         }
     }
 
@@ -1325,6 +1366,8 @@ impl BackendAttempt {
             #[cfg(feature = "vello-gpu")]
             Self::Vello(Some(backends)) if backends == wgpu::Backends::VULKAN => "Vello/Vulkan",
             #[cfg(feature = "vello-gpu")]
+            Self::Vello(Some(backends)) if backends == wgpu::Backends::GL => "Vello/GL",
+            #[cfg(feature = "vello-gpu")]
             Self::Vello(_) => "Vello/WGPU",
             Self::Cpu => "CPU",
         }
@@ -1366,7 +1409,18 @@ fn startup_attempts(
         ],
         #[cfg(all(target_os = "windows", not(feature = "vello-gpu")))]
         ResolvedRenderer::Gpu => vec![BackendAttempt::D3d11],
-        #[cfg(all(not(target_os = "windows"), feature = "vello-gpu"))]
+        // Linux: Vulkan alone first. An instance with every backend also starts wgpu's EGL one,
+        // whose teardown leaves libglvnd without vendors when another library (libmpv) holds
+        // libEGL, which breaks GL for `<surface>` producers; GL stays the fallback.
+        #[cfg(all(target_os = "linux", feature = "vello-gpu"))]
+        ResolvedRenderer::Gpu => vec![
+            BackendAttempt::Vello(Some(wgpu::Backends::VULKAN)),
+            BackendAttempt::Vello(Some(wgpu::Backends::GL)),
+        ],
+        #[cfg(all(
+            not(any(target_os = "windows", target_os = "linux")),
+            feature = "vello-gpu"
+        ))]
         ResolvedRenderer::Gpu => vec![BackendAttempt::Vello(None)],
         // Without Vello the only GPU renderer is D3D11; elsewhere GPU requests paint on the CPU.
         #[cfg(all(not(target_os = "windows"), not(feature = "vello-gpu")))]
@@ -1398,7 +1452,12 @@ fn recovery_attempts(
                 BackendAttempt::Vello(Some(second)),
             ]
         }
-        #[cfg(all(not(target_os = "windows"), feature = "vello-gpu"))]
+        #[cfg(all(target_os = "linux", feature = "vello-gpu"))]
+        RendererBackend::Gpu(_) => startup_attempts(ResolvedRenderer::Gpu, false),
+        #[cfg(all(
+            not(any(target_os = "windows", target_os = "linux")),
+            feature = "vello-gpu"
+        ))]
         RendererBackend::Gpu(_) => vec![BackendAttempt::Vello(None)],
     }
 }
@@ -1529,7 +1588,19 @@ mod tests {
                 ]
             );
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        {
+            let linux = [
+                Vello(Some(wgpu::Backends::VULKAN)),
+                Vello(Some(wgpu::Backends::GL)),
+            ];
+            assert_eq!(startup_attempts(ResolvedRenderer::Gpu, false), linux);
+            assert_eq!(
+                recovery_attempts(RendererBackend::Gpu(wgpu::Backend::Vulkan), false),
+                linux
+            );
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         {
             assert_eq!(
                 startup_attempts(ResolvedRenderer::Gpu, false),

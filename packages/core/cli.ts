@@ -224,9 +224,13 @@ async function main(): Promise<number> {
   }
   const app = resolve(entrypoint);
   const smol = values.smol ? smolExecArgv("bun") : [];
+  // Bun's runtime transpiler cache has handed back modules as they were before an edit (seen on
+  // Windows, e.g. framework sources reached through a linked package): the app ran stale code. Off
+  // for tarve run and dev unless set; a build bundles from source and is not affected.
+  const env = { ...process.env, BUN_RUNTIME_TRANSPILER_CACHE_PATH: process.env.BUN_RUNTIME_TRANSPILER_CACHE_PATH ?? "0" };
   return command === "dev"
-    ? forward(process.execPath, [...smol, ...frameworkPreloads(app), "--hot", app], { ...process.env, TARVE_DEV: process.env.TARVE_DEV ?? "1" })
-    : forward(process.execPath, [...smol, ...frameworkPreloads(app), app]);
+    ? forward(process.execPath, [...smol, ...frameworkPreloads(app), "--hot", app], { ...env, TARVE_DEV: process.env.TARVE_DEV ?? "1" })
+    : forward(process.execPath, [...smol, ...frameworkPreloads(app), app], env);
 }
 
 try {

@@ -63,6 +63,13 @@ pub(super) fn css_dimension(token: &str) -> Option<Dimension> {
     if token == "0" {
         return Some(length(0.0));
     }
+    // `200px` and `50%` (the flex shorthand's basis), then whatever Taffy parses.
+    if let Some(px) = token.strip_suffix("px").and_then(|n| n.parse::<f32>().ok()) {
+        return Some(length(px));
+    }
+    if let Some(pc) = token.strip_suffix('%').and_then(|n| n.parse::<f32>().ok()) {
+        return Some(percent(pc / 100.0));
+    }
     token.parse::<Dimension>().ok()
 }
 
@@ -96,11 +103,15 @@ pub(crate) fn grid_line(
 }
 
 /// `columns`/`rows`: a count of equal tracks, or a CSS track list such as
-/// `repeat(auto-fill, minmax(176px, 1fr))` or `200px 1fr auto`.
+/// `repeat(auto-fill, minmax(176px, 1fr))` or `200px 1fr auto`. `"none"` is CSS's initial
+/// value: no explicit tracks, so items fill implicit ones (one auto column, a row each).
 pub(crate) fn grid_template(
     value: &serde_json::Value,
     default_count: usize,
 ) -> Vec<GridTemplateComponent<String>> {
+    if value.as_str().is_some_and(|text| text.trim() == "none") {
+        return Vec::new();
+    }
     if let Some(text) = value.as_str()
         && let Some(tracks) = css_track_list(text)
     {
@@ -113,6 +124,26 @@ pub(crate) fn grid_template(
     vec![flex(1.0); count]
 }
 
+/// `0` standing alone between delimiters becomes `0px`; every other token is kept.
+fn zero_lengths(piece: &str) -> String {
+    let mut out = String::with_capacity(piece.len() + 4);
+    let mut token = String::new();
+    let flush = |token: &mut String, out: &mut String| {
+        out.push_str(if token == "0" { "0px" } else { token });
+        token.clear();
+    };
+    for character in piece.chars() {
+        if matches!(character, '(' | ')' | ',' | ' ' | '\t' | '\n') {
+            flush(&mut token, &mut out);
+            out.push(character);
+        } else {
+            token.push(character);
+        }
+    }
+    flush(&mut token, &mut out);
+    out
+}
+
 pub(crate) fn css_track_list(text: &str) -> Option<Vec<GridTemplateComponent<String>>> {
     let mut tracks = Vec::new();
     let mut depth = 0usize;
@@ -121,6 +152,8 @@ pub(crate) fn css_track_list(text: &str) -> Option<Vec<GridTemplateComponent<Str
     let mut push = |piece: &str| -> Option<()> {
         let piece = piece.trim();
         if !piece.is_empty() {
+            // CSS allows a unitless 0 as a length (`minmax(0, 1fr)`); the track parser wants `0px`.
+            let piece = zero_lengths(piece);
             tracks.push(piece.parse::<GridTemplateComponent<String>>().ok()?);
         }
         Some(())

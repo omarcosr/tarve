@@ -67,6 +67,7 @@ export { BunFfiBridge, openExternal } from "./bridge";
 export type { NativeBridge, BunFfiBridgeOptions } from "./bridge";
 export { CanvasRenderingContext2D, CanvasGradient, parseCanvasFont } from "./canvas";
 export type { MediaAudioTrack, MediaTextTrack, MediaController, MediaElementProps, MediaErrorInfo, MediaEventInfo, SubtitleTrack } from "./media-element";
+export { Surface, type SurfaceController, type SurfaceEvent, type SurfaceGl, type SurfacePixelFormat, type SurfaceProps } from "./surface";
 export { parseSubtitles } from "./subtitles";
-export { tw } from "./tailwind";
+export { extendTailwind, tw } from "./tailwind";
 

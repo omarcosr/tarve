@@ -24,10 +24,12 @@ use std::{
 use taffy::prelude::*;
 use unicode_segmentation::UnicodeSegmentation;
 use vello::{
-    kurbo::{Affine, Cap, Rect as BoxRect, RoundedRect, Stroke, Vec2},
+    kurbo::{Affine, Cap, Join, Line, Rect as BoxRect, RoundedRect, Stroke, Vec2},
     peniko::{Blob, Color, Fill, ImageAlphaType, ImageData, ImageFormat},
 };
 mod css_layout;
+#[cfg(test)]
+pub(crate) use css_layout::css_track_list;
 mod gestures;
 mod inherit;
 mod keyframes;
@@ -62,6 +64,7 @@ const LAYOUT_KEYS: &[&str] = &[
     "basis",
     "shrink",
     "aspectRatio",
+    "boxSizing",
     "direction",
     "wrap",
     "gap",
@@ -78,6 +81,8 @@ const LAYOUT_KEYS: &[&str] = &[
     "display",
     "columns",
     "rows",
+    "autoRows",
+    "autoColumns",
     "gridColumn",
     "gridRow",
     "borderWidth",
@@ -1024,10 +1029,33 @@ fn visual_corner_radii(entry: &Entry, state: VisualState) -> [f64; 4] {
         .get("radius")
         .filter(|track| track.state_driven || !visual_state_overrides(&entry.node, "radius", state))
         .and_then(|track| <[f32; 4]>::try_from(track.current.as_slice()).ok());
+    let value = visual_value(&entry.node, "radius", state);
     animated
-        .or_else(|| corner_radii(visual_value(&entry.node, "radius", state)))
+        .or_else(|| corner_radii(value))
+        .or_else(|| percent_corner_radii(value, entry.rect.width().min(entry.rect.height())))
         .unwrap_or([0.0; 4])
         .map(f64::from)
+}
+
+/// `border-radius: 50%` (per corner too): a percentage of the box. CSS rounds each corner as an
+/// ellipse of its width and height percentages; a circle of the shorter side is the same on a
+/// square and a pill on a longer box, as CSS draws it once radii are scaled to fit.
+pub(crate) fn percent_corner_radii(value: &Value, side: f64) -> Option<[f32; 4]> {
+    let one = |value: &Value| -> Option<f32> {
+        if let Some(number) = value.as_f64() {
+            return Some(number.max(0.0) as f32);
+        }
+        let percent: f64 = value.as_str()?.trim().strip_suffix('%')?.parse().ok()?;
+        Some((side * percent / 100.0).max(0.0) as f32)
+    };
+    if value.is_string() {
+        return one(value).map(|radius| [radius; 4]);
+    }
+    let object = value.as_object()?;
+    Some(
+        ["topLeft", "topRight", "bottomRight", "bottomLeft"]
+            .map(|corner| object.get(corner).and_then(one).unwrap_or(0.0)),
+    )
 }
 
 fn input_display_index(node: &Node, value: &str, actual_index: usize) -> usize {
@@ -1096,7 +1124,7 @@ pub struct Entry {
     structure_dirty: bool,
     measure_dirty: bool,
     pub rect: BoxRect,
-    bounds: BoxRect,
+    pub(crate) bounds: BoxRect,
     pub scroll_x: f64,
     pub scroll_max_x: f64,
     pub scroll: f64,
@@ -1257,6 +1285,8 @@ pub struct Tree {
     /// `<video>`s the last paint drew (culled ones are absent): a new picture of
     /// any other one waits for the next paint instead of causing one.
     video_painted: HashSet<String>,
+    /// `<surface>` pictures presented as frames, by node id.
+    surface_frames: HashMap<String, (ImageData, bool)>,
     /// Keys whose decoded pixels were dropped because a GPU texture holds them.
     released_images: HashSet<String>,
     /// Smooth `scrollToItem` requests in flight, by list id.
@@ -1278,8 +1308,11 @@ pub struct Tree {
     pending_layout_events: Vec<Value>,
     /// Last inner size sent for each node with `reportSize`.
     reported_sizes: HashMap<String, (f64, f64, f64, f64)>,
-    /// Last `pointerMove` sent: node and position.
-    last_pointer_report: Option<(String, f64, f64)>,
+    /// Last `pointerMove` sent to each node under the pointer that asked for it: node and position.
+    last_pointer_report: Vec<(String, f64, f64)>,
+    /// The node holding pointer capture (DOM `setPointerCapture`): it alone gets `pointerMove`,
+    /// wherever the pointer goes, until it releases it.
+    pointer_capture: Option<String>,
     pending_interaction_events: Vec<Value>,
     pending_motion_events: Vec<Value>,
     /// The node a filtered subtree is being rasterized for (painted unfiltered inside).
@@ -1304,6 +1337,8 @@ pub struct Tree {
     /// Ids with a `spin` style: rotated by the clock, so they need a frame every tick.
     spinning: HashSet<String>,
     window_chrome_suppressed: bool,
+    /// The window is full screen: `TitleBar` nodes take no room, as the system caption does not.
+    window_fullscreen: bool,
     /// Where the root sits in the window and its size (Android: inside the system bars).
     pub viewport: (f32, f32, f32, f32),
     pub dirty: Dirty,
@@ -1546,6 +1581,7 @@ impl Tree {
             video_frames: HashMap::default(),
             video_display: HashMap::default(),
             video_painted: HashSet::default(),
+            surface_frames: HashMap::default(),
             released_images: HashSet::default(),
             scroll_animations: HashMap::default(),
             wheel_latch: None,
@@ -1559,7 +1595,8 @@ impl Tree {
             virtual_measurements: HashMap::default(),
             pending_layout_events: Vec::new(),
             reported_sizes: HashMap::default(),
-            last_pointer_report: None,
+            last_pointer_report: Vec::new(),
+            pointer_capture: None,
             pending_interaction_events: Vec::new(),
             pending_motion_events: Vec::new(),
             filtering: None,
@@ -1576,6 +1613,7 @@ impl Tree {
             transformed: HashSet::default(),
             spinning: HashSet::default(),
             window_chrome_suppressed: false,
+            window_fullscreen: false,
             viewport: (0.0, 0.0, 0.0, 0.0),
             dirty: Dirty::all(),
             hovered: None,
@@ -1620,6 +1658,20 @@ impl Tree {
         self.window_chrome_suppressed = suppressed;
         if let Some(root) = self.entries.get_mut(&self.root) {
             root.layout_dirty = true;
+        }
+        self.dirty.layout = true;
+        self.dirty.paint = true;
+        true
+    }
+    pub fn set_window_fullscreen(&mut self, fullscreen: bool) -> bool {
+        if self.window_fullscreen == fullscreen {
+            return false;
+        }
+        self.window_fullscreen = fullscreen;
+        for entry in self.entries.values_mut() {
+            if entry.node.kind == "titlebar" {
+                entry.layout_dirty = true;
+            }
         }
         self.dirty.layout = true;
         self.dirty.paint = true;
@@ -2703,6 +2755,42 @@ impl Tree {
 
     /// Device pixels each `<video>` covered when last painted: the decoder scales
     /// pictures read back into memory to it.
+    /// Every `<surface>` and its laid-out box in device pixels at `scale`: x, y, width, height.
+    pub(crate) fn surface_boxes(&self, scale: f64) -> Vec<(String, [i32; 4], bool)> {
+        let pixels = |length: f64| (length * scale).round() as i32;
+        self.entries
+            .iter()
+            .filter(|(_, entry)| entry.node.kind == "surface")
+            .map(|(id, entry)| {
+                let rect = entry.rect;
+                (
+                    id.clone(),
+                    [
+                        pixels(rect.x0),
+                        pixels(rect.y0),
+                        pixels(rect.width()).max(0),
+                        pixels(rect.height()).max(0),
+                    ],
+                    entry.node.native,
+                )
+            })
+            .collect()
+    }
+
+    /// The last picture a `<surface>`'s producer presented (`None`: the surface is gone).
+    /// `flipped`: the picture's first row is its bottom (OpenGL's origin).
+    pub(crate) fn set_surface_frame(&mut self, id: &str, frame: Option<ImageData>, flipped: bool) {
+        match frame {
+            Some(frame) => {
+                self.surface_frames.insert(id.to_string(), (frame, flipped));
+            }
+            None => {
+                self.surface_frames.remove(id);
+            }
+        }
+        self.dirty.paint = true;
+    }
+
     pub(crate) fn video_display_sizes(&self) -> &HashMap<String, (u32, u32)> {
         &self.video_display
     }
@@ -3321,9 +3409,13 @@ impl Tree {
             .map(|child| self.build_layout(child, None))
             .collect::<Result<Vec<_>, _>>()?;
         let suppress_root_chrome = self.window_chrome_suppressed && id == self.root;
+        let fullscreen = self.window_fullscreen;
         let entry = self.entries.get_mut(id).unwrap();
         let style = if entry.layout_dirty || entry.layout_id.is_none() || viewport.is_some() {
             let mut style = layout_style(entry, suppress_root_chrome);
+            if fullscreen && entry.node.kind == "titlebar" {
+                style.display = Display::None;
+            }
             if let Some((w, h)) = viewport {
                 style.size = Size {
                     width: length(w),
@@ -3414,7 +3506,13 @@ impl Tree {
         let children = entry.children.clone();
         let clips = clips_overflow(&entry.node);
         // A blurred box paints three standard deviations past its edge.
-        let mut bounds = entry.rect.inset(3.0 + filter_blur(&entry.node) * 3.0);
+        // Text paints past its box (accents over capitals, descenders under a tight line-height).
+        let ink = if matches!(entry.node.kind.as_str(), "text" | "markdown") && !clips {
+            f64::from(entry.node.font_size(14.0))
+        } else {
+            0.0
+        };
+        let mut bounds = entry.rect.inset(3.0 + filter_blur(&entry.node) * 3.0 + ink);
         for child in children {
             let child_bounds = self.positions(&child, origin)?;
             if !clips {
@@ -4444,10 +4542,15 @@ impl Tree {
                         style: border_style,
                     },
                 );
+            } else if let Some(sides) =
+                side_colors(visual_value(&node, "borderColors", state), border_color)
+                && border_style == "solid"
+            {
+                paint_side_coloured_border(target, transform, &shape, border, sides);
             } else if uniform {
                 let width = border[0];
                 target.stroke(
-                    &Stroke::new(width),
+                    &css_stroke(width),
                     transform,
                     border_color,
                     &RoundedRect::from_rect(
@@ -4509,7 +4612,16 @@ impl Tree {
             } else {
                 rect.y0 + (rect.height() - th as f64) / 2.0
             };
-            let visible_text_y = (clip.y0.max(rect.y0) - y, clip.y1.min(rect.y1) - y);
+            let ink = if matches!(node.kind.as_str(), "text" | "markdown") && !clips_overflow(&node)
+            {
+                f64::from(node.font_size(14.0))
+            } else {
+                0.0
+            };
+            let visible_text_y = (
+                clip.y0.max(rect.y0 - ink) - y,
+                clip.y1.min(rect.y1 + ink) - y,
+            );
             if node.kind == "button" {
                 x = rect.x0 + (rect.width() - tw as f64) / 2.0;
             }
@@ -4546,7 +4658,7 @@ impl Tree {
             {
                 let (dx, dy, blur) = (shadow.0, shadow.1, shadow.2);
                 // A gaussian of sigma = blur / 2 is invisible past 3 sigma.
-                let reach = (blur * 1.5).ceil();
+                let reach = (blur * 1.5).ceil() + ink;
                 let shadow_clip = BoxRect::new(
                     rect.x0 + dx.min(0.0) - reach,
                     rect.y0 + dy.min(0.0) - reach,
@@ -4564,7 +4676,16 @@ impl Tree {
                 );
                 target.pop_layer();
             }
-            target.push_clip(Fill::NonZero, transform, &shape);
+            // CSS: glyphs are ink overflow. A text box clips them only with `overflow: hidden`;
+            // otherwise accents over capitals and descenders paint past a tight `line-height`.
+            let ink_overflow =
+                matches!(node.kind.as_str(), "text" | "markdown") && !clips_overflow(&node);
+            if ink_overflow {
+                let reach = f64::from(node.font_size(14.0));
+                target.push_clip(Fill::NonZero, transform, &rect.inflate(reach, reach));
+            } else {
+                target.push_clip(Fill::NonZero, transform, &shape);
+            }
             let code_source_clip = (node.kind == "code").then(|| {
                 let left = rect.x0 + pad[3] as f64 + border[3] + gutter;
                 let right = (rect.x1 - pad[1] as f64 - border[1]).max(left);
@@ -4949,14 +5070,49 @@ impl Tree {
                 target.pop_layer();
             }
         }
+        if node.kind == "surface" && rect.width() > 0.0 && rect.height() > 0.0 {
+            // Frames fill the box: the producer renders at its size in device pixels.
+            if let Some((frame, flipped)) = self.surface_frames.get(&node.id) {
+                let (sx, sy) = (
+                    rect.width() / f64::from(frame.width.max(1)),
+                    rect.height() / f64::from(frame.height.max(1)),
+                );
+                let place = if *flipped {
+                    Affine::translate((rect.x0, rect.y1)) * Affine::scale_non_uniform(sx, -sy)
+                } else {
+                    Affine::translate((rect.x0, rect.y0)) * Affine::scale_non_uniform(sx, sy)
+                };
+                target.draw_image(&format!("surface:{}", node.id), frame, transform * place);
+            }
+            target.draw_surface(
+                &node.id,
+                transform * Affine::translate((rect.x0, rect.y0)),
+                (rect.width(), rect.height()),
+            );
+        }
         let clips_children = clips_overflow(&node);
+        // CSS clips overflow to the padding box: inside the border, each corner's radius
+        // shrunk by its borders. Clipping to the border box let a child (a poster scaled on
+        // hover) paint over the border, where an overlay filling the padding box left it bare.
+        let padding_box = BoxRect::new(
+            rect.x0 + border[3],
+            rect.y0 + border[0],
+            (rect.x1 - border[1]).max(rect.x0 + border[3]),
+            (rect.y1 - border[2]).max(rect.y0 + border[0]),
+        );
+        let inner_radii = inner_corner_radii(radii, border);
         // A square box holding all its ancestors' clip lets through needs no layer of its own.
-        let clip_layer = clips_children && !(radii == [0.0; 4] && rect.union(clip) == rect);
+        let clip_layer = clips_children
+            && !(inner_radii == (0.0, 0.0, 0.0, 0.0) && padding_box.union(clip) == padding_box);
         if clip_layer {
-            target.push_clip(Fill::NonZero, transform, &shape);
+            target.push_clip(
+                Fill::NonZero,
+                transform,
+                &RoundedRect::from_rect(padding_box, inner_radii),
+            );
         }
         let child_clip = if clips_children {
-            clip.intersect(rect)
+            clip.intersect(padding_box)
         } else {
             clip
         };
@@ -6016,38 +6172,72 @@ impl Tree {
         }
         events
     }
-    /// `pointerMove` for the innermost node under the pointer that asked for it
-    /// (`onPointerMove`), in that node's own coordinates, like DOM `offsetX`.
+    /// `pointerMove` for every node under the pointer that asked for it (`onPointerMove`),
+    /// innermost first, each in its own coordinates like DOM `offsetX`; `pointerLeave` once
+    /// the pointer leaves a node's box, as DOM `pointerleave` does. A child with its own
+    /// handler does not take the pointer from its ancestors: a control bar's button keeps
+    /// the screen's auto-hide timer alive and does not "leave" the screen.
     fn report_pointer(&mut self) -> Vec<Value> {
-        let target = self.hover_path().into_iter().rev().find(|id| {
-            self.entries
-                .get(id)
-                .is_some_and(|entry| entry.node.report_pointer)
-        });
-        let mut events = vec![];
-        if let Some((previous, ..)) = &self.last_pointer_report
-            && target.as_ref() != Some(previous)
+        if self
+            .pointer_capture
+            .as_ref()
+            .is_some_and(|id| !self.entries.contains_key(id))
         {
-            events.push(json!({"type":"pointerLeave", "id":previous}));
-            self.last_pointer_report = None;
+            self.pointer_capture = None;
         }
-        let Some(id) = target else {
-            return events;
+        let targets: Vec<String> = if let Some(id) = &self.pointer_capture {
+            vec![id.clone()]
+        } else {
+            self.hover_path()
+                .into_iter()
+                .rev()
+                .filter(|id| {
+                    self.entries
+                        .get(id)
+                        .is_some_and(|entry| entry.node.report_pointer)
+                })
+                .collect()
         };
-        let entry = &self.entries[&id];
-        let offset = self.ancestor_scroll_offset(&id);
-        let x = ((self.mouse.0 - (entry.rect.x0 - offset.x)) * 10.0).round() / 10.0;
-        let y = ((self.mouse.1 - (entry.rect.y0 - offset.y)) * 10.0).round() / 10.0;
-        if self.last_pointer_report.as_ref() == Some(&(id.clone(), x, y)) {
-            return events;
+        let mut events = vec![];
+        let previous = std::mem::take(&mut self.last_pointer_report);
+        for (id, ..) in &previous {
+            if !targets.contains(id) {
+                events.push(json!({"type":"pointerLeave", "id":id}));
+            }
         }
-        self.last_pointer_report = Some((id.clone(), x, y));
-        events.push(json!({"type":"pointerMove", "id":id, "x":x, "y":y}));
+        for id in targets {
+            let entry = &self.entries[&id];
+            let offset = self.ancestor_scroll_offset(&id);
+            let x = ((self.mouse.0 - (entry.rect.x0 - offset.x)) * 10.0).round() / 10.0;
+            let y = ((self.mouse.1 - (entry.rect.y0 - offset.y)) * 10.0).round() / 10.0;
+            let report = (id.clone(), x, y);
+            if !previous.contains(&report) {
+                events.push(json!({"type":"pointerMove", "id":id, "x":x, "y":y}));
+            }
+            self.last_pointer_report.push(report);
+        }
         events
     }
+    /// DOM `setPointerCapture` (`Some`) and `releasePointerCapture` (`None`): while a node holds
+    /// it, pointer moves report to it alone, outside its box too, as a drag needs.
+    pub fn capture_pointer(&mut self, id: Option<String>) -> Vec<Value> {
+        self.pointer_capture = id.filter(|id| self.entries.contains_key(id));
+        if self.mouse.0 < 0.0 {
+            return vec![];
+        }
+        self.report_pointer()
+    }
+    /// The node holding pointer capture, if any.
+    pub fn pointer_capture(&self) -> Option<&str> {
+        self.pointer_capture.as_deref()
+    }
     pub fn pointer_leave(&mut self) -> Vec<Value> {
+        if self.pointer_capture.is_some() {
+            // A captured drag keeps going outside the window, as browsers do.
+            return vec![];
+        }
         let mut events = vec![];
-        if let Some((id, ..)) = self.last_pointer_report.take() {
+        for (id, ..) in std::mem::take(&mut self.last_pointer_report) {
             events.push(json!({"type":"pointerLeave", "id":id}));
         }
         self.mouse = (-1.0, -1.0);
@@ -6225,8 +6415,13 @@ impl Tree {
         self.refresh_hover_chain();
         let mut out = vec![];
         let long_pressed = self.long_press_up();
+        // A press under pointer capture belongs to the capturing node (a dragged seek bar): the
+        // release clicks nothing else, as a browser targets the click at the captured element.
+        // Releasing the button ends capture, as it does in the DOM.
+        let captured = self.pointer_capture.take();
         if let Some(id) = self.pressed.take() {
             if !long_pressed
+                && captured.as_ref().is_none_or(|captured| *captured == id)
                 && self.hovered.as_ref() == Some(&id)
                 && matches!(self.entries[&id].node.kind.as_str(), "button" | "pressable")
             {
@@ -8717,12 +8912,7 @@ fn paint_inset_shadow<P: PaintTarget>(
     let hole_radius = (radius - spread).max(0.0);
     let sigma = shadow_sigma(shadow.blur);
     if sigma < 0.01 {
-        let mut ring = vello::kurbo::Shape::to_path(&padding_box, 0.1);
-        ring.extend(vello::kurbo::Shape::to_path(
-            &RoundedRect::from_rect(hole, hole_radius),
-            0.1,
-        ));
-        target.fill(Fill::EvenOdd, transform, shadow.color, &ring);
+        target.sharp_inset_shadow(transform, padding_box, hole, shadow.color, hole_radius);
     } else {
         target.box_shadow(
             transform,
@@ -8762,19 +8952,30 @@ fn paint_outline<P: PaintTarget>(
         return;
     }
     match outline_style {
-        "dashed" => paint_outline_stroke(
-            target,
-            transform,
-            rect,
-            base_radius,
-            width,
-            offset,
-            radius_override,
-            color(outline_color),
-            Stroke::new(width).with_dashes(0.0, [width * 3.0, width * 2.0]),
-            width,
-            offset,
-        ),
+        "dashed" => {
+            let Some(ring) = outline_ring(
+                rect,
+                base_radius,
+                width,
+                offset,
+                radius_override,
+                width,
+                offset,
+            ) else {
+                return;
+            };
+            let (dash, gap) = css_dash(width);
+            if ring.radii().as_single_radius() == Some(0.0) {
+                paint_dashed_sides(target, transform, ring.rect(), width, color(outline_color));
+            } else {
+                target.stroke(
+                    &css_stroke(width).with_dashes(0.0, [dash, gap]),
+                    transform,
+                    color(outline_color),
+                    &ring,
+                );
+            }
+        }
         "dotted" => paint_outline_stroke(
             target,
             transform,
@@ -8801,7 +9002,7 @@ fn paint_outline<P: PaintTarget>(
                 offset,
                 radius_override,
                 color(outline_color),
-                Stroke::new(band),
+                css_stroke(band),
                 width,
                 offset,
             );
@@ -8814,7 +9015,7 @@ fn paint_outline<P: PaintTarget>(
                 offset + band * 2.0,
                 radius_override,
                 color(outline_color),
-                Stroke::new(band),
+                css_stroke(band),
                 width,
                 offset,
             );
@@ -8897,10 +9098,173 @@ fn paint_outline<P: PaintTarget>(
             offset,
             radius_override,
             color(outline_color),
-            Stroke::new(width),
+            css_stroke(width),
             width,
             offset,
         ),
+    }
+}
+
+/// A CSS border or outline stroke: mitred corners and butt ends, as browsers paint them
+/// (kurbo's default round join rounds a square box's outer corners).
+fn css_stroke(width: f64) -> Stroke {
+    Stroke::new(width)
+        .with_join(Join::Miter)
+        .with_caps(Cap::Butt)
+}
+
+/// Chrome's dash and gap for a dashed line `width` thick (StrokeData's DashLengthRatio and
+/// DashGapRatio): 2:1 from 3px up, 3:2 below.
+fn css_dash(width: f64) -> (f64, f64) {
+    if width >= 3.0 {
+        (width * 2.0, width)
+    } else {
+        (width * 3.0, width * 2.0)
+    }
+}
+
+/// Chrome's SelectBestDashGap for an open line: the gap closest to `gap` that fits whole
+/// dashes from one end to the other, so both ends (the box corners) are dashes.
+fn best_dash_gap(length: f64, dash: f64, gap: f64) -> f64 {
+    let fewer = ((length + gap) / (dash + gap)).floor().max(1.0);
+    let more = fewer + 1.0;
+    let fewer_gap = if fewer > 1.0 {
+        (length - fewer * dash) / (fewer - 1.0)
+    } else {
+        gap
+    };
+    let more_gap = (length - more * dash) / (more - 1.0);
+    if more_gap <= 0.0 || (fewer_gap - gap).abs() < (more_gap - gap).abs() {
+        fewer_gap
+    } else {
+        more_gap
+    }
+}
+
+/// A dashed square border or outline as Chrome paints one: each side a line from outer
+/// corner to outer corner, its gaps fitted so it starts and ends with a dash.
+/// `ring` is the rect the stroke is centred on.
+fn paint_dashed_sides<P: PaintTarget>(
+    target: &mut P,
+    transform: Affine,
+    ring: BoxRect,
+    width: f64,
+    line_color: Color,
+) {
+    let half = width / 2.0;
+    let (dash, gap) = css_dash(width);
+    for line in [
+        Line::new((ring.x0 - half, ring.y0), (ring.x1 + half, ring.y0)),
+        Line::new((ring.x1, ring.y0 - half), (ring.x1, ring.y1 + half)),
+        Line::new((ring.x1 + half, ring.y1), (ring.x0 - half, ring.y1)),
+        Line::new((ring.x0, ring.y1 + half), (ring.x0, ring.y0 - half)),
+    ] {
+        let length = line.p0.distance(line.p1);
+        let stroke = if dash >= length {
+            css_stroke(width)
+        } else {
+            css_stroke(width).with_dashes(0.0, [dash, best_dash_gap(length, dash, gap)])
+        };
+        target.stroke(&stroke, transform, line_color, &line);
+    }
+}
+
+/// `borderColors` ({top, right, bottom, left}, from CSS `border-top-color` and kin) over
+/// the box's `borderColor`; None when every side has the same colour.
+fn side_colors(value: &Value, fallback: Color) -> Option<[Color; 4]> {
+    let object = value.as_object()?;
+    let sides = ["top", "right", "bottom", "left"].map(|side| {
+        object
+            .get(side)
+            .and_then(Value::as_str)
+            .map_or(fallback, color)
+    });
+    sides.iter().any(|side| *side != sides[0]).then_some(sides)
+}
+
+/// A solid border whose sides differ in colour: each side's share of the ring. As in CSS, sides
+/// meet along the line from each outer corner through its inner corner, and that line runs on
+/// into the box until it meets a neighbour's: on a round box (a CSS spinner, `border-radius: 50%`)
+/// the ring lies far inside the corners, so a side's share is the whole quarter, not a strip.
+fn paint_side_coloured_border<P: PaintTarget>(
+    target: &mut P,
+    transform: Affine,
+    shape: &RoundedRect,
+    border: [f64; 4],
+    sides: [Color; 4],
+) {
+    use vello::kurbo::Point;
+    let outer = shape.rect();
+    let centre = outer.center();
+    let [top, right, bottom, left] = border;
+    // Corners clockwise from top-left, each with its join direction (outer corner → inner corner).
+    let corners = [
+        (Point::new(outer.x0, outer.y0), Vec2::new(left, top)),
+        (Point::new(outer.x1, outer.y0), Vec2::new(-right, top)),
+        (Point::new(outer.x1, outer.y1), Vec2::new(-right, -bottom)),
+        (Point::new(outer.x0, outer.y1), Vec2::new(left, -bottom)),
+    ]
+    .map(|(corner, direction)| {
+        // Two open sides: no join, split towards the centre.
+        let direction = if direction.hypot() < 1e-6 {
+            centre - corner
+        } else {
+            direction
+        };
+        (corner, direction)
+    });
+    // Where the rays from corners `a` and `b` meet, as a distance along `a`'s ray.
+    let meet = |a: usize, b: usize| -> Option<(f64, Point)> {
+        let ((p, d), (q, e)) = (corners[a], corners[b]);
+        let cross = d.cross(e);
+        if cross.abs() < 1e-9 {
+            return None;
+        }
+        let s = (q - p).cross(e) / cross;
+        (s > 0.0).then(|| (s, p + d * s))
+    };
+    // A wide box: the left and right shares are triangles, the top and bottom ones meet between them.
+    let left_apex = meet(0, 3);
+    let top_apex = meet(0, 1);
+    let wide = match (left_apex, top_apex) {
+        (Some((sl, _)), Some((st, _))) => sl <= st,
+        (Some(_), None) => true,
+        _ => false,
+    };
+    let regions: [Vec<Point>; 4] = if wide {
+        let q = left_apex.map_or(centre, |(_, point)| point);
+        let r = meet(1, 2).map_or(centre, |(_, point)| point);
+        let [tl, tr, br, bl] = corners.map(|(corner, _)| corner);
+        [
+            vec![tl, tr, r, q],
+            vec![tr, br, r],
+            vec![br, bl, q, r],
+            vec![bl, tl, q],
+        ]
+    } else {
+        let p = top_apex.map_or(centre, |(_, point)| point);
+        let p2 = meet(2, 3).map_or(centre, |(_, point)| point);
+        let [tl, tr, br, bl] = corners.map(|(corner, _)| corner);
+        [
+            vec![tl, tr, p],
+            vec![tr, br, p2, p],
+            vec![br, bl, p2],
+            vec![bl, tl, p, p2],
+        ]
+    };
+    for (index, (side_color, region)) in sides.into_iter().zip(regions).enumerate() {
+        if border[index] <= 0.0 {
+            continue;
+        }
+        let mut wedge = vello::kurbo::BezPath::new();
+        wedge.move_to(region[0]);
+        for point in &region[1..] {
+            wedge.line_to(*point);
+        }
+        wedge.close_path();
+        target.push_clip(Fill::NonZero, transform, &wedge);
+        target.fill_ring(transform, shape, border, side_color);
+        target.pop_layer();
     }
 }
 
@@ -8955,7 +9319,12 @@ fn outline_ring(
     let base_expansion = total_offset + total_width / 2.0;
     let outline_radius = radius_override
         .map(|radius| radius + expansion - base_expansion)
-        .unwrap_or(base_radius + expansion)
+        // CSS: an outline follows the border radius out by its offset; a square box keeps square corners.
+        .unwrap_or(if base_radius > 0.0 {
+            base_radius + expansion
+        } else {
+            0.0
+        })
         .max(0.0);
     Some(RoundedRect::from_rect(outline_rect, outline_radius))
 }
@@ -8973,11 +9342,10 @@ fn paint_gradient_styled_border<P: PaintTarget>(
     gradient: &PaintGradient,
 ) -> bool {
     let bands: Vec<(f64, f64, Stroke)> = match style {
-        "dashed" => vec![(
-            width,
-            -width,
-            Stroke::new(width).with_dashes(0.0, [width * 3.0, width * 2.0]),
-        )],
+        "dashed" => vec![(width, -width, {
+            let (dash, gap) = css_dash(width);
+            css_stroke(width).with_dashes(0.0, [dash, gap])
+        })],
         "dotted" => vec![(
             width,
             -width,
@@ -8988,8 +9356,8 @@ fn paint_gradient_styled_border<P: PaintTarget>(
         "double" => {
             let band = width / 3.0;
             vec![
-                (band, -width, Stroke::new(band)),
-                (band, -width + band * 2.0, Stroke::new(band)),
+                (band, -width, css_stroke(band)),
+                (band, -width + band * 2.0, css_stroke(band)),
             ]
         }
         _ => return false,
@@ -9035,7 +9403,7 @@ fn paint_directional_outline<P: PaintTarget>(
         band_offset,
         radius_override,
         color(bottom_right_color),
-        Stroke::new(band_width),
+        css_stroke(band_width),
         total_width,
         total_offset,
     );
@@ -9063,7 +9431,7 @@ fn paint_directional_outline<P: PaintTarget>(
             band_offset,
             radius_override,
             color(top_left_color),
-            Stroke::new(band_width),
+            css_stroke(band_width),
             total_width,
             total_offset,
         );
@@ -9173,6 +9541,39 @@ fn motion_limit(entry: &Entry, key: &str) -> LengthPercentageAuto {
         |track| length(track.current.first().copied().unwrap_or(0.0)),
     )
 }
+/// One side of `padding`: a percentage string (`"5%"`, on its own or per side) is of the
+/// containing block's width; anything else is the resolved px value.
+fn padding_side(node: &Node, side: &str, px: f32) -> LengthPercentage {
+    let value = &node.style["padding"];
+    let raw = value.get(side).unwrap_or(value);
+    match raw
+        .as_str()
+        .and_then(|text| text.trim().strip_suffix('%'))
+        .and_then(|n| n.parse::<f32>().ok())
+    {
+        Some(percent) => LengthPercentage::percent(percent / 100.0),
+        None => LengthPercentage::length(px),
+    }
+}
+
+/// `grid-auto-rows` / `-columns` track sizes (`30px`, `minmax(0, 1fr)`, `auto`).
+fn auto_tracks(value: &Value) -> Vec<taffy::style::TrackSizingFunction> {
+    let Some(text) = value.as_str() else {
+        return value
+            .as_f64()
+            .map(|n| vec![length(n as f32)])
+            .unwrap_or_default();
+    };
+    css_layout::css_track_list(text)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|component| match component {
+            taffy::style::GridTemplateComponent::Single(track) => Some(track),
+            _ => None,
+        })
+        .collect()
+}
+
 fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
     let node = &entry.node;
     let pad = node.insets("padding");
@@ -9197,6 +9598,12 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
             "row-reverse" => FlexDirection::RowReverse,
             "column-reverse" => FlexDirection::ColumnReverse,
             _ => FlexDirection::Column,
+        },
+        // CSS `box-sizing`: Tarve sizes border boxes unless a node asks for content boxes.
+        box_sizing: if node.string("boxSizing", "border-box") == "content-box" {
+            taffy::style::BoxSizing::ContentBox
+        } else {
+            taffy::style::BoxSizing::BorderBox
         },
         aspect_ratio: node.style["aspectRatio"]
             .as_f64()
@@ -9230,11 +9637,12 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
             width: limit(&node.style["maxWidth"]),
             height: limit(&node.style["maxHeight"]),
         },
+        // Percentages (CSS `padding: 5%`) are of the container's width, as in CSS.
         padding: Rect {
-            top: length(pad[0]),
-            right: length(pad[1]),
-            bottom: length(pad[2]),
-            left: length(pad[3]),
+            top: padding_side(node, "top", pad[0]),
+            right: padding_side(node, "right", pad[1]),
+            bottom: padding_side(node, "bottom", pad[2]),
+            left: padding_side(node, "left", pad[3]),
         },
         // Margins take `"auto"` (and percentages) per side, as CSS does: `mx-auto` centres.
         margin: Rect {
@@ -9271,7 +9679,8 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
             "around" => JustifyContent::SPACE_AROUND,
             "evenly" => JustifyContent::SPACE_EVENLY,
             "stretch" => JustifyContent::STRETCH,
-            _ => JustifyContent::START,
+            // CSS `flex-start`: the main start, the right of a `row-reverse` row.
+            _ => JustifyContent::FLEX_START,
         }),
         // CSS `align-self`, `align-content`, `justify-items`, `justify-self`: unset means the container decides.
         align_self: align_keyword(node.string("alignSelf", "")),
@@ -9314,6 +9723,9 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
         }
         style.grid_template_columns = grid_template(&node.style["columns"], 2);
         style.grid_template_rows = grid_template(&node.style["rows"], 0);
+        // CSS `grid-auto-rows` / `grid-auto-columns`: the size of implicit tracks.
+        style.grid_auto_rows = auto_tracks(&node.style["autoRows"]);
+        style.grid_auto_columns = auto_tracks(&node.style["autoColumns"]);
     }
     // CSS `grid-column` / `grid-row`: "span 2", "2", "1 / 3", "2 / span 2".
     if let Some(line) = grid_line(&node.style["gridColumn"]) {

@@ -64,6 +64,9 @@ pub(crate) enum LayerFormat {
 }
 
 struct Layer {
+    /// A `<surface>`: the producer's swap chain (its raw pointer, to notice a new one),
+    /// shown at its own pixel size. Videos: 0, stretched over their rectangle.
+    external: usize,
     parent: IDCompositionVisual,
     child: IDCompositionVisual,
     clip: IDCompositionRectangleClip,
@@ -150,6 +153,7 @@ impl Composition {
             .layers
             .get(id)
             .is_none_or(|layer| layer.size != size || layer.format != format);
+        let fresh = fresh || self.layers.get(id).is_some_and(|layer| layer.external != 0);
         if fresh {
             if let Some(old) = self.layers.remove(id) {
                 unsafe {
@@ -231,11 +235,38 @@ impl Composition {
                 let _ = swap_chain.SetColorSpace1(space);
             }
         }
+        let (parent, child, clip) = unsafe { self.visuals(&swap_chain)? };
+        Ok(Layer {
+            external: 0,
+            parent,
+            child,
+            clip,
+            swap_chain,
+            target,
+            format,
+            size,
+            placement: None,
+        })
+    }
+
+    /// A clipped visual showing `content`, under the UI: what the UI draws over it
+    /// shows on top.
+    unsafe fn visuals(
+        &self,
+        content: &IDXGISwapChain1,
+    ) -> Result<
+        (
+            IDCompositionVisual,
+            IDCompositionVisual,
+            IDCompositionRectangleClip,
+        ),
+        String,
+    > {
         unsafe {
             let parent = self.device.CreateVisual().map_err(win)?;
             let child = self.device.CreateVisual().map_err(win)?;
             child
-                .SetContent(&swap_chain)
+                .SetContent(content)
                 .map_err(|error| format!("layer content: {}", win(error)))?;
             child
                 .SetBitmapInterpolationMode(DCOMPOSITION_BITMAP_INTERPOLATION_MODE_LINEAR)
@@ -245,21 +276,57 @@ impl Composition {
                 .map_err(win)?;
             let clip = self.device.CreateRectangleClip().map_err(win)?;
             parent.SetClip(&clip).map_err(win)?;
-            // Under the UI: what the UI draws over the video shows on top of it.
             self.root
                 .AddVisual(&parent, false, &self.ui)
                 .map_err(|error| format!("layer order: {}", win(error)))?;
-            Ok(Layer {
-                parent,
-                child,
-                clip,
-                swap_chain,
-                target,
-                format,
-                size,
-                placement: None,
-            })
+            Ok((parent, child, clip))
         }
+    }
+
+    /// The layer of `<surface>` `id`: `chain` (a composition swap chain its producer
+    /// presents on its own) at its own pixel size from the box's corner, clipped to it.
+    pub(crate) fn set_surface(
+        &mut self,
+        id: &str,
+        chain: &IDXGISwapChain1,
+        placement: OverlayPlacement,
+    ) -> Result<(), String> {
+        let raw = chain.as_raw() as usize;
+        if self
+            .layers
+            .get(id)
+            .is_none_or(|layer| layer.external != raw)
+        {
+            if let Some(old) = self.layers.remove(id) {
+                unsafe {
+                    let _ = self.root.RemoveVisual(&old.parent);
+                }
+            }
+            let (parent, child, clip) = unsafe { self.visuals(chain)? };
+            self.layers.insert(
+                id.to_string(),
+                Layer {
+                    external: raw,
+                    parent,
+                    child,
+                    clip,
+                    swap_chain: chain.clone(),
+                    target: None,
+                    format: LayerFormat::Bgra,
+                    size: (1, 1),
+                    placement: None,
+                },
+            );
+            self.dirty = true;
+        }
+        let layer = self.layers.get_mut(id).unwrap();
+        if layer.placement != Some(placement) {
+            unsafe { place(layer, placement) }
+                .map_err(|error| format!("surface placement: {error}"))?;
+            layer.placement = Some(placement);
+            self.dirty = true;
+        }
+        Ok(())
     }
 
     /// Drops the layers of videos not shown any more.
@@ -335,11 +402,17 @@ impl Composition {
 unsafe fn place(layer: &Layer, placement: OverlayPlacement) -> Result<(), String> {
     let (w, h) = (layer.size.0 as f32, layer.size.1 as f32);
     let [x0, y0, x1, y1] = placement.dest;
+    // A surface's swap chain shows pixel for pixel, as in a SwapChainPanel.
+    let (sx, sy) = if layer.external != 0 {
+        (1.0, 1.0)
+    } else {
+        ((x1 - x0) / w, (y1 - y0) / h)
+    };
     let matrix = windows_numerics::Matrix3x2 {
-        M11: (x1 - x0) / w,
+        M11: sx,
         M12: 0.0,
         M21: 0.0,
-        M22: (y1 - y0) / h,
+        M22: sy,
         M31: x0,
         M32: y0,
     };

@@ -307,6 +307,14 @@ struct Pending {
 const MIX_RATE: u32 = 48_000;
 const MIX_CHANNELS: u16 = 2;
 
+/// The app's mix as `<video>` sound joins it: its mixer and how many channels it plays.
+#[cfg(target_os = "windows")]
+#[derive(Clone)]
+pub(crate) struct OutputMix {
+    pub(crate) mixer: Mixer,
+    pub(crate) channels: rodio::ChannelCount,
+}
+
 /// The app's own mix of every track. It outlives output streams: when the
 /// device changes, a new stream plays this same source on from where the old
 /// one stopped, so no track is reopened, reloaded or moved.
@@ -664,8 +672,14 @@ impl Media {
 
     /// The app's audio mix, for `<video>` sound to play through the same output.
     #[cfg(target_os = "windows")]
-    pub(crate) fn output_mixer(&mut self) -> Result<Mixer, String> {
-        self.mixer()
+    pub(crate) fn output_mixer(&mut self) -> Result<OutputMix, String> {
+        let mixer = self.mixer()?;
+        let channels = self
+            .mix
+            .as_ref()
+            .map(|(_, mix)| mix.channels)
+            .ok_or("no audio mix")?;
+        Ok(OutputMix { mixer, channels })
     }
 
     fn apply_volume(track: &Track) {

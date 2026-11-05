@@ -294,7 +294,8 @@ export function resolveStyleString(key: string, value: string, selected: ThemeDe
   return resolved;
 }
 
-const STATE_KEYS = ["hover", "focus", "focusVisible", "active", "disabled"] as const;
+// Every state style resolves like the base one (theme tokens, CSS shadows, gradients).
+const STATE_KEYS = ["hover", "focus", "focusVisible", "active", "disabled", "focusWithin", "groupHover"] as const;
 
 const resolvedStyles = new WeakMap<ThemeDefinition, Map<string, Style>>();
 let resolvedStyleCount = 0;
@@ -348,11 +349,12 @@ function splitLayers(value: string): string[] {
   return parts.filter(Boolean);
 }
 
-const CSS_PX = /^(-?\d*\.?\d+)(px)?$/;
+// px, or rem/em at the 16 px root size.
+const CSS_PX = /^(-?\d*\.?\d+)(px|rem|em)?$/;
 function cssPx(value: string, what: string): number {
   const match = CSS_PX.exec(value.trim());
   if (!match || (match[2] === undefined && Number(match[1]) !== 0)) throw new TypeError(`${what} needs a px length, got "${value}"`);
-  return Number(match[1]);
+  return Number(match[1]) * (match[2] === "rem" || match[2] === "em" ? 16 : 1);
 }
 
 /** `blur(12px) saturate(160%)` → { blur: 12, saturate: 1.6 }. */
@@ -440,6 +442,11 @@ function resolveCssLayers(style: StateStyle, selected: ThemeDefinition): void {
   }
   if (style.filter && typeof style.filter === "object" && typeof style.filter.dropShadow?.color === "string") {
     style.filter = { ...style.filter, dropShadow: { ...style.filter.dropShadow, color: resolveThemeColor(cssColor(style.filter.dropShadow.color), selected) } };
+  }
+  // Per-side border colours (CSS border-top-color and kin), each a theme token or CSS colour.
+  if (style.borderColors && typeof style.borderColors === "object") {
+    style.borderColors = Object.fromEntries(Object.entries(style.borderColors).filter(([, value]) => typeof value === "string")
+      .map(([side, value]) => [side, resolveThemeColor(cssColor(value as string), selected)]));
   }
   if (style.maskImage !== undefined) {
     const value = style.maskImage;

@@ -446,6 +446,76 @@ fn taffy_aspect_ratio_and_reverse_direction_are_native_layout_features() {
     )]));
     reverse_tree.compute(300.0, 200.0).unwrap();
     assert!(reverse_tree.entries["first"].rect.x0 > reverse_tree.entries["second"].rect.x0);
+
+    // `auto minmax(0, 1fr) auto`: a unitless 0 is a length in a track list.
+    assert_eq!(
+        crate::tree::css_track_list("auto minmax(0, 1fr) auto").map(|tracks| tracks.len()),
+        Some(3)
+    );
+
+    // A poster card: the ratio box takes its width from the stretched column, as in CSS.
+    let mut card_tree = Tree::new(root(vec![node(
+        "track",
+        "row",
+        json!({"direction":"row","gap":8}),
+        vec![node(
+            "card",
+            "pressable",
+            json!({"direction":"column","align":"stretch","width":176,"shrink":0}),
+            vec![node(
+                "poster",
+                "view",
+                json!({"aspectRatio":2.0 / 3.0,"overflow":"hidden"}),
+                vec![node(
+                    "img",
+                    "view",
+                    json!({"width":"100%","height":"100%"}),
+                    vec![],
+                )],
+            )],
+        )],
+    )]));
+    card_tree.compute(800.0, 600.0).unwrap();
+    let poster = card_tree.entries["poster"].rect;
+    assert!((poster.width() - 176.0).abs() < 0.1, "{poster:?}");
+    assert!((poster.height() - 264.0).abs() < 0.1, "{poster:?}");
+
+    // The same card in a horizontally scrolling row (a Netflix-style shelf).
+    let mut scroll = node(
+        "shelf",
+        "scroll",
+        json!({"direction":"row","gap":8,"overflow":"hidden","minHeight":0,"shrink":1}),
+        vec![node(
+            "card2",
+            "pressable",
+            json!({"direction":"column","align":"stretch","width":176,"minWidth":176,"flex":"0 0 auto","gap":6}),
+            vec![node(
+                "poster2",
+                "view",
+                json!({"aspectRatio":2.0 / 3.0,"overflow":"hidden","position":"relative"}),
+                vec![node(
+                    "img2",
+                    "view",
+                    json!({"width":"100%","height":"100%"}),
+                    vec![],
+                )],
+            )],
+        )],
+    );
+    scroll.scroll_orientation = "horizontal".into();
+    let mut shelf_tree = Tree::new(root(vec![node(
+        "section",
+        "view",
+        json!({"direction":"column"}),
+        vec![scroll],
+    )]));
+    shelf_tree.compute(800.0, 600.0).unwrap();
+    let poster = shelf_tree.entries["poster2"].rect;
+    assert!(
+        (poster.height() - 264.0).abs() < 0.1,
+        "shelf poster {poster:?} card {:?}",
+        shelf_tree.entries["card2"].rect
+    );
 }
 
 #[test]
@@ -909,6 +979,59 @@ fn custom_window_chrome_border_is_suppressed_when_maximized_or_fullscreen() {
     tree.compute(100.0, 80.0).unwrap();
     assert!((tree.entries["child"].rect.x0 - 1.0).abs() < 0.1);
     assert!((tree.entries["child"].rect.width() - 98.0).abs() < 0.1);
+}
+#[test]
+fn pointer_move_reaches_every_reporting_ancestor_and_leave_waits_for_its_box() {
+    let mut inner = node("inner", "view", json!({"width":40,"height":40}), vec![]);
+    inner.report_pointer = true;
+    let mut outer = node(
+        "outer",
+        "view",
+        json!({"width":200,"height":200}),
+        vec![inner],
+    );
+    outer.report_pointer = true;
+    let mut tree = Tree::new(root(vec![outer]));
+    tree.compute(300.0, 300.0).unwrap();
+    let of = |events: &[serde_json::Value], kind: &str| -> Vec<String> {
+        events
+            .iter()
+            .filter(|event| event["type"] == kind)
+            .map(|event| event["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let events = tree.pointer_move(100.0, 100.0);
+    assert_eq!(of(&events, "pointerMove"), ["outer"]);
+    // Into the child: both hear the move; the outer node has not been left.
+    let events = tree.pointer_move(10.0, 10.0);
+    assert_eq!(of(&events, "pointerMove"), ["inner", "outer"]);
+    assert!(of(&events, "pointerLeave").is_empty());
+    // Out of the child, still inside the outer box: only the child is left.
+    let events = tree.pointer_move(120.0, 120.0);
+    assert_eq!(of(&events, "pointerLeave"), ["inner"]);
+    assert_eq!(of(&events, "pointerMove"), ["outer"]);
+    let events = tree.pointer_move(250.0, 250.0);
+    assert_eq!(of(&events, "pointerLeave"), ["outer"]);
+}
+#[test]
+fn a_title_bar_takes_no_room_in_full_screen_as_the_system_caption() {
+    let bar = node("bar", "titlebar", json!({"height":40}), vec![]);
+    let content = node("content", "view", json!({"flex":1}), vec![]);
+    let mut tree = Tree::new(node("root", "window", json!({}), vec![bar, content]));
+    tree.compute(100.0, 80.0).unwrap();
+    assert_eq!(tree.entries["content"].rect.y0, 40.0);
+    assert_eq!(tree.entries["content"].rect.height(), 40.0);
+
+    assert!(tree.set_window_fullscreen(true));
+    assert!(!tree.set_window_fullscreen(true));
+    tree.compute(100.0, 80.0).unwrap();
+    assert_eq!(tree.entries["content"].rect.y0, 0.0);
+    assert_eq!(tree.entries["content"].rect.height(), 80.0);
+    assert_eq!(tree.entries["bar"].rect.height(), 0.0);
+
+    assert!(tree.set_window_fullscreen(false));
+    tree.compute(100.0, 80.0).unwrap();
+    assert_eq!(tree.entries["content"].rect.y0, 40.0);
 }
 #[test]
 fn hover_and_color_update_do_not_invalidate_layout_or_text() {
@@ -6047,6 +6170,147 @@ fn border_style_paints_dashed_borders_and_can_be_hidden() {
 }
 
 #[test]
+fn a_square_dashed_border_is_four_dashed_sides_and_side_colours_split_the_ring() {
+    // Chrome dashes each side from corner to corner; a rounded box keeps one dashed ring.
+    let style = |radius: f64| json!({"width": 120, "height": 40, "borderWidth": 3, "borderColor": "#ff0000", "borderStyle": "dashed", "radius": radius});
+    let square = painted(vec![node("box", "view", style(0.0), vec![])]);
+    assert_eq!(
+        square
+            .strokes
+            .iter()
+            .filter(|(width, dashed, _)| *width == 3.0 && *dashed)
+            .count(),
+        4
+    );
+    let rounded = painted(vec![node("box", "view", style(8.0), vec![])]);
+    assert_eq!(
+        rounded
+            .strokes
+            .iter()
+            .filter(|(width, dashed, _)| *width == 3.0 && *dashed)
+            .count(),
+        1
+    );
+
+    let sides = painted(vec![node(
+        "box",
+        "view",
+        json!({"width": 140, "height": 50, "borderWidth": {"top": 4, "right": 2, "bottom": 6, "left": 1},
+            "borderColor": "#ff0000", "borderColors": {"top": "#ff0000", "right": "#00ff00", "bottom": "#0000ff", "left": "#ffff00"}}),
+        vec![],
+    )]);
+    for hex in ["#ff0000", "#00ff00", "#0000ff", "#ffff00"] {
+        let side = crate::tree::color(hex);
+        assert!(
+            sides.fills.iter().any(|(color, _)| *color == side),
+            "{hex} side painted"
+        );
+    }
+}
+
+#[test]
+fn a_border_with_open_sides_is_clipped_by_the_box_not_cut_along_its_edges() {
+    // border-right and border-bottom only (a tooltip arrow): the inner edge must not lie on the
+    // outer one, where both would antialias into a faint line on the open sides.
+    let border = crate::tree::color("#ff0000");
+    let recorder = painted(vec![node(
+        "arrow",
+        "view",
+        json!({"width": 80, "height": 40, "borderWidth": {"right": 1, "bottom": 1}, "borderColor": "#ff0000"}),
+        vec![],
+    )]);
+    let (_, ring) = recorder
+        .fills
+        .iter()
+        .find(|(color, _)| *color == border)
+        .expect("the border is painted");
+    assert_eq!(
+        (ring.width(), ring.height()),
+        (86.0, 46.0),
+        "the ring runs past the box, which clips it"
+    );
+}
+
+#[test]
+fn pointer_capture_reports_moves_outside_the_box_and_the_release_clicks_nothing_else() {
+    // A seek bar's hit area over a full-window pressable (a player's click-to-pause layer).
+    let mut tree = crate::tree::Tree::new(node(
+        "root",
+        "window",
+        json!({"width": 400, "height": 300}),
+        vec![
+            node(
+                "layer",
+                "pressable",
+                json!({"position": "absolute", "left": 0, "top": 0, "width": 400, "height": 300}),
+                vec![],
+            ),
+            {
+                let mut bar = node(
+                    "bar",
+                    "view",
+                    json!({"position": "absolute", "left": 100, "top": 100, "width": 200, "height": 20}),
+                    vec![],
+                );
+                bar.report_pointer = true;
+                bar
+            },
+        ],
+    ));
+    tree.compute(400.0, 300.0).unwrap();
+    tree.pointer_move(150.0, 110.0);
+    tree.pointer_down();
+    tree.capture_pointer(Some("bar".into()));
+    assert_eq!(tree.pointer_capture(), Some("bar"));
+    let events = tree.pointer_move(350.0, 20.0);
+    assert!(
+        events.iter().any(|event| event["type"] == "pointerMove"
+            && event["id"] == "bar"
+            && event["x"] == 250.0),
+        "{events:?}"
+    );
+    assert!(
+        !events.iter().any(|event| event["type"] == "pointerLeave"),
+        "{events:?}"
+    );
+    let released = tree.pointer_up();
+    assert!(
+        !released.iter().any(|event| event["type"] == "click"),
+        "{released:?}"
+    );
+    assert_eq!(tree.pointer_capture(), None);
+    let after = tree.pointer_move(351.0, 20.0);
+    assert!(
+        after
+            .iter()
+            .any(|event| event["type"] == "pointerLeave" && event["id"] == "bar"),
+        "{after:?}"
+    );
+}
+
+#[test]
+fn grid_columns_none_is_one_implicit_column_like_css() {
+    let mut tree = crate::tree::Tree::new(node(
+        "root",
+        "window",
+        json!({"width": 400, "height": 300}),
+        vec![node(
+            "g",
+            "view",
+            json!({"display": "grid", "columns": "none", "width": 300}),
+            vec![
+                node("a", "view", json!({"height": 10}), vec![]),
+                node("b", "view", json!({"height": 10}), vec![]),
+            ],
+        )],
+    ));
+    tree.compute(400.0, 300.0).unwrap();
+    let (a, b) = (tree.entries["a"].rect, tree.entries["b"].rect);
+    assert_eq!((a.width(), b.width()), (300.0, 300.0));
+    assert_eq!(b.y0, a.y1, "a row each");
+}
+
+#[test]
 fn text_shadow_paints_an_offset_copy_under_the_text() {
     let shadow = crate::tree::color("#ff0000");
     let recorder = painted(vec![text_node(
@@ -6696,6 +6960,57 @@ fn conic_gradients_resolve_centre_from_and_stop_fixup() {
 }
 
 #[test]
+fn text_ink_overflows_its_box_unless_it_clips() {
+    // Accents over capitals paint above a tight line box: its paint bounds reach past it.
+    let mut text = node(
+        "t",
+        "text",
+        json!({"fontSize": 24, "lineHeight": 1}),
+        vec![],
+    );
+    text.text = "ÉÂÍ".into();
+    let mut clipped = node(
+        "c",
+        "text",
+        json!({"fontSize": 24, "lineHeight": 1, "overflow": "hidden"}),
+        vec![],
+    );
+    clipped.text = "ÉÂÍ".into();
+    let mut tree = Tree::new(root(vec![text, clipped]));
+    tree.compute(300.0, 200.0).unwrap();
+    let (free, kept) = (&tree.entries["t"], &tree.entries["c"]);
+    assert!(
+        free.rect.y0 - free.bounds.y0 >= 24.0,
+        "{:?} {:?}",
+        free.rect,
+        free.bounds
+    );
+    assert!(kept.rect.y0 - kept.bounds.y0 < 24.0);
+}
+
+#[test]
+fn gradient_colours_interpolate_with_premultiplied_alpha() {
+    // linear-gradient(rgba(255,0,0,0.08), rgba(18,21,30,0.85)): half way is nearly the grey.
+    let stops = crate::tree::premultiplied_stops(&[
+        (0.0, crate::tree::color("#ff000014")),
+        (1.0, crate::tree::color("#12151ed9")),
+    ]);
+    assert!(stops.len() > 2);
+    let middle = stops
+        .iter()
+        .find(|stop| (stop.0 - 0.5).abs() < 1e-3)
+        .unwrap()
+        .1;
+    assert!(middle.components[0] < 0.2, "{middle:?}");
+    // To transparent: the colour stays, only alpha falls (no grey fringe from #0000).
+    let fade = crate::tree::premultiplied_stops(&[
+        (0.0, crate::tree::color("#ffffffff")),
+        (1.0, crate::tree::color("#00000000")),
+    ]);
+    assert!(fade[4].1.components[0] > 0.99, "{:?}", fade[4]);
+}
+
+#[test]
 fn gradient_stops_support_px_css_fixup_and_repeating() {
     use crate::paint::GradientGeometry;
     let card = |id: &str, background: serde_json::Value| {
@@ -7067,9 +7382,10 @@ fn per_side_border_on_a_rounded_box_paints_one_ring_that_keeps_the_corner_arcs()
         1,
         "one even-odd ring, not one rectangle per side"
     );
+    // The open bottom side: the ring runs past the box and the rounded box clips it.
     let (_, bounds) = borders[0];
     assert!(
-        (bounds.width() - 80.0).abs() < 0.5 && (bounds.height() - 32.0).abs() < 0.5,
+        (bounds.width() - 86.0).abs() < 0.5 && (bounds.height() - 38.0).abs() < 0.5,
         "{bounds:?}"
     );
     assert!(
@@ -7088,6 +7404,14 @@ fn per_corner_radius_parses_shrinks_inside_borders_and_animates_four_values() {
     );
     assert_eq!(corner_radii(&json!({"topLeft": -3})), Some([0.0; 4]));
     assert_eq!(corner_radii(&json!("8px")), None);
+    assert_eq!(
+        crate::tree::percent_corner_radii(&json!("50%"), 20.0),
+        Some([10.0; 4])
+    );
+    assert_eq!(
+        crate::tree::percent_corner_radii(&json!({"topLeft": "25%", "topRight": 3}), 40.0),
+        Some([10.0, 3.0, 0.0, 0.0])
+    );
     assert_eq!(corner_radii(&json!(f64::NAN)), None);
 
     // A uniform radius still transitions; so does a per-corner one, corner by corner.

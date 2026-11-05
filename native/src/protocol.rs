@@ -289,6 +289,9 @@ pub struct Node {
     pub image: Option<Box<ImageSource>>,
     #[serde(default)]
     pub fit: String,
+    /// `<surface>`: a native view the producer draws into (X11 child window) instead of frames.
+    #[serde(default)]
+    pub native: bool,
     #[serde(default)]
     pub svg: String,
     #[serde(default)]
@@ -715,6 +718,18 @@ pub enum Command {
     /// A `<video>` engine has news (an event, a picture): poll the videos.
     #[serde(skip)]
     VideoWake,
+    /// `<surface>`: `attach` shows the swap chain at `swapChain` (an `IDXGISwapChain*` of this
+    /// process, in decimal or 0x hex) in the element, as `ISwapChainPanelNative::SetSwapChain`;
+    /// `detach` stops showing it.
+    Surface {
+        id: String,
+        action: String,
+        #[serde(default, rename = "swapChain")]
+        swap_chain: Option<String>,
+    },
+    /// A producer handed a `<surface>` a new swap chain: show it.
+    #[serde(skip)]
+    SurfaceWake,
     #[serde(skip)]
     RemoteImage {
         url: String,
@@ -734,6 +749,10 @@ pub enum Command {
     },
     Focus {
         id: String,
+    },
+    /// DOM `setPointerCapture` (an id) and `releasePointerCapture` (`null`).
+    CapturePointer {
+        id: Option<String>,
     },
     ScrollToItem {
         id: String,
@@ -873,6 +892,7 @@ pub fn validate(root: &Node) -> Result<(), String> {
             "slider",
             "splitter",
             "video",
+            "surface",
         ]
         .contains(&n.kind.as_str())
         {
@@ -924,6 +944,7 @@ pub fn validate_mutations(mutations: &[TreeMutation]) -> Result<(), String> {
                     "slider",
                     "splitter",
                     "video",
+                    "surface",
                 ]
                 .contains(&node.kind.as_str())
                 {

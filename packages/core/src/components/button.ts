@@ -35,11 +35,16 @@ function firstStopColor(gradient: Gradient): string {
   return typeof stop === "string" ? stop : stop?.color ?? theme.colors.foreground;
 }
 
-function composedContent(child: Child, foreground: string): Child {
-  if (Array.isArray(child)) return child.map(item => composedContent(item, foreground));
+/**
+ * A button's label in the button's ink. Strings take the label size and weight; an element that
+ * sets its own colour keeps it for everything inside (the nearest ancestor wins, as CSS inherits),
+ * and one that sets its own font keeps that font for the strings inside.
+ */
+function composedContent(child: Child, foreground: string, fonts = true, font: { size: number; weight: number } = { size: 14, weight: 500 }): Child {
+  if (Array.isArray(child)) return child.map(item => composedContent(item, foreground, fonts, font));
   if (child == null || typeof child === "boolean") return child;
   if (typeof child === "string" || typeof child === "number") {
-    return jsx(Text, { size: 14, weight: 500, color: foreground, children: child });
+    return jsx(Text, fonts ? { size: font.size, weight: font.weight, color: foreground, children: child } : { color: foreground, children: child });
   }
 
   const props = child.props;
@@ -48,8 +53,8 @@ function composedContent(child: Child, foreground: string): Child {
       ...child,
       props: {
         ...props,
-        size: props.size ?? 14,
-        weight: props.weight ?? 500,
+        size: props.size ?? font.size,
+        weight: props.weight ?? font.weight,
         ...(props.color === undefined && props.style?.foreground === undefined ? { color: foreground } : {}),
       },
     };
@@ -60,8 +65,8 @@ function composedContent(child: Child, foreground: string): Child {
       type: Text,
       props: {
         ...props,
-        size: props.size ?? 14,
-        weight: props.weight ?? 500,
+        ...(props.size === undefined && props.style?.fontSize === undefined ? { size: font.size } : {}),
+        ...(props.weight === undefined && props.style?.fontWeight === undefined ? { weight: font.weight } : {}),
         ...(props.color === undefined && props.style?.foreground === undefined && props.style?.color === undefined
           ? { color: foreground }
           : {}),
@@ -83,16 +88,19 @@ function composedContent(child: Child, foreground: string): Child {
       props: {
         ...props,
         style: {
-          fontSize: 14,
+          fontSize: font.size,
           lineHeight: theme.font.lineHeight,
-          fontWeight: 500,
+          fontWeight: font.weight,
           foreground,
           ...props.style,
         },
       },
     };
   }
-  const children = props.children === undefined ? undefined : composedContent(props.children, foreground);
+  const style = (props.style ?? {}) as Record<string, unknown>;
+  if (style.foreground !== undefined || style.color !== undefined || props.color !== undefined) return child;
+  const ownFont = style.fontSize !== undefined || style.fontWeight !== undefined || props.size !== undefined;
+  const children = props.children === undefined ? undefined : composedContent(props.children, foreground, fonts && !ownFont, font);
   if (children === undefined) return child;
   return { ...child, props: { ...props, children } };
 }
@@ -144,7 +152,11 @@ export function Button({ variant = "default", size = "default", style, disabled,
 
   return _nativeJsx("pressable", {
     ...props,
-    children: composedContent(children, foreground),
+    // Labels take the button's own font (its CSS `font-size`/`font-weight`, else 14 px medium).
+    children: composedContent(children, foreground, true, {
+      size: typeof buttonStyle.fontSize === "number" ? buttonStyle.fontSize : 14,
+      weight: typeof buttonStyle.fontWeight === "number" ? buttonStyle.fontWeight : 500,
+    }),
     control: semanticControl,
     disabled,
     style: {

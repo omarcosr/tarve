@@ -4,7 +4,7 @@ export type Length = number | `${number}%` | "auto" | ViewportLength;
 /** A CSS viewport unit: resolved to px for the window when the tree compiles, again on resize. */
 export type ViewportLength = `${number}${"vh" | "vw" | "vmin" | "vmax" | "dvh" | "svh" | "lvh" | "dvw" | "svw" | "lvw"}`;
 
-export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "markdown" | "code" | "diff" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter" | "video";
+export type NodeKind = "window" | "titlebar" | "view" | "row" | "column" | "text" | "markdown" | "code" | "diff" | "button" | "image" | "svg" | "scroll" | "input" | "textarea" | "pressable" | "slider" | "splitter" | "video" | "surface";
 export type SvgElementName = "path" | "circle" | "ellipse" | "g" | "line" | "polygon" | "polyline" | "rect";
 export type SvgAttributeValue = string | number;
 export type SvgAttributes = Record<string, SvgAttributeValue>;

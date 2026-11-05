@@ -96,6 +96,7 @@ const entries = [
   ["packages/core/src/pack-host.ts", "pack-host.js"],
   ["packages/core/build.ts", "build.js"],
   ["packages/core/cli.ts", "cli.js"],
+  ["packages/core/alias-preload.ts", "alias-preload.js"],
   ["packages/core/node-build.ts", "node-build.js"],
   ["packages/core/package-installer.ts", "package-installer.js"],
   ["packages/protocol/src/index.ts", "protocol.js"],

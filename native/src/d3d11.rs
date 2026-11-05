@@ -19,7 +19,7 @@ use swash::{
     zeno::{Format as SwashFormat, Vector as SwashVector},
 };
 use vello::{
-    kurbo::{Affine, BezPath, Cap, Join, PathEl, Point, Rect, RoundedRect, Shape, Stroke, dash},
+    kurbo::{Affine, BezPath, Cap, Join, PathEl, Point, RoundedRect, Shape, Stroke, dash},
     peniko::{Color, Fill, FontData, ImageAlphaType, ImageData, ImageFormat},
 };
 use windows::{
@@ -279,6 +279,15 @@ enum TextureRef {
     /// A `<video>` picture: the same texture shows a new picture each generation.
     /// Its node id: a video in its own composition layer is drawn as a hole.
     Video(VideoView, u64, Arc<str>),
+    /// A `<surface>` by node id: clears the UI's alpha over its composition layer
+    /// (draws nothing while it has none).
+    Hole(Arc<str>),
+}
+
+/// A `<surface>` this frame shows: where its producer's swap chain goes.
+struct SurfaceRequest {
+    id: String,
+    placement: OverlayPlacement,
 }
 
 /// What a `<video>` texture holds: RGBA, or the decoder's NV12 planes converted while drawn.
@@ -508,6 +517,12 @@ pub(crate) struct D3d11Graphics {
     /// What the frame drawn last changed, for Present1: `None` the whole window,
     /// empty nothing (no present), else these dirty rectangles.
     present_rects: Option<Vec<windows::Win32::Foundation::RECT>>,
+    /// Per back buffer of the flip-sequential chain (indexed by `back_buffer`): what the
+    /// canvas changed since that buffer last received it. `None`: all of it. A partial
+    /// frame copies only these into the buffer instead of the whole canvas.
+    back_damage: [Option<Vec<[f32; 4]>>; 2],
+    /// Which of the two back buffers `GetBuffer(0)` returns now; flips on each present.
+    back_buffer: usize,
     /// Where the commands being replayed draw (the canvas or the back buffer);
     /// glass copies its backdrop from it.
     current_target: Option<(ID3D11RenderTargetView, ID3D11Texture2D)>,
@@ -558,6 +573,10 @@ pub(crate) struct D3d11Graphics {
     /// Videos this frame could show as layers, and the ones drawn as holes for them.
     overlay_requests: Vec<OverlayRequest>,
     punched: HashSet<String>,
+    /// `<surface>` swap chains by node id (their producers present them), and the
+    /// surfaces this frame shows.
+    surface_chains: HashMap<String, IDXGISwapChain1>,
+    surface_requests: Vec<SurfaceRequest>,
     /// Videos whose layer could not be made (no YUV swap chains): drawn in the frame.
     overlay_blocked: HashSet<String>,
     /// Clears the UI's alpha under a video layer (antialiased at clipped edges).
@@ -716,6 +735,8 @@ impl D3d11Graphics {
             tile_hashes: Vec::new(),
             canvas: None,
             present_rects: None,
+            back_damage: [None, None],
+            back_buffer: 0,
             current_target: None,
             scissor_rasterizer,
             gpu_timer,
@@ -753,6 +774,8 @@ impl D3d11Graphics {
             composition_failed: false,
             overlay_requests: Vec::new(),
             punched: HashSet::new(),
+            surface_chains: HashMap::new(),
+            surface_requests: Vec::new(),
             overlay_blocked: HashSet::new(),
             punch_blend,
             overlay_error: None,
@@ -803,6 +826,7 @@ impl D3d11Graphics {
         self.commands.clear();
         self.used_images.clear();
         self.overlay_requests.clear();
+        self.surface_requests.clear();
         if self.glyph_atlas_exhausted {
             self.tile_hashes.clear();
             self.glyphs.clear();
@@ -845,10 +869,11 @@ impl D3d11Graphics {
         &self.device
     }
 
-    /// Video layers for this frame's requests (when the window can show them),
-    /// and the holes the UI draws for them.
+    /// Video and `<surface>` layers for this frame's requests (when the window can
+    /// show them), and the holes the UI draws for them.
     fn sync_overlays(&mut self) {
         let requests = std::mem::take(&mut self.overlay_requests);
+        let surfaces = std::mem::take(&mut self.surface_requests);
         let previous = std::mem::take(&mut self.punched);
         let shown = self._window.is_visible().unwrap_or(false)
             && !self._window.is_minimized().unwrap_or(false);
@@ -858,15 +883,22 @@ impl D3d11Graphics {
             .any(|command| matches!(command, DrawCommand::Glass { .. }));
         let enabled = std::env::var_os("TARVE_VIDEO_LAYERS").is_none_or(|value| value != "0");
         // Glass samples the UI behind it, which would not hold the video: draw it in the frame.
-        if requests.is_empty()
+        // A surface has no other way to show: it keeps its layer (glass over it misses it).
+        let requests = if glass || !enabled {
+            Vec::new()
+        } else {
+            requests
+        };
+        if (requests.is_empty() && surfaces.is_empty())
             || !shown
-            || glass
-            || !enabled
             || self.tile.is_some()
             || self.composition_failed
         {
             if let Some(composition) = &mut self.composition {
                 composition.retain(&HashSet::new());
+            }
+            if !previous.is_empty() {
+                self.tile_hashes.clear();
             }
             return;
         }
@@ -881,6 +913,23 @@ impl D3d11Graphics {
             return;
         };
         let mut kept = HashSet::new();
+        for surface in surfaces {
+            let Some(chain) = self.surface_chains.get(&surface.id) else {
+                continue;
+            };
+            if kept.contains(&surface.id) {
+                continue;
+            }
+            match composition.set_surface(&surface.id, chain, surface.placement) {
+                Ok(()) => {
+                    self.punched.insert(surface.id.clone());
+                    kept.insert(surface.id);
+                }
+                Err(error) => {
+                    self.overlay_error = Some(format!("surface '{}': {error}", surface.id));
+                }
+            }
+        }
         let mut fresh_layers = Vec::new();
         for request in requests {
             if self.overlay_blocked.contains(&request.id) || kept.contains(&request.id) {
@@ -1135,6 +1184,11 @@ impl D3d11Graphics {
         self.video_views = views.into_iter().collect();
     }
 
+    /// The `<surface>` swap chains the next frame shows, by node id.
+    pub(crate) fn set_surface_chains(&mut self, chains: Vec<(String, IDXGISwapChain1)>) {
+        self.surface_chains = chains.into_iter().collect();
+    }
+
     /// Images uploaded and images missing their pixels since the last call.
     pub(crate) fn take_image_residency(&mut self) -> (Vec<String>, Vec<String>) {
         (
@@ -1245,6 +1299,9 @@ impl D3d11Graphics {
         };
         if let Err(error) = presented {
             return Err(self.classify_windows_gpu_error("DXGI Present", error));
+        }
+        if !rects.as_ref().is_some_and(Vec::is_empty) {
+            self.back_buffer ^= 1;
         }
         // Layer moves and holes show with the frame that drew them.
         if let Some(composition) = &mut self.composition
@@ -1412,6 +1469,8 @@ impl D3d11Graphics {
             self.context.PSSetShaderResources(0, Some(&[None]));
             self.context.CopyResource(&backbuffer, cache);
         }
+        // This path writes whole buffers outside the retained canvas: resync it after.
+        self.back_damage = [None, None];
         self.tile_hashes = hashes;
         if !hashes_fresh && !partial_redraw_disabled() {
             self.present_rects = Some(merge_rects(changed).into_iter().map(to_rect).collect());
@@ -1438,6 +1497,7 @@ impl D3d11Graphics {
         if self.canvas.is_none() {
             self.canvas = Some(create_canvas(&self.device, &backbuffer)?);
             self.tile_hashes.clear();
+            self.back_damage = [None, None];
         }
         let canvas = self.canvas.clone().ok_or("D3D11 canvas is unavailable")?;
         let bounds = self.command_bounds();
@@ -1491,10 +1551,52 @@ impl D3d11Graphics {
                 !rects.is_empty()
             }
         };
+        // The back buffer holds the canvas as of the last frame it was given: only what
+        // changed since goes over (the whole canvas each frame cost a full-window copy,
+        // ~32 MB of traffic per hovered frame at 2560×1600).
+        for slot in &mut self.back_damage {
+            match (slot.as_mut(), &damage) {
+                (Some(pending), Some(rects)) => pending.extend_from_slice(rects),
+                _ => *slot = None,
+            }
+        }
+        let index = self.back_buffer;
+        let pending = if self.composition.is_none() {
+            self.back_damage[index].replace(Vec::new())
+        } else {
+            self.back_damage[index] = None;
+            None
+        };
         unsafe {
             self.context.PSSetShaderResources(0, Some(&[None]));
             self.context.OMSetRenderTargets(None, None);
-            self.context.CopyResource(&backbuffer, &canvas.texture);
+            match pending {
+                Some(rects) => {
+                    for rect in merge_rects(rects) {
+                        let area = windows::Win32::Graphics::Direct3D11::D3D11_BOX {
+                            left: rect[0] as u32,
+                            top: rect[1] as u32,
+                            front: 0,
+                            right: (rect[2] as u32).min(self.width),
+                            bottom: (rect[3] as u32).min(self.height),
+                            back: 1,
+                        };
+                        if area.right > area.left && area.bottom > area.top {
+                            self.context.CopySubresourceRegion(
+                                &backbuffer,
+                                0,
+                                area.left,
+                                area.top,
+                                0,
+                                &canvas.texture,
+                                0,
+                                Some(&area),
+                            );
+                        }
+                    }
+                }
+                None => self.context.CopyResource(&backbuffer, &canvas.texture),
+            }
         }
         self.current_target = None;
         if partial && gpu_damage_check() {
@@ -1695,6 +1797,10 @@ impl D3d11Graphics {
                             TextureRef::Video(_, _, id) if self.punched.contains(&**id) => {
                                 mix_hash(PUNCH_HASH, hash_str(id))
                             }
+                            TextureRef::Hole(id) if self.punched.contains(&**id) => {
+                                mix_hash(PUNCH_HASH, hash_str(id))
+                            }
+                            TextureRef::Hole(_) => 0,
                             TextureRef::Video(view, generation, _) => mix_hash(
                                 windows::core::Interface::as_raw(view.first()) as u64,
                                 *generation,
@@ -1907,6 +2013,16 @@ impl D3d11Graphics {
                         | TextureRef::Image(view) => {
                             windows::core::Interface::as_raw(view) as usize
                         }
+                        TextureRef::Hole(id) => {
+                            // The surface's layer shows through (none yet: nothing to draw).
+                            flush(&mut batch);
+                            if self.punched.contains(&**id) && visible(index) {
+                                use_cleartype(false, &mut cleartype_shader);
+                                set_state(State::Punch(clip_depth), &mut state);
+                                unsafe { self.context.DrawIndexed(*count, *first, 0) };
+                            }
+                            continue;
+                        }
                         TextureRef::Video(_, _, id) if self.punched.contains(&**id) => {
                             // The video shows through: clear the UI's alpha under it.
                             flush(&mut batch);
@@ -1945,7 +2061,7 @@ impl D3d11Graphics {
                     if bound_texture != Some(key) {
                         unsafe {
                             match texture {
-                                TextureRef::Solid => {
+                                TextureRef::Solid | TextureRef::Hole(_) => {
                                     self.context.PSSetShaderResources(0, Some(&[None]))
                                 }
                                 TextureRef::Glyph(view) | TextureRef::ClearType(view) => {
@@ -2569,15 +2685,28 @@ impl D3d11Graphics {
     ) {
         // The copy must hold what the lens reaches past the edge, plus the blur taps around
         // that, plus the bridge to a merged neighbour.
-        let reach = params[2].ceil()
-            + (params[0] * 6.0).ceil()
-            + 2.0
-            + if merge == 0 { 0.0 } else { blend.ceil() };
+        // A plain backdrop blur (CSS `backdrop-filter: blur()`: no lens, rim or bridge)
+        // blurs only what lies under the box, its edges repeated as CSS does: reading
+        // past them pulled the page around the box in, a dark fringe inside its border.
+        let plain = params[2] <= 0.0 && params[3] <= 0.0 && params[4] <= 0.0 && merge == 0;
+        let reach = if plain {
+            0.0
+        } else {
+            params[2].ceil()
+                + (params[0] * 6.0).ceil()
+                + 2.0
+                + if merge == 0 { 0.0 } else { blend.ceil() }
+        };
         let (width, height) = (self.width.max(1) as f32, self.height.max(1) as f32);
-        let x0 = (center[0] - half[0] - reach).floor().clamp(0.0, width);
-        let y0 = (center[1] - half[1] - reach).floor().clamp(0.0, height);
-        let x1 = (center[0] + half[0] + reach).ceil().clamp(0.0, width);
-        let y1 = (center[1] + half[1] + reach).ceil().clamp(0.0, height);
+        // A plain blur reads whole pixels inside the box only: a pixel it straddles holds
+        // the antialiased border around it.
+        let round = |value: f32, up: bool| if up { value.ceil() } else { value.floor() };
+        let low = |value: f32| round(value, plain);
+        let high = |value: f32| round(value, !plain);
+        let x0 = low(center[0] - half[0] - reach).clamp(0.0, width);
+        let y0 = low(center[1] - half[1] - reach).clamp(0.0, height);
+        let x1 = high(center[0] + half[0] + reach).clamp(0.0, width);
+        let y1 = high(center[1] + half[1] + reach).clamp(0.0, height);
         if x1 <= x0 || y1 <= y0 {
             return;
         }
@@ -3191,6 +3320,14 @@ fn combine_clips(current: ShaderClip, next: ShaderClip) -> Option<ShaderClip> {
     };
     let (a, ar) = (current.rect, current.radii);
     let (b, br) = (next.rect, next.radii);
+    // The same box twice (a card's overflow clip, then its image's own rounded clip):
+    // the intersection keeps each corner's larger radius.
+    if contains(a, b) && contains(b, a) {
+        return Some(ShaderClip::device(
+            a,
+            [0, 1, 2, 3].map(|corner| ar[corner].max(br[corner])),
+        ));
+    }
     if contains(a, b) && square(ar) {
         return Some(next);
     }
@@ -3569,32 +3706,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             );
             return;
         }
-        let rect = outer.rect();
-        let [top, right, bottom, left] = widths;
-        let inner = Rect::new(
-            rect.x0 + left,
-            rect.y0 + top,
-            (rect.x1 - right).max(rect.x0 + left),
-            (rect.y1 - bottom).max(rect.y0 + top),
-        );
-        let radii = outer.radii();
-        let mut ring = outer.to_path(0.1);
-        ring.extend(
-            RoundedRect::from_rect(
-                inner,
-                crate::paint::inner_corner_radii(
-                    [
-                        radii.top_left,
-                        radii.top_right,
-                        radii.bottom_right,
-                        radii.bottom_left,
-                    ],
-                    widths,
-                ),
-            )
-            .path_elements(0.1),
-        );
-        self.fill(Fill::EvenOdd, transform, color, &ring);
+        crate::paint::fill_ring_path(self, transform, outer, widths, color);
     }
 
     fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S) {
@@ -3771,10 +3883,23 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                 half[0],
                 half[1],
                 ((radius * scale) as f32).min(half[0].min(half[1])).max(0.0),
-                ((std_dev * scale) as f32).max(0.01),
+                ((std_dev * scale) as f32).max(SHARP_SHADOW_SIGMA),
             ],
             None,
         );
+    }
+
+    /// The hole's edge from the shadow shader at the least sigma, antialiased like a
+    /// fill's: the feathered even-odd ring left a hard step along the hole's corners.
+    fn sharp_inset_shadow(
+        &mut self,
+        transform: Affine,
+        area: vello::kurbo::Rect,
+        hole: vello::kurbo::Rect,
+        color: Color,
+        radius: f64,
+    ) {
+        self.box_shadow(transform, area, hole, color, radius, 0.0, true);
     }
 
     fn outer_box_shadow(
@@ -3826,7 +3951,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                 half[0],
                 half[1],
                 ((radius * scale) as f32).min(half[0].min(half[1])).max(0.0),
-                ((std_dev * scale) as f32).max(0.01),
+                ((std_dev * scale) as f32).max(SHARP_SHADOW_SIGMA),
             ],
             Some((
                 [
@@ -4138,6 +4263,47 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             Color::WHITE.multiply_alpha(self.opacity),
             mode,
             TextureRef::Video(view, frame.generation, Arc::from(id)),
+        );
+    }
+
+    fn draw_surface(&mut self, id: &str, transform: Affine, size: (f64, f64)) {
+        if self.suppressed_clips > 0 || !self.graphics.surface_chains.contains_key(id) {
+            return;
+        }
+        let stencil = self.layers.iter().any(|layer| {
+            matches!(
+                layer,
+                D3d11PaintLayer::Clip(Some(_)) | D3d11PaintLayer::AnalyticClip(_, Some(_))
+            )
+        });
+        // A composition layer is axis-aligned and opaque: a rotated, translucent or
+        // path-clipped surface shows nothing.
+        let Some(placement) = overlay_placement(
+            transform,
+            size.0,
+            size.1,
+            &self.graphics.clip,
+            self.opacity,
+            stencil,
+        ) else {
+            return;
+        };
+        self.graphics.surface_requests.push(SurfaceRequest {
+            id: id.to_string(),
+            placement,
+        });
+        let corners = [
+            transform * Point::new(0.0, 0.0),
+            transform * Point::new(size.0, 0.0),
+            transform * Point::new(size.0, size.1),
+            transform * Point::new(0.0, size.1),
+        ];
+        self.graphics.append_quad_points(
+            corners.map(|point| [point.x as f32, point.y as f32]),
+            [0.0, 0.0, 1.0, 1.0],
+            Color::WHITE,
+            0.0,
+            TextureRef::Hole(Arc::from(id)),
         );
     }
 
@@ -4853,6 +5019,11 @@ fn lyon_join(join: Join) -> LineJoin {
     }
 }
 
+/// The least gaussian a shadow is drawn with, in device pixels: a `blur: 0` shadow (a
+/// CSS hairline highlight, `inset 0 1px 0`) gets the edge of a one-pixel box filter
+/// (σ = 1/√12) instead of a step, so its curved corners are antialiased like a fill's.
+const SHARP_SHADOW_SIGMA: f32 = 0.29;
+
 fn rgba(color: Color) -> [f32; 4] {
     let c = color.to_rgba8();
     [
@@ -4939,6 +5110,15 @@ mod tests {
             combine_clips(card, overlap),
             None,
             "a cut rounded corner needs the stencil"
+        );
+        let image = ShaderClip::device([10.0, 10.0, 50.0, 50.0], [6.0, 9.0, 6.0, 6.0]);
+        assert_eq!(
+            combine_clips(card, image),
+            Some(ShaderClip::device(
+                [10.0, 10.0, 50.0, 50.0],
+                [8.0, 9.0, 8.0, 8.0]
+            )),
+            "the same box twice keeps the larger radius of each corner, still in the shader"
         );
         // A spinning card: rotated clips map pixels into the card's own space.
         let spin = vello::kurbo::Affine::rotate(0.5).then_translate((100.0, 100.0).into());

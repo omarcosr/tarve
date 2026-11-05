@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { resolveImport, resolveSvelte, resolveTarveSvelte, SVELTE_SPECIFIER, TARVE_SVELTE_SPECIFIER } from "./resolve";
 
@@ -15,6 +15,8 @@ export interface SveltePluginOptions {
 }
 
 const NAMESPACE = "tarve-svelte";
+/** Global style sheets an app imports (`import "./style.css"`). */
+const CSS_NAMESPACE = "tarve-css";
 
 /** Strips TypeScript from a `.svelte.ts` module before Svelte compiles its runes. */
 async function stripTypes(source: string, path: string): Promise<string> {
@@ -29,7 +31,7 @@ function importsOf(file: string) {
   return (specifier: string) => {
     if (SVELTE_SPECIFIER.test(specifier) || TARVE_SVELTE_SPECIFIER.test(specifier)) return resolveImport(specifier);
     // Relative `.svelte` imports stay relative: Bun hands absolute paths to its own loader, not to onResolve.
-    if (/\.svelte(\.(js|ts))?$/.test(specifier)) return specifier;
+    if (/\.svelte(\.(js|ts))?$|\.css$/.test(specifier)) return specifier;
     if (specifier.startsWith("./") || specifier.startsWith("../")) return join(dirname(file), specifier).replace(/\\/g, "/");
     return specifier;
   };
@@ -54,12 +56,35 @@ export function sveltePlugin(options: SveltePluginOptions = {}) {
         try { return { path: resolveSvelte(args.path) }; } finally { resolving = false; }
       });
       build.onResolve({ filter: TARVE_SVELTE_SPECIFIER }, args => ({ path: resolveTarveSvelte(args.path) }));
-      build.onResolve({ filter: /\.svelte(\.(js|ts))?$/ }, args => ({
+      build.onResolve({ filter: /\.svelte(\.(js|ts))?$/ }, args => {
         // Bun names a namespaced importer "tarve-svelte:<path>".
-        path: isAbsolute(args.path) ? args.path
-          : resolve(args.importer?.startsWith(`${NAMESPACE}:`) ? dirname(args.importer.slice(NAMESPACE.length + 1)) : args.resolveDir ?? dirname(args.importer), args.path),
-        namespace: NAMESPACE,
-      }));
+        const path = isAbsolute(args.path) ? args.path
+          : resolve(args.importer?.startsWith(`${NAMESPACE}:`) ? dirname(args.importer.slice(NAMESPACE.length + 1)) : args.resolveDir ?? dirname(args.importer), args.path);
+        // `import { x } from "./store.svelte"` names the module store.svelte.ts (or .js), as Vite resolves it.
+          const module = path.endsWith(".svelte") && !existsSync(path) ? [path + ".ts", path + ".js"].find(existsSync) : undefined;
+        return { path: module ?? path, namespace: NAMESPACE };
+      });
+      // `import "./app.css"`: a global style sheet, registered as the module loads (like a <link>).
+      // Imports with attributes (`with { type: "file" }`) stay files.
+      build.onResolve({ filter: /\.css$/ }, args => {
+        if (Object.keys((args as { with?: object }).with ?? {}).length) return undefined;
+        if (!isAbsolute(args.path) && !args.path.startsWith(".")) return undefined;
+        const directory = args.importer?.startsWith(`${NAMESPACE}:`) || args.importer?.startsWith(`${CSS_NAMESPACE}:`)
+          ? dirname(args.importer.slice(args.importer.indexOf(":") + 1)) : args.resolveDir ?? dirname(args.importer);
+        return { path: isAbsolute(args.path) ? args.path : resolve(directory, args.path), namespace: CSS_NAMESPACE };
+      });
+      build.onLoad({ filter: /.*/, namespace: CSS_NAMESPACE }, async args => {
+        const { parseCss, cssImports } = await import("./css");
+        const source = readFileSync(args.path, "utf8");
+        const rules = parseCss(source, message => warn(`${args.path}: ${message}`));
+        // `@import "./other.css"` registers the other sheet first, as the cascade orders them.
+        // Kept relative: Bun's runtime hands absolute paths to its own loader, not to onResolve.
+        const imports = cssImports(source).map(url => `import ${JSON.stringify(/^\.{1,2}\//.test(url) ? url : "./" + url)};`);
+        return {
+          contents: `${imports.join("\n")}\nimport { registerCss } from ${JSON.stringify(resolveImport("@tarve/svelte/css"))};\nregisterCss(${JSON.stringify(rules)});\n`,
+          loader: "js", resolveDir: dirname(args.path),
+        };
+      });
       // A bundle resolves `svelte` through this plugin: no runtime lookup by path.
       // The client build by absolute path: under Bun.plugin this hook also runs at runtime, where a
         // bare "svelte" may reach Bun's resolver (no importer) and load the server build.

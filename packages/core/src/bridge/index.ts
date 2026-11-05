@@ -1,5 +1,5 @@
 import { NATIVE_ABI_VERSION, type SceneDocument, type NativeCommand, type NativeEvent } from "../protocol";
-import { openLibrary } from "./binding";
+import { openLibrary, setStartedLibrary } from "./binding";
 import { nativePath } from "#tarve/runtime";
 import { createConnection, type Socket } from "node:net";
 
@@ -270,6 +270,7 @@ export class BunFfiBridge implements NativeBridge {
     this.onEvent = onEvent;
     const path = this.options.libraryPath ?? nativePath();
     this.library = openLibrary(path);
+    setStartedLibrary(path);
     assertNativeAbiVersion(this.library.symbols.tarve_abi_version());
     const payload = new TextEncoder().encode(JSON.stringify(document));
     if (this.library.symbols.tarve_start(payload, payload.length) !== 0) {

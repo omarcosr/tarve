@@ -105,12 +105,20 @@ export function expandInput(props: Record<string, any>, key: string, form: FormC
         onValueChange: next => { state.set(group, next); record(next); props.onChange?.(next); } });
     }
     case "range": {
-      const min = Number(props.min ?? 0);
-      const max = Number(props.max ?? 100);
-      const fallback = max < min ? min : min + (max - min) / 2;
-      const value = Number(uncontrolled<string | number>(id, props.value, props.defaultValue ?? fallback));
+      // As a browser sanitizes them: a missing or non-numeric bound takes its default, a max below
+      // min is min (a range with no room, as a video's before its duration is known), a bad step
+      // (or "any") steps by 1, and the value is clamped into the range.
+      const number = (raw: unknown, fallback: number) => { const parsed = typeof raw === "number" ? raw : raw == null || raw === "" ? NaN : Number(raw); return Number.isFinite(parsed) ? parsed : fallback; };
+      const min = number(props.min, 0);
+      const max = Math.max(min, number(props.max, 100));
+      const rawStep = number(props.step, 1);
+      const step = rawStep > 0 ? rawStep : 1;
+      const fallback = min + (max - min) / 2;
+      const value = Math.min(max, Math.max(min, number(uncontrolled<string | number>(id, props.value, props.defaultValue ?? fallback), fallback)));
       record(String(value));
-      return Slider({ id, style, value, min, max, step: Number(props.step ?? 1), label: props.label ?? props.ariaLabel, disabled: props.disabled,
+      // `writing-mode: vertical-*` stands a range up (min at the bottom, as Chrome draws it).
+      const vertical = /^vertical|^sideways/.test(String((style as Record<string, unknown>).writingMode ?? "")) || props.orient === "vertical";
+      return Slider({ id, style: rangeStyle(style), orientation: vertical ? "vertical" : "horizontal", value, min, max: max > min ? max : min + step, step, label: props.label ?? props.ariaLabel, disabled: props.disabled,
         onValueChange: next => { state.set(id, next); record(String(next)); props.onChange?.(String(next)); } });
     }
     case "date": {
@@ -369,4 +377,19 @@ function expandTable(props: Record<string, any>, key: string): VNode {
   return Column({ align: "start", children: [caption
     ? View({ style: { display: "grid", columns: "auto", justify: "start" }, children: [Text({ style: { textAlign: "center", width: "100%" }, children: (caption.props as Record<string, any>).children }), grid] } as never)
     : grid] } as never);
+}
+/**
+ * A range input's CSS as the slider's paint: `accent-color` is the filled part and the thumb's ring,
+ * `appearance: none` drops the native track and fill (the element's own background shows, as in a
+ * browser), `trackColor`/`thumbColor` come from its `::-webkit-slider-runnable-track`/`-thumb` rules.
+ */
+function rangeStyle(style: Record<string, any>): Record<string, any> {
+  const { appearance, accentColor, trackColor, writingMode: _writing, textDirection: _direction, ...rest } = style;
+  const out: Record<string, any> = { ...rest };
+  if (accentColor !== undefined && accentColor !== "auto") out.foreground = accentColor;
+  if (appearance === "none") {
+    out.foreground = "transparent";
+    out.borderColor = trackColor ?? "transparent";
+  } else if (trackColor !== undefined) out.borderColor = trackColor;
+  return out;
 }

@@ -286,10 +286,58 @@ pub(super) fn hide_from_task_switcher(window: &Window) {
 #[cfg(not(target_os = "windows"))]
 pub(super) fn hide_from_task_switcher(_: &Window) {}
 
-/// Borderless full screen on the window's monitor, or back to the window it was.
+/// Window property marking a window in borderless full screen for its subclass
+/// (`WM_NCCALCSIZE` in `install_dpi_scaled_size`): "TarveFullscreen", UTF-16, NUL-terminated.
+#[cfg(target_os = "windows")]
+pub(super) const FULLSCREEN_PROP: &[u16] = &[
+    b'T' as u16,
+    b'a' as u16,
+    b'r' as u16,
+    b'v' as u16,
+    b'e' as u16,
+    b'F' as u16,
+    b'u' as u16,
+    b'l' as u16,
+    b'l' as u16,
+    b's' as u16,
+    b'c' as u16,
+    b'r' as u16,
+    b'e' as u16,
+    b'e' as u16,
+    b'n' as u16,
+    0,
+];
+
+/// Borderless full screen on the window's monitor (`on`), or back to the window it was.
+/// winit keeps the client area of a maximized window without decorations inside the
+/// monitor's work area (its `WM_NCCALCSIZE`), full screen included, which left the
+/// taskbar's strip outside the client area. The window is marked for its subclass, which
+/// gives a full-screen window its whole rect: it stays maximized underneath, so no
+/// restore/maximize animation plays on the way in or out.
+pub(super) fn set_fullscreen(window: &Window, on: bool) {
+    if on == window.fullscreen().is_some() {
+        return;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{RemovePropW, SetPropW};
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(handle) = window.window_handle()
+            && let RawWindowHandle::Win32(handle) = handle.as_raw()
+        {
+            let hwnd = handle.hwnd.get() as _;
+            unsafe {
+                if on {
+                    SetPropW(hwnd, FULLSCREEN_PROP.as_ptr(), 1 as _);
+                } else {
+                    RemovePropW(hwnd, FULLSCREEN_PROP.as_ptr());
+                }
+            }
+        }
+    }
+    window.set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
+}
+
 pub(super) fn toggle_fullscreen(window: &Window) {
-    window.set_fullscreen(match window.fullscreen() {
-        Some(_) => None,
-        None => Some(Fullscreen::Borderless(None)),
-    });
+    set_fullscreen(window, window.fullscreen().is_none());
 }

@@ -524,7 +524,44 @@ pub(super) fn paint_gradient(values: &[f32], rect: BoxRect) -> Option<PaintGradi
     };
     Some(PaintGradient {
         geometry,
-        stops,
+        stops: premultiplied_stops(&stops),
         repeat,
     })
+}
+
+/// CSS interpolates gradient colours with premultiplied alpha: from a faint red to an opaque
+/// dark grey the colour is nearly the grey all the way, not a half-way red. The renderers
+/// interpolate straight colour between stops, so each segment whose alpha changes gets
+/// intermediate stops taken in premultiplied space (straight-colour runs between them stay exact
+/// to within a level).
+pub(crate) fn premultiplied_stops(stops: &[(f32, Color)]) -> Vec<(f32, Color)> {
+    const STEPS: usize = 8;
+    let mut out = Vec::with_capacity(stops.len());
+    for (index, &(offset, colour)) in stops.iter().enumerate() {
+        out.push((offset, colour));
+        let Some(&(next_offset, next)) = stops.get(index + 1) else {
+            continue;
+        };
+        let (a0, a1) = (colour.components[3], next.components[3]);
+        if (a0 - a1).abs() < 1e-3 || next_offset <= offset {
+            continue;
+        }
+        for step in 1..STEPS {
+            let t = step as f32 / STEPS as f32;
+            let alpha = a0 + (a1 - a0) * t;
+            let mut components = [0.0_f32; 4];
+            for (channel, value) in components.iter_mut().enumerate().take(3) {
+                let premultiplied =
+                    colour.components[channel] * a0 * (1.0 - t) + next.components[channel] * a1 * t;
+                *value = if alpha > 1e-6 {
+                    premultiplied / alpha
+                } else {
+                    0.0
+                };
+            }
+            components[3] = alpha;
+            out.push((offset + (next_offset - offset) * t, Color::new(components)));
+        }
+    }
+    out
 }

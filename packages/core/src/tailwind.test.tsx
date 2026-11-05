@@ -1,11 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { tw } from "./tailwind";
+import { extendTailwind, tw } from "./tailwind";
 import { jsx } from "./jsx-runtime";
 import { compileTree } from "./reconciler";
 import { Window, View } from "./components";
 import { darkTheme, lightTheme, theme } from "./theme";
 
 describe("tailwind classes", () => {
+  test("extendTailwind adds an app's @theme colours to every colour utility", () => {
+    expect(tw("bg-brandx").background).toBeUndefined();
+    extendTailwind({ colors: { brandx: "#ff0000", "brandx-soft": "#00ff00" } });
+    expect(tw("bg-brandx text-brandx-soft border-brandx/50")).toMatchObject({ background: "#ff0000", foreground: "#00ff00", borderColor: "#ff000080" });
+    expect(() => extendTailwind({ colors: { "bad name": "#fff" } })).toThrow(TypeError);
+  });
   test("layout, spacing and sizing", () => {
     expect(tw("flex flex-col items-center justify-between gap-2 p-4 px-6 mt-1 w-full h-10 min-w-0 max-w-md")).toEqual({
       display: "flex", direction: "column", align: "center", justify: "between", gap: 8,
@@ -16,6 +22,8 @@ describe("tailwind classes", () => {
       width: "50%", margin: -8, height: 32, padding: 10, position: "absolute",
       top: -4, right: 0, bottom: 0, left: 0, zIndex: 10,
     });
+    // `grid` alone is one implicit column, as in CSS (Tarve's own grid default is two).
+    expect(tw("grid gap-2")).toMatchObject({ display: "grid", columns: "none" });
     expect(tw("grid grid-cols-3 col-span-2 flex-1 grow shrink-0 hidden")).toEqual({
       display: "none", columns: 3, gridColumn: "span 2", flex: 1, grow: 1, shrink: 0,
     });

@@ -26,6 +26,7 @@ describe("CSS shadow syntax", () => {
     ]);
     expect(parseBoxShadow("2px 2px red inset")).toEqual([{ x: 2, y: 2, blur: 0, spread: 0, color: "#ff0000", inset: true }]);
     expect(parseBoxShadow("3px 4px")).toEqual([{ x: 3, y: 4, blur: 0, spread: 0, color: "#000000" }]);
+    expect(parseBoxShadow("0 0.5rem 1.5rem #000")).toEqual([{ x: 0, y: 8, blur: 24, spread: 0, color: "#000000" }]);
     expect(parseBoxShadow("none")).toEqual([]);
   });
 
@@ -70,6 +71,7 @@ describe("CSS shadow syntax", () => {
     expect(parseTransform("translateX(-100%)")).toEqual({ xPercent: -100 });
     expect(parseTransform("scale(2) translate(10px, 50%)")).toEqual({ x: 20, yPercent: 100, scale: 2 });
     expect(parseTransform("translateY(.5%) translateY(2px)")).toEqual({ y: 2, yPercent: 0.5 });
+    expect(parseTransform("translateX(-50%) translateY(0.45rem)")).toEqual({ xPercent: -50, y: 7.2 });
     expect(() => parseTransform("rotate(10deg)")).toThrow("translate and scale only");
     expect(() => parseTransform("scale(0)")).toThrow("Invalid scale");
     expect(() => parseTransform("translateX(1em)")).toThrow("length");

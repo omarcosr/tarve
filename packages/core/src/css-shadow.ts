@@ -72,12 +72,16 @@ function splitTopLevel(value: string, separator: RegExp): string[] {
   return parts;
 }
 
+/**
+ * A length in px: `px`, or `rem` at the 16 px root size (`0 0.8rem 2rem`). `em` follows the
+ * element's font size, which a style string doesn't know, so it stays an error.
+ */
 function length(token: string): number | undefined {
-  const match = token.match(/^(-?(?:\d+\.?\d*|\.\d+))(px)?$/);
+  const match = token.match(/^(-?(?:\d+\.?\d*|\.\d+))(px|rem)?$/);
   if (!match) return undefined;
   const number = Number(match[1]);
   if (match[2] === undefined && number !== 0) return undefined;
-  return number;
+  return match[2] === "rem" ? number * 16 : number;
 }
 
 function parseLayer(layer: string, allowInset: boolean): { lengths: number[]; color: string; inset: boolean } {

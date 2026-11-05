@@ -43,7 +43,7 @@ export interface CompiledTree {
   /** The environment key the render read (viewport.ts), when it read one: a change re-renders. */
   environment?: string;
 }
-const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "markdown", "code", "diff", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter", "video"]);
+const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "markdown", "code", "diff", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter", "video", "surface"]);
 const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
 
 function focusOutlineOverrides(style: NonNullable<NativeNode["style"]["focus"]> | undefined) {
@@ -59,7 +59,7 @@ function focusOutlineOverrides(style: NonNullable<NativeNode["style"]["focus"]> 
  * theme font is the initial value at the root; Code, Diff and `<code>` set
  * monospace explicitly, like the user-agent style sheet.
  */
-const INHERITED_FONT = ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "fontVariantNumeric", "fontFeatureSettings", "fontSize", "fontWeight", "lineHeight", "foreground", "textAlign", "textTransform", "whiteSpace"] as const;
+const INHERITED_FONT = ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "fontVariantNumeric", "fontFeatureSettings", "fontSize", "fontWeight", "lineHeight", "foreground", "textAlign", "textTransform", "whiteSpace", "textShadow"] as const;
 const INHERITED_FONT_SET: ReadonlySet<string> = new Set(INHERITED_FONT);
 /** Inherited font values that controls (buttons, inputs, code) take too. */
 const CONTROL_FONT = ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "textTransform"] as const;
@@ -545,6 +545,7 @@ export function compileTree(
     if (control) node.control = control;
     // CSS object-fit: a video keeps its ratio inside its box by default.
     if (nativeType === "video") node.fit = p.fit ?? "contain";
+    if (nativeType === "surface" && p.native === true) node.native = true;
     if (imageSource && "path" in imageSource) {
       node.src = nativeAssetPath(imageSource.path);
       node.fit = p.fit ?? "cover";

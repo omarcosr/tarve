@@ -101,6 +101,7 @@
   },
   "scripts": {
     "dev": "bun scripts/dev.ts",
+    "css-parity:baseline": "bun scripts/css-parity-baseline.ts",
     "dev:example": "bun scripts/dev.ts --entry examples/basic/basic.tsx",
     "build": "bun scripts/build.ts --release",
     "build:exe": "bun scripts/build.ts --exe",
@@ -160,6 +161,8 @@
     "test:canvas": "bun run build:native && bun run setup:examples && bun scripts/canvas-parity.ts check",
     "smoke:video": "bun run build:native && bun scripts/smoke-video.tsx",
     "smoke:video-layers": "bun run build:native && bun scripts/smoke-video-layers.tsx",
+    "smoke:surface": "bun run build:native && bun scripts/smoke-surface.tsx",
+    "smoke:surface-mpv": "bun run build:native && bun scripts/smoke-surface-mpv.tsx",
     "smoke:video-formats": "bun run build:native && bun scripts/smoke-video-formats.tsx",
     "smoke:media": "bun run build:native && bun scripts/smoke-media.tsx",
     "smoke:remote-image": "bun run build:native && bun scripts/smoke-remote-image.tsx",

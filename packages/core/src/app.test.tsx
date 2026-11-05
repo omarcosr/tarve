@@ -383,6 +383,17 @@ describe("controlled native reconciliation", () => {
     app.setFullscreen(true); app.setFullscreen(false); app.toggleFullscreen(); app.setMaximized(true); app.setMaximized(false);
     expect(bridge.commands.slice(-5).map(command => (command as { action: string }).action))
       .toEqual(["fullscreen", "exitFullscreen", "toggleFullscreen", "maximize", "unmaximize"]);
+    // The state follows the window's own events, however full screen was entered (F11, the OS).
+    const states: boolean[] = [];
+    const stop = app.onFullscreenChange(on => states.push(on));
+    expect(app.isFullscreen()).toBe(false);
+    bridge.emit({ type: "fullscreen", fullscreen: true });
+    bridge.emit({ type: "fullscreen", fullscreen: true });
+    expect(app.isFullscreen()).toBe(true);
+    bridge.emit({ type: "fullscreen", fullscreen: false });
+    stop();
+    bridge.emit({ type: "fullscreen", fullscreen: true });
+    expect(states).toEqual([true, false]);
     tray.remove();
     expect(bridge.commands.at(-1)).toEqual({ type: "tray", tray: null });
     expect(() => app.tray({ menu: [{ id: "a", label: "A" }, { id: "a", label: "B" }] })).toThrow(TypeError);

@@ -402,7 +402,8 @@ function toCss(style: Style | StateStyle): Decls {
   if (s.shrink !== undefined) out["flex-shrink"] = String(s.shrink);
   if (s.position !== undefined) out.position = s.position;
   if (s.zIndex !== undefined) out["z-index"] = String(s.zIndex);
-  if (s.columns !== undefined) out["grid-template-columns"] = typeof s.columns === "number" ? `repeat(${s.columns}, minmax(0, 1fr))` : s.columns;
+  // `none` is CSS's initial value, which `grid` alone keeps (Tarve's own default is two columns).
+  if (s.columns !== undefined && s.columns !== "none") out["grid-template-columns"] = typeof s.columns === "number" ? `repeat(${s.columns}, minmax(0, 1fr))` : s.columns;
   if (s.gridColumn !== undefined) out["grid-column"] = String(s.gridColumn);
   if (s.gridRow !== undefined) out["grid-row"] = String(s.gridRow);
   if (s.background !== undefined) {

@@ -109,6 +109,10 @@ impl WebTree {
                     self.events.push(json!({"type":"blur", "id":blurred}));
                 }
             }
+            Command::CapturePointer { id } => {
+                let events = self.tree.capture_pointer(id);
+                self.events.extend(events);
+            }
             Command::ScrollToItem {
                 id,
                 index,

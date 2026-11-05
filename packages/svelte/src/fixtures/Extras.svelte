@@ -1,6 +1,8 @@
 <script lang="ts">
   let rect = $state("none");
   let downs = $state<string[]>([]);
+  let moved = $state("none");
+  let hovers = $state<string[]>([]);
   let wheel = $state(0);
   let text = $state("hello");
   let paused = $state(true);
@@ -13,7 +15,10 @@
   export function play() { void player.play(); }
 </script>
 
-<div id="box" bind:this={box} onmousedown={e => downs.push("down" + e.button)} onmouseup={e => downs.push("up" + e.button)} onwheel={e => (wheel += e.deltaY)}>box</div>
+<div id="box" bind:this={box} onmousedown={e => downs.push("down" + e.button)} onmouseup={e => downs.push("up" + e.button)} onwheel={e => (wheel += e.deltaY)} onpointermove={e => { const r = box.getBoundingClientRect(); moved = `${e.clientX},${e.clientY},${e.clientX - r.left}`; }}>box</div>
+<p id="moved">{moved}</p>
+<div id="hov" onmouseenter={() => hovers.push("enter")} onpointerleave={() => hovers.push("leave")}>hover me</div>
+<p id="hovers">{hovers.join(" ")}</p>
 <p id="rect">{rect}</p>
 <p id="downs">{downs.join(" ")}</p>
 <p id="wheel">{wheel}</p>

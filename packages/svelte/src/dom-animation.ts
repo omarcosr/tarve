@@ -1,16 +1,42 @@
 
 export type Keyframe = { offset: number; values: Record<string, string> };
 
-/** Keyframes with offsets (missing ones spread evenly, as Web Animations does). */
-export function keyframesOf(input: Record<string, string | number | null | undefined>[]): Keyframe[] {
+/**
+ * The value a property animates from (or to) when a keyframe leaves it out: the element's own
+ * value when known, else the property's neutral one (`transform: rotate(360deg)` → `rotate(0deg)`,
+ * `opacity` → 1), as CSS's implicit `from`/`to` keyframes take the underlying value.
+ */
+export function neutralValue(key: string, value: string): string {
+  if (key === "opacity") return "1";
+  if (key === "transform") {
+    if (value.trim() === "none") return "none";
+    return value.replace(/([a-zA-Z0-9]+)\(([^)]*)\)/g, (_match, fn: string, args: string) =>
+      `${fn}(${args.replace(NUMBER, () => (/^scale/i.test(fn) ? "1" : "0"))})`);
+  }
+  return value;
+}
+
+/**
+ * Keyframes with offsets (missing ones spread evenly, as Web Animations does). A missing first or last
+ * keyframe (`@keyframes spin { to { transform: rotate(360deg) } }`) is implicit: each property starts
+ * or ends at `underlying(key)`, else its neutral value.
+ */
+export function keyframesOf(input: Record<string, string | number | null | undefined>[], underlying?: (key: string) => string | undefined): Keyframe[] {
   const frames = input.map(frame => {
     const values: Record<string, string> = {};
     for (const [key, value] of Object.entries(frame)) if (key !== "offset" && key !== "easing" && key !== "composite" && value != null) values[key] = String(value);
     return { offset: typeof frame.offset === "number" ? frame.offset : NaN, values };
   });
-  if (frames.length === 1) frames.unshift({ offset: 0, values: { ...frames[0]!.values } });
+  if (frames.length === 1 && Number.isNaN(frames[0]!.offset)) frames[0]!.offset = 1;
   frames.forEach((frame, index) => { if (Number.isNaN(frame.offset)) frame.offset = frames.length > 1 ? index / (frames.length - 1) : 0; });
-  return frames.sort((a, b) => a.offset - b.offset);
+  frames.sort((a, b) => a.offset - b.offset);
+  const implicit = (from: Keyframe, offset: number): Keyframe => ({
+    offset,
+    values: Object.fromEntries(Object.entries(from.values).map(([key, value]) => [key, underlying?.(key) ?? neutralValue(key, value)])),
+  });
+  if (frames.length && frames[0]!.offset > 0) frames.unshift(implicit(frames[0]!, 0));
+  if (frames.length && frames.at(-1)!.offset < 1) frames.push(implicit(frames.at(-1)!, 1));
+  return frames;
 }
 
 export const COLOR = /#([0-9a-f]{3,8})\b|rgba?\(([^)]*)\)/gi;

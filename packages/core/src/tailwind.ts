@@ -102,6 +102,22 @@ function alpha(hex: string, opacity: number): string {
 
 const camel = (name: string) => name.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
 
+/** Colours an app adds to the palette (Tailwind v4's `@theme { --color-<name>: … }`). */
+const themeColors = new Map<string, string>();
+
+/**
+ * Extends the Tailwind utilities with an app's own theme, as Tailwind v4's `@theme` block does:
+ * `extendTailwind({ colors: { lead: "#ff0000" } })` makes `bg-lead`, `text-lead/50` and
+ * `ring-lead` work. Values are CSS colours; later calls add to or replace earlier names.
+ */
+export function extendTailwind(theme: { colors?: Record<string, string> }): void {
+  for (const [name, value] of Object.entries(theme.colors ?? {})) {
+    if (!/^[a-z][\w-]*$/i.test(name) || typeof value !== "string" || !value.trim()) throw new TypeError(`extendTailwind: invalid colour ${name}`);
+    themeColors.set(name, value.trim());
+  }
+  cache.clear();
+}
+
 /** Palette (`red-500`, `white`, `red-500/50`), theme token (`primary`, `muted-foreground`) or arbitrary colour. */
 function color(value: string): string | undefined {
   const raw = arbitrary(value);
@@ -116,7 +132,7 @@ function color(value: string): string | undefined {
   }
   const opacity = slash > 0 ? number(value.slice(slash + 1)) : undefined;
   const name = slash > 0 && opacity !== undefined ? value.slice(0, slash) : value;
-  let resolved = NAMED_COLORS[name];
+  let resolved = themeColors.get(name) ?? NAMED_COLORS[name];
   if (resolved === undefined) {
     const dash = name.lastIndexOf("-");
     const family = PALETTE[name.slice(0, dash)];
@@ -520,6 +536,8 @@ export function tw(...classes: readonly (string | false | null | undefined)[]): 
     if (cache.size > 4096) cache.clear();
     compiled = compile(joined);
     for (const key of Object.keys(compiled)) if (compiled[key] === undefined) delete compiled[key];
+    // `grid` without `grid-cols-*` is one implicit column in CSS; Tarve's own default is two.
+    if (compiled.display === "grid" && compiled.columns === undefined) compiled.columns = "none";
     cache.set(joined, compiled);
   }
   return { ...compiled } as Style;

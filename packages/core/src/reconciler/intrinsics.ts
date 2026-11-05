@@ -65,14 +65,17 @@ const expand = (element: VNode): IntrinsicExpansion => ({ element });
 /** The component element an intrinsic `child` compiles as; undefined when `child` is a native kind. */
 export function expandIntrinsic(child: VNode, path: string, context: IntrinsicContext): IntrinsicExpansion | undefined {
   if (typeof child.type !== "string") return undefined;
+  // `userAgentStyles: false`: no browser defaults (a page with a CSS reset, such as Tailwind's
+  // preflight): headings and paragraphs inherit their font and have no margins.
+  const ua = (child.props as { userAgentStyles?: boolean }).userAgentStyles !== false;
   if (child.type in headingPreset) {
-    const props = child.props as Parameters<typeof Text>[0];
+    const { userAgentStyles: _ua, ...props } = child.props as Parameters<typeof Text>[0] & { userAgentStyles?: boolean };
     const preset = headingPreset[child.type as keyof typeof headingPreset];
     return expand(Text({
-      ...({ uaMargin: { block: UA_HEADING_MARGIN[child.type as keyof typeof headingPreset] } } as object),
+      ...({ uaMargin: { block: ua ? UA_HEADING_MARGIN[child.type as keyof typeof headingPreset] : 0 } } as object),
       ...props,
-      size: props.size ?? preset.size,
-      weight: props.weight ?? preset.weight,
+      size: props.size ?? (ua ? preset.size : undefined),
+      weight: props.weight ?? (ua ? preset.weight : undefined),
       style: canonicalizeIntrinsicStyle(props.style),
     }));
   }
@@ -82,8 +85,8 @@ export function expandIntrinsic(child: VNode, path: string, context: IntrinsicCo
     return expand(Text({ id: child.props.id, children: child }));
   }
   if ((child.type === "span" || child.type === "p")) {
-    const props = child.props as Parameters<typeof Text>[0];
-    return expand(Text({ ...(child.type === "p" ? { uaMargin: { block: 1 } } : {}), ...props, style: canonicalizeIntrinsicStyle(props.style) } as never));
+    const { userAgentStyles: _ua, ...props } = child.props as Parameters<typeof Text>[0] & { userAgentStyles?: boolean };
+    return expand(Text({ ...(child.type === "p" ? { uaMargin: { block: ua ? 1 : 0 } } : {}), ...props, style: canonicalizeIntrinsicStyle(props.style) } as never));
   }
   if (child.type === "img") {
     const props = child.props as Parameters<typeof Image>[0];
@@ -266,8 +269,10 @@ export function expandIntrinsic(child: VNode, path: string, context: IntrinsicCo
     if (scrolls(overflowX) || scrolls(overflowY)) {
       const shorthands: Record<string, unknown> = {};
       for (const key of DIV_SHORTHANDS) if (divProps[key] !== undefined) { shorthands[key] = divProps[key]; delete divProps[key]; }
+      // A scrolling `display: flex` div still lays its children in a row, as an unscrolled one does.
+      const flexRow = rest.display === "flex" && rest.direction === undefined && rest.flexDirection === undefined ? { direction: "row" } : {};
       return expand(Scroll({ ...divProps, orientation: scrolls(overflowX) && scrolls(overflowY) ? "both" : scrolls(overflowX) ? "horizontal" : "vertical",
-        style: { ...shorthands, ...canonicalizeIntrinsicStyle(rest) } } as never));
+        style: { ...shorthands, ...canonicalizeIntrinsicStyle(rest), ...flexRow } } as never));
     }
     // Other overflow values pass through; overflowX/overflowY collapse into overflow.
     if (explicitX !== undefined || overflowY !== overflow) {

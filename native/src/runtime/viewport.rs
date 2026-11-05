@@ -9,6 +9,16 @@ use super::*;
 pub(super) fn layout_viewport(window: &Window, tree: &mut crate::tree::Tree) -> LogicalSize<f32> {
     let scale = window.scale_factor();
     let physical = window.inner_size();
+    // Minimized, the client area is empty or a sliver (a window without a system
+    // frame reports the ~160×40 rect of its minimized caption): the content keeps the size it had. Laying it out at that size let
+    // `onSize` report it and scroll areas clamp to the collapsed content, so lists
+    // came back scrolled to the top.
+    let (_, _, width, height) = tree.viewport;
+    let minimized =
+        physical.width == 0 || physical.height == 0 || window.is_minimized().unwrap_or(false);
+    if minimized && width > 0.0 && height > 0.0 {
+        return LogicalSize::new(width, height);
+    }
     #[cfg(target_os = "android")]
     if let Some(app) = crate::android::app() {
         let rect = app.content_rect();

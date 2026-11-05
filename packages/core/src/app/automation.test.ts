@@ -14,6 +14,13 @@ describe("command-line automation", () => {
     expect(parseAutomationScript("key:F5")).toEqual([{ kind: "key", key: "F5" }]);
     expect(() => parseAutomationScript("tap:x")).toThrow("unknown step");
     expect(() => parseAutomationScript("wait:soon")).toThrow("milliseconds");
+    expect(parseAutomationScript("move:120, 40.5")).toEqual([{ kind: "move", x: 120, y: 40.5 }]);
+    expect(() => parseAutomationScript("move:here")).toThrow("x,y");
+    expect(parseAutomationScript("down;up")).toEqual([{ kind: "down" }, { kind: "up" }]);
+    expect(parseAutomationScript("hover:Card;wheel:600;wheel:-120")).toEqual([
+      { kind: "hover", text: "Card" }, { kind: "wheel", delta: 600 }, { kind: "wheel", delta: -120 },
+    ]);
+    expect(() => parseAutomationScript("wheel:0")).toThrow("non-zero");
   });
 
   test("reads flags before environment and stays off without them", () => {

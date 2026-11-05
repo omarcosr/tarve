@@ -8,6 +8,7 @@ import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
 import { jsx, type VNode } from "./jsx-runtime";
 import { createElementDispatcher } from "./app/element-events";
 import { createMediaSync, mediaController } from "./app/media";
+import { surfaceController, trackSurfaceHandles, type SurfaceController } from "./surface";
 import { createNativeRequests } from "./app/requests";
 import { editShadowNode, nativeShadow, reconciliationCommand } from "./app/shadow";
 import { createTrayController, type TrayHandle, type TrayOptions } from "./app/tray";
@@ -295,6 +296,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     },
   });
   const syncLoadedMedia = createMediaSync((command, event, targetId) => sendInternal(command, { source: "bridge", event, targetId }));
+  /** `TarveFrames` handles of the live `<surface>` elements, for `app.surface(id).present`. */
+  const surfaceHandles = new Map<string, bigint>();
   const dispatchElementEvent = createElementDispatcher(invokeHandler, id => committed?.handlers.get(id));
 
   function restoreCommitted(): void {
@@ -441,6 +444,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     });
   }
 
+  /** The window's full screen state, as its `fullscreen` events report it. */
+  let fullscreen = false;
+  const fullscreenListeners = new Set<(fullscreen: boolean) => void>();
+
   function dispatchNativeEvent(event: NativeEvent): void {
     (globalThis as Record<symbol, unknown>)[ACTIVE_APP_KEY] = app;
     if (event.type === "ready") settleReadySuccess();
@@ -454,6 +461,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       reportError(error, { source: "native", event: "error" });
     }
 
+    if (event.type === "fullscreen" && event.fullscreen !== fullscreen) {
+      fullscreen = event.fullscreen;
+      for (const listener of [...fullscreenListeners]) listener(fullscreen);
+    }
     if (event.type === "windowState" && rememberKey) {
       windowStateStore().set(rememberKey, { x: event.x, y: event.y, width: event.width, height: event.height, maximized: event.maximized, ...(event.physical ? { physical: true } : {}) });
     }
@@ -512,6 +523,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     if (!ended && event.type === "systemMedia" && systemMediaAction) {
       try { systemMediaAction(event.action, event.time); } catch (error) { reportError(error, { source: "event-handler", event: `systemMedia:${event.action}` }); }
     }
+
+    if (event.type === "surface") trackSurfaceHandles(surfaceHandles, event);
 
     if (!ended && event.type === "media") {
       const handler = applyMediaEvent(event, committed?.media?.get(event.id), renderScope);
@@ -668,6 +681,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     focus(id: string): void {
       if (!ended) sendAfterRender({ type: "focus", id });
     },
+    capturePointer(id: string | null): void {
+      if (!ended) sendAfterRender({ type: "capturePointer", id });
+    },
     scrollToItem(id: string, index: number, offset = 0, options: { smooth?: boolean } = {}): void {
       if (!id) throw new TypeError("scrollToItem requires a list id");
       if (!Number.isInteger(index) || index < 0) throw new RangeError("scrollToItem index must be a nonnegative integer");
@@ -695,6 +711,13 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     toggleFullscreen(): void {
       if (!ended) sendPublic({ type: "window", action: "toggleFullscreen" });
     },
+    isFullscreen(): boolean {
+      return fullscreen;
+    },
+    onFullscreenChange(listener: (fullscreen: boolean) => void): () => void {
+      fullscreenListeners.add(listener);
+      return () => { fullscreenListeners.delete(listener); };
+    },
     tray(initial: TrayOptions): TrayHandle {
       return trays.tray(initial);
     },
@@ -717,6 +740,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     requestPermissions: names => requests.permissions("request", names),
     media(id: string): MediaController {
       return mediaController(id, command => { if (!ended) sendPublic(command); });
+    },
+    surface(id: string): SurfaceController {
+      return surfaceController(id, command => { if (!ended) sendPublic(command); }, surfaceId => surfaceHandles.get(surfaceId));
     },
     registerHotkey(shortcut: string, handler: HotkeyHandler): () => void {
       const canonical = normalizeHotkey(shortcut);

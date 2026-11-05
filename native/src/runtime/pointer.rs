@@ -12,7 +12,8 @@ impl App {
         let mut event = json!({
             "type": "pointer",
             "phase": phase,
-            "id": self.tree.hover_path().last(),
+            // A node holding pointer capture gets the presses too, as in the DOM.
+            "id": self.tree.pointer_capture().map(str::to_string).or_else(|| self.tree.hover_path().last().cloned()),
             "x": self.tree.mouse.0,
             "y": self.tree.mouse.1,
             "ctrlKey": self.modifiers.control_key(),

@@ -21,6 +21,40 @@ test("checkbox, radio, range and date inputs compile to native controls", () => 
   expect(tree.nodes.has("when")).toBe(true);
 });
 
+test("userAgentStyles={false} drops heading sizes and paragraph margins (a CSS reset)", () => {
+  const tree = compileTree(<Window>
+    <h3 id="plain" {...{ userAgentStyles: false }}>Title</h3>
+    <h3 id="ua">Title</h3>
+    <p id="para" {...{ userAgentStyles: false }}>Text</p>
+  </Window>);
+  expect(tree.nodes.get("plain")!.style.margin).toEqual({ top: 0, bottom: 0, left: 0, right: 0 });
+  expect(tree.nodes.get("plain")!.style.fontSize).not.toBe(20);
+  expect(tree.nodes.get("ua")!.style.fontSize).toBe(20);
+  expect(tree.nodes.get("para")!.style.margin).toEqual({ top: 0, bottom: 0, left: 0, right: 0 });
+});
+
+test("a range's accent-color fills it; appearance: none keeps only what its CSS paints", () => {
+  const tree = compileTree(<Window>
+    <input id="accent" type="range" style={{ accentColor: "#ff0000" } as never} />
+    <input id="bare" type="range" style={{ appearance: "none", thumbColor: "transparent" } as never} />
+    <input id="up" type="range" style={{ writingMode: "vertical-lr", textDirection: "rtl" } as never} />
+  </Window>);
+  expect(tree.nodes.get("accent")!.style.foreground).toBe("#ff0000");
+  expect(tree.nodes.get("up")!.control!.orientation).toBe("vertical");
+  expect(tree.nodes.get("bare")!.style).toMatchObject({ foreground: "#00000000", borderColor: "#00000000", thumbColor: "#00000000" });
+});
+
+test("a range sanitizes its bounds and value as a browser does", () => {
+  const tree = compileTree(<Window>
+    <input id="empty" type="range" min={0} max={0} value="0" />
+    <input id="reversed" type="range" min="5" max="2" value="9" />
+    <input id="loose" type="range" {...{ min: "x", max: "", step: "any" } as Record<string, string>} value="250" />
+  </Window>);
+  expect(tree.nodes.get("empty")!.control).toMatchObject({ value: 0, min: 0 });
+  expect(tree.nodes.get("reversed")!.control).toMatchObject({ value: 5, min: 5 });
+  expect(tree.nodes.get("loose")!.control).toMatchObject({ value: 100, min: 0, max: 100 });
+});
+
 test("uncontrolled checkbox keeps its state across renders", () => {
   const view = () => <Window><input id="c" type="checkbox" label="C" /></Window>;
   click(compileTree(view()), "c");

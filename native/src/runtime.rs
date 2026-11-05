@@ -595,9 +595,9 @@ fn install_dpi_scaled_size(window: &Window, main: bool) {
     use windows_sys::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForWindow};
     use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetMenu, GetWindowLongPtrW, GetWindowRect,
+        GWL_EXSTYLE, GWL_STYLE, GetClientRect, GetMenu, GetPropW, GetWindowLongPtrW, GetWindowRect,
         HWND_BOTTOM, STYLESTRUCT, SWP_NOZORDER, WINDOWPOS, WM_COMMAND, WM_EXITSIZEMOVE, WM_MOVING,
-        WM_SETTINGCHANGE, WM_STYLECHANGING, WM_WINDOWPOSCHANGING,
+        WM_NCCALCSIZE, WM_SETTINGCHANGE, WM_STYLECHANGING, WM_WINDOWPOSCHANGING,
     };
 
     const WM_GETDPISCALEDSIZE: u32 = 0x02E4;
@@ -614,6 +614,15 @@ fn install_dpi_scaled_size(window: &Window, main: bool) {
         // The z-order, task switcher and logical-size state is the main window's.
         let main = main != 0;
         match message {
+            // Full screen (`set_fullscreen`): the client area is the whole window (the
+            // monitor), even while the window is maximized underneath.
+            WM_NCCALCSIZE
+                if wparam != 0
+                    && !unsafe { GetPropW(hwnd, window_chrome::FULLSCREEN_PROP.as_ptr()) }
+                        .is_null() =>
+            {
+                return 0;
+            }
             WM_MOVING => with_logical_size(hwnd as u64, |state| state.moving.set(true)),
             WM_STYLECHANGING
                 if main
@@ -846,6 +855,39 @@ pub(crate) fn window_icons(base64: &str) -> Result<WindowIcons, String> {
         small: sized(64)?,
         large: sized(256)?,
     })
+}
+
+/// What `<surface>` elements of `window` can present through.
+/// Frames everywhere, composition swap chains on D3D11, X11 child windows for `native`.
+#[allow(unused_variables)]
+fn surface_host(window: &Window, d3d11: bool, gpu_upgrade: bool) -> crate::surface::Host {
+    #[cfg(target_os = "windows")]
+    {
+        if d3d11 {
+            return crate::surface::Host::Composition;
+        }
+        // The CPU draws the first frames while the D3D11 device is made: wait for it, so a
+        // surface is announced once, with the swap chain host.
+        if gpu_upgrade {
+            return crate::surface::Host::Pending;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(handle) = window.window_handle() {
+            match handle.as_raw() {
+                RawWindowHandle::Xlib(handle) => {
+                    return crate::surface::Host::X11(handle.window as u32);
+                }
+                RawWindowHandle::Xcb(handle) => {
+                    return crate::surface::Host::X11(handle.window.get());
+                }
+                _ => {}
+            }
+        }
+    }
+    crate::surface::Host::Frames
 }
 
 /// Where a window's events go: the app's queue, tagged with the window they come
@@ -1135,6 +1177,15 @@ impl App {
                 }
             })
         };
+        let surfaces = {
+            // Producers hand swap chains over from their own threads.
+            let proxy = std::sync::Mutex::new(command_proxy.clone());
+            crate::surface::Surfaces::new(move || {
+                if let Ok(proxy) = proxy.lock() {
+                    proxy.send(Command::SurfaceWake);
+                }
+            })
+        };
         App {
             is_main,
             wanted_flow: std::cell::Cell::new(ControlFlow::Wait),
@@ -1178,6 +1229,8 @@ impl App {
             tray: None,
             media: Default::default(),
             videos,
+            surfaces,
+            surfaces_waiting: false,
             remote_images,
             present_times: Default::default(),
             backdrop_dark: None,
@@ -1355,6 +1408,10 @@ struct App {
     media: crate::media::Media,
     /// `<video>` elements: the platform decoder and the pictures it hands the tree.
     videos: crate::video::Videos,
+    /// `<surface>` elements: the swap chains their producers present into them.
+    surfaces: crate::surface::Surfaces,
+    /// Surfaces wait for the GPU renderer: sync them on the next frame even without changes.
+    surfaces_waiting: bool,
     remote_images: crate::remote_image::RemoteImages,
     /// When each of the last second's frames was presented, for `inspect().fps`.
     present_times: std::collections::VecDeque<Instant>,
@@ -1604,6 +1661,7 @@ impl App {
         let _ = (widget, window);
     }
     fn sync_custom_window_chrome(&mut self) {
+        self.sync_window_fullscreen();
         if self.document.window.decorations {
             return;
         }
@@ -1612,12 +1670,24 @@ impl App {
         self.apply_custom_window_chrome();
     }
     fn sync_custom_window_chrome_state(&mut self) {
+        self.sync_window_fullscreen();
         if self.document.window.decorations {
             return;
         }
         let suppressed = self.window_chrome_suppressed();
         if self.tree.set_window_chrome_suppressed(suppressed) {
             self.apply_custom_window_chrome();
+        }
+    }
+    /// A TitleBar stands in for the system caption, which full screen hides: it hides too.
+    fn sync_window_fullscreen(&mut self) {
+        let fullscreen = self
+            .window
+            .as_ref()
+            .is_some_and(|window| window.fullscreen().is_some());
+        if self.tree.set_window_fullscreen(fullscreen) {
+            self.events
+                .push(json!({ "type": "fullscreen", "fullscreen": fullscreen }));
         }
     }
     fn apply_initial_window_position(
@@ -2559,6 +2629,7 @@ impl App {
                 #[cfg(target_os = "windows")]
                 {
                     graphics.set_video_views(self.videos.views());
+                    graphics.set_surface_chains(self.surfaces.chains());
                     retained_prepared = graphics.prepare_d3d11_frame(
                         physical.width,
                         physical.height,
@@ -2600,6 +2671,41 @@ impl App {
             self.frame_stats
                 .paint
                 .push(paint_started.elapsed().as_secs_f64() * 1000.0);
+        }
+        if content_changed || self.surfaces_waiting {
+            let boxes = self.tree.surface_boxes(scale);
+            let host = surface_host(window, d3d11, self.gpu_upgrade);
+            #[cfg(all(target_os = "linux", feature = "vello-gpu"))]
+            if host != crate::surface::Host::Pending && !boxes.is_empty() {
+                let vulkan = match &self.graphics {
+                    GraphicsState::Ready(graphics) => graphics.vulkan(),
+                    _ => None,
+                };
+                self.surfaces.set_gl(vulkan);
+            }
+            self.surfaces_waiting = host == crate::surface::Host::Pending && !boxes.is_empty();
+            if !boxes.is_empty() || !self.surfaces.is_empty() {
+                let events = self.surfaces.sync(boxes, scale, host);
+                for event in &events {
+                    // A surface gone or no longer presenting frames drops its last picture.
+                    if (event["event"] == "destroyed"
+                        || (event["event"] == "ready" && event["handleType"] != "TarveFrames"))
+                        && let Some(id) = event["id"].as_str()
+                    {
+                        self.tree.set_surface_frame(id, None, false);
+                    }
+                }
+                self.emit(events);
+            }
+            #[cfg(all(target_os = "linux", feature = "vello-gpu"))]
+            {
+                let released = self.surfaces.take_released();
+                if let GraphicsState::Ready(graphics) = &mut self.graphics {
+                    for image in released {
+                        graphics.override_image(&image, None);
+                    }
+                }
+            }
         }
         let requests = self.tree.take_remote_image_requests();
         self.remote_images.request(requests);
@@ -2664,6 +2770,8 @@ impl App {
             Ok(PresentResult::Presented) => {
                 self.presentation_retry_at = None;
                 self.tree.record_frame_time(frame_cpu_ms);
+                #[cfg(all(target_os = "linux", feature = "vello-gpu"))]
+                self.surfaces.poll_gpu();
                 #[cfg(target_os = "android")]
                 self.android_frame_presented(frame_started);
                 crate::stats::trace_frame(
@@ -2718,27 +2826,43 @@ impl App {
                 window.set_cursor_visible(true);
             } else {
                 // A link or clickable span inside text wins over the text caret, as in a browser.
-                // CSS `cursor` inherits: the nearest ancestor that sets one wins.
+                // CSS `cursor` inherits: the nearest ancestor that sets one wins. A control's
+                // own cursor (a pressable's or a slider's pointer, like a UA style on the
+                // element) beats one it would inherit; only `none` (a player hiding the
+                // pointer) still reaches through it.
                 let mut hidden = false;
                 let explicit = {
                     let mut current = self.tree.hovered.clone();
                     let mut found = None;
+                    let mut intrinsic = None;
+                    let mut set = false;
                     while let Some(id) = current {
                         let Some(entry) = self.tree.entries.get(&id) else {
                             break;
                         };
                         if let Some(name) = entry.node.style["cursor"].as_str() {
                             hidden = name == "none";
-                            found = if name == "auto" || hidden {
+                            found = if hidden {
                                 None
+                            } else if name == "auto" {
+                                intrinsic
                             } else {
-                                css_cursor(name)
+                                intrinsic.or_else(|| css_cursor(name))
                             };
+                            set = true;
                             break;
+                        }
+                        if intrinsic.is_none()
+                            && matches!(
+                                entry.node.kind.as_str(),
+                                "button" | "pressable" | "slider" | "splitter"
+                            )
+                        {
+                            intrinsic = Some(cursor_for_node(Some(&entry.node)));
                         }
                         current = entry.parent.clone();
                     }
-                    found
+                    if set { found } else { intrinsic }
                 };
                 let cursor = if self.tree.pointer_on_scrollbar() {
                     CursorIcon::Default
@@ -3187,8 +3311,8 @@ impl ApplicationHandler<Command> for App {
                         "focus" if !background_windows() => window.focus_window(),
                         "maximize" => window.set_maximized(true),
                         "unmaximize" => window.set_maximized(false),
-                        "fullscreen" => window.set_fullscreen(Some(Fullscreen::Borderless(None))),
-                        "exitFullscreen" => window.set_fullscreen(None),
+                        "fullscreen" => set_fullscreen(window, true),
+                        "exitFullscreen" => set_fullscreen(window, false),
                         "toggleFullscreen" => toggle_fullscreen(window),
                         // Brought back for the user (a second launch, a tray click): shown,
                         // restored if minimized and focused.
@@ -3306,6 +3430,43 @@ impl ApplicationHandler<Command> for App {
                 self.tick_videos();
                 self.sync_control_flow(event_loop);
             }
+            Command::Surface {
+                id,
+                action,
+                swap_chain,
+            } => {
+                if let Err(message) = self.surfaces.command(&id, &action, swap_chain.as_deref()) {
+                    self.events.push(error(message));
+                }
+            }
+            Command::SurfaceWake => {
+                // A swap chain came or went (the next frame places its layer and hole), or
+                // producers presented pictures.
+                for (id, picture) in self.surfaces.take_frames() {
+                    let image = vello::peniko::ImageData {
+                        data: vello::peniko::Blob::new(Arc::new(picture.rgba)),
+                        format: vello::peniko::ImageFormat::Rgba8,
+                        alpha_type: vello::peniko::ImageAlphaType::Alpha,
+                        width: picture.width,
+                        height: picture.height,
+                    };
+                    self.tree.set_surface_frame(&id, Some(image), false);
+                }
+                // GL pictures: already on the GPU; the frame copies them into Vello's atlas.
+                #[cfg(all(target_os = "linux", feature = "vello-gpu"))]
+                for picture in self.surfaces.take_gl() {
+                    if let GraphicsState::Ready(graphics) = &mut self.graphics {
+                        if let Some(old) = &picture.replaced {
+                            graphics.override_image(old, None);
+                        }
+                        graphics.override_image(&picture.image, Some(picture.texture));
+                    }
+                    self.tree
+                        .set_surface_frame(&picture.id, Some(picture.image), false);
+                }
+                self.tree.dirty.paint = true;
+                self.redraw();
+            }
             Command::SystemMedia { session } => {
                 #[cfg(target_os = "windows")]
                 {
@@ -3389,6 +3550,11 @@ impl ApplicationHandler<Command> for App {
                 }
                 accessibility_changed = true;
             }
+            Command::CapturePointer { id } => {
+                for event in self.tree.capture_pointer(id) {
+                    self.events.push(event);
+                }
+            }
             Command::ScrollToItem {
                 id,
                 index,
@@ -3421,7 +3587,7 @@ impl ApplicationHandler<Command> for App {
                     .map(|window| layout_viewport(window, &mut self.tree))
                     .filter(|size| size.width > 0.0 && size.height > 0.0)
                     .map(|size| (size.width, size.height))
-                    // Before the window exists (or while minimized) the requested size stands in.
+                    // Before the window was ever laid out the requested size stands in.
                     .unwrap_or((
                         self.document.window.width as f32,
                         self.document.window.height as f32,
@@ -3465,6 +3631,10 @@ impl ApplicationHandler<Command> for App {
                         GraphicsState::Ready(graphics) => graphics.shows_alpha(),
                         _ => false,
                     };
+                    let renderer = match &self.graphics {
+                        GraphicsState::Ready(graphics) => format!("{:?}", graphics.backend()),
+                        _ => String::new(),
+                    };
                     let fps = self
                         .present_times
                         .iter()
@@ -3475,7 +3645,7 @@ impl ApplicationHandler<Command> for App {
                         "hovered":self.tree.hovered, "focused":self.tree.focused, "nodes":self.tree.snapshots(), "width":size.width, "height":size.height, "scale":window.scale_factor(),
                         "layoutNodes":self.tree.layout_node_count(), "layoutNodesCreated":self.tree.layout_nodes_created, "measureCalls":self.tree.measure_calls, "paintedNodes":self.tree.painted_nodes,
                         "activeMotions":self.tree.active_motion_count(), "glyphRasterizations": glyph_rasterizations,
-                        "videoLayers": video_layers.0, "videoLayerError": video_layers.1, "windowAlpha": window_alpha,
+                        "videoLayers": video_layers.0, "videoLayerError": video_layers.1, "windowAlpha": window_alpha, "renderer": renderer,
                         "transparencyEffects": transparency_effects_enabled()
                     }}));
                 }
@@ -3591,6 +3761,11 @@ impl ApplicationHandler<Command> for App {
                 delta_y,
                 text,
             } if self.document.window.debug => {
+                // A scripted press is a real one: DOM pointerdown/pointerup reach the app too.
+                if self.document.pointer_events && matches!(action.as_str(), "down" | "up") {
+                    let event = self.dom_pointer_event(&action, json!({ "button": 0 }));
+                    self.events.push(event);
+                }
                 let events = match action.as_str() {
                     "move" => self.tree.pointer_move(x.unwrap_or(0.0), y.unwrap_or(0.0)),
                     "down" => self.tree.pointer_down(),

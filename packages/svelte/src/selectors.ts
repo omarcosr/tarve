@@ -36,12 +36,21 @@ export interface Compound {
 export type Combinator = " " | ">" | "+" | "~";
 
 /** Compounds left to right, with the combinator before each but the first. */
+/**
+ * Pseudo-elements a rule can style: generated content (`::before`/`::after`), an input's
+ * `::placeholder` and the scrollbar parts (`::-webkit-scrollbar`, `-thumb`, `-track`).
+ */
+export type PseudoElement = "before" | "after" | "placeholder" | "-webkit-scrollbar" | "-webkit-scrollbar-thumb" | "-webkit-scrollbar-track"
+  | "-webkit-slider-thumb" | "-moz-range-thumb" | "-webkit-slider-runnable-track" | "-moz-range-track" | "-moz-range-progress";
+const PSEUDO_ELEMENTS = new Set<string>(["before", "after", "placeholder", "-webkit-scrollbar", "-webkit-scrollbar-thumb", "-webkit-scrollbar-track",
+  "-webkit-slider-thumb", "-moz-range-thumb", "-webkit-slider-runnable-track", "-moz-range-track", "-moz-range-progress"]);
+
 export interface Selector {
   compounds: Compound[];
   combinators: Combinator[];
   specificity: number;
   /** `::before` / `::after` on the last compound: the rule styles generated content. */
-  pseudoElement?: "before" | "after";
+  pseudoElement?: PseudoElement;
 }
 
 const STATES: Record<string, "hover" | "focus" | "focusVisible" | "active" | "focusWithin"> = {
@@ -79,7 +88,13 @@ function splitTopLevel(text: string, separator: string): string[] {
   return out.map(part => part.trim()).filter(Boolean);
 }
 
-const IDENT = /^-?[_a-zA-Z\u00a0-\uffff][-_a-zA-Z0-9\u00a0-\uffff]*|^\*/;
+// Identifiers may escape any character (`.md\:flex`, `.w-1\/2`, Tailwind's class names).
+const IDENT = /^(?:-?(?:[_a-zA-Z\u00a0-\uffff]|\\[0-9a-fA-F]{1,6}\s?|\\[^\n0-9a-fA-F])(?:[-_a-zA-Z0-9\u00a0-\uffff]|\\[0-9a-fA-F]{1,6}\s?|\\[^\n0-9a-fA-F])*|\*)/;
+
+/** An identifier as written, its escapes resolved (`md\:flex` is the class "md:flex"). */
+function unescape(ident: string): string {
+  return ident.replace(/\\([0-9a-fA-F]{1,6})\s?|\\(.)/g, (_, hex: string | undefined, char: string | undefined) => hex ? String.fromCodePoint(parseInt(hex, 16)) : char!);
+}
 
 function parseSelector(text: string): Selector {
   const compounds: Compound[] = [];
@@ -107,7 +122,7 @@ function parseSelector(text: string): Selector {
     if (char === "#" || char === ".") {
       const ident = IDENT.exec(rest.slice(1));
       if (!ident) throw new SyntaxError(`Invalid selector "${text}"`);
-      if (char === "#") { current.id = ident[0]; specificity += 100; } else { current.classes.push(ident[0]); specificity += 10; }
+      if (char === "#") { current.id = unescape(ident[0]); specificity += 100; } else { current.classes.push(unescape(ident[0])); specificity += 10; }
       rest = rest.slice(1 + ident[0].length);
     } else if (char === "[") {
       const match = /^\[\s*([^\s~|^$*=\]]+)\s*(?:([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\s\]]+))\s*(i)?\s*)?\]/.exec(rest);
@@ -129,8 +144,8 @@ function parseSelector(text: string): Selector {
         rest = rest.slice(end + 1);
       }
       if (element || name === "before" || name === "after") {
-        if (name !== "before" && name !== "after") throw new SyntaxError(`Pseudo-element ::${name} is not supported`);
-        pseudoElement = name;
+        if (!PSEUDO_ELEMENTS.has(name)) throw new SyntaxError(`Pseudo-element ::${name} is not supported`);
+        pseudoElement = name as PseudoElement;
         specificity += 1;
         started = true;
         continue;
@@ -299,6 +314,17 @@ export function matchesList(element: SelectorElement, text: string): boolean {
 export function ruleState(selector: Selector): "hover" | "focus" | "focusVisible" | "active" | "focusWithin" | undefined {
   const last = selector.compounds[selector.compounds.length - 1]!;
   for (const pseudo of last.pseudos) if (pseudo.kind === "state") return pseudo.state;
+  return undefined;
+}
+
+/**
+ * The interaction state an ancestor compound requires (`.card:hover .title` → "hover"), with
+ * the index of that compound; undefined when only the last compound (or none) has one.
+ */
+export function ancestorState(selector: Selector): { state: "hover" | "focus" | "focusVisible" | "active" | "focusWithin"; index: number } | undefined {
+  for (let index = selector.compounds.length - 2; index >= 0; index--) {
+    for (const pseudo of selector.compounds[index]!.pseudos) if (pseudo.kind === "state") return { state: pseudo.state, index };
+  }
   return undefined;
 }
 

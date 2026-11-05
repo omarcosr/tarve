@@ -152,7 +152,7 @@ struct PendingLoad {
     looped: bool,
     muted: bool,
     volume: f32,
-    mixer: Option<rodio::mixer::Mixer>,
+    mixer: Option<crate::media::OutputMix>,
     play: bool,
     seek: Option<f64>,
 }
@@ -499,7 +499,7 @@ impl Videos {
         &mut self,
         id: &str,
         load: VideoLoad<'_>,
-        mixer: Option<rodio::mixer::Mixer>,
+        mixer: Option<crate::media::OutputMix>,
     ) -> Vec<Value> {
         let removed = self.players.remove(id).is_some() | self.readers.remove(id).is_some();
         self.pending_loads.remove(id);

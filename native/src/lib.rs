@@ -36,6 +36,8 @@ mod d3d11_overlay;
 mod desktop_widget;
 #[cfg(not(target_arch = "wasm32"))]
 mod device;
+#[cfg(all(not(target_arch = "wasm32"), feature = "media"))]
+mod downmix;
 mod environment;
 mod glass;
 #[cfg(target_os = "windows")]
@@ -67,6 +69,10 @@ mod startup_bench;
 mod stats;
 #[cfg(all(not(target_arch = "wasm32"), feature = "media"))]
 mod stretch;
+#[cfg(not(target_arch = "wasm32"))]
+mod surface;
+#[cfg(all(target_os = "linux", feature = "vello-gpu"))]
+mod surface_gl;
 mod svg;
 mod syntax;
 #[cfg(test)]

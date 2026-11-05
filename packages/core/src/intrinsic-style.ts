@@ -11,7 +11,7 @@ function canonicalizeStateStyle(style: IntrinsicStateStyle | undefined): StateSt
   return result as StateStyle;
 }
 
-const STATES = ["hover", "focus", "focusVisible", "active", "disabled"] as const;
+const STATES = ["hover", "focus", "focusVisible", "active", "disabled", "groupHover", "focusWithin"] as const;
 const edge = (value: unknown) => value === "flex-start" ? "start" : value === "flex-end" ? "end"
   : value === "space-between" ? "between" : value === "space-around" ? "around" : value === "space-evenly" ? "evenly" : value;
 
@@ -24,6 +24,8 @@ export function canonicalizeIntrinsicStyle(style: IntrinsicStyle | undefined): S
   delete result.borderRadius;
   if (result.align === undefined && result.alignItems !== undefined) result.align = edge(result.alignItems) as Style["align"];
   if (result.justify === undefined && result.justifyContent !== undefined) result.justify = edge(result.justifyContent) as Style["justify"];
+  if (typeof result.alignContent === "string") result.alignContent = edge(result.alignContent) as Style["alignContent"];
+  if (typeof result.alignSelf === "string") result.alignSelf = edge(result.alignSelf) as Style["alignSelf"];
   delete result.alignItems;
   delete result.justifyContent;
   delete result.objectFit;

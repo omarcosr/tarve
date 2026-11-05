@@ -5,7 +5,7 @@ import { registerSvelte } from "./bun";
 
 registerSvelte({ onWarning: () => {} });
 const { mount, TEvent } = await import("./index");
-const { documentInstance } = await import("./dom");
+const { documentInstance, windowInstance } = await import("./dom");
 const { default: Counter } = await import("./fixtures/Counter.svelte");
 const { default: Todos } = await import("./fixtures/Todos.svelte");
 const { default: TodoApp } = await import("../../../examples/svelte/App.svelte");
@@ -22,6 +22,8 @@ const { default: Plain } = await import("./fixtures/Plain.svelte");
 const { default: Visible } = await import("./fixtures/Visible.svelte");
 const { default: Rich } = await import("./fixtures/Rich.svelte");
 const { default: VideoFixture } = await import("./fixtures/Video.svelte");
+const { default: FlexItems } = await import("./fixtures/FlexItems.svelte");
+const { default: HtmlClass } = await import("./fixtures/HtmlClass.svelte");
 
 class FakeBridge implements NativeBridge {
   commands: NativeCommand[] = [];
@@ -312,7 +314,7 @@ describe("@tarve/svelte", () => {
     await new Promise(resolve => setTimeout(resolve, 60));
     const midway = nodes().filter(node => node.id === "faded").map(node => node.style.opacity).filter(value => value !== undefined) as number[];
     expect(midway.some(value => value > 0 && value < 1)).toBe(true);
-    const flown = nodes().filter(node => node.id === "flown").map(node => node.style.transformMatrix?.[5]).filter(value => value !== undefined) as number[];
+    const flown = nodes().filter(node => node.id === "flown").map(node => (node.style.transform as { y?: number } | undefined)?.y).filter(value => value !== undefined) as number[];
     expect(flown.some(value => value > 0 && value < 20)).toBe(true);
     await new Promise(resolve => setTimeout(resolve, 150));
     await settle();
@@ -347,6 +349,19 @@ describe("@tarve/svelte", () => {
     await settle();
     expect(text("downs")).toBe("down2 up2");
     expect(text("wheel")).toBe("120");
+    // Native reports a move inside the box; clientX is in the viewport, as getBoundingClientRect is,
+    // so clientX - rect.left (a slider's hover position) is that offset.
+    bridge.emit({ type: "pointerMove", id: "box", x: 30, y: 5 } as NativeEvent);
+    await settle();
+    expect(text("moved")).toBe("42,39,30");
+    // Enter and leave follow native's per-element pointer reports, not its single hovered node:
+    // a plain div under a full-window pressable still learns the pointer left (a seek bar's tooltip).
+    expect(current("hov").reportPointer).toBe(true);
+    bridge.emit({ type: "pointerMove", id: "hov", x: 3, y: 3 } as NativeEvent);
+    bridge.emit({ type: "pointerMove", id: "hov", x: 4, y: 3 } as NativeEvent);
+    bridge.emit({ type: "pointerLeave", id: "hov" } as NativeEvent);
+    await settle();
+    expect(text("hovers")).toBe("enter leave");
     // Structure: :has() on the list, generated content.
     const ul = mounted.target.querySelector("ul")!;
     expect(current("s" + ul._key).style.gap).toBe(9);
@@ -434,6 +449,77 @@ describe("@tarve/svelte", () => {
     expect(bridge.commands.some(command => command.type === "windowTitle" && command.title === "Plain 1")).toBe(true);
   });
 
+  test("phrasing children of a flex container are items; min()/max() widths are capped percentages", async () => {
+    const bridge = new FakeBridge();
+    const mounted = mount(FlexItems as never, { bridge });
+    cleanup = mounted.unmount;
+    await mounted.app.ready;
+    const root = bridge.document!.root;
+    const row = find(root, node => node.style?.display === "flex")!;
+    expect(row.children?.map(child => child.id)).toEqual(expect.arrayContaining([expect.stringContaining("a"), expect.stringContaining("b")]));
+    expect(row.children).toHaveLength(2);
+    const paragraph = find(root, node => node.id?.includes("para"))!;
+    expect(paragraph.children?.length ?? 0).toBeLessThanOrEqual(1);
+    const box = find(root, node => node.id?.includes("box"))!;
+    expect(box.style).toMatchObject({ width: "92%", maxWidth: 544, height: "50%", minHeight: 120 });
+    // An inline-block in a block shrinks to its content; an em-sized icon follows the font size.
+    const badge = find(root, node => node.id?.includes("badge"))!;
+    expect(badge.style).toMatchObject({ alignSelf: "start" });
+    expect("inline" in badge.style!).toBe(false);
+    // A flex <p> with an icon and text keeps both on one line, aligned as its CSS says.
+    const tip = find(root, node => node.id === "tip")!;
+    expect(tip.style).toMatchObject({ wrap: false, align: "start", direction: "row" });
+    // A flex text element is a box centring its text.
+    const num = find(root, node => node.id === "num")!;
+    expect(num.kind).not.toBe("text");
+    expect(num.style).toMatchObject({ width: 28, height: 28, align: "center", justify: "center", group: true, hover: { background: "#000000" } });
+    expect(num.children?.[0]).toMatchObject({ kind: "text", text: "1", style: { fontSize: 12, foreground: "#ff0000", groupHover: { foreground: "#ffffff" } } });
+    // Tailwind's display classes count as the element's display; its alignment classes stand.
+    const chip = find(root, node => node.id === "chip")!;
+    expect(chip.style).toMatchObject({ wrap: false, direction: "row", align: "center", gap: 6 });
+    const cta = find(root, node => node.id === "cta")!;
+    expect(cta.style).toMatchObject({ align: "center", justify: "center" });
+    expect(cta.style!.height).not.toBe(36);
+    // An inline icon's width="24" is 24 px; a CSS-styled button keeps its colours on hover.
+    const back = find(root, node => node.id === "bk")!;
+    expect(back.children?.[0]?.style).toMatchObject({ width: 24, height: 24 });
+    expect(back.style?.hover?.background).toBeUndefined();
+    expect(back.children?.[0]?.style?.foreground).toBe("currentColor");
+    // A flex heading's empty accent span is a box of its own beside the text.
+    const heading = find(root, node => node.id === "heading")!;
+    expect(heading.kind).not.toBe("text");
+    expect(find(heading, node => node.id === "accent")?.style).toMatchObject({ width: 6, height: 24 });
+    expect(find(root, node => node.id === "fill")?.style?.radius).toBe(9999);
+    const icon = find(root, node => node.id === "icon")!;
+    expect(icon.style).toMatchObject({ width: 24, height: 24 });
+  });
+
+  test("a class on <html> restyles the page (`html.player .app`)", async () => {
+    const bridge = new FakeBridge();
+    const mounted = mount<Record<string, any>, { play(on: boolean): void }>(HtmlClass as never, { bridge });
+    cleanup = mounted.unmount;
+    await mounted.app.ready;
+    const background = () => {
+      const sent = bridge.commands.flatMap(command => command.type === "patch" ? command.nodes : command.type === "mutate" ? command.mutations.flatMap(mutation => "node" in mutation ? [mutation.node] : []) : []);
+      const latest = [...sent].reverse().find(node => node.id === "app") ?? find(bridge.document!.root, node => node.id === "app");
+      return latest?.style?.background;
+    };
+    expect(background()).toBe("#ff0000");
+    const canvas = () => {
+      const roots = bridge.commands.flatMap(command => command.type === "patch" ? command.nodes : []).filter(node => node.id === bridge.document!.root.id);
+      return (roots.at(-1) ?? bridge.document!.root).style?.background;
+    };
+    expect(canvas()).toBe("#111111");
+    mounted.component.play(true);
+    await settle();
+    expect(background()).toBe("#00000000");
+    // The page's canvas follows <html> too: the window shows what is under it (a video surface).
+    expect(canvas()).toBe("#00000000");
+    mounted.component.play(false);
+    await settle();
+    expect(background()).toBe("#ff0000");
+  });
+
   test("titleBar with a <TitleBar> in the component renders one bar", async () => {
     const bridge = new FakeBridge();
     const mounted = mount<Record<string, any>, { read(): void }>(ComponentBar as never, { bridge, window: { titleBar: true } });
@@ -488,6 +574,21 @@ describe("@tarve/svelte", () => {
     bridge.commands = [];
     expect(mounted.target.querySelector("#measured")!.getBoundingClientRect().width).toBe(210);
     expect(bridge.commands.length).toBe(0);
+  });
+
+  test("under Tarve's title bar the page is the viewport: its size and client rects start below the bar", async () => {
+    const bridge = new SyncBridge();
+    bridge.boxes.measured = { width: 200, height: 20, x: 10, y: 140, borderWidth: 200, borderHeight: 20 };
+    const mounted = mount(Rich as any, { bridge, window: { title: "Svelte", width: 400, height: 300, titleBar: true } });
+    cleanup = mounted.unmount;
+    await mounted.app.ready;
+    const root = bridge.document!.root;
+    const viewport = root.children!.find(node => node.kind !== "titlebar")!;
+    bridge.boxes[viewport.id] = { width: 400, height: 260, x: 0, y: 40, borderWidth: 400, borderHeight: 260 };
+    bridge.emit({ type: "size", id: viewport.id, width: 400, height: 260 });
+    await settle();
+    expect(windowInstance.innerHeight).toBe(260);
+    expect(mounted.target.querySelector("#measured")!.getBoundingClientRect().y).toBe(100);
   });
 
   test("contenteditable is rich text: styled runs, edits in place, selection and execCommand", async () => {

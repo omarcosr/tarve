@@ -1,10 +1,10 @@
 /// <reference path="./elements.d.ts" />
 import "./install";
-import { createApp, TitleBar as NativeTitleBar, Window, type AppHandle, type AppOptions, type TitleBarProps, type WindowProps } from "@tarve/core";
+import { createApp, TitleBar as NativeTitleBar, View, Window, type AppHandle, type AppOptions, type TitleBarProps, type WindowProps } from "@tarve/core";
 import type { Component } from "svelte";
 import { flushSync, mount as mountSvelte, unmount as unmountSvelte } from "./svelte-client";
-import { beginRender, documentInstance, endRender, restyle, setLayoutReader, setScheduler, type TElement } from "./dom";
-import { elementForNativeId, nativeIdOf, rootChildren } from "./render";
+import { beginRender, documentInstance, endRender, restyle, setLayoutReader, setScheduler, setViewportElement, type TElement } from "./dom";
+import { canvasBackground, canvasText, elementForNativeId, nativeIdOf, rootChildren, viewportId } from "./render";
 import { setSelectionReader, textOfEditable, utf16Offset } from "./editable";
 import { connectNativeEvents, windowResized } from "./events";
 
@@ -64,14 +64,24 @@ export function mount<Props extends Record<string, any>, Exports extends Record<
     app = createApp(() => {
       const title = documentInstance.title || windowOptions.title;
       beginRender();
-      let content;
-      try { content = rootChildren(target); } finally { endRender(); }
+      let content, canvas, text: Record<string, unknown> = {};
+      try { content = rootChildren(target); canvas = canvasBackground(); text = canvasText(); } finally { endRender(); }
+      // A window has one title bar: a <TitleBar> in the component wins over the option's.
+      const ownBar = Boolean(titleBar) && !target.querySelector("titlebar");
+      // With Tarve's bar the page is the box under it, as a browser's viewport is under its frame:
+      // `innerWidth`/`innerHeight` are its size and client rects start at its corner.
+      setViewportElement(ownBar ? target : undefined);
       return Window({
         ...windowOptions,
+        // The page's `html`/`body` background is the window's, over the option's (`html.player { background: transparent }`).
+        // Without Tarve's bar the window is the page: it passes the html/body text down too.
+        style: { ...windowOptions.style, ...(ownBar ? {} : text), ...(canvas !== undefined ? { background: canvas } : {}) } as WindowProps["style"],
         title,
-        onSize: windowResized,
-        // A window has one title bar: a <TitleBar> in the component wins over the option's.
-        children: titleBar && !target.querySelector("titlebar") ? [NativeTitleBar({ ...(titleBar === true ? {} : titleBar), title }), content] : content,
+        ...(ownBar ? {} : { onSize: windowResized }),
+        children: ownBar
+          ? [NativeTitleBar({ ...(titleBar === true ? {} : titleBar as Omit<TitleBarProps, "children" | "title">), title }), View({ id: viewportId(target), onSize: windowResized, style: { flex: 1, minHeight: 0, width: "100%", position: "relative", display: "block", ...text }, children: content })]
+          // The page is a CSS block, as <body> is: its children's margins collapse as in a browser.
+          : View({ style: { flex: 1, minHeight: 0, width: "100%", position: "relative", display: "block" }, children: content }),
       });
     }, { keyboardEvents: true, pointerEvents: true, ...appOptions });
     disconnect = connectNativeEvents(app);

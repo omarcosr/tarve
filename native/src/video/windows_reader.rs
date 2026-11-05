@@ -6,9 +6,10 @@
 use super::windows_shared::{SendCom, plane_array_view, win};
 use super::windows_stream::{RemoteStream, VIDEO_WINDOW, content_type, streamable};
 use crate::d3d11::VideoView;
+use crate::downmix::Downmix;
+use crate::media::OutputMix;
 use crate::media::remote::{Stream, is_remote};
 use crate::stretch::Stretcher;
-use rodio::mixer::Mixer;
 use rodio::{Player, Source};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -238,7 +239,7 @@ pub(super) struct ReaderPlayer {
     device: ID3D11Device,
     info: Option<Info>,
     output: Option<Arc<Player>>,
-    mixer: Mixer,
+    mixer: OutputMix,
     shown: Option<Shown>,
     views: HashMap<(usize, u32), VideoView>,
     /// The decoder's surfaces cannot be sampled here: each picture is copied.
@@ -295,7 +296,7 @@ impl ReaderPlayer {
         src: &str,
         manager: &IMFDXGIDeviceManager,
         device: ID3D11Device,
-        mixer: Mixer,
+        mixer: OutputMix,
         looped: bool,
         muted: bool,
         volume: f32,
@@ -447,9 +448,9 @@ impl ReaderPlayer {
         if self.output.is_some() {
             return;
         }
-        let player = Arc::new(Player::connect_new(&self.mixer));
+        let player = Arc::new(Player::connect_new(&self.mixer.mixer));
         player.pause();
-        player.append(Feed {
+        let feed = Feed {
             sound: self.shared.sound.clone(),
             channels: std::num::NonZero::new(channels).unwrap_or(std::num::NonZero::<u16>::MIN),
             rate: std::num::NonZero::new(rate).unwrap_or(std::num::NonZero::<u32>::MIN),
@@ -458,7 +459,8 @@ impl ReaderPlayer {
             epoch: self.shared.sound.epoch.load(Ordering::Acquire),
             stretch: None,
             credit: 0.0,
-        });
+        };
+        player.append(Downmix::new(feed, self.mixer.channels));
         self.output = Some(player);
         self.apply_volume();
     }
@@ -1117,7 +1119,7 @@ impl ReaderPlayer {
         self.volume
     }
 
-    pub(super) fn mixer(&self) -> Mixer {
+    pub(super) fn mixer(&self) -> OutputMix {
         self.mixer.clone()
     }
 }

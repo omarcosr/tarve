@@ -10,7 +10,10 @@ import { type AppHandle } from "../app";
  *
  * Steps run in order once the first frame is drawn: `click:<text>` clicks the node whose text
  * (or control label) is that text, `type:<text>` types into the focused field, `key:<name>`
- * presses a key, `wait:<ms>` sleeps and `capture:<path>` saves a PNG mid-script. Then
+ * presses a key, `hover:<text>` moves the pointer over a node, `move:<x>,<y>` moves it to a window
+ * point (logical px, for controls without text such as a slider), `down` and `up` press and release
+ * the button where the pointer is (a drag: `move`, `down`, `move`, `up`), `wheel:<px>` scrolls under the
+ * pointer (positive is down), `wait:<ms>` sleeps and `capture:<path>` saves a PNG mid-script. Then
  * `--tarve-snapshot` saves the final frame, `--tarve-inspect` writes the node tree as JSON and the
  * app closes (`--tarve-keep` leaves it open). Environment variables TARVE_SCRIPT,
  * TARVE_SNAPSHOT, TARVE_INSPECT and TARVE_KEEP=1 do the same.
@@ -26,6 +29,11 @@ export type AutomationStep =
   | { kind: "click"; text: string }
   | { kind: "type"; text: string }
   | { kind: "key"; key: string }
+  | { kind: "hover"; text: string }
+  | { kind: "move"; x: number; y: number }
+  | { kind: "down" }
+  | { kind: "up" }
+  | { kind: "wheel"; delta: number }
   | { kind: "wait"; ms: number }
   | { kind: "capture"; path: string };
 
@@ -49,6 +57,21 @@ export function parseAutomationScript(script: string): AutomationStep[] {
     switch (verb) {
       case "click": if (!arg) throw new Error("tarve-script: click needs a text"); steps.push({ kind: "click", text: arg }); break;
       case "type": steps.push({ kind: "type", text: arg }); break;
+      case "hover": if (!arg) throw new Error("tarve-script: hover needs a text"); steps.push({ kind: "hover", text: arg }); break;
+      case "move": {
+        // A point in window coordinates (logical px): hover where no text is, e.g. a slider.
+        const [x, y] = arg.split(",").map(Number);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`tarve-script: move needs x,y, got ${JSON.stringify(arg)}`);
+        steps.push({ kind: "move", x: x!, y: y! });
+        break;
+      }
+      case "down": case "up": steps.push({ kind: verb }); break;
+      case "wheel": {
+        const delta = Number(arg);
+        if (!Number.isFinite(delta) || delta === 0) throw new Error(`tarve-script: wheel needs a non-zero pixel delta, got ${JSON.stringify(arg)}`);
+        steps.push({ kind: "wheel", delta });
+        break;
+      }
       case "key": if (!arg) throw new Error("tarve-script: key needs a name"); steps.push({ kind: "key", key: KEYS[arg.trim().toLowerCase()] ?? arg.trim() }); break;
       case "wait": {
         const ms = Number(arg);
@@ -57,7 +80,7 @@ export function parseAutomationScript(script: string): AutomationStep[] {
         break;
       }
       case "capture": if (!arg) throw new Error("tarve-script: capture needs a path"); steps.push({ kind: "capture", path: arg.trim() }); break;
-      default: throw new Error(`tarve-script: unknown step ${JSON.stringify(verb)} (click, type, key, wait, capture)`);
+      default: throw new Error(`tarve-script: unknown step ${JSON.stringify(verb)} (click, hover, move, down, up, wheel, type, key, wait, capture)`);
     }
   }
   return steps;
@@ -116,13 +139,21 @@ export async function runAutomation(app: AutomatedApp, automation: Automation): 
     await app.ready;
     let snapshot = await settle(app);
     for (const step of automation.steps) {
-      if (step.kind === "click") {
+      if (step.kind === "click" || step.kind === "hover") {
         const node = findByText(snapshot, step.text);
         if (!node) throw new Error(`tarve-script: no node shows ${JSON.stringify(step.text)}`);
         const point = { x: node.x + node.width / 2, y: node.y + node.height / 2 };
         app.debug({ type: "input", action: "move", ...point });
-        app.debug({ type: "input", action: "down" });
-        app.debug({ type: "input", action: "up" });
+        if (step.kind === "click") {
+          app.debug({ type: "input", action: "down" });
+          app.debug({ type: "input", action: "up" });
+        }
+      } else if (step.kind === "move") {
+        app.debug({ type: "input", action: "move", x: step.x, y: step.y });
+      } else if (step.kind === "down" || step.kind === "up") {
+        app.debug({ type: "input", action: step.kind });
+      } else if (step.kind === "wheel") {
+        app.debug({ type: "input", action: "wheel", deltaY: step.delta });
       } else if (step.kind === "type") {
         if (step.text) app.debug({ type: "input", action: "text", text: step.text });
       } else if (step.kind === "key") {
