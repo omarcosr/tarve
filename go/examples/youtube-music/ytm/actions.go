@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
 	"strings"
 	"time"
 
@@ -50,7 +49,11 @@ func Connect(app *tarve.App) {
 			OnAction: func(action string, t *float64) {
 				switch action {
 				case "play":
-					state.media(tarve.MediaController.Play)
+					if state.Path != "" {
+						state.media(tarve.MediaController.Play)
+					} else {
+						state.TogglePlay()
+					}
 				case "pause":
 					state.media(tarve.MediaController.Pause)
 				case "next":
@@ -297,9 +300,20 @@ func Connect(app *tarve.App) {
 	radioFor := ""
 	var radioWaiters []func()
 	radioLoading := false
-	var start func()
+	// Songs heard lately (by SongKey), so autoplay does not bring back what just played.
+	var recent []string
+	const recentKept = 60
+	heardLately := func(key string, last int) bool {
+		for _, k := range recent[max(0, len(recent)-last):] {
+			if k == key {
+				return true
+			}
+		}
+		return false
+	}
+	var start func(at float64)
 	extendQueue := func(done func()) {
-		if len(state.Queue) == 0 || state.Repeat != "off" {
+		if len(state.Queue) == 0 || state.Repeat != "off" || !state.Autoplay {
 			if done != nil {
 				done()
 			}
@@ -324,16 +338,36 @@ func Connect(app *tarve.App) {
 				if err != nil {
 					radioFor = ""
 				} else if len(state.Queue) == len(queueAtStart) && (len(queueAtStart) == 0 || &state.Queue[0] == &queueAtStart[0]) {
+					// Every video of a song already queued counts as that song, and so does one heard lately
+					// (unless the radio has nothing else); what is left is spread so neighbours differ.
 					have := map[string]bool{}
 					for _, s := range state.Queue {
-						have[s.ID] = true
+						have[s.ID], have[SongKey(s)] = true, true
 					}
-					var more []*Item
+					var fresh []*Item
 					for _, s := range songs {
-						if !have[s.ID] {
-							more = append(more, s)
+						key := SongKey(s)
+						if have[s.ID] || have[key] {
+							continue
 						}
+						have[key] = true
+						fresh = append(fresh, s)
 					}
+					// A radio of only songs heard lately still keeps playing, with the latest ones left out.
+					heardIn := func(last int) []*Item {
+						var out []*Item
+						for _, s := range fresh {
+							if !heardLately(SongKey(s), last) {
+								out = append(out, s)
+							}
+						}
+						return out
+					}
+					unheard := heardIn(recentKept)
+					if len(unheard) == 0 {
+						unheard = heardIn(10)
+					}
+					more := Spread(unheard, seed)
 					if len(more) > 0 {
 						state.Queue = append(append([]*Item{}, state.Queue...), more...)
 						if !strings.HasSuffix(state.Source, "radio") {
@@ -366,7 +400,7 @@ func Connect(app *tarve.App) {
 					app.Post(func() {
 						if token == playToken && state.Index == index {
 							blocked++
-							start()
+							start(0)
 						}
 					})
 				})
@@ -420,10 +454,21 @@ func Connect(app *tarve.App) {
 		})
 	}
 	loadedID := ""
-	start = func() {
+	start = func(at float64) {
 		song := state.current()
 		if song == nil {
 			return
+		}
+		key := SongKey(song)
+		for i, k := range recent {
+			if k == key {
+				recent = append(recent[:i:i], recent[i+1:]...)
+				break
+			}
+		}
+		recent = append(recent, key)
+		if len(recent) > recentKept {
+			recent = recent[1:]
 		}
 		if song.ID == loadedID && state.Path != "" && state.PlayError == nil {
 			playToken++
@@ -437,12 +482,12 @@ func Connect(app *tarve.App) {
 		loadLyrics()
 		playToken++
 		token := playToken
-		state.Path, state.Playing, state.Time = "", false, 0
+		state.Path, state.Playing, state.Time = "", false, at
 		state.Duration = 0
 		if song.Duration != nil {
 			state.Duration = *song.Duration
 		}
-		state.PlayError, state.ResumeAt, state.Loading = nil, 0, ptr(0)
+		state.PlayError, state.ResumeAt, state.Loading = nil, at, ptr(0)
 		async(func() func() {
 			url, err := StreamURL(song.ID)
 			return func() {
@@ -467,31 +512,40 @@ func Connect(app *tarve.App) {
 		}
 		refresh()
 	}
+	// following is the next queue entry that is not the song playing again.
+	following := func() int {
+		current := state.current()
+		i := state.Index + 1
+		for i < len(state.Queue) && SameSong(state.Queue[i], current) {
+			i++
+		}
+		return i
+	}
 	state.Played = func() { skipped, blocked = 0, 0 }
 	state.Play = func(queue []*Item, index int, from string) {
-		state.Queue = append([]*Item{}, queue...)
-		state.Index = index
+		// A list with a song more than once (two videos of it, a duplicated playlist entry) plays it once.
+		state.Queue, state.Index = Distinct(queue, index)
 		state.Source = from
 		if state.Shuffle {
 			state.Shuffle = false
 			state.ToggleShuffle()
 		}
-		start()
+		start(0)
 	}
 	state.Jump = func(index int) {
 		if index != state.Index && index >= 0 && index < len(state.Queue) {
 			state.Index = index
-			start()
+			start(0)
 		}
 	}
 	state.Next = func() {
-		switch {
-		case state.Index+1 < len(state.Queue):
-			state.Index++
-			start()
+		switch ahead := following(); {
+		case ahead < len(state.Queue):
+			state.Index = ahead
+			start(0)
 		case state.Repeat == "all" && len(state.Queue) > 0:
 			state.Index = 0
-			start()
+			start(0)
 		case len(state.Queue) > 0:
 			token := playToken
 			state.Loading = ptr(0)
@@ -501,9 +555,9 @@ func Connect(app *tarve.App) {
 					return
 				}
 				state.Loading = nil
-				if state.Index+1 < len(state.Queue) {
-					state.Index++
-					start()
+				if after := following(); after < len(state.Queue) {
+					state.Index = after
+					start(0)
 				} else {
 					refresh()
 				}
@@ -517,19 +571,117 @@ func Connect(app *tarve.App) {
 			return
 		}
 		state.Index--
-		start()
+		start(0)
 	}
 	state.ToggleShuffle = func() {
 		state.Shuffle = !state.Shuffle
 		if !state.Shuffle || state.Index < 0 {
 			return
 		}
-		rest := append([]*Item{}, state.Queue[state.Index+1:]...)
-		for i := len(rest) - 1; i > 0; i-- {
-			j := rand.Intn(i + 1)
-			rest[i], rest[j] = rest[j], rest[i]
-		}
+		// Neighbours differ: never one song twice in a row, and artists alternate where they can.
+		rest := Shuffled(state.Queue[state.Index+1:], state.current())
 		state.Queue = append(append([]*Item{}, state.Queue[:state.Index+1]...), rest...)
+	}
+
+	// TogglePlay plays or pauses; a queue restored from the last session (no stream yet) starts where it stopped.
+	state.TogglePlay = func() {
+		if state.Path != "" {
+			if state.Playing {
+				state.media(tarve.MediaController.Pause)
+			} else {
+				state.media(tarve.MediaController.Play)
+			}
+			return
+		}
+		if state.Loading == nil && state.current() != nil {
+			at := state.Time
+			if state.PlayError != nil {
+				at = 0
+			}
+			start(at)
+		}
+		refresh()
+	}
+	state.SeekBy = func(seconds float64) {
+		if state.Path == "" {
+			return
+		}
+		duration := state.Duration
+		if song := state.current(); duration == 0 && song != nil && song.Duration != nil {
+			duration = *song.Duration
+		}
+		limit := math.Inf(1)
+		if duration > 0 {
+			limit = duration - 1
+		}
+		at := math.Max(0, math.Min(limit, state.Time+seconds))
+		state.media(func(m tarve.MediaController) { m.Seek(at) })
+		state.Time = at
+		state.FollowLyrics()
+		refresh()
+	}
+	noticeID := 0
+	state.Notify = func(text string) {
+		state.Notice = &text
+		noticeID++
+		id := noticeID
+		time.AfterFunc(2500*time.Millisecond, func() {
+			app.Post(func() {
+				if id == noticeID {
+					state.Notice = nil
+					refresh()
+				}
+			})
+		})
+		refresh()
+	}
+	// enqueue: nothing playing, the song starts; otherwise it goes in at at, moved there if it was already coming up.
+	enqueue := func(song *Item, at int, done string) {
+		current := state.current()
+		if current == nil {
+			state.Play([]*Item{song}, 0, "Queue")
+			return
+		}
+		if SameSong(song, current) {
+			state.Notify("Already playing")
+			return
+		}
+		queue := []*Item{}
+		for i, item := range state.Queue {
+			if i <= state.Index || !SameSong(item, song) {
+				queue = append(queue, item)
+			}
+		}
+		at = min(at, len(queue))
+		// Its upcoming copies went above; the current song was checked, so it plays once from here.
+		state.Queue = append(queue[:at:at], append([]*Item{song}, queue[at:]...)...)
+		state.Notify(done)
+	}
+	state.PlayNext = func(song *Item) { enqueue(song, state.Index+1, "\""+song.Title+"\" plays next") }
+	state.AddToQueue = func(song *Item) { enqueue(song, len(state.Queue), "\""+song.Title+"\" added to queue") }
+	state.RemoveFromQueue = func(index int) {
+		if index == state.Index || index < 0 || index >= len(state.Queue) {
+			return
+		}
+		state.Queue = append(append([]*Item{}, state.Queue[:index]...), state.Queue[index+1:]...)
+		if index < state.Index {
+			state.Index--
+		}
+		refresh()
+	}
+	state.ClearUpNext = func() {
+		if state.Index >= 0 {
+			state.Queue = append([]*Item{}, state.Queue[:min(state.Index+1, len(state.Queue))]...)
+		}
+		radioFor = ""
+		refresh()
+	}
+	state.ToggleAutoplay = func() {
+		state.Autoplay = !state.Autoplay
+		if state.Autoplay && state.Index >= 0 && state.Index+3 >= len(state.Queue) {
+			extendQueue(nil)
+		}
+		refresh()
 	}
 
 	loadLibrary := func() {
@@ -622,16 +774,35 @@ func Connect(app *tarve.App) {
 		}
 	}()
 
-	app.RegisterHotkey("Space", func() {
-		if state.Path == "" {
-			return
+	// YouTube's keyboard shortcuts. A focused text field keeps its keys, so typing a search is unaffected.
+	cycleRepeat := func() {
+		switch state.Repeat {
+		case "off":
+			state.Repeat = "all"
+		case "all":
+			state.Repeat = "one"
+		default:
+			state.Repeat = "off"
 		}
-		if state.Playing {
-			state.media(tarve.MediaController.Pause)
-		} else {
-			state.media(tarve.MediaController.Play)
-		}
-	})
+	}
+	keys := []struct {
+		key string
+		run func()
+	}{
+		{"Space", state.TogglePlay}, {"K", state.TogglePlay},
+		{"J", func() { state.SeekBy(-10) }}, {"L", func() { state.SeekBy(10) }},
+		{"Shift+N", state.Next}, {"Shift+P", state.Previous},
+		{"M", func() { state.Muted = !state.Muted }},
+		{"=", func() { state.Volume = math.Min(1, math.Round(state.Volume*100+5)/100); state.Muted = false }},
+		{"-", func() { state.Volume = math.Max(0, math.Round(state.Volume*100-5)/100) }},
+		{"S", state.ToggleShuffle},
+		{"R", cycleRepeat},
+		{"Q", func() { state.ShowQueue = !state.ShowQueue }},
+	}
+	for _, k := range keys {
+		run := k.run
+		app.RegisterHotkey(k.key, func() { run(); refresh() })
+	}
 	state.SignedIn = SignedIn()
 	show(&Page{Kind: "home"})
 	if state.SignedIn {

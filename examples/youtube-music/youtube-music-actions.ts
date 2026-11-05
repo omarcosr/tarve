@@ -3,7 +3,9 @@ import type { createApp } from "@tarve/core";
 import { signInWithBrowser } from "./youtube-music-login";
 import { phone } from "./youtube-music-mobile";
 import { lineAt, lyricsFor, type Lyrics } from "./youtube-music-lyrics";
+import { distinct, sameSong, shuffled, songKey, spread } from "./youtube-music-queue";
 import * as source from "./youtube-music-source";
+import type { Song } from "./youtube-music-source";
 import { AUDIO_ID, LYRICS_LIST, lyricsShown, state, type Page } from "./youtube-music-view";
 
 /** Waits before retrying a song the bot check refused (VPN exits change; the block often lifts). */
@@ -34,7 +36,7 @@ export function connect(app: ReturnType<typeof createApp>): void {
       canNext: state.queue.length > 0,
       canPrevious: state.index >= 0,
       onAction: (action, time) => {
-        if (action === "play") state.media()?.play();
+        if (action === "play") { if (state.path) state.media()?.play(); else state.togglePlay(); }
         else if (action === "pause") state.media()?.pause();
         else if (action === "next") state.next();
         else if (action === "previous") state.previous();
@@ -166,19 +168,33 @@ export function connect(app: ReturnType<typeof createApp>): void {
 
   // Autoplay, as YouTube Music does: when the queue runs low, the radio of its
   // last song is added after it, so playback never just stops.
+  /** Songs heard lately (by songKey), so autoplay does not bring back what just played. */
+  const recent: string[] = [];
+  const RECENT = 60;
   let radioFor: string | null = null;
   let radioLoad: Promise<void> | null = null;
   function extendQueue(): Promise<void> {
     const seed = state.queue.at(-1);
-    if (!seed || state.repeat !== "off") return Promise.resolve();
+    if (!seed || state.repeat !== "off" || !state.autoplay) return Promise.resolve();
     if (seed.id === radioFor && radioLoad) return radioLoad;
     radioFor = seed.id;
     const queueAtStart = state.queue;
     radioLoad = source.radio(seed.id).then(songs => {
       // A new queue (another song played) replaces this one; its own radio comes later.
       if (state.queue !== queueAtStart) return;
-      const have = new Set(state.queue.map(song => song.id));
-      const more = songs.filter(song => !have.has(song.id));
+      // Every video of a song already queued counts as that song, and so does one heard lately
+      // (unless the radio has nothing else); what is left is spread so neighbours differ.
+      const have = new Set(state.queue.flatMap(song => [song.id, songKey(song)]));
+      const fresh = songs.filter(song => {
+        const key = songKey(song);
+        if (have.has(song.id) || have.has(key)) return false;
+        have.add(key);
+        return true;
+      });
+      // A radio of only songs heard lately still keeps playing, with the latest ones left out.
+      const heardIn = (last: number) => fresh.filter(song => !recent.slice(-last).includes(songKey(song)));
+      const unheard = heardIn(RECENT);
+      const more = spread(unheard.length ? unheard : heardIn(10), seed);
       if (!more.length) return;
       state.queue = [...state.queue, ...more];
       if (!state.source.endsWith("radio")) state.source = state.source ? `${state.source} · radio` : `${seed.title} radio`;
@@ -246,9 +262,14 @@ export function connect(app: ReturnType<typeof createApp>): void {
   };
   /** The song whose stream is loaded in <audio>. */
   let loadedId: string | null = null;
-  function start(): void {
+  function start(at = 0): void {
     const song = state.queue[state.index];
     if (!song) return;
+    const key = songKey(song);
+    const heard = recent.indexOf(key);
+    if (heard >= 0) recent.splice(heard, 1);
+    recent.push(key);
+    if (recent.length > RECENT) recent.shift();
     // The same song again (clicked twice, or picked by autoplay and by a click):
     // its stream is loaded, so it restarts in place. Reloading the same URL
     // would not reach <audio> at all and leave the player showing paused.
@@ -266,10 +287,10 @@ export function connect(app: ReturnType<typeof createApp>): void {
     const token = ++playToken;
     state.path = undefined;
     state.playing = false;
-    state.time = 0;
+    state.time = at;
     state.duration = song.duration ?? 0;
     state.playError = null;
-    state.resumeAt = 0;
+    state.resumeAt = at;
     state.loading = 0;
     source.streamUrl(song.id).then(url => {
       if (token !== playToken) return;
@@ -291,15 +312,25 @@ export function connect(app: ReturnType<typeof createApp>): void {
   }
   state.played = () => { skipped = 0; blocked = 0; };
   state.play = (queue, index, from = "") => {
-    state.queue = [...queue];
-    state.index = index;
+    // A list with a song more than once (two videos of it, a duplicated playlist entry) plays it once.
+    const clean = distinct(queue, index);
+    state.queue = clean.songs;
+    state.index = clean.index;
     state.source = from;
     if (state.shuffle) { state.shuffle = false; state.toggleShuffle(); }
     start();
   };
   state.jump = index => { if (index !== state.index && state.queue[index]) { state.index = index; start(); } };
+  /** The next queue entry that is not the song playing again. */
+  const following = () => {
+    const current = state.queue[state.index];
+    let i = state.index + 1;
+    while (i < state.queue.length && sameSong(state.queue[i], current)) i++;
+    return i;
+  };
   state.next = () => {
-    if (state.index + 1 < state.queue.length) { state.index++; start(); }
+    const ahead = following();
+    if (ahead < state.queue.length) { state.index = ahead; start(); }
     else if (state.repeat === "all" && state.queue.length) { state.index = 0; start(); }
     else if (state.queue.length) {
       // The end of the queue: wait for its radio, then go on.
@@ -309,7 +340,8 @@ export function connect(app: ReturnType<typeof createApp>): void {
       void extendQueue().then(() => {
         if (token !== playToken) return;
         state.loading = null;
-        if (state.index + 1 < state.queue.length) { state.index++; start(); } else refresh();
+        const after = following();
+        if (after < state.queue.length) { state.index = after; start(); } else refresh();
       });
     }
   };
@@ -322,9 +354,60 @@ export function connect(app: ReturnType<typeof createApp>): void {
     state.shuffle = !state.shuffle;
     if (!state.shuffle || state.index < 0) return;
     // Shuffle what is still to come; history and the current song stay put.
-    const rest = state.queue.slice(state.index + 1);
-    for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[rest[i], rest[j]] = [rest[j]!, rest[i]!]; }
-    state.queue = [...state.queue.slice(0, state.index + 1), ...rest];
+    // Neighbours differ: never one song twice in a row, and artists alternate where they can.
+    const current = state.queue[state.index];
+    state.queue = [...state.queue.slice(0, state.index + 1), ...shuffled(state.queue.slice(state.index + 1), current)];
+  };
+
+  /** Play/pause; a queue restored from the last session (no stream yet) starts where it stopped. */
+  state.togglePlay = () => {
+    if (state.path) { if (state.playing) state.media()?.pause(); else state.media()?.play(); return; }
+    if (state.loading === null && state.queue[state.index]) start(state.playError ? 0 : state.time);
+    refresh();
+  };
+  state.seekBy = seconds => {
+    if (!state.path) return;
+    const duration = state.duration || state.queue[state.index]?.duration || 0;
+    const time = Math.max(0, Math.min(duration > 0 ? duration - 1 : Infinity, state.time + seconds));
+    state.media()?.seek(time);
+    state.time = time;
+    state.followLyrics();
+    refresh();
+  };
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  state.notify = text => {
+    state.notice = text;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { state.notice = null; refresh(); }, 2500);
+    refresh();
+  };
+  /** Nothing playing: the song starts. Otherwise it goes in at `at`, moved there if it was already coming up. */
+  const enqueue = (song: Song, at: number, done: string) => {
+    if (!state.queue[state.index]) { state.play([song], 0, "Queue"); return; }
+    if (sameSong(song, state.queue[state.index])) { state.notify("Already playing"); return; }
+    const queue = state.queue.filter((item, i) => i <= state.index || !sameSong(item, song));
+    // Its upcoming copies went above; the current song was checked, so it plays once from here.
+    queue.splice(Math.min(at, queue.length), 0, song);
+    state.queue = queue;
+    state.notify(done);
+  };
+  state.playNext = song => enqueue(song, state.index + 1, `"${song.title}" plays next`);
+  state.addToQueue = song => enqueue(song, state.queue.length, `"${song.title}" added to queue`);
+  state.removeFromQueue = index => {
+    if (index === state.index || !state.queue[index]) return;
+    state.queue = state.queue.filter((_, i) => i !== index);
+    if (index < state.index) state.index--;
+    refresh();
+  };
+  state.clearUpNext = () => {
+    state.queue = state.queue.slice(0, state.index + 1);
+    radioFor = null;
+    refresh();
+  };
+  state.toggleAutoplay = () => {
+    state.autoplay = !state.autoplay;
+    if (state.autoplay && state.index >= 0 && state.index + 3 >= state.queue.length) void extendQueue();
+    refresh();
   };
 
   function signedIn(): void {
@@ -372,7 +455,19 @@ export function connect(app: ReturnType<typeof createApp>): void {
   const mediaWatch = setInterval(syncSystemMedia, 1000);
   void app.closed.then(() => { clearInterval(closeWatch); clearInterval(mediaWatch); signInAbort?.abort(); });
 
-  app.registerHotkey("Space", () => { if (!state.path) return; if (state.playing) state.media()?.pause(); else state.media()?.play(); });
+  // YouTube's keyboard shortcuts. A focused text field keeps its keys, so typing a search is unaffected.
+  const keys: [string, () => void][] = [
+    ["Space", state.togglePlay], ["K", state.togglePlay],
+    ["J", () => state.seekBy(-10)], ["L", () => state.seekBy(10)],
+    ["Shift+N", state.next], ["Shift+P", state.previous],
+    ["M", () => { state.muted = !state.muted; }],
+    ["=", () => { state.volume = Math.min(1, Math.round(state.volume * 100 + 5) / 100); state.muted = false; }],
+    ["-", () => { state.volume = Math.max(0, Math.round(state.volume * 100 - 5) / 100); }],
+    ["S", state.toggleShuffle],
+    ["R", () => { state.repeat = state.repeat === "off" ? "all" : state.repeat === "all" ? "one" : "off"; }],
+    ["Q", () => { state.showQueue = !state.showQueue; }],
+  ];
+  for (const [key, run] of keys) app.registerHotkey(key, () => { run(); refresh(); });
   state.signedIn = source.signedIn();
   show({ kind: "home" });
   if (state.signedIn) void source.library().then(list => { state.library = list; refresh(); }, () => undefined);

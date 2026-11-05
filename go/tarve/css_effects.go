@@ -50,7 +50,7 @@ func parseShadow(value string, box bool, t *Theme) []S {
 	var out []S
 	for _, layer := range splitTopLevel(value, isComma) {
 		var lengths []float64
-		colour, inset := "#00000040", false
+		colour, inset := "#000000", false
 		for _, token := range splitTopLevel(layer, isSpace) {
 			if token == "inset" && box {
 				inset = true
@@ -64,7 +64,11 @@ func parseShadow(value string, box bool, t *Theme) []S {
 			panic("tarve: invalid shadow: " + layer)
 		}
 		shadow := S{"x": lengths[0], "y": lengths[1], "color": resolveThemeColor(cssColor(colour), t)}
-		if len(lengths) > 2 {
+		// As @tarve/core: a box shadow always carries blur and spread (0 when omitted); a text shadow a non-zero blur only.
+		if box {
+			shadow["blur"], shadow["spread"] = 0.0, 0.0
+		}
+		if len(lengths) > 2 && (box || lengths[2] != 0) {
 			shadow["blur"] = lengths[2]
 		}
 		if len(lengths) > 3 {

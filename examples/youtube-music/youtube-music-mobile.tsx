@@ -50,8 +50,8 @@ export function MobilePlayerBar() {
           <Text id="now-status" size={12} color={state.playError ? "#ff8a8a" : c.muted} style={ellipsis}>{status ?? song.artist}</Text>
         </Column>
         <IconButton id="previous" d={icons.prev} label="Previous" size={20} fill box={40} onClick={state.previous} />
-        <IconButton id="play" d={state.playing ? icons.pause : icons.play} label={state.playing ? "Pause" : "Play"} size={22} fill box={44} disabled={!ready}
-          onClick={() => { if (state.playing) state.media()?.pause(); else state.media()?.play(); }} />
+        <IconButton id="play" d={state.playing ? icons.pause : icons.play} label={state.playing ? "Pause" : "Play"} size={22} fill box={44} disabled={!ready && state.loading !== null}
+          onClick={state.togglePlay} />
         <IconButton id="next" d={icons.next} label="Next" size={20} fill box={40} onClick={state.next} />
       </Row>
       <Row gap={8} align="center">

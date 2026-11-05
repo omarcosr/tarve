@@ -9,7 +9,11 @@
 import { createApp } from "@tarve/core";
 import { connect } from "./youtube-music-actions";
 import { phone } from "./youtube-music-mobile";
+import { restoreSession, saveSession } from "./youtube-music-session";
 import { YouTubeMusicView, state } from "./youtube-music-view";
+
+// The queue, song, position, volume and modes of the last run come back, paused.
+restoreSession();
 
 // Name, icon and app id (media controls, taskbar) come from examples/package.json "tarve".
 const app = createApp(() => <YouTubeMusicView />, { closeBehavior: "hide", textRendering: "cleartype" });
@@ -30,4 +34,7 @@ if (!phone) {
   // host on this Linux desktop) it minimizes to the taskbar instead, still playing.
   state.hide = () => (tray.availability()?.available ? app.hide() : app.minimize());
 }
+const saving = setInterval(saveSession, 5000);
 await app.closed;
+clearInterval(saving);
+saveSession();

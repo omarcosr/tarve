@@ -44,6 +44,10 @@ export const state = {
   muted: false,
   shuffle: false,
   repeat: "off" as Repeat,
+  /** When the queue runs out, its radio keeps playing (YouTube Music's Autoplay). */
+  autoplay: true,
+  /** A short confirmation ("added to queue"), shown for a moment above the player bar. */
+  notice: null as string | null,
   /** Lyrics of the song playing, loaded while the now-playing page is open. */
   lyrics: null as { id: string; status: "loading" | "ready" | "none" | "error"; data?: Lyrics; error?: string } | null,
   /** Scroll offset of the synced lyrics. */
@@ -61,6 +65,14 @@ export const state = {
   next: () => { },
   previous: () => { },
   toggleShuffle: () => { },
+  togglePlay: () => { },
+  seekBy: (_seconds: number) => { },
+  notify: (_text: string) => { },
+  playNext: (_song: Song) => { },
+  addToQueue: (_song: Song) => { },
+  removeFromQueue: (_index: number) => { },
+  clearUpNext: () => { },
+  toggleAutoplay: () => { },
   signInWithBrowser: () => { },
   savePastedCookies: () => { },
   signOut: () => { },
@@ -119,7 +131,17 @@ export const icons = {
   note: "M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
   user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
   bars: "M5 20V10M10 20V4M15 20v-8M20 20V7",
+  playNext: "M3 6h12M3 12h8M3 18h8M15 13v8l6-4z",
+  addQueue: "M3 6h12M3 12h12M3 18h8M18 15v6M15 18h6",
+  close: "M6 6l12 12M18 6 6 18",
+  autoplay: "M8.5 8.5a5 5 0 1 0 0 7l7-7a5 5 0 1 1 0 7z",
 };
+/** Eases hover colours and lifts, as the official app does. */
+const ease = { background: { duration: 140 }, transform: { duration: 160, easing: "easeOut" }, opacity: { duration: 140 } } as const;
+/** Fades and settles content in when it appears (a new song, a new card). */
+const appear = { from: { opacity: 0, transform: "translateY(6px) scale(0.98)" }, duration: 320, easing: "easeOut" } as const;
+/** The equalizer glyph of the playing song pulses while it plays. */
+const pulse = { from: { opacity: 0.45 }, to: { opacity: 1 }, duration: 520, iterations: "infinite", direction: "alternate", easing: "easeInOut" } as const;
 
 export function Glyph({ d, size = 18, color = c.text, fill = false, weight = 2 }: { d: string; size?: number; color?: string; fill?: boolean; weight?: number }) {
   return (
@@ -138,13 +160,13 @@ function Tip({ id, label, side = "top", children }: { id: string; label: string;
   );
 }
 
-export function IconButton({ id, d, label, onClick, size = 18, fill = false, active = false, disabled = false, box = 32, tip = "top" }: { id: string; d: string; label: string; onClick: () => void; size?: number; fill?: boolean; active?: boolean; disabled?: boolean; box?: number; tip?: "top" | "bottom" }) {
+export function IconButton({ id, d, label, onClick, size = 18, fill = false, active = false, disabled = false, box = 32, tip = "top", shortcut }: { id: string; d: string; label: string; onClick: () => void; size?: number; fill?: boolean; active?: boolean; disabled?: boolean; box?: number; tip?: "top" | "bottom"; shortcut?: string }) {
   return (
-    <Tip id={id} label={label} side={tip}>
+    <Tip id={id} label={shortcut ? `${label} (${shortcut})` : label} side={tip}>
       <Pressable id={id} onClick={disabled ? () => { } : onClick} control={{ role: "button", label }}
         style={{
           width: box, height: box, align: "center", justify: "center", radius: 8, shrink: 0, cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.35 : 1,
-          background: active ? c.selected : "transparent", hover: { background: active ? c.selected : c.hover }
+          background: active ? c.selected : "transparent", hover: { background: active ? c.selected : c.hover }, active: disabled ? undefined : { transform: "scale(0.92)" }, transition: ease
         }}>
         <Glyph d={d} size={size} fill={fill} color={active ? c.accent : c.text} />
       </Pressable>
@@ -280,10 +302,19 @@ function openItem(item: Item, shelf: Shelf): void {
 
 const Card = memo(({ item, shelf, slot }: { item: Item; shelf: Shelf; slot: string }) => {
   const subtitle = item.kind === "song" ? item.artist : item.subtitle;
+  const round = item.kind === "artist";
   return (
     <Pressable id={`card-${slot}`} onClick={() => openItem(item, shelf)} control={{ role: "button", label: item.title }}
-      style={{ width: 168, shrink: 0, direction: "column", gap: 8, padding: 8, radius: 10, cursor: "pointer", hover: { background: c.hover } }}>
-      <Art url={item.thumbnail} size={152} radius={8} round={item.kind === "artist"} />
+      style={{ width: 168, shrink: 0, direction: "column", gap: 8, padding: 8, radius: 10, cursor: "pointer", group: true, hover: { background: c.hover }, transition: ease, animation: appear }}>
+      {/* Hovered, the cover lifts and shows a play button, as on music.youtube.com. */}
+      <View style={{ width: 152, height: 152, position: "relative", transition: ease, groupHover: { transform: "translateY(-3px)" } }}>
+        <Art url={item.thumbnail} size={152} radius={8} round={round} />
+        <View style={{ position: "absolute", left: 0, top: 0, width: 152, height: 152, radius: round ? 76 : 8, align: "end", justify: "end", padding: 10, opacity: 0, transition: ease, background: "linear-gradient(to bottom, transparent 55%, #000000a0)", groupHover: { opacity: 1 } }}>
+          <View style={{ width: 36, height: 36, radius: 18, background: "#000000b3", align: "center", justify: "center", hover: { background: c.accent }, transition: ease }}>
+            <Glyph d={icons.play} size={16} fill color={c.text} />
+          </View>
+        </View>
+      </View>
       <Column gap={2}>
         <Text size={13} weight={600} style={ellipsis}>{item.title}</Text>
         <Text size={12} color={c.muted} style={ellipsis}>{subtitle}</Text>
@@ -299,15 +330,22 @@ const PAD = { left: 24, right: 24, top: 20, bottom: 28 } as const;
 const SongRow = memo(({ song, index, list, source, isCurrent, playing }: { song: Song; index: number; list: Song[]; source: string; isCurrent: boolean; playing: boolean }) => (
   <Pressable id={`row-${index}-${song.id}`} onClick={() => state.play(list, index, source)} control={{ role: "button", label: `Play ${song.title}` }}
     style={{
-      width: "100%", height: ROW, direction: "row", align: "center", gap: 16, padding: { left: 12, right: 16 }, radius: 6, cursor: "pointer",
-      background: isCurrent ? c.selected : "transparent", hover: { background: isCurrent ? c.selected : c.hover }
+      width: "100%", height: ROW, direction: "row", align: "center", gap: 16, padding: { left: 12, right: 16 }, radius: 6, cursor: "pointer", group: true,
+      background: isCurrent ? c.selected : "transparent", hover: { background: isCurrent ? c.selected : c.hover }, transition: ease
     }}>
     <View style={{ width: 24, shrink: 0, align: "center" }}>
-      {isCurrent ? <Glyph d={playing ? icons.bars : icons.note} size={14} color={c.accent} /> : <Text size={12} color={c.muted}>{index + 1}</Text>}
+      {isCurrent
+        ? <View style={{ animation: playing ? pulse : undefined }}><Glyph d={playing ? icons.bars : icons.note} size={14} color={c.accent} /></View>
+        : <Text size={12} color={c.muted}>{index + 1}</Text>}
     </View>
     <Row gap={10} align="center" style={{ flex: 1, minWidth: 0 }}>
       <Art url={song.thumbnail} size={28} radius={4} />
       <Text size={13} color={isCurrent ? c.accent : c.text} style={{ ...ellipsis, flex: 1, minWidth: 0 }}>{song.title}</Text>
+      {/* Hover actions, as in the official app's song menu: queue the song without replacing the queue. */}
+      <Row gap={2} style={{ shrink: 0, opacity: 0, transition: ease, groupHover: { opacity: 1 } }}>
+        <IconButton id={`row-next-${index}`} d={icons.playNext} label="Play next" size={15} box={28} onClick={() => state.playNext(song)} />
+        <IconButton id={`row-queue-${index}`} d={icons.addQueue} label="Add to queue" size={15} box={28} onClick={() => state.addToQueue(song)} />
+      </Row>
     </Row>
     <Text size={13} color={c.muted} style={{ ...ellipsis, width: "26%" }}>{song.artist}</Text>
     <Text size={13} color={c.muted} style={{ ...ellipsis, width: "22%", display: "none", sm: { display: "flex" } }}>{song.album}</Text>
@@ -395,10 +433,17 @@ function NowPlaying({ lyricLine }: { lyricLine: number }) {
   const art = stage ? Math.max(96, Math.min(420, width - 48, stage.height - 150)) : 320;
   const text = Math.min(520, Math.max(160, width - 48));
   return (
-    <Row id="main-playing" flex={1} align="stretch" gap={32} style={{ minHeight: 0, minWidth: 0, padding: PAD, overflow: "hidden" }}
+    <Row id="main-playing" flex={1} align="stretch" gap={32} style={{ minHeight: 0, minWidth: 0, padding: PAD, overflow: "hidden", position: "relative" }}
       onSize={size => { if (size.width !== state.stage?.width || size.height !== state.stage?.height) state.stage = size; }}>
+      {/* The cover, blurred, fills the stage behind everything: each song tints the page its own colours. */}
+      {song.thumbnail ? <View key={`backdrop-${song.id}`} style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0, overflow: "hidden", animation: { from: { opacity: 0 }, duration: 600, easing: "easeOut" } }}>
+        <Image src={cover(song.thumbnail, 120)} fit="cover" style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", opacity: 0.55 }} />
+        <View style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", backdropBlur: 64, background: "linear-gradient(to bottom, #030303a6, #030303f0)" }} />
+      </View> : null}
       <Column flex={1} align="center" justify="center" gap={18} style={{ minWidth: 0, minHeight: 0 }}>
-        <Art url={song.thumbnail} size={Math.round(art)} radius={10} />
+        <View key={`art-${song.id}`} style={{ animation: appear, boxShadow: "0 24px 60px #000000a0", radius: 10 }}>
+          <Art url={song.thumbnail} size={Math.round(art)} radius={10} />
+        </View>
         <Column gap={6} align="center" style={{ maxWidth: text, minWidth: 0 }}>
           <Text size={26} weight={800} style={{ ...ellipsis, maxWidth: text }}>{song.title}</Text>
           <Text size={15} color={c.muted} style={{ ...ellipsis, maxWidth: text }}>{[song.artist, song.album].filter(Boolean).join(" • ")}</Text>
@@ -451,7 +496,7 @@ function LyricsPanel({ song, line }: { song: Song; line: number }) {
           return (
             <Pressable id={`lyric-${at}`} control={{ role: "button", label: `Go to “${lyric.text || "instrumental break"}”` }}
               onClick={() => { state.media()?.seek(lyric.time); state.time = lyric.time; state.followLyrics(); state.refresh(); }}
-              style={{ padding: { top: 6, bottom: 6, right: 12 }, cursor: "pointer", opacity: at < line ? 0.45 : 1 }}>
+              style={{ padding: { top: 6, bottom: 6, right: 12 }, cursor: "pointer", opacity: at < line ? 0.45 : 1, transition: ease, hover: { opacity: 1 } }}>
               <Text size={current ? 24 : 19} weight={current ? 800 : 600} color={current ? c.text : c.muted}>{lyric.text || "♪"}</Text>
             </Pressable>
           );
@@ -502,18 +547,21 @@ const ContentRegion = memo((props: {
   pageError: string | null; listOffset: number; current: string | undefined; playing: boolean; source: string; stage: unknown;
   lyrics: unknown; lyricLine: number;
 }) => <Content lyricLine={props.lyricLine} />);
-const QueueRegion = memo((_: { queue: Song[]; index: number; source: string }) => <QueuePanel />);
+const QueueRegion = memo((_: { queue: Song[]; index: number; source: string; autoplay: boolean }) => <QueuePanel />);
 
 function QueueRow({ song, index, dim = false }: { song: Song; index: number; dim?: boolean }) {
   const current = index === state.index;
   return (
     <Pressable id={`queue-${index}`} onClick={() => state.jump(index)} control={{ role: "button", label: `Play ${song.title}` }}
-      style={{ padding: 6, gap: 10, direction: "row", align: "center", radius: 8, cursor: "pointer", opacity: dim ? 0.6 : 1, hover: { background: c.hover } }}>
+      style={{ padding: 6, gap: 10, direction: "row", align: "center", radius: 8, cursor: "pointer", group: true, opacity: dim ? 0.6 : 1, hover: { background: c.hover, opacity: 1 }, transition: ease }}>
       <Art url={song.thumbnail} size={36} radius={4} />
       <Column gap={1} style={{ flex: 1, minWidth: 0 }}>
         <Text size={13} color={current ? c.accent : c.text} style={ellipsis}>{song.title}</Text>
-        <Text size={11} color={c.muted} style={ellipsis}>{song.artist}</Text>
+        <Text size={11} color={c.muted} style={ellipsis}>{[song.artist, clock(song.duration)].filter(part => part && part !== "-:--").join(" • ")}</Text>
       </Column>
+      {current ? null : <View style={{ opacity: 0, transition: ease, groupHover: { opacity: 1 } }}>
+        <IconButton id={`queue-remove-${index}`} d={icons.close} label="Remove from queue" size={14} box={26} onClick={() => state.removeFromQueue(index)} />
+      </View>}
     </Pressable>
   );
 }
@@ -522,7 +570,7 @@ function QueuePanel() {
   const history = state.queue.slice(Math.max(0, state.index - 3), Math.max(0, state.index));
   const upNext = state.queue.slice(state.index + 1, state.index + 51);
   const current = state.queue[state.index];
-  
+  const left = state.queue.slice(state.index + 1).reduce((sum, song) => sum + (song.duration ?? 0), 0);
   const label = (text: string) => <Text size={11} weight={700} color={c.muted} style={{ padding: { left: 6, top: 14, bottom: 4 }, letterSpacing: 0.6 }}>{text}</Text>;
   return (
     <Column style={{ width: 264, shrink: 0, background: c.panel, borderColor: c.border, borderWidth: { left: 1 }, minHeight: 0 }}>
@@ -530,13 +578,34 @@ function QueuePanel() {
         <Text size={11} weight={700} color={c.muted} style={{ letterSpacing: 0.6, flex: 1 }}>QUEUE</Text>
         <Text size={11} color={c.muted}>{state.queue.length ? `${state.index + 1} / ${state.queue.length}` : ""}</Text>
       </Row>
+      {/* Autoplay, as in the official queue: when the queue ends, similar songs keep playing. */}
+      <Pressable id="autoplay" onClick={state.toggleAutoplay} control={{ role: "switch", label: "Autoplay", selected: state.autoplay }}
+        style={{ direction: "row", align: "center", gap: 10, padding: { left: 14, right: 12, top: 8, bottom: 8 }, cursor: "pointer", borderColor: c.border, borderWidth: { bottom: 1 }, hover: { background: c.hover }, transition: ease }}>
+        <Glyph d={icons.autoplay} size={15} color={state.autoplay ? c.accent : c.muted} />
+        <Column gap={1} style={{ flex: 1, minWidth: 0 }}>
+          <Text size={12} weight={600}>Autoplay</Text>
+          <Text size={11} color={c.muted} style={ellipsis}>Similar songs play when the queue ends</Text>
+        </Column>
+        <View style={{ width: 30, height: 16, radius: 8, padding: 2, background: state.autoplay ? c.accent : "#3a3a3a", align: state.autoplay ? "end" : "start", transition: ease }}>
+          <View style={{ width: 12, height: 12, radius: 6, background: c.text }} />
+        </View>
+      </Pressable>
       <Scroll flex={1} style={{ minHeight: 0 }}>
         <Column style={{ padding: { left: 8, right: 8, bottom: 12 } }}>
           {current ? <>
             {history.length ? <>{label("HISTORY")}{history.map((song, i) => <QueueRow key={`h${i}`} song={song} index={state.index - history.length + i} dim />)}</> : null}
             {label(state.source ? `NOW PLAYING · ${state.source.toUpperCase()}` : "NOW PLAYING")}
             <QueueRow song={current} index={state.index} />
-            {upNext.length ? <>{label("UP NEXT")}{upNext.map((song, i) => <QueueRow key={`n${i}-${song.id}`} song={song} index={state.index + 1 + i} />)}</> : null}
+            {upNext.length ? <>
+              <Row align="center" style={{ padding: { right: 2 } }}>
+                <View flex={1}>{label(left ? `UP NEXT · ${clock(left)}` : "UP NEXT")}</View>
+                <Pressable id="queue-clear" onClick={state.clearUpNext} control={{ role: "button", label: "Clear up next" }}
+                  style={{ height: 24, padding: { left: 8, right: 8 }, margin: { top: 10 }, radius: 12, align: "center", justify: "center", cursor: "pointer", hover: { background: c.hover }, transition: ease }}>
+                  <Text size={11} color={c.muted}>Clear</Text>
+                </Pressable>
+              </Row>
+              {upNext.map((song, i) => <QueueRow key={`n${i}-${song.id}`} song={song} index={state.index + 1 + i} />)}
+            </> : null}
           </> : <Text size={12} color={c.muted} style={{ padding: { top: 14, left: 6 } }}>Play something to fill the queue.</Text>}
         </Column>
       </Scroll>
@@ -555,6 +624,8 @@ function PlayerBar() {
   const duration = state.duration || song?.duration || 0;
   const volume = state.muted ? 0 : state.volume;
   const ready = !!state.path && state.loading === null;
+  // A queue restored from the last session plays from where it stopped on the first click.
+  const canPlay = ready || (!!song && state.loading === null);
   const status = state.playError ?? (state.loading !== null || (state.path && !state.playing && state.time === 0) ? "Loading…" : null);
   return (
     <Pressable id="player-bar" onClick={togglePlaying} control={{ role: "button", label: state.page.kind === "playing" ? "Close now playing" : "Open now playing" }}
@@ -570,15 +641,17 @@ function PlayerBar() {
       </Row>
       <Column flex={1} gap={4} align="center" style={{ minWidth: 0 }}>
         <Row gap={6} align="center">
-          <IconButton id="shuffle" d={icons.shuffle} label="Shuffle" size={15} active={state.shuffle} onClick={state.toggleShuffle} />
-          <IconButton id="previous" d={icons.prev} label="Previous" size={16} fill onClick={state.previous} disabled={!song} />
-          <Pressable id="play" onClick={() => { if (!ready) return; if (state.playing) state.media()?.pause(); else state.media()?.play(); }}
-            control={{ role: "button", label: state.playing ? "Pause" : "Play" }}
-            style={{ width: 34, height: 34, radius: 999, background: c.text, align: "center", justify: "center", cursor: "pointer", opacity: ready ? 1 : 0.5, hover: { transform: "scale(1.06)" } }}>
-            <Glyph d={state.playing ? icons.pause : icons.play} size={16} fill color={c.window} />
-          </Pressable>
-          <IconButton id="next" d={icons.next} label="Next" size={16} fill onClick={state.next} disabled={!song} />
-          <IconButton id="repeat" d={icons.repeat} label={`Repeat: ${state.repeat}`} size={15} active={state.repeat !== "off"}
+          <IconButton id="shuffle" d={icons.shuffle} label="Shuffle" shortcut="S" size={15} active={state.shuffle} onClick={state.toggleShuffle} />
+          <IconButton id="previous" d={icons.prev} label="Previous" shortcut="Shift+P" size={16} fill onClick={state.previous} disabled={!song} />
+          <Tip id="play" label={`${state.playing ? "Pause" : "Play"} (K)`}>
+            <Pressable id="play" onClick={() => { if (canPlay) state.togglePlay(); }}
+              control={{ role: "button", label: state.playing ? "Pause" : "Play" }}
+              style={{ width: 34, height: 34, radius: 999, background: c.text, align: "center", justify: "center", cursor: "pointer", opacity: canPlay ? 1 : 0.5, hover: { transform: "scale(1.08)" }, active: { transform: "scale(0.94)" }, transition: ease }}>
+              <Glyph d={state.playing ? icons.pause : icons.play} size={16} fill color={c.window} />
+            </Pressable>
+          </Tip>
+          <IconButton id="next" d={icons.next} label="Next" shortcut="Shift+N" size={16} fill onClick={state.next} disabled={!song} />
+          <IconButton id="repeat" d={icons.repeat} label={`Repeat: ${state.repeat}`} shortcut="R" size={15} active={state.repeat !== "off"}
             onClick={() => { state.repeat = state.repeat === "off" ? "all" : state.repeat === "all" ? "one" : "off"; }} />
         </Row>
         <Row gap={10} align="center" style={{ width: "100%", maxWidth: 560 }}>
@@ -590,7 +663,7 @@ function PlayerBar() {
         </Row>
       </Column>
       <Row gap={6} align="center" justify="end" style={{ width: 300, shrink: 0 }}>
-        <IconButton id="mute" d={volume === 0 ? icons.mute : icons.volume} label={state.muted ? "Unmute" : "Mute"} size={16} onClick={() => { state.muted = !state.muted; }} />
+        <IconButton id="mute" d={volume === 0 ? icons.mute : icons.volume} label={state.muted ? "Unmute" : "Mute"} shortcut="M" size={16} onClick={() => { state.muted = !state.muted; }} />
         <Slider id="volume" label="Volume" value={Math.round(volume * 100)} min={0} max={100} step={1}
           onValueChange={value => { state.volume = value / 100; state.muted = value === 0; }}
           style={{ width: 110, foreground: c.text }} />
@@ -664,11 +737,14 @@ export function YouTubeMusicView() {
               pageError={state.pageError} listOffset={state.listOffset} current={song?.id} playing={state.playing} source={state.source} stage={state.stage}
               lyrics={state.lyrics} lyricLine={lyricLine} />
           </Column>
-          {state.showQueue && !compact() ? <QueueRegion queue={state.queue} index={state.index} source={state.source} /> : null}
+          {state.showQueue && !compact() ? <QueueRegion queue={state.queue} index={state.index} source={state.source} autoplay={state.autoplay} /> : null}
         </Row>
         {compact() ? <><MobilePlayerBar /><MobileNav /></> : <PlayerBar />}
       </Column>
       <SignInDialog />
+      {state.notice ? <View key={`notice-${state.notice}`} style={{ position: "absolute", left: 16, bottom: compact() ? 136 : 84, padding: { left: 14, right: 14, top: 10, bottom: 10 }, radius: 8, background: "#f1f1f1", boxShadow: "0 8px 24px #00000080", animation: appear, pointerEvents: "none" }}>
+        <Text size={13} weight={500} color={c.window}>{state.notice}</Text>
+      </View> : null}
     </Window>
   );
 }

@@ -68,13 +68,7 @@ func MobilePlayerBar() Child {
 				Text(Props{"id": "now-title", "size": 14, "weight": 600, "style": ellipsis}, song.Title),
 				Text(Props{"id": "now-status", "size": 12, "color": statusColor, "style": ellipsis}, shown)),
 			IconButton(iconButton{id: "previous", d: icons.prev, label: "Previous", size: 20, fill: true, box: 40, onClick: func() { state.Previous() }}),
-			IconButton(iconButton{id: "play", d: playIcon, label: playLabel, size: 22, fill: true, box: 44, disabled: !ready, onClick: func() {
-				if state.Playing {
-					state.media(MediaController.Pause)
-				} else {
-					state.media(MediaController.Play)
-				}
-			}}),
+			IconButton(iconButton{id: "play", d: playIcon, label: playLabel, size: 22, fill: true, box: 44, disabled: !ready && state.Loading != nil, onClick: func() { state.TogglePlay() }}),
 			IconButton(iconButton{id: "next", d: icons.next, label: "Next", size: 20, fill: true, box: 40, onClick: func() { state.Next() }})),
 		Row(Props{"gap": 8, "align": "center"},
 			Text(Props{"id": "time", "size": 11, "color": c.muted, "style": S{"width": 44, "shrink": 0, "whiteSpace": "nowrap"}}, clock(ptr(state.Time))),

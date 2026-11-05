@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/omarcosr/tarve/go/examples/youtube-music/ytm"
 	"github.com/omarcosr/tarve/go/tarve"
@@ -40,9 +41,23 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// The queue, song, position, volume and modes of the last run come back, paused.
+	ytm.RestoreSession()
 	app.Post(func() {
 		ytm.Connect(app)
 	})
+	go func() {
+		saving := time.NewTicker(5 * time.Second)
+		defer saving.Stop()
+		for {
+			select {
+			case <-saving.C:
+				app.Post(ytm.SaveSession)
+			case <-app.Closed():
+				return
+			}
+		}
+	}()
 	go func() {
 		<-app.Ready()
 		app.Post(func() {
@@ -57,7 +72,9 @@ func main() {
 			})
 		})
 	}()
-	if err := app.Run(); err != nil {
+	err = app.Run()
+	ytm.SaveSession()
+	if err != nil {
 		log.Fatal(err)
 	}
 }

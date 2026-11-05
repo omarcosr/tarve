@@ -31,7 +31,8 @@ export type Item = Song | Collection;
 export interface Shelf { title: string; items: Item[] }
 export interface CollectionPage { header: Collection; songs: Song[] }
 
-const dataDir = join(homedir(), ".tarve-youtube-music");
+/** Where the example keeps the sign-in cookies and the last session. */
+export const dataDir = join(homedir(), ".tarve-youtube-music");
 const cookieFile = join(dataDir, "cookies.txt");
 const ORIGIN = "https://music.youtube.com";
 const USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";

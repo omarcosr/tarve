@@ -340,7 +340,8 @@ func resolveThemeStyle(style S, t *Theme) S {
 			out[k] = resolveStyleString(k, s, t)
 			continue
 		}
-		if isStateKey(k) {
+		// groupHover and focusWithin are state styles too (applied while an ancestor is hovered or focus is inside).
+		if isStateKey(k) || k == "groupHover" || k == "focusWithin" {
 			if m, ok := asMap(v); ok {
 				next := make(S, len(m))
 				for sk, sv := range m {

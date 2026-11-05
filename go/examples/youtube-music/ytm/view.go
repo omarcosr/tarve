@@ -61,38 +61,42 @@ type LyricsEntry struct {
 
 // State is the app state the view reads; actions.go wires the functions.
 type State struct {
-	Page          *Page        `json:"page"`
-	Back          []*Page      `json:"back"`
-	Shelves       []*Shelf     `json:"shelves"`
-	Results       []*Item      `json:"results"`
-	Opened        *Opened      `json:"opened"`
-	Library       []*Item      `json:"library"`
-	Query         string       `json:"query"`
-	ListOffset    float64      `json:"listOffset"`
-	PageError     *string      `json:"pageError"`
-	SignedIn      bool         `json:"signedIn"`
-	SignIn        string       `json:"signIn"`
-	SignInError   *string      `json:"signInError"`
-	PastedCookies string       `json:"pastedCookies"`
-	Queue         []*Item      `json:"queue"`
-	Index         int          `json:"index"`
-	Source        string       `json:"source"`
-	ShowQueue     bool         `json:"showQueue"`
-	Path          string       `json:"path,omitempty"`
-	Loading       *float64     `json:"loading"`
-	PlayError     *string      `json:"playError"`
-	ResumeAt      float64      `json:"resumeAt"`
-	Playing       bool         `json:"playing"`
-	Time          float64      `json:"time"`
-	Duration      float64      `json:"duration"`
-	Volume        float64      `json:"volume"`
-	Muted         bool         `json:"muted"`
-	Shuffle       bool         `json:"shuffle"`
-	Repeat        string       `json:"repeat"`
-	Lyrics        *LyricsEntry `json:"lyrics"`
-	LyricsOffset  float64      `json:"lyricsOffset"`
-	AccountOpen   bool         `json:"accountOpen"`
-	Stage         *Size        `json:"stage"`
+	Page          *Page    `json:"page"`
+	Back          []*Page  `json:"back"`
+	Shelves       []*Shelf `json:"shelves"`
+	Results       []*Item  `json:"results"`
+	Opened        *Opened  `json:"opened"`
+	Library       []*Item  `json:"library"`
+	Query         string   `json:"query"`
+	ListOffset    float64  `json:"listOffset"`
+	PageError     *string  `json:"pageError"`
+	SignedIn      bool     `json:"signedIn"`
+	SignIn        string   `json:"signIn"`
+	SignInError   *string  `json:"signInError"`
+	PastedCookies string   `json:"pastedCookies"`
+	Queue         []*Item  `json:"queue"`
+	Index         int      `json:"index"`
+	Source        string   `json:"source"`
+	ShowQueue     bool     `json:"showQueue"`
+	Path          string   `json:"path,omitempty"`
+	Loading       *float64 `json:"loading"`
+	PlayError     *string  `json:"playError"`
+	ResumeAt      float64  `json:"resumeAt"`
+	Playing       bool     `json:"playing"`
+	Time          float64  `json:"time"`
+	Duration      float64  `json:"duration"`
+	Volume        float64  `json:"volume"`
+	Muted         bool     `json:"muted"`
+	Shuffle       bool     `json:"shuffle"`
+	Repeat        string   `json:"repeat"`
+	// Autoplay: when the queue runs out, its radio keeps playing (YouTube Music's Autoplay).
+	Autoplay bool `json:"autoplay"`
+	// Notice is a short confirmation ("added to queue"), shown for a moment above the player bar.
+	Notice       *string      `json:"notice"`
+	Lyrics       *LyricsEntry `json:"lyrics"`
+	LyricsOffset float64      `json:"lyricsOffset"`
+	AccountOpen  bool         `json:"accountOpen"`
+	Stage        *Size        `json:"stage"`
 	// Shelves loaded (nil and empty differ: nil is "loading").
 	ShelvesLoaded, ResultsLoaded, LibraryLoaded bool `json:"-"`
 
@@ -103,6 +107,11 @@ type State struct {
 	Jump                                                   func(int)                                     `json:"-"`
 	Next, Previous                                         func()                                        `json:"-"`
 	ToggleShuffle                                          func()                                        `json:"-"`
+	TogglePlay, ClearUpNext, ToggleAutoplay                func()                                        `json:"-"`
+	SeekBy                                                 func(seconds float64)                         `json:"-"`
+	Notify                                                 func(text string)                             `json:"-"`
+	PlayNext, AddToQueue                                   func(song *Item)                              `json:"-"`
+	RemoveFromQueue                                        func(index int)                               `json:"-"`
 	SignInWithBrowser, SavePastedCookies, SignOut, Refresh func()                                        `json:"-"`
 	MediaFailed                                            func(string)                                  `json:"-"`
 	Played                                                 func()                                        `json:"-"`
@@ -112,11 +121,14 @@ type State struct {
 }
 
 func NewState() *State {
-	s := &State{Page: &Page{Kind: "home"}, Index: -1, SignIn: "closed", Volume: 0.8, Repeat: "off"}
+	s := &State{Page: &Page{Kind: "home"}, Index: -1, SignIn: "closed", Volume: 0.8, Repeat: "off", Autoplay: true}
 	noop := func() {}
 	s.Media = func() *MediaController { return nil }
 	s.Open, s.GoBack, s.Play, s.Jump = func(*Page) {}, noop, func([]*Item, int, string) {}, func(int) {}
 	s.Next, s.Previous, s.ToggleShuffle = noop, noop, noop
+	s.TogglePlay, s.ClearUpNext, s.ToggleAutoplay = noop, noop, noop
+	s.SeekBy, s.Notify = func(float64) {}, func(string) {}
+	s.PlayNext, s.AddToQueue, s.RemoveFromQueue = func(*Item) {}, func(*Item) {}, func(int) {}
 	s.SignInWithBrowser, s.SavePastedCookies, s.SignOut, s.Refresh = noop, noop, noop, noop
 	s.MediaFailed, s.Played = func(string) {}, noop
 	s.LyricsScrolled, s.FollowLyrics, s.Hide = func(float64, ScrollInfo) {}, noop, noop
@@ -184,25 +196,41 @@ func clock(seconds *float64) string {
 
 func ptr(f float64) *float64 { return &f }
 
-var icons = struct{ play, pause, next, prev, shuffle, repeat, home, search, library, heart, volume, mute, queue, back, note, user, bars string }{
-	play:    "M7 4.8v14.4a1 1 0 0 0 1.5.86l11.9-7.2a1 1 0 0 0 0-1.72L8.5 3.94A1 1 0 0 0 7 4.8z",
-	pause:   "M7 4h3.5v16H7zM13.5 4H17v16h-3.5z",
-	next:    "M6 5v14l9.5-7zM17 5h2v14h-2z",
-	prev:    "M18 5v14L8.5 12zM5 5h2v14H5z",
-	shuffle: "M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5",
-	repeat:  "M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3",
-	home:    "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
-	search:  "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4",
-	library: "M5 3v18M10 3v18M15 4l5 16",
-	heart:   "M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z",
-	volume:  "M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14",
-	mute:    "M11 5 6 9H2v6h4l5 4zM22 9l-6 6M16 9l6 6",
-	queue:   "M3 6h13M3 12h13M3 18h9M17 15v6l5-3z",
-	back:    "M15 18l-6-6 6-6",
-	note:    "M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
-	user:    "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
-	bars:    "M5 20V10M10 20V4M15 20v-8M20 20V7",
+var icons = struct {
+	play, pause, next, prev, shuffle, repeat, home, search, library, heart, volume, mute, queue, back, note, user, bars string
+	playNext, addQueue, close, autoplay                                                                                 string
+}{
+	play:     "M7 4.8v14.4a1 1 0 0 0 1.5.86l11.9-7.2a1 1 0 0 0 0-1.72L8.5 3.94A1 1 0 0 0 7 4.8z",
+	pause:    "M7 4h3.5v16H7zM13.5 4H17v16h-3.5z",
+	next:     "M6 5v14l9.5-7zM17 5h2v14h-2z",
+	prev:     "M18 5v14L8.5 12zM5 5h2v14H5z",
+	shuffle:  "M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5",
+	repeat:   "M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3",
+	home:     "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
+	search:   "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4",
+	library:  "M5 3v18M10 3v18M15 4l5 16",
+	heart:    "M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z",
+	volume:   "M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14",
+	mute:     "M11 5 6 9H2v6h4l5 4zM22 9l-6 6M16 9l6 6",
+	queue:    "M3 6h13M3 12h13M3 18h9M17 15v6l5-3z",
+	back:     "M15 18l-6-6 6-6",
+	note:     "M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
+	user:     "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
+	bars:     "M5 20V10M10 20V4M15 20v-8M20 20V7",
+	playNext: "M3 6h12M3 12h8M3 18h8M15 13v8l6-4z",
+	addQueue: "M3 6h12M3 12h12M3 18h8M18 15v6M15 18h6",
+	close:    "M6 6l12 12M18 6 6 18",
+	autoplay: "M8.5 8.5a5 5 0 1 0 0 7l7-7a5 5 0 1 1 0 7z",
 }
+
+// ease eases hover colours and lifts, as the official app does.
+var ease = S{"background": S{"duration": 140}, "transform": S{"duration": 160, "easing": "easeOut"}, "opacity": S{"duration": 140}}
+
+// appear fades and settles content in when it appears (a new song, a new card).
+var appear = S{"from": S{"opacity": 0, "transform": "translateY(6px) scale(0.98)"}, "duration": 320, "easing": "easeOut"}
+
+// pulse: the equalizer glyph of the playing song pulses while it plays.
+var pulse = S{"from": S{"opacity": 0.45}, "to": S{"opacity": 1}, "duration": 520, "iterations": "infinite", "direction": "alternate", "easing": "easeInOut"}
 
 type glyph struct {
 	d      string
@@ -246,6 +274,7 @@ type iconButton struct {
 	fill, active, disabled bool
 	box                    float64
 	tip                    string
+	shortcut               string
 }
 
 func IconButton(b iconButton) *VNode {
@@ -267,9 +296,16 @@ func IconButton(b iconButton) *VNode {
 	if b.active {
 		bg, hover, color = c.selected, c.selected, c.accent
 	}
-	return Tip(b.id, b.label, b.tip, Pressable(Props{"id": b.id, "onClick": click, "control": S{"role": "button", "label": b.label},
-		"style": S{"width": b.box, "height": b.box, "align": "center", "justify": "center", "radius": 8, "shrink": 0, "cursor": cursor, "opacity": opacity,
-			"background": bg, "hover": S{"background": hover}}},
+	style := S{"width": b.box, "height": b.box, "align": "center", "justify": "center", "radius": 8, "shrink": 0, "cursor": cursor, "opacity": opacity,
+		"background": bg, "hover": S{"background": hover}, "transition": ease}
+	if !b.disabled {
+		style["active"] = S{"transform": "scale(0.92)"}
+	}
+	tip := b.label
+	if b.shortcut != "" {
+		tip = b.label + " (" + b.shortcut + ")"
+	}
+	return Tip(b.id, tip, b.tip, Pressable(Props{"id": b.id, "onClick": click, "control": S{"role": "button", "label": b.label}, "style": style},
 		Glyph(glyph{d: b.d, size: b.size, fill: b.fill, color: color})))
 }
 
@@ -411,9 +447,20 @@ var cardMemo = NewMemo(func(p Props) Child {
 	if item.Kind == "song" {
 		subtitle = item.Artist
 	}
+	round := item.Kind == "artist"
+	overlayRadius := 8.0
+	if round {
+		overlayRadius = 76
+	}
 	return Pressable(Props{"id": "card-" + slot, "onClick": func() { openItem(item, shelf) }, "control": S{"role": "button", "label": item.Title},
-		"style": S{"width": 168, "shrink": 0, "direction": "column", "gap": 8, "padding": 8, "radius": 10, "cursor": "pointer", "hover": S{"background": c.hover}}},
-		Art(item.Thumbnail, 152, 8, item.Kind == "artist"),
+		"style": S{"width": 168, "shrink": 0, "direction": "column", "gap": 8, "padding": 8, "radius": 10, "cursor": "pointer", "group": true, "hover": S{"background": c.hover}, "transition": ease, "animation": appear}},
+		// Hovered, the cover lifts and shows a play button, as on music.youtube.com.
+		View(Props{"style": S{"width": 152, "height": 152, "position": "relative", "transition": ease, "groupHover": S{"transform": "translateY(-3px)"}}},
+			Art(item.Thumbnail, 152, 8, round),
+			View(Props{"style": S{"position": "absolute", "left": 0, "top": 0, "width": 152, "height": 152, "radius": overlayRadius, "align": "end", "justify": "end", "padding": 10, "opacity": 0, "transition": ease,
+				"background": "linear-gradient(to bottom, transparent 55%, #000000a0)", "groupHover": S{"opacity": 1}}},
+				View(Props{"style": S{"width": 36, "height": 36, "radius": 18, "background": "#000000b3", "align": "center", "justify": "center", "hover": S{"background": c.accent}, "transition": ease}},
+					Glyph(glyph{d: icons.play, size: 16, fill: true, color: c.text})))),
 		Column(Props{"gap": 2},
 			Text(Props{"size": 13, "weight": 600, "style": ellipsis}, item.Title),
 			Text(Props{"size": 12, "color": c.muted, "style": ellipsis}, subtitle)))
@@ -440,17 +487,25 @@ var songRowMemo = NewMemo(func(p Props) Child {
 		if playing {
 			d = icons.bars
 		}
-		mark = Glyph(glyph{d: d, size: 14, color: c.accent})
+		pulsing := S{}
+		if playing {
+			pulsing["animation"] = pulse
+		}
+		mark = View(Props{"style": pulsing}, Glyph(glyph{d: d, size: 14, color: c.accent}))
 	} else {
 		mark = Text(Props{"size": 12, "color": c.muted}, index+1)
 	}
 	return Pressable(Props{"id": fmt.Sprintf("row-%d-%s", index, song.ID), "onClick": func() { state.Play(list, index, source) }, "control": S{"role": "button", "label": "Play " + song.Title},
-		"style": S{"width": "100%", "height": rowHeight, "direction": "row", "align": "center", "gap": 16, "padding": S{"left": 12, "right": 16}, "radius": 6, "cursor": "pointer",
-			"background": bg, "hover": S{"background": hover}}},
+		"style": S{"width": "100%", "height": rowHeight, "direction": "row", "align": "center", "gap": 16, "padding": S{"left": 12, "right": 16}, "radius": 6, "cursor": "pointer", "group": true,
+			"background": bg, "hover": S{"background": hover}, "transition": ease}},
 		View(Props{"style": S{"width": 24, "shrink": 0, "align": "center"}}, mark),
 		Row(Props{"gap": 10, "align": "center", "style": S{"flex": 1, "minWidth": 0}},
 			Art(song.Thumbnail, 28, 4, false),
-			Text(Props{"size": 13, "color": tc, "style": with(ellipsis, S{"flex": 1, "minWidth": 0})}, song.Title)),
+			Text(Props{"size": 13, "color": tc, "style": with(ellipsis, S{"flex": 1, "minWidth": 0})}, song.Title),
+			// Hover actions, as in the official app's song menu: queue the song without replacing the queue.
+			Row(Props{"gap": 2, "style": S{"shrink": 0, "opacity": 0, "transition": ease, "groupHover": S{"opacity": 1}}},
+				IconButton(iconButton{id: fmt.Sprintf("row-next-%d", index), d: icons.playNext, label: "Play next", size: 15, box: 28, onClick: func() { state.PlayNext(song) }}),
+				IconButton(iconButton{id: fmt.Sprintf("row-queue-%d", index), d: icons.addQueue, label: "Add to queue", size: 15, box: 28, onClick: func() { state.AddToQueue(song) }}))),
 		Text(Props{"size": 13, "color": c.muted, "style": with(ellipsis, S{"width": "26%"})}, song.Artist),
 		Text(Props{"size": 13, "color": c.muted, "style": with(ellipsis, S{"width": "22%", "display": "none", "sm": S{"display": "flex"}})}, song.Album),
 		Text(Props{"size": 12, "color": c.muted, "style": S{"width": 52, "textAlign": "end", "shrink": 0}}, clock(song.Duration)))
@@ -592,14 +647,23 @@ func NowPlaying(lyricLine int) *VNode {
 	if side {
 		lyrics = LyricsPanel(song, lyricLine)
 	}
-	return Row(Props{"id": "main-playing", "flex": 1, "align": "stretch", "gap": 32, "style": S{"minHeight": 0, "minWidth": 0, "padding": pad, "overflow": "hidden"},
+	// The cover, blurred, fills the stage behind everything: each song tints the page its own colours.
+	var backdrop Child
+	if song.Thumbnail != nil && *song.Thumbnail != "" {
+		backdrop = View(Props{"key": "backdrop-" + song.ID, "style": S{"position": "absolute", "left": 0, "top": 0, "right": 0, "bottom": 0, "overflow": "hidden", "animation": S{"from": S{"opacity": 0}, "duration": 600, "easing": "easeOut"}}},
+			Image(Props{"src": cover(*song.Thumbnail, 120), "fit": "cover", "style": S{"position": "absolute", "left": 0, "top": 0, "width": "100%", "height": "100%", "opacity": 0.55}}),
+			View(Props{"style": S{"position": "absolute", "left": 0, "top": 0, "width": "100%", "height": "100%", "backdropBlur": 64, "background": "linear-gradient(to bottom, #030303a6, #030303f0)"}}))
+	}
+	return Row(Props{"id": "main-playing", "flex": 1, "align": "stretch", "gap": 32, "style": S{"minHeight": 0, "minWidth": 0, "padding": pad, "overflow": "hidden", "position": "relative"},
 		"onSize": func(size Size) {
 			if state.Stage == nil || size.Width != state.Stage.Width || size.Height != state.Stage.Height {
 				state.Stage = &size
 			}
 		}},
+		backdrop,
 		Column(Props{"flex": 1, "align": "center", "justify": "center", "gap": 18, "style": S{"minWidth": 0, "minHeight": 0}},
-			Art(song.Thumbnail, math.Round(art), 10, false),
+			View(Props{"key": "art-" + song.ID, "style": S{"animation": appear, "boxShadow": "0 24px 60px #000000a0", "radius": 10}},
+				Art(song.Thumbnail, math.Round(art), 10, false)),
 			Column(Props{"gap": 6, "align": "center", "style": S{"maxWidth": text, "minWidth": 0}},
 				Text(Props{"size": 26, "weight": 800, "style": with(ellipsis, S{"maxWidth": text})}, song.Title),
 				Text(Props{"size": 15, "color": c.muted, "style": with(ellipsis, S{"maxWidth": text})}, strings.Join(parts, " • ")),
@@ -691,7 +755,7 @@ func LyricsPanel(song *Item, line int) *VNode {
 						state.FollowLyrics()
 						state.Refresh()
 					},
-					"style": S{"padding": S{"top": 6, "bottom": 6, "right": 12}, "cursor": "pointer", "opacity": opacity}},
+					"style": S{"padding": S{"top": 6, "bottom": 6, "right": 12}, "cursor": "pointer", "opacity": opacity, "transition": ease, "hover": S{"opacity": 1}}},
 					Text(Props{"size": size, "weight": weight, "color": color}, shown))
 			}}),
 		credit)
@@ -774,15 +838,27 @@ func QueueRow(key string, song *Item, index int, dim bool) *VNode {
 		tc = c.accent
 	}
 	p := Props{"id": fmt.Sprintf("queue-%d", index), "onClick": func() { state.Jump(index) }, "control": S{"role": "button", "label": "Play " + song.Title},
-		"style": S{"padding": 6, "gap": 10, "direction": "row", "align": "center", "radius": 8, "cursor": "pointer", "opacity": opacity, "hover": S{"background": c.hover}}}
+		"style": S{"padding": 6, "gap": 10, "direction": "row", "align": "center", "radius": 8, "cursor": "pointer", "group": true, "opacity": opacity, "hover": S{"background": c.hover, "opacity": 1}, "transition": ease}}
 	if key != "" {
 		p["key"] = key
+	}
+	parts := []string{}
+	for _, part := range []string{song.Artist, clock(song.Duration)} {
+		if part != "" && part != "-:--" {
+			parts = append(parts, part)
+		}
+	}
+	var remove Child
+	if !current {
+		remove = View(Props{"style": S{"opacity": 0, "transition": ease, "groupHover": S{"opacity": 1}}},
+			IconButton(iconButton{id: fmt.Sprintf("queue-remove-%d", index), d: icons.close, label: "Remove from queue", size: 14, box: 26, onClick: func() { state.RemoveFromQueue(index) }}))
 	}
 	return Pressable(p,
 		Art(song.Thumbnail, 36, 4, false),
 		Column(Props{"gap": 1, "style": S{"flex": 1, "minWidth": 0}},
 			Text(Props{"size": 13, "color": tc, "style": ellipsis}, song.Title),
-			Text(Props{"size": 11, "color": c.muted, "style": ellipsis}, song.Artist)))
+			Text(Props{"size": 11, "color": c.muted, "style": ellipsis}, strings.Join(parts, " • "))),
+		remove)
 }
 
 func QueuePanel() *VNode {
@@ -790,6 +866,12 @@ func QueuePanel() *VNode {
 	history := state.Queue[min(lo, len(state.Queue)):min(hi, len(state.Queue))]
 	upNext := state.Queue[min(state.Index+1, len(state.Queue)):min(state.Index+51, len(state.Queue))]
 	current := state.current()
+	left := 0.0
+	for _, s := range state.Queue[min(state.Index+1, len(state.Queue)):] {
+		if s.Duration != nil {
+			left += *s.Duration
+		}
+	}
 	label := func(text string) *VNode {
 		return Text(Props{"size": 11, "weight": 700, "color": c.muted, "style": S{"padding": S{"left": 6, "top": 14, "bottom": 4}, "letterSpacing": 0.6}}, text)
 	}
@@ -808,7 +890,17 @@ func QueuePanel() *VNode {
 			for i, s := range upNext {
 				rows = append(rows, QueueRow(fmt.Sprintf("n%d-%s", i, s.ID), s, state.Index+1+i, false))
 			}
-			next = Fragment(label("UP NEXT"), rows)
+			heading := "UP NEXT"
+			if left != 0 {
+				heading = "UP NEXT · " + clock(&left)
+			}
+			next = Fragment(
+				Row(Props{"align": "center", "style": S{"padding": S{"right": 2}}},
+					View(Props{"flex": 1}, label(heading)),
+					Pressable(Props{"id": "queue-clear", "onClick": func() { state.ClearUpNext() }, "control": S{"role": "button", "label": "Clear up next"},
+						"style": S{"height": 24, "padding": S{"left": 8, "right": 8}, "margin": S{"top": 10}, "radius": 12, "align": "center", "justify": "center", "cursor": "pointer", "hover": S{"background": c.hover}, "transition": ease}},
+						Text(Props{"size": 11, "color": c.muted}, "Clear"))),
+				rows)
 		}
 		nowPlaying := "NOW PLAYING"
 		if state.Source != "" {
@@ -826,8 +918,25 @@ func QueuePanel() *VNode {
 		Row(Props{"align": "center", "style": S{"height": 36, "padding": S{"left": 14, "right": 8}, "borderColor": c.border, "borderWidth": S{"bottom": 1}}},
 			Text(Props{"size": 11, "weight": 700, "color": c.muted, "style": S{"letterSpacing": 0.6, "flex": 1}}, "QUEUE"),
 			Text(Props{"size": 11, "color": c.muted}, count)),
+		autoplaySwitch(),
 		Scroll(Props{"flex": 1, "style": S{"minHeight": 0}},
 			Column(Props{"style": S{"padding": S{"left": 8, "right": 8, "bottom": 12}}}, body)))
+}
+
+// autoplaySwitch is Autoplay, as in the official queue: when the queue ends, similar songs keep playing.
+func autoplaySwitch() *VNode {
+	color, track, knob := c.muted, "#3a3a3a", "start"
+	if state.Autoplay {
+		color, track, knob = c.accent, c.accent, "end"
+	}
+	return Pressable(Props{"id": "autoplay", "onClick": func() { state.ToggleAutoplay() }, "control": S{"role": "switch", "label": "Autoplay", "selected": state.Autoplay},
+		"style": S{"direction": "row", "align": "center", "gap": 10, "padding": S{"left": 14, "right": 12, "top": 8, "bottom": 8}, "cursor": "pointer", "borderColor": c.border, "borderWidth": S{"bottom": 1}, "hover": S{"background": c.hover}, "transition": ease}},
+		Glyph(glyph{d: icons.autoplay, size: 15, color: color}),
+		Column(Props{"gap": 1, "style": S{"flex": 1, "minWidth": 0}},
+			Text(Props{"size": 12, "weight": 600}, "Autoplay"),
+			Text(Props{"size": 11, "color": c.muted, "style": ellipsis}, "Similar songs play when the queue ends")),
+		View(Props{"style": S{"width": 30, "height": 16, "radius": 8, "padding": 2, "background": track, "align": knob, "transition": ease}},
+			View(Props{"style": S{"width": 12, "height": 12, "radius": 6, "background": c.text}})))
 }
 
 func togglePlaying() {
@@ -849,6 +958,8 @@ func PlayerBar() *VNode {
 		volume = 0
 	}
 	ready := state.Path != "" && state.Loading == nil
+	// A queue restored from the last session plays from where it stopped on the first click.
+	canPlay := ready || (song != nil && state.Loading == nil)
 	var status string
 	if state.PlayError != nil {
 		status = *state.PlayError
@@ -878,7 +989,7 @@ func PlayerBar() *VNode {
 		left = Text(Props{"size": 12, "color": c.muted}, "Nothing playing")
 	}
 	playOpacity := 0.5
-	if ready {
+	if canPlay {
 		playOpacity = 1
 	}
 	playLabel, playIcon := "Play", icons.play
@@ -901,22 +1012,18 @@ func PlayerBar() *VNode {
 		Row(Props{"gap": 12, "align": "center", "style": S{"width": 300, "shrink": 0, "minWidth": 0}}, left),
 		Column(Props{"flex": 1, "gap": 4, "align": "center", "style": S{"minWidth": 0}},
 			Row(Props{"gap": 6, "align": "center"},
-				IconButton(iconButton{id: "shuffle", d: icons.shuffle, label: "Shuffle", size: 15, active: state.Shuffle, onClick: func() { state.ToggleShuffle() }}),
-				IconButton(iconButton{id: "previous", d: icons.prev, label: "Previous", size: 16, fill: true, onClick: func() { state.Previous() }, disabled: song == nil}),
-				Pressable(Props{"id": "play", "onClick": func() {
-					if !ready {
-						return
-					}
-					if state.Playing {
-						state.media(MediaController.Pause)
-					} else {
-						state.media(MediaController.Play)
+				IconButton(iconButton{id: "shuffle", d: icons.shuffle, label: "Shuffle", shortcut: "S", size: 15, active: state.Shuffle, onClick: func() { state.ToggleShuffle() }}),
+				IconButton(iconButton{id: "previous", d: icons.prev, label: "Previous", shortcut: "Shift+P", size: 16, fill: true, onClick: func() { state.Previous() }, disabled: song == nil}),
+				Tip("play", playLabel+" (K)", "", Pressable(Props{"id": "play", "onClick": func() {
+					if canPlay {
+						state.TogglePlay()
 					}
 				}, "control": S{"role": "button", "label": playLabel},
-					"style": S{"width": 34, "height": 34, "radius": 999, "background": c.text, "align": "center", "justify": "center", "cursor": "pointer", "opacity": playOpacity, "hover": S{"transform": "scale(1.06)"}}},
-					Glyph(glyph{d: playIcon, size: 16, fill: true, color: c.window})),
-				IconButton(iconButton{id: "next", d: icons.next, label: "Next", size: 16, fill: true, onClick: func() { state.Next() }, disabled: song == nil}),
-				IconButton(iconButton{id: "repeat", d: icons.repeat, label: "Repeat: " + state.Repeat, size: 15, active: state.Repeat != "off", onClick: func() {
+					"style": S{"width": 34, "height": 34, "radius": 999, "background": c.text, "align": "center", "justify": "center", "cursor": "pointer", "opacity": playOpacity,
+						"hover": S{"transform": "scale(1.08)"}, "active": S{"transform": "scale(0.94)"}, "transition": ease}},
+					Glyph(glyph{d: playIcon, size: 16, fill: true, color: c.window}))),
+				IconButton(iconButton{id: "next", d: icons.next, label: "Next", shortcut: "Shift+N", size: 16, fill: true, onClick: func() { state.Next() }, disabled: song == nil}),
+				IconButton(iconButton{id: "repeat", d: icons.repeat, label: "Repeat: " + state.Repeat, shortcut: "R", size: 15, active: state.Repeat != "off", onClick: func() {
 					switch state.Repeat {
 					case "off":
 						state.Repeat = "all"
@@ -936,7 +1043,7 @@ func PlayerBar() *VNode {
 					"style": S{"flex": 1, "minWidth": 0, "width": "auto", "foreground": c.accent}}),
 				Text(Props{"size": 11, "color": c.muted, "style": S{"width": 36, "shrink": 0}}, clock(durationShown)))),
 		Row(Props{"gap": 6, "align": "center", "justify": "end", "style": S{"width": 300, "shrink": 0}},
-			IconButton(iconButton{id: "mute", d: muteIcon, label: muteLabel, size: 16, onClick: func() { state.Muted = !state.Muted }}),
+			IconButton(iconButton{id: "mute", d: muteIcon, label: muteLabel, shortcut: "M", size: 16, onClick: func() { state.Muted = !state.Muted }}),
 			Slider(Props{"id": "volume", "label": "Volume", "value": math.Round(volume * 100), "min": 0, "max": 100, "step": 1,
 				"onValueChange": func(v float64) { state.Volume = v / 100; state.Muted = v == 0 },
 				"style":         S{"width": 110, "foreground": c.text}})))
@@ -1056,7 +1163,7 @@ func YouTubeMusicView() *VNode {
 	narrow := compact()
 	var queue, sidebar Child
 	if state.ShowQueue && !narrow {
-		queue = E(queueRegion, Props{"queue": state.Queue, "index": state.Index, "source": state.Source})
+		queue = E(queueRegion, Props{"queue": state.Queue, "index": state.Index, "source": state.Source, "autoplay": state.Autoplay})
 	}
 	if !narrow {
 		sidebar = E(sidebarRegion, Props{"page": state.Page, "library": state.Library, "signedIn": state.SignedIn, "source": state.Source, "playing": state.Playing, "current": current})
@@ -1064,6 +1171,16 @@ func YouTubeMusicView() *VNode {
 	player := []Child{PlayerBar()}
 	if narrow {
 		player = []Child{MobilePlayerBar(), MobileNav()}
+	}
+	var notice Child
+	if state.Notice != nil {
+		bottom := 84
+		if narrow {
+			bottom = 136
+		}
+		notice = View(Props{"key": "notice-" + *state.Notice, "style": S{"position": "absolute", "left": 16, "bottom": bottom, "padding": S{"left": 14, "right": 14, "top": 10, "bottom": 10}, "radius": 8,
+			"background": "#f1f1f1", "boxShadow": "0 8px 24px #00000080", "animation": appear, "pointerEvents": "none"}},
+			Text(Props{"size": 13, "weight": 500, "color": c.window}, *state.Notice))
 	}
 	return Window(Props{"onCloseRequest": func(e *CloseRequest) { e.PreventDefault(); state.Hide() }, "title": title, "width": 1320, "height": 820, "minWidth": 360, "minHeight": 520,
 		"position": "center", "theme": ytmTheme, "style": S{"background": c.window, "foreground": c.text, "fontFamily": "Inter", "borderColor": c.border}},
@@ -1078,7 +1195,8 @@ func YouTubeMusicView() *VNode {
 						"lyrics": state.Lyrics, "lyricLine": lyricLine})),
 				queue),
 			player),
-		SignInDialog())
+		SignInDialog(),
+		notice)
 }
 
 func HomeShelves() *VNode {
