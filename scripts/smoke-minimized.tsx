@@ -1,14 +1,17 @@
 // A minimized `lowPower` window gives its GPU device back like a hidden one, draws
 // nothing while an animation runs, and asks Windows for EcoQoS; restored, it builds
-// the device again and draws, updates made meanwhile included.
-import { Column, createApp, Spinner, Text, Window } from "@tarve/core";
+// the device again and draws, updates made meanwhile included. `--frameless`: the same with
+// a TitleBar window, which Windows minimizes to a ~160×40 caption instead of 0×0.
+import { Column, createApp, Spinner, Text, TitleBar, Window } from "@tarve/core";
 import { strict as assert } from "node:assert";
 import { setTimeout as sleep } from "node:timers/promises";
 
+const frameless = process.argv.includes("--frameless");
 let label = "before";
 const errors: string[] = [];
 const app = createApp(() => (
   <Window title="Minimized smoke" width={320} height={200}>
+    {frameless ? <TitleBar><Text>Minimized smoke</Text></TitleBar> : null}
     <Column flex={1} align="center" justify="center" gap={8}>
       <Spinner size={32} />
       <Text id="label">{label}</Text>
@@ -54,7 +57,7 @@ try {
   assert.ok(again.frames > minimized.frames && again.fps > 10, `restored, it draws (fps ${again.fps})`);
   assert.equal(again.nodes.find(node => node.id === "label")?.text, "while minimized", "updates made while minimized are shown");
   assert.deepEqual(errors, []);
-  console.log(`[tarve smoke:minimized] PASS ${JSON.stringify({ fpsShown: shown.fps, fpsAgain: again.fps, gpuShown, gpuMinimized, firstFrameAfterRestoreMs })}`);
+  console.log(`[tarve smoke:minimized] PASS ${JSON.stringify({ frameless, fpsShown: shown.fps, fpsAgain: again.fps, gpuShown, gpuMinimized, firstFrameAfterRestoreMs })}`);
 } finally {
   app.close();
 }

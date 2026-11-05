@@ -1854,7 +1854,8 @@ impl App {
     fn minimized(&self) -> bool {
         self.window.as_ref().is_some_and(|window| {
             let size = window.inner_size();
-            size.width == 0 || size.height == 0
+            // A frameless window reports its minimized caption (~160×40), not 0×0.
+            size.width == 0 || size.height == 0 || window.is_minimized().unwrap_or(false)
         })
     }
     /// Hides the window and gives its GPU device, swap chain and textures back,
@@ -2593,7 +2594,7 @@ impl App {
         let scale = window.scale_factor();
         let physical = window.inner_size();
         // Minimized: nothing to paint, and D3D11 cannot size targets to zero.
-        if physical.width == 0 || physical.height == 0 {
+        if physical.width == 0 || physical.height == 0 || window.is_minimized().unwrap_or(false) {
             return Ok(false);
         }
         let size = layout_viewport(window, &mut self.tree);
@@ -2734,11 +2735,7 @@ impl App {
         if self.parked {
             return;
         }
-        if self
-            .window
-            .as_ref()
-            .is_some_and(|window| window.inner_size().width == 0 || window.inner_size().height == 0)
-        {
+        if self.minimized() {
             return;
         }
         if matches!(self.graphics, GraphicsState::Recovering(_)) {
@@ -3849,6 +3846,7 @@ impl ApplicationHandler<Command> for App {
         );
         let motion_due = !self.motion_test_clock
             && !self.parked
+            && !self.minimized()
             && self.tree.next_clock_tick_ms().is_some_and(|deadline| {
                 deadline <= self.motion_epoch.elapsed().as_secs_f64() * 1000.0 + 0.001
             });
@@ -3960,15 +3958,15 @@ impl ApplicationHandler<Command> for App {
                 self.file_drag = FileDrag::default();
             }
             WindowEvent::Resized(size) => {
-                if size.width == 0 || size.height == 0 {
+                // Minimized, a window without a system frame reports its caption's ~160×40
+                // client rect instead of 0×0: that is no size to paint or remember either.
+                let minimized = size.width == 0 || size.height == 0 || self.minimized();
+                if minimized {
                     self.iconify(event_loop);
                 } else {
                     self.deiconify();
                 }
-                if size.width > 0
-                    && size.height > 0
-                    && let Some(window) = &self.window
-                {
+                if !minimized && let Some(window) = &self.window {
                     let logical = size.to_logical::<f64>(window_dpi_scale(window));
                     // While the user moves the window the logical size stays frozen:
                     // resizes on the way are DPI transitions, not user intent.
@@ -3980,7 +3978,7 @@ impl ApplicationHandler<Command> for App {
                         }
                     });
                 }
-                if size.width > 0 && size.height > 0 {
+                if !minimized {
                     let resize_error = if let GraphicsState::Ready(graphics) = &mut self.graphics {
                         graphics.resize(size.width, size.height).err()
                     } else {
