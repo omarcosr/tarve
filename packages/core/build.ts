@@ -51,6 +51,18 @@ export interface BuildOptions {
    */
   smol?: boolean;
   /**
+   * Bun's `--trim`: leave the Bun and Node.js APIs the app never calls out of the executable
+   * (about a third smaller). Used when the running Bun supports it; otherwise the build warns
+   * and keeps the full runtime. Node.js and txiki.js have no such setting and ignore it.
+   */
+  trim?: boolean;
+  /**
+   * Experimental, Bun's `--aot`: the app compiled to machine code at build time. With `trim`
+   * Bun then also drops the JIT and every API it can prove unused (examples/counter: about 66 MB
+   * instead of 100 MB). Needs a Bun with `--aot`; Node.js and txiki.js ignore it.
+   */
+  aot?: boolean;
+  /**
    * Native subsystems to compile in: "auto" (default) keeps the ones the app's code uses,
    * "all" ships the full prebuilt library, or a list (see native-features.ts). Trimming needs
    * a Tarve checkout with Cargo; otherwise the full library is used. Also TARVE_NATIVE_FEATURES.
@@ -68,8 +80,20 @@ export function smolExecArgv(runtime: "bun" | "node"): string[] {
   return runtime === "bun" ? ["--smol"] : ["--optimize-for-size", "--max-semi-space-size=1"];
 }
 
+let bunBuildHelp: string | undefined;
+/** Whether this Bun's `build --compile` takes `flag` (Bun.build's `compile.trim`, `compile.aot`). */
+export function bunBuildSupports(flag: "--trim" | "--aot"): boolean {
+  if (bunBuildHelp === undefined) {
+    const help = spawnSync(process.execPath, ["build", "--help"], { encoding: "utf8" });
+    bunBuildHelp = `${help.stdout ?? ""}${help.stderr ?? ""}`;
+  }
+  return new RegExp(`^\\s*${flag}\\s`, "m").test(bunBuildHelp);
+}
+
 // Level 12: within 1 MB of level 19 at a fiftieth of the compression time.
 const NATIVE_ZSTD_LEVEL = 12;
+/** `trim` asks for the smallest executable: level 19 saves another ~0.4 MB in about 4 s. */
+const NATIVE_ZSTD_LEVEL_TRIM = 19;
 
 function resolveNativeLibrary(target: BuildTarget, override?: string): string {
   if (override) {
@@ -155,7 +179,7 @@ export async function build(options: BuildOptions): Promise<string> {
   // macOS: the dylib sits in Contents/Frameworks, signed with the bundle, instead of being
   // extracted at run time (the hardened runtime refuses unsigned libraries).
   const macExecutable = mac ? join(packDirectory, bundleExecutableName(name)) : undefined;
-  if (!mac) writeFileSync(packedLibrary, Bun.zstdCompressSync(libraryBytes, { level: NATIVE_ZSTD_LEVEL }));
+  if (!mac) writeFileSync(packedLibrary, Bun.zstdCompressSync(libraryBytes, { level: options.trim ? NATIVE_ZSTD_LEVEL_TRIM : NATIVE_ZSTD_LEVEL }));
   const runtime: BunPlugin = {
     name: "tarve-native-runtime",
     setup(builder) {
@@ -191,6 +215,10 @@ export async function build(options: BuildOptions): Promise<string> {
       entry: packHost ? (await import("./pack-build")).writeHostEntry(packDirectory, entrypoint, packHost) : entrypoint,
       appEntrypoint: entrypoint, directory: packDirectory, define, compileJsx: options.compileJsx,
     });
+    const trim = options.trim === true && bunBuildSupports("--trim");
+    const aot = options.aot === true && bunBuildSupports("--aot");
+    if (options.aot && !aot) console.warn(`Bun ${Bun.version} has no --aot; building without it.`);
+    if (options.trim && !trim) console.warn(`Bun ${Bun.version} has no --trim; building with the full runtime.`);
     const result = await Bun.build({
       entrypoints: [bundle],
       target: "bun",
@@ -201,6 +229,8 @@ export async function build(options: BuildOptions): Promise<string> {
         outfile: macExecutable ?? outfile,
         autoloadDotenv: false,
         autoloadBunfig: false,
+        ...(trim ? { trim: true } : {}),
+        ...(aot ? { aot: true } : {}),
         ...(config.platform === "win32" ? {
           windows: {
             hideConsole: true,

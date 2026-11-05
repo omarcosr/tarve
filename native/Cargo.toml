@@ -160,5 +160,8 @@ required-features = ["qjs-prototype"]
 opt-level = 1
 
 [profile.release]
-lto = "thin"
+# Fat LTO in one codegen unit: the Windows core library 13.5 → 12.2 MB (zstd 19: 4.0 → 3.85 MB),
+# at about a minute more of release build time. Unwinding stays: bridge.rs catches panics.
+lto = "fat"
+codegen-units = 1
 strip = true

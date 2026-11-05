@@ -7,6 +7,8 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless` an
 ### Added
 
 - `tarve dev app.tsx --target android` (`android-x64`, `android-arm64`): installs a dev APK once, then on every save rebundles only the JS, pushes it to the app's external files directory and restarts the app, without reinstalling (about 0.7 s from save to reload on an emulator). The app's logcat output and crashes print in the terminal, a bundling error keeps the last good app running, and `--device` / `ANDROID_SERIAL` picks the device.
+- `tarve build|package --trim` (`trim: true` in `build()`): Bun's `--compile --trim`, which leaves the Bun and Node.js APIs the app never calls out of the executable (`examples/counter`: 154.6 → 100.6 MB on Windows). Used when the running Bun supports it (1.4.4+); an older Bun warns and builds the full runtime. Node.js and txiki.js builds ignore it. `--aot` (`aot: true`, experimental) adds Bun's ahead-of-time compilation; with `--trim` Bun then also drops the JIT and the APIs it can prove unused (`examples/counter` 70.1 MB, `examples/components` 84.6 MB, both start normally). Tarve's `bun:ffi.dlopen` keeps the interpreter, so it goes no lower. With `--trim` the native library is packed at zstd level 19 instead of 12 (−0.45 MB, about 4 s more).
+- The native library's release profile uses fat LTO in one codegen unit (Windows core library 13.5 → 12.2 MB).
 
 ### Changed
 

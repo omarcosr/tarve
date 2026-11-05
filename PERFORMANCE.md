@@ -98,6 +98,11 @@ O que entrou:
 - **`--smol`** em `tarve run|dev|build` (Bun: `--smol`; Node.js: `--optimize-for-size --max-semi-space-size=1`; txiki.js
   ignora). Bun: sem diferença mensurável (172 → 175 MB em `components`, 214 → 214 MB em `fixed`). Node.js: −12 MB em
   `components`, +4 MB em `fixed` e mais CPU ocioso por GC. Fica opcional; não é parte de `lowPower`.
+- **`--trim`** em `tarve build|package` (Bun 1.4.4+: `--compile --trim`; Node.js e txiki.js ignoram) tira do executável as
+  APIs do Bun e do Node.js que o app nunca chama: `examples/counter` 154,6 → 100,6 MB no Windows, abre normalmente.
+  Bun sem `--trim` gera aviso e o runtime completo. Com `--aot` (experimental) vai a 70,1 MB (`counter`) e 84,6 MB
+  (`components`); o `dlopen` do binding mantém o interpretador, e cada acesso `obj[chave]` dinâmico faz o trim manter
+  APIs, então zerar esses acessos não reduziu o tamanho (medido: 66,2 MB antes e depois).
 
 Achado em aberto: tanto escondida (`hide`) quanto minimizada, a janela mantém ~30 MB de memória de vídeo segundo o DXGI
 mesmo sem device próprio. Por isso `bun run smoke:hidden` falha nesta máquina (36 → 35 MB; com a DLL do commit

@@ -46,6 +46,8 @@ function usage(target?: BuildTarget): string {
     `  --outfile ${output}              build, pack: output path`,
     "  --compile-jsx                   build: compile JSX into reusable templates (needs typescript 7)",
     "  --smol                          smaller JS heap, collected more often (bun, node)",
+    "  --trim                          build (bun): leave unused Bun/Node.js APIs out of the executable, when Bun supports it",
+    "  --aot                           build (bun, experimental): compile the app to machine code; with --trim also drops the JIT",
     "  --native-features auto|all|<list> build: native subsystems (vello-gpu, syntax, markdown, net, media); auto = what the app uses",
     "  --name App, --version 1.0.0     app metadata (executable, window, app identity)",
     "  --icon icon.png                 app icon: .png (square, 256 px+) or .ico",
@@ -111,7 +113,7 @@ async function main(): Promise<number> {
       outfile: { type: "string" }, name: { type: "string" }, version: { type: "string" },
       icon: { type: "string" }, "app-id": { type: "string" }, description: { type: "string" },
       publisher: { type: "string" }, copyright: { type: "string" },
-      target: { type: "string" }, runtime: { type: "string" }, "compile-jsx": { type: "boolean" }, smol: { type: "boolean" },
+      target: { type: "string" }, runtime: { type: "string" }, "compile-jsx": { type: "boolean" }, smol: { type: "boolean" }, trim: { type: "boolean" }, aot: { type: "boolean" },
       "native-features": { type: "string" },
       "target-executable": { type: "string" }, keystore: { type: "string" },
       permission: { type: "string", multiple: true }, format: { type: "string" }, bundletool: { type: "string" },
@@ -203,6 +205,8 @@ async function main(): Promise<number> {
       runtime,
       compileJsx: values["compile-jsx"],
       smol: values.smol,
+      trim: values.trim,
+      aot: values.aot,
       targetExecutable: values["target-executable"],
       nativeFeatures: values["native-features"],
       updateKey: values.packs ? updateKey(values.key, "tarve build --packs") : undefined,
@@ -281,7 +285,7 @@ async function packageCommand(input: string | undefined, count: number, values: 
     for (const [target, targetFormats] of byTarget) {
       const executable = await build({
         entrypoint: input, outfile: byTarget.size === 1 ? string("outfile") : undefined, ...metadata, target, runtime,
-        compileJsx: values["compile-jsx"] === true, smol: values.smol === true,
+        compileJsx: values["compile-jsx"] === true, smol: values.smol === true, trim: values.trim === true, aot: values.aot === true,
         targetExecutable: string("target-executable"), nativeFeatures: string("native-features"),
       });
       emit(executable, targetFormats);
