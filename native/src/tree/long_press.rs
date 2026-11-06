@@ -71,6 +71,7 @@ impl Tree {
             Some(drag) if drag.active => {
                 self.pressed = None;
                 self.dirty.paint = true;
+                self.dirty.full_paint = true;
                 vec![json!({"type":"dragCancel", "id":drag.id})]
             }
             _ => vec![],

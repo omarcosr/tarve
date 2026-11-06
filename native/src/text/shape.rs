@@ -31,7 +31,11 @@ impl TextEngine {
             let shared = self.shaped_by.get(&key).is_some_and(|id| {
                 self.signatures.get(id) == Some(&signature) && self.layouts.contains_key(id)
             });
-            if shared || self.preshaped.contains_key(&key) || !seen.insert(key) {
+            if shared
+                || self.preshaped.contains_key(&key)
+                || self.recent.contains(&key)
+                || !seen.insert(key)
+            {
                 continue;
             }
             pending.push((key, node, content));

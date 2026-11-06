@@ -860,6 +860,12 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       report: (error, event) => { reportError(error, { source: "plugin", event }); },
     });
   }
+  // The library loads, and native warms its text engine and GPU device, while the first view compiles.
+  try {
+    bridge.prewarm?.(options.renderer ?? (options.headless || options.lowPower ? "cpu" : "auto"));
+  } catch {
+    // start() reports a library that cannot load.
+  }
   try {
     committed = compileView();
     observed = nativeShadow(committed);

@@ -109,6 +109,7 @@ impl Tree {
         if over.x != 0.0 || over.y != 0.0 || self.overscroll.areas.contains_key(id) {
             self.overscroll.areas.insert(id.to_string(), over);
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
         }
         events
     }
@@ -164,6 +165,7 @@ impl Tree {
             true
         });
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
     }
 
     /// Whether overscroll needs animation frames.

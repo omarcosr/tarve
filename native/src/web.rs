@@ -90,8 +90,8 @@ impl WebTree {
     /// Applies a JSON `NativeCommand`, including the diagnostic `inspect`, `input` and
     /// `motionAdvance` commands. Commands that need a desktop window are ignored.
     pub fn command(&mut self, command: &str) -> Result<(), JsError> {
-        let command: Command =
-            serde_json::from_str(command).map_err(|error| JsError::new(&error.to_string()))?;
+        let command = Command::from_json(command.as_bytes())
+            .map_err(|error| JsError::new(&error.to_string()))?;
         match command {
             Command::Patch { nodes } => {
                 if let Err(error) = self.tree.patch(nodes) {
@@ -215,6 +215,7 @@ impl WebTree {
             self.height = height.max(1.0);
             self.scale = scale.max(0.5);
             self.tree.dirty.paint = true;
+            self.tree.dirty.full_paint = true;
             self.painted = false;
         }
     }

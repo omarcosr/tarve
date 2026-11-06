@@ -18,3 +18,26 @@ fn read_json_rejects_oversized_input_before_dereferencing_the_buffer() {
     };
     assert_eq!(result.unwrap_err(), "Invalid input buffer");
 }
+
+#[test]
+fn updates_parse_the_same_on_the_fast_path_as_through_the_tagged_enum() {
+    use crate::protocol::Command;
+    let node = r##"{"id":"a","kind":"view","style":{"width":4,"background":"#fff"},"children":[],"text":"x"}"##;
+    for json in [
+        format!(r#"{{"type":"patch","nodes":[{node}]}}"#),
+        format!(
+            r#"{{"type":"mutate","mutations":[{{"type":"patch","node":{node}}},{{"type":"remove","id":"b"}}]}}"#
+        ),
+        format!(r#"{{"type":"update","root":{node}}}"#),
+    ] {
+        let fast = Command::from_json(json.as_bytes()).unwrap();
+        let tagged: Command = serde_json::from_str(&json).unwrap();
+        assert_eq!(format!("{fast:?}"), format!("{tagged:?}"));
+    }
+    // A malformed update is still an error, and other commands take the tagged enum.
+    assert!(Command::from_json(br#"{"type":"patch","nodes":7}"#).is_err());
+    assert!(matches!(
+        Command::from_json(br#"{"type":"close"}"#).unwrap(),
+        Command::Close
+    ));
+}

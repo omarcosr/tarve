@@ -50,6 +50,8 @@ enum Op {
         std_dev: f64,
         invert: bool,
     },
+    /// `close`: how many ops after this one its `Pop` is (relative, so a recorded span
+    /// can be reused at another position of the next frame).
     PushClip {
         rule: Fill,
         transform: Affine,
@@ -98,10 +100,40 @@ struct Recorded {
 
 #[derive(Default)]
 pub(crate) struct DisplayList {
-    ops: Vec<Recorded>,
+    /// Shared with the frames that reuse them (see `CpuRecorder::cache_begin`).
+    ops: Vec<Arc<Recorded>>,
+    /// Spans of `ops` a painter recorded under a key, for the next frame to reuse.
+    spans: SpanMap,
     /// The frame's glass boxes in paint order, and the op of the first one.
     glass: Vec<GlassCall>,
     first_glass: usize,
+}
+
+impl DisplayList {
+    /// Recorded commands.
+    pub(crate) fn len(&self) -> usize {
+        self.ops.len()
+    }
+}
+
+/// Recorded spans by key. Keys are hashes already: they index the table as they are.
+type SpanMap = HashMap<u64, std::ops::Range<usize>, std::hash::BuildHasherDefault<KeyHasher>>;
+
+#[derive(Default)]
+struct KeyHasher(u64);
+
+impl Hasher for KeyHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 = self.0.rotate_left(8) ^ u64::from(*byte);
+        }
+    }
+    fn write_u64(&mut self, value: u64) {
+        self.0 = value;
+    }
 }
 
 /// Everything when bounds cannot be computed (a non-finite transform).
@@ -177,8 +209,16 @@ fn hash_path(hasher: &mut DefaultHasher, path: &BezPath) {
 
 /// Records paint commands for one frame.
 pub(crate) struct CpuRecorder<'a> {
-    ops: Vec<Recorded>,
+    ops: Vec<Arc<Recorded>>,
     open: Vec<usize>,
+    /// The last frame, whose spans this one may reuse.
+    previous: Option<&'a DisplayList>,
+    spans: SpanMap,
+    /// Spans being recorded: key and first op.
+    recording: Vec<(u64, usize)>,
+    /// One past the last op that cannot be reused (an image, a glass box): spans holding it
+    /// are not kept.
+    tainted: usize,
     images: &'a mut HashMap<String, CpuCachedImage>,
     used_images: HashSet<String>,
     glass: Vec<GlassCall>,
@@ -187,10 +227,24 @@ pub(crate) struct CpuRecorder<'a> {
 }
 
 impl<'a> CpuRecorder<'a> {
+    #[cfg(test)]
     pub(crate) fn new(images: &'a mut HashMap<String, CpuCachedImage>) -> Self {
+        Self::after(images, None)
+    }
+
+    /// A recorder for the frame after `previous`: sized for as many ops, and reusing its
+    /// spans whose keys come again.
+    pub(crate) fn after(
+        images: &'a mut HashMap<String, CpuCachedImage>,
+        previous: Option<&'a DisplayList>,
+    ) -> Self {
         Self {
-            ops: Vec::new(),
+            ops: Vec::with_capacity(previous.map_or(0, DisplayList::len)),
             open: Vec::new(),
+            previous,
+            spans: SpanMap::default(),
+            recording: Vec::new(),
+            tainted: 0,
             images,
             used_images: HashSet::new(),
             glass: Vec::new(),
@@ -199,11 +253,11 @@ impl<'a> CpuRecorder<'a> {
     }
 
     fn push(&mut self, op: Op, hasher: DefaultHasher, bounds: Rect) {
-        self.ops.push(Recorded {
+        self.ops.push(Arc::new(Recorded {
             op,
             hash: hasher.finish(),
             bounds,
-        });
+        }));
     }
 
     pub(crate) fn finish(mut self) -> DisplayList {
@@ -219,6 +273,7 @@ impl<'a> CpuRecorder<'a> {
             .unwrap_or(self.ops.len());
         DisplayList {
             ops: self.ops,
+            spans: self.spans,
             glass: self.glass,
             first_glass,
         }
@@ -369,12 +424,13 @@ impl PaintTarget for CpuRecorder<'_> {
     fn pop_layer(&mut self) {
         let Some(start) = self.open.pop() else { return };
         self.opacity.pop();
-        let close = self.ops.len();
+        let close = self.ops.len() - start;
         // A layer clips and fades what it holds: changing it changes all of that.
         let extent = self.ops[start..]
             .iter()
             .fold(self.ops[start].bounds, |all, op| all.union(op.bounds));
-        let layer = &mut self.ops[start];
+        // Pushed while this layer was open, so not shared yet.
+        let layer = Arc::get_mut(&mut self.ops[start]).expect("an open layer is not shared");
         layer.bounds = extent;
         match &mut layer.op {
             Op::PushClip { close: end, .. }
@@ -421,7 +477,37 @@ impl PaintTarget for CpuRecorder<'_> {
         );
     }
 
+    fn cache_begin(&mut self, key: u64, reuse: bool) -> bool {
+        if reuse
+            && let Some(previous) = self.previous
+            && let Some(span) = previous.spans.get(&key)
+        {
+            let start = self.ops.len();
+            self.ops.extend(previous.ops[span.clone()].iter().cloned());
+            self.spans.insert(key, start..self.ops.len());
+            return true;
+        }
+        self.recording.push((key, self.ops.len()));
+        false
+    }
+
+    fn cache_end(&mut self) {
+        let Some((key, start)) = self.recording.pop() else {
+            return;
+        };
+        // Only a span whose layers close inside it, with nothing that cannot be reused.
+        let balanced = self.open.last().is_none_or(|open| *open < start);
+        if balanced && self.tainted <= start {
+            self.spans.insert(key, start..self.ops.len());
+        }
+    }
+
+    fn cache_taint(&mut self) {
+        self.tainted = self.ops.len() + 1;
+    }
+
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine) {
+        self.cache_taint();
         let Some(pixmap) = cached_cpu_pixmap(self.images, &mut self.used_images, key, image) else {
             return;
         };
@@ -454,6 +540,7 @@ impl PaintTarget for CpuRecorder<'_> {
         tint: Color,
         glass: &GlassParams,
     ) {
+        self.cache_taint();
         let opacity = self.opacity.last().copied().unwrap_or(1.0);
         let Some(call) = GlassCall::new(transform, rect, radius, tint, glass, opacity) else {
             return;
@@ -543,7 +630,7 @@ const SHADOW_MAX_SIDE: f64 = 4096.0;
 impl ShadowCache {
     pub(crate) fn new() -> Self {
         Self {
-            context: RenderContext::new(1, 1),
+            context: crate::paint::single_threaded_context(1, 1),
             entries: HashMap::new(),
             seen: HashMap::new(),
             frame: 0,

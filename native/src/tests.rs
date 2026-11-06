@@ -415,6 +415,7 @@ fn taffy_grid_and_parley_measurement_reflow_on_resize() {
     let shapes = tree.text.shapes;
     assert!((tree.entries["box"].rect.width() - 294.0).abs() < 1.0);
     tree.dirty.layout = true;
+    tree.dirty.full = true;
     tree.compute(300.0, 300.0).unwrap();
     assert!(tree.entries["text"].rect.height() > wide_height);
     assert_eq!(
@@ -4095,6 +4096,7 @@ fn report_size_sends_the_inner_size_once_per_change() {
     assert!(sizes(&mut tree).is_empty(), "unchanged size sends nothing");
     // A window resize marks layout dirty, as the runtime does.
     tree.dirty.layout = true;
+    tree.dirty.full = true;
     tree.compute(300.0, 420.0).unwrap();
     let grown = sizes(&mut tree);
     assert_eq!(grown.len(), 1);
@@ -4317,6 +4319,7 @@ fn remote_images_load_once_painted_and_lay_out_again() {
         vec!["https://example.com/cover.png".to_string()]
     );
     tree.dirty.paint = true;
+    tree.dirty.full_paint = true;
     tree.scene(1.0);
     assert!(
         tree.take_remote_image_requests().is_empty(),
@@ -4484,6 +4487,7 @@ fn failed_remote_images_retry_when_shown_again_and_schemes_ignore_case() {
     tree.finish_remote_image("HTTPS://example.com/x.png".into(), Err("offline".into()));
     tree.warnings.clear();
     tree.dirty.paint = true;
+    tree.dirty.full_paint = true;
     tree.scene(1.0);
     assert!(
         tree.take_remote_image_requests().is_empty(),
@@ -4522,6 +4526,7 @@ fn svg_images_decode_into_the_retained_image_cache() {
     tree.scene(1.0);
     std::fs::remove_file(path).unwrap();
     tree.dirty.paint = true;
+    tree.dirty.full_paint = true;
     tree.scene(1.0);
     assert_eq!(
         tree.image_cache_len(),
@@ -4606,6 +4611,7 @@ fn repaint_after_graphics_epoch_preserves_cpu_ui_and_decoded_images() {
 
     std::fs::remove_file(&path).unwrap();
     tree.dirty.paint = true;
+    tree.dirty.full_paint = true;
     tree.scene(1.0);
 
     assert_eq!(
@@ -7513,6 +7519,7 @@ fn a_filtered_subtree_is_rasterized_again_only_when_what_it_paints_changes() {
     tree.scene(1.0);
     let first = tree.filter_images["glow"].1.data.id();
     tree.dirty.paint = true;
+    tree.dirty.full_paint = true;
     tree.scene(1.0);
     assert_eq!(
         tree.filter_images["glow"].1.data.id(),

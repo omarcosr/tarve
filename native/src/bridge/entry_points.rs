@@ -26,6 +26,7 @@ pub extern "C" fn tarve_prewarm(renderer: u32) -> i32 {
         _ => protocol::RendererPreference::Auto,
     };
     crate::renderer::prewarm(preference);
+    crate::text::prewarm();
     0
 }
 

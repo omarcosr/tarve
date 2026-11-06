@@ -179,6 +179,17 @@ use vello_cpu::{
     color::PremulRgba8,
 };
 
+/// A CPU render context that rasterizes on the calling thread. Filter layers need one (the
+/// threaded dispatcher of vello_cpu does not implement them), and a small offscreen pass gains
+/// nothing from a pool of its own threads; only the window's frame rasterizes on several.
+pub(crate) fn single_threaded_context(width: u16, height: u16) -> RenderContext {
+    let settings = vello_cpu::RenderSettings {
+        num_threads: 0,
+        ..Default::default()
+    };
+    RenderContext::new_with(width, height, settings)
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct PaintGlyph {
     pub id: u32,
@@ -273,6 +284,19 @@ pub(crate) trait PaintTarget {
     /// `pop_transform`. Only [`TransformTarget`] implements it.
     fn push_transform(&mut self, _transform: Affine) {}
     fn pop_transform(&mut self) {}
+    /// Retained painting. Starts the paint of a subtree whose look `key` stands for. With
+    /// `reuse`, true when the target holds what that paint recorded the last frame (it adds
+    /// it again, and the painter skips the subtree). Otherwise false: the painter paints it,
+    /// recorded under `key`, and closes it with `cache_end`. Targets that keep nothing
+    /// answer false.
+    fn cache_begin(&mut self, _key: u64, _reuse: bool) -> bool {
+        false
+    }
+    /// Ends the subtree `cache_begin` started (and answered false for).
+    fn cache_end(&mut self) {}
+    /// What was just painted cannot be reused in another frame (it reads more than the
+    /// subtree's own state: an image, a video, a glass backdrop).
+    fn cache_taint(&mut self) {}
     /// An inset shadow without blur: `area` minus the rounded `hole`, an even-odd ring.
     fn sharp_inset_shadow(
         &mut self,
@@ -435,6 +459,25 @@ impl<P: PaintTarget> PaintTarget for TransformTarget<'_, P> {
 
     fn pop_transform(&mut self) {
         self.stack.pop();
+    }
+
+    fn cache_begin(&mut self, key: u64, reuse: bool) -> bool {
+        // What is recorded carries the transform it was painted under.
+        let mut hasher = std::hash::DefaultHasher::new();
+        std::hash::Hash::hash(&key, &mut hasher);
+        for value in self.map(Affine::IDENTITY).as_coeffs() {
+            std::hash::Hash::hash(&value.to_bits(), &mut hasher);
+        }
+        self.inner
+            .cache_begin(std::hash::Hasher::finish(&hasher), reuse)
+    }
+
+    fn cache_end(&mut self) {
+        self.inner.cache_end();
+    }
+
+    fn cache_taint(&mut self) {
+        self.inner.cache_taint();
     }
 
     fn box_shadow(

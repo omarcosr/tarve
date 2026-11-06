@@ -204,7 +204,7 @@ pub(crate) fn rasterize_filtered(
     paint: impl FnOnce(&mut CpuPaintTarget<'_>),
 ) -> Vec<u8> {
     use vello_common::filter_effects::{EdgeMode, Filter, FilterPrimitive};
-    let mut context = RenderContext::new(width, height);
+    let mut context = crate::paint::single_threaded_context(width, height);
     let mut resources = Resources::new();
     let mut images = HashMap::new();
     let mut layers = 0;

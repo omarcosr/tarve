@@ -17,6 +17,8 @@ use vello::Scene;
 use vello::{AaConfig, RenderParams, Renderer, wgpu};
 use vello_cpu::{PixmapMut, RenderContext as CpuRenderContext, Resources as CpuResources};
 use winit::window::Window;
+#[cfg(test)]
+mod cells_probe;
 mod cpu_raster;
 #[cfg(feature = "vello-gpu")]
 mod glass_gpu;
@@ -784,7 +786,7 @@ impl CpuGraphics {
         self.width = u32::from(cpu_width);
         self.height = u32::from(cpu_height);
         let list = {
-            let mut recorder = CpuRecorder::new(&mut self.images);
+            let mut recorder = CpuRecorder::after(&mut self.images, self.list.as_ref());
             paint(&mut recorder);
             recorder.finish()
         };

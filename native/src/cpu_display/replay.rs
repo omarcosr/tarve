@@ -94,9 +94,9 @@ impl DisplayList {
                 Op::PushClip { close, .. }
                 | Op::PushOpacity { close, .. }
                 | Op::PushMask { close, .. }
-                    if *close < range.start || !visible =>
+                    if index + *close < range.start || !visible =>
                 {
-                    index = close + 1;
+                    index += close + 1;
                     continue;
                 }
                 Op::PushClip {
@@ -145,7 +145,7 @@ impl DisplayList {
                     close,
                 } => {
                     if !visible {
-                        index = close + 1;
+                        index += close + 1;
                         continue;
                     }
                     context.set_fill_rule(*rule);
@@ -160,7 +160,7 @@ impl DisplayList {
                     close,
                 } => {
                     if !visible {
-                        index = close + 1;
+                        index += close + 1;
                         continue;
                     }
                     context.set_fill_rule(Fill::NonZero);
@@ -174,7 +174,7 @@ impl DisplayList {
                     close,
                 } => {
                     if !visible {
-                        index = close + 1;
+                        index += close + 1;
                         continue;
                     }
                     context.set_fill_rule(Fill::NonZero);
@@ -382,7 +382,7 @@ mod tests {
 
     fn draw(list: &DisplayList, region: Rect) -> Vec<u8> {
         let (width, height) = (region.width() as u16, region.height() as u16);
-        let mut context = RenderContext::new(width, height);
+        let mut context = crate::paint::single_threaded_context(width, height);
         let mut resources = Resources::new();
         list.replay(&mut context, &mut resources, region, None);
         context.flush();
@@ -412,7 +412,7 @@ mod tests {
             .collect();
         let font = FontData::new(vello::peniko::Blob::new(Arc::new(bytes)), 0);
         let list = DisplayList {
-            ops: vec![Recorded {
+            ops: vec![Arc::new(Recorded {
                 op: Op::Glyphs {
                     font,
                     size: 20.0,
@@ -423,7 +423,7 @@ mod tests {
                 },
                 hash: 0,
                 bounds: EVERYWHERE,
-            }],
+            })],
             ..Default::default()
         };
         let full = draw(&list, Rect::new(0.0, 0.0, 80.0, 64.0));

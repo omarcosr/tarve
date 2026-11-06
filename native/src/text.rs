@@ -661,6 +661,35 @@ fn compact(layout: Layout<TextBrush>) -> Layout<TextBrush> {
     layout.clone()
 }
 
+/// Shapes a short text on a thread of its own, once: the system font collection, the default
+/// UI font and the shaper's tables load there while the window is being created, not in the
+/// first layout (about half of it).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn prewarm() {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    if std::env::var_os("TARVE_TEXT_PREWARM").is_some_and(|value| value == "0") {
+        return;
+    }
+    STARTED.call_once(|| {
+        let _ = std::thread::Builder::new()
+            .name("tarve-text-prewarm".into())
+            .spawn(|| {
+                let Ok(node) = serde_json::from_value::<Node>(serde_json::json!({
+                    "id": "prewarm", "kind": "text", "text": "Ag 0123456789", "children": []
+                })) else {
+                    return;
+                };
+                let mut engine = TextEngine::new();
+                engine.prepare(&node);
+                let _ = engine.measure(&node.id, Some(120.0));
+            });
+    });
+}
+
+/// Short plain texts `TextEngine::recent` keeps shaped, and the longest it keeps.
+const RECENT_SHAPES: usize = 1024;
+const RECENT_SHAPE_BYTES: usize = 32;
+
 /// Sizes a text measured to, by wrap width; reset when its layout is rebuilt.
 #[derive(Default)]
 struct MeasureCache {
@@ -695,6 +724,10 @@ pub struct TextEngine {
     shaped_by: HashMap<ShapeKey, String>,
     /// Layouts shaped ahead on worker threads (`preshape`), taken by `prepare`.
     preshaped: HashMap<ShapeKey, Preshaped>,
+    /// Short plain texts shaped lately, by content and style: an animated label (a counter,
+    /// a clock, a list of changing numbers) shows strings that another node shaped a frame
+    /// before, when `shaped_by` no longer names a node showing them.
+    recent: lru::LruCache<ShapeKey, Layout<TextBrush>>,
     /// Font and layout contexts of the shaping workers, kept between frames.
     workers: Vec<(FontContext, LayoutContext<TextBrush>)>,
     alignments: HashMap<String, parley::Alignment>,
@@ -1200,6 +1233,7 @@ impl TextEngine {
             signatures: HashMap::default(),
             shaped_by: HashMap::default(),
             preshaped: HashMap::default(),
+            recent: lru::LruCache::new(std::num::NonZeroUsize::new(RECENT_SHAPES).unwrap()),
             workers: Vec::new(),
             alignments: HashMap::default(),
             shadow_images: HashMap::default(),
@@ -1246,7 +1280,12 @@ impl TextEngine {
             .flatten()
             .filter(|id| self.signatures.get(*id) == Some(&signature))
             .and_then(|id| self.layouts.get(id))
-            .cloned();
+            .cloned()
+            .or_else(|| {
+                shareable
+                    .then(|| self.recent.get(&share_key).cloned())
+                    .flatten()
+            });
         let (preshaped, min_content) = match shareable
             .then(|| self.preshaped.remove(&share_key))
             .flatten()
@@ -1271,6 +1310,9 @@ impl TextEngine {
                 layout
             }
         };
+        if shareable && content.len() <= RECENT_SHAPE_BYTES && !self.recent.contains(&share_key) {
+            self.recent.put(share_key, layout.clone());
+        }
         self.truncated.remove(&node.id);
         if text_nowrap(node) {
             self.nowrap.insert(node.id.clone());

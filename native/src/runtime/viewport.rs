@@ -63,6 +63,7 @@ fn set_viewport(tree: &mut crate::tree::Tree, viewport: (f32, f32, f32, f32)) {
     if tree.viewport != viewport {
         tree.viewport = viewport;
         tree.dirty.layout = true;
+        tree.dirty.full = true;
     }
 }
 

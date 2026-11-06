@@ -147,19 +147,69 @@ impl ImageSource {
 /// each. Deserializing interns the map, so equal styles keep one allocation,
 /// clones are a reference count and equal styles compare by pointer first.
 /// Writes go through `Arc::make_mut` and never touch the shared copy.
+///
+/// Native reads a style by key many times a frame (validation, stacking, layout, paint), and
+/// most keys it asks for are absent. Each style carries a Bloom filter of its keys, so asking
+/// for an absent key is a hash and a bit test instead of a search of the map.
 #[derive(Clone, Debug)]
-pub struct NodeStyle(Arc<Value>);
+pub struct NodeStyle(Arc<Value>, u128);
+
+/// Two bits of a 128-bit Bloom filter for `key`, from its length and first and last eight
+/// bytes: constant time for any key, and style keys differ there.
+fn style_key_bits(key: &str) -> u128 {
+    let bytes = key.as_bytes();
+    let n = bytes.len();
+    let word = |part: &[u8]| {
+        let mut buffer = [0u8; 8];
+        buffer[..part.len()].copy_from_slice(part);
+        u64::from_le_bytes(buffer)
+    };
+    let head = word(&bytes[..n.min(8)]);
+    let tail = word(&bytes[n.saturating_sub(8)..]);
+    let hash = (head ^ tail.rotate_left(29) ^ n as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    (1u128 << (hash >> 57)) | (1u128 << ((hash >> 50) & 127))
+}
+
+fn style_bits(value: &Value) -> u128 {
+    value.as_object().map_or(0, |map| {
+        map.keys().fold(0, |bits, key| bits | style_key_bits(key))
+    })
+}
 
 impl NodeStyle {
     pub fn new(value: Value) -> Self {
-        Self(intern_style(value))
+        let (value, bits) = intern_style(value);
+        Self(value, bits)
+    }
+
+    /// `Value::get` for a key: `None` without searching the map when the filter rules it out.
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        let bits = style_key_bits(key);
+        if self.1 & bits != bits {
+            return None;
+        }
+        self.0.get(key)
+    }
+}
+
+impl std::ops::Index<&str> for NodeStyle {
+    type Output = Value;
+    fn index(&self, key: &str) -> &Value {
+        static NULL: Value = Value::Null;
+        self.get(key).unwrap_or(&NULL)
+    }
+}
+
+impl std::ops::IndexMut<&str> for NodeStyle {
+    fn index_mut(&mut self, key: &str) -> &mut Value {
+        &mut std::ops::DerefMut::deref_mut(self)[key]
     }
 }
 
 impl Default for NodeStyle {
     fn default() -> Self {
         static NULL: std::sync::OnceLock<Arc<Value>> = std::sync::OnceLock::new();
-        Self(NULL.get_or_init(|| Arc::new(Value::Null)).clone())
+        Self(NULL.get_or_init(|| Arc::new(Value::Null)).clone(), 0)
     }
 }
 
@@ -178,6 +228,8 @@ impl std::ops::Deref for NodeStyle {
 
 impl std::ops::DerefMut for NodeStyle {
     fn deref_mut(&mut self) -> &mut Value {
+        // The caller may add keys: the filter can no longer rule any out.
+        self.1 = u128::MAX;
         Arc::make_mut(&mut self.0)
     }
 }
@@ -209,13 +261,14 @@ impl<'de> Deserialize<'de> for NodeStyle {
 /// Live styles by content hash. Entries are weak: a style no node uses any
 /// more is freed, and its slot is swept once the table doubles.
 struct StyleInterner {
-    styles: std::collections::HashMap<u64, std::sync::Weak<Value>>,
+    styles: std::collections::HashMap<u64, (std::sync::Weak<Value>, u128)>,
     sweep_at: usize,
 }
 
-fn intern_style(value: Value) -> Arc<Value> {
+/// The shared style equal to `value`, and the Bloom filter of its keys.
+fn intern_style(value: Value) -> (Arc<Value>, u128) {
     if !value.as_object().is_some_and(|map| !map.is_empty()) {
-        return Arc::new(value);
+        return (Arc::new(value), 0);
     }
     static STYLES: std::sync::Mutex<Option<StyleInterner>> = std::sync::Mutex::new(None);
     let hash = {
@@ -224,27 +277,33 @@ fn intern_style(value: Value) -> Arc<Value> {
         std::hash::Hasher::finish(&hasher)
     };
     let Ok(mut guard) = STYLES.lock() else {
-        return Arc::new(value);
+        let bits = style_bits(&value);
+        return (Arc::new(value), bits);
     };
     let interner = guard.get_or_insert_with(|| StyleInterner {
         styles: std::collections::HashMap::new(),
         sweep_at: 1024,
     });
-    if let Some(shared) = interner
+    if let Some((shared, bits)) = interner
         .styles
         .get(&hash)
-        .and_then(std::sync::Weak::upgrade)
+        .and_then(|(style, bits)| Some((style.upgrade()?, *bits)))
         && *shared == value
     {
-        return shared;
+        return (shared, bits);
     }
+    let bits = style_bits(&value);
     let shared = Arc::new(value);
-    interner.styles.insert(hash, Arc::downgrade(&shared));
+    interner
+        .styles
+        .insert(hash, (Arc::downgrade(&shared), bits));
     if interner.styles.len() >= interner.sweep_at {
-        interner.styles.retain(|_, style| style.strong_count() > 0);
+        interner
+            .styles
+            .retain(|_, (style, _)| style.strong_count() > 0);
         interner.sweep_at = (interner.styles.len() * 2).max(1024);
     }
-    shared
+    (shared, bits)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -643,6 +702,40 @@ pub struct TrayMenuItem {
     pub disabled: bool,
     #[serde(default)]
     pub items: Vec<TrayMenuItem>,
+}
+
+impl Command {
+    /// Parses a command. An internally tagged enum buffers the whole input into serde's
+    /// `Content` tree before it reads a field; an update (`patch`, `mutate`, `update`), the
+    /// command sent every frame and the largest by far, names its type first (JS writes it so)
+    /// and is read straight into its fields instead, which halves its parse.
+    pub fn from_json(bytes: &[u8]) -> serde_json::Result<Self> {
+        #[derive(Deserialize)]
+        struct Patch {
+            nodes: Vec<Node>,
+        }
+        #[derive(Deserialize)]
+        struct Mutate {
+            mutations: Vec<TreeMutation>,
+        }
+        #[derive(Deserialize)]
+        struct Update {
+            root: Box<Node>,
+        }
+        if bytes.starts_with(br#"{"type":"patch","#) {
+            serde_json::from_slice::<Patch>(bytes)
+                .map(|patch| Command::Patch { nodes: patch.nodes })
+        } else if bytes.starts_with(br#"{"type":"mutate","#) {
+            serde_json::from_slice::<Mutate>(bytes).map(|mutate| Command::Mutate {
+                mutations: mutate.mutations,
+            })
+        } else if bytes.starts_with(br#"{"type":"update","#) {
+            serde_json::from_slice::<Update>(bytes)
+                .map(|update| Command::Update { root: update.root })
+        } else {
+            serde_json::from_slice(bytes)
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1147,7 +1240,7 @@ fn validate_control(node: &Node) -> Result<(), String> {
         "focusWithin",
     ]
     .iter()
-    .filter_map(|state| node.style.get(*state));
+    .filter_map(|state| node.style.get(state));
     let styles: Vec<&Value> = std::iter::once(&*node.style).chain(state_styles).collect();
     for transform in styles.iter().filter_map(|style| style.get("transform")) {
         let valid = transform.as_object().is_some_and(|transform| {

@@ -10,6 +10,69 @@ export interface MemoInfo<P> {
   template?: boolean;
 }
 
+/**
+ * Marks a component whose output depends only on its props (a layout box, a text): no state,
+ * no context, no module variables. The reconciler then reuses an unchanged list item made of
+ * such components without compiling it again (`sameVNode`).
+ */
+export const PURE = Symbol.for("tarve.pure");
+
+export function markPure<T extends Function>(component: T): T {
+  (component as unknown as Record<symbol, boolean>)[PURE] = true;
+  return component;
+}
+
+/**
+ * Whether two VNodes compile the same: equal types and keys, props equal as plain data, and
+ * every element in them pure: `pureElement` (the reconciler's call: native kinds and plain
+ * HTML boxes; elements such as `<video>` expand with state and are not) or a component marked
+ * with {@link markPure}. Anything else, a component that may read state included, is never the same.
+ */
+export function sameVNode(a: VNode, b: VNode, pureElement: (vnode: VNode) => boolean): boolean {
+  const pure = (node: VNode): boolean => typeof node.type === "string"
+    ? pureElement(node)
+    : typeof node.type === "function" && (node.type as unknown as Record<symbol, unknown>)[PURE] === true;
+  const isVNodeLike = (value: object): value is VNode => "type" in value && "props" in value && "key" in value;
+  const everyVNode = (child: unknown): boolean => {
+    if (Array.isArray(child)) return child.every(everyVNode);
+    if (typeof child === "object" && child !== null && isVNodeLike(child)) {
+      if (!pure(child)) return false;
+      for (const key in child.props) if (!everyVNode(child.props[key])) return false;
+    }
+    return true;
+  };
+  // Plain data equal by value: what a pure subtree's output can depend on. Functions only by identity.
+  const sameData = (x: unknown, y: unknown): boolean => {
+    // The same object: equal, but a VNode in it must still be pure.
+    if (Object.is(x, y)) return typeof x !== "object" || x === null || everyVNode(x);
+    if (typeof x !== "object" || typeof y !== "object" || x === null || y === null) return false;
+    if (Array.isArray(x)) {
+      if (!Array.isArray(y) || x.length !== y.length) return false;
+      for (let index = 0; index < x.length; index++) if (!sameData(x[index], y[index])) return false;
+      return true;
+    }
+    if (Array.isArray(y)) return false;
+    if (isVNodeLike(x) || isVNodeLike(y)) return isVNodeLike(x) && isVNodeLike(y) && sameNode(x, y);
+    const prototype = Object.getPrototypeOf(x);
+    if ((prototype !== Object.prototype && prototype !== null) || Object.getPrototypeOf(y) !== prototype) return false;
+    const p = x as Record<string, unknown>, q = y as Record<string, unknown>;
+    let count = 0;
+    for (const key in p) {
+      if (!Object.prototype.hasOwnProperty.call(p, key)) continue;
+      count++;
+      if (!Object.prototype.hasOwnProperty.call(q, key) || !sameData(p[key], q[key])) return false;
+    }
+    for (const key in q) if (Object.prototype.hasOwnProperty.call(q, key)) count--;
+    return count === 0;
+  };
+  const sameNode = (x: VNode, y: VNode): boolean => {
+    if (x === y) return everyVNode(x);
+    if (x.type !== y.type || x.key !== y.key || !pure(x)) return false;
+    return sameData(x.props, y.props);
+  };
+  return sameNode(a, b);
+}
+
 /** Object.is on every own prop, like React.memo's default comparison. */
 export function shallowEqual(previous: object, next: object): boolean {
   if (previous === next) return true;

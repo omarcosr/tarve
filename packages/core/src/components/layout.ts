@@ -1,4 +1,5 @@
 import type { Style } from "../protocol";
+import { markPure } from "../memo";
 import { jsx, type BaseProps, type DropTargetProps, type FileDropTargetProps, type VNode } from "../jsx-runtime";
 
 export interface ViewProps extends BaseProps, DropTargetProps, FileDropTargetProps {
@@ -45,6 +46,11 @@ export function Row(props: ViewProps): VNode {
 export function Column(props: ViewProps): VNode {
   return container("column", props, { direction: "column" });
 }
+
+// Their output is their props: unchanged list items made of them are reused as compiled.
+markPure(View);
+markPure(Row);
+markPure(Column);
 
 export type PortalProps = ViewProps;
 

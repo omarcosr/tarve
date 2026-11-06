@@ -92,6 +92,45 @@ const LAYOUT_KEYS: &[&str] = &[
     "bottom",
     "left",
 ];
+
+/// Node kinds whose paint depends only on their own state, their ancestors' and their
+/// layout: their subtrees may reuse what they recorded the last frame (`Tree::paint_node`).
+const RETAINED_KINDS: &[&str] = &["view", "row", "column", "text", "button", "stack"];
+
+/// Whether a `LAYOUT_KEYS` and whether a `TEXT_KEYS` value differs between two styles (an
+/// absent key reads as null). Interned equal styles share one allocation; otherwise only
+/// the keys the styles have are compared, not a lookup in both per known key.
+fn style_key_changes(
+    next: &crate::protocol::NodeStyle,
+    previous: &crate::protocol::NodeStyle,
+) -> (bool, bool) {
+    if std::ptr::eq::<Value>(&**next, &**previous) {
+        return (false, false);
+    }
+    let (Some(next_map), Some(previous_map)) = (next.as_object(), previous.as_object()) else {
+        let differs = |key: &&str| next[*key] != previous[*key];
+        return (
+            LAYOUT_KEYS.iter().any(differs),
+            TEXT_KEYS.iter().any(differs),
+        );
+    };
+    let (mut layout, mut text) = (false, false);
+    let mut note = |key: &str| {
+        layout |= LAYOUT_KEYS.contains(&key);
+        text |= TEXT_KEYS.contains(&key);
+    };
+    for (key, value) in next_map {
+        if previous_map.get(key).unwrap_or(&Value::Null) != value {
+            note(key);
+        }
+    }
+    for (key, value) in previous_map {
+        if !next_map.contains_key(key) && !value.is_null() {
+            note(key);
+        }
+    }
+    (layout, text)
+}
 const MOTION_PROPERTIES: &[&str] = &[
     "width",
     "height",
@@ -755,6 +794,12 @@ pub struct Dirty {
     pub layout: bool,
     pub text: bool,
     pub paint: bool,
+    /// The layout changed for a reason no entry's dirty flags record (the window, a loaded
+    /// image, a running size transition): the next layout covers the whole tree.
+    pub full: bool,
+    /// The look changed for a reason `Tree::paint_changed` does not record (state, scroll,
+    /// motion, a loaded image, a whole layout): no subtree reuses last frame's paint.
+    pub full_paint: bool,
 }
 impl Dirty {
     fn all() -> Self {
@@ -762,6 +807,8 @@ impl Dirty {
             layout: true,
             text: true,
             paint: true,
+            full: true,
+            full_paint: true,
         }
     }
 }
@@ -1138,11 +1185,97 @@ pub struct Entry {
     last_state: VisualState,
 }
 
+/// Taffy's measure of a leaf: text, diff, video and image intrinsic sizes.
+fn measure_leaf(
+    text: &mut TextEngine,
+    nodes: &HashMap<String, Entry>,
+    images: &HashMap<String, ImageData>,
+    videos: &HashMap<String, crate::video::VideoFrame>,
+    inputs: taffy::tree::LayoutInput,
+    context: Option<&mut String>,
+    style: &Style,
+) -> taffy::tree::LayoutOutput {
+    taffy::compute_leaf_layout(
+        inputs,
+        style,
+        |_, _| 0.0,
+        |known, available| {
+            let Some(id) = context.as_deref() else {
+                return Size::ZERO;
+            };
+            let node = &nodes[id].node;
+            let mut measured = Size::ZERO;
+            if node.is_text() {
+                let max_width = if matches!(node.kind.as_str(), "text" | "markdown") {
+                    known.width.or(match available.width {
+                        AvailableSpace::Definite(w) => Some(w),
+                        AvailableSpace::MinContent => Some(0.0),
+                        _ => None,
+                    })
+                } else {
+                    None
+                };
+                let (w, h) = text.measure(id, max_width);
+                measured = Size {
+                    width: w + text.code_gutter_inset(node),
+                    height: h,
+                };
+            } else if node.kind == "diff" {
+                let (w, h) = text.measure_diff(node);
+                measured = Size {
+                    width: w,
+                    height: h,
+                };
+            } else if node.kind == "video" {
+                // HTML: 300×150 until the video's own size is known.
+                let (width, height) = videos.get(&node.id).map_or((300.0, 150.0), |frame| {
+                    (frame.width as f32, frame.height as f32)
+                });
+                let ratio = width / height;
+                measured = Size {
+                    width: known.height.map(|h| h * ratio).unwrap_or(width),
+                    height: known.width.map(|w| w / ratio).unwrap_or(height),
+                };
+            } else if let Some(image) = image_cache_key(node).and_then(|key| images.get(key)) {
+                let ratio = image.width as f32 / image.height as f32;
+                measured = Size {
+                    width: known
+                        .height
+                        .map(|h| h * ratio)
+                        .unwrap_or(image.width as f32),
+                    height: known
+                        .width
+                        .map(|w| w / ratio)
+                        .unwrap_or(image.height as f32),
+                };
+            }
+            Size {
+                width: known.width.unwrap_or(measured.width),
+                height: known.height.unwrap_or(measured.height),
+            }
+        },
+    )
+}
+
 fn motion_tracks_for_node(
     node: &Node,
     previous: Option<&Entry>,
     now_ms: f64,
 ) -> HashMap<String, MotionTrack> {
+    // Every track is one of MOTION_PROPERTIES and needs a `transition` to start or survive an
+    // update, or an `animation`: without either there is none, and no style value need be read.
+    if node
+        .style
+        .get("transition")
+        .and_then(Value::as_object)
+        .is_none()
+        && node
+            .style
+            .get("animation")
+            .is_none_or(|value| !value.is_object())
+    {
+        return HashMap::default();
+    }
     let mut motions = previous
         .map(|entry| entry.motions.clone())
         .unwrap_or_default();
@@ -1380,6 +1513,17 @@ pub struct Tree {
     ime_blocked: Option<ImeBlock>,
     modal_focus_returns: Vec<(String, Option<String>)>,
     pub layouts: u64,
+    /// The window size of the last full layout; a layout within boundaries keeps it.
+    laid_out_size: Option<(f32, f32)>,
+    /// Nodes whose own look changed since the last paint (a patch, a layout within
+    /// boundaries). Their subtrees and ancestors paint again; every other subtree reuses what
+    /// it recorded the last frame, unless `dirty.full_paint`.
+    paint_changed: HashSet<String>,
+    /// While painting: nodes holding a changed one, and how many changed ancestors the
+    /// node being painted has.
+    paint_holds_changed: HashSet<String>,
+    paint_changed_depth: usize,
+    paint_reuse: bool,
     pub paints: u64,
     pub layout_nodes_created: u64,
     pub measure_calls: u64,
@@ -1412,7 +1556,7 @@ fn stacking_inputs(node: &Node) -> (u32, bool, bool) {
         .iter()
         .any(|state| {
             node.style
-                .get(*state)
+                .get(state)
                 .is_some_and(|style| style.get("transform").is_some())
         });
     (
@@ -1486,7 +1630,7 @@ impl Tree {
                         entry
                             .node
                             .style
-                            .get(*state)
+                            .get(state)
                             .is_some_and(|style| style.get("transform").is_some())
                     })
             })
@@ -1642,6 +1786,11 @@ impl Tree {
             ime_blocked: None,
             modal_focus_returns: Vec::new(),
             layouts: 0,
+            laid_out_size: None,
+            paint_changed: HashSet::default(),
+            paint_holds_changed: HashSet::default(),
+            paint_changed_depth: 0,
+            paint_reuse: false,
             paints: 0,
             layout_nodes_created: 0,
             measure_calls: 0,
@@ -1660,7 +1809,9 @@ impl Tree {
             root.layout_dirty = true;
         }
         self.dirty.layout = true;
+        self.dirty.full = true;
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
         true
     }
     pub fn set_window_fullscreen(&mut self, fullscreen: bool) -> bool {
@@ -1674,7 +1825,9 @@ impl Tree {
             }
         }
         self.dirty.layout = true;
+        self.dirty.full = true;
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
         true
     }
     /// Moves the native clock without stepping motion tracks. Cheap enough to
@@ -1686,10 +1839,12 @@ impl Tree {
         let caret_was_visible = self.caret_visible();
         if !self.spinning.is_empty() && now_ms > self.motion_time_ms {
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
         }
         self.motion_time_ms = self.motion_time_ms.max(now_ms);
         if self.caret_blink_target().is_some() && caret_was_visible != self.caret_visible() {
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
         }
     }
     pub fn advance_motion(&mut self, now_ms: f64) {
@@ -1721,8 +1876,10 @@ impl Tree {
                     if motion_is_layout(&property) {
                         entry.layout_dirty = true;
                         self.dirty.layout = true;
+                        self.dirty.full = true;
                     }
                     self.dirty.paint = true;
+                    self.dirty.full_paint = true;
                 }
                 if done {
                     completed.push((id.clone(), property));
@@ -1875,6 +2032,7 @@ impl Tree {
                 entry.motions.extend(started);
                 self.animating.insert(id.clone());
                 self.dirty.paint = true;
+                self.dirty.full_paint = true;
             }
         }
     }
@@ -1964,6 +2122,7 @@ impl Tree {
     fn touch_caret(&mut self) {
         if !self.caret_visible() {
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
         }
         self.caret_activity_ms = self.motion_time_ms;
     }
@@ -2149,37 +2308,31 @@ impl Tree {
                 self.vertical_goal = None;
                 self.caret = floor_boundary(incoming, self.caret.min(incoming.len()));
                 self.dirty.paint = true;
+                self.dirty.full_paint = true;
             }
             if matches!(node.kind.as_str(), "input" | "textarea") && node.value.is_none() {
                 node.value = prev.node.value.clone();
             }
             structure_dirty = prev.structure_dirty || child_ids != prev.children;
+            let (layout_style_changed, text_style_changed) =
+                style_key_changes(&node.style, &prev.node.style);
+            let text_changed = node.display_text() != prev.node.display_text();
             layout_dirty = prev.layout_dirty
                 || node.kind != prev.node.kind
                 || node.virtual_list != prev.node.virtual_list
-                || LAYOUT_KEYS
-                    .iter()
-                    .any(|key| node.style[*key] != prev.node.style[*key]);
+                || layout_style_changed;
             measure_dirty = prev.measure_dirty
                 || rich_changed
                 || node.src != prev.node.src
                 || node.image != prev.node.image
                 || node.kind != prev.node.kind
-                || node.display_text() != prev.node.display_text()
+                || text_changed
                 || syntax_theme_changed
-                || TEXT_KEYS
-                    .iter()
-                    .any(|key| node.style[*key] != prev.node.style[*key]);
+                || text_style_changed;
             if structure_dirty || layout_dirty || measure_dirty {
                 self.dirty.layout = true;
             }
-            if rich_changed
-                || node.display_text() != prev.node.display_text()
-                || syntax_theme_changed
-                || TEXT_KEYS
-                    .iter()
-                    .any(|key| node.style[*key] != prev.node.style[*key])
-            {
+            if rich_changed || text_changed || syntax_theme_changed || text_style_changed {
                 self.text.layouts.remove(&node.id);
                 self.text.diff_layouts.remove(&node.id);
                 self.dirty.text = true;
@@ -2187,6 +2340,7 @@ impl Tree {
             }
             if node != prev.node || structure_dirty {
                 self.dirty.paint = true;
+                self.paint_changed.insert(node.id.clone());
             }
         } else {
             self.dirty = Dirty::all();
@@ -2573,6 +2727,7 @@ impl Tree {
                 self.highlight_dirty = true;
                 self.dirty.layout = true;
                 self.dirty.paint = true;
+                self.paint_changed.insert(id.clone());
             }
         }
         for id in removes {
@@ -2730,7 +2885,9 @@ impl Tree {
             }
         }
         self.dirty.layout = true;
+        self.dirty.full = true;
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
     }
 
     /// The current picture of the `<video>` `id` (`None`: it has none any more).
@@ -2749,8 +2906,10 @@ impl Tree {
                 entry.measure_dirty = true;
             }
             self.dirty.layout = true;
+            self.dirty.full = true;
         }
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
     }
 
     /// Device pixels each `<video>` covered when last painted: the decoder scales
@@ -2789,6 +2948,7 @@ impl Tree {
             }
         }
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
     }
 
     pub(crate) fn video_display_sizes(&self) -> &HashMap<String, (u32, u32)> {
@@ -3154,6 +3314,7 @@ impl Tree {
             }
             if changed {
                 self.dirty.paint = true;
+                self.dirty.full_paint = true;
             }
             if !changed && scroll_request.is_none() {
                 continue;
@@ -3241,6 +3402,17 @@ impl Tree {
                 .filter(|entry| entry.measure_dirty)
                 .map(|entry| &entry.node),
         );
+        if !self.dirty.full
+            && self.laid_out_size == Some((width, height))
+            && self.compute_within_boundaries()?
+        {
+            self.layouts += 1;
+            self.dirty.layout = false;
+            self.dirty.text = false;
+            self.dirty.paint = true;
+            return Ok(());
+        }
+        self.laid_out_size = None;
         let root = self.build_layout(&self.root.clone(), Some((width, height)))?;
         let text = &mut self.text;
         let nodes = &self.entries;
@@ -3256,70 +3428,7 @@ impl Tree {
                 },
                 |inputs, _, context, style| {
                     *measure_calls += 1;
-                    taffy::compute_leaf_layout(
-                        inputs,
-                        style,
-                        |_, _| 0.0,
-                        |known, available| {
-                            let Some(id) = context.as_deref() else {
-                                return Size::ZERO;
-                            };
-                            let node = &nodes[id].node;
-                            let mut measured = Size::ZERO;
-                            if node.is_text() {
-                                let max_width = if matches!(node.kind.as_str(), "text" | "markdown")
-                                {
-                                    known.width.or(match available.width {
-                                        AvailableSpace::Definite(w) => Some(w),
-                                        AvailableSpace::MinContent => Some(0.0),
-                                        _ => None,
-                                    })
-                                } else {
-                                    None
-                                };
-                                let (w, h) = text.measure(id, max_width);
-                                measured = Size {
-                                    width: w + text.code_gutter_inset(node),
-                                    height: h,
-                                };
-                            } else if node.kind == "diff" {
-                                let (w, h) = text.measure_diff(node);
-                                measured = Size {
-                                    width: w,
-                                    height: h,
-                                };
-                            } else if node.kind == "video" {
-                                // HTML: 300×150 until the video's own size is known.
-                                let (width, height) =
-                                    videos.get(&node.id).map_or((300.0, 150.0), |frame| {
-                                        (frame.width as f32, frame.height as f32)
-                                    });
-                                let ratio = width / height;
-                                measured = Size {
-                                    width: known.height.map(|h| h * ratio).unwrap_or(width),
-                                    height: known.width.map(|w| w / ratio).unwrap_or(height),
-                                };
-                            } else if let Some(image) =
-                                image_cache_key(node).and_then(|key| images.get(key))
-                            {
-                                let ratio = image.width as f32 / image.height as f32;
-                                measured = Size {
-                                    width: known
-                                        .height
-                                        .map(|h| h * ratio)
-                                        .unwrap_or(image.width as f32),
-                                    height: known
-                                        .width
-                                        .map(|w| w / ratio)
-                                        .unwrap_or(image.height as f32),
-                                };
-                            }
-                            Size {
-                                width: known.width.unwrap_or(measured.width),
-                                height: known.height.unwrap_or(measured.height),
-                            }
-                        },
-                    )
+                    measure_leaf(text, nodes, images, videos, inputs, context, style)
                 },
             )
             .map_err(|e| e.to_string())?;
@@ -3338,7 +3447,154 @@ impl Tree {
         self.dirty.layout = false;
         self.dirty.text = false;
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
+        self.dirty.full = false;
+        self.laid_out_size = Some((width, height));
         Ok(())
+    }
+
+    /// A box with a fixed size, inside a flex container: its parent sizes and places it the
+    /// same whatever it holds, so a change inside it needs no layout outside it.
+    fn layout_boundary(&self, id: &str) -> bool {
+        let entry = &self.entries[id];
+        if entry.layout_dirty || entry.structure_dirty || entry.measure_dirty {
+            return false;
+        }
+        let (Some(layout_id), Some(parent)) = (entry.layout_id, entry.parent.as_deref()) else {
+            return false;
+        };
+        let Some(parent_layout) = self.entries.get(parent).and_then(|parent| parent.layout_id)
+        else {
+            return false;
+        };
+        let (Ok(style), Ok(parent_style)) = (
+            self.layout.style(layout_id),
+            self.layout.style(parent_layout),
+        ) else {
+            return false;
+        };
+        let (Some(width), Some(height)) = (
+            style.size.width.into_option(),
+            style.size.height.into_option(),
+        ) else {
+            return false;
+        };
+        // Block parents collapse a first child's margin through it; baseline alignment and
+        // min/max sizes read its content.
+        if parent_style.display != Display::Flex
+            || style.display == Display::None
+            || style.box_sizing != BoxSizing::BorderBox
+            || style.aspect_ratio.is_some()
+            || !(style.min_size.width.is_auto()
+                && style.min_size.height.is_auto()
+                && style.max_size.width.is_auto()
+                && style.max_size.height.is_auto())
+            || parent_style
+                .align_items
+                .is_some_and(|align| align.keyword == taffy::AlignItemsKeyword::Baseline)
+            || style
+                .align_self
+                .is_some_and(|align| align.keyword == taffy::AlignItemsKeyword::Baseline)
+        {
+            return false;
+        }
+        // It came out at its specified size: neither grown nor shrunk by its line.
+        let size = self.layout.unrounded_layout(layout_id).size;
+        size.width == width && size.height == height
+    }
+
+    /// Lays out again only inside the layout boundaries that hold every change (see
+    /// `layout_boundary`), when there are such. False when the tree needs a full layout.
+    fn compute_within_boundaries(&mut self) -> Result<bool, String> {
+        let mut boundaries: Vec<String> = Vec::new();
+        let mut seen: HashSet<&str> = HashSet::default();
+        for entry in self.entries.values() {
+            if entry.node.virtual_list.is_some() || entry.node.report_size {
+                return Ok(false);
+            }
+            if !(entry.layout_dirty
+                || entry.structure_dirty
+                || entry.measure_dirty
+                || entry.layout_id.is_none())
+            {
+                continue;
+            }
+            let mut ancestor = entry.parent.as_deref();
+            let found = loop {
+                let Some(candidate) = ancestor else {
+                    return Ok(false);
+                };
+                if self.layout_boundary(candidate) {
+                    break candidate;
+                }
+                ancestor = self.entries[candidate].parent.as_deref();
+            };
+            if seen.insert(found) {
+                boundaries.push(found.to_string());
+            }
+        }
+        if boundaries.is_empty() {
+            return Ok(false);
+        }
+        // A boundary inside another one is laid out with it.
+        let boundaries: Vec<String> = boundaries
+            .into_iter()
+            .filter(|id| {
+                let mut ancestor = self.entries[id].parent.as_deref();
+                while let Some(candidate) = ancestor {
+                    if seen.contains(candidate) {
+                        return false;
+                    }
+                    ancestor = self.entries[candidate].parent.as_deref();
+                }
+                true
+            })
+            .collect();
+        for id in &boundaries {
+            let layout_id = self.build_layout(id, None)?;
+            let text = &mut self.text;
+            let nodes = &self.entries;
+            let images = &self.images;
+            let videos = &self.video_frames;
+            let measure_calls = &mut self.measure_calls;
+            let same_size = self
+                .layout
+                .compute_subtree_layout_with_measure(layout_id, |inputs, _, context, style| {
+                    *measure_calls += 1;
+                    measure_leaf(text, nodes, images, videos, inputs, context, style)
+                })
+                .map_err(|e| e.to_string())?;
+            if !same_size {
+                return Ok(false);
+            }
+        }
+        for id in &boundaries {
+            self.paint_changed.insert(id.clone());
+            let parent_origin = self.absolute_origin(self.entries[id].parent.as_deref())?;
+            let bounds = self.positions(id, parent_origin)?;
+            // Ancestors paint (and are culled) within their descendants' bounds.
+            let mut ancestor = self.entries[id].parent.clone();
+            while let Some(current) = ancestor {
+                let entry = self.entries.get_mut(&current).unwrap();
+                if !clips_overflow(&entry.node) {
+                    entry.bounds = entry.bounds.union(bounds);
+                }
+                ancestor = entry.parent.clone();
+            }
+        }
+        self.ensure_focused_textarea_caret_visible();
+        self.resolve_highlights();
+        self.highlight_dirty = false;
+        Ok(true)
+    }
+
+    /// The unrounded window position `positions` laid `id` out at (the viewport origin for none).
+    fn absolute_origin(&self, id: Option<&str>) -> Result<(f64, f64), String> {
+        let Some(id) = id else {
+            return Ok((f64::from(self.viewport.0), f64::from(self.viewport.1)));
+        };
+        let parent = self.absolute_origin(self.entries[id].parent.as_deref())?;
+        self.layout_origin(id, parent)
     }
     /// The boxes of these nodes as of the last layout, shaped like their `size`
     /// events: the content box and where the border box sits in the window.
@@ -3826,6 +4082,27 @@ impl Tree {
         }
         self.painted_nodes = 0;
         self.video_painted.clear();
+        // Search highlights span several texts: one text's change can move another's.
+        // When most of the tree changed, finding what holds a change costs more than it saves.
+        self.paint_reuse = !self.dirty.full_paint
+            && self.highlight_ranges.is_empty()
+            && self.paint_changed.len() * 2 < self.entries.len();
+        self.paint_holds_changed.clear();
+        self.paint_changed_depth = 0;
+        if self.paint_reuse {
+            for id in &self.paint_changed {
+                let mut current = Some(id.as_str());
+                while let Some(id) = current {
+                    if !self.paint_holds_changed.insert(id.to_string()) {
+                        break;
+                    }
+                    current = self
+                        .entries
+                        .get(id)
+                        .and_then(|entry| entry.parent.as_deref());
+                }
+            }
+        }
         let target = &mut crate::paint::TransformTarget::new(target);
         let root_rect = self.entries[&self.root].rect;
         self.paint_node(&self.root.clone(), Vec2::ZERO, scale, root_rect, target);
@@ -3845,6 +4122,9 @@ impl Tree {
         self.paint_frame_overlay(scale, root_rect, target);
         self.paints += 1;
         self.dirty.paint = false;
+        self.dirty.full_paint = false;
+        self.paint_changed.clear();
+        self.paint_holds_changed.clear();
         if !self.filter_images.is_empty() {
             let entries = &self.entries;
             self.filter_images.retain(|id, _| entries.contains_key(id));
@@ -3886,6 +4166,7 @@ impl Tree {
         }
         self.frame_overlay = enabled.then(VecDeque::new);
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
         true
     }
     /// Records a presented frame's CPU time. Never schedules a frame itself:
@@ -4064,10 +4345,78 @@ impl Tree {
             visual_string(&entry.node, "foreground", fallback, state),
         )
     }
+    /// `children` in the order they paint: by stacking level, ties in document order. Each
+    /// level is looked up once; a list whose children share one level (nearly every one) is
+    /// already in order and is not sorted.
+    fn paint_order(&self, children: &[String]) -> Vec<String> {
+        let levels: Vec<f32> = children
+            .iter()
+            .map(|child| self.stacking.get(child).copied().unwrap_or(0.0))
+            .collect();
+        if levels
+            .windows(2)
+            .all(|pair| pair[0].total_cmp(&pair[1]).is_le())
+        {
+            return children.to_vec();
+        }
+        let mut order: Vec<usize> = (0..children.len()).collect();
+        order.sort_by(|a, b| levels[*a].total_cmp(&levels[*b]));
+        order
+            .into_iter()
+            .map(|index| children[index].clone())
+            .collect()
+    }
     /// Paints one node and its subtree, applying its `transform` (translate /
     /// scale about the box centre) to everything underneath. Layout, hit
     /// testing and hover use the untransformed box.
     fn paint_node<P: PaintTarget>(
+        &mut self,
+        id: &str,
+        offset: Vec2,
+        scale: f64,
+        clip: BoxRect,
+        target: &mut P,
+    ) {
+        // Retained painting: a plain subtree records what it paints under a key of where and
+        // how it paints, and the next frame adds that again when nothing in it, above it or
+        // around it changed (`paint_changed`, `dirty.full_paint`).
+        let Some(entry) = self.entries.get(id) else {
+            return;
+        };
+        if !RETAINED_KINDS.contains(&entry.node.kind.as_str()) || !entry.motions.is_empty() {
+            target.cache_taint();
+            self.paint_node_now(id, offset, scale, clip, target);
+            return;
+        }
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::hash::DefaultHasher::new();
+            id.hash(&mut hasher);
+            for value in [
+                offset.x, offset.y, scale, clip.x0, clip.y0, clip.x1, clip.y1,
+            ] {
+                value.to_bits().hash(&mut hasher);
+            }
+            hasher.finish()
+        };
+        let own_changed = self.paint_changed.contains(id);
+        let reuse = self.paint_reuse
+            && self.paint_changed_depth == 0
+            && !self.paint_holds_changed.contains(id);
+        if target.cache_begin(key, reuse) {
+            return;
+        }
+        if own_changed {
+            self.paint_changed_depth += 1;
+        }
+        self.paint_node_now(id, offset, scale, clip, target);
+        if own_changed {
+            self.paint_changed_depth -= 1;
+        }
+        target.cache_end();
+    }
+
+    fn paint_node_now<P: PaintTarget>(
         &mut self,
         id: &str,
         offset: Vec2,
@@ -4354,14 +4703,7 @@ impl Tree {
         let scroll_max_x = entry.scroll_max_x;
         let scroll_max = entry.scroll_max;
         let overscroll = self.overscroll_of(id);
-        let mut children = entry.children.clone();
-        children.sort_by(|a, b| {
-            self.stacking
-                .get(a)
-                .copied()
-                .unwrap_or(0.0)
-                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
-        });
+        let children = self.paint_order(&entry.children);
         self.painted_nodes += 1;
         let transform = Affine::scale(scale);
         let state = self.visual_state_for(id, &node);
@@ -5219,6 +5561,7 @@ impl Tree {
         if next != self.hover_styled {
             self.hover_styled = next;
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
         }
         // `group-hover:`: every `groupHover`-styled node inside a hovered `group` ancestor.
         let mut groups: Vec<String> = Vec::new();
@@ -5247,6 +5590,7 @@ impl Tree {
         if groups != self.group_hovered {
             self.group_hovered = groups;
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
         }
     }
 
@@ -5620,6 +5964,7 @@ impl Tree {
             self.focus_visible = visible;
             if self.focused.is_some() {
                 self.dirty.paint = true;
+                self.dirty.full_paint = true;
             }
         }
     }
@@ -5644,6 +5989,7 @@ impl Tree {
             self.static_text_dragging = false;
             self.caret = self.entries[id].node.value.as_deref().map_or(0, str::len);
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
             self.touch_caret();
         }
         let mut virtual_scrolls = Vec::new();
@@ -5684,6 +6030,7 @@ impl Tree {
                             follows_tail && (next_y - entry.scroll_max).abs() <= 0.5;
                     }
                     self.dirty.paint = true;
+                    self.dirty.full_paint = true;
                     if variable_list {
                         virtual_scrolls.push(parent_id.clone());
                     }
@@ -5779,6 +6126,7 @@ impl Tree {
         }
         if changed {
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
         }
         self.sync_virtual_focus();
     }
@@ -5868,6 +6216,7 @@ impl Tree {
         }
         control.value = next;
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
         vec![json!({"type":"valueChange", "id":id, "value":next})]
     }
     fn slider_from_pointer(&mut self, id: &str) -> Vec<Value> {
@@ -5932,6 +6281,7 @@ impl Tree {
                 });
                 self.static_text_dragging = false;
                 self.dirty.paint = true;
+                self.dirty.full_paint = true;
             }
             UserSelectMode::Text => {
                 let Some(index) = self.static_text_index_from_pointer(id) else {
@@ -5946,6 +6296,7 @@ impl Tree {
                 });
                 self.static_text_dragging = true;
                 self.dirty.paint = true;
+                self.dirty.full_paint = true;
             }
         }
     }
@@ -5967,6 +6318,7 @@ impl Tree {
                 }
                 self.static_text_dragging = false;
                 self.dirty.paint = true;
+                self.dirty.full_paint = true;
             }
             UserSelectMode::Text => {
                 let Some(index) = self.static_text_index_from_pointer(&id) else {
@@ -5977,6 +6329,7 @@ impl Tree {
                     selection.focus = index;
                     selection.atomic_root = None;
                     self.dirty.paint = true;
+                    self.dirty.full_paint = true;
                 }
             }
         }
@@ -6110,6 +6463,7 @@ impl Tree {
             self.static_text_dragging = false;
             self.static_selection = None;
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
             events.push(json!({"type":"dragStart", "id":id, "x":origin_x, "y":origin_y}));
         }
         let id = self.pointer_drag.as_ref()?.id.clone();
@@ -6152,6 +6506,7 @@ impl Tree {
             }
             self.hovered = next;
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
         }
         self.refresh_hover_chain();
         events.extend(self.report_pointer());
@@ -6244,6 +6599,7 @@ impl Tree {
         self.refresh_hover_chain();
         if let Some(id) = self.hovered.take() {
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
             events.push(json!({"type":"hover", "id":id, "entered":false}));
         }
         events
@@ -6260,6 +6616,7 @@ impl Tree {
             self.caret = 0;
             self.selection_anchor = None;
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
         }
         self.sync_virtual_focus();
         blurred
@@ -6368,6 +6725,7 @@ impl Tree {
             self.static_text_dragging = false;
         }
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
         if let Some(id) = self
             .pressed
             .clone()
@@ -6393,6 +6751,7 @@ impl Tree {
             self.hovered = self.hit_root(false);
             self.refresh_hover_chain();
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
             let target = self.drop_target_at_pointer(&drag.id);
             return vec![json!({
                 "type":"drop", "id":drag.id, "target":target, "x":self.mouse.0, "y":self.mouse.1
@@ -6428,6 +6787,7 @@ impl Tree {
                 out.push(json!({"type":"click", "id":id}));
             }
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
         }
         if let Some((id, run)) = self.pressed_link.clone()
             && self
@@ -6688,6 +7048,7 @@ impl Tree {
             .is_some_and(|control| control.role == "virtualList")
         {
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
         }
         let (offset, max) =
             if entry.node.kind == "scroll" && entry.node.scroll_orientation == "horizontal" {
@@ -6894,6 +7255,7 @@ impl Tree {
                 ime.cursor = None;
                 self.clear_ime_layout(target);
                 self.dirty.paint = true;
+                self.dirty.full_paint = true;
                 self.ensure_focused_textarea_caret_visible();
             }
             return;
@@ -6933,6 +7295,7 @@ impl Tree {
         }
         self.clear_ime_layout(target);
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
         self.ensure_focused_textarea_caret_visible();
     }
 
@@ -6957,6 +7320,7 @@ impl Tree {
                 .map(|anchor| floor_boundary(value, anchor.min(value.len())));
         }
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
         self.ensure_focused_textarea_caret_visible();
     }
 
@@ -7001,6 +7365,7 @@ impl Tree {
             self.caret = floor_boundary(&current, self.caret.min(current.len()));
             self.selection_anchor = None;
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
             return vec![];
         }
         let start = floor_boundary(&current, ime.replace_start.min(current.len()));
@@ -7021,6 +7386,7 @@ impl Tree {
                 .original_anchor
                 .map(|anchor| floor_boundary(base, anchor.min(base.len())));
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
             return vec![];
         }
         self.caret = start + committed.len();
@@ -7132,6 +7498,7 @@ impl Tree {
                         atomic_root,
                     });
                     self.dirty.paint = true;
+                    self.dirty.full_paint = true;
                 }
             }
             return vec![];
@@ -7378,6 +7745,7 @@ impl Tree {
                 self.ensure_focused_textarea_caret_visible();
             }
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
             return vec![];
         }
         if selecting && self.selection_anchor.is_none() {
@@ -7500,6 +7868,7 @@ impl Tree {
             self.ensure_focused_textarea_caret_visible();
         }
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
         vec![]
     }
     pub fn type_text(&mut self, text: &str) -> Vec<Value> {
@@ -7878,6 +8247,7 @@ impl Tree {
             self.ensure_focused_textarea_caret_visible();
         }
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
         events
     }
 
@@ -8452,6 +8822,7 @@ impl Tree {
             self.caret = value.len();
         }
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
         self.touch_caret();
         true
     }
@@ -8475,6 +8846,7 @@ impl Tree {
         if let Some(index) = self.text.index_at(id, x, y, multiline.then_some(width)) {
             self.caret = input_actual_index(&entry.node, value, index);
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
             self.touch_caret();
         }
     }
@@ -8665,6 +9037,7 @@ impl Tree {
         }
         if restored {
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
         }
         restored
     }

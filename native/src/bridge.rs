@@ -355,12 +355,17 @@ fn guard(f: impl FnOnce() -> Result<i32, String>) -> i32 {
 const MAX_JSON_INPUT_BYTES: u32 = 128 * 1024 * 1024;
 
 unsafe fn read_json<T: serde::de::DeserializeOwned>(ptr: *const u8, len: u32) -> Result<T, String> {
+    let bytes = unsafe { input_bytes(ptr, len)? };
+    serde_json::from_slice(bytes).map_err(|e| e.to_string())
+}
+
+/// The caller's buffer, checked for size; valid for this call only.
+unsafe fn input_bytes<'a>(ptr: *const u8, len: u32) -> Result<&'a [u8], String> {
     if ptr.is_null() || len == 0 || len > MAX_JSON_INPUT_BYTES {
         return Err("Invalid input buffer".into());
     }
     // SAFETY: C caller promises a readable buffer of len bytes for this call only.
-    let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
-    serde_json::from_slice(bytes).map_err(|e| e.to_string())
+    Ok(unsafe { std::slice::from_raw_parts(ptr, len as usize) })
 }
 
 #[cfg(test)]
@@ -527,6 +532,7 @@ pub(crate) mod entry_points;
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
     crate::stats::mark_started();
+    crate::text::prewarm();
     guard(|| {
         let document: Document = unsafe { read_json(ptr, len)? };
         validate_document(&document)?;
@@ -611,7 +617,8 @@ pub unsafe extern "C" fn tarve_event_pipe_name(ptr: *mut u8, capacity: u32) -> i
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tarve_send(ptr: *const u8, len: u32) -> i32 {
     guard(|| {
-        let command: Command = unsafe { read_json(ptr, len)? };
+        let bytes = unsafe { input_bytes(ptr, len)? };
+        let command = Command::from_json(bytes).map_err(|e| e.to_string())?;
         validate_command(&command, false)?;
         let state = host().lock().map_err(|e| e.to_string())?;
         let proxy = &state.as_ref().ok_or("App not started")?.proxy;

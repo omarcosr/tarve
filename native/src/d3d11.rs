@@ -364,6 +364,27 @@ fn overlay_placement(
     Some(OverlayPlacement { dest, clip })
 }
 
+/// A frame's geometry kept for the next one to reuse.
+#[derive(Default)]
+struct RecordedFrame {
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
+    commands: Vec<DrawCommand>,
+    spans: HashMap<u64, RecordedSpan>,
+    /// Per command: its damage hash and unclipped window bounds, as that frame computed them.
+    hashes: Vec<u64>,
+    raw_bounds: Vec<[f32; 4]>,
+}
+
+/// Where a recorded subtree's geometry sits: its commands, indices and vertices.
+#[derive(Clone, Copy)]
+struct RecordedSpan {
+    commands: (usize, usize),
+    indices: (usize, usize),
+    vertices: (usize, usize),
+}
+
+#[derive(Clone)]
 enum DrawCommand {
     Draw {
         first: u32,
@@ -561,6 +582,22 @@ pub(crate) struct D3d11Graphics {
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
     commands: Vec<DrawCommand>,
+    /// Retained painting (`PaintTarget::cache_begin`): the last frame's geometry, and the
+    /// spans of it painters recorded under keys (commands, indices, vertices). A subtree
+    /// whose key comes again copies its span instead of painting it.
+    previous: RecordedFrame,
+    spans: HashMap<u64, RecordedSpan>,
+    /// Spans being recorded: key, where they start, how many layers were open, and
+    /// whether they can be kept at all (no clip suppression).
+    recording: Vec<(u64, RecordedSpan, usize, bool)>,
+    /// One past the last command that cannot be reused (an image, a video, glass).
+    tainted: usize,
+    /// Per command of this frame: the hash and unclipped bounds a reused span brought along
+    /// (the same commands with the same vertices), so they are not computed again.
+    known: Vec<Option<(u64, [f32; 4])>>,
+    /// What this frame computed, kept for the next one's reused spans.
+    frame_hashes: Vec<u64>,
+    frame_raw_bounds: Vec<[f32; 4]>,
     images: HashMap<String, CachedImage>,
     /// Current `<video>` pictures by node id: textures the video decoder writes.
     video_views: HashMap<String, VideoView>,
@@ -766,6 +803,13 @@ impl D3d11Graphics {
             vertices: Vec::with_capacity(2048),
             indices: Vec::with_capacity(4096),
             commands: Vec::with_capacity(256),
+            previous: RecordedFrame::default(),
+            spans: HashMap::new(),
+            recording: Vec::new(),
+            tainted: 0,
+            known: Vec::new(),
+            frame_hashes: Vec::new(),
+            frame_raw_bounds: Vec::new(),
             images: HashMap::new(),
             video_views: HashMap::new(),
             hwnd,
@@ -813,12 +857,31 @@ impl D3d11Graphics {
                 "D3D11 renderer cannot prepare a zero-sized frame".into(),
             ));
         }
+        let same_size = self.width == width && self.height == height;
         if (self.width != width || self.height != height)
             && let Err(error) = self.resize_targets(width, height)
         {
             self.prepared = false;
             return Err(self.classify_gpu_error("D3D11 resize during frame preparation", error));
         }
+        // Keep this frame's geometry for the next one: its unchanged subtrees reuse it.
+        // Positions are in this size's device coordinates, and glyph quads point into
+        // the atlas pages: a new size or atlas makes the old spans unusable.
+        let reusable = same_size && !self.glyph_atlas_exhausted;
+        std::mem::swap(&mut self.vertices, &mut self.previous.vertices);
+        std::mem::swap(&mut self.indices, &mut self.previous.indices);
+        std::mem::swap(&mut self.commands, &mut self.previous.commands);
+        self.previous.spans = std::mem::take(&mut self.spans);
+        std::mem::swap(&mut self.frame_hashes, &mut self.previous.hashes);
+        std::mem::swap(&mut self.frame_raw_bounds, &mut self.previous.raw_bounds);
+        self.frame_hashes.clear();
+        self.frame_raw_bounds.clear();
+        self.known.clear();
+        if !reusable {
+            self.previous.spans.clear();
+        }
+        self.recording.clear();
+        self.tainted = 0;
         self.vertices.clear();
         self.clip = NO_CLIP;
         self.mask = NO_MASK;
@@ -843,6 +906,7 @@ impl D3d11Graphics {
         }
         if self.cleartype.begin_frame(&self.device, self.transparent) {
             self.tile_hashes.clear();
+            self.previous.spans.clear();
         }
         let mut target = D3d11PaintTarget {
             graphics: self,
@@ -1620,6 +1684,26 @@ impl D3d11Graphics {
         }
         let command_hashes = self.command_hashes();
         let mut hashes = std::mem::take(&mut self.tile_hashes);
+        let tile_hashes = self.tile_hashes_of(bounds, &command_hashes, bg, columns);
+        // TARVE_GPU_DAMAGE_CHECK=1 also checks the one-pass tile hashes against a pass per tile.
+        if gpu_damage_check() {
+            for y in (0..height).step_by(DAMAGE_TILE as usize) {
+                for x in (0..width).step_by(DAMAGE_TILE as usize) {
+                    let area = [
+                        x as f32,
+                        y as f32,
+                        (x + DAMAGE_TILE).min(width) as f32,
+                        (y + DAMAGE_TILE).min(height) as f32,
+                    ];
+                    let slot = (y / DAMAGE_TILE) as usize * columns + (x / DAMAGE_TILE) as usize;
+                    assert_eq!(
+                        tile_hashes[slot],
+                        self.tile_hash(area, bounds, &command_hashes, bg),
+                        "tile hash at {x},{y}"
+                    );
+                }
+            }
+        }
         let mut rects = Vec::new();
         for y in (0..height).step_by(DAMAGE_TILE as usize) {
             for x in (0..width).step_by(DAMAGE_TILE as usize) {
@@ -1630,7 +1714,7 @@ impl D3d11Graphics {
                     (y + DAMAGE_TILE).min(height) as f32,
                 ];
                 let slot = (y / DAMAGE_TILE) as usize * columns + (x / DAMAGE_TILE) as usize;
-                let hash = self.tile_hash(area, bounds, &command_hashes, bg);
+                let hash = tile_hashes[slot];
                 if hashes[slot] != hash {
                     hashes[slot] = hash;
                     rects.push(area);
@@ -1772,10 +1856,15 @@ impl D3d11Graphics {
 
     /// One hash per command over what it draws (kind, texture, vertices),
     /// computed once per frame; tiles then combine only the visible ones.
-    fn command_hashes(&self) -> Vec<u64> {
-        self.commands
+    fn command_hashes(&mut self) -> Vec<u64> {
+        let hashes: Vec<u64> = self
+            .commands
             .iter()
-            .map(|command| {
+            .enumerate()
+            .map(|(index, command)| {
+                if let Some(Some((hash, _))) = self.known.get(index) {
+                    return *hash;
+                }
                 let (tag, first, count, texture) = match command {
                     DrawCommand::Draw {
                         first,
@@ -1833,7 +1922,74 @@ impl D3d11Graphics {
                 }
                 hash
             })
-            .collect()
+            .collect();
+        self.frame_hashes = hashes.clone();
+        hashes
+    }
+
+    /// `tile_hash` of every tile, in one pass over the commands: each command folds into
+    /// the tiles its bounds touch only (a pass per tile over every command cost ~5 ms
+    /// for a frame of 3,000 boxes).
+    fn tile_hashes_of(
+        &self,
+        bounds: &[[f32; 4]],
+        command_hashes: &[u64],
+        background: [f32; 4],
+        columns: usize,
+    ) -> Vec<u64> {
+        let (width, height) = (self.width, self.height);
+        let rows = height.div_ceil(DAMAGE_TILE) as usize;
+        let mut start = 0_u64;
+        for channel in background {
+            start = mix_hash(start, u64::from(channel.to_bits()));
+        }
+        let mut hashes = vec![start; columns * rows];
+        let tile = DAMAGE_TILE as f32;
+        let mut clip_depth = 0_u64;
+        for (index, command) in self.commands.iter().enumerate() {
+            let b = bounds[index];
+            if b[0] < width as f32
+                && b[2] > 0.0
+                && b[1] < height as f32
+                && b[3] > 0.0
+                && b[0] < b[2]
+                && b[1] < b[3]
+            {
+                let column0 = (b[0].max(0.0) / tile).floor() as usize;
+                let column1 = (((b[2] / tile).ceil() as usize).max(1) - 1).min(columns - 1);
+                let row0 = (b[1].max(0.0) / tile).floor() as usize;
+                let row1 = (((b[3] / tile).ceil() as usize).max(1) - 1).min(rows - 1);
+                for row in row0..=row1 {
+                    let (y0, y1) = (
+                        row as f32 * tile,
+                        ((row as u32 + 1) * DAMAGE_TILE).min(height) as f32,
+                    );
+                    if !(b[1] < y1 && b[3] > y0) {
+                        continue;
+                    }
+                    for column in column0..=column1.min(columns - 1) {
+                        let (x0, x1) = (
+                            column as f32 * tile,
+                            ((column as u32 + 1) * DAMAGE_TILE).min(width) as f32,
+                        );
+                        if b[0] < x1 && b[2] > x0 {
+                            let slot = row * columns + column;
+                            hashes[slot] =
+                                mix_hash(mix_hash(hashes[slot], clip_depth), command_hashes[index]);
+                        }
+                    }
+                }
+            }
+            match command {
+                DrawCommand::PushClip { .. } => clip_depth += 1,
+                DrawCommand::PopClip { .. } => clip_depth = clip_depth.saturating_sub(1),
+                DrawCommand::Draw { .. } | DrawCommand::Glass { .. } => {}
+            }
+        }
+        for hash in &mut hashes {
+            *hash = (*hash).max(1);
+        }
+        hashes
     }
 
     /// What one tile would draw: the visible commands in order with their
@@ -1880,37 +2036,47 @@ impl D3d11Graphics {
 
     /// Window-pixel bounds of each command's triangles, one pixel wider for
     /// antialiased edges.
-    fn command_bounds(&self) -> Vec<[f32; 4]> {
+    fn command_bounds(&mut self) -> Vec<[f32; 4]> {
         let (width, height) = (self.width as f32, self.height as f32);
         // A draw inside a stencil clip can only touch the clip's pixels.
         let mut clips: Vec<[f32; 4]> = Vec::new();
-        self.commands
+        let mut raw_bounds = Vec::with_capacity(self.commands.len());
+        let bounds = self
+            .commands
             .iter()
-            .map(|command| {
-                let (first, count) = match command {
-                    DrawCommand::Draw { first, count, .. }
-                    | DrawCommand::PushClip { first, count }
-                    | DrawCommand::PopClip { first, count } => (first, count),
-                    DrawCommand::Glass { quad, .. } => (&quad.0, &quad.1),
+            .enumerate()
+            .map(|(command_index, command)| {
+                let raw = match self.known.get(command_index).copied().flatten() {
+                    Some((_, raw)) => raw,
+                    None => {
+                        let (first, count) = match command {
+                            DrawCommand::Draw { first, count, .. }
+                            | DrawCommand::PushClip { first, count }
+                            | DrawCommand::PopClip { first, count } => (first, count),
+                            DrawCommand::Glass { quad, .. } => (&quad.0, &quad.1),
+                        };
+                        let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+                        for &index in &self.indices[*first as usize..(*first + *count) as usize] {
+                            let [nx, ny] = self.vertices[index as usize].pos;
+                            let x = (nx + 1.0) * 0.5 * width;
+                            let y = (1.0 - ny) * 0.5 * height;
+                            bounds = [
+                                bounds[0].min(x),
+                                bounds[1].min(y),
+                                bounds[2].max(x),
+                                bounds[3].max(y),
+                            ];
+                        }
+                        [
+                            bounds[0] - 1.0,
+                            bounds[1] - 1.0,
+                            bounds[2] + 1.0,
+                            bounds[3] + 1.0,
+                        ]
+                    }
                 };
-                let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
-                for &index in &self.indices[*first as usize..(*first + *count) as usize] {
-                    let [nx, ny] = self.vertices[index as usize].pos;
-                    let x = (nx + 1.0) * 0.5 * width;
-                    let y = (1.0 - ny) * 0.5 * height;
-                    bounds = [
-                        bounds[0].min(x),
-                        bounds[1].min(y),
-                        bounds[2].max(x),
-                        bounds[3].max(y),
-                    ];
-                }
-                let mut bounds = [
-                    bounds[0] - 1.0,
-                    bounds[1] - 1.0,
-                    bounds[2] + 1.0,
-                    bounds[3] + 1.0,
-                ];
+                raw_bounds.push(raw);
+                let mut bounds = raw;
                 if let Some(clip) = clips.last() {
                     bounds = [
                         bounds[0].max(clip[0]),
@@ -1928,7 +2094,9 @@ impl D3d11Graphics {
                 }
                 bounds
             })
-            .collect()
+            .collect();
+        self.frame_raw_bounds = raw_bounds;
+        bounds
     }
 
     /// Issues the frame's commands. With an `area`, commands whose bounds miss it
@@ -3413,6 +3581,104 @@ fn quantize_glyph_position(value: f32) -> (f32, u8) {
 }
 
 impl PaintTarget for D3d11PaintTarget<'_> {
+    fn cache_begin(&mut self, key: u64, reuse: bool) -> bool {
+        let graphics = &mut *self.graphics;
+        let start = RecordedSpan {
+            commands: (graphics.commands.len(), graphics.commands.len()),
+            indices: (graphics.indices.len(), graphics.indices.len()),
+            vertices: (graphics.vertices.len(), graphics.vertices.len()),
+        };
+        if reuse
+            && self.suppressed_clips == 0
+            && let Some(span) = graphics.previous.spans.get(&key).copied()
+        {
+            // The span's vertices carry the clip, mask and opacity they were painted
+            // under: the same, as nothing above this subtree changed (the key and the
+            // painter's `reuse` say so).
+            let vertex_shift = start.vertices.0 as i64 - span.vertices.0 as i64;
+            let index_shift = start.indices.0 as i64 - span.indices.0 as i64;
+            let previous = &graphics.previous;
+            graphics
+                .vertices
+                .extend_from_slice(&previous.vertices[span.vertices.0..span.vertices.1]);
+            graphics.indices.extend(
+                previous.indices[span.indices.0..span.indices.1]
+                    .iter()
+                    .map(|index| (i64::from(*index) + vertex_shift) as u32),
+            );
+            let measured = previous.hashes.len() == previous.commands.len()
+                && previous.raw_bounds.len() == previous.commands.len();
+            graphics.known.resize(start.commands.0, None);
+            graphics
+                .known
+                .extend((span.commands.0..span.commands.1).map(|index| {
+                    measured.then(|| (previous.hashes[index], previous.raw_bounds[index]))
+                }));
+            let shift = |first: u32| (i64::from(first) + index_shift) as u32;
+            graphics.commands.extend(
+                previous.commands[span.commands.0..span.commands.1]
+                    .iter()
+                    .map(|command| match command {
+                        DrawCommand::Draw {
+                            first,
+                            count,
+                            texture,
+                        } => DrawCommand::Draw {
+                            first: shift(*first),
+                            count: *count,
+                            texture: texture.clone(),
+                        },
+                        DrawCommand::PushClip { first, count } => DrawCommand::PushClip {
+                            first: shift(*first),
+                            count: *count,
+                        },
+                        DrawCommand::PopClip { first, count } => DrawCommand::PopClip {
+                            first: shift(*first),
+                            count: *count,
+                        },
+                        // Never recorded: glass taints its span.
+                        other => other.clone(),
+                    }),
+            );
+            graphics.spans.insert(
+                key,
+                RecordedSpan {
+                    commands: (start.commands.0, graphics.commands.len()),
+                    indices: (start.indices.0, graphics.indices.len()),
+                    vertices: (start.vertices.0, graphics.vertices.len()),
+                },
+            );
+            return true;
+        }
+        let keep = self.suppressed_clips == 0;
+        graphics
+            .recording
+            .push((key, start, self.layers.len(), keep));
+        false
+    }
+
+    fn cache_end(&mut self) {
+        let graphics = &mut *self.graphics;
+        let Some((key, start, layers, keep)) = graphics.recording.pop() else {
+            return;
+        };
+        // Only a span whose layers close inside it, with nothing that cannot be reused.
+        if keep && self.layers.len() == layers && graphics.tainted <= start.commands.0 {
+            graphics.spans.insert(
+                key,
+                RecordedSpan {
+                    commands: (start.commands.0, graphics.commands.len()),
+                    indices: (start.indices.0, graphics.indices.len()),
+                    vertices: (start.vertices.0, graphics.vertices.len()),
+                },
+            );
+        }
+    }
+
+    fn cache_taint(&mut self) {
+        self.graphics.tainted = self.graphics.commands.len() + 1;
+    }
+
     fn fill<S: Shape>(&mut self, fill: Fill, transform: Affine, color: Color, shape: &S) {
         if self.suppressed_clips > 0 {
             return;
@@ -3979,6 +4245,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         tint: Color,
         glass: &GlassParams,
     ) {
+        self.cache_taint();
         if self.suppressed_clips > 0 {
             return;
         }
@@ -4138,6 +4405,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
     }
 
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine) {
+        self.cache_taint();
         if self.suppressed_clips > 0 {
             return;
         }
@@ -4200,6 +4468,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
     }
 
     fn draw_video(&mut self, id: &str, frame: &crate::video::VideoFrame, transform: Affine) {
+        self.cache_taint();
         if self.suppressed_clips > 0 {
             return;
         }
@@ -4267,6 +4536,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
     }
 
     fn draw_surface(&mut self, id: &str, transform: Affine, size: (f64, f64)) {
+        self.cache_taint();
         if self.suppressed_clips > 0 || !self.graphics.surface_chains.contains_key(id) {
             return;
         }

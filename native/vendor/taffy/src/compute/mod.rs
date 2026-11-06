@@ -217,7 +217,13 @@ where
 /// In order to prevent innacuracies caused by rounding already-rounded values, we read from `unrounded_layout`
 /// and write to `final_layout`.
 pub fn round_layout(tree: &mut impl RoundTree, node_id: NodeId) {
-    return round_layout_inner(tree, node_id, 0.0, 0.0);
+    round_subtree_layout(tree, node_id, 0.0, 0.0)
+}
+
+/// Tarve patch: rounds the subtree of `node_id` exactly as `round_layout` of the whole tree
+/// would, given the unrounded absolute position of its parent.
+pub fn round_subtree_layout(tree: &mut impl RoundTree, node_id: NodeId, parent_x: f32, parent_y: f32) {
+    return round_layout_inner(tree, node_id, parent_x, parent_y);
 
     /// Recursive function to apply rounding to all descendents
     fn round_layout_inner(tree: &mut impl RoundTree, node_id: NodeId, cumulative_x: f32, cumulative_y: f32) {

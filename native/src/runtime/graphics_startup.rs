@@ -11,11 +11,15 @@ impl App {
         without_redirection: bool,
         transparent: bool,
     ) -> Result<(Arc<Window>, Graphics), String> {
-        // Waiting for the GPU device would hold the first frame (D3D11 creation takes ~60 ms):
-        // an opaque window starts on the CPU renderer and switches once the device exists.
+        // Waiting for the GPU device would hold the first frame (D3D11 creation takes ~60 ms,
+        // ~250 ms from a cold start): an opaque window starts on the CPU renderer and switches
+        // once the device exists, whether the app asked for the GPU or left it to Tarve. The
+        // frames look the same; only the renderer behind them changes.
         #[cfg(target_os = "windows")]
-        let cpu_first = self.document.renderer == crate::protocol::RendererPreference::Auto
-            && !transparent
+        let cpu_first = matches!(
+            self.document.renderer,
+            crate::protocol::RendererPreference::Auto | crate::protocol::RendererPreference::Gpu
+        ) && !transparent
             && std::env::var_os("TARVE_RENDERER").is_none()
             && std::env::var_os("WGPU_BACKEND").is_none()
             && std::env::var_os("TARVE_CPU_FIRST").is_none_or(|value| value != "0")
@@ -28,12 +32,13 @@ impl App {
         // Android draws on the GPU too: Vello's pipelines come from a disk cache after the first
         // launch (renderer/pipeline_cache.rs), so the first frame takes ~0.15 s, and the CPU
         // renderer cannot hand the surface over to Vulkan (Android keeps it connected to the CPU).
+        let preference = self.document.renderer;
         if cpu_first {
             self.document.renderer = crate::protocol::RendererPreference::Cpu;
         }
         let created = self.create_graphics_window(event_loop, attributes, without_redirection);
         if cpu_first {
-            self.document.renderer = crate::protocol::RendererPreference::Auto;
+            self.document.renderer = preference;
             self.gpu_upgrade = created.is_ok();
         }
         created
@@ -70,6 +75,7 @@ impl App {
                     graphics.restore_counters(frames, generation.saturating_add(1));
                     self.graphics = GraphicsState::Ready(Box::new(graphics));
                     self.tree.dirty.paint = true;
+                    self.tree.dirty.full_paint = true;
                     self.request_present_now();
                 }
                 Err(message) => self.events.push(error(format!(

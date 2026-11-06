@@ -70,6 +70,7 @@ impl Tree {
         };
         if self.text.scroll_markdown_block(&id, y, width, delta as f32) {
             self.dirty.paint = true;
+            self.dirty.full_paint = true;
             return true;
         }
         false
@@ -136,6 +137,7 @@ impl Tree {
                     },
                 );
                 self.dirty.paint = true;
+                self.dirty.full_paint = true;
             }
             return vec![];
         }

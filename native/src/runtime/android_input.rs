@@ -136,6 +136,7 @@ impl App {
             layout_viewport(&window, &mut self.tree);
             if self.tree.viewport != before {
                 self.tree.dirty.paint = true;
+                self.tree.dirty.full_paint = true;
                 window.request_redraw();
             }
         }

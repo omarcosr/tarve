@@ -13,6 +13,12 @@ export interface NativeBridge {
    * Optional: bridges without it cannot answer synchronous layout reads.
    */
   requestSync?(command: NativeCommand & { requestId: string }, timeoutMs: number): NativeEvent | undefined;
+  /**
+   * Loads the native library and starts what the first frame waits on (the text engine, the
+   * GPU device) while the app compiles its first view. Optional and best effort: `start`
+   * reports what fails.
+   */
+  prewarm?(renderer: "auto" | "gpu" | "cpu"): void;
 }
 
 export interface BunFfiBridgeOptions {
@@ -112,6 +118,8 @@ export class BunFfiBridge implements NativeBridge {
   private backlog: NativeEvent[] = [];
   private onEvent?: (event: NativeEvent) => void;
   private backlogScheduled = false;
+  /** The library `prewarm` loaded, with its path; `start` takes it. */
+  private prewarmed?: { library: ReturnType<typeof openLibrary>; path: string };
 
   constructor(private readonly options: BunFfiBridgeOptions = {}) {}
 
@@ -265,11 +273,24 @@ export class BunFfiBridge implements NativeBridge {
     return cleanupErrors;
   }
 
+  prewarm(renderer: "auto" | "gpu" | "cpu"): void {
+    if (this.library || this.prewarmed) return;
+    const path = this.options.libraryPath ?? nativePath();
+    const library = openLibrary(path);
+    if (library.symbols.tarve_abi_version() !== NATIVE_ABI_VERSION) {
+      library.close();
+      return;
+    }
+    this.prewarmed = { library, path };
+    library.symbols.tarve_prewarm?.(renderer === "gpu" ? 1 : renderer === "cpu" ? 2 : 0);
+  }
+
   start(document: SceneDocument, onEvent: (event: NativeEvent) => void): void {
     if (this.library) throw new Error("Bridge already started");
     this.onEvent = onEvent;
-    const path = this.options.libraryPath ?? nativePath();
-    this.library = openLibrary(path);
+    const path = this.prewarmed?.path ?? this.options.libraryPath ?? nativePath();
+    this.library = this.prewarmed?.library ?? openLibrary(path);
+    this.prewarmed = undefined;
     setStartedLibrary(path);
     assertNativeAbiVersion(this.library.symbols.tarve_abi_version());
     const payload = new TextEncoder().encode(JSON.stringify(document));

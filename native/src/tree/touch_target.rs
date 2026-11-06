@@ -15,7 +15,9 @@ impl Tree {
         self.text.diff_layouts.clear();
         self.dirty.text = true;
         self.dirty.layout = true;
+        self.dirty.full = true;
         self.dirty.paint = true;
+        self.dirty.full_paint = true;
     }
 
     /// Where a finger at (x, y) presses: there, or when nothing there takes a press, the

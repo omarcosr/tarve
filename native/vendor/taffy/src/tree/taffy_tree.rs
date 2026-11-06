@@ -19,6 +19,7 @@ use crate::util::sys::{new_vec_with_capacity, ChildrenVec, Vec};
 
 use crate::compute::{
     compute_cached_layout, compute_hidden_layout, compute_leaf_layout, compute_root_layout, round_layout,
+    round_subtree_layout,
 };
 use crate::CacheTree;
 
@@ -891,6 +892,79 @@ impl<NodeContext> TaffyTree<NodeContext> {
     #[inline]
     pub fn dirty(&self, node: NodeId) -> TaffyResult<bool> {
         Ok(self.nodes[node.into()].cache.is_empty())
+    }
+
+    /// Tarve patch: lays out the subtree of `node_id` again at the size its parent gave it last,
+    /// without laying out anything around it, and rounds it in place. For a box whose size
+    /// cannot depend on its content (a fixed size): its parent would place and size it the same.
+    /// Returns false, leaving the node's own layout untouched, when the subtree came out at a
+    /// different size; the caller lays out the whole tree then (its ancestors are dirty).
+    pub fn compute_subtree_layout_with_measure<MeasureFunction>(
+        &mut self,
+        node_id: NodeId,
+        measure_function: MeasureFunction,
+    ) -> Result<bool, TaffyError>
+    where
+        MeasureFunction: FnMut(LayoutInput, NodeId, Option<&mut NodeContext>, &Style) -> LayoutOutput,
+    {
+        use crate::geometry::Line;
+        use crate::tree::{LayoutPartialTreeExt, SizingMode};
+        let previous = self.nodes[node_id.into()].unrounded_layout;
+        let size = previous.size;
+        let parent_id = self.parents[node_id.into()];
+        // The parent's content box, which percentages of the node's own padding resolve against.
+        let parent_size = parent_id.map_or(Size::NONE, |parent| {
+            let layout = &self.nodes[parent.into()].unrounded_layout;
+            Size {
+                width: Some(
+                    layout.size.width
+                        - layout.padding.left
+                        - layout.padding.right
+                        - layout.border.left
+                        - layout.border.right
+                        - layout.scrollbar_size.width,
+                ),
+                height: Some(
+                    layout.size.height
+                        - layout.padding.top
+                        - layout.padding.bottom
+                        - layout.border.top
+                        - layout.border.bottom
+                        - layout.scrollbar_size.height,
+                ),
+            }
+        });
+        let (mut parent_x, mut parent_y) = (0.0, 0.0);
+        let mut current = parent_id;
+        while let Some(parent) = current {
+            let location = self.nodes[parent.into()].unrounded_layout.location;
+            parent_x += location.x;
+            parent_y += location.y;
+            current = self.parents[parent.into()];
+        }
+        let use_rounding = self.config.use_rounding;
+        let mut taffy_view = TaffyView { taffy: self, measure_function };
+        let output = taffy_view.perform_child_layout(
+            node_id,
+            Size { width: Some(size.width), height: Some(size.height) },
+            parent_size,
+            Size { width: AvailableSpace::Definite(size.width), height: AvailableSpace::Definite(size.height) },
+            SizingMode::InherentSize,
+            Line::FALSE,
+        );
+        if output.size != size {
+            return Ok(false);
+        }
+        #[cfg(feature = "content_size")]
+        {
+            let mut layout = previous;
+            layout.scrollable_overflow_rect = output.scrollable_overflow_rect;
+            taffy_view.set_unrounded_layout(node_id, &layout);
+        }
+        if use_rounding {
+            round_subtree_layout(&mut taffy_view, node_id, parent_x, parent_y);
+        }
+        Ok(true)
     }
 
     /// Updates the stored layout of the provided `node` and its children

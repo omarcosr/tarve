@@ -1,5 +1,6 @@
 import { jsx, type BaseProps, type Child, type IntrinsicStyle, type VNode } from "../jsx-runtime";
 import { canonicalizeIntrinsicStyle } from "../intrinsic-style";
+import { markPure } from "../memo";
 
 export interface TextProps extends Omit<BaseProps, "style"> {
   size?: number;
@@ -22,3 +23,5 @@ export function Text({ size, weight, color, style, ...props }: TextProps): VNode
     },
   });
 }
+// Its output is its props (see markPure).
+markPure(Text);

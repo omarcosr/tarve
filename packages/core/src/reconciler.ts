@@ -8,7 +8,7 @@ import { Text } from "./components/text";
 import { serializeImageSource } from "./components/image";
 import { parseTransform } from "./css-shadow";
 import { withRenderScope } from "./render-scope";
-import { MEMO, type MemoInfo } from "./memo";
+import { MEMO, sameVNode, type MemoInfo } from "./memo";
 import { openExternal } from "./bridge";
 import { compileInline, type InlineContext } from "./inline-text";
 import type { MediaRequest } from "./media-element";
@@ -98,6 +98,30 @@ interface MemoEntry {
 }
 const memoStores = new WeakMap<object, Map<string, MemoEntry>>();
 
+/**
+ * Automatic memo for list items: an item made only of native kinds and pure components
+ * (View, Row, Column, Text…) is compiled from its VNode alone, so an item equal to last
+ * render's (`sameVNode`) reuses its compiled nodes, as `memo` would. A grid where one cell
+ * of thousands changes compiles and diffs one cell.
+ */
+const AUTO_MEMO: MemoInfo<{ vnode: VNode; same: boolean }> = {
+  render: props => props.vnode,
+  // Compared once, before visitMemo (which counts on it).
+  equal: (_previous, next) => next.same,
+  template: true,
+};
+/** Native kinds and HTML elements that compile to plain boxes, text and pictures from their props alone. */
+const PURE_INTRINSICS = new Set(["view", "row", "column", "text", "image", "svg", "div", "span", "p", "section", "main", "header", "footer", "article", "nav", "aside", "h1", "h2", "h3", "h4", "h5", "h6", "strong", "em", "b", "i", "small"]);
+/** A string-typed element whose compile depends on its props alone: a native kind, or a plain HTML box. */
+/** A media picture: its `<video>`/`<audio>` element registers the media around it, which a reused item would replace with its old request. */
+const MEDIA_KINDS = new Set(["video", "audio", "surface"]);
+const pureElement = (vnode: VNode): boolean => !MEDIA_KINDS.has(vnode.type as string) && (_isNativeVNode(vnode) || PURE_INTRINSICS.has(vnode.type as string));
+/** Per render scope: how the last renders' automatic memos fared, to stop trying when most miss. */
+interface AutoMemoState { tries: number; misses: number; off: number }
+const autoMemoStates = new WeakMap<object, AutoMemoState>();
+/** Renders to skip after one where most items changed (an animation of every item), before trying again. */
+const AUTO_MEMO_BACKOFF = 16;
+
 /** Devtools (devtools/trace.ts): wraps each function component's compile while the inspector traces a render. */
 export type ComponentTrace = (type: Component, props: Record<string, any>, path: string, compile: () => NativeNode[]) => NativeNode[];
 let componentTrace: ComponentTrace | undefined;
@@ -157,6 +181,14 @@ export function compileTree(
     if (!memoStore) memoStores.set(renderScope, memoStore = new Map());
   }
   const memoSeen = new Set<string>();
+  let autoMemo: AutoMemoState | undefined;
+  if (renderScope && memoStore && (typeof process === "undefined" || process.env?.TARVE_AUTO_MEMO !== "0")) {
+    autoMemo = autoMemoStates.get(renderScope);
+    if (!autoMemo) autoMemoStates.set(renderScope, autoMemo = { tries: 0, misses: 0, off: 0 });
+    // Most items changed last time: compile them plainly for a while, then try again.
+    if (autoMemo.off > 0) { autoMemo.off--; autoMemo = undefined; }
+    else { autoMemo.tries = 0; autoMemo.misses = 0; }
+  }
   /** What compiling a subtree registered: the ids claimed since `mark` and their nodes, handlers and media. */
   function claimedSince(mark: number): Pick<MemoEntry, "ids" | "nodes" | "handlers" | "media"> {
     // Anonymous text logs its id twice (claimed, released, claimed again by its Text): keep one.
@@ -180,6 +212,18 @@ export function compileTree(
       const entry = entries[index]!;
       map.set(entry[0], entry[1]);
     }
+  }
+  function autoMemoItem(item: VNode, path: string, group: string | undefined, at: Position | undefined): NativeNode[] {
+    const state = autoMemo!;
+    const previous = memoStore!.get(path);
+    state.tries++;
+    // visitMemo reuses it when equal; count the misses to know when this does not pay.
+    const known = previous !== undefined && previous.render === AUTO_MEMO.render;
+    const same = known && sameVNode((previous.props as { vnode: VNode }).vnode, item, pureElement);
+    // An item seen for the first time is no evidence either way.
+    if (!known) state.tries--;
+    else if (!same) state.misses++;
+    return visitMemo(memoStore!, AUTO_MEMO as MemoInfo<object>, { vnode: item, same }, path, group, at);
   }
   function visitMemo(store: Map<string, MemoEntry>, info: MemoInfo<object>, props: object, path: string, group?: string, position?: Position): NativeNode[] {
     const at = position ? position.index + "/" + position.count : "";
@@ -341,7 +385,10 @@ export function compileTree(
           piece = text;
         }
         const at = element ? { index: seen++, count: elements } : undefined;
-        const nodes = visit(piece, path + "/" + (key != null ? "k:" + key : index), group, false, at);
+        const itemPath = path + "/" + (key != null ? "k:" + key : index);
+        const nodes = element && autoMemo && componentTrace === undefined && !((item as VNode).type as unknown as Record<symbol, unknown>)[MEMO]
+          ? autoMemoItem(item as VNode, itemPath, group, at)
+          : visit(piece, itemPath, group, false, at);
         for (let n = 0; n < nodes.length; n++) out.push(nodes[n]!);
       }
       return out;
@@ -569,6 +616,7 @@ export function compileTree(
   }
   const roots = withRenderScope(renderScope, () => visit(element, "root"));
   if (memoStore) for (const path of memoStore.keys()) if (!memoSeen.has(path)) memoStore.delete(path);
+  if (autoMemo && autoMemo.tries >= 64 && autoMemo.misses * 2 > autoMemo.tries) autoMemo.off = AUTO_MEMO_BACKOFF;
   for (const [targetId, labelIds] of labelAssociations) {
     const nativeTargetId = labelableTargets.get(targetId);
     if (!nativeTargetId) throw new Error(`label htmlFor references unknown or unsupported target: ${targetId}`);

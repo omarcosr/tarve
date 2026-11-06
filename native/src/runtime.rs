@@ -153,6 +153,31 @@ pub(crate) use graphics_startup::{
     graphics_recovery_delay, graphics_recovery_failure_action,
 };
 
+/// Shows the hidden window without activating it. Showing and activating a never-shown
+/// window in one `ShowWindow(SW_SHOW)` holds the UI thread ~15 ms (DWM brings up the window
+/// and its activation together); shown first, the activation that follows takes under 1 ms.
+#[cfg(target_os = "windows")]
+fn show_without_activation(window: &Window) {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    if std::env::var_os("TARVE_SHOW_ACTIVATE").is_some() {
+        return;
+    }
+    if let Ok(handle) = window.window_handle()
+        && let RawWindowHandle::Win32(handle) = handle.as_raw()
+    {
+        // SAFETY: the window handle is live for the window's lifetime.
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
+                handle.hwnd.get() as _,
+                windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNA,
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn show_without_activation(_: &Window) {}
+
 pub(crate) fn background_windows() -> bool {
     static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *FLAG.get_or_init(|| {
@@ -1965,7 +1990,9 @@ impl App {
             };
         }
         self.tree.dirty.layout = true;
+        self.tree.dirty.full = true;
         self.tree.dirty.paint = true;
+        self.tree.dirty.full_paint = true;
     }
     /// Shows a parked window: a new device, then the first frame painted before
     /// the window appears, as at startup.
@@ -2266,6 +2293,7 @@ impl App {
                 graphics.restore_counters(recovery.checkpoint.frames, generation);
                 self.graphics = GraphicsState::Ready(Box::new(graphics));
                 self.tree.dirty.paint = true;
+                self.tree.dirty.full_paint = true;
                 self.presentation_retry_at = None;
                 self.wanted_flow.set(ControlFlow::Wait);
                 self.request_present_now();
@@ -3050,6 +3078,7 @@ impl ApplicationHandler<Command> for App {
                             graphics.restore_counters(checkpoint.frames, generation);
                             self.graphics = GraphicsState::Ready(Box::new(graphics));
                             self.tree.dirty.paint = true;
+                            self.tree.dirty.full_paint = true;
                             self.request_present_now();
                         }
                         Err(error) => {
@@ -3179,6 +3208,8 @@ impl ApplicationHandler<Command> for App {
                         // prepared. Making it visible immediately before the synchronous present
                         // prevents Windows from compositing an empty client area on startup.
                         if visible {
+                            show_without_activation(&window);
+                            // Activates it (or not, for a background window) now that it shows.
                             window.set_visible(true);
                         }
                         crate::stats::trace("visible");
@@ -3462,6 +3493,7 @@ impl ApplicationHandler<Command> for App {
                         .set_surface_frame(&picture.id, Some(picture.image), false);
                 }
                 self.tree.dirty.paint = true;
+                self.tree.dirty.full_paint = true;
                 self.redraw();
             }
             Command::SystemMedia { session } => {
@@ -3989,7 +4021,9 @@ impl ApplicationHandler<Command> for App {
                         return;
                     }
                     self.tree.dirty.layout = true;
+                    self.tree.dirty.full = true;
                     self.tree.dirty.paint = true;
+                    self.tree.dirty.full_paint = true;
                     self.presentation_retry_at = None;
                 }
                 self.sync_custom_window_chrome_state();
@@ -4010,7 +4044,9 @@ impl ApplicationHandler<Command> for App {
                     );
                 }
                 self.tree.dirty.layout = true;
+                self.tree.dirty.full = true;
                 self.tree.dirty.paint = true;
+                self.tree.dirty.full_paint = true;
                 accessibility_changed = true;
             }
             WindowEvent::Occluded(false) => self.request_present_now(),
