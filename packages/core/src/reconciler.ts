@@ -560,7 +560,13 @@ export function compileTree(
       if (!isSignal(value)) continue;
       const bindingTheme = selectedTheme;
       const context: VariantContext = { viewportWidth: viewportWidth(), viewportHeight: viewportHeight(), usedViewport: () => {}, usedPosition: () => {} };
-      const resolve = (next: unknown) => resolveThemeStyle(foldVariants({ [key]: next } as never, bindingTheme, context), bindingTheme) as Record<string, unknown>;
+      // Strings and numbers (a colour, an opacity) resolve on their own, as resolveThemeStyle
+      // would; anything else (a gradient, a shadow) goes through the whole resolution.
+      const resolve = (next: unknown) => typeof next === "string"
+        ? { [key]: resolveStyleString(key, next, bindingTheme) }
+        : typeof next === "number"
+          ? { [key]: next }
+          : resolveThemeStyle(foldVariants({ [key]: next } as never, bindingTheme, context), bindingTheme) as Record<string, unknown>;
       (nodeBindings ??= []).push({ signal: value, style: { key, resolve } });
       rawStyle[key] = value.value;
     }

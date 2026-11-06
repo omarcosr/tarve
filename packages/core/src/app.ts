@@ -379,9 +379,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         const shadow = observed?.nodes.get(id);
         if (binding.style) {
           const resolved = binding.style.resolve(signal.value);
-          node.style = { ...node.style, ...resolved };
-          set.style = { ...set.style, ...resolved };
-          if (shadow && shadow !== node) shadow.style = { ...shadow.style, ...resolved };
+          // The node's own style object (compiled for it alone): updated where it is.
+          Object.assign(node.style, resolved);
+          set.style = set.style ? Object.assign(set.style, resolved) : resolved;
+          if (shadow && shadow !== node) Object.assign(shadow.style, resolved);
         }
         if (binding.text) {
           const text = boundText(binding.text);
