@@ -13,6 +13,8 @@ impl Tree {
             }
         }
         self.text.diff_layouts.clear();
+        // Style hashes include the text scale.
+        self.text.forget_style_hashes();
         self.dirty.text = true;
         self.dirty.layout = true;
         self.dirty.full = true;

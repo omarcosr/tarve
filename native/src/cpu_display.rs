@@ -299,7 +299,7 @@ impl PaintTarget for CpuRecorder<'_> {
         hash_affine(&mut hasher, transform);
         hash_color(&mut hasher, color);
         hash_path(&mut hasher, &path);
-        let bounds = device(transform, path.bounding_box());
+        let bounds = device(transform, shape.bounding_box());
         self.push(
             Op::Fill {
                 rule: fill,
@@ -320,7 +320,7 @@ impl PaintTarget for CpuRecorder<'_> {
         hash_affine(&mut hasher, transform);
         format!("{gradient:?}").hash(&mut hasher);
         hash_path(&mut hasher, &path);
-        let bounds = device(transform, path.bounding_box());
+        let bounds = device(transform, shape.bounding_box());
         self.push(
             Op::Fill {
                 rule: Fill::NonZero,
@@ -343,7 +343,7 @@ impl PaintTarget for CpuRecorder<'_> {
         hash_path(&mut hasher, &path);
         // Miter joins reach up to miter_limit × half the width past the path.
         let reach = stroke.width * stroke.miter_limit.max(1.0) / 2.0 + 1.0;
-        let bounds = device(transform, path.bounding_box().inflate(reach, reach));
+        let bounds = device(transform, shape.bounding_box().inflate(reach, reach));
         self.push(
             Op::Stroke {
                 stroke: stroke.clone(),
@@ -362,7 +362,7 @@ impl PaintTarget for CpuRecorder<'_> {
         (3u8, fill as u8).hash(&mut hasher);
         hash_affine(&mut hasher, transform);
         hash_path(&mut hasher, &path);
-        let bounds = device(transform, path.bounding_box());
+        let bounds = device(transform, shape.bounding_box());
         self.push_layer(
             Op::PushClip {
                 rule: fill,
@@ -383,7 +383,7 @@ impl PaintTarget for CpuRecorder<'_> {
         alpha.to_bits().hash(&mut hasher);
         hash_affine(&mut hasher, transform);
         hash_path(&mut hasher, &path);
-        let bounds = device(transform, path.bounding_box());
+        let bounds = device(transform, shape.bounding_box());
         self.push_layer(
             Op::PushOpacity {
                 alpha,
@@ -406,7 +406,7 @@ impl PaintTarget for CpuRecorder<'_> {
         11u8.hash(&mut hasher);
         hash_affine(&mut hasher, transform);
         hash_path(&mut hasher, &path);
-        let bounds = device(transform, path.bounding_box());
+        let bounds = device(transform, rect);
         self.push_layer(
             Op::PushMask {
                 transform,

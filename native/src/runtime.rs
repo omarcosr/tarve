@@ -2907,7 +2907,7 @@ impl App {
                     }) {
                         CursorIcon::Default
                     } else {
-                        cursor_for_node(hovered.map(|id| &self.tree.entries[id].node))
+                        cursor_for_node(hovered.map(|id| &*self.tree.entries[id].node))
                     }
                 };
                 window.set_cursor(cursor);
@@ -3250,7 +3250,10 @@ impl ApplicationHandler<Command> for App {
         let apply_started = Instant::now();
         if matches!(
             command,
-            Command::Patch { .. } | Command::Mutate { .. } | Command::Update { .. }
+            Command::Patch { .. }
+                | Command::SetNodes { .. }
+                | Command::Mutate { .. }
+                | Command::Update { .. }
         ) {
             self.input_hold = None;
             // Transitions a patch starts begin now, not at the last painted frame: after
@@ -3263,6 +3266,26 @@ impl ApplicationHandler<Command> for App {
                     node.id == self.tree.root && node.style.get("borderColor").is_some()
                 });
                 if let Err(error) = self.tree.patch(nodes) {
+                    self.events.push(crate::protocol::error(error));
+                } else {
+                    accessibility_changed = true;
+                    if chrome_changed {
+                        self.sync_custom_window_chrome();
+                    }
+                }
+                self.frame_stats
+                    .apply
+                    .push(apply_started.elapsed().as_secs_f64() * 1000.0);
+            }
+            Command::SetNodes { nodes } => {
+                let chrome_changed = nodes.iter().any(|node| {
+                    node.id == self.tree.root
+                        && node
+                            .style
+                            .as_ref()
+                            .is_some_and(|style| style.contains_key("borderColor"))
+                });
+                if let Err(error) = self.tree.set_nodes(nodes) {
                     self.events.push(crate::protocol::error(error));
                 } else {
                     accessibility_changed = true;
@@ -4135,7 +4158,7 @@ impl ApplicationHandler<Command> for App {
                         .focused
                         .as_ref()
                         .and_then(|id| self.tree.entries.get(id))
-                        .map(|entry| &entry.node),
+                        .map(|entry| &*entry.node),
                 );
                 let typing = editing && text_field_consumes(&event.logical_key, self.modifiers);
                 if !event.repeat

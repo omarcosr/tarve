@@ -8,7 +8,8 @@
  *   BUI=path/to/bui-bench.exe bun scripts/bench-bui.ts
  *
  * CELLS=100,1000,3000  MODES=anim,one,idle  APPS=tarve-cpu,tarve-gpu,bui-cpu,bui-gpu  REPS=1
- * (tarve-txiki-cpu / tarve-txiki-gpu run TARVE_TXIKI, default work/bench-cells-txiki.exe)
+ * (tarve-txiki-cpu / tarve-txiki-gpu run TARVE_TXIKI, default work/bench-cells-txiki.exe;
+ * tarve[-txiki]-signals-* bind each cell to signals, as BUI's JS bench sets DOM nodes)
  * TARVE=work/bench-cells.exe  JSON=path writes the rows.
  *
  * Each app reports its own frames and first frame (Tarve from process start, Bun's boot
@@ -92,7 +93,7 @@ async function run(app: string, cells: number, mode: string): Promise<Record<str
   const child = js
     ? Bun.spawn(jsCommand, { cwd: buiJs, env: { ...process.env, NODE_ENV: "production" }, stdout: "pipe", stderr: "pipe" })
     : app.startsWith("tarve")
-    ? Bun.spawn([app.includes("txiki") ? tarveTxiki : tarve], { env: { ...process.env, CELLS: String(cells), MODE: mode, R: gpu ? "gpu" : "cpu", WARMUP: String(warmup), SECONDS: String(seconds) }, stdout: "pipe", stderr: "pipe" })
+    ? Bun.spawn([app.includes("txiki") ? tarveTxiki : tarve], { env: { ...process.env, CELLS: String(cells), MODE: mode, R: gpu ? "gpu" : "cpu", WARMUP: String(warmup), SECONDS: String(seconds), SIGNALS: app.includes("-signals") ? "1" : "0" }, stdout: "pipe", stderr: "pipe" })
     : Bun.spawn([bui, "--cells", String(cells), "--mode", mode, "--warmup", String(warmup), "--seconds", String(seconds)], { env: { ...process.env, BUI_GPU: gpu ? "1" : "0" }, stdout: "pipe", stderr: "pipe" });
   let start: Sample | undefined, end: Sample | undefined, sampling = false, report: Record<string, unknown> | undefined;
   const ws: number[] = [];

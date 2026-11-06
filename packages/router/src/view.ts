@@ -170,7 +170,8 @@ export function TabRouterView({ router, placement = "bottom", id, style, ...rest
   });
 }
 
-export interface LinkProps extends Omit<PressableProps, "onClick" | "control"> {
+export interface LinkProps extends Omit<PressableProps, "onClick" | "control" | "children"> {
+  children?: Child;
   /** A path: `/users/42?tab=posts`. */
   to: string;
   replace?: boolean;

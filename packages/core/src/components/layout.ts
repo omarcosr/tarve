@@ -1,8 +1,11 @@
 import type { Style } from "../protocol";
 import { markPure } from "../memo";
-import { jsx, type BaseProps, type DropTargetProps, type FileDropTargetProps, type VNode } from "../jsx-runtime";
+import { jsx, type BaseProps, type BindableChild, type DropTargetProps, type FileDropTargetProps, type Reactive, type VNode } from "../jsx-runtime";
 
-export interface ViewProps extends BaseProps, DropTargetProps, FileDropTargetProps {
+export interface ViewProps extends Omit<BaseProps, "style" | "children">, DropTargetProps, FileDropTargetProps {
+  /** Values may be signals: setting one restyles this box without a render. */
+  style?: Reactive<Style>;
+  children?: BindableChild;
   gap?: number;
   padding?: Style["padding"];
   /** CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `"1 1 176px"`. */
@@ -26,7 +29,7 @@ export interface ViewProps extends BaseProps, DropTargetProps, FileDropTargetPro
 export function container(kind: string, props: ViewProps, defaults: Style = {}): VNode {
   const { gap, padding, flex, align, justify, style, ...rest } = props;
   // Assignments, not Object.entries/filter/fromEntries: this runs for every row and column.
-  const merged: Style = { ...defaults };
+  const merged: Reactive<Style> = { ...defaults };
   if (gap !== undefined) merged.gap = gap;
   if (padding !== undefined) merged.padding = padding;
   if (flex !== undefined) merged.flex = flex;

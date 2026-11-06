@@ -98,6 +98,11 @@ impl WebTree {
                     self.events.push(crate::protocol::error(error));
                 }
             }
+            Command::SetNodes { nodes } => {
+                if let Err(error) = self.tree.set_nodes(nodes) {
+                    self.events.push(crate::protocol::error(error));
+                }
+            }
             Command::Mutate { mutations } => {
                 if let Err(error) = self.tree.mutate(mutations) {
                     self.events.push(crate::protocol::error(error));

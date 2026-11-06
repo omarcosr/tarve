@@ -670,9 +670,9 @@ fn group_hover_focus_within_and_pointer_events_none_follow_css() {
     );
 
     assert!(tree.focus("field").is_none());
-    let state = tree.visual_state_for("form", &tree.entries["form"].node.clone());
+    let state = tree.visual_state_for("form", &(*tree.entries["form"].node).clone());
     assert!(state.focus_within);
-    let state = tree.visual_state_for("card", &tree.entries["card"].node.clone());
+    let state = tree.visual_state_for("card", &(*tree.entries["card"].node).clone());
     assert!(!state.focus_within);
 }
 
@@ -880,13 +880,13 @@ fn text_ellipsis_line_clamp_and_clickable_runs() {
     // nowrap keeps one 24px line; the clamp keeps two.
     assert_eq!(tree.entries["line"].rect.height(), 24.0);
     assert_eq!(tree.entries["clamp"].rect.height(), 48.0);
-    let line_node = tree.entries["line"].node.clone();
+    let line_node = (*tree.entries["line"].node).clone();
     let (width, lines) = tree
         .text
         .truncated_metrics(&line_node, 120.0)
         .expect("ellipsized");
     assert!(width <= 120.5 && lines == 1, "width {width}, lines {lines}");
-    let clamp_node = tree.entries["clamp"].node.clone();
+    let clamp_node = (*tree.entries["clamp"].node).clone();
     let (_, lines) = tree
         .text
         .truncated_metrics(&clamp_node, 150.0)
@@ -1443,7 +1443,7 @@ fn ime_preedit_replaces_selection_visually_and_commits_once() {
     tree.ime_preedit("field", "", None);
     assert!(!tree.ime_active());
     assert_eq!(tree.ime_display_text(), None);
-    let mut controlled = tree.entries["field"].node.clone();
+    let mut controlled = (*tree.entries["field"].node).clone();
     controlled.value = Some("server".into());
     tree.patch(vec![controlled]).unwrap();
     assert!(
@@ -1473,14 +1473,14 @@ fn ime_cancel_focus_change_and_controlled_reconciliation_reject_stale_commit() {
     let _ = tree.focus("first");
 
     tree.ime_preedit("first", "世界", Some((0, "世界".len())));
-    let same = tree.entries["first"].node.clone();
+    let same = (*tree.entries["first"].node).clone();
     tree.patch(vec![same]).unwrap();
     assert!(
         tree.ime_active(),
         "same controlled value must preserve preedit"
     );
 
-    let mut changed = tree.entries["first"].node.clone();
+    let mut changed = (*tree.entries["first"].node).clone();
     changed.value = Some("server".into());
     tree.patch(vec![changed]).unwrap();
     assert!(!tree.ime_active());
@@ -7999,7 +7999,7 @@ fn textarea_goal_column_resets_on_focus_assistive_edits_and_value_updates() {
     // An app-driven value update makes a recorded column stale even at the same caret.
     let mut tree = setup();
     tree.entries.get_mut("field").unwrap().node.value = Some("abcdef\nxz".into());
-    tree.text.prepare(&tree.entries["field"].node.clone());
+    tree.text.prepare(&(*tree.entries["field"].node).clone());
     tree.scene(1.0);
     assert_eq!(up(&mut tree), "ab|cdef\nxz");
 }
@@ -8029,7 +8029,7 @@ fn typing_and_pasting_replace_the_selection() {
 fn caret_is_clamped_when_the_value_shrinks_under_it() {
     let mut tree = editor_tree("input", "a long value");
     tree.key("End");
-    let mut shorter = tree.entries["field"].node.clone();
+    let mut shorter = (*tree.entries["field"].node).clone();
     shorter.value = Some("ab".into());
     tree.patch(vec![shorter]).unwrap();
     tree.key("ShiftArrowLeft");

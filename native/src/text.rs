@@ -741,6 +741,13 @@ pub struct TextEngine {
     nowrap: HashSet<String>,
     /// `lineClamp` per text node.
     clamps: HashMap<String, usize>,
+    /// How `draw` last broke and aligned each layout (wrap width bits, alignment). Anything
+    /// else that breaks or replaces a layout forgets it here.
+    drawn: HashMap<String, (u32, parley::Alignment)>,
+    /// Layouts last broken into their unwrapped lines (shaped, or measured unwrapped).
+    unwrapped: HashSet<String>,
+    /// `style_hash`: each text's style and its hash.
+    style_hashes: HashMap<String, (crate::protocol::NodeStyle, u64)>,
     /// Ellipsized layout per text node and paint width; `None` when it fits.
     truncated: HashMap<String, (u32, Option<Layout<TextBrush>>)>,
 }
@@ -1226,6 +1233,9 @@ impl TextEngine {
             nowrap: HashSet::default(),
             clamps: HashMap::default(),
             truncated: HashMap::default(),
+            drawn: HashMap::default(),
+            unwrapped: HashSet::default(),
+            style_hashes: HashMap::default(),
             diff_column_widths: HashMap::default(),
             shapes: 0,
             #[cfg(test)]
@@ -1247,7 +1257,7 @@ impl TextEngine {
             return;
         }
         let content = node.display_text();
-        let signature = (hash_text(&content), text_style_hash(node));
+        let signature = (hash_text(&content), self.style_hash(node));
         if self.layouts.contains_key(&node.id) && self.signatures.get(&node.id) == Some(&signature)
         {
             return;
@@ -1263,6 +1273,7 @@ impl TextEngine {
             self.prepare_markdown_lines(node, &content);
             let mut placeholder = self.context.ranged_builder(&mut self.fonts, "", 1.0, true);
             placeholder.push_default(StyleProperty::FontSize(node.font_size(14.0)));
+            self.drawn.remove(&node.id);
             self.layouts.insert(node.id.clone(), placeholder.build(""));
             self.signatures.insert(node.id.clone(), signature);
             self.alignments
@@ -1395,6 +1406,9 @@ impl TextEngine {
         } else {
             self.unwrapped_code.remove(&node.id);
         }
+        self.drawn.remove(&node.id);
+        // Broken unwrapped above (or by the shaping workers).
+        self.unwrapped.insert(node.id.clone());
         self.layouts.insert(node.id.clone(), layout);
         self.markdown_lines.remove(&node.id);
         self.signatures.insert(node.id.clone(), signature);
@@ -1430,6 +1444,8 @@ impl TextEngine {
         let nowrap = self.nowrap.contains(&node.id);
         let clamp = self.clamps.get(&node.id).copied().unwrap_or(1);
         let wrap = if nowrap { None } else { Some(width) };
+        self.drawn.remove(&node.id);
+        self.unwrapped.remove(&node.id);
         let Some(layout) = self.layouts.get_mut(&node.id) else {
             return;
         };
@@ -1767,6 +1783,13 @@ impl TextEngine {
                 return size;
             }
         }
+        // Breaking for a measure undoes how `draw` broke it.
+        self.drawn.remove(id);
+        if wrap.is_none() {
+            self.unwrapped.insert(id.to_string());
+        } else {
+            self.unwrapped.remove(id);
+        }
         layout.break_all_lines(wrap);
         let mut height = layout.height();
         if let Some(extents) = shifted_line_extents(layout) {
@@ -1989,15 +2012,34 @@ impl TextEngine {
         let Some(layout) = layout else {
             return;
         };
-        layout.break_all_lines(
-            if matches!(node.kind.as_str(), "text" | "markdown" | "textarea") && !nowrap {
-                Some(width.max(0.0))
-            } else {
-                None
-            },
-        );
+        let wrap = if matches!(node.kind.as_str(), "text" | "markdown" | "textarea") && !nowrap {
+            Some(width.max(0.0))
+        } else {
+            None
+        };
         let align = alignment_for_node(node);
-        layout.align(align, parley::AlignmentOptions::default());
+        // Broken and aligned for this width when last drawn, and not touched since: a
+        // repaint draws it as it is (breaking costs as much as the rest of the paint).
+        let key = (wrap.map_or(u32::MAX, f32::to_bits), align);
+        if truncated || self.drawn.get(&node.id) != Some(&key) {
+            // Still broken into its unwrapped lines (as shaped) and as narrow as the width:
+            // breaking at the width gives the same lines.
+            let fits = !truncated
+                && self.unwrapped.contains(&node.id)
+                && wrap.is_none_or(|width| width >= layout.width());
+            if !fits {
+                layout.break_all_lines(wrap);
+                if !truncated && wrap.is_some() {
+                    self.unwrapped.remove(&node.id);
+                }
+            }
+            layout.align(align, parley::AlignmentOptions::default());
+            if truncated {
+                self.drawn.remove(&node.id);
+            } else {
+                self.drawn.insert(node.id.clone(), key);
+            }
+        }
         if node.kind == "code" && node.show_line_numbers {
             let gutter_color = crate::tree::color(node.string("gutterColor", "#8b949e"));
             if let Some(gutters) = self.code_gutter_layouts.get(&node.id) {
@@ -2235,6 +2277,8 @@ impl TextEngine {
             }
             return;
         }
+        self.drawn.remove(&node.id);
+        self.unwrapped.remove(&node.id);
         let Some(layout) = self.layouts.get_mut(&node.id) else {
             return;
         };
@@ -2631,6 +2675,8 @@ impl TextEngine {
             .copied()
             .unwrap_or(parley::Alignment::Start);
         let width = self.wrap_width(id, width);
+        self.drawn.remove(id);
+        self.unwrapped.remove(id);
         let layout = self.layouts.get_mut(id)?;
         layout.break_all_lines(width.map(|width| width.max(0.0)));
         layout.align(align, parley::AlignmentOptions::default());
@@ -2703,6 +2749,8 @@ impl TextEngine {
             .copied()
             .unwrap_or(parley::Alignment::Start);
         let width = self.wrap_width(id, width);
+        self.drawn.remove(id);
+        self.unwrapped.remove(id);
         let Some(layout) = self.layouts.get_mut(id) else {
             return vec![];
         };
@@ -2742,6 +2790,8 @@ impl TextEngine {
             .copied()
             .unwrap_or(parley::Alignment::Start);
         let width = self.wrap_width(id, width);
+        self.drawn.remove(id);
+        self.unwrapped.remove(id);
         let layout = self.layouts.get_mut(id)?;
         layout.break_all_lines(width.map(|width| width.max(0.0)));
         layout.align(align, parley::AlignmentOptions::default());
@@ -2790,6 +2840,8 @@ impl TextEngine {
             .get(id)
             .copied()
             .unwrap_or(parley::Alignment::Start);
+        self.drawn.remove(id);
+        self.unwrapped.remove(id);
         let Some(layout) = self.layouts.get_mut(id) else {
             return vec![];
         };

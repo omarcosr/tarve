@@ -1,8 +1,13 @@
 import type { Control, MotionProperty, MotionValues, StateStyle, Style, SvgNode, TextHighlight } from "./protocol";
 import type { ImageSource } from "./components/image";
 import { styleWithClassName } from "./tailwind";
+import type { Signal } from "./signal";
 
 export type Child = VNode | string | number | boolean | null | undefined | Child[];
+/** A child that may be a signal: text bound to it (`<Text>{count}</Text>`), updated without a render. */
+export type BindableChild = Child | Signal<unknown> | BindableChild[];
+/** A style whose values may be signals: setting one updates only that node's style. */
+export type Reactive<S> = { [K in keyof S]: S[K] | Signal<Exclude<S[K], undefined>> };
 /** Clipboard content delivered to the focused element when the clipboard holds no text. */
 export type PastePayload =
   | { kind: "files"; files: string[] }

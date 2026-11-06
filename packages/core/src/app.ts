@@ -1,9 +1,10 @@
-import type { SceneDocument, LayoutBox, NativeEvent, NativeCommand, Snapshot } from "./protocol";
+import type { SceneDocument, LayoutBox, NativeEvent, NativeCommand, NativeNodeSet, Snapshot } from "./protocol";
 import { readFileSync } from "node:fs";
 import { environmentKey, initialViewport, setEnvironment, trackViewport } from "./viewport";
 import { applyMediaEvent, type MediaController } from "./media-element";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
-import { compileTree, type CompiledTree, invalidateMemos } from "./reconciler";
+import { boundText, compileTree, type CompiledTree, type NodeBinding, invalidateMemos } from "./reconciler";
+import type { Signal } from "./signal";
 import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
 import { jsx, type VNode } from "./jsx-runtime";
 import { createElementDispatcher } from "./app/element-events";
@@ -328,6 +329,72 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     queueMicrotask(() => { if (queued) renderQueued(); });
   }
 
+  /** Signals the committed tree binds, with the nodes each one sets, and their unsubscribes. */
+  const boundSignals = new Map<Signal<unknown>, { targets: { id: string; binding: NodeBinding }[]; unsubscribe: () => void }>();
+  const changedSignals = new Set<Signal<unknown>>();
+  let signalFlushQueued = false;
+  function syncBindings(tree: CompiledTree): void {
+    const next = new Map<Signal<unknown>, { id: string; binding: NodeBinding }[]>();
+    if (tree.bindings) {
+      for (const [id, list] of tree.bindings) {
+        for (const binding of list) {
+          let targets = next.get(binding.signal);
+          if (!targets) next.set(binding.signal, targets = []);
+          targets.push({ id, binding });
+        }
+      }
+    }
+    for (const [signal, entry] of boundSignals) {
+      if (!next.has(signal)) { entry.unsubscribe(); boundSignals.delete(signal); }
+    }
+    for (const [signal, targets] of next) {
+      const entry = boundSignals.get(signal);
+      if (entry) entry.targets = targets;
+      else boundSignals.set(signal, { targets, unsubscribe: signal.subscribe(onSignal) });
+    }
+  }
+  function onSignal(signal: Signal<unknown>): void {
+    changedSignals.add(signal);
+    if (signalFlushQueued) return;
+    signalFlushQueued = true;
+    queueMicrotask(flushSignals);
+  }
+  /**
+   * Sends what changed signals show: only the bound fields of their nodes (`setNodes`), with
+   * no render, compile or diff. The compiled nodes take the values too, so the next render
+   * (which reads the signals again) finds nothing to send for them.
+   */
+  function flushSignals(): void {
+    signalFlushQueued = false;
+    if (ended || closing || !committed) { changedSignals.clear(); return; }
+    const sets = new Map<string, NativeNodeSet>();
+    for (const signal of changedSignals) {
+      const entry = boundSignals.get(signal);
+      if (!entry) continue;
+      for (const { id, binding } of entry.targets) {
+        const node = committed.nodes.get(id);
+        if (!node) continue;
+        let set = sets.get(id);
+        if (!set) sets.set(id, set = { id });
+        const shadow = observed?.nodes.get(id);
+        if (binding.style) {
+          const resolved = binding.style.resolve(signal.value);
+          node.style = { ...node.style, ...resolved };
+          set.style = { ...set.style, ...resolved };
+          if (shadow && shadow !== node) shadow.style = { ...shadow.style, ...resolved };
+        }
+        if (binding.text) {
+          const text = boundText(binding.text);
+          node.text = text;
+          set.text = text;
+          if (shadow && shadow !== node) shadow.text = text;
+        }
+      }
+    }
+    changedSignals.clear();
+    if (sets.size) sendInternal({ type: "setNodes", nodes: [...sets.values()] }, { source: "bridge", event: "setNodes" });
+  }
+
   /** Renders the queued update and sends its patch. */
   function renderQueued(): void {
     queued = false;
@@ -385,6 +452,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
     committed = next;
     observed = nextObserved;
+    syncBindings(next);
     syncMedia();
     jsStats.update.push(performance.now() - updateStarted);
   }
@@ -890,6 +958,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     const fonts = options.fontFaces?.map(path => Buffer.from(readFileSync(nativeAssetPath(path))).toString("base64"));
     bridge.start(fonts?.length ? { ...committed.document, fonts } : committed.document, onNativeEvent);
     syncMedia();
+    syncBindings(committed);
   } catch (error) {
     const startupError = reportError(error, { source: "bridge", event: "start" });
     terminalError = startupError;

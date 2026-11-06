@@ -385,12 +385,16 @@ export interface NativeTrayMenuItem {
   id?: string; label?: string; /** Shown next to the label in a menu bar (`Ctrl+S`). */ accelerator?: string; separator?: boolean; checked?: boolean; disabled?: boolean; items?: NativeTrayMenuItem[];
 }
 export interface NativeTrayOptions { /** Base64 PNG/JPEG/WebP bytes. */ iconData?: string; tooltip?: string; menu: NativeTrayMenuItem[] }
+/** New values for an existing node: style keys merged into its style, and its text. */
+export interface NativeNodeSet { id: string; style?: Record<string, unknown>; text?: string }
 export type NativeCommand =
   /** A command for another window of the app (`app.openWindow`). */
   | { type: "toWindow"; window: string; command: NativeCommand; requestId?: string }
   /** Opens another window of the app from its own document. */
   | { type: "openWindow"; window: string; document: SceneDocument }
   | { type: "patch"; nodes: NativeNode[] }
+  /** Signal updates: new values of a few fields of existing nodes (their other fields stay). */
+  | { type: "setNodes"; nodes: NativeNodeSet[] }
   | { type: "mutate"; mutations: TreeMutation[] }
   | { type: "update"; root: NativeNode }
   | { type: "close" }

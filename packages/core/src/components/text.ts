@@ -1,17 +1,18 @@
-import { jsx, type BaseProps, type Child, type IntrinsicStyle, type VNode } from "../jsx-runtime";
+import { jsx, type BaseProps, type BindableChild, type IntrinsicStyle, type Reactive, type VNode } from "../jsx-runtime";
 import { canonicalizeIntrinsicStyle } from "../intrinsic-style";
 import { markPure } from "../memo";
 
-export interface TextProps extends Omit<BaseProps, "style"> {
+export interface TextProps extends Omit<BaseProps, "style" | "children"> {
   size?: number;
   weight?: number;
   color?: string;
-  style?: IntrinsicStyle;
-  children?: Child;
+  style?: Reactive<IntrinsicStyle>;
+  children?: BindableChild;
 }
 
 export function Text({ size, weight, color, style, ...props }: TextProps): VNode {
-  const canonicalStyle = canonicalizeIntrinsicStyle(style);
+  // Signal values pass through untouched: the reconciler binds them.
+  const canonicalStyle = canonicalizeIntrinsicStyle(style as IntrinsicStyle | undefined);
   return jsx("text", {
     ...props,
     // Unset font and colour inherit from the parent, like CSS; the theme gives the root values.

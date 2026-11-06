@@ -1162,8 +1162,32 @@ fn valid_number_edit(value: &str) -> bool {
     }
 }
 
+/// A retained node, shared: painting and hit testing hold it while the tree changes
+/// (copying a node per painted box cost a tenth of a frame). Writes copy it only while shared.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SharedNode(Arc<Node>);
+
+impl SharedNode {
+    pub fn new(node: Node) -> Self {
+        Self(Arc::new(node))
+    }
+}
+
+impl std::ops::Deref for SharedNode {
+    type Target = Node;
+    fn deref(&self) -> &Node {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for SharedNode {
+    fn deref_mut(&mut self) -> &mut Node {
+        Arc::make_mut(&mut self.0)
+    }
+}
+
 pub struct Entry {
-    pub node: Node,
+    pub node: SharedNode,
     pub(crate) children: Vec<String>,
     pub(crate) parent: Option<String>,
     layout_id: Option<NodeId>,
@@ -2338,7 +2362,7 @@ impl Tree {
                 self.dirty.text = true;
                 self.dirty.layout = true;
             }
-            if node != prev.node || structure_dirty {
+            if node != *prev.node || structure_dirty {
                 self.dirty.paint = true;
                 self.paint_changed.insert(node.id.clone());
             }
@@ -2480,7 +2504,7 @@ impl Tree {
         self.entries.insert(
             id,
             Entry {
-                node,
+                node: SharedNode::new(node),
                 children: child_ids,
                 parent: previous.as_ref().and_then(|e| e.parent.clone()),
                 layout_id: previous.as_ref().and_then(|e| e.layout_id),
@@ -2543,6 +2567,101 @@ impl Tree {
             self.refresh_stacking();
         }
         Ok(())
+    }
+
+    /// Signal updates: each node keeps every field but the style keys and text it is given.
+    /// Applied as a patch of the updated nodes, so they validate and invalidate the same way.
+    pub fn set_nodes(&mut self, sets: Vec<crate::protocol::NodeSet>) -> Result<(), String> {
+        // All or nothing: every node must exist before any changes.
+        for set in &sets {
+            if !self.entries.contains_key(&set.id) {
+                return Err(format!("Node update references a missing node: {}", set.id));
+            }
+        }
+        let mut nodes = Vec::new();
+        for set in sets {
+            if self.set_node_in_place(&set) {
+                continue;
+            }
+            let entry = &self.entries[&set.id];
+            let mut node = (*entry.node).clone();
+            node.children = Vec::new();
+            if let Some(style) = set.style {
+                let mut map = node.style.as_object().cloned().unwrap_or_default();
+                for (key, value) in style {
+                    map.insert(key, value);
+                }
+                node.style = crate::protocol::NodeStyle::new(Value::Object(map));
+            }
+            if let Some(text) = set.text {
+                node.text = text;
+            }
+            nodes.push(node);
+        }
+        if nodes.is_empty() {
+            return Ok(());
+        }
+        self.patch(nodes)
+    }
+
+    /// The common signal update, applied to the retained entry without reconciling it: a
+    /// colour or opacity (paint only), and the text of a plain text node (measure again). False
+    /// when the update needs the whole patch path (a transition, a layout key, rich text…).
+    fn set_node_in_place(&mut self, set: &crate::protocol::NodeSet) -> bool {
+        const PAINT_ONLY: &[&str] = &["background", "foreground", "borderColor", "opacity"];
+        let Some(entry) = self.entries.get_mut(&set.id) else {
+            return false;
+        };
+        let node = &entry.node;
+        if node.style.get("transition").is_some()
+            || node.style.get("animation").is_some()
+            || !entry.motions.is_empty()
+        {
+            return false;
+        }
+        if let Some(style) = &set.style
+            && style.keys().any(|key| !PAINT_ONLY.contains(&key.as_str()))
+        {
+            return false;
+        }
+        let text_changed = set.text.as_ref().is_some_and(|text| *text != node.text);
+        if text_changed
+            && (node.kind != "text"
+                || node.rich.is_some()
+                || !node.runs.is_null()
+                || node.highlight.is_some())
+        {
+            return false;
+        }
+        let mut changed = false;
+        if let Some(style) = &set.style
+            && style
+                .iter()
+                .any(|(key, value)| node.style.get(key) != Some(value))
+        {
+            let mut map = node.style.as_object().cloned().unwrap_or_default();
+            for (key, value) in style {
+                map.insert(key.clone(), value.clone());
+            }
+            entry.node.style = crate::protocol::NodeStyle::unshared(Value::Object(map));
+            changed = true;
+        }
+        if text_changed {
+            entry.node.text = set.text.clone().unwrap_or_default();
+            entry.measure_dirty = true;
+            self.text.layouts.remove(&set.id);
+            self.text.diff_layouts.remove(&set.id);
+            self.dirty.text = true;
+            self.dirty.layout = true;
+            // Search highlights match over the texts.
+            self.highlight_dirty = true;
+            changed = true;
+        }
+        if changed {
+            self.dirty.paint = true;
+            self.paint_changed.insert(set.id.clone());
+        }
+        true
     }
 
     pub fn mutate(&mut self, mutations: Vec<TreeMutation>) -> Result<(), String> {
@@ -3400,8 +3519,11 @@ impl Tree {
             self.entries
                 .values()
                 .filter(|entry| entry.measure_dirty)
-                .map(|entry| &entry.node),
+                .map(|entry| &*entry.node),
         );
+        if !self.dirty.full && self.laid_out_size == Some((width, height)) {
+            self.settle_same_size_texts();
+        }
         if !self.dirty.full
             && self.laid_out_size == Some((width, height))
             && self.compute_within_boundaries()?
@@ -3451,6 +3573,42 @@ impl Tree {
         self.dirty.full = false;
         self.laid_out_size = Some((width, height));
         Ok(())
+    }
+
+    /// Texts whose new content measures exactly as the box they have (a counter going from
+    /// "12" to "13" in tabular digits) need no layout: they keep their box. Only single words
+    /// laid out at their natural size qualify, whose min- and max-content are that size, so
+    /// no line of the flex algorithm can come out differently.
+    fn settle_same_size_texts(&mut self) {
+        let candidates: Vec<(String, NodeId)> = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| {
+                entry.measure_dirty
+                    && !entry.layout_dirty
+                    && !entry.structure_dirty
+                    && entry.node.kind == "text"
+                    && entry.node.rich.is_none()
+                    && entry.node.runs.is_null()
+                    && !entry.node.text.is_empty()
+                    && entry.node.text.chars().all(|c| {
+                        c.is_ascii_alphanumeric() || matches!(c, '.' | ',' | ':' | '%' | '#')
+                    })
+            })
+            .filter_map(|(id, entry)| Some((id.clone(), entry.layout_id?)))
+            .collect();
+        for (id, layout_id) in candidates {
+            let (width, height) = self.text.measure(&id, None);
+            let laid = self.layout.unrounded_layout(layout_id).size;
+            if (width - laid.width.ceil()).abs() < 0.01
+                && (height - laid.height.ceil()).abs() < 0.01
+                && (laid.width - laid.width.ceil()).abs() < 0.01
+                && (laid.height - laid.height.ceil()).abs() < 0.01
+                && let Some(entry) = self.entries.get_mut(&id)
+            {
+                entry.measure_dirty = false;
+            }
+        }
     }
 
     /// A box with a fixed size, inside a flex container: its parent sizes and places it the
@@ -3533,8 +3691,12 @@ impl Tree {
                 boundaries.push(found.to_string());
             }
         }
+        // Nothing an entry records needs layout (texts that kept their size, say): done.
         if boundaries.is_empty() {
-            return Ok(false);
+            self.ensure_focused_textarea_caret_visible();
+            self.resolve_highlights();
+            self.highlight_dirty = false;
+            return Ok(true);
         }
         // A boundary inside another one is laid out with it.
         let boundaries: Vec<String> = boundaries
@@ -3780,6 +3942,18 @@ impl Tree {
     }
     fn resolve_highlights(&mut self) {
         self.highlight_ranges.clear();
+        // No search highlight anywhere (nearly every frame of nearly every app): nothing to match.
+        // (With counts reported before, the full pass below reports them gone.)
+        if self.highlight_counts.is_empty()
+            && !self
+                .entries
+                .values()
+                .any(|entry| entry.node.highlight.is_some())
+        {
+            self.highlight_focus.clear();
+            self.highlight_match_cache.clear();
+            return;
+        }
         let mut counts = HashMap::default();
         let mut queries = HashMap::default();
         let mut focus = HashMap::default();
@@ -4928,7 +5102,7 @@ impl Tree {
             let render_node = ime_display
                 .as_ref()
                 .map(|display| display.node.clone())
-                .unwrap_or_else(|| node.clone());
+                .unwrap_or_else(|| (*node).clone());
             if ime_display.is_some() {
                 self.text.prepare(&render_node);
             }
@@ -7095,7 +7269,7 @@ impl Tree {
             let caret = floor_char_boundary(&ime.preedit, caret.min(ime.preedit.len()));
             (start + anchor, start + caret)
         });
-        let mut node = entry.node.clone();
+        let mut node = (*entry.node).clone();
         node.id = format!("{id}::ime");
         node.value = Some(value.clone());
         node.placeholder.clear();
@@ -7124,7 +7298,7 @@ impl Tree {
         if !matches!(entry.node.kind.as_str(), "input" | "textarea") {
             return None;
         }
-        let node = entry.node.clone();
+        let node = (*entry.node).clone();
         let value = node.value.clone().unwrap_or_default();
         let caret = floor_boundary(&value, self.caret.min(value.len()));
         self.text.prepare(&node);
@@ -8014,8 +8188,9 @@ impl Tree {
     fn set_input(&mut self, id: String, value: String) -> Vec<Value> {
         let entry = self.entries.get_mut(&id).unwrap();
         // Styled runs (a rich text area) stay on the text they styled until the app answers.
-        let previous = entry.node.value.as_deref().unwrap_or("");
-        shift_runs(&mut entry.node.runs, previous, &value);
+        let node = &mut *entry.node;
+        let previous = node.value.as_deref().unwrap_or("");
+        shift_runs(&mut node.runs, previous, &value);
         entry.node.value = Some(value.clone());
         entry.measure_dirty = true;
         self.text.layouts.remove(&id);

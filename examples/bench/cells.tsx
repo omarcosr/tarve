@@ -4,7 +4,7 @@
 // whole scene each frame but only cell 0 changes, MODE=idle renders once. R picks the
 // renderer (cpu, gpu, auto). Run by scripts/bench-bui.ts, which samples CPU and memory
 // from outside the process the same way for every app.
-import { Text, View, Window, createApp, memo, type Renderer } from "@tarve/core";
+import { Text, View, Window, batch, createApp, memo, signal, type Renderer } from "@tarve/core";
 
 const tImported = performance.now();
 const cells = Number(process.env.CELLS ?? 100);
@@ -40,7 +40,30 @@ function PlainCell({ i, t }: { i: number; t: number }) {
 // "React with signals" analogue: the grid does not render again, only the changed cell).
 const Cell = process.env.MEMO === "1" ? memo(PlainCell) : PlainCell;
 
+// SIGNALS=1: each cell's colour and label are signals (BUI's DOM / "React with signals"):
+// the grid renders once, and a frame sets only the changed signals.
+const signals = process.env.SIGNALS === "1";
+const colors = signals ? indexes.map(i => signal(cellColor(i, 0))) : [];
+const labels = signals ? indexes.map(i => signal(String((i * 13) % 1000))) : [];
+function tick(): void {
+  if (!signals) { app.update(); return; }
+  batch(() => {
+    const count = mode === "one" ? 1 : cells;
+    for (let i = 0; i < count; i++) {
+      colors[i]!.value = cellColor(i, t);
+      labels[i]!.value = String((i * 13 + t) % 1000);
+    }
+  });
+}
+
 function Scene() {
+  if (signals) return <Window title="tarve-bench" width={width} height={height}>
+    <View style={{ flex: 1, direction: "row", wrap: true, alignContent: "start", gap, padding: gap, background: "#303030" }}>
+      {indexes.map(i => <View key={i} style={{ width: w, height: h, background: colors[i]!, radius: 3, align: "center", justify: "center" }}>
+        <Text style={{ fontSize: font, foreground: "#ffffff" }}>{labels[i]!}</Text>
+      </View>)}
+    </View>
+  </Window>;
   return <Window title="tarve-bench" width={width} height={height}>
     <View style={{ flex: 1, direction: "row", wrap: true, alignContent: "start", gap, padding: gap, background: "#303030" }}>
       {process.env.MEMO === "1"
@@ -61,7 +84,7 @@ let firstFrameMs = 0;
 app.onEvent(event => {
   if (event.type !== "frame") return;
   if (!firstFrameMs) firstFrameMs = performance.now();
-  if (mode !== "idle") { t++; app.update(); }
+  if (mode !== "idle") { t++; tick(); }
 });
 await app.ready;
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -75,6 +98,6 @@ console.log("@mark end");
 const { js, native } = await app.stats();
 const p50 = (summary: { p50: number } | undefined) => summary?.p50;
 const phases = { render: p50(js.render), diff: p50(js.diff), shadow: p50(js.shadow), send: p50(js.send), update: p50(js.update), apply: p50(native.phases?.apply), layout: p50(native.phases?.layout), paint: p50(native.phases?.paint), present: p50(native.phases?.present), frame: p50(native.phases?.frame) };
-console.log(JSON.stringify({ app: `tarve-${process.env.MEMO === "1" ? "memo-" : ""}${renderer}`, cells, mode, fps: +(frames / wall * 1000).toFixed(1), frames, wallMs: Math.round(wall), first_frame_ms: Math.round(firstFrameMs), startup: { imported: Math.round(tImported), createApp: Math.round(tCreate), started: Math.round(tCreated) }, phases }));
+console.log(JSON.stringify({ app: `tarve-${process.env.MEMO === "1" ? "memo-" : ""}${signals ? "signals-" : ""}${renderer}`, cells, mode, fps: +(frames / wall * 1000).toFixed(1), frames, wallMs: Math.round(wall), first_frame_ms: Math.round(firstFrameMs), startup: { imported: Math.round(tImported), createApp: Math.round(tCreate), started: Math.round(tCreated) }, phases }));
 app.close();
 process.exit(0);

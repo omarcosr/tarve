@@ -9,6 +9,7 @@ import { serializeImageSource } from "./components/image";
 import { parseTransform } from "./css-shadow";
 import { withRenderScope } from "./render-scope";
 import { MEMO, sameVNode, type MemoInfo } from "./memo";
+import { isSignal, type Signal } from "./signal";
 import { openExternal } from "./bridge";
 import { compileInline, type InlineContext } from "./inline-text";
 import type { MediaRequest } from "./media-element";
@@ -34,8 +35,41 @@ function windowBorder(background: string, selected: ThemeDefinition): string {
   return own < 0.5 ? "#ffffff1f" : "#0000001f";
 }
 
+/**
+ * A node's value bound to a signal: a style key (resolved like the rest of the style when the
+ * signal changes) or the text, made of the pieces it was written with (`Clicks: {count}`).
+ */
+export interface NodeBinding {
+  signal: Signal<unknown>;
+  style?: { key: string; resolve: (value: unknown) => Record<string, unknown> };
+  text?: unknown[];
+}
+/** The text of bound pieces now: signals read, the rest as written. */
+export function boundText(parts: readonly unknown[]): string {
+  let text = "";
+  for (let index = 0; index < parts.length; index++) {
+    const part = parts[index];
+    if (part == null || typeof part === "boolean") continue;
+    text += isSignal(part) ? String(part.value ?? "") : String(part);
+  }
+  return text;
+}
+/** Text pieces when they hold a signal: a signal, or a list of strings, numbers and signals. */
+function signalParts(children: unknown): unknown[] | undefined {
+  if (isSignal(children)) return [children];
+  if (!Array.isArray(children)) return undefined;
+  let found = false;
+  for (let index = 0; index < children.length; index++) {
+    const child = children[index];
+    if (isSignal(child)) found = true;
+    else if (child != null && typeof child !== "string" && typeof child !== "number" && typeof child !== "boolean") return undefined;
+  }
+  return found ? children : undefined;
+}
 export interface CompiledTree {
   document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode>; media?: Map<string, MediaRequest>;
+  /** Signal bindings by node id (`signal.ts`). */
+  bindings?: Map<string, NodeBinding[]>;
   /** Some style carried a window-width breakpoint: the app re-renders when the width changes. */
   usesViewport?: boolean;
   /** `viewport()` read the exact size: any resize re-renders (set by the app). */
@@ -88,6 +122,7 @@ interface MemoEntry {
   nodes: [string, NativeNode][];
   handlers: [string, Handlers][];
   media: [string, MediaRequest][];
+  bindings: [string, NodeBinding[]][];
   /** Memoized components inside this one, kept alive when it is reused. */
   nested: string[];
   idSet?: Set<string>;
@@ -164,6 +199,7 @@ export function compileTree(
   const viewportWidth = () => startViewport?.width ?? windowOptions?.width ?? 1120;
   const viewportHeight = () => startViewport?.height ?? windowOptions?.height ?? 760;
   const handlers = new Map<string, Handlers>();
+  const bindings = new Map<string, NodeBinding[]>();
   const ids = new Set<string>();
   /** Every id in the order it was claimed: memo entries slice their own span. */
   const idLog: string[] = [];
@@ -190,7 +226,7 @@ export function compileTree(
     else { autoMemo.tries = 0; autoMemo.misses = 0; }
   }
   /** What compiling a subtree registered: the ids claimed since `mark` and their nodes, handlers and media. */
-  function claimedSince(mark: number): Pick<MemoEntry, "ids" | "nodes" | "handlers" | "media"> {
+  function claimedSince(mark: number): Pick<MemoEntry, "ids" | "nodes" | "handlers" | "media" | "bindings"> {
     // Anonymous text logs its id twice (claimed, released, claimed again by its Text): keep one.
     const own = [...new Set(idLog.slice(mark))].filter(id => ids.has(id));
     const pick = <T>(map: Map<string, T>) => {
@@ -198,7 +234,7 @@ export function compileTree(
       for (const id of own) { const value = map.get(id); if (value !== undefined) out.push([id, value]); }
       return out;
     };
-    return { ids: own, nodes: pick(nodes), handlers: pick(handlers), media: pick(media) };
+    return { ids: own, nodes: pick(nodes), handlers: pick(handlers), media: pick(media), bindings: pick(bindings) };
   }
   function added(set: Set<string>, skip: number): string[] {
     // Only reached on a cache miss; Sets iterate in insertion order.
@@ -247,6 +283,7 @@ export function compileTree(
       restore(nodes, previous.nodes);
       restore(handlers, previous.handlers);
       restore(media, previous.media);
+      restore(bindings, previous.bindings);
       // Memoized components nested in a reused subtree stay cached too.
       for (let index = 0; index < previous.nested.length; index++) memoSeen.add(previous.nested[index]!);
       previous.props = props;
@@ -366,22 +403,41 @@ export function compileTree(
       let elements = 0;
       for (let index = 0; index < child.length; index++) {
         const item = child[index];
-        if (typeof item === "object" && item !== null && !Array.isArray(item)) elements++;
+        if (typeof item === "object" && item !== null && !Array.isArray(item) && !isSignal(item)) elements++;
       }
       let seen = 0;
       const out: NativeNode[] = [];
       for (let index = 0; index < child.length; index++) {
         const item = child[index];
-        const primitive = typeof item === "string" || typeof item === "number";
+        // Signals are text pieces too (`Clicks: {count}`).
+        const primitive = isPrimitive(item) || isSignal(item);
         // CSS: a contiguous run of text children (`Mark {count} as read`) is one
         // anonymous box, not one per JSX expression; later pieces joined the first.
-        if (primitive && index > 0 && isPrimitive(child[index - 1])) continue;
-        const element = typeof item === "object" && item !== null && !Array.isArray(item);
+        if (primitive && index > 0 && (isPrimitive(child[index - 1]) || isSignal(child[index - 1]))) continue;
+        const element = typeof item === "object" && item !== null && !Array.isArray(item) && !isSignal(item);
         const key = element ? (item as VNode).key : undefined;
         let piece: Child = item;
         if (primitive) {
+          let end = index + 1;
+          while (end < child.length && (isPrimitive(child[end]) || isSignal(child[end]))) end++;
+          const run = child.slice(index, end);
+          if (run.some(isSignal)) {
+            const runPath = path + "/" + index;
+            if (run.length === 1) {
+              const nodes = visit(run[0] as Child, runPath, group);
+              for (let n = 0; n < nodes.length; n++) out.push(nodes[n]!);
+              continue;
+            }
+            // A run with a signal: one anonymous text bound to it.
+            if (ids.has(runPath)) throw new Error(`Duplicate node id: ${runPath}`);
+            ids.add(runPath); idLog.push(runPath);
+            ids.delete(runPath);
+            const bound = visit(Text({ id: runPath, children: run as never }), runPath, group);
+            for (let n = 0; n < bound.length; n++) out.push(bound[n]!);
+            continue;
+          }
           let text = String(item);
-          for (let next = index + 1; next < child.length && isPrimitive(child[next]); next++) text += String(child[next]);
+          for (let next = index + 1; next < end; next++) text += String(child[next]);
           piece = text;
         }
         const at = element ? { index: seen++, count: elements } : undefined;
@@ -399,6 +455,13 @@ export function compileTree(
       // Anonymous text (a bare string child) inherits like any text node.
       ids.delete(path);
       return visit(Text({ id: path, children: String(child) }), path, group);
+    }
+    if (isSignal(child)) {
+      // A bare signal child is anonymous text bound to it.
+      if (ids.has(path)) throw new Error(`Duplicate node id: ${path}`);
+      ids.add(path); idLog.push(path);
+      ids.delete(path);
+      return visit(Text({ id: path, children: child as never }), path, group);
     }
     if (child.type === Fragment || child.type === "fragment") return visit(child.props.children, path, group);
     if (!adapterNative) {
@@ -490,6 +553,17 @@ export function compileTree(
       for (const key of DIV_SHORTHANDS) if (p[key] !== undefined) divShorthands[key] = p[key];
       rawStyle = { ...divShorthands, ...canonicalizeIntrinsicStyle(p.style) };
     } else rawStyle = { ...p.style };
+    // Style values bound to signals: the current value now, and a binding that resolves the next ones.
+    let nodeBindings: NodeBinding[] | undefined;
+    for (const key in rawStyle) {
+      const value = rawStyle[key];
+      if (!isSignal(value)) continue;
+      const bindingTheme = selectedTheme;
+      const context: VariantContext = { viewportWidth: viewportWidth(), viewportHeight: viewportHeight(), usedViewport: () => {}, usedPosition: () => {} };
+      const resolve = (next: unknown) => resolveThemeStyle(foldVariants({ [key]: next } as never, bindingTheme, context), bindingTheme) as Record<string, unknown>;
+      (nodeBindings ??= []).push({ signal: value, style: { key, resolve } });
+      rawStyle[key] = value.value;
+    }
     // CSS: `display: flex` lays a div's children in a row unless flex-direction says otherwise.
     if (isIntrinsicDiv && rawStyle.display === "flex" && rawStyle.direction === undefined) rawStyle.direction = "row";
     if ((interactiveKinds.has(nativeType) && p.focusable !== false) || control?.role === "otpSlot") {
@@ -560,11 +634,15 @@ export function compileTree(
     }
     const node: NativeNode = { id, kind: nativeType as NativeNode["kind"], style, children };
     const optional = node as unknown as Record<string, unknown>;
+    // A text bound to signals: its pieces now, and a binding per signal that writes the text again.
+    const parts = isText ? signalParts(p.children) : undefined;
+    const textChildren = parts ? boundText(parts) : p.children;
+    if (parts) for (const part of parts) if (isSignal(part)) (nodeBindings ??= []).push({ signal: part, text: parts });
     if (nativeType === "text") {
-      const inline = compileInline(p.children, String(style.whiteSpace ?? "normal"), style as Record<string, unknown>, () => inlineContext(id, style as Record<string, unknown>));
+      const inline = compileInline(textChildren, String(style.whiteSpace ?? "normal"), style as Record<string, unknown>, () => inlineContext(id, style as Record<string, unknown>));
       node.text = inline.text;
       if (inline.runs.length) node.runs = inline.runs;
-    } else if (isText) node.text = textContent(p.children);
+    } else if (isText) node.text = textContent(textChildren);
     if (nativeType === "textarea" && p.richText !== undefined) {
       // A rich text area: its value styled by phrasing children, as runs over the value's text.
       const inline = compileInline(p.richText, "pre-wrap", style as Record<string, unknown>, () => inlineContext(id, style as Record<string, unknown>));
@@ -611,6 +689,7 @@ export function compileTree(
         : { ...p.motionFrom };
     }
     if (nativeType === "input" || nativeType === "textarea") labelableTargets.set(id, id);
+    if (nodeBindings) bindings.set(id, nodeBindings);
     nodes.set(id, node);
     return [node];
   }
@@ -642,5 +721,5 @@ export function compileTree(
   // The root reports its size so the app can re-render when the window crosses a breakpoint.
   if (usesViewport) roots[0].reportSize = true;
   setViewportHook(outerViewportHook);
-  return { document: { version: PROTOCOL_VERSION, renderer, window: windowOptions, root: roots[0] }, handlers, nodes, media, usesViewport };
+  return { document: { version: PROTOCOL_VERSION, renderer, window: windowOptions, root: roots[0] }, handlers, nodes, media, usesViewport, ...bindings.size ? { bindings } : {} };
 }

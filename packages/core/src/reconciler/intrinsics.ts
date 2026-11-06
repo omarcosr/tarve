@@ -1,4 +1,4 @@
-import { jsx, type Child, type IntrinsicAnchorProps, type VNode } from "../jsx-runtime";
+import { jsx, type Child, type IntrinsicAnchorProps, type IntrinsicStyle, type VNode } from "../jsx-runtime";
 import { canonicalizeIntrinsicStyle } from "../intrinsic-style";
 import { Text } from "../components/text";
 import { Image } from "../components/image";
@@ -76,7 +76,7 @@ export function expandIntrinsic(child: VNode, path: string, context: IntrinsicCo
       ...props,
       size: props.size ?? (ua ? preset.size : undefined),
       weight: props.weight ?? (ua ? preset.weight : undefined),
-      style: canonicalizeIntrinsicStyle(props.style),
+      style: canonicalizeIntrinsicStyle(props.style as IntrinsicStyle | undefined),
     }));
   }
   if (typeof child.type === "string" && child.type !== "span" && child.type !== "a"
@@ -86,7 +86,7 @@ export function expandIntrinsic(child: VNode, path: string, context: IntrinsicCo
   }
   if ((child.type === "span" || child.type === "p")) {
     const { userAgentStyles: _ua, ...props } = child.props as Parameters<typeof Text>[0] & { userAgentStyles?: boolean };
-    return expand(Text({ ...(child.type === "p" ? { uaMargin: { block: ua ? 1 : 0 } } : {}), ...props, style: canonicalizeIntrinsicStyle(props.style) } as never));
+    return expand(Text({ ...(child.type === "p" ? { uaMargin: { block: ua ? 1 : 0 } } : {}), ...props, style: canonicalizeIntrinsicStyle(props.style as IntrinsicStyle | undefined) } as never));
   }
   if (child.type === "img") {
     const props = child.props as Parameters<typeof Image>[0];

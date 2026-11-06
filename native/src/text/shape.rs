@@ -21,7 +21,7 @@ impl TextEngine {
             if content.contains('\t') {
                 continue;
             }
-            let signature = (hash_text(&content), text_style_hash(node));
+            let signature = (hash_text(&content), self.style_hash(node));
             if self.layouts.contains_key(&node.id)
                 && self.signatures.get(&node.id) == Some(&signature)
             {
@@ -91,6 +91,28 @@ impl TextEngine {
             self.preshaped.insert(key, layout);
         }
     }
+    /// `text_style_hash` of the node, kept per node while its style is the same object (a text
+    /// whose content changes every frame keeps its style). The kept style holds the object, so
+    /// a new one is never at the same address.
+    pub(super) fn style_hash(&mut self, node: &Node) -> u64 {
+        if !node.syntax_theme.is_null() || !node.runs.is_null() || node.show_line_numbers {
+            return text_style_hash(node);
+        }
+        if let Some((style, hash)) = self.style_hashes.get(&node.id)
+            && std::ptr::eq::<serde_json::Value>(&**style, &*node.style)
+        {
+            return *hash;
+        }
+        let hash = text_style_hash(node);
+        self.style_hashes
+            .insert(node.id.clone(), (node.style.clone(), hash));
+        hash
+    }
+
+    pub(crate) fn forget_style_hashes(&mut self) {
+        self.style_hashes.clear();
+    }
+
     pub fn clear_preshaped(&mut self) {
         self.preshaped.clear();
     }

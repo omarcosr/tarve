@@ -6,8 +6,9 @@ import { theme } from "../theme";
 import { Pressable, type PressableProps } from "./pressable";
 import { Text } from "./text";
 
-export interface LinkProps extends Omit<PressableProps, "control" | "style"> {
+export interface LinkProps extends Omit<PressableProps, "control" | "style" | "children"> {
   href: string;
+  children?: Child;
   style?: IntrinsicStyle;
   /** Accessible label override for icon-only or otherwise non-textual links. */
   label?: string;

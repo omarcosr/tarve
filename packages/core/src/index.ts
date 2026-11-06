@@ -5,7 +5,9 @@ export type { CheckboxProps, SwitchProps, RadioOption, RadioGroupProps, SliderPr
 export { VirtualList } from "./virtual-list";
 export { viewport } from "./viewport";
 export type { Viewport, ViewportOrientation, ViewportPointer } from "./viewport";
-export { memo, shallowEqual, template } from "./memo";
+export { markPure, memo, shallowEqual, template } from "./memo";
+export { Signal, batch, isSignal, signal, type Bindable } from "./signal";
+export type { BindableChild, Reactive } from "./jsx-runtime";
 export type { VirtualListProps } from "./virtual-list";
 export { AnimatePresence } from "./motion";
 export type { AnimatePresenceProps } from "./motion";

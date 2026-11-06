@@ -506,6 +506,12 @@ fn validate_command(command: &Command, routed: bool) -> Result<(), String> {
     match command {
         Command::Update { root } => protocol::validate(root),
         Command::Patch { nodes } => protocol::validate_patch(nodes),
+        Command::SetNodes { nodes } => {
+            if nodes.len() > 20_000 || nodes.iter().any(|node| node.id.is_empty()) {
+                return Err("A node update needs ids, at most 20000".into());
+            }
+            Ok(())
+        }
         Command::Mutate { mutations } => protocol::validate_mutations(mutations),
         Command::FileDialog(r) => protocol::validate_file_dialog(&r.mode, &r.options),
         Command::ToWindow { .. } | Command::OpenWindow { .. } if routed => {

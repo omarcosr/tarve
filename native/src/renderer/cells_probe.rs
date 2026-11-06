@@ -80,6 +80,22 @@ fn patch_json(cells: usize, t: usize) -> String {
             [view, text]
         })
         .collect();
+    // SET=1: what bound signals send (`setNodes`): the colour and the label only.
+    if std::env::var("SET").is_ok_and(|value| value == "1") {
+        let sets: Vec<Value> = (0..changed)
+            .flat_map(|i| {
+                let (view, text) = cell(i, t, size);
+                [
+                    json!({"id": view["id"], "style": {"background": view["style"]["background"]}}),
+                    json!({"id": text["id"], "text": text["text"]}),
+                ]
+            })
+            .collect();
+        return format!(
+            r#"{{"type":"setNodes","nodes":{}}}"#,
+            serde_json::to_string(&sets).unwrap()
+        );
+    }
     // JS writes the type first (a `Value` map would sort it after "nodes").
     format!(
         r#"{{"type":"patch","nodes":{}}}"#,
@@ -465,12 +481,13 @@ fn cells_probe() {
         let command = crate::protocol::Command::from_json(text.as_bytes()).unwrap();
         profiling("parse", false);
         parse.push(start.elapsed().as_secs_f64() * 1e3);
-        let crate::protocol::Command::Patch { nodes } = command else {
-            panic!("not a patch")
-        };
         let start = Instant::now();
         profiling("apply", true);
-        tree.patch(nodes).unwrap();
+        match command {
+            crate::protocol::Command::Patch { nodes } => tree.patch(nodes).unwrap(),
+            crate::protocol::Command::SetNodes { nodes } => tree.set_nodes(nodes).unwrap(),
+            _ => panic!("not a patch"),
+        }
         profiling("apply", false);
         apply.push(start.elapsed().as_secs_f64() * 1e3);
         let start = Instant::now();

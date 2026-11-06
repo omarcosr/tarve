@@ -156,6 +156,7 @@ pub struct NodeStyle(Arc<Value>, u128);
 
 /// Two bits of a 128-bit Bloom filter for `key`, from its length and first and last eight
 /// bytes: constant time for any key, and style keys differ there.
+#[inline]
 fn style_key_bits(key: &str) -> u128 {
     let bytes = key.as_bytes();
     let n = bytes.len();
@@ -182,7 +183,15 @@ impl NodeStyle {
         Self(value, bits)
     }
 
+    /// A style of its own, not interned: for a value that changes every frame (a bound
+    /// signal), where looking for an equal style would cost more than it shares.
+    pub fn unshared(value: Value) -> Self {
+        let bits = style_bits(&value);
+        Self(Arc::new(value), bits)
+    }
+
     /// `Value::get` for a key: `None` without searching the map when the filter rules it out.
+    #[inline]
     pub fn get(&self, key: &str) -> Option<&Value> {
         let bits = style_key_bits(key);
         if self.1 & bits != bits {
@@ -704,6 +713,16 @@ pub struct TrayMenuItem {
     pub items: Vec<TrayMenuItem>,
 }
 
+/// New values for an existing node: style keys merged into its style, and its text.
+#[derive(Debug, Deserialize)]
+pub struct NodeSet {
+    pub id: String,
+    #[serde(default)]
+    pub style: Option<serde_json::Map<String, Value>>,
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
 impl Command {
     /// Parses a command. An internally tagged enum buffers the whole input into serde's
     /// `Content` tree before it reads a field; an update (`patch`, `mutate`, `update`), the
@@ -722,6 +741,10 @@ impl Command {
         struct Update {
             root: Box<Node>,
         }
+        #[derive(Deserialize)]
+        struct SetNodes {
+            nodes: Vec<NodeSet>,
+        }
         if bytes.starts_with(br#"{"type":"patch","#) {
             serde_json::from_slice::<Patch>(bytes)
                 .map(|patch| Command::Patch { nodes: patch.nodes })
@@ -729,6 +752,9 @@ impl Command {
             serde_json::from_slice::<Mutate>(bytes).map(|mutate| Command::Mutate {
                 mutations: mutate.mutations,
             })
+        } else if bytes.starts_with(br#"{"type":"setNodes","#) {
+            serde_json::from_slice::<SetNodes>(bytes)
+                .map(|set| Command::SetNodes { nodes: set.nodes })
         } else if bytes.starts_with(br#"{"type":"update","#) {
             serde_json::from_slice::<Update>(bytes)
                 .map(|update| Command::Update { root: update.root })
@@ -753,6 +779,10 @@ pub enum Command {
     },
     Patch {
         nodes: Vec<Node>,
+    },
+    /// Signal updates: new values for a few fields of existing nodes (`Tree::set_nodes`).
+    SetNodes {
+        nodes: Vec<NodeSet>,
     },
     Mutate {
         mutations: Vec<TreeMutation>,
