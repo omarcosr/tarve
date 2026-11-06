@@ -207,7 +207,11 @@ impl DisplayList {
                             context.set_paint_transform(*brush);
                         }
                     }
-                    context.fill_path(path);
+                    match path {
+                        FillShape::Rect(rect) => context.fill_rect(rect),
+                        FillShape::RoundedRect(rounded) => context.fill_path(&rounded.to_path(0.1)),
+                        FillShape::Path(path) => context.fill_path(path),
+                    }
                     context.set_paint_transform(Affine::IDENTITY);
                 }
                 Op::Stroke {

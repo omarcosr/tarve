@@ -1261,6 +1261,8 @@ impl App {
             backdrop_dark: None,
             transparency_effects: None,
             frame_stats: Default::default(),
+            accessibility_pending: false,
+            last_accessibility_sync: Instant::now(),
             memory_stages,
             gpu_upgrade: false,
             gpu_check_pending: false,
@@ -1446,6 +1448,9 @@ struct App {
     transparency_effects: Option<bool>,
     /// Phase timings of recent frames, for `app.stats()`.
     frame_stats: crate::stats::FrameStats,
+    /// An app update changed the tree since the accessibility tree was last updated.
+    accessibility_pending: bool,
+    last_accessibility_sync: Instant,
     /// Process memory after each startup stage, for `app.stats()`.
     memory_stages: crate::stats::MemoryStages,
     /// The first frames are drawn on the CPU while the GPU device is still being created;
@@ -1466,6 +1471,8 @@ const PRESENT_RETRY_DELAY: Duration = Duration::from_millis(16);
 /// Longest a frame waits for the JS patch answering a click or key (under a 60 Hz frame).
 const INPUT_HOLD: Duration = Duration::from_millis(10);
 const MEMORY_RELEASE_INTERVAL: Duration = Duration::from_millis(500);
+/// Shortest time between two accessibility tree updates that come from app updates.
+const ACCESSIBILITY_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_PASTE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PASTE_IMAGE_DIMENSION: usize = 16_384;
 const MAX_PASTE_FILES: usize = 4_096;
@@ -1552,6 +1559,8 @@ impl App {
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
     fn sync_accessibility(&mut self) {
+        self.accessibility_pending = false;
+        self.last_accessibility_sync = Instant::now();
         if !self
             .accessibility
             .as_ref()
@@ -1581,7 +1590,10 @@ impl App {
     }
 
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "android")))]
-    fn sync_accessibility(&mut self) {}
+    fn sync_accessibility(&mut self) {
+        self.accessibility_pending = false;
+        self.last_accessibility_sync = Instant::now();
+    }
 
     fn request_close(&mut self, _event_loop: &ActiveEventLoop) {
         let intercept = self
@@ -2151,8 +2163,12 @@ impl App {
         let video_at = self.videos.deadline();
         let file_drag_at = self.file_drag.active().then(|| now + FILE_DRAG_POLL);
         let upgrade_at = self.gpu_upgrade.then(|| now + Duration::from_millis(2));
+        let accessibility_at = self
+            .accessibility_pending
+            .then(|| self.last_accessibility_sync + ACCESSIBILITY_INTERVAL);
         let gpu_check_at = self.gpu_check_pending.then(|| now + GPU_CHECK_POLL);
         let deadline = [
+            accessibility_at,
             upgrade_at,
             gpu_check_at,
             file_drag_at,
@@ -3241,6 +3257,13 @@ impl ApplicationHandler<Command> for App {
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, command: Command) {
         let mut accessibility_changed = false;
+        let update_command = matches!(
+            command,
+            Command::Patch { .. }
+                | Command::SetNodes { .. }
+                | Command::Mutate { .. }
+                | Command::Update { .. }
+        );
         // `motionAdvance` is the hand-off to the deterministic test clock. Do not
         // sample wall time immediately before applying it, otherwise the first
         // deterministic step depends on how long the command spent in transit.
@@ -3841,6 +3864,7 @@ impl ApplicationHandler<Command> for App {
                 AccessKitWindowEvent::InitialTreeRequested => {
                     if let Some(accessibility) = self.accessibility.as_mut() {
                         accessibility.set_active(true);
+                        accessibility.request_full_update();
                     }
                     accessibility_changed = true;
                 }
@@ -3866,7 +3890,14 @@ impl ApplicationHandler<Command> for App {
         let interaction_events = self.tree.take_interaction_events();
         self.emit(interaction_events);
         if accessibility_changed {
-            self.sync_accessibility();
+            // Tree updates (an animation sets thousands of nodes every frame) reach assistive
+            // technology at most every ACCESSIBILITY_INTERVAL, with the state they left; focus,
+            // actions and input still answer at once.
+            if update_command && self.last_accessibility_sync.elapsed() < ACCESSIBILITY_INTERVAL {
+                self.accessibility_pending = true;
+            } else {
+                self.sync_accessibility();
+            }
             self.layout_hidden_window();
         }
         self.sync_cursor();
@@ -3919,6 +3950,11 @@ impl ApplicationHandler<Command> for App {
             self.advance_live_motion();
         }
         let gpu_redraw = self.poll_gpu_check();
+        if self.accessibility_pending
+            && self.last_accessibility_sync.elapsed() >= ACCESSIBILITY_INTERVAL
+        {
+            self.sync_accessibility();
+        }
         if (present_due || recovery_due || motion_due || gpu_redraw)
             && let Some(window) = &self.window
         {

@@ -41,8 +41,23 @@ function windowBorder(background: string, selected: ThemeDefinition): string {
  */
 export interface NodeBinding {
   signal: Signal<unknown>;
-  style?: { key: string; resolve: (value: unknown) => Record<string, unknown> };
+  /** The style key, and the theme and viewport the node compiled with (`resolveBoundStyle`). */
+  style?: { key: string; theme: ThemeDefinition; viewport: [number, number] };
   text?: unknown[];
+}
+const noop = () => {};
+/** Writes the style values a bound signal's `value` stands for into `out`, resolved like the rest of the style. */
+export function resolveBoundStyle(binding: NonNullable<NodeBinding["style"]>, value: unknown, out: Map<string, unknown>): void {
+  const { key, theme: bindingTheme } = binding;
+  // Strings and numbers (a colour, an opacity) resolve on their own, as resolveThemeStyle
+  // would; anything else (a gradient, a shadow) goes through the whole resolution.
+  if (typeof value === "string") out.set(key, resolveStyleString(key, value, bindingTheme));
+  else if (typeof value === "number") out.set(key, value);
+  else {
+    const context: VariantContext = { viewportWidth: binding.viewport[0], viewportHeight: binding.viewport[1], usedViewport: noop, usedPosition: noop };
+    const resolved = resolveThemeStyle(foldVariants({ [key]: value } as never, bindingTheme, context), bindingTheme) as Record<string, unknown>;
+    for (const name in resolved) out.set(name, resolved[name]);
+  }
 }
 /** The text of bound pieces now: signals read, the rest as written. */
 export function boundText(parts: readonly unknown[]): string {
@@ -132,6 +147,7 @@ interface MemoEntry {
   position?: string;
 }
 const memoStores = new WeakMap<object, Map<string, MemoEntry>>();
+const EMPTY_ENTRIES: readonly [string, unknown][] = Object.freeze([]) as readonly [string, unknown][];
 
 /**
  * Automatic memo for list items: an item made only of native kinds and pure components
@@ -229,10 +245,12 @@ export function compileTree(
   function claimedSince(mark: number): Pick<MemoEntry, "ids" | "nodes" | "handlers" | "media" | "bindings"> {
     // Anonymous text logs its id twice (claimed, released, claimed again by its Text): keep one.
     const own = [...new Set(idLog.slice(mark))].filter(id => ids.has(id));
-    const pick = <T>(map: Map<string, T>) => {
-      const out: [string, T][] = [];
-      for (const id of own) { const value = map.get(id); if (value !== undefined) out.push([id, value]); }
-      return out;
+    // Nothing registered (most subtrees have no handlers, media or bindings): one shared empty list.
+    const pick = <T>(map: Map<string, T>): [string, T][] => {
+      if (map.size === 0) return EMPTY_ENTRIES as [string, T][];
+      let out: [string, T][] | undefined;
+      for (const id of own) { const value = map.get(id); if (value !== undefined) (out ??= []).push([id, value]); }
+      return out ?? EMPTY_ENTRIES as [string, T][];
     };
     return { ids: own, nodes: pick(nodes), handlers: pick(handlers), media: pick(media), bindings: pick(bindings) };
   }
@@ -241,7 +259,7 @@ export function compileTree(
     const out: string[] = [];
     let index = 0;
     for (const value of set) if (index++ >= skip) out.push(value);
-    return out;
+    return out.length ? out : EMPTY_ENTRIES as unknown as string[];
   }
   function restore<T>(map: Map<string, T>, entries: [string, T][]): void {
     for (let index = 0; index < entries.length; index++) {
@@ -558,16 +576,8 @@ export function compileTree(
     for (const key in rawStyle) {
       const value = rawStyle[key];
       if (!isSignal(value)) continue;
-      const bindingTheme = selectedTheme;
-      const context: VariantContext = { viewportWidth: viewportWidth(), viewportHeight: viewportHeight(), usedViewport: () => {}, usedPosition: () => {} };
-      // Strings and numbers (a colour, an opacity) resolve on their own, as resolveThemeStyle
-      // would; anything else (a gradient, a shadow) goes through the whole resolution.
-      const resolve = (next: unknown) => typeof next === "string"
-        ? { [key]: resolveStyleString(key, next, bindingTheme) }
-        : typeof next === "number"
-          ? { [key]: next }
-          : resolveThemeStyle(foldVariants({ [key]: next } as never, bindingTheme, context), bindingTheme) as Record<string, unknown>;
-      (nodeBindings ??= []).push({ signal: value, style: { key, resolve } });
+      // Plain data, no closure: thousands of bound nodes hold one each.
+      (nodeBindings ??= []).push({ signal: value, style: { key, theme: selectedTheme, viewport: [viewportWidth(), viewportHeight()] } });
       rawStyle[key] = value.value;
     }
     // CSS: `display: flex` lays a div's children in a row unless flex-direction says otherwise.
@@ -643,7 +653,10 @@ export function compileTree(
     // A text bound to signals: its pieces now, and a binding per signal that writes the text again.
     const parts = isText ? signalParts(p.children) : undefined;
     const textChildren = parts ? boundText(parts) : p.children;
-    if (parts) for (const part of parts) if (isSignal(part)) (nodeBindings ??= []).push({ signal: part, text: parts });
+    if (parts) for (let index = 0; index < parts.length; index++) {
+      const part = parts[index];
+      if (isSignal(part)) (nodeBindings ??= []).push({ signal: part, text: parts });
+    }
     if (nativeType === "text") {
       const inline = compileInline(textChildren, String(style.whiteSpace ?? "normal"), style as Record<string, unknown>, () => inlineContext(id, style as Record<string, unknown>));
       node.text = inline.text;

@@ -172,6 +172,11 @@ pub(crate) fn draw_decoration<P: PaintTarget>(
 /// Extra space a line needs above and below for raised and lowered runs, as
 /// CSS grows a line box to contain shifted inline boxes. Per line: (top, bottom).
 pub(crate) fn shifted_line_extents(layout: &Layout<TextBrush>) -> Option<Vec<(f32, f32)>> {
+    // Nearly every text has no shifted run: the layout's few styles say so without walking
+    // its lines and runs.
+    if layout.styles().iter().all(|style| style.brush.1 == 0.0) {
+        return None;
+    }
     let mut any = false;
     let extents = layout
         .lines()

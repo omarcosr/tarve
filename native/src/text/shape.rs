@@ -109,6 +109,36 @@ impl TextEngine {
         hash
     }
 
+    /// Memory probe: frees each part in turn and reports the live bytes it held.
+    #[cfg(all(test, not(feature = "mimalloc")))]
+    pub(crate) fn memory_report(&mut self) -> Vec<(&'static str, isize)> {
+        use crate::counting_alloc::LIVE;
+        use std::sync::atomic::Ordering;
+        let mut out = Vec::new();
+        let mut step = |name: &'static str, free: &mut dyn FnMut(&mut Self), this: &mut Self| {
+            let before = LIVE.load(Ordering::Relaxed);
+            free(this);
+            out.push((name, before - LIVE.load(Ordering::Relaxed)));
+        };
+        step("recent", &mut |t| t.recent.clear(), self);
+        step("measure_cache", &mut |t| t.measure_cache.clear(), self);
+        step(
+            "signatures+shaped_by",
+            &mut |t| {
+                t.signatures.clear();
+                t.shaped_by.clear();
+                t.style_hashes.clear();
+                t.alignments.clear();
+                t.drawn.clear();
+                t.unwrapped.clear();
+            },
+            self,
+        );
+        step("layouts", &mut |t| t.layouts.clear(), self);
+        step("workers", &mut |t| t.workers.clear(), self);
+        out
+    }
+
     pub(crate) fn forget_style_hashes(&mut self) {
         self.style_hashes.clear();
     }

@@ -15,7 +15,9 @@ const pending = new Set<Signal<unknown>>();
 export class Signal<T> {
   readonly [SIGNAL] = true;
   #value: T;
-  #listeners = new Set<Listener>();
+  /** Most signals have one subscriber (the node they are bound to): no Set for them. */
+  #listener: Listener | undefined;
+  #listeners: Set<Listener> | undefined;
 
   constructor(value: T) {
     this.#value = value;
@@ -39,13 +41,23 @@ export class Signal<T> {
 
   /** Calls `listener` after each change; returns the unsubscribe. */
   subscribe(listener: (signal: Signal<T>) => void): () => void {
-    this.#listeners.add(listener as Listener);
-    return () => { this.#listeners.delete(listener as Listener); };
+    const added = listener as Listener;
+    if (this.#listeners) this.#listeners.add(added);
+    else if (this.#listener && this.#listener !== added) this.#listeners = new Set([this.#listener, added]);
+    else this.#listener = added;
+    return () => this.unsubscribe(listener);
+  }
+
+  /** Stops calling `listener` (what `subscribe`'s returned function does, without a closure per subscription). */
+  unsubscribe(listener: (signal: Signal<T>) => void): void {
+    if (this.#listeners) this.#listeners.delete(listener as Listener);
+    else if (this.#listener === listener) this.#listener = undefined;
   }
 
   /** @internal */
   notify(): void {
-    for (const listener of this.#listeners) listener(this as Signal<unknown>);
+    if (this.#listeners) for (const listener of this.#listeners) listener(this as Signal<unknown>);
+    else this.#listener?.(this as Signal<unknown>);
   }
 
   toString(): string {

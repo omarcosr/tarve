@@ -996,6 +996,30 @@ fn visual_value<'a>(node: &'a Node, key: &str, state: VisualState) -> &'a Value 
     value
 }
 
+/// Whether the node's style sets `key` directly or in any of its state styles.
+fn style_sets_anywhere(node: &Node, key: &str) -> bool {
+    const STATES: [&str; 7] = [
+        "hover",
+        "focus",
+        "focusVisible",
+        "active",
+        "disabled",
+        "groupHover",
+        "focusWithin",
+    ];
+    // The state keys' filter bits, worked out once: most styles have no state style at all.
+    static STATE_BITS: std::sync::OnceLock<[u128; 7]> = std::sync::OnceLock::new();
+    let bits = STATE_BITS.get_or_init(|| STATES.map(crate::protocol::style_key_bits));
+    node.style.get(key).is_some()
+        || STATES.iter().zip(bits).any(|(state, bits)| {
+            node.style.may_hold(*bits)
+                && node
+                    .style
+                    .get(state)
+                    .is_some_and(|style| style.get(key).is_some())
+        })
+}
+
 fn visual_string<'a>(node: &'a Node, key: &str, fallback: &'a str, state: VisualState) -> &'a str {
     visual_value(node, key, state).as_str().unwrap_or(fallback)
 }
@@ -1548,6 +1572,8 @@ pub struct Tree {
     paint_holds_changed: HashSet<String>,
     paint_changed_depth: usize,
     paint_reuse: bool,
+    /// Whether any node is a link (`link_foreground_for`), true outside a paint.
+    paint_has_links: bool,
     pub paints: u64,
     pub layout_nodes_created: u64,
     pub measure_calls: u64,
@@ -1711,6 +1737,10 @@ impl Tree {
     }
 
     fn portal_roots(&self) -> Vec<String> {
+        // Most trees have no portal: a pass over the entries, not a lookup per id in order.
+        if !self.entries.values().any(|entry| entry.node.portal) {
+            return Vec::new();
+        }
         self.order
             .iter()
             .filter(|id| {
@@ -1815,6 +1845,7 @@ impl Tree {
             paint_holds_changed: HashSet::default(),
             paint_changed_depth: 0,
             paint_reuse: false,
+            paint_has_links: true,
             paints: 0,
             layout_nodes_created: 0,
             measure_calls: 0,
@@ -2571,6 +2602,11 @@ impl Tree {
 
     /// Signal updates: each node keeps every field but the style keys and text it is given.
     /// Applied as a patch of the updated nodes, so they validate and invalidate the same way.
+    #[cfg(all(test, not(feature = "mimalloc")))]
+    pub(crate) fn text_memory_report(&mut self) -> Vec<(&'static str, isize)> {
+        self.text.memory_report()
+    }
+
     pub fn set_nodes(&mut self, sets: Vec<crate::protocol::NodeSet>) -> Result<(), String> {
         // All or nothing: every node must exist before any changes.
         for set in &sets {
@@ -2639,11 +2675,7 @@ impl Tree {
                 .iter()
                 .any(|(key, value)| node.style.get(key) != Some(value))
         {
-            let mut map = node.style.as_object().cloned().unwrap_or_default();
-            for (key, value) in style {
-                map.insert(key.clone(), value.clone());
-            }
-            entry.node.style = crate::protocol::NodeStyle::unshared(Value::Object(map));
+            entry.node.style.set_keys(style.iter());
             changed = true;
         }
         if text_changed {
@@ -3209,18 +3241,19 @@ impl Tree {
     }
 
     pub(crate) fn is_virtual_parked(&self, id: &str) -> bool {
-        let mut current = id.to_string();
+        // Borrowed ids: this runs for every painted text.
+        let mut current = id;
         loop {
             let Some(parent_id) = self
                 .entries
-                .get(&current)
-                .and_then(|entry| entry.parent.clone())
+                .get(current)
+                .and_then(|entry| entry.parent.as_deref())
             else {
                 return false;
             };
             if let Some(list_id) = self
                 .entries
-                .get(&parent_id)
+                .get(parent_id)
                 .and_then(|entry| entry.parent.as_deref())
                 && self
                     .virtual_parked_row(list_id)
@@ -4256,6 +4289,13 @@ impl Tree {
         }
         self.painted_nodes = 0;
         self.video_painted.clear();
+        self.paint_has_links = self.entries.values().any(|entry| {
+            entry
+                .node
+                .control
+                .as_ref()
+                .is_some_and(|control| control.role == "link")
+        });
         // Search highlights span several texts: one text's change can move another's.
         // When most of the tree changed, finding what holds a change costs more than it saves.
         self.paint_reuse = !self.dirty.full_paint
@@ -4295,6 +4335,7 @@ impl Tree {
         }
         self.paint_frame_overlay(scale, root_rect, target);
         self.paints += 1;
+        self.paint_has_links = true;
         self.dirty.paint = false;
         self.dirty.full_paint = false;
         self.paint_changed.clear();
@@ -4410,6 +4451,19 @@ impl Tree {
         );
     }
     pub(crate) fn visual_state_for(&self, id: &str, node: &Node) -> VisualState {
+        // Nothing focused, hovered or pressed (an animation the pointer is not over): every
+        // node is in its plain state, without the lookups below for each of thousands.
+        if self.focused.is_none()
+            && self.hovered.is_none()
+            && self.pressed.is_none()
+            && self.hover_styled.is_empty()
+            && self.group_hovered.is_empty()
+        {
+            return VisualState {
+                disabled: node.disabled,
+                ..VisualState::default()
+            };
+        }
         let otp_slot_focused = node.control.as_ref().is_some_and(|control| {
             if control.role != "otpSlot" || control.group.is_empty() {
                 return false;
@@ -4461,6 +4515,11 @@ impl Tree {
             let Some(entry) = self.entries.get(current_id) else {
                 break;
             };
+            // Most boxes set no decoration in any state: skip working out their state.
+            if !style_sets_anywhere(&entry.node, "textDecoration") {
+                current = entry.parent.as_deref();
+                continue;
+            }
             let state = self.visual_state_for(current_id, &entry.node);
             if let Some(value) = visual_value(&entry.node, "textDecoration", state).as_str() {
                 return value.to_string();
@@ -4477,6 +4536,10 @@ impl Tree {
             let Some(entry) = self.entries.get(current_id) else {
                 break;
             };
+            if !style_sets_anywhere(&entry.node, "textDecoration") {
+                current = entry.parent.as_deref();
+                continue;
+            }
             let state = self.visual_state_for(current_id, &entry.node);
             if visual_value(&entry.node, "textDecoration", state).is_string() {
                 return entry.node.style["textDecorationStyle"]
@@ -4489,6 +4552,10 @@ impl Tree {
     }
 
     fn link_foreground_for(&self, id: &str) -> Option<String> {
+        // No link anywhere (looked up once per paint): no ancestor walk per text.
+        if !self.paint_has_links {
+            return None;
+        }
         let mut current = self.entries.get(id)?.parent.as_deref();
         while let Some(current_id) = current {
             let entry = self.entries.get(current_id)?;
@@ -5196,10 +5263,16 @@ impl Tree {
             // otherwise accents over capitals and descenders paint past a tight `line-height`.
             let ink_overflow =
                 matches!(node.kind.as_str(), "text" | "markdown") && !clips_overflow(&node);
-            if ink_overflow {
+            // A plain text whose lines fit its box paints inside that clip anyway (ink reaches
+            // less than a font size past the box): no clip layer, which costs a layer per text.
+            let text_clip = !(node.kind == "text" && ink_overflow && ime_display.is_none() && {
+                let (width, height) = self.text.measure(&render_node.id, Some(available_width));
+                f64::from(width) <= rect.width() + 0.5 && f64::from(height) <= rect.height() + 0.5
+            });
+            if text_clip && ink_overflow {
                 let reach = f64::from(node.font_size(14.0));
                 target.push_clip(Fill::NonZero, transform, &rect.inflate(reach, reach));
-            } else {
+            } else if text_clip {
                 target.push_clip(Fill::NonZero, transform, &shape);
             }
             let code_source_clip = (node.kind == "code").then(|| {
@@ -5443,7 +5516,9 @@ impl Tree {
                     }
                 }
             }
-            target.pop_layer();
+            if text_clip {
+                target.pop_layer();
+            }
         }
         if node.kind == "svg"
             && let Some(scene) = self.svgs.get(id).cloned()

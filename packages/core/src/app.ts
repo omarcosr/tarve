@@ -3,8 +3,9 @@ import { readFileSync } from "node:fs";
 import { environmentKey, initialViewport, setEnvironment, trackViewport } from "./viewport";
 import { applyMediaEvent, type MediaController } from "./media-element";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
-import { boundText, compileTree, type CompiledTree, type NodeBinding, invalidateMemos } from "./reconciler";
+import { boundText, compileTree, resolveBoundStyle, type CompiledTree, type NodeBinding, invalidateMemos } from "./reconciler";
 import type { Signal } from "./signal";
+import { NodeSetQueue } from "./app/node-sets";
 import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
 import { jsx, type VNode } from "./jsx-runtime";
 import { createElementDispatcher } from "./app/element-events";
@@ -330,27 +331,33 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   }
 
   /** Signals the committed tree binds, with the nodes each one sets, and their unsubscribes. */
-  const boundSignals = new Map<Signal<unknown>, { targets: { id: string; binding: NodeBinding }[]; unsubscribe: () => void }>();
+  /** Signals the committed tree binds, with the node (or nodes) each one sets. */
+  type BoundTarget = { id: string; binding: NodeBinding };
+  const boundSignals = new Map<Signal<unknown>, BoundTarget | BoundTarget[]>();
   const changedSignals = new Set<Signal<unknown>>();
+  const signalQueue = new NodeSetQueue();
+  const scratchStyle = new Map<string, unknown>();
   let signalFlushQueued = false;
   function syncBindings(tree: CompiledTree): void {
-    const next = new Map<Signal<unknown>, { id: string; binding: NodeBinding }[]>();
+    // One target object per bound node (most signals set one node): an array only when shared.
+    const next = new Map<Signal<unknown>, BoundTarget | BoundTarget[]>();
     if (tree.bindings) {
       for (const [id, list] of tree.bindings) {
         for (const binding of list) {
-          let targets = next.get(binding.signal);
-          if (!targets) next.set(binding.signal, targets = []);
-          targets.push({ id, binding });
+          const target = { id, binding };
+          const existing = next.get(binding.signal);
+          if (!existing) next.set(binding.signal, target);
+          else if (Array.isArray(existing)) existing.push(target);
+          else next.set(binding.signal, [existing, target]);
         }
       }
     }
-    for (const [signal, entry] of boundSignals) {
-      if (!next.has(signal)) { entry.unsubscribe(); boundSignals.delete(signal); }
+    for (const signal of boundSignals.keys()) {
+      if (!next.has(signal)) { signal.unsubscribe(onSignal); boundSignals.delete(signal); }
     }
     for (const [signal, targets] of next) {
-      const entry = boundSignals.get(signal);
-      if (entry) entry.targets = targets;
-      else boundSignals.set(signal, { targets, unsubscribe: signal.subscribe(onSignal) });
+      if (!boundSignals.has(signal)) signal.subscribe(onSignal);
+      boundSignals.set(signal, targets);
     }
   }
   function onSignal(signal: Signal<unknown>): void {
@@ -367,33 +374,58 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   function flushSignals(): void {
     signalFlushQueued = false;
     if (ended || closing || !committed) { changedSignals.clear(); return; }
-    const sets = new Map<string, NativeNodeSet>();
+    // Flat lists reused from flush to flush: an animation of thousands of nodes keeps no
+    // object per node between frames and makes almost none during one.
+    const queue = signalQueue;
+    queue.reset();
     for (const signal of changedSignals) {
-      const entry = boundSignals.get(signal);
-      if (!entry) continue;
-      for (const { id, binding } of entry.targets) {
-        const node = committed.nodes.get(id);
-        if (!node) continue;
-        let set = sets.get(id);
-        if (!set) sets.set(id, set = { id });
-        const shadow = observed?.nodes.get(id);
+      const bound = boundSignals.get(signal);
+      if (!bound) continue;
+      const count = Array.isArray(bound) ? bound.length : 1;
+      for (let index = 0; index < count; index++) {
+        const { id, binding } = Array.isArray(bound) ? bound[index]! : bound;
+        if (!committed.nodes.has(id)) continue;
+        const at = queue.entry(id);
         if (binding.style) {
-          const resolved = binding.style.resolve(signal.value);
-          // The node's own style object (compiled for it alone): updated where it is.
-          Object.assign(node.style, resolved);
-          set.style = set.style ? Object.assign(set.style, resolved) : resolved;
-          if (shadow && shadow !== node) Object.assign(shadow.style, resolved);
+          scratchStyle.clear();
+          resolveBoundStyle(binding.style, signal.value, scratchStyle);
+          for (const [key, value] of scratchStyle) queue.style(at, key, value);
         }
-        if (binding.text) {
-          const text = boundText(binding.text);
-          node.text = text;
-          set.text = text;
-          if (shadow && shadow !== node) shadow.text = text;
-        }
+        if (binding.text) queue.text[at] = boundText(binding.text);
       }
     }
     changedSignals.clear();
-    if (sets.size) sendInternal({ type: "setNodes", nodes: [...sets.values()] }, { source: "bridge", event: "setNodes" });
+    if (!queue.ids.length) return;
+    // The compiled nodes (and the shadow, when it holds its own copy) take the values, so the
+    // next render (which reads the signals again) finds nothing to send for them.
+    const nodes: NativeNodeSet[] = [];
+    for (let at = 0; at < queue.ids.length; at++) {
+      const id = queue.ids[at]!;
+      const node = committed.nodes.get(id)!;
+      const shadow = observed?.nodes.get(id);
+      const text = queue.text[at];
+      for (let kv = queue.first[at]!; kv >= 0; kv = queue.next[kv]!) {
+        const key = queue.keys[kv]!, value = queue.values[kv];
+        (node.style as Record<string, unknown>)[key] = value;
+        if (shadow && shadow !== node) (shadow.style as Record<string, unknown>)[key] = value;
+      }
+      if (text !== undefined) {
+        node.text = text;
+        if (shadow && shadow !== node) shadow.text = text;
+      }
+      // JSON.stringify (native code on every runtime) serializes these faster than any
+      // writer in JavaScript, which an interpreter (QuickJS) runs slowly.
+      const set: NativeNodeSet = { id };
+      if (queue.first[at]! >= 0) {
+        const style: Record<string, unknown> = {};
+        for (let kv = queue.first[at]!; kv >= 0; kv = queue.next[kv]!) style[queue.keys[kv]!] = queue.values[kv];
+        set.style = style;
+      }
+      if (text !== undefined) set.text = text;
+      nodes.push(set);
+    }
+    queue.reset();
+    sendInternal({ type: "setNodes", nodes }, { source: "bridge", event: "setNodes" });
   }
 
   /** Renders the queued update and sends its patch. */

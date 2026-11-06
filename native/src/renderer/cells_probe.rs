@@ -419,6 +419,62 @@ fn retained_paint_reuses_unchanged_subtrees_and_matches_a_fresh_paint() {
     assert_retained_matches_fresh(&mut tree, &third);
 }
 
+/// Live heap bytes of the native tree for the cells scene, stage by stage:
+///   CELLS=3000 cargo test --release --lib --no-default-features --features fxhash memory_probe -- --ignored --nocapture
+#[cfg(not(feature = "mimalloc"))]
+#[test]
+#[ignore = "manual memory probe"]
+fn memory_probe() {
+    use crate::counting_alloc::LIVE;
+    use std::sync::atomic::Ordering;
+    let cells: usize = std::env::var("CELLS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3000);
+    let mb = |bytes: isize| bytes as f64 / 1048576.0;
+    println!(
+        "SIZES node={} entry={} taffy_style={} taffy_layout={} taffy_cache={}",
+        std::mem::size_of::<Node>(),
+        std::mem::size_of::<crate::tree::Entry>(),
+        std::mem::size_of::<taffy::Style<String>>(),
+        std::mem::size_of::<taffy::Layout>(),
+        std::mem::size_of::<taffy::Cache>()
+    );
+    let base = LIVE.load(Ordering::Relaxed);
+    let document = document(cells, 0);
+    let parsed = LIVE.load(Ordering::Relaxed);
+    let mut tree = crate::tree::Tree::new(document);
+    let built = LIVE.load(Ordering::Relaxed);
+    tree.compute(WIDTH, HEIGHT).unwrap();
+    let laid = LIVE.load(Ordering::Relaxed);
+    let mut images = HashMap::new();
+    let list = {
+        let mut recorder = CpuRecorder::new(&mut images);
+        tree.paint(1.0, &mut recorder);
+        recorder.finish()
+    };
+    let painted = LIVE.load(Ordering::Relaxed);
+    println!(
+        "MEMORY cells={cells} document={:.2} tree={:.2} layout+text={:.2} displaylist={:.2} total={:.2} MB ({} ops)",
+        mb(parsed - base),
+        mb(built - parsed),
+        mb(laid - built),
+        mb(painted - laid),
+        mb(painted - base),
+        list.len()
+    );
+    drop(list);
+    for (name, bytes) in tree.text_memory_report() {
+        println!("MEMORY text {name}: {:.2} MB", mb(bytes));
+    }
+    let before_drop = LIVE.load(Ordering::Relaxed);
+    drop(tree);
+    println!(
+        "MEMORY rest of tree (entries, taffy): {:.2} MB",
+        mb(before_drop - LIVE.load(Ordering::Relaxed))
+    );
+}
+
 #[test]
 #[ignore = "manual performance probe"]
 fn font_startup_probe() {

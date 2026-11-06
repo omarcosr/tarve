@@ -112,6 +112,8 @@ export class BunFfiBridge implements NativeBridge {
   private eventSocket?: Socket;
   private eventBuffer: Uint8Array<ArrayBufferLike> = new Uint8Array(64 * 1024);
   private readonly decoder = new TextDecoder();
+  private readonly encoder = new TextEncoder();
+  private sendBuffer = new Uint8Array(4096);
   private closed = false;
   private eventTransportFailed = false;
   /** Events polled while a synchronous request waited: delivered before newer ones. */
@@ -314,8 +316,16 @@ export class BunFfiBridge implements NativeBridge {
   send(command: NativeCommand): void {
     if (this.closed) throw new Error("Native window is closed");
     if (!this.library) throw new Error("Bridge not started");
-    const payload = new TextEncoder().encode(JSON.stringify(command));
-    if (this.library.symbols.tarve_send(payload, payload.length) !== 0) throw this.error();
+    const json = JSON.stringify(command);
+    // One buffer reused for every command (native copies what it needs during the call):
+    // a frame of updates no longer leaves a fresh buffer of its size behind for the GC.
+    // UTF-8 takes at most three bytes per UTF-16 unit.
+    const needed = json.length * 3;
+    if (this.sendBuffer.length < needed) this.sendBuffer = new Uint8Array(Math.max(needed, this.sendBuffer.length * 2, 4096));
+    const { written } = this.encoder.encodeInto(json, this.sendBuffer);
+    if (this.library.symbols.tarve_send(this.sendBuffer, written) !== 0) throw this.error();
+    // A buffer grown for one large command (a first render) is not kept around.
+    if (this.sendBuffer.length > 4 * 1048576) this.sendBuffer = new Uint8Array(4096);
   }
 
   join(): void {

@@ -23,6 +23,9 @@ struct AccessibilityTree {
     reverse: HashMap<NodeId, String>,
     text_run_starts: HashMap<NodeId, usize>,
     next_id: u64,
+    /// The nodes as the platform adapter has them: an update sends only those that changed
+    /// (an animation of colours changes none). Empty: the next update is the whole tree.
+    sent: HashMap<NodeId, AccessNode>,
 }
 
 #[derive(Clone)]
@@ -745,12 +748,34 @@ impl AccessibilityTree {
                     .and_then(|modal| self.ids.get(modal).copied())
             })
             .unwrap_or(root_id);
-        let mut info = TreeInfo::new(root_id);
-        info.toolkit_name = Some("Tarve".into());
-        info.toolkit_version = Some(env!("CARGO_PKG_VERSION").into());
+        let full = self.sent.is_empty();
+        let nodes = if full {
+            self.sent = nodes.iter().cloned().collect();
+            nodes
+        } else {
+            let current: std::collections::HashSet<NodeId> =
+                nodes.iter().map(|(id, _)| *id).collect();
+            self.sent.retain(|id, _| current.contains(id));
+            nodes
+                .into_iter()
+                .filter(|(id, node)| {
+                    if self.sent.get(id) == Some(node) {
+                        return false;
+                    }
+                    self.sent.insert(*id, node.clone());
+                    true
+                })
+                .collect()
+        };
+        let tree = full.then(|| {
+            let mut info = TreeInfo::new(root_id);
+            info.toolkit_name = Some("Tarve".into());
+            info.toolkit_version = Some(env!("CARGO_PKG_VERSION").into());
+            info
+        });
         TreeUpdate {
             nodes,
-            tree: Some(info),
+            tree,
             tree_id: TreeId::ROOT,
             focus,
         }
@@ -782,7 +807,16 @@ impl AccessibilityBridge {
     }
 
     pub(crate) fn set_active(&mut self, active: bool) {
+        // A client that comes (back) asks for the whole tree.
+        if active != self.active {
+            self.tree.sent.clear();
+        }
         self.active = active;
+    }
+
+    /// The platform asked for the initial tree: the next update sends every node.
+    pub(crate) fn request_full_update(&mut self) {
+        self.tree.sent.clear();
     }
 
     pub(crate) fn is_active(&self) -> bool {
@@ -827,6 +861,38 @@ mod tests {
 
     fn node(value: serde_json::Value) -> TarveNode {
         serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn updates_after_the_first_send_only_the_nodes_that_changed() {
+        let document = |label: &str, color: &str| {
+            node(json!({"id":"root","kind":"window","children":[
+                {"id":"box","kind":"view","style":{"background":color},"children":[
+                    {"id":"label","kind":"text","text":label,"children":[]}
+                ]},
+                {"id":"other","kind":"text","text":"same","children":[]}
+            ]}))
+        };
+        let mut tree = Tree::new(document("a", "#ff0000"));
+        tree.compute(400.0, 300.0).unwrap();
+        let mut accessibility = AccessibilityTree::default();
+        let first = accessibility.build(&mut tree, "Window", 1.0);
+        assert!(first.tree.is_some());
+        assert_eq!(first.nodes.len(), 4, "the first update is the whole tree");
+        // A colour is nothing assistive technology sees: nothing to send.
+        tree.update(document("a", "#00ff00"));
+        tree.compute(400.0, 300.0).unwrap();
+        let colour = accessibility.build(&mut tree, "Window", 1.0);
+        assert!(colour.nodes.is_empty());
+        // A new text: that node alone.
+        tree.update(document("b", "#00ff00"));
+        tree.compute(400.0, 300.0).unwrap();
+        let text = accessibility.build(&mut tree, "Window", 1.0);
+        assert_eq!(text.nodes.len(), 1);
+        assert_eq!(text.nodes[0].0, accessibility.ids["label"]);
+        // A client asking again gets the whole tree.
+        accessibility.sent.clear();
+        assert_eq!(accessibility.build(&mut tree, "Window", 1.0).nodes.len(), 4);
     }
 
     #[test]

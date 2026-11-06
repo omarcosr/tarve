@@ -157,16 +157,18 @@ pub struct NodeStyle(Arc<Value>, u128);
 /// Two bits of a 128-bit Bloom filter for `key`, from its length and first and last eight
 /// bytes: constant time for any key, and style keys differ there.
 #[inline]
-fn style_key_bits(key: &str) -> u128 {
+pub(crate) fn style_key_bits(key: &str) -> u128 {
     let bytes = key.as_bytes();
     let n = bytes.len();
-    let word = |part: &[u8]| {
+    let (head, tail) = if n >= 8 {
+        let word = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap_or([0; 8]));
+        (word(0), word(n - 8))
+    } else {
         let mut buffer = [0u8; 8];
-        buffer[..part.len()].copy_from_slice(part);
-        u64::from_le_bytes(buffer)
+        buffer[..n].copy_from_slice(bytes);
+        let word = u64::from_le_bytes(buffer);
+        (word, word)
     };
-    let head = word(&bytes[..n.min(8)]);
-    let tail = word(&bytes[n.saturating_sub(8)..]);
     let hash = (head ^ tail.rotate_left(29) ^ n as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
     (1u128 << (hash >> 57)) | (1u128 << ((hash >> 50) & 127))
 }
@@ -183,11 +185,26 @@ impl NodeStyle {
         Self(value, bits)
     }
 
-    /// A style of its own, not interned: for a value that changes every frame (a bound
-    /// signal), where looking for an equal style would cost more than it shares.
-    pub fn unshared(value: Value) -> Self {
-        let bits = style_bits(&value);
-        Self(Arc::new(value), bits)
+    /// Sets top-level keys where the style is (copying it first only when another node shares
+    /// it), keeping the key filter exact. For bound signals, which set a colour every frame.
+    pub fn set_keys<'a>(&mut self, values: impl IntoIterator<Item = (&'a String, &'a Value)>) {
+        let style = Arc::make_mut(&mut self.0);
+        if !style.is_object() {
+            *style = Value::Object(serde_json::Map::new());
+        }
+        let Value::Object(map) = style else {
+            return;
+        };
+        for (key, value) in values {
+            self.1 |= style_key_bits(key);
+            map.insert(key.clone(), value.clone());
+        }
+    }
+
+    /// Whether the style may hold a key of these filter bits (`style_key_bits`): false is certain.
+    #[inline]
+    pub fn may_hold(&self, bits: u128) -> bool {
+        self.1 & bits == bits
     }
 
     /// `Value::get` for a key: `None` without searching the map when the filter rules it out.

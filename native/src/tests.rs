@@ -6332,11 +6332,14 @@ fn text_shadow_paints_an_offset_copy_under_the_text() {
     assert_eq!((delta.x, delta.y), (2.0, 3.0));
 
     let shadow_clip = recorder.glyph_clips[0].expect("shadow is clipped");
-    let text_clip = recorder.glyph_clips[1].expect("text is clipped");
-    assert_eq!(
-        (shadow_clip.x1 - text_clip.x1, shadow_clip.y1 - text_clip.y1),
-        (2.0, 3.0),
-        "the shadow clip grows by its offset so the last glyph is not cut"
+    // A text that fits its box needs no clip layer; its shadow keeps one, grown by the
+    // offset (and the ink reach) so the last glyph is not cut.
+    assert_eq!(recorder.glyph_clips[1], None, "a text that fits paints unclipped");
+    let reach = 16.0;
+    assert!(
+        shadow_clip.x1 >= text_at.translation().x + 2.0 + reach
+            && shadow_clip.y1 >= text_at.translation().y + 3.0,
+        "the shadow clip grows by its offset: {shadow_clip:?}"
     );
 
     let plain = painted(vec![text_node("label", json!({"fontSize": 16}))]);

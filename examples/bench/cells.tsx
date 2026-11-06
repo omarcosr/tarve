@@ -80,11 +80,18 @@ const tCreate = performance.now();
 const app = createApp(Scene, { debug: true, renderer });
 const tCreated = performance.now();
 let firstFrameMs = 0;
+const tickTimes: number[] = [];
 // `frame` (debug builds of the window) arrives after each present: the requestAnimationFrame of the scene.
 app.onEvent(event => {
   if (event.type !== "frame") return;
   if (!firstFrameMs) firstFrameMs = performance.now();
-  if (mode !== "idle") { t++; tick(); }
+  if (mode !== "idle") {
+    t++;
+    const started = performance.now();
+    tick();
+    // The flush of a signal batch runs in a microtask: time it there.
+    queueMicrotask(() => queueMicrotask(() => tickTimes.push(performance.now() - started)));
+  }
 });
 await app.ready;
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -97,7 +104,9 @@ const frames = (await app.inspect()).frames - f0, wall = performance.now() - w0;
 console.log("@mark end");
 const { js, native } = await app.stats();
 const p50 = (summary: { p50: number } | undefined) => summary?.p50;
+// MEMORY=1: where the memory goes (JS heap, native stages and now).
+if (process.env.MEMORY === "1") console.log(JSON.stringify({ heapUsedMb: js.heapUsedMb, rssMb: Math.round((process.memoryUsage?.()?.rss ?? 0) / 1048576), native: native.memory }));
 const phases = { render: p50(js.render), diff: p50(js.diff), shadow: p50(js.shadow), send: p50(js.send), update: p50(js.update), apply: p50(native.phases?.apply), layout: p50(native.phases?.layout), paint: p50(native.phases?.paint), present: p50(native.phases?.present), frame: p50(native.phases?.frame) };
-console.log(JSON.stringify({ app: `tarve-${process.env.MEMO === "1" ? "memo-" : ""}${signals ? "signals-" : ""}${renderer}`, cells, mode, fps: +(frames / wall * 1000).toFixed(1), frames, wallMs: Math.round(wall), first_frame_ms: Math.round(firstFrameMs), startup: { imported: Math.round(tImported), createApp: Math.round(tCreate), started: Math.round(tCreated) }, phases }));
+console.log(JSON.stringify({ app: `tarve-${process.env.MEMO === "1" ? "memo-" : ""}${signals ? "signals-" : ""}${renderer}`, cells, mode, fps: +(frames / wall * 1000).toFixed(1), frames, wallMs: Math.round(wall), first_frame_ms: Math.round(firstFrameMs), tickMs: tickTimes.length ? +[...tickTimes].sort((a, b) => a - b)[tickTimes.length >> 1]!.toFixed(2) : 0, startup: { imported: Math.round(tImported), createApp: Math.round(tCreate), started: Math.round(tCreated) }, phases }));
 app.close();
 process.exit(0);

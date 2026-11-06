@@ -271,7 +271,13 @@ const COLOR_KEY = /^(background|foreground|color)$|(Color|Background|Foreground|
 const resolvedStrings = new WeakMap<ThemeDefinition, Map<string, Map<string, string>>>();
 let resolvedStringCount = 0;
 
+/** A lowercase 6- or 8-digit hex colour: what `cssColor` and the theme return unchanged. */
+const PLAIN_HEX = /^#(?:[0-9a-f]{6}|[0-9a-f]{8})$/;
+
 export function resolveStyleString(key: string, value: string, selected: ThemeDefinition): string {
+  // Resolves to itself: not cached, as an animated colour is a new value every frame and
+  // would churn the cache (and the GC) for nothing.
+  if (value.charCodeAt(0) === 35 && PLAIN_HEX.test(value)) return value;
   let cache = resolvedStrings.get(selected);
   if (!cache) resolvedStrings.set(selected, cache = new Map());
   let values = cache.get(key);

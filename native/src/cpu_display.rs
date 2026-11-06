@@ -28,12 +28,59 @@ enum Paint {
     Gradient(Gradient, Affine),
 }
 
+/// What a fill covers: boxes (nearly every fill) kept as they are, other shapes as paths.
+/// A rounded box's path is ~400 bytes and costs a flattening to build: kept as a box, the
+/// list is smaller and records faster.
+enum FillShape {
+    Rect(Rect),
+    RoundedRect(vello::kurbo::RoundedRect),
+    Path(BezPath),
+}
+
+impl FillShape {
+    fn of<S: Shape>(shape: &S) -> Self {
+        if let Some(rect) = shape.as_rect() {
+            FillShape::Rect(rect)
+        } else if let Some(rounded) = shape.as_rounded_rect() {
+            FillShape::RoundedRect(rounded)
+        } else {
+            FillShape::Path(shape.to_path(0.1))
+        }
+    }
+
+    fn hash(&self, hasher: &mut DefaultHasher) {
+        match self {
+            FillShape::Rect(rect) => {
+                0u8.hash(hasher);
+                hash_rect(hasher, *rect);
+            }
+            FillShape::RoundedRect(rounded) => {
+                1u8.hash(hasher);
+                hash_rect(hasher, rounded.rect());
+                let radii = rounded.radii();
+                for value in [
+                    radii.top_left,
+                    radii.top_right,
+                    radii.bottom_right,
+                    radii.bottom_left,
+                ] {
+                    value.to_bits().hash(hasher);
+                }
+            }
+            FillShape::Path(path) => {
+                2u8.hash(hasher);
+                hash_path(hasher, path);
+            }
+        }
+    }
+}
+
 enum Op {
     Fill {
         rule: Fill,
         transform: Affine,
         paint: Paint,
-        path: BezPath,
+        path: FillShape,
     },
     Stroke {
         stroke: Stroke,
@@ -293,12 +340,12 @@ impl<'a> CpuRecorder<'a> {
 
 impl PaintTarget for CpuRecorder<'_> {
     fn fill<S: Shape>(&mut self, fill: Fill, transform: Affine, color: Color, shape: &S) {
-        let path = shape.to_path(0.1);
+        let path = FillShape::of(shape);
         let mut hasher = DefaultHasher::new();
         (0u8, fill as u8).hash(&mut hasher);
         hash_affine(&mut hasher, transform);
         hash_color(&mut hasher, color);
-        hash_path(&mut hasher, &path);
+        path.hash(&mut hasher);
         let bounds = device(transform, shape.bounding_box());
         self.push(
             Op::Fill {
@@ -313,13 +360,13 @@ impl PaintTarget for CpuRecorder<'_> {
     }
 
     fn fill_gradient<S: Shape>(&mut self, transform: Affine, gradient: &PaintGradient, shape: &S) {
-        let path = shape.to_path(0.1);
+        let path = FillShape::of(shape);
         let (brush, brush_transform) = gradient.brush();
         let mut hasher = DefaultHasher::new();
         1u8.hash(&mut hasher);
         hash_affine(&mut hasher, transform);
         format!("{gradient:?}").hash(&mut hasher);
-        hash_path(&mut hasher, &path);
+        path.hash(&mut hasher);
         let bounds = device(transform, shape.bounding_box());
         self.push(
             Op::Fill {
