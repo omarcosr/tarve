@@ -684,6 +684,8 @@ pub(crate) struct D3d11Graphics {
     layer_nv12: bool,
     /// The four corners of that quad.
     layer_vertices: ID3D11Buffer,
+    /// `VertexState::PLAIN` alone, for the video layer pictures drawn outside a frame.
+    layer_state: (ID3D11Buffer, ID3D11ShaderResourceView),
     used_images: HashSet<String>,
     /// Textures whose CPU pixels were released: kept even when off screen.
     pinned_images: HashSet<String>,
@@ -812,6 +814,7 @@ impl D3d11Graphics {
         )?;
         let state_capacity = 256;
         let (state_buffer, state_view) = create_state_buffer(&device, state_capacity)?;
+        let layer_state = create_state_buffer(&device, 1)?;
         let first_atlas = create_glyph_atlas(&device)?;
         let layer_vertices =
             create_dynamic_buffer(&device, 4 * size_of::<Vertex>(), D3D11_BIND_VERTEX_BUFFER)?;
@@ -896,6 +899,7 @@ impl D3d11Graphics {
             overlay_error: None,
             layer_nv12: true,
             layer_vertices,
+            layer_state,
             used_images: HashSet::default(),
             pinned_images: HashSet::default(),
             uploaded_images: Vec::new(),
@@ -1254,7 +1258,7 @@ impl D3d11Graphics {
             return Ok(());
         };
         let mode = if bt709 { 11.0 } else { 10.0 };
-        // State 0 of the uploaded states is `VertexState::PLAIN`.
+        // State 0 of its own one-state buffer: the frame's states may not be uploaded yet.
         let corner = |x: f32, y: f32, u: f32, v: f32| Vertex {
             pos: [x, y],
             uv: [u, v],
@@ -1273,6 +1277,11 @@ impl D3d11Graphics {
             &self.context,
             &self.layer_vertices,
             bytemuck::cast_slice(&vertices),
+        )?;
+        upload_dynamic(
+            &self.context,
+            &self.layer_state.0,
+            bytemuck::cast_slice(&[VertexState::PLAIN]),
         )?;
         upload_dynamic(
             &self.context,
@@ -1302,7 +1311,7 @@ impl D3d11Graphics {
             self.context
                 .VSSetConstantBuffers(0, Some(&[Some(self.target_transform.clone())]));
             self.context
-                .VSSetShaderResources(2, Some(&[Some(self.state_view.clone())]));
+                .VSSetShaderResources(2, Some(&[Some(self.layer_state.1.clone())]));
             self.context.PSSetShader(&self.pixel_shader, None);
             self.context
                 .PSSetSamplers(0, Some(&[Some(self.image_sampler.clone())]));
