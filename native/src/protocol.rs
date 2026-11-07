@@ -741,6 +741,70 @@ pub struct NodeSet {
 }
 
 impl Command {
+    /// Parses a `setNodes` the JS bridge wrote packed (`NodeSetsCommand` in
+    /// packages/core/src/app/node-sets.ts): a 1, then records of a kind byte (1 style string,
+    /// 2 style number, 3 style JSON, 4 text), the node id, and the style key and value or the
+    /// text. Strings are UTF-8 after their u32 little-endian byte length, numbers f64. Sets of
+    /// one node in a row merge into one.
+    pub fn from_packed_sets(bytes: &[u8]) -> Result<Command, String> {
+        struct Reader<'a>(&'a [u8]);
+        impl<'a> Reader<'a> {
+            fn take(&mut self, count: usize) -> Result<&'a [u8], String> {
+                if self.0.len() < count {
+                    return Err("Packed node update is truncated".into());
+                }
+                let (head, rest) = self.0.split_at(count);
+                self.0 = rest;
+                Ok(head)
+            }
+            fn string(&mut self) -> Result<&'a str, String> {
+                let length = u32::from_le_bytes(self.take(4)?.try_into().unwrap()) as usize;
+                std::str::from_utf8(self.take(length)?)
+                    .map_err(|_| "Packed node update has invalid UTF-8".to_string())
+            }
+        }
+        let mut reader = Reader(bytes.get(1..).ok_or("Empty packed node update")?);
+        let mut nodes: Vec<NodeSet> = Vec::new();
+        while !reader.0.is_empty() {
+            let kind = reader.take(1)?[0];
+            let id = reader.string()?;
+            if nodes.last().is_none_or(|last| last.id != id) {
+                nodes.push(NodeSet {
+                    id: id.to_string(),
+                    style: None,
+                    text: None,
+                });
+            }
+            let set = nodes.last_mut().expect("pushed above");
+            if kind == 4 {
+                set.text = Some(reader.string()?.to_string());
+                continue;
+            }
+            let key = reader.string()?.to_string();
+            let value = match kind {
+                1 => Value::String(reader.string()?.to_string()),
+                2 => {
+                    let number = f64::from_le_bytes(reader.take(8)?.try_into().unwrap());
+                    // As JSON would give it: a whole number is an integer.
+                    if number.fract() == 0.0 && number.abs() < 9.0e15 {
+                        Value::from(number as i64)
+                    } else {
+                        serde_json::Number::from_f64(number).map_or(Value::Null, Value::Number)
+                    }
+                }
+                3 => serde_json::from_str(reader.string()?).map_err(|error| error.to_string())?,
+                _ => return Err(format!("Unknown packed node update record {kind}")),
+            };
+            set.style
+                .get_or_insert_with(Default::default)
+                .insert(key, value);
+        }
+        if nodes.len() > 20_000 || nodes.iter().any(|node| node.id.is_empty()) {
+            return Err("A node update needs ids, at most 20000".into());
+        }
+        Ok(Command::SetNodes { nodes })
+    }
+
     /// Parses a command. An internally tagged enum buffers the whole input into serde's
     /// `Content` tree before it reads a field; an update (`patch`, `mutate`, `update`), the
     /// command sent every frame and the largest by far, names its type first (JS writes it so)
@@ -801,6 +865,12 @@ pub enum Command {
     SetNodes {
         nodes: Vec<NodeSet>,
     },
+    /// A packed `setNodes` as the bridge received it, parsed on the window's thread
+    /// (`from_packed_sets`): the sets are made and dropped by the thread that applies them,
+    /// so none of the allocator's pages is shared between the app's thread and the window's
+    /// (frees from another thread left a frame's worth of pages committed each time).
+    #[serde(skip)]
+    PackedSets(Vec<u8>),
     Mutate {
         mutations: Vec<TreeMutation>,
     },

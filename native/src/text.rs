@@ -19,6 +19,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
+use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 use vello::{
     kurbo::{Affine, BezPath, Rect, RoundedRect, Stroke},
@@ -695,6 +696,27 @@ pub(crate) fn prewarm() {
 const RECENT_SHAPES: usize = 1024;
 const RECENT_SHAPE_BYTES: usize = 32;
 
+/// Sets `id`'s value, copying the id only when it is not a key yet.
+fn put_id<V, S: std::hash::BuildHasher>(
+    map: &mut std::collections::HashMap<String, V, S>,
+    id: &str,
+    value: V,
+) {
+    match map.get_mut(id) {
+        Some(slot) => *slot = value,
+        None => {
+            map.insert(id.to_string(), value);
+        }
+    }
+}
+
+/// Adds `id`, copying it only when it is not in the set yet.
+fn add_id<S: std::hash::BuildHasher>(set: &mut std::collections::HashSet<String, S>, id: &str) {
+    if !set.contains(id) {
+        set.insert(id.to_string());
+    }
+}
+
 /// Sizes a text measured to, by wrap width; reset when its layout is rebuilt.
 #[derive(Default)]
 struct MeasureCache {
@@ -707,7 +729,9 @@ pub struct TextEngine {
     measure_cache: HashMap<String, MeasureCache>,
     fonts: FontContext,
     context: LayoutContext<TextBrush>,
-    pub layouts: HashMap<String, Layout<TextBrush>>,
+    /// Shaped layouts by node, shared (`Arc`): an equal text elsewhere, the recent cache and
+    /// the node hold one copy; mutating one (`Arc::make_mut`) copies it only while shared.
+    pub layouts: HashMap<String, Arc<Layout<TextBrush>>>,
     markdown_lines: HashMap<String, Vec<MarkdownLine>>,
     markdown_scroll: HashMap<(String, usize), f32>,
     markdown_metrics: HashMap<String, (Option<f32>, (f32, f32))>,
@@ -732,7 +756,7 @@ pub struct TextEngine {
     /// Short plain texts shaped lately, by content and style: an animated label (a counter,
     /// a clock, a list of changing numbers) shows strings that another node shaped a frame
     /// before, when `shaped_by` no longer names a node showing them.
-    recent: lru::LruCache<ShapeKey, Layout<TextBrush>>,
+    recent: lru::LruCache<ShapeKey, Arc<Layout<TextBrush>>>,
     /// Font and layout contexts of the shaping workers, kept between frames.
     workers: Vec<(FontContext, LayoutContext<TextBrush>)>,
     alignments: HashMap<String, parley::Alignment>,
@@ -751,6 +775,8 @@ pub struct TextEngine {
     drawn: HashMap<String, (u32, parley::Alignment)>,
     /// Layouts last broken into their unwrapped lines (shaped, or measured unwrapped).
     unwrapped: HashSet<String>,
+    /// Of those, the ones aligned too (by `prepare`): a start-aligned one that fits is drawn as is.
+    prealigned: HashSet<String>,
     /// `style_hash`: each text's style and its hash.
     style_hashes: HashMap<String, (crate::protocol::NodeStyle, u64)>,
     /// Ellipsized layout per text node and paint width; `None` when it fits.
@@ -1240,6 +1266,7 @@ impl TextEngine {
             truncated: HashMap::default(),
             drawn: HashMap::default(),
             unwrapped: HashSet::default(),
+            prealigned: HashSet::default(),
             style_hashes: HashMap::default(),
             diff_column_widths: HashMap::default(),
             shapes: 0,
@@ -1257,7 +1284,10 @@ impl TextEngine {
         }
     }
     pub fn prepare(&mut self, node: &Node) {
-        self.measure_cache.remove(&node.id);
+        if let Some(cache) = self.measure_cache.get_mut(&node.id) {
+            cache.sizes.clear();
+            cache.natural = None;
+        }
         if !node.is_text() {
             return;
         }
@@ -1279,7 +1309,8 @@ impl TextEngine {
             let mut placeholder = self.context.ranged_builder(&mut self.fonts, "", 1.0, true);
             placeholder.push_default(StyleProperty::FontSize(node.font_size(14.0)));
             self.drawn.remove(&node.id);
-            self.layouts.insert(node.id.clone(), placeholder.build(""));
+            self.layouts
+                .insert(node.id.clone(), Arc::new(placeholder.build("")));
             self.signatures.insert(node.id.clone(), signature);
             self.alignments
                 .insert(node.id.clone(), alignment_for_node(node));
@@ -1295,13 +1326,15 @@ impl TextEngine {
             .then(|| self.shaped_by.get(&share_key))
             .flatten()
             .filter(|id| self.signatures.get(*id) == Some(&signature))
-            .and_then(|id| self.layouts.get(id))
-            .cloned()
-            .or_else(|| {
-                shareable
-                    .then(|| self.recent.get(&share_key).cloned())
-                    .flatten()
-            });
+            .and_then(|id| self.layouts.get(id).cloned());
+        // A recent layout is already broken into its unwrapped lines and aligned.
+        let recent = if copied.is_none() && shareable {
+            self.recent.get(&share_key).cloned()
+        } else {
+            None
+        };
+        let ready = recent.is_some();
+        let copied = copied.or(recent);
         let (preshaped, min_content) = match shareable
             .then(|| self.preshaped.remove(&share_key))
             .flatten()
@@ -1311,7 +1344,7 @@ impl TextEngine {
         };
         // A preshaped layout arrives broken into unwrapped lines; a copied one at its last width.
         let preshaped_broken = copied.is_none() && preshaped.is_some();
-        let mut layout = match copied.or(preshaped) {
+        let mut layout = match copied.or(preshaped.map(Arc::new)) {
             Some(layout) => {
                 if shareable && !self.shaped_by.contains_key(&share_key) {
                     self.shaped_by.insert(share_key, node.id.clone());
@@ -1319,16 +1352,13 @@ impl TextEngine {
                 layout
             }
             None => {
-                let layout = self.build_text_layout(node, &content, content.len());
+                let layout = Arc::new(self.build_text_layout(node, &content, content.len()));
                 if shareable {
                     self.shaped_by.insert(share_key, node.id.clone());
                 }
                 layout
             }
         };
-        if shareable && content.len() <= RECENT_SHAPE_BYTES && !self.recent.contains(&share_key) {
-            self.recent.put(share_key, layout.clone());
-        }
         self.truncated.remove(&node.id);
         if text_nowrap(node) {
             self.nowrap.insert(node.id.clone());
@@ -1344,8 +1374,16 @@ impl TextEngine {
         // only measures — the a11y pass, the hit test, a snapshot — must see the
         // same line structure, or the gutter numbers a different set of lines
         // than the text does.
-        if !preshaped_broken {
-            layout.break_all_lines(None);
+        if !preshaped_broken && !ready {
+            Arc::make_mut(&mut layout).break_all_lines(None);
+        }
+        // Aligned now, at its own width: `draw` keeps it as it is when it fits (`prealigned`).
+        let align = alignment_for_node(node);
+        if !ready {
+            Arc::make_mut(&mut layout).align(align, parley::AlignmentOptions::default());
+        }
+        if shareable && content.len() <= RECENT_SHAPE_BYTES && !self.recent.contains(&share_key) {
+            self.recent.put(share_key, layout.clone());
         }
         // The unwrapped lines are what layout asks for first (max-content) and for any wider width.
         if matches!(node.kind.as_str(), "text" | "button") {
@@ -1360,7 +1398,14 @@ impl TextEngine {
                 height = line.metrics().block_max_coord;
             }
             let size = (layout.width().ceil(), height.ceil());
-            let cache = self.measure_cache.entry(node.id.clone()).or_default();
+            if !self.measure_cache.contains_key(&node.id) {
+                self.measure_cache
+                    .insert(node.id.clone(), MeasureCache::default());
+            }
+            let cache = self
+                .measure_cache
+                .get_mut(&node.id)
+                .expect("inserted above");
             cache.natural = Some((layout.width(), size));
             cache.sizes.push((None, size));
             if let Some(min) = min_content.filter(|_| preshaped_broken) {
@@ -1412,13 +1457,14 @@ impl TextEngine {
             self.unwrapped_code.remove(&node.id);
         }
         self.drawn.remove(&node.id);
-        // Broken unwrapped above (or by the shaping workers).
-        self.unwrapped.insert(node.id.clone());
-        self.layouts.insert(node.id.clone(), layout);
+        // Broken unwrapped above (or by the shaping workers), and aligned. A key already in
+        // a map is kept: a text whose content changes every frame copies no id.
+        add_id(&mut self.unwrapped, &node.id);
+        add_id(&mut self.prealigned, &node.id);
+        put_id(&mut self.layouts, &node.id, layout);
         self.markdown_lines.remove(&node.id);
-        self.signatures.insert(node.id.clone(), signature);
-        self.alignments
-            .insert(node.id.clone(), alignment_for_node(node));
+        put_id(&mut self.signatures, &node.id, signature);
+        put_id(&mut self.alignments, &node.id, alignment_for_node(node));
         self.shapes += 1;
     }
     /// Width and line count of the ellipsized layout painted for `id`.
@@ -1451,7 +1497,8 @@ impl TextEngine {
         let wrap = if nowrap { None } else { Some(width) };
         self.drawn.remove(&node.id);
         self.unwrapped.remove(&node.id);
-        let Some(layout) = self.layouts.get_mut(&node.id) else {
+        self.prealigned.remove(&node.id);
+        let Some(layout) = self.layouts.get_mut(&node.id).map(Arc::make_mut) else {
             return;
         };
         layout.break_all_lines(wrap);
@@ -1754,7 +1801,7 @@ impl TextEngine {
                 height,
             );
         }
-        let Some(layout) = self.layouts.get_mut(id) else {
+        let Some(layout) = self.layouts.get(id) else {
             return (0.0, 0.0);
         };
         // A `Code` block never wraps: its width is its content and the block
@@ -1766,7 +1813,11 @@ impl TextEngine {
         // draws. Both apply with and without a gutter, so turning the line
         // numbers on or off never resizes the block.
         if self.unwrapped_code.contains(id) {
-            return (layout.width().ceil(), code_content_height(layout));
+            let width = layout.width().ceil();
+            let Some(layout) = self.layouts.get_mut(id).map(Arc::make_mut) else {
+                return (0.0, 0.0);
+            };
+            return (width, code_content_height(layout));
         }
         let wrap = if self.nowrap.contains(id) {
             None
@@ -1788,13 +1839,17 @@ impl TextEngine {
                 return size;
             }
         }
-        // Breaking for a measure undoes how `draw` broke it.
+        // Breaking for a measure undoes how `draw` and `prepare` broke and aligned it.
         self.drawn.remove(id);
+        self.prealigned.remove(id);
         if wrap.is_none() {
             self.unwrapped.insert(id.to_string());
         } else {
             self.unwrapped.remove(id);
         }
+        let Some(layout) = self.layouts.get_mut(id).map(Arc::make_mut) else {
+            return (0.0, 0.0);
+        };
         layout.break_all_lines(wrap);
         let mut height = layout.height();
         if let Some(extents) = shifted_line_extents(layout) {
@@ -2007,16 +2062,6 @@ impl TextEngine {
                 .truncated
                 .get(&node.id)
                 .is_some_and(|(_, layout)| layout.is_some());
-        let layout = if truncated {
-            self.truncated
-                .get_mut(&node.id)
-                .and_then(|(_, layout)| layout.as_mut())
-        } else {
-            self.layouts.get_mut(&node.id)
-        };
-        let Some(layout) = layout else {
-            return;
-        };
         let wrap = if matches!(node.kind.as_str(), "text" | "markdown" | "textarea") && !nowrap {
             Some(width.max(0.0))
         } else {
@@ -2026,25 +2071,65 @@ impl TextEngine {
         // Broken and aligned for this width when last drawn, and not touched since: a
         // repaint draws it as it is (breaking costs as much as the rest of the paint).
         let key = (wrap.map_or(u32::MAX, f32::to_bits), align);
-        if truncated || self.drawn.get(&node.id) != Some(&key) {
+        // Shaped, unwrapped and start-aligned by `prepare`, and narrow enough for the width:
+        // breaking and aligning again would give the same lines and positions (and copy a
+        // layout shared with an equal text).
+        let as_prepared = !truncated
+            && matches!(align, parley::Alignment::Start | parley::Alignment::Left)
+            && self.prealigned.contains(&node.id)
+            && self
+                .layouts
+                .get(&node.id)
+                .is_some_and(|layout| !layout.is_rtl() && wrap.is_none_or(|w| w >= layout.width()));
+        if as_prepared {
+            put_id(&mut self.drawn, &node.id, key);
+        } else if truncated || self.drawn.get(&node.id) != Some(&key) {
             // Still broken into its unwrapped lines (as shaped) and as narrow as the width:
             // breaking at the width gives the same lines.
-            let fits = !truncated
-                && self.unwrapped.contains(&node.id)
-                && wrap.is_none_or(|width| width >= layout.width());
+            let unwrapped = !truncated && self.unwrapped.contains(&node.id);
+            let layout = if truncated {
+                self.truncated
+                    .get_mut(&node.id)
+                    .and_then(|(_, layout)| layout.as_mut())
+            } else {
+                self.layouts.get_mut(&node.id).map(Arc::make_mut)
+            };
+            let Some(layout) = layout else {
+                return;
+            };
+            let fits = unwrapped && wrap.is_none_or(|width| width >= layout.width());
             if !fits {
                 layout.break_all_lines(wrap);
-                if !truncated && wrap.is_some() {
-                    self.unwrapped.remove(&node.id);
-                }
             }
             layout.align(align, parley::AlignmentOptions::default());
+            if !truncated {
+                if !fits && wrap.is_some() {
+                    self.unwrapped.remove(&node.id);
+                }
+                // Aligned at this width now, no longer as `prepare` left it.
+                self.prealigned.remove(&node.id);
+            }
             if truncated {
                 self.drawn.remove(&node.id);
             } else {
-                self.drawn.insert(node.id.clone(), key);
+                put_id(&mut self.drawn, &node.id, key);
             }
         }
+        let layout: &Layout<TextBrush> = if truncated {
+            match self
+                .truncated
+                .get(&node.id)
+                .and_then(|(_, layout)| layout.as_ref())
+            {
+                Some(layout) => layout,
+                None => return,
+            }
+        } else {
+            match self.layouts.get(&node.id) {
+                Some(layout) => layout,
+                None => return,
+            }
+        };
         if node.kind == "code" && node.show_line_numbers {
             let gutter_color = crate::tree::color(node.string("gutterColor", "#8b949e"));
             if let Some(gutters) = self.code_gutter_layouts.get(&node.id) {
@@ -2284,7 +2369,8 @@ impl TextEngine {
         }
         self.drawn.remove(&node.id);
         self.unwrapped.remove(&node.id);
-        let Some(layout) = self.layouts.get_mut(&node.id) else {
+        self.prealigned.remove(&node.id);
+        let Some(layout) = self.layouts.get_mut(&node.id).map(Arc::make_mut) else {
             return;
         };
         let Some(rich) = &node.rich else {
@@ -2682,7 +2768,8 @@ impl TextEngine {
         let width = self.wrap_width(id, width);
         self.drawn.remove(id);
         self.unwrapped.remove(id);
-        let layout = self.layouts.get_mut(id)?;
+        self.prealigned.remove(id);
+        let layout = self.layouts.get_mut(id).map(Arc::make_mut)?;
         layout.break_all_lines(width.map(|width| width.max(0.0)));
         layout.align(align, parley::AlignmentOptions::default());
         let mut rect =
@@ -2756,7 +2843,8 @@ impl TextEngine {
         let width = self.wrap_width(id, width);
         self.drawn.remove(id);
         self.unwrapped.remove(id);
-        let Some(layout) = self.layouts.get_mut(id) else {
+        self.prealigned.remove(id);
+        let Some(layout) = self.layouts.get_mut(id).map(Arc::make_mut) else {
             return vec![];
         };
         layout.break_all_lines(width.map(|width| width.max(0.0)));
@@ -2797,7 +2885,8 @@ impl TextEngine {
         let width = self.wrap_width(id, width);
         self.drawn.remove(id);
         self.unwrapped.remove(id);
-        let layout = self.layouts.get_mut(id)?;
+        self.prealigned.remove(id);
+        let layout = self.layouts.get_mut(id).map(Arc::make_mut)?;
         layout.break_all_lines(width.map(|width| width.max(0.0)));
         layout.align(align, parley::AlignmentOptions::default());
         Some(Cursor::from_point(layout, x, y).index())
@@ -2847,7 +2936,8 @@ impl TextEngine {
             .unwrap_or(parley::Alignment::Start);
         self.drawn.remove(id);
         self.unwrapped.remove(id);
-        let Some(layout) = self.layouts.get_mut(id) else {
+        self.prealigned.remove(id);
+        let Some(layout) = self.layouts.get_mut(id).map(Arc::make_mut) else {
             return vec![];
         };
         layout.break_all_lines(width.map(|width| width.max(0.0)));

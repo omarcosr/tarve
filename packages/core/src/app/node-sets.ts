@@ -1,54 +1,157 @@
+import type { NativeNodeSet } from "../protocol";
+
 /**
- * The nodes one flush sets, in flat lists kept from flush to flush: per node its id, its text
- * and a chain of style values (`first` → `next` into `keys`/`values`).
+ * A command that writes itself as packed bytes (`NodeSetsCommand`): the FFI bridge sends
+ * them instead of JSON. Native reads a leading byte 1 as this format (JSON starts with `{`).
  */
-export class NodeSetQueue {
-  readonly ids: string[] = [];
-  readonly text: (string | undefined)[] = [];
-  readonly first: number[] = [];
-  readonly last: number[] = [];
-  readonly keys: string[] = [];
-  readonly values: unknown[] = [];
-  readonly next: number[] = [];
-  private readonly index = new Map<string, number>();
+export const PACK: unique symbol = Symbol.for("tarve.pack") as never;
+
+/** A growable byte buffer the packed commands are written into, reused from send to send. */
+export class PackWriter {
+  bytes = new Uint8Array(65536);
+  view = new DataView(this.bytes.buffer);
+  length = 0;
+  private readonly encoder = new TextEncoder();
 
   reset(): void {
-    this.ids.length = 0;
-    this.text.length = 0;
-    this.first.length = 0;
-    this.last.length = 0;
-    this.keys.length = 0;
-    this.values.length = 0;
-    this.next.length = 0;
-    this.index.clear();
+    this.length = 0;
+    // A buffer grown for one large flush is not kept around.
+    if (this.bytes.length > 4 * 1048576) this.grow(0, 65536);
   }
 
-  /** The node's slot, added on first use. */
-  entry(id: string): number {
-    let at = this.index.get(id);
-    if (at === undefined) {
-      at = this.ids.length;
-      this.index.set(id, at);
-      this.ids.push(id);
-      this.text.push(undefined);
-      this.first.push(-1);
-      this.last.push(-1);
-    }
-    return at;
+  private grow(extra: number, size = 0): void {
+    const next = new Uint8Array(Math.max(size, this.length + extra, this.bytes.length * 2));
+    next.set(this.bytes.subarray(0, this.length));
+    this.bytes = next;
+    this.view = new DataView(next.buffer);
   }
 
-  /** Sets one style value of the node (a later value of the same key wins). */
-  style(at: number, key: string, value: unknown): void {
-    for (let kv = this.first[at]!; kv >= 0; kv = this.next[kv]!) {
-      if (this.keys[kv] === key) { this.values[kv] = value; return; }
+  u8(value: number): void {
+    if (this.length + 1 > this.bytes.length) this.grow(1);
+    this.bytes[this.length++] = value;
+  }
+
+  f64(value: number): void {
+    if (this.length + 8 > this.bytes.length) this.grow(8);
+    this.view.setFloat64(this.length, value, true);
+    this.length += 8;
+  }
+
+  /** A string as UTF-8 after its byte length (u32): ASCII byte by byte, the rest encoded. */
+  string(text: string): void {
+    const max = text.length * 3 + 4;
+    if (this.length + max > this.bytes.length) this.grow(max);
+    const start = this.length + 4;
+    let at = start;
+    const bytes = this.bytes;
+    let index = 0;
+    for (; index < text.length; index++) {
+      const code = text.charCodeAt(index);
+      if (code >= 0x80) break;
+      bytes[at++] = code;
     }
-    const kv = this.keys.length;
-    this.keys.push(key);
-    this.values.push(value);
-    this.next.push(-1);
-    if (this.last[at]! >= 0) this.next[this.last[at]!] = kv;
-    else this.first[at] = kv;
-    this.last[at] = kv;
+    if (index < text.length) at += this.encoder.encodeInto(text.slice(index), bytes.subarray(at)).written;
+    this.view.setUint32(this.length, at - start, true);
+    this.length = at;
   }
 }
 
+/** Record kinds of the packed `setNodes` (see `Command::from_packed_sets`). */
+const STYLE_STRING = 1, STYLE_NUMBER = 2, STYLE_JSON = 3, TEXT = 4;
+
+/**
+ * The `setNodes` command a signal flush sends: per set the node's id and its new style
+ * values or text, kept in flat lists. The FFI bridge sends it packed (`PACK`): no object,
+ * string or JSON per node is made for it. A node set twice in one flush is in it twice;
+ * the later value of a key wins, as native applies the sets in order. `nodes` (tests,
+ * bridges that serialize JSON) is built from the same lists when read.
+ */
+export class NodeSetsCommand {
+  readonly type = "setNodes" as const;
+  readonly #ids: string[] = [];
+  readonly #styles: (Record<string, unknown> | undefined)[] = [];
+  /** `addValue`'s key and value, kept apart until `nodes` is read. */
+  readonly #keys: (string | undefined)[] = [];
+  readonly #values: unknown[] = [];
+  readonly #texts: (string | undefined)[] = [];
+
+  get length(): number {
+    return this.#ids.length;
+  }
+
+  /** One node's style values and text. */
+  add(id: string, style: Record<string, unknown> | undefined, text: string | undefined): void {
+    this.#ids.push(id);
+    this.#styles.push(style);
+    this.#keys.push(undefined);
+    this.#values.push(undefined);
+    this.#texts.push(text);
+  }
+
+  /** One style value of a node, the common signal update, without a style object. */
+  addValue(id: string, key: string, value: unknown): void {
+    this.#ids.push(id);
+    this.#styles.push(undefined);
+    this.#keys.push(key);
+    this.#values.push(value);
+    this.#texts.push(undefined);
+  }
+
+  /** Own and enumerable (read like a plain command's), built when read. */
+  declare readonly nodes: NativeNodeSet[];
+
+  constructor() {
+    Object.defineProperty(this, "nodes", { enumerable: true, get: () => this.#buildNodes() });
+  }
+
+  #buildNodes(): NativeNodeSet[] {
+    return this.#ids.map((id, index) => {
+      const set: NativeNodeSet = { id };
+      const key = this.#keys[index];
+      const style = this.#styles[index] ?? (key === undefined ? undefined : { [key]: this.#values[index] });
+      const text = this.#texts[index];
+      if (style) set.style = style as NativeNodeSet["style"];
+      if (text !== undefined) set.text = text;
+      return set;
+    });
+  }
+
+  /** Writes the command packed: a 1, then per value a kind, the id, the key and the value. */
+  [PACK](out: PackWriter): void {
+    out.reset();
+    out.u8(1);
+    const value = (kind: number, id: string, key: string, data: unknown) => {
+      if (kind === STYLE_STRING || kind === STYLE_NUMBER || kind === STYLE_JSON) {
+        out.u8(kind);
+        out.string(id);
+        out.string(key);
+        if (kind === STYLE_STRING) out.string(data as string);
+        else if (kind === STYLE_NUMBER) out.f64(data as number);
+        else out.string(JSON.stringify(data) ?? "null");
+      }
+    };
+    const kindOf = (data: unknown) =>
+      typeof data === "string" ? STYLE_STRING : typeof data === "number" && Number.isFinite(data) ? STYLE_NUMBER : STYLE_JSON;
+    for (let index = 0; index < this.#ids.length; index++) {
+      const id = this.#ids[index]!;
+      const key = this.#keys[index];
+      if (key !== undefined) {
+        const data = this.#values[index];
+        value(kindOf(data), id, key, data);
+        continue;
+      }
+      const style = this.#styles[index];
+      if (style) for (const name in style) value(kindOf(style[name]), id, name, style[name]);
+      const text = this.#texts[index];
+      if (text !== undefined) {
+        out.u8(TEXT);
+        out.string(id);
+        out.string(text);
+      }
+    }
+  }
+
+  toJSON(): { type: "setNodes"; nodes: NativeNodeSet[] } {
+    return { type: this.type, nodes: this.#buildNodes() };
+  }
+}

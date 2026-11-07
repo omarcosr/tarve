@@ -132,21 +132,26 @@ async function run(app: string, cells: number, mode: string): Promise<Record<str
 
 const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]!;
 const rows: Record<string, unknown>[] = [];
-for (const cells of cellCounts) for (const mode of modes) for (const app of apps) {
-  const samples: Record<string, unknown>[] = [];
-  for (let rep = 0; rep < reps; rep++) {
+// REPS rounds run the apps in turn (tarve, BUI, tarve, BUI and so on), so a burst of load
+// from elsewhere on the machine falls on both sides; each figure is the median of its rounds.
+for (const cells of cellCounts) for (const mode of modes) {
+  const byApp = new Map<string, Record<string, unknown>[]>();
+  for (let rep = 0; rep < reps; rep++) for (const app of apps) {
     const row = await run(app, cells, mode);
-    if (row) samples.push(row);
+    if (row) byApp.set(app, [...(byApp.get(app) ?? []), row]);
     await Bun.sleep(1000);
   }
-  if (!samples.length) continue;
-  const row: Record<string, unknown> = { app, cells, mode };
-  for (const key of ["fps", "cpuPct", "cpuMsPerFrame", "wsMb", "privateMb", "firstFrameMs", "selfCpuMsPerFrame"]) {
-    const values = samples.map(s => s[key]).filter((v): v is number => typeof v === "number");
-    row[key] = values.length ? median(values) : null;
+  for (const app of apps) {
+    const samples = byApp.get(app) ?? [];
+    if (!samples.length) continue;
+    const row: Record<string, unknown> = { app, cells, mode };
+    for (const key of ["fps", "cpuPct", "cpuMsPerFrame", "wsMb", "privateMb", "firstFrameMs", "selfCpuMsPerFrame"]) {
+      const values = samples.map(s => s[key]).filter((v): v is number => typeof v === "number");
+      row[key] = values.length ? median(values) : null;
+    }
+    rows.push(row);
+    console.log(JSON.stringify(row));
   }
-  rows.push(row);
-  console.log(JSON.stringify(row));
 }
 probe.stdin.end();
 console.table(rows);

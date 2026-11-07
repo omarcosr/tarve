@@ -20,6 +20,7 @@ use winit::window::Window;
 #[cfg(test)]
 mod cells_probe;
 mod cpu_raster;
+mod cpu_worker;
 #[cfg(feature = "vello-gpu")]
 mod glass_gpu;
 #[cfg(feature = "vello-gpu")]
@@ -38,6 +39,9 @@ pub(crate) use resolution::{render_scale, scaled_size};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PresentResult {
     Presented,
+    /// A frame already counted as presented reached the window (the CPU renderer's raster
+    /// thread finished it).
+    Shown,
     RetryNow,
     RetryLater,
     Occluded,
@@ -695,20 +699,22 @@ struct CpuGraphics {
     surface: SoftSurface<Arc<Window>, Arc<Window>>,
     #[cfg(target_os = "android")]
     surface: crate::android::cpu_surface::CpuSurface,
-    context: CpuRenderContext,
-    resources: CpuResources,
+    /// The raster thread, with the rasterizer and the retained frame.
+    worker: cpu_worker::CpuWorker,
     images: HashMap<String, CpuCachedImage>,
     width: u32,
     height: u32,
     prepared: bool,
-    /// The recorded frame, and the region that differs from what `frame` shows.
-    list: Option<DisplayList>,
+    /// The recorded frame, and the region that differs from what the raster thread drew.
+    list: Option<Arc<DisplayList>>,
     damage: CpuDamage,
-    /// What the retained back buffer was drawn for.
+    /// What the retained frame was drawn for.
     frame_background: Option<[u8; 4]>,
     frame_size: (u16, u16),
-    scratch: Vec<u8>,
-    shadows: ShadowCache,
+    /// The part of the retained frame drawn since it was last copied to the window.
+    unshown: Option<vello::kurbo::Rect>,
+    /// Frames shown so far: the first one is rasterized before it is presented.
+    shown: u64,
     /// Pixels carry premultiplied alpha for a transparent window.
     alpha: bool,
     /// Device pixels per CSS px of the prepared frame (for the glass backdrop's resolution).
@@ -749,15 +755,22 @@ impl CpuGraphics {
         #[cfg(not(target_os = "android"))]
         let soft_context = SoftContext::new(window.clone()).map_err(|error| error.to_string())?;
         #[cfg(not(target_os = "android"))]
-        let surface = SoftSurface::new(&soft_context, window).map_err(|error| error.to_string())?;
+        let surface =
+            SoftSurface::new(&soft_context, window.clone()).map_err(|error| error.to_string())?;
         #[cfg(target_os = "android")]
         let surface = crate::android::cpu_surface::CpuSurface::new(&window)?;
+        // A finished frame asks for a redraw, which presents it.
+        let wake = Arc::downgrade(&window);
+        let worker = cpu_worker::CpuWorker::new((width, height), move || {
+            if let Some(window) = wake.upgrade() {
+                window.request_redraw();
+            }
+        })?;
         Ok(Self {
             #[cfg(not(target_os = "android"))]
             _soft_context: soft_context,
             surface,
-            context: CpuRenderContext::new_with(width, height, cpu_render_settings()),
-            resources: CpuResources::new(),
+            worker,
             images: HashMap::new(),
             width: u32::from(width),
             height: u32::from(height),
@@ -766,8 +779,8 @@ impl CpuGraphics {
             damage: CpuDamage::Full,
             frame_background: None,
             frame_size: (0, 0),
-            scratch: Vec::new(),
-            shadows: ShadowCache::new(),
+            unshown: None,
+            shown: 0,
             alpha,
             scale: 1.0,
         })
@@ -786,7 +799,7 @@ impl CpuGraphics {
         self.width = u32::from(cpu_width);
         self.height = u32::from(cpu_height);
         let list = {
-            let mut recorder = CpuRecorder::after(&mut self.images, self.list.as_ref());
+            let mut recorder = CpuRecorder::after(&mut self.images, self.list.as_deref());
             paint(&mut recorder);
             recorder.finish()
         };
@@ -797,7 +810,7 @@ impl CpuGraphics {
             _ => CpuDamage::Full,
         };
         self.damage = self.damage.add(changed);
-        self.list = Some(list);
+        self.list = Some(Arc::new(list));
         self.prepared = true;
         Ok(())
     }
@@ -813,8 +826,77 @@ impl CpuGraphics {
         true
     }
 
-    /// Redraws what the last prepare changed (nothing for a plain redraw request:
-    /// the retained frame is presented again) and presents it.
+    /// Waits for the frame on the raster thread, if any, and notes what it drew.
+    fn settle(&mut self) -> Result<(), RenderError> {
+        if let Some(region) = self.worker.settle().map_err(RenderError::Fatal)? {
+            self.unshown = Some(self.unshown.map_or(region, |shown| shown.union(region)));
+        }
+        Ok(())
+    }
+
+    /// Copies what the raster thread drew since the last time (`all`: the whole frame) to
+    /// the window and presents it. False when there was nothing to show.
+    fn show(&mut self, all: bool) -> Result<bool, RenderError> {
+        let Some(unshown) = self
+            .unshown
+            .take()
+            .or(all.then_some(vello::kurbo::Rect::ZERO))
+        else {
+            return Ok(false);
+        };
+        let raster = self
+            .worker
+            .raster
+            .lock()
+            .map_err(|_| RenderError::Fatal("CPU raster state poisoned".into()))?;
+        let (width, height) = raster.size;
+        if width == 0 || height == 0 {
+            return Ok(false);
+        }
+        self.surface
+            .resize(
+                NonZeroU32::new(u32::from(width)).unwrap(),
+                NonZeroU32::new(u32::from(height)).unwrap(),
+            )
+            .map_err(|error| RenderError::Fatal(format!("Softbuffer resize failed: {error}")))?;
+        let mut buffer = self
+            .surface
+            .buffer_mut()
+            .map_err(|error| RenderError::Fatal(format!("Softbuffer buffer failed: {error}")))?;
+        let (frame_width, frame_height) = (usize::from(width), usize::from(height));
+        let full = vello::kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
+        // At age 1 the back buffer holds the last presented frame: only what changed is copied.
+        let region = if all || buffer.age() != 1 || buffer.len() != raster.pixels.len() {
+            full
+        } else {
+            unshown.intersect(full)
+        };
+        let (x0, x1) = (region.x0 as usize, (region.x1 as usize).min(frame_width));
+        for row in region.y0 as usize..(region.y1 as usize).min(frame_height) {
+            let range = row * frame_width + x0..row * frame_width + x1;
+            buffer[range.clone()].copy_from_slice(&raster.pixels[range]);
+        }
+        drop(raster);
+        let presented = if region == full {
+            buffer.present()
+        } else {
+            buffer.present_with_damage(&[softbuffer::Rect {
+                x: region.x0 as u32,
+                y: region.y0 as u32,
+                width: NonZeroU32::new((region.x1 - region.x0) as u32).unwrap_or(NonZeroU32::MIN),
+                height: NonZeroU32::new((region.y1 - region.y0) as u32).unwrap_or(NonZeroU32::MIN),
+            }])
+        };
+        presented
+            .map_err(|error| RenderError::Fatal(format!("Softbuffer present failed: {error}")))?;
+        self.shown += 1;
+        Ok(true)
+    }
+
+    /// Hands what the last prepare changed to the raster thread, and presents the frame it
+    /// drew before (`Shown`: a frame already counted reached the window). A redraw with
+    /// nothing new presents the retained frame again. The first frame, and every frame under
+    /// TARVE_CPU_PIPELINE=0, is rasterized and presented before this returns.
     fn render(&mut self, background: vello::peniko::Color) -> Result<PresentResult, RenderError> {
         if !self.prepared {
             return Err(RenderError::Fatal(
@@ -823,25 +905,11 @@ impl CpuGraphics {
         }
         let (width, height) =
             Self::dimensions(self.width, self.height).map_err(RenderError::Fatal)?;
-        self.surface
-            .resize(
-                NonZeroU32::new(u32::from(width)).unwrap(),
-                NonZeroU32::new(u32::from(height)).unwrap(),
-            )
-            .map_err(|error| RenderError::Fatal(format!("Softbuffer resize failed: {error}")))?;
         let background_bytes = background.to_rgba8().to_u8_array();
         let full = vello::kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
-        let mut buffer = self
-            .surface
-            .buffer_mut()
-            .map_err(|error| RenderError::Fatal(format!("Softbuffer buffer failed: {error}")))?;
-        // The back buffer is the retained frame: at age 1 it holds the last presented
-        // one, so only the damage is drawn into it. Otherwise it is drawn whole.
+        self.settle()?;
         let mut damage = self.damage;
-        if buffer.age() != 1
-            || self.frame_background != Some(background_bytes)
-            || self.frame_size != (width, height)
-        {
+        if self.frame_background != Some(background_bytes) || self.frame_size != (width, height) {
             damage = CpuDamage::Full;
         }
         let region = match damage {
@@ -851,64 +919,39 @@ impl CpuGraphics {
         };
         // Glass reads what lies under it: a frame with glass is drawn whole.
         let region = region.map(|region| {
-            if self.list.as_ref().is_some_and(DisplayList::has_glass) {
+            if self.list.as_ref().is_some_and(|list| list.has_glass()) {
                 full
             } else {
                 region
             }
         });
-        if let (Some(region), Some(list)) = (region, &self.list) {
-            let (frame_width, frame_height) = (usize::from(width), usize::from(height));
-            rasterize_cpu_region(
-                &mut self.context,
-                &mut self.resources,
-                list,
-                CpuFrame {
-                    pixels: &mut buffer,
-                    width: frame_width,
-                    height: frame_height,
-                    alpha: self.alpha,
-                },
-                &mut self.scratch,
-                Some(&mut self.shadows),
+        let showed = self.show(false)?;
+        let job = match (region, &self.list) {
+            (Some(region), Some(list)) => Some(cpu_worker::CpuJob {
+                list: list.clone(),
                 region,
+                size: (width, height),
                 background,
-                Some(self.scale),
-            );
-            if region != full && cpu_damage_check() {
-                check_partial_redraw(
-                    &mut self.context,
-                    &mut self.resources,
-                    list,
-                    &buffer,
-                    frame_width,
-                    frame_height,
-                    region,
-                    background,
-                    self.alpha,
-                )?;
-            }
-        }
+                alpha: self.alpha,
+                scale: self.scale,
+            }),
+            _ => None,
+        };
         self.frame_background = Some(background_bytes);
         self.frame_size = (width, height);
         self.damage = CpuDamage::None;
-        self.shadows.next_frame();
-        let presented = match region {
-            Some(region) if region != full => {
-                let rect = softbuffer::Rect {
-                    x: region.x0 as u32,
-                    y: region.y0 as u32,
-                    width: NonZeroU32::new((region.x1 - region.x0) as u32)
-                        .unwrap_or(NonZeroU32::MIN),
-                    height: NonZeroU32::new((region.y1 - region.y0) as u32)
-                        .unwrap_or(NonZeroU32::MIN),
-                };
-                buffer.present_with_damage(&[rect])
+        let Some(job) = job else {
+            if showed {
+                return Ok(PresentResult::Shown);
             }
-            _ => buffer.present(),
+            self.show(true)?;
+            return Ok(PresentResult::Presented);
         };
-        presented
-            .map_err(|error| RenderError::Fatal(format!("Softbuffer present failed: {error}")))?;
+        self.worker.submit(job).map_err(RenderError::Fatal)?;
+        if !self.worker.pipelined || self.shown == 0 {
+            self.settle()?;
+            self.show(false)?;
+        }
         Ok(PresentResult::Presented)
     }
 
@@ -922,34 +965,42 @@ impl CpuGraphics {
                 "CPU renderer frame was not prepared before capture".into(),
             ));
         }
+        self.settle()
+            .map_err(|error| CaptureError::Request(format!("{error:?}")))?;
         let (width, height) =
             Self::dimensions(self.width, self.height).map_err(CaptureError::Request)?;
         let mut pixels = vec![0_u8; usize::from(width) * usize::from(height) * 4];
-        if let Some(list) = &self.list
-            && !crate::glass::cpu::rasterize(
-                &mut self.context,
-                &mut self.resources,
+        if let Some(list) = &self.list {
+            let mut guard = self
+                .worker
+                .raster
+                .lock()
+                .map_err(|_| CaptureError::Request("CPU raster state poisoned".into()))?;
+            let raster = &mut *guard;
+            if !crate::glass::cpu::rasterize(
+                &mut raster.context,
+                &mut raster.resources,
                 list,
                 &mut pixels,
                 (width, height),
-                Some(&mut self.shadows),
+                Some(&mut raster.shadows),
                 background,
                 false,
                 self.scale,
-                &mut self.scratch,
-            )
-        {
-            self.context.reset_and_resize(width, height);
-            list.replay(
-                &mut self.context,
-                &mut self.resources,
-                vello::kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height)),
-                Some(&mut self.shadows),
-            );
-            self.context.flush();
-            let pixmap = PixmapMut::new(width, height, &mut pixels)
-                .ok_or_else(|| CaptureError::Request("Invalid CPU capture size".into()))?;
-            self.context.render(pixmap, &mut self.resources);
+                &mut raster.scratch,
+            ) {
+                raster.context.reset_and_resize(width, height);
+                list.replay(
+                    &mut raster.context,
+                    &mut raster.resources,
+                    vello::kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height)),
+                    Some(&mut raster.shadows),
+                );
+                raster.context.flush();
+                let pixmap = PixmapMut::new(width, height, &mut pixels)
+                    .ok_or_else(|| CaptureError::Request("Invalid CPU capture size".into()))?;
+                raster.context.render(pixmap, &mut raster.resources);
+            }
         }
         // The next presented frame cannot reuse the rasterizer's state.
         self.damage = CpuDamage::Full;
@@ -1726,6 +1777,7 @@ mod tests {
             Rect::new(0.0, 0.0, W as f64, H as f64),
             Color::from_rgb8(250, 250, 250),
             None,
+            Some(&mut crate::cpu_display::GlyphMasks::new()),
         );
         frame
     }
@@ -1753,6 +1805,7 @@ mod tests {
                 region,
                 Color::from_rgb8(250, 250, 250),
                 None,
+                Some(&mut crate::cpu_display::GlyphMasks::new()),
             );
         }
         let expected = full_frame(after);
@@ -1928,6 +1981,7 @@ mod tests {
                 Some(&mut cache),
                 Rect::new(0.0, 0.0, W as f64, H as f64),
                 Color::from_rgb8(250, 250, 250),
+                None,
                 None,
             );
             cache.next_frame();

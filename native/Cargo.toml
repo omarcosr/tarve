@@ -68,6 +68,8 @@ ureq = { version = "3", default-features = false, features = ["rustls"], optiona
 # Clipboard on desktops; Android reads and writes it through the activity (runtime/android.rs).
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "android")))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+# The CPU renderer rasterizes a frame's strips on helper threads (`cpu_render_settings`).
+vello_cpu = { version = "=0.2.0", default-features = false, features = ["multithreading"] }
 
 # Android: winit over NativeActivity (android-activity); the app's JS or Go runs in the same process.
 [target.'cfg(target_os = "android")'.dependencies]

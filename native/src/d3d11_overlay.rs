@@ -6,7 +6,7 @@
 //! compositor places, clips and blends it. A new picture then costs that copy
 //! or quad and a present: the UI frame is not drawn again.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BOX, ID3D11Device, ID3D11DeviceContext, ID3D11RenderTargetView, ID3D11Texture2D,
@@ -330,7 +330,10 @@ impl Composition {
     }
 
     /// Drops the layers of videos not shown any more.
-    pub(crate) fn retain(&mut self, ids: &HashSet<String>) {
+    pub(crate) fn retain<S: std::hash::BuildHasher>(
+        &mut self,
+        ids: &std::collections::HashSet<String, S>,
+    ) {
         let gone: Vec<String> = self
             .layers
             .keys()

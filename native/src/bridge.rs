@@ -624,7 +624,12 @@ pub unsafe extern "C" fn tarve_event_pipe_name(ptr: *mut u8, capacity: u32) -> i
 pub unsafe extern "C" fn tarve_send(ptr: *const u8, len: u32) -> i32 {
     guard(|| {
         let bytes = unsafe { input_bytes(ptr, len)? };
-        let command = Command::from_json(bytes).map_err(|e| e.to_string())?;
+        // A leading 1 is a packed `setNodes` (JSON starts with `{`).
+        let command = if bytes.first() == Some(&1) {
+            Command::PackedSets(bytes.to_vec())
+        } else {
+            Command::from_json(bytes).map_err(|e| e.to_string())?
+        };
         validate_command(&command, false)?;
         let state = host().lock().map_err(|e| e.to_string())?;
         let proxy = &state.as_ref().ok_or("App not started")?.proxy;

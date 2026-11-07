@@ -12,7 +12,7 @@ impl TextEngine {
     pub fn preshape<'a>(&mut self, nodes: impl Iterator<Item = &'a Node>) {
         const MIN: usize = 256;
         let mut pending: Vec<(ShapeKey, &Node, String)> = Vec::new();
-        let mut seen = HashSet::default();
+        let mut seen: HashSet<ShapeKey> = HashSet::default();
         for node in nodes {
             if !matches!(node.kind.as_str(), "text" | "button") || node.rich.is_some() {
                 continue;

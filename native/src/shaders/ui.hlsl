@@ -1,6 +1,7 @@
+// `state`: the vertex's draw state, nine float4 in `states` (clip, its radii and map, shape,
+// inner, mask, its stops and mode), shared by every vertex of the draws that have it.
 struct VSIn { float2 pos : POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; float4 params : TEXCOORD2;
-    float2 dev : TEXCOORD3; float4 clip : TEXCOORD4; float4 clipRadii : TEXCOORD5; float4 clipM0 : TEXCOORD6; float4 clipM1 : TEXCOORD7;
-    float4 shape : TEXCOORD8; float4 inner : TEXCOORD9; float4 mask : TEXCOORD10; float4 maskStops : TEXCOORD11; float4 maskMode : TEXCOORD12; };
+    float2 dev : TEXCOORD3; uint state : TEXCOORD4; };
 struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; float mode : TEXCOORD1; float4 params : TEXCOORD2;
     float2 dev : TEXCOORD3; nointerpolation float4 clip : TEXCOORD4; nointerpolation float4 clipRadii : TEXCOORD5;
     nointerpolation float4 clipM0 : TEXCOORD6; nointerpolation float4 clipM1 : TEXCOORD7;
@@ -13,6 +14,7 @@ struct PSIn { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; float4 color : CO
     nointerpolation float4 maskMode : TEXCOORD12; };
 // Window NDC -> render-target NDC: identity, or one tile of a tiled MSAA frame.
 cbuffer Target : register(b0) { float4 target; };
+Buffer<float4> states : register(t2);
 // Liquid glass: sigma, saturate, refraction, highlight | backdrop width, height, blurred backdrop bound
 // (0 none, 1 full resolution, 2 half), magnify.
 cbuffer Glass : register(b1) { float4 glassA; float4 glassB; float4 glassRegion; };
@@ -20,7 +22,8 @@ cbuffer Glass : register(b1) { float4 glassA; float4 glassB; float4 glassRegion;
 // centre, half size | corner radius, opacity. Shape 0 is the quad's own box.
 cbuffer GlassShapes : register(b2) { float4 glassShapeInfo; float4 glassShapes[16]; };
 PSIn vs_main(VSIn i) { PSIn o; o.pos=float4(i.pos*target.xy+target.zw,0,1); o.uv=i.uv; o.color=i.color; o.mode=i.mode; o.params=i.params;
-    o.dev=i.dev; o.clip=i.clip; o.clipRadii=i.clipRadii; o.clipM0=i.clipM0; o.clipM1=i.clipM1; o.shape=i.shape; o.inner=i.inner; o.mask=i.mask; o.maskStops=i.maskStops; o.maskMode=i.maskMode; return o; }
+    o.dev=i.dev; uint s=i.state*9; o.clip=states.Load(s); o.clipRadii=states.Load(s+1); o.clipM0=states.Load(s+2); o.clipM1=states.Load(s+3);
+    o.shape=states.Load(s+4); o.inner=states.Load(s+5); o.mask=states.Load(s+6); o.maskStops=states.Load(s+7); o.maskMode=states.Load(s+8); return o; }
 // Signed distance to a rounded rectangle (x0,y0,x1,y1) with per-corner radii
 // (top-left, top-right, bottom-right, bottom-left); negative inside.
 float sdRoundRect(float2 p, float4 rect, float4 radii) {

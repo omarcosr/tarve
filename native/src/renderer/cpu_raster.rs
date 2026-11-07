@@ -52,6 +52,7 @@ pub(super) fn check_partial_redraw(
         vello::kurbo::Rect::new(0.0, 0.0, width as f64, height as f64),
         background,
         None,
+        Some(&mut crate::cpu_display::GlyphMasks::new()),
     );
     let mut wrong = 0;
     let (mut x0, mut y0, mut x1, mut y1, mut worst) = (usize::MAX, usize::MAX, 0, 0, 0_i32);
@@ -107,6 +108,7 @@ pub(super) fn rasterize_cpu_region(
     region: vello::kurbo::Rect,
     color: vello::peniko::Color,
     glass_scale: Option<f64>,
+    masks: Option<&mut crate::cpu_display::GlyphMasks>,
 ) {
     let (width, height) = (frame.width, frame.height);
     let pack = if frame.alpha {
@@ -157,12 +159,24 @@ pub(super) fn rasterize_cpu_region(
     context.reset_and_resize(raster_width as u16, region_height as u16);
     let opaque =
         pixels::fill_opaque_background(context, frame.alpha, color, raster_width, region_height);
-    list.replay(context, resources, raster, shadows);
+    // Glyph runs nothing covers are blended in from cached masks after the render.
+    let blits = masks.map(|masks| list.plan_glyph_blits(raster, masks));
+    list.replay_skipping(
+        context,
+        resources,
+        raster,
+        shadows,
+        blits.as_ref().map(crate::cpu_display::GlyphBlits::skip),
+    );
     context.flush();
     if full {
         let bytes = bytemuck::cast_slice_mut::<u32, u8>(frame.pixels);
-        if let Some(pixmap) = PixmapMut::new(region_width as u16, region_height as u16, bytes) {
+        if let Some(pixmap) = PixmapMut::new(region_width as u16, region_height as u16, &mut *bytes)
+        {
             context.render(pixmap, resources);
+        }
+        if let Some(blits) = &blits {
+            blits.blend(bytes, raster);
         }
         if !opaque {
             pack(frame.pixels, color);
@@ -172,6 +186,9 @@ pub(super) fn rasterize_cpu_region(
         scratch.resize(raster_width * region_height * 4, 0);
         if let Some(pixmap) = PixmapMut::new(raster_width as u16, region_height as u16, scratch) {
             context.render(pixmap, resources);
+        }
+        if let Some(blits) = &blits {
+            blits.blend(scratch, raster);
         }
         for row in 0..region_height {
             let source = &scratch[(row * raster_width + margin) * 4..(row + 1) * raster_width * 4];

@@ -915,6 +915,14 @@ fn surface_host(window: &Window, d3d11: bool, gpu_upgrade: bool) -> crate::surfa
     crate::surface::Host::Frames
 }
 
+/// TARVE_PROFILE=<phase>: keeps the profiler's samples inside that phase (`crate::profiler`).
+fn profile_phase(name: &str, on: bool) {
+    #[cfg(target_os = "windows")]
+    crate::profiler::phase(name, on);
+    #[cfg(not(target_os = "windows"))]
+    let _ = (name, on);
+}
+
 /// Where a window's events go: the app's queue, tagged with the window they come
 /// from (`"window"`) unless it is the main one.
 #[derive(Clone)]
@@ -1102,6 +1110,8 @@ impl Host {
 
 impl ApplicationHandler<Command> for Host {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "windows")]
+        crate::profiler::start_from_env();
         self.main.resumed(event_loop);
         for (_, app) in &mut self.others {
             app.resumed(event_loop);
@@ -1131,6 +1141,7 @@ impl ApplicationHandler<Command> for Host {
         self.settle(event_loop);
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, command: Command) {
+        profile_phase("event", true);
         match command {
             Command::OpenWindow { window, document } => self.open(event_loop, window, *document),
             Command::ToWindow { window, command } => match *command {
@@ -1159,6 +1170,7 @@ impl ApplicationHandler<Command> for Host {
             command => self.main.user_event(event_loop, command),
         }
         self.settle(event_loop);
+        profile_phase("event", false);
     }
 }
 
@@ -1262,7 +1274,9 @@ impl App {
             transparency_effects: None,
             frame_stats: Default::default(),
             accessibility_pending: false,
+            updated_since_frame: false,
             last_accessibility_sync: Instant::now(),
+            accessibility_interval: ACCESSIBILITY_INTERVAL,
             memory_stages,
             gpu_upgrade: false,
             gpu_check_pending: false,
@@ -1450,7 +1464,11 @@ struct App {
     frame_stats: crate::stats::FrameStats,
     /// An app update changed the tree since the accessibility tree was last updated.
     accessibility_pending: bool,
+    /// An app update arrived since the last `frame` event.
+    updated_since_frame: bool,
     last_accessibility_sync: Instant,
+    /// How long app updates wait between accessibility updates (`sync_accessibility`).
+    accessibility_interval: Duration,
     /// Process memory after each startup stage, for `app.stats()`.
     memory_stages: crate::stats::MemoryStages,
     /// The first frames are drawn on the CPU while the GPU device is still being created;
@@ -1471,7 +1489,8 @@ const PRESENT_RETRY_DELAY: Duration = Duration::from_millis(16);
 /// Longest a frame waits for the JS patch answering a click or key (under a 60 Hz frame).
 const INPUT_HOLD: Duration = Duration::from_millis(10);
 const MEMORY_RELEASE_INTERVAL: Duration = Duration::from_millis(500);
-/// Shortest time between two accessibility tree updates that come from app updates.
+/// Shortest time between two accessibility tree updates that come from app updates (longer
+/// when an update costs more: `sync_accessibility`).
 const ACCESSIBILITY_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_PASTE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PASTE_IMAGE_DIMENSION: usize = 16_384;
@@ -1561,6 +1580,15 @@ impl App {
     fn sync_accessibility(&mut self) {
         self.accessibility_pending = false;
         self.last_accessibility_sync = Instant::now();
+        let started = Instant::now();
+        self.sync_accessibility_now();
+        // App updates wait at least fifty times what this update cost: assistive technology
+        // on a large animated tree takes at most a fiftieth of the CPU.
+        self.accessibility_interval = (started.elapsed() * 50).max(ACCESSIBILITY_INTERVAL);
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
+    fn sync_accessibility_now(&mut self) {
         if !self
             .accessibility
             .as_ref()
@@ -2165,7 +2193,7 @@ impl App {
         let upgrade_at = self.gpu_upgrade.then(|| now + Duration::from_millis(2));
         let accessibility_at = self
             .accessibility_pending
-            .then(|| self.last_accessibility_sync + ACCESSIBILITY_INTERVAL);
+            .then(|| self.last_accessibility_sync + self.accessibility_interval);
         let gpu_check_at = self.gpu_check_pending.then(|| now + GPU_CHECK_POLL);
         let deadline = [
             accessibility_at,
@@ -2581,6 +2609,7 @@ impl App {
         let background = self.root_color("background", &self.document.window.background);
         self.sync_backdrop_appearance(&background);
         let present_started = Instant::now();
+        profile_phase("present", true);
         let result = match &mut self.graphics {
             GraphicsState::Ready(graphics) => graphics.render(
                 &self.scene,
@@ -2590,6 +2619,7 @@ impl App {
             ),
             _ => Err(RenderError::Fatal("Renderer not ready".into())),
         }?;
+        profile_phase("present", false);
         self.frame_stats
             .present
             .push(present_started.elapsed().as_secs_f64() * 1000.0);
@@ -2611,13 +2641,6 @@ impl App {
         if result == PresentResult::Presented {
             self.present_times.push_back(Instant::now());
             self.prune_present_times();
-        }
-        if result == PresentResult::Presented && self.document.window.debug {
-            let frames = match &self.graphics {
-                GraphicsState::Ready(graphics) => graphics.frames(),
-                _ => 0,
-            };
-            self.events.push(json!({"type":"frame", "frames":frames}));
         }
         Ok(result)
     }
@@ -2658,7 +2681,9 @@ impl App {
             self.tree.restore_all_image_pixels();
         }
         let layout_started = Instant::now();
+        profile_phase("layout", true);
         let computed = self.tree.compute(size.width, size.height);
+        profile_phase("layout", false);
         self.frame_stats
             .layout
             .push(layout_started.elapsed().as_secs_f64() * 1000.0);
@@ -2667,6 +2692,7 @@ impl App {
         self.emit(layout_events);
         let content_changed = self.tree.dirty.paint;
         let paint_started = Instant::now();
+        profile_phase("paint", true);
         if content_changed {
             let tree = &mut self.tree;
             let mut retained_prepared = false;
@@ -2717,6 +2743,7 @@ impl App {
                 .paint
                 .push(paint_started.elapsed().as_secs_f64() * 1000.0);
         }
+        profile_phase("paint", false);
         if content_changed || self.surfaces_waiting {
             let boxes = self.tree.surface_boxes(scale);
             let host = surface_host(window, d3d11, self.gpu_upgrade);
@@ -2793,6 +2820,20 @@ impl App {
             return;
         }
         let frame_started = Instant::now();
+        // `frame` (debug builds of the window, the scene's requestAnimationFrame) goes out as
+        // a frame with new content starts, as a browser runs its callbacks while a frame is
+        // drawn and presented: the app's next changes are ready for the frame after it.
+        if self.document.window.debug
+            && (self.updated_since_frame
+                || self.tree.dirty.paint
+                || self.tree.dirty.layout
+                || self.tree.dirty.text)
+            && let GraphicsState::Ready(graphics) = &self.graphics
+        {
+            self.updated_since_frame = false;
+            let frames = graphics.frames() + 1;
+            self.events.push(json!({"type":"frame", "frames":frames}));
+        }
         self.advance_live_motion();
         let content_changed = match self.prepare() {
             Ok(content_changed) => content_changed,
@@ -2840,6 +2881,7 @@ impl App {
                 }
                 self.sync_control_flow(event_loop);
             }
+            Ok(PresentResult::Shown) => self.sync_control_flow(event_loop),
             Ok(PresentResult::RetryNow) => {
                 self.graphics_stable_since = None;
                 self.request_present_now();
@@ -3256,6 +3298,16 @@ impl ApplicationHandler<Command> for App {
         }
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, command: Command) {
+        let command = match command {
+            Command::PackedSets(bytes) => match Command::from_packed_sets(&bytes) {
+                Ok(command) => command,
+                Err(message) => {
+                    self.events.push(error(message));
+                    return;
+                }
+            },
+            command => command,
+        };
         let mut accessibility_changed = false;
         let update_command = matches!(
             command,
@@ -3271,6 +3323,7 @@ impl ApplicationHandler<Command> for App {
             self.advance_live_motion();
         }
         let apply_started = Instant::now();
+        self.updated_since_frame |= update_command;
         if matches!(
             command,
             Command::Patch { .. }
@@ -3349,7 +3402,11 @@ impl ApplicationHandler<Command> for App {
                     .push(apply_started.elapsed().as_secs_f64() * 1000.0);
             }
             Command::Stats { request_id, reset } => self.stats(request_id, reset),
-            Command::Close => self.exit_requested = true,
+            Command::Close => {
+                #[cfg(target_os = "windows")]
+                crate::profiler::finish();
+                self.exit_requested = true;
+            }
             Command::CancelCloseRequest => self.close_request_pending = false,
             Command::MenuBar { menu } => {
                 if let Err(message) = self.apply_menu_bar(menu) {
@@ -3893,7 +3950,9 @@ impl ApplicationHandler<Command> for App {
             // Tree updates (an animation sets thousands of nodes every frame) reach assistive
             // technology at most every ACCESSIBILITY_INTERVAL, with the state they left; focus,
             // actions and input still answer at once.
-            if update_command && self.last_accessibility_sync.elapsed() < ACCESSIBILITY_INTERVAL {
+            if update_command
+                && self.last_accessibility_sync.elapsed() < self.accessibility_interval
+            {
                 self.accessibility_pending = true;
             } else {
                 self.sync_accessibility();
@@ -3951,7 +4010,7 @@ impl ApplicationHandler<Command> for App {
         }
         let gpu_redraw = self.poll_gpu_check();
         if self.accessibility_pending
-            && self.last_accessibility_sync.elapsed() >= ACCESSIBILITY_INTERVAL
+            && self.last_accessibility_sync.elapsed() >= self.accessibility_interval
         {
             self.sync_accessibility();
         }

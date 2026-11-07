@@ -2,6 +2,7 @@ import { NATIVE_ABI_VERSION, type SceneDocument, type NativeCommand, type Native
 import { openLibrary, setStartedLibrary } from "./binding";
 import { nativePath } from "#tarve/runtime";
 import { createConnection, type Socket } from "node:net";
+import { PACK, PackWriter } from "../app/node-sets";
 
 export interface NativeBridge {
   start(document: SceneDocument, onEvent: (event: NativeEvent) => void): void;
@@ -114,6 +115,7 @@ export class BunFfiBridge implements NativeBridge {
   private readonly decoder = new TextDecoder();
   private readonly encoder = new TextEncoder();
   private sendBuffer = new Uint8Array(4096);
+  private packWriter?: PackWriter;
   private closed = false;
   private eventTransportFailed = false;
   /** Events polled while a synchronous request waited: delivered before newer ones. */
@@ -316,6 +318,14 @@ export class BunFfiBridge implements NativeBridge {
   send(command: NativeCommand): void {
     if (this.closed) throw new Error("Native window is closed");
     if (!this.library) throw new Error("Bridge not started");
+    // A signal flush writes itself packed: no JSON is built, encoded or parsed for it.
+    const pack = (command as { [PACK]?: (out: PackWriter) => void })[PACK];
+    if (pack) {
+      const out = (this.packWriter ??= new PackWriter());
+      pack.call(command, out);
+      if (this.library.symbols.tarve_send(out.bytes, out.length) !== 0) throw this.error();
+      return;
+    }
     const json = JSON.stringify(command);
     // One buffer reused for every command (native copies what it needs during the call):
     // a frame of updates no longer leaves a fresh buffer of its size behind for the GC.

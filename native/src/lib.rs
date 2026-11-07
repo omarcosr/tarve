@@ -52,6 +52,8 @@ mod menu_bar;
 #[cfg(not(target_arch = "wasm32"))]
 mod notification;
 mod paint;
+#[cfg(target_os = "windows")]
+mod profiler;
 mod protocol;
 #[cfg(not(target_arch = "wasm32"))]
 mod remote_image;
@@ -115,7 +117,113 @@ pub(crate) mod counting_alloc {
 }
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static GLOBAL: alloc_trace::Traced = alloc_trace::Traced;
+
+/// TARVE_ALLOC_TRACE=<KB>: every allocation of at least that size goes to stderr with the
+/// stack that made it (debug info and _NT_SYMBOL_PATH pointing at the PDBs), and the live
+/// bytes of the native heap with it. Off, it costs one relaxed load per allocation.
+#[cfg(feature = "mimalloc")]
+pub(crate) mod alloc_trace {
+    use std::alloc::{GlobalAlloc, Layout};
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
+
+    /// The threshold in bytes; 0 off, usize::MAX not read yet.
+    static THRESHOLD: AtomicUsize = AtomicUsize::new(usize::MAX);
+    static LIVE: AtomicIsize = AtomicIsize::new(0);
+    thread_local! {
+        static INSIDE: Cell<bool> = const { Cell::new(false) };
+    }
+
+    fn threshold() -> usize {
+        let value = THRESHOLD.load(Ordering::Relaxed);
+        if value != usize::MAX {
+            return value;
+        }
+        // Reading the environment allocates: settle on "off" while it does.
+        THRESHOLD.store(0, Ordering::Relaxed);
+        let read = std::env::var("TARVE_ALLOC_TRACE")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .map_or(0, |kb| kb.max(1) * 1024);
+        THRESHOLD.store(read, Ordering::Relaxed);
+        read
+    }
+
+    fn report(size: usize) {
+        let _ = INSIDE.try_with(|inside| {
+            if inside.replace(true) {
+                return;
+            }
+            let trace = std::backtrace::Backtrace::force_capture().to_string();
+            let frames: Vec<&str> = trace
+                .lines()
+                .filter(|line| {
+                    line.contains("tarve_native::")
+                        || line.contains("vello")
+                        || line.contains("parley")
+                        || line.contains("accesskit")
+                        || line.contains("taffy")
+                })
+                .filter(|line| !line.contains("alloc_trace"))
+                .take(6)
+                .map(str::trim)
+                .collect();
+            eprintln!(
+                "[alloc] {} KB live={} MB :: {}",
+                size / 1024,
+                LIVE.load(Ordering::Relaxed) / 1048576,
+                frames.join(" <- ")
+            );
+            inside.set(false);
+        });
+    }
+
+    /// Live bytes of the native heap while tracing.
+    pub(crate) fn live() -> Option<isize> {
+        (threshold() != 0).then(|| LIVE.load(Ordering::Relaxed))
+    }
+
+    pub struct Traced;
+    unsafe impl GlobalAlloc for Traced {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let limit = threshold();
+            if limit != 0 {
+                LIVE.fetch_add(layout.size() as isize, Ordering::Relaxed);
+                if layout.size() >= limit {
+                    report(layout.size());
+                }
+            }
+            unsafe { mimalloc::MiMalloc.alloc(layout) }
+        }
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            let limit = threshold();
+            if limit != 0 {
+                LIVE.fetch_add(layout.size() as isize, Ordering::Relaxed);
+                if layout.size() >= limit {
+                    report(layout.size());
+                }
+            }
+            unsafe { mimalloc::MiMalloc.alloc_zeroed(layout) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            if threshold() != 0 {
+                LIVE.fetch_sub(layout.size() as isize, Ordering::Relaxed);
+            }
+            unsafe { mimalloc::MiMalloc.dealloc(ptr, layout) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+            let limit = threshold();
+            if limit != 0 {
+                LIVE.fetch_add(size as isize - layout.size() as isize, Ordering::Relaxed);
+                if size >= limit && size > layout.size() {
+                    report(size);
+                }
+            }
+            unsafe { mimalloc::MiMalloc.realloc(ptr, layout, size) }
+        }
+    }
+}
 
 #[cfg(feature = "mimalloc")]
 unsafe extern "C" {

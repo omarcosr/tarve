@@ -19,13 +19,13 @@ const w = Math.floor((width - gap) / cols - gap);
 const h = Math.floor((height - gap) / rows - gap);
 const font = Math.floor(Math.min(14, Math.max(8, ((height - gap) / rows - gap) * 0.55)));
 
+// The colour exactly as BUI's bench/cells.js computes it (the same JS work per frame).
 function cellColor(i: number, t: number): string {
-  const hue = ((i * 7 + t * 3) % 360) / 60;
-  const s = 0.55, v = 0.75, c = v * s;
-  const x = c * (1 - Math.abs((hue % 2) - 1));
-  const [r, g, b] = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.min(5, Math.floor(hue))]!;
-  const m = v - c;
-  return "#" + [r!, g!, b!].map(f => Math.round((f + m) * 255).toString(16).padStart(2, "0")).join("");
+  const h = ((i * 7 + t * 3) % 360) / 60, s = 0.55, v = 0.75, c = v * s;
+  const x = c * (1 - Math.abs((h % 2) - 1)), m = v - c;
+  const [r, g, b] = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.floor(h) % 6]!;
+  const hex = (u: number) => Math.round((u + m) * 255).toString(16).padStart(2, "0");
+  return `#${hex(r!)}${hex(g!)}${hex(b!)}`;
 }
 const tFor = (i: number, t: number) => (mode === "one" && i !== 0 ? 0 : t);
 const indexes = Array.from({ length: cells }, (_, i) => i);
@@ -80,10 +80,14 @@ const tCreate = performance.now();
 const app = createApp(Scene, { debug: true, renderer });
 const tCreated = performance.now();
 let firstFrameMs = 0;
+// Frames counted from the `frame` events, as BUI's bench counts its requestAnimationFrame
+// callbacks: `app.inspect()` would snapshot every node into the measured window.
+let framesSeen = 0;
 const tickTimes: number[] = [];
 // `frame` (debug builds of the window) arrives after each present: the requestAnimationFrame of the scene.
 app.onEvent(event => {
   if (event.type !== "frame") return;
+  framesSeen++;
   if (!firstFrameMs) firstFrameMs = performance.now();
   if (mode !== "idle") {
     t++;
@@ -98,15 +102,19 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 while (!firstFrameMs) await sleep(1);
 await sleep(warmup);
 console.log("@mark start");
-const f0 = (await app.inspect()).frames, w0 = performance.now();
+const f0 = framesSeen, w0 = performance.now();
 await sleep(seconds);
-const frames = (await app.inspect()).frames - f0, wall = performance.now() - w0;
+const frames = framesSeen - f0, wall = performance.now() - w0;
 console.log("@mark end");
 const { js, native } = await app.stats();
 const p50 = (summary: { p50: number } | undefined) => summary?.p50;
 // MEMORY=1: where the memory goes (JS heap, native stages and now).
-if (process.env.MEMORY === "1") console.log(JSON.stringify({ heapUsedMb: js.heapUsedMb, rssMb: Math.round((process.memoryUsage?.()?.rss ?? 0) / 1048576), native: native.memory }));
+if (process.env.MEMORY === "1") console.log(JSON.stringify({ jsc: await import("bun:jsc").then(jsc => { const s = jsc.heapStats(); return { types: Object.entries(s.objectTypeCounts).sort((a, b) => b[1] - a[1]).slice(0, 16), heapMb: Math.round(s.heapSize / 1048576), capacityMb: Math.round(s.heapCapacity / 1048576), extraMb: Math.round(s.extraMemorySize / 1048576) }; }).catch(() => null), heapUsedMb: js.heapUsedMb, rssMb: Math.round((process.memoryUsage?.()?.rss ?? 0) / 1048576), native: native.memory }));
 const phases = { render: p50(js.render), diff: p50(js.diff), shadow: p50(js.shadow), send: p50(js.send), update: p50(js.update), apply: p50(native.phases?.apply), layout: p50(native.phases?.layout), paint: p50(native.phases?.paint), present: p50(native.phases?.present), frame: p50(native.phases?.frame) };
 console.log(JSON.stringify({ app: `tarve-${process.env.MEMO === "1" ? "memo-" : ""}${signals ? "signals-" : ""}${renderer}`, cells, mode, fps: +(frames / wall * 1000).toFixed(1), frames, wallMs: Math.round(wall), first_frame_ms: Math.round(firstFrameMs), tickMs: tickTimes.length ? +[...tickTimes].sort((a, b) => a - b)[tickTimes.length >> 1]!.toFixed(2) : 0, startup: { imported: Math.round(tImported), createApp: Math.round(tCreate), started: Math.round(tCreated) }, phases }));
+// CAPTURE=<file.png>: the frame as the renderer drew it, to look at.
+if (process.env.CAPTURE) await app.capture(process.env.CAPTURE);
 app.close();
+// TARVE_PROFILE: the window prints the profiler's report as it closes.
+if (process.env.TARVE_PROFILE) await sleep(Number(process.env.PROFILE_WAIT ?? 20) * 1000);
 process.exit(0);

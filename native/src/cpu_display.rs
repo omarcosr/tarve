@@ -17,7 +17,9 @@ use vello_cpu::{
 };
 
 use crate::glass::{GlassCall, GlassPlan};
+mod glyph_blit;
 mod replay;
+pub(crate) use glyph_blit::{GlyphBlits, GlyphMasks};
 
 use crate::paint::{
     CpuCachedImage, GlassParams, PaintGlyph, PaintGradient, PaintTarget, cached_cpu_pixmap,

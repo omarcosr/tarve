@@ -8,7 +8,7 @@ use accesskit::{
     SortDirection, TextDirection, TextPosition, TextSelection, Toggled, TreeId, TreeInfo,
     TreeUpdate,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use unicode_segmentation::UnicodeSegmentation;
 use winit::{
     event::WindowEvent,
@@ -25,7 +25,25 @@ struct AccessibilityTree {
     next_id: u64,
     /// The nodes as the platform adapter has them: an update sends only those that changed
     /// (an animation of colours changes none). Empty: the next update is the whole tree.
-    sent: HashMap<NodeId, AccessNode>,
+    /// Kept as a hash of each node, not a copy (a copy doubled the tree's memory).
+    sent: HashMap<NodeId, u64>,
+}
+
+/// A hash of everything an accessibility node holds (its `Debug` form, fed straight into
+/// the hasher): equal nodes hash equal, so an unchanged node is not sent again.
+fn node_hash(node: &AccessNode) -> u64 {
+    use std::fmt::Write;
+    use std::hash::Hasher;
+    struct Feed(std::collections::hash_map::DefaultHasher);
+    impl Write for Feed {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            self.0.write(text.as_bytes());
+            Ok(())
+        }
+    }
+    let mut feed = Feed(Default::default());
+    let _ = write!(feed, "{node:?}");
+    feed.0.finish()
 }
 
 #[derive(Clone)]
@@ -154,6 +172,60 @@ impl AccessibilityTree {
             "splitter" => Role::Splitter,
             "scroll" => Role::ScrollView,
             _ => Role::GenericContainer,
+        }
+    }
+
+    /// Plain layout boxes (a view, row or column with no role, label, text, focus or
+    /// relation) left out of the tree, their children standing in their place, as browsers
+    /// leave generic `div`s out: assistive technology reads the content, not the nesting,
+    /// and a grid of thousands of boxes is half the nodes.
+    fn ignored_boxes<'a>(tree: &Tree, order: &'a [String]) -> HashSet<&'a str> {
+        let mut referenced: HashSet<&str> = HashSet::new();
+        for entry in tree.entries.values() {
+            referenced.extend(entry.node.labelled_by.iter().map(String::as_str));
+            if let Some(control) = &entry.node.control {
+                referenced.insert(control.group.as_str());
+            }
+        }
+        if let Some(focused) = tree.focused.as_deref() {
+            referenced.insert(focused);
+        }
+        if let Some(modal) = tree.active_modal() {
+            referenced.insert(modal);
+        }
+        order
+            .iter()
+            .map(String::as_str)
+            .filter(|id| {
+                let node = &tree.entries[*id].node;
+                *id != tree.root
+                    && matches!(node.kind.as_str(), "view" | "row" | "column")
+                    && node.control.is_none()
+                    && !node.modal
+                    && node.labelled_by.is_empty()
+                    && node.text.is_empty()
+                    && !(node.focusable && node.interactive())
+                    && !referenced.contains(id)
+            })
+            .collect()
+    }
+
+    /// `children`'s ids, an ignored box's own children in its place.
+    fn push_children(
+        &self,
+        tree: &Tree,
+        ignored: &HashSet<&str>,
+        children: &[String],
+        out: &mut Vec<NodeId>,
+    ) {
+        for child in children {
+            if ignored.contains(child.as_str()) {
+                if let Some(entry) = tree.entries.get(child) {
+                    self.push_children(tree, ignored, &entry.children, out);
+                }
+            } else if let Some(id) = self.ids.get(child) {
+                out.push(*id);
+            }
         }
     }
 
@@ -467,9 +539,13 @@ impl AccessibilityTree {
 
         let modal = tree.active_modal().map(str::to_string);
         let root_id = self.ids[&tree.root];
+        let ignored = Self::ignored_boxes(tree, &order);
         let mut nodes = Vec::with_capacity(tree.entries.len() * 2);
 
         for native_id in &order {
+            if ignored.contains(native_id.as_str()) {
+                continue;
+            }
             let (
                 tarve_node,
                 entry_children,
@@ -509,10 +585,8 @@ impl AccessibilityTree {
                 });
             }
 
-            let mut children: Vec<NodeId> = entry_children
-                .iter()
-                .filter_map(|child| self.ids.get(child).copied())
-                .collect();
+            let mut children: Vec<NodeId> = Vec::with_capacity(entry_children.len());
+            self.push_children(tree, &ignored, &entry_children, &mut children);
 
             if let Some(control) = &tarve_node.control {
                 if !control.label.is_empty() {
@@ -742,6 +816,7 @@ impl AccessibilityTree {
         let focus = tree
             .focused
             .as_ref()
+            .filter(|focused| !ignored.contains(focused.as_str()))
             .and_then(|focused| self.ids.get(focused).copied())
             .or_else(|| {
                 tree.active_modal()
@@ -750,7 +825,10 @@ impl AccessibilityTree {
             .unwrap_or(root_id);
         let full = self.sent.is_empty();
         let nodes = if full {
-            self.sent = nodes.iter().cloned().collect();
+            self.sent = nodes
+                .iter()
+                .map(|(id, node)| (*id, node_hash(node)))
+                .collect();
             nodes
         } else {
             let current: std::collections::HashSet<NodeId> =
@@ -759,10 +837,11 @@ impl AccessibilityTree {
             nodes
                 .into_iter()
                 .filter(|(id, node)| {
-                    if self.sent.get(id) == Some(node) {
+                    let hash = node_hash(node);
+                    if self.sent.get(id) == Some(&hash) {
                         return false;
                     }
-                    self.sent.insert(*id, node.clone());
+                    self.sent.insert(*id, hash);
                     true
                 })
                 .collect()
@@ -878,7 +957,9 @@ mod tests {
         let mut accessibility = AccessibilityTree::default();
         let first = accessibility.build(&mut tree, "Window", 1.0);
         assert!(first.tree.is_some());
-        assert_eq!(first.nodes.len(), 4, "the first update is the whole tree");
+        // The plain box is left out: its label is the window's child in its place.
+        assert_eq!(first.nodes.len(), 3, "the first update is the whole tree");
+        assert!(!accessibility.sent.contains_key(&accessibility.ids["box"]));
         // A colour is nothing assistive technology sees: nothing to send.
         tree.update(document("a", "#00ff00"));
         tree.compute(400.0, 300.0).unwrap();
@@ -892,7 +973,7 @@ mod tests {
         assert_eq!(text.nodes[0].0, accessibility.ids["label"]);
         // A client asking again gets the whole tree.
         accessibility.sent.clear();
-        assert_eq!(accessibility.build(&mut tree, "Window", 1.0).nodes.len(), 4);
+        assert_eq!(accessibility.build(&mut tree, "Window", 1.0).nodes.len(), 3);
     }
 
     #[test]

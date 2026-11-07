@@ -11,6 +11,18 @@ impl DisplayList {
         region: Rect,
         shadows: Option<&mut ShadowCache>,
     ) {
+        self.replay_skipping(context, resources, region, shadows, None);
+    }
+
+    /// `replay`, leaving out the ops `skip` marks (glyph runs blended in afterwards).
+    pub(crate) fn replay_skipping(
+        &self,
+        context: &mut RenderContext,
+        resources: &mut Resources,
+        region: Rect,
+        shadows: Option<&mut ShadowCache>,
+        skip: Option<&[bool]>,
+    ) {
         let origin = Affine::translate((-region.x0, -region.y0));
         self.replay_ops(
             context,
@@ -20,6 +32,7 @@ impl DisplayList {
             0..self.ops.len(),
             shadows,
             false,
+            skip,
         );
     }
 
@@ -60,6 +73,7 @@ impl DisplayList {
             range,
             shadows,
             true,
+            None,
         );
         true
     }
@@ -83,6 +97,7 @@ impl DisplayList {
         range: std::ops::Range<usize>,
         mut shadows: Option<&mut ShadowCache>,
         glass_composited: bool,
+        skip: Option<&[bool]>,
     ) {
         let mut depth = 0_usize;
         // Starting inside layers: open the ones that hold the start.
@@ -136,6 +151,10 @@ impl DisplayList {
         let mut index = range.start;
         while index < range.end.min(self.ops.len()) {
             let recorded = &self.ops[index];
+            if skip.is_some_and(|skip| skip.get(index) == Some(&true)) {
+                index += 1;
+                continue;
+            }
             let visible = recorded.bounds.intersect(region).area() > 0.0;
             match &recorded.op {
                 Op::PushClip {

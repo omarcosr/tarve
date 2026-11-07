@@ -1188,12 +1188,72 @@ fn valid_number_edit(value: &str) -> bool {
 
 /// A retained node, shared: painting and hit testing hold it while the tree changes
 /// (copying a node per painted box cost a tenth of a frame). Writes copy it only while shared.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SharedNode(Arc<Node>);
+#[derive(Clone, Debug)]
+pub struct SharedNode(
+    Arc<Node>,
+    std::cell::Cell<u8>,
+    std::cell::Cell<Option<SimpleStyle>>,
+);
+
+/// What `paint_simple` reads from a plain node's style besides its colours, parsed once per
+/// version of the node (a colour or text write keeps it, `keep_simple_paint`).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SimpleStyle {
+    radii: [f64; 4],
+    padding: [f32; 4],
+    font_size: f32,
+}
+
+impl PartialEq for SharedNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
 
 impl SharedNode {
     pub fn new(node: Node) -> Self {
-        Self(Arc::new(node))
+        Self(
+            Arc::new(node),
+            std::cell::Cell::new(0),
+            std::cell::Cell::new(None),
+        )
+    }
+
+    /// The node's `SimpleStyle`, parsed on first use.
+    fn simple_style(&self) -> SimpleStyle {
+        if let Some(style) = self.2.get() {
+            return style;
+        }
+        let style = SimpleStyle {
+            radii: corner_radii(&self.0.style["radius"])
+                .unwrap_or([0.0; 4])
+                .map(f64::from),
+            padding: self.0.insets("padding"),
+            font_size: self.0.font_size(14.0),
+        };
+        self.2.set(Some(style));
+        style
+    }
+
+    /// Keeps the `simple_paint` answer across a write that cannot change it: a solid colour
+    /// for `background` or `foreground`, or a plain text's content.
+    fn keep_simple_paint(&self, (known, style): (u8, Option<SimpleStyle>)) {
+        self.1.set(known);
+        self.2.set(style);
+    }
+
+    /// Whether the node paints as a plain box or text (`simple_paint`), worked out once per
+    /// version of the node: any write through `DerefMut` forgets it.
+    fn simple_paint(&self) -> bool {
+        match self.1.get() {
+            1 => false,
+            2 => true,
+            _ => {
+                let simple = simple_paint(&self.0);
+                self.1.set(if simple { 2 } else { 1 });
+                simple
+            }
+        }
     }
 }
 
@@ -1206,8 +1266,89 @@ impl std::ops::Deref for SharedNode {
 
 impl std::ops::DerefMut for SharedNode {
     fn deref_mut(&mut self) -> &mut Node {
+        self.1.set(0);
+        self.2.set(None);
         Arc::make_mut(&mut self.0)
     }
+}
+
+/// Style keys a plain box or text may set and still paint through `paint_simple`: layout,
+/// a solid background and corner radius, and the font. Anything else (borders, shadows,
+/// state styles, transforms, opacity, motion…) takes the full paint.
+const SIMPLE_PAINT_KEYS: &[&str] = &[
+    "width",
+    "height",
+    "minWidth",
+    "minHeight",
+    "maxWidth",
+    "maxHeight",
+    "flex",
+    "grow",
+    "basis",
+    "shrink",
+    "aspectRatio",
+    "boxSizing",
+    "direction",
+    "wrap",
+    "gap",
+    "rowGap",
+    "columnGap",
+    "padding",
+    "margin",
+    "align",
+    "justify",
+    "alignSelf",
+    "alignContent",
+    "justifyItems",
+    "justifySelf",
+    "columns",
+    "rows",
+    "autoRows",
+    "autoColumns",
+    "gridColumn",
+    "gridRow",
+    "position",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "background",
+    "radius",
+    "foreground",
+    "fontSize",
+    "fontWeight",
+    "fontFamily",
+    "lineHeight",
+    "textAlign",
+    "cursor",
+];
+
+/// A view, row, column or plain text whose paint is its background and its text alone.
+fn simple_paint(node: &Node) -> bool {
+    if !matches!(node.kind.as_str(), "view" | "row" | "column" | "text")
+        || node.control.is_some()
+        || node.portal
+        || node.highlight.is_some()
+        || node.rich.is_some()
+        || !node.runs.is_null()
+        || node.disabled
+    {
+        return false;
+    }
+    let Some(style) = node.style.as_object() else {
+        return node.style.is_null();
+    };
+    style.iter().all(|(key, value)| {
+        SIMPLE_PAINT_KEYS.contains(&key.as_str())
+            && match key.as_str() {
+                // A colour, not a gradient, theme object or currentColor.
+                "background" | "foreground" => value.as_str().is_some_and(|colour| {
+                    !colour.contains('(') && !colour.eq_ignore_ascii_case("currentColor")
+                }),
+                "radius" => value.is_number(),
+                _ => true,
+            }
+    })
 }
 
 pub struct Entry {
@@ -1567,13 +1708,20 @@ pub struct Tree {
     /// boundaries). Their subtrees and ancestors paint again; every other subtree reuses what
     /// it recorded the last frame, unless `dirty.full_paint`.
     paint_changed: HashSet<String>,
+    /// Half the tree or more changed since the last paint: `paint_changed` stops recording
+    /// (no subtree is reused then) instead of copying every id.
+    paint_changed_most: bool,
     /// While painting: nodes holding a changed one, and how many changed ancestors the
     /// node being painted has.
     paint_holds_changed: HashSet<String>,
     paint_changed_depth: usize,
     paint_reuse: bool,
+    /// `paint_simple` for plain boxes and texts (TARVE_SIMPLE_PAINT=0 turns it off).
+    pub(crate) simple_paint_enabled: bool,
     /// Whether any node is a link (`link_foreground_for`), true outside a paint.
     paint_has_links: bool,
+    /// Whether any node sets `textDecoration` (true outside a paint).
+    paint_has_decorations: bool,
     pub paints: u64,
     pub layout_nodes_created: u64,
     pub measure_calls: u64,
@@ -1761,11 +1909,17 @@ impl Tree {
     }
 
     pub fn new(root: Node) -> Self {
+        // Sized for the document: a layout node is over a kilobyte, and growing by doubling
+        // would leave up to half the slots unused.
+        fn count(node: &Node) -> usize {
+            1 + node.children.iter().map(count).sum::<usize>()
+        }
+        let nodes = count(&root);
         let mut tree = Self {
             root: root.id.clone(),
-            entries: HashMap::default(),
-            order: Vec::new(),
-            layout: TaffyTree::new(),
+            entries: HashMap::with_capacity_and_hasher(nodes, Default::default()),
+            order: Vec::with_capacity(nodes),
+            layout: TaffyTree::with_capacity(nodes),
             text: TextEngine::new(),
             highlight_ranges: HashMap::default(),
             highlight_counts: HashMap::default(),
@@ -1842,10 +1996,14 @@ impl Tree {
             layouts: 0,
             laid_out_size: None,
             paint_changed: HashSet::default(),
+            paint_changed_most: false,
             paint_holds_changed: HashSet::default(),
             paint_changed_depth: 0,
             paint_reuse: false,
+            simple_paint_enabled: std::env::var_os("TARVE_SIMPLE_PAINT")
+                .is_none_or(|value| value != "0"),
             paint_has_links: true,
+            paint_has_decorations: true,
             paints: 0,
             layout_nodes_created: 0,
             measure_calls: 0,
@@ -2395,7 +2553,7 @@ impl Tree {
             }
             if node != *prev.node || structure_dirty {
                 self.dirty.paint = true;
-                self.paint_changed.insert(node.id.clone());
+                self.mark_paint_changed(&node.id);
             }
         } else {
             self.dirty = Dirty::all();
@@ -2614,11 +2772,28 @@ impl Tree {
                 return Err(format!("Node update references a missing node: {}", set.id));
             }
         }
-        let mut nodes = Vec::new();
+        let mut nodes: Vec<Node> = Vec::new();
+        // A node set twice (two signals of one node) takes both sets, the later on top.
+        let mut patched: HashMap<String, usize> = HashMap::default();
         for set in sets {
+            if let Some(&at) = patched.get(&set.id) {
+                let node = &mut nodes[at];
+                if let Some(style) = set.style {
+                    let mut map = node.style.as_object().cloned().unwrap_or_default();
+                    for (key, value) in style {
+                        map.insert(key, value);
+                    }
+                    node.style = crate::protocol::NodeStyle::new(Value::Object(map));
+                }
+                if let Some(text) = set.text {
+                    node.text = text;
+                }
+                continue;
+            }
             if self.set_node_in_place(&set) {
                 continue;
             }
+            patched.insert(set.id.clone(), nodes.len());
             let entry = &self.entries[&set.id];
             let mut node = (*entry.node).clone();
             node.children = Vec::new();
@@ -2670,6 +2845,15 @@ impl Tree {
             return false;
         }
         let mut changed = false;
+        let known_simple = (entry.node.1.get(), entry.node.2.get());
+        let keeps_simple = set.style.as_ref().is_none_or(|style| {
+            style.iter().all(|(key, value)| {
+                matches!(key.as_str(), "background" | "foreground")
+                    && value.as_str().is_some_and(|colour| {
+                        !colour.contains('(') && !colour.eq_ignore_ascii_case("currentColor")
+                    })
+            })
+        });
         if let Some(style) = &set.style
             && style
                 .iter()
@@ -2689,9 +2873,12 @@ impl Tree {
             self.highlight_dirty = true;
             changed = true;
         }
+        if keeps_simple && let Some(entry) = self.entries.get(&set.id) {
+            entry.node.keep_simple_paint(known_simple);
+        }
         if changed {
             self.dirty.paint = true;
-            self.paint_changed.insert(set.id.clone());
+            self.mark_paint_changed(&set.id);
         }
         true
     }
@@ -2878,7 +3065,7 @@ impl Tree {
                 self.highlight_dirty = true;
                 self.dirty.layout = true;
                 self.dirty.paint = true;
-                self.paint_changed.insert(id.clone());
+                self.mark_paint_changed(&id);
             }
         }
         for id in removes {
@@ -3613,10 +3800,9 @@ impl Tree {
     /// laid out at their natural size qualify, whose min- and max-content are that size, so
     /// no line of the flex algorithm can come out differently.
     fn settle_same_size_texts(&mut self) {
-        let candidates: Vec<(String, NodeId)> = self
-            .entries
-            .iter()
-            .filter(|(_, entry)| {
+        let (entries, text, layout) = (&mut self.entries, &mut self.text, &self.layout);
+        for (id, entry) in entries.iter_mut() {
+            let candidate =
                 entry.measure_dirty
                     && !entry.layout_dirty
                     && !entry.structure_dirty
@@ -3626,18 +3812,16 @@ impl Tree {
                     && !entry.node.text.is_empty()
                     && entry.node.text.chars().all(|c| {
                         c.is_ascii_alphanumeric() || matches!(c, '.' | ',' | ':' | '%' | '#')
-                    })
-            })
-            .filter_map(|(id, entry)| Some((id.clone(), entry.layout_id?)))
-            .collect();
-        for (id, layout_id) in candidates {
-            let (width, height) = self.text.measure(&id, None);
-            let laid = self.layout.unrounded_layout(layout_id).size;
+                    });
+            let Some(layout_id) = entry.layout_id.filter(|_| candidate) else {
+                continue;
+            };
+            let (width, height) = text.measure(id, None);
+            let laid = layout.unrounded_layout(layout_id).size;
             if (width - laid.width.ceil()).abs() < 0.01
                 && (height - laid.height.ceil()).abs() < 0.01
                 && (laid.width - laid.width.ceil()).abs() < 0.01
                 && (laid.height - laid.height.ceil()).abs() < 0.01
-                && let Some(entry) = self.entries.get_mut(&id)
             {
                 entry.measure_dirty = false;
             }
@@ -3764,7 +3948,7 @@ impl Tree {
             }
         }
         for id in &boundaries {
-            self.paint_changed.insert(id.clone());
+            self.mark_paint_changed(id);
             let parent_origin = self.absolute_origin(self.entries[id].parent.as_deref())?;
             let bounds = self.positions(id, parent_origin)?;
             // Ancestors paint (and are culled) within their descendants' bounds.
@@ -4282,6 +4466,19 @@ impl Tree {
             parent = next;
         }
     }
+    /// Records that `id` paints differently (`paint_changed`).
+    fn mark_paint_changed(&mut self, id: &str) {
+        if self.paint_changed_most || self.paint_changed.contains(id) {
+            return;
+        }
+        if (self.paint_changed.len() + 1) * 2 >= self.entries.len() {
+            self.paint_changed_most = true;
+            self.paint_changed.clear();
+            return;
+        }
+        self.paint_changed.insert(id.to_string());
+    }
+
     pub(crate) fn paint<P: PaintTarget>(&mut self, scale: f64, target: &mut P) {
         if self.highlight_dirty {
             self.resolve_highlights();
@@ -4289,17 +4486,23 @@ impl Tree {
         }
         self.painted_nodes = 0;
         self.video_painted.clear();
-        self.paint_has_links = self.entries.values().any(|entry| {
-            entry
-                .node
+        (self.paint_has_links, self.paint_has_decorations) = (false, false);
+        for entry in self.entries.values() {
+            let node = &entry.node;
+            self.paint_has_links |= node
                 .control
                 .as_ref()
-                .is_some_and(|control| control.role == "link")
-        });
+                .is_some_and(|control| control.role == "link");
+            self.paint_has_decorations |= style_sets_anywhere(node, "textDecoration");
+            if self.paint_has_links && self.paint_has_decorations {
+                break;
+            }
+        }
         // Search highlights span several texts: one text's change can move another's.
         // When most of the tree changed, finding what holds a change costs more than it saves.
         self.paint_reuse = !self.dirty.full_paint
             && self.highlight_ranges.is_empty()
+            && !self.paint_changed_most
             && self.paint_changed.len() * 2 < self.entries.len();
         self.paint_holds_changed.clear();
         self.paint_changed_depth = 0;
@@ -4336,9 +4539,11 @@ impl Tree {
         self.paint_frame_overlay(scale, root_rect, target);
         self.paints += 1;
         self.paint_has_links = true;
+        self.paint_has_decorations = true;
         self.dirty.paint = false;
         self.dirty.full_paint = false;
         self.paint_changed.clear();
+        self.paint_changed_most = false;
         self.paint_holds_changed.clear();
         if !self.filter_images.is_empty() {
             let entries = &self.entries;
@@ -4510,6 +4715,10 @@ impl Tree {
     }
 
     fn text_decoration_for(&self, id: &str) -> String {
+        // No decoration anywhere (looked up once per paint): no ancestor walk per text.
+        if !self.paint_has_decorations {
+            return "none".into();
+        }
         let mut current = Some(id);
         while let Some(current_id) = current {
             let Some(entry) = self.entries.get(current_id) else {
@@ -4586,10 +4795,99 @@ impl Tree {
             visual_string(&entry.node, "foreground", fallback, state),
         )
     }
+    /// `paint_node_content` for a node `simple_paint` accepts: its solid background and its
+    /// text, in the same commands the full paint records, without the lookups for everything
+    /// such a node cannot have. False, having painted nothing, when the text needs more
+    /// (it overflows its box, a decoration, a selection): the full paint then runs.
+    fn paint_simple<P: PaintTarget>(
+        &mut self,
+        id: &str,
+        offset: Vec2,
+        scale: f64,
+        clip: BoxRect,
+        target: &mut P,
+    ) -> bool {
+        let entry = &self.entries[id];
+        // Parsed into the kept node (a clone's cache would be lost with it).
+        let simple = entry.node.simple_style();
+        let node = entry.node.clone();
+        let rect = entry.rect + Vec2::new(-offset.x, -offset.y);
+        let transform = Affine::scale(scale);
+        let text_paint = if node.kind == "text" {
+            let pad = simple.padding;
+            let available_width = (rect.width() - pad[1] as f64 - pad[3] as f64).max(0.0) as f32;
+            let (width, height) = self.text.measure(id, Some(available_width));
+            // As the full paint decides: only a text that fits its box draws unclipped.
+            if f64::from(width) > rect.width() + 0.5 || f64::from(height) > rect.height() + 0.5 {
+                return false;
+            }
+            if self.static_selection_range_for(id).is_some()
+                || self.text_decoration_for(id) != "none"
+            {
+                return false;
+            }
+            let (x, y) = (rect.x0 + pad[3] as f64, rect.y0 + pad[0] as f64);
+            let ink = f64::from(simple.font_size);
+            let visible_y = (
+                clip.y0.max(rect.y0 - ink) - y,
+                clip.y1.min(rect.y1 + ink) - y,
+            );
+            // No link anywhere and its own colour: borrowed, not copied, for each label.
+            let foreground: std::borrow::Cow<'_, str> = if self.paint_has_links {
+                self.resolved_text_foreground(id, "#18181b").into()
+            } else {
+                let state = self.visual_state_for(id, &node);
+                let own = visual_string(&node, "foreground", "#18181b", state);
+                if own.eq_ignore_ascii_case("currentColor") {
+                    self.current_foreground(id, own).into()
+                } else {
+                    own.into()
+                }
+            };
+            Some((x, y, available_width, visible_y, foreground))
+        } else {
+            None
+        };
+        let entry = &self.entries[id];
+        let radii = simple.radii;
+        let shape = RoundedRect::from_rect(rect, (radii[0], radii[1], radii[2], radii[3]));
+        let children = self.paint_order(&entry.children);
+        let scrolled = Vec2::new(entry.scroll_x, entry.scroll) + self.overscroll_of(id);
+        self.painted_nodes += 1;
+        let background = colour_from(&background_vector(&node.style["background"]));
+        if background.components[3] > 0.0 {
+            target.fill(Fill::NonZero, transform, background, &shape);
+        }
+        if let Some((x, y, width, visible_y, foreground)) = text_paint {
+            self.text.draw(
+                target,
+                &node,
+                crate::text::TextDrawArea {
+                    origin: (x, y),
+                    width,
+                    visible_y,
+                    scroll_x: 0.0,
+                },
+                color(&foreground),
+                scale,
+            );
+        }
+        for child in &children {
+            if self.entries[child].node.portal {
+                continue;
+            }
+            self.paint_node(child, offset + scrolled, scale, clip, target);
+        }
+        true
+    }
+
     /// `children` in the order they paint: by stacking level, ties in document order. Each
     /// level is looked up once; a list whose children share one level (nearly every one) is
     /// already in order and is not sorted.
     fn paint_order(&self, children: &[String]) -> Vec<String> {
+        if self.stacking.is_empty() {
+            return children.to_vec();
+        }
         let levels: Vec<f32> = children
             .iter()
             .map(|child| self.stacking.get(child).copied().unwrap_or(0.0))
@@ -4631,6 +4929,9 @@ impl Tree {
         }
         let key = {
             use std::hash::{Hash, Hasher};
+            #[cfg(feature = "fxhash")]
+            let mut hasher = rustc_hash::FxHasher::default();
+            #[cfg(not(feature = "fxhash"))]
             let mut hasher = std::hash::DefaultHasher::new();
             id.hash(&mut hasher);
             for value in [
@@ -4640,7 +4941,8 @@ impl Tree {
             }
             hasher.finish()
         };
-        let own_changed = self.paint_changed.contains(id);
+        // Without reuse this frame (most of the tree changed) nothing is looked up.
+        let own_changed = self.paint_reuse && self.paint_changed.contains(id);
         let reuse = self.paint_reuse
             && self.paint_changed_depth == 0
             && !self.paint_holds_changed.contains(id);
@@ -4934,6 +5236,16 @@ impl Tree {
         {
             return;
         }
+        if self.simple_paint_enabled
+            && entry.node.simple_paint()
+            && entry.motions.is_empty()
+            && self.filtering.is_none()
+            && id != self.root
+            && self.paint_simple(id, offset, scale, clip, target)
+        {
+            return;
+        }
+        let entry = &self.entries[id];
         let node = entry.node.clone();
         if node.string("display", "flex") == "none" {
             return;
@@ -8912,10 +9224,10 @@ impl Tree {
     }
 
     fn static_selection_range_for(&self, id: &str) -> Option<(usize, usize)> {
+        let selection = self.static_selection.as_ref()?;
         if self.is_virtual_parked(id) {
             return None;
         }
-        let selection = self.static_selection.as_ref()?;
         let entry = self.entries.get(id)?;
         if !matches!(
             entry.node.kind.as_str(),

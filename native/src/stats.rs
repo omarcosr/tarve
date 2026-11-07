@@ -86,6 +86,11 @@ static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::n
 
 pub(crate) fn mark_started() {
     STARTED.get_or_init(std::time::Instant::now);
+    // Where the native heap lives, to tell it from the JS engine's in a memory map.
+    if trace_enabled() {
+        let probe = Box::new(0_u64);
+        eprintln!("[native] heap at {:p}", &*probe);
+    }
 }
 
 fn trace_enabled() -> bool {
@@ -122,6 +127,13 @@ pub(crate) fn trace_frame(cpu_ms: f64, total_ms: f64) {
 impl MemoryStages {
     pub(crate) fn record(&mut self, label: &'static str) {
         let ms = trace(label);
+        #[cfg(feature = "mimalloc")]
+        if let Some(live) = crate::alloc_trace::live() {
+            eprintln!(
+                "[alloc] stage {label} live={:.1} MB",
+                live as f64 / 1048576.0
+            );
+        }
         self.0.push((label, process_memory(), ms));
     }
 

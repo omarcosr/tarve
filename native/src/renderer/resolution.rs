@@ -22,13 +22,25 @@ pub(crate) fn render_scale(scale_factor: f64) -> f64 {
     }
 }
 
-/// The CPU rasterizer's threads: on Android, up to four helpers beside the window's thread (a
-/// phone's big cores; each thread keeps its own tile buffers). Elsewhere the default.
-pub(super) fn cpu_render_settings() -> vello_cpu::RenderSettings {
+/// The CPU rasterizer's threads for a frame of `pixels`. On Android, up to four helpers (a
+/// phone's single core cannot fill a 1080 px wide frame per vsync). On desktops the raster
+/// thread already works beside the window's: a frame up to `HELPERS_FROM_PIXELS` (a laptop
+/// window) rasterizes on it alone, as fast per frame and without each helper's tile buffers
+/// (about 10 MB); a larger one gets two helpers. TARVE_CPU_THREADS overrides the count.
+pub(super) fn cpu_render_settings(pixels: usize) -> vello_cpu::RenderSettings {
+    const HELPERS_FROM_PIXELS: usize = 1_500_000;
     let mut settings = vello_cpu::RenderSettings::default();
-    if cfg!(target_os = "android") {
-        settings.num_threads = settings.num_threads.min(4);
-    }
+    let available = settings.num_threads;
+    settings.num_threads = std::env::var("TARVE_CPU_THREADS")
+        .ok()
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(if cfg!(target_os = "android") {
+            available.min(4)
+        } else if pixels > HELPERS_FROM_PIXELS {
+            available.min(2)
+        } else {
+            0
+        });
     settings
 }
 

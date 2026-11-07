@@ -1,10 +1,9 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ffi::c_void,
-    mem::size_of,
-    ptr,
-    sync::Arc,
-};
+// Glyph, span and image lookups run per glyph and per box of every frame: Fx, not SipHash.
+#[cfg(feature = "fxhash")]
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+#[cfg(not(feature = "fxhash"))]
+use std::collections::{HashMap, HashSet};
+use std::{ffi::c_void, mem::size_of, ptr, sync::Arc};
 
 use crate::d3d11_overlay::{Composition, LayerFormat, LayerTarget, OverlayPlacement};
 use lyon_tessellation::{
@@ -80,9 +79,11 @@ pub(crate) enum D3d11Error {
     Request(String),
 }
 
-#[repr(C)]
+/// What a painter hands `push_vertex`: the vertex and the shape fields of its draw. The clip
+/// and mask come from the target's state; `push_vertex` keeps them, with `shape` and
+/// `inner`, once per distinct state (`VertexState`) instead of in every vertex.
 #[derive(Clone, Copy, Default)]
-struct Vertex {
+struct VertexIn {
     pos: [f32; 2],
     uv: [f32; 2],
     color: [f32; 4],
@@ -90,32 +91,74 @@ struct Vertex {
     /// Blurred rounded-rect shadow: half width, half height, corner radius,
     /// gaussian sigma, all in device pixels. Zero for every other mode.
     params: [f32; 4],
-    /// Window position in device pixels (set by `push_vertex`).
-    dev: [f32; 2],
-    /// Antialiased rounded clip in device pixels (x0, y0, x1, y1); x0 > x1: none.
-    clip: [f32; 4],
-    /// Its corner radii: top-left, top-right, bottom-right, bottom-left.
-    clip_radii: [f32; 4],
-    /// Device pixels to the clip's own space: x' = a x + c y + e, y' = b x + d y + f,
-    /// as (a, b, c, d) and (e, f, pixels per clip unit, 0). Rotated clips stay exact.
-    clip_m0: [f32; 4],
-    clip_m1: [f32; 4],
     /// Rounded-rect modes (5, 9): corner radii top-left, top-right, bottom-right,
     /// bottom-left in device pixels.
     shape: [f32; 4],
     /// Ring mode (9): border widths top, right, bottom, left in device pixels;
     /// the ring is the box minus the box inset by them.
     inner: [f32; 4],
-    /// CSS `mask-image` (a linear gradient): start in device pixels and the axis over
-    /// its squared length, so t = dot(dev - start, axis).
+}
+
+/// A vertex as the GPU reads it (64 bytes): the per-vertex fields and the index of its
+/// draw's `VertexState` (nine float4 the vertex shader loads from `states`).
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct Vertex {
+    pos: [f32; 2],
+    uv: [f32; 2],
+    color: [f32; 4],
+    mode: f32,
+    params: [f32; 4],
+    dev: [f32; 2],
+    state: u32,
+}
+
+/// A draw's clip, shape and mask, in the order the shader loads them. `clip`: antialiased
+/// rounded clip in device pixels (x0, y0, x1, y1; x0 > x1: none), `clip_radii` its corner
+/// radii, `clip_m0`/`clip_m1` device pixels to the clip's own space (x' = a x + c y + e,
+/// y' = b x + d y + f as (a, b, c, d) and (e, f, pixels per clip unit, 0)). `mask`: CSS
+/// `mask-image` start and axis (or centre and inverse radii, or centre and start angle),
+/// `mask_stops` t0, t1 and their alphas, `mask_mode`.x 0 none, 1 linear, 2 radial, 3 conic.
+#[repr(C)]
+#[derive(Clone, Copy, Default, PartialEq)]
+struct VertexState {
+    clip: [f32; 4],
+    clip_radii: [f32; 4],
+    clip_m0: [f32; 4],
+    clip_m1: [f32; 4],
+    shape: [f32; 4],
+    inner: [f32; 4],
     mask: [f32; 4],
-    /// Its ramp: t0, t1, alpha at t0, alpha at t1.
     mask_stops: [f32; 4],
-    /// x: 0 no mask, 1 linear (t = dot(dev - start, axis)), 2 radial (`mask` holds the
-    /// centre and the inverse radii, t = length((dev - centre) * inverse)), 3 conic (`mask`
-    /// holds the centre and the start angle; t is the fraction of a turn).
     mask_mode: [f32; 4],
 }
+
+impl VertexState {
+    /// No clip, mask or shape: entry 0 of every frame's states.
+    const PLAIN: VertexState = VertexState {
+        clip: NO_CLIP.rect,
+        clip_radii: NO_CLIP.radii,
+        clip_m0: NO_CLIP.m0,
+        clip_m1: NO_CLIP.m1,
+        shape: [0.0; 4],
+        inner: [0.0; 4],
+        mask: [0.0; 4],
+        mask_stops: [0.0; 4],
+        mask_mode: [0.0; 4],
+    };
+
+    fn key(&self) -> [u32; 36] {
+        let mut key = [0_u32; 36];
+        let values: &[f32] = bytemuck::cast_slice(std::slice::from_ref(self));
+        for (slot, value) in key.iter_mut().zip(values) {
+            *slot = value.to_bits();
+        }
+        key
+    }
+}
+
+unsafe impl bytemuck::Zeroable for VertexState {}
+unsafe impl bytemuck::Pod for VertexState {}
 
 /// A linear alpha ramp the pixel shader applies to every draw (`mask-image`).
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -368,6 +411,7 @@ fn overlay_placement(
 #[derive(Default)]
 struct RecordedFrame {
     vertices: Vec<Vertex>,
+    states: Vec<VertexState>,
     indices: Vec<u32>,
     commands: Vec<DrawCommand>,
     spans: HashMap<u64, RecordedSpan>,
@@ -574,6 +618,16 @@ pub(crate) struct D3d11Graphics {
     glass_shapes: ID3D11Buffer,
     vertex_buffer: ID3D11Buffer,
     vertex_capacity: usize,
+    /// The frame's `VertexState`s (`Buffer<float4> states` of the vertex shader), with
+    /// their content hashes and an index to find one again.
+    state_buffer: ID3D11Buffer,
+    state_view: ID3D11ShaderResourceView,
+    state_capacity: usize,
+    states: Vec<VertexState>,
+    state_hashes: Vec<u64>,
+    state_index: HashMap<[u32; 36], u32>,
+    last_state: Option<(VertexState, u32)>,
+    prev_state: Option<(VertexState, u32)>,
     index_buffer: ID3D11Buffer,
     index_capacity: usize,
     sample_desc: DXGI_SAMPLE_DESC,
@@ -592,9 +646,14 @@ pub(crate) struct D3d11Graphics {
     recording: Vec<(u64, RecordedSpan, usize, bool)>,
     /// One past the last command that cannot be reused (an image, a video, glass).
     tainted: usize,
+    /// Commands from here on may take the next glyph quad (`append_quad_points`); a
+    /// retained span starts or ends above it, so a merged draw never crosses one.
+    merge_floor: usize,
     /// Per command of this frame: the hash and unclipped bounds a reused span brought along
     /// (the same commands with the same vertices), so they are not computed again.
     known: Vec<Option<(u64, [f32; 4])>>,
+    /// Commands of this frame copied from reused spans.
+    reused_commands: usize,
     /// What this frame computed, kept for the next one's reused spans.
     frame_hashes: Vec<u64>,
     frame_raw_bounds: Vec<[f32; 4]>,
@@ -751,6 +810,8 @@ impl D3d11Graphics {
             index_capacity * size_of::<u32>(),
             D3D11_BIND_INDEX_BUFFER,
         )?;
+        let state_capacity = 256;
+        let (state_buffer, state_view) = create_state_buffer(&device, state_capacity)?;
         let first_atlas = create_glyph_atlas(&device)?;
         let layer_vertices =
             create_dynamic_buffer(&device, 4 * size_of::<Vertex>(), D3D11_BIND_VERTEX_BUFFER)?;
@@ -795,6 +856,14 @@ impl D3d11Graphics {
             glass_shapes,
             vertex_buffer,
             vertex_capacity,
+            state_buffer,
+            state_view,
+            state_capacity,
+            states: Vec::new(),
+            state_hashes: Vec::new(),
+            state_index: HashMap::default(),
+            last_state: None,
+            prev_state: None,
             index_buffer,
             index_capacity,
             sample_desc,
@@ -804,33 +873,35 @@ impl D3d11Graphics {
             indices: Vec::with_capacity(4096),
             commands: Vec::with_capacity(256),
             previous: RecordedFrame::default(),
-            spans: HashMap::new(),
+            spans: HashMap::default(),
             recording: Vec::new(),
             tainted: 0,
+            merge_floor: 0,
             known: Vec::new(),
+            reused_commands: 0,
             frame_hashes: Vec::new(),
             frame_raw_bounds: Vec::new(),
-            images: HashMap::new(),
-            video_views: HashMap::new(),
+            images: HashMap::default(),
+            video_views: HashMap::default(),
             hwnd,
             factory,
             composition: None,
             composition_failed: false,
             overlay_requests: Vec::new(),
-            punched: HashSet::new(),
-            surface_chains: HashMap::new(),
+            punched: HashSet::default(),
+            surface_chains: HashMap::default(),
             surface_requests: Vec::new(),
-            overlay_blocked: HashSet::new(),
+            overlay_blocked: HashSet::default(),
             punch_blend,
             overlay_error: None,
             layer_nv12: true,
             layer_vertices,
-            used_images: HashSet::new(),
-            pinned_images: HashSet::new(),
+            used_images: HashSet::default(),
+            pinned_images: HashSet::default(),
             uploaded_images: Vec::new(),
             missing_images: Vec::new(),
-            glyphs: HashMap::new(),
-            glyph_outlines: HashMap::new(),
+            glyphs: HashMap::default(),
+            glyph_outlines: HashMap::default(),
             glyph_atlases: vec![first_atlas],
             glyph_atlas_exhausted: false,
             glyph_rasterizations: 0,
@@ -869,6 +940,8 @@ impl D3d11Graphics {
         // the atlas pages: a new size or atlas makes the old spans unusable.
         let reusable = same_size && !self.glyph_atlas_exhausted;
         std::mem::swap(&mut self.vertices, &mut self.previous.vertices);
+        std::mem::swap(&mut self.states, &mut self.previous.states);
+        self.reset_states();
         std::mem::swap(&mut self.indices, &mut self.previous.indices);
         std::mem::swap(&mut self.commands, &mut self.previous.commands);
         self.previous.spans = std::mem::take(&mut self.spans);
@@ -877,11 +950,13 @@ impl D3d11Graphics {
         self.frame_hashes.clear();
         self.frame_raw_bounds.clear();
         self.known.clear();
+        self.reused_commands = 0;
         if !reusable {
             self.previous.spans.clear();
         }
         self.recording.clear();
         self.tainted = 0;
+        self.merge_floor = 0;
         self.vertices.clear();
         self.clip = NO_CLIP;
         self.mask = NO_MASK;
@@ -959,7 +1034,7 @@ impl D3d11Graphics {
             || self.composition_failed
         {
             if let Some(composition) = &mut self.composition {
-                composition.retain(&HashSet::new());
+                composition.retain(&HashSet::<String>::default());
             }
             if !previous.is_empty() {
                 self.tile_hashes.clear();
@@ -976,7 +1051,7 @@ impl D3d11Graphics {
         let Some(composition) = self.composition.as_mut() else {
             return;
         };
-        let mut kept = HashSet::new();
+        let mut kept: HashSet<String> = HashSet::default();
         for surface in surfaces {
             let Some(chain) = self.surface_chains.get(&surface.id) else {
                 continue;
@@ -1179,15 +1254,12 @@ impl D3d11Graphics {
             return Ok(());
         };
         let mode = if bt709 { 11.0 } else { 10.0 };
+        // State 0 of the uploaded states is `VertexState::PLAIN`.
         let corner = |x: f32, y: f32, u: f32, v: f32| Vertex {
             pos: [x, y],
             uv: [u, v],
             color: [1.0; 4],
             mode,
-            clip: NO_CLIP.rect,
-            clip_radii: NO_CLIP.radii,
-            clip_m0: NO_CLIP.m0,
-            clip_m1: NO_CLIP.m1,
             ..Default::default()
         };
         // A strip: top-left, top-right, bottom-left, bottom-right.
@@ -1229,6 +1301,8 @@ impl D3d11Graphics {
             self.context.VSSetShader(&self.vertex_shader, None);
             self.context
                 .VSSetConstantBuffers(0, Some(&[Some(self.target_transform.clone())]));
+            self.context
+                .VSSetShaderResources(2, Some(&[Some(self.state_view.clone())]));
             self.context.PSSetShader(&self.pixel_shader, None);
             self.context
                 .PSSetSamplers(0, Some(&[Some(self.image_sampler.clone())]));
@@ -1329,7 +1403,9 @@ impl D3d11Graphics {
         if let Some(timer) = &mut self.gpu_timer {
             timer.begin(&self.context);
         }
+        let trace_started = std::time::Instant::now();
         let drawn = self.draw_frame(background);
+        let trace_drawn = trace_started.elapsed();
         if let Some(timer) = &mut self.gpu_timer {
             timer.end(&self.context);
         }
@@ -1361,6 +1437,13 @@ impl D3d11Graphics {
             }
             None => unsafe { self.swap_chain.Present(1, DXGI_PRESENT(0)).ok() },
         };
+        if std::env::var_os("TARVE_TRACE_GPU").is_some() {
+            eprintln!(
+                "gpu draw_frame={:.2} present={:.2}",
+                trace_drawn.as_secs_f64() * 1e3,
+                (trace_started.elapsed() - trace_drawn).as_secs_f64() * 1e3
+            );
+        }
         if let Err(error) = presented {
             return Err(self.classify_windows_gpu_error("DXGI Present", error));
         }
@@ -1412,6 +1495,8 @@ impl D3d11Graphics {
             self.context.VSSetShader(&self.vertex_shader, None);
             self.context
                 .VSSetConstantBuffers(0, Some(&[Some(self.target_transform.clone())]));
+            self.context
+                .VSSetShaderResources(2, Some(&[Some(self.state_view.clone())]));
             self.context.PSSetShader(&self.pixel_shader, None);
             self.context.PSSetConstantBuffers(
                 1,
@@ -1564,8 +1649,11 @@ impl D3d11Graphics {
             self.back_damage = [None, None];
         }
         let canvas = self.canvas.clone().ok_or("D3D11 canvas is unavailable")?;
+        let trace_started = std::time::Instant::now();
         let bounds = self.command_bounds();
+        let trace_bounds = trace_started.elapsed();
         let damage = self.damage_rects(&bounds, bg);
+        let trace_damage = trace_started.elapsed();
         self.present_rects = damage
             .as_ref()
             .map(|rects| rects.iter().map(|rect| to_rect(*rect)).collect());
@@ -1663,6 +1751,15 @@ impl D3d11Graphics {
             }
         }
         self.current_target = None;
+        if std::env::var_os("TARVE_TRACE_GPU").is_some() {
+            eprintln!(
+                "gpu bounds={:.2} damage={:.2} draw+copy={:.2} commands={} partial={partial}",
+                trace_bounds.as_secs_f64() * 1e3,
+                (trace_damage - trace_bounds).as_secs_f64() * 1e3,
+                (trace_started.elapsed() - trace_damage).as_secs_f64() * 1e3,
+                self.commands.len()
+            );
+        }
         if partial && gpu_damage_check() {
             self.check_partial_redraw(bg, clear_stencil, &canvas, &backbuffer, &depth_view)?;
         }
@@ -1678,6 +1775,13 @@ impl D3d11Graphics {
         let (width, height) = (self.width, self.height);
         let columns = width.div_ceil(DAMAGE_TILE) as usize;
         let tiles = columns * height.div_ceil(DAMAGE_TILE) as usize;
+        // Most of the frame painted anew (an animation of everything): the damage would cover
+        // it anyway, so hashing every command's vertices (~4 ms for 12,000) buys nothing.
+        if self.reused_commands * 2 < self.commands.len() && !gpu_damage_check() {
+            self.tile_hashes.clear();
+            self.frame_hashes.clear();
+            return None;
+        }
         let fresh = self.tile_hashes.len() != tiles;
         if fresh {
             self.tile_hashes = vec![0; tiles];
@@ -1914,11 +2018,13 @@ impl D3d11Graphics {
                 };
                 let mut hash = mix_hash(mix_hash(mix_hash(0, tag), texture), u64::from(count));
                 for &vertex in &self.indices[first as usize..(first + count) as usize] {
-                    let words: &[u32] =
-                        bytemuck::cast_slice(bytemuck::bytes_of(&self.vertices[vertex as usize]));
-                    for word in words {
+                    let vertex = &self.vertices[vertex as usize];
+                    let words: &[u32] = bytemuck::cast_slice(bytemuck::bytes_of(vertex));
+                    // The state by what it holds: its index differs from frame to frame.
+                    for word in &words[..words.len() - 1] {
                         hash = mix_hash(hash, u64::from(*word));
                     }
+                    hash = mix_hash(hash, self.state_hashes[vertex.state as usize]);
                 }
                 hash
             })
@@ -2675,6 +2781,11 @@ impl D3d11Graphics {
                 D3D11_BIND_VERTEX_BUFFER,
             )?;
         }
+        if self.states.len() > self.state_capacity {
+            self.state_capacity = self.states.len().next_power_of_two().max(256);
+            (self.state_buffer, self.state_view) =
+                create_state_buffer(&self.device, self.state_capacity)?;
+        }
         if self.indices.len() > self.index_capacity {
             self.index_capacity = self.indices.len().next_power_of_two().max(8192);
             self.index_buffer = create_dynamic_buffer(
@@ -2687,6 +2798,11 @@ impl D3d11Graphics {
     }
 
     fn upload_frame_buffers(&self) -> Result<(), String> {
+        upload_dynamic(
+            &self.context,
+            &self.state_buffer,
+            bytemuck::cast_slice(&self.states),
+        )?;
         upload_dynamic(
             &self.context,
             &self.vertex_buffer,
@@ -2714,7 +2830,7 @@ impl D3d11Graphics {
         for source in points {
             let texcoord = uv(*source);
             let p = transform * Point::new(f64::from(source.x), f64::from(source.y));
-            self.push_vertex(Vertex {
+            self.push_vertex(VertexIn {
                 pos: self.ndc(p.x as f32, p.y as f32),
                 uv: texcoord,
                 color: rgba,
@@ -2749,7 +2865,7 @@ impl D3d11Graphics {
         // x0 > x1: nothing cut out.
         let (inner, shape) = exclude.unwrap_or(([1.0, 1.0, -1.0, -1.0], [0.0; 4]));
         for [x, y] in [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] {
-            self.push_vertex(Vertex {
+            self.push_vertex(VertexIn {
                 pos: self.ndc(x, y),
                 uv: [x - center[0], y - center[1]],
                 color: rgba,
@@ -2757,7 +2873,6 @@ impl D3d11Graphics {
                 params,
                 shape,
                 inner,
-                ..Default::default()
             });
         }
         self.indices
@@ -2816,7 +2931,7 @@ impl D3d11Graphics {
             center[1] + half[1] + 1.0,
         );
         for [x, y] in [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] {
-            self.push_vertex(Vertex {
+            self.push_vertex(VertexIn {
                 pos: self.ndc(x, y),
                 uv: [x - center[0], y - center[1]],
                 color: rgba,
@@ -2824,7 +2939,6 @@ impl D3d11Graphics {
                 params: [half[0], half[1], radii[0], 0.0],
                 shape: radii,
                 inner: widths,
-                ..Default::default()
             });
         }
         self.indices
@@ -2885,7 +2999,7 @@ impl D3d11Graphics {
             let first = self.indices.len() as u32;
             let base = self.vertices.len() as u32;
             for [x, y] in [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] {
-                self.push_vertex(Vertex {
+                self.push_vertex(VertexIn {
                     pos: self.ndc(x, y),
                     uv: [0.0, 0.0],
                     color: [1.0; 4],
@@ -2912,7 +3026,7 @@ impl D3d11Graphics {
             center[1] + half[1] + 1.0,
         );
         for [x, y] in [[qx0, qy0], [qx1, qy0], [qx1, qy1], [qx0, qy1]] {
-            self.push_vertex(Vertex {
+            self.push_vertex(VertexIn {
                 pos: self.ndc(x, y),
                 uv: [x - center[0], y - center[1]],
                 color: rgba,
@@ -2950,7 +3064,7 @@ impl D3d11Graphics {
         let base = self.vertices.len() as u32;
         for (index, (point, color)) in points.iter().enumerate() {
             let p = transform * *point;
-            self.push_vertex(Vertex {
+            self.push_vertex(VertexIn {
                 pos: self.ndc(p.x as f32, p.y as f32),
                 uv: [0.0, 0.0],
                 color: rgba(color.multiply_alpha(opacity)),
@@ -2967,19 +3081,75 @@ impl D3d11Graphics {
         });
     }
 
-    fn push_vertex(&mut self, mut vertex: Vertex) {
-        vertex.dev = [
-            (vertex.pos[0] + 1.0) * 0.5 * self.width.max(1) as f32,
-            (1.0 - vertex.pos[1]) * 0.5 * self.height.max(1) as f32,
-        ];
-        vertex.clip = self.clip.rect;
-        vertex.clip_radii = self.clip.radii;
-        vertex.clip_m0 = self.clip.m0;
-        vertex.clip_m1 = self.clip.m1;
-        vertex.mask = self.mask.axis;
-        vertex.mask_stops = self.mask.stops;
-        vertex.mask_mode = [self.mask.mode, 0.0, 0.0, 0.0];
-        self.vertices.push(vertex);
+    fn push_vertex(&mut self, vertex: VertexIn) {
+        let state = self.intern_state(VertexState {
+            clip: self.clip.rect,
+            clip_radii: self.clip.radii,
+            clip_m0: self.clip.m0,
+            clip_m1: self.clip.m1,
+            shape: vertex.shape,
+            inner: vertex.inner,
+            mask: self.mask.axis,
+            mask_stops: self.mask.stops,
+            mask_mode: [self.mask.mode, 0.0, 0.0, 0.0],
+        });
+        self.vertices.push(Vertex {
+            pos: vertex.pos,
+            uv: vertex.uv,
+            color: vertex.color,
+            mode: vertex.mode,
+            params: vertex.params,
+            dev: [
+                (vertex.pos[0] + 1.0) * 0.5 * self.width.max(1) as f32,
+                (1.0 - vertex.pos[1]) * 0.5 * self.height.max(1) as f32,
+            ],
+            state,
+        });
+    }
+
+    /// The index of `state` in this frame's states, added on first use (consecutive draws
+    /// nearly always share the last one).
+    fn intern_state(&mut self, state: VertexState) -> u32 {
+        if let Some((last, index)) = self.last_state
+            && last == state
+        {
+            return index;
+        }
+        // Boxes and their labels alternate between two states.
+        if let Some((before, index)) = self.prev_state
+            && before == state
+        {
+            self.prev_state = self.last_state;
+            self.last_state = Some((before, index));
+            return index;
+        }
+        let key = state.key();
+        let index = match self.state_index.get(&key) {
+            Some(&index) => index,
+            None => {
+                let index = self.states.len() as u32;
+                self.states.push(state);
+                self.state_hashes.push(
+                    key.iter()
+                        .fold(0, |hash, word| mix_hash(hash, u64::from(*word))),
+                );
+                self.state_index.insert(key, index);
+                index
+            }
+        };
+        self.prev_state = self.last_state;
+        self.last_state = Some((state, index));
+        index
+    }
+
+    /// Starts this frame's states with `VertexState::PLAIN` at 0.
+    fn reset_states(&mut self) {
+        self.states.clear();
+        self.state_hashes.clear();
+        self.state_index.clear();
+        self.last_state = None;
+        self.prev_state = None;
+        self.intern_state(VertexState::PLAIN);
     }
 
     fn ndc(&self, x: f32, y: f32) -> [f32; 2] {
@@ -3001,11 +3171,20 @@ impl D3d11Graphics {
         let base = self.vertices.len() as u32;
         let rgba = rgba(color);
         let [u0, v0, u1, v1] = uv;
+        // The glyphs of a run go to one atlas page: one draw for all of them (a frame of
+        // thousands of labels records, bounds and hashes half the commands).
+        let merge = self.commands.len() > self.merge_floor
+            && matches!(
+                (self.commands.last(), &texture),
+                (Some(DrawCommand::Draw { first: last_first, count, texture: TextureRef::Glyph(last) }), TextureRef::Glyph(view))
+                    | (Some(DrawCommand::Draw { first: last_first, count, texture: TextureRef::ClearType(last) }), TextureRef::ClearType(view))
+                    if last_first + count == first && windows::core::Interface::as_raw(last) == windows::core::Interface::as_raw(view)
+            );
         for ([x, y], [u, v]) in points
             .into_iter()
             .zip([[u0, v0], [u1, v0], [u1, v1], [u0, v1]])
         {
-            self.push_vertex(Vertex {
+            self.push_vertex(VertexIn {
                 pos: self.ndc(x, y),
                 uv: [u, v],
                 color: rgba,
@@ -3016,6 +3195,10 @@ impl D3d11Graphics {
         }
         self.indices
             .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        if merge && let Some(DrawCommand::Draw { count, .. }) = self.commands.last_mut() {
+            *count += 6;
+            return;
+        }
         self.commands.push(DrawCommand::Draw {
             first,
             count: 6,
@@ -3583,6 +3766,7 @@ fn quantize_glyph_position(value: f32) -> (f32, u8) {
 impl PaintTarget for D3d11PaintTarget<'_> {
     fn cache_begin(&mut self, key: u64, reuse: bool) -> bool {
         let graphics = &mut *self.graphics;
+        graphics.merge_floor = graphics.commands.len();
         let start = RecordedSpan {
             commands: (graphics.commands.len(), graphics.commands.len()),
             indices: (graphics.indices.len(), graphics.indices.len()),
@@ -3597,10 +3781,24 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             // painter's `reuse` say so).
             let vertex_shift = start.vertices.0 as i64 - span.vertices.0 as i64;
             let index_shift = start.indices.0 as i64 - span.indices.0 as i64;
-            let previous = &graphics.previous;
+            let previous = std::mem::take(&mut graphics.previous);
             graphics
                 .vertices
                 .extend_from_slice(&previous.vertices[span.vertices.0..span.vertices.1]);
+            // Their states, by what they hold, among this frame's.
+            let mut remapped: Option<(u32, u32)> = None;
+            for index in start.vertices.0..graphics.vertices.len() {
+                let old = graphics.vertices[index].state;
+                let new = match remapped {
+                    Some((from, to)) if from == old => to,
+                    _ => {
+                        let to = graphics.intern_state(previous.states[old as usize]);
+                        remapped = Some((old, to));
+                        to
+                    }
+                };
+                graphics.vertices[index].state = new;
+            }
             graphics.indices.extend(
                 previous.indices[span.indices.0..span.indices.1]
                     .iter()
@@ -3614,6 +3812,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                 .extend((span.commands.0..span.commands.1).map(|index| {
                     measured.then(|| (previous.hashes[index], previous.raw_bounds[index]))
                 }));
+            graphics.reused_commands += span.commands.1 - span.commands.0;
             let shift = |first: u32| (i64::from(first) + index_shift) as u32;
             graphics.commands.extend(
                 previous.commands[span.commands.0..span.commands.1]
@@ -3648,6 +3847,8 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                     vertices: (start.vertices.0, graphics.vertices.len()),
                 },
             );
+            graphics.previous = previous;
+            graphics.merge_floor = graphics.commands.len();
             return true;
         }
         let keep = self.suppressed_clips == 0;
@@ -3659,6 +3860,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
 
     fn cache_end(&mut self) {
         let graphics = &mut *self.graphics;
+        graphics.merge_floor = graphics.commands.len();
         let Some((key, start, layers, keep)) = graphics.recording.pop() else {
             return;
         };
@@ -4913,6 +5115,36 @@ fn create_dynamic_buffer(
     buffer.ok_or_else(|| "D3D11 dynamic buffer was not created".into())
 }
 
+/// The `states` buffer of the vertex shader: `capacity` `VertexState`s as float4s.
+fn create_state_buffer(
+    device: &ID3D11Device,
+    capacity: usize,
+) -> Result<(ID3D11Buffer, ID3D11ShaderResourceView), String> {
+    let buffer = create_dynamic_buffer(
+        device,
+        capacity * size_of::<VertexState>(),
+        windows::Win32::Graphics::Direct3D11::D3D11_BIND_SHADER_RESOURCE,
+    )?;
+    let desc = windows::Win32::Graphics::Direct3D11::D3D11_SHADER_RESOURCE_VIEW_DESC {
+        Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+        ViewDimension: windows::Win32::Graphics::Direct3D::D3D11_SRV_DIMENSION_BUFFER,
+        Anonymous: windows::Win32::Graphics::Direct3D11::D3D11_SHADER_RESOURCE_VIEW_DESC_0 {
+            Buffer: windows::Win32::Graphics::Direct3D11::D3D11_BUFFER_SRV {
+                Anonymous1: windows::Win32::Graphics::Direct3D11::D3D11_BUFFER_SRV_0 {
+                    FirstElement: 0,
+                },
+                Anonymous2: windows::Win32::Graphics::Direct3D11::D3D11_BUFFER_SRV_1 {
+                    NumElements: (capacity * 9) as u32,
+                },
+            },
+        },
+    };
+    let mut view = None;
+    unsafe { device.CreateShaderResourceView(&buffer, Some(&desc), Some(&mut view)) }
+        .map_err(win_error)?;
+    Ok((buffer, view.ok_or("D3D11 state view was not created")?))
+}
+
 fn upload_dynamic(
     context: &ID3D11DeviceContext,
     buffer: &ID3D11Buffer,
@@ -4948,6 +5180,7 @@ fn create_shaders(
     let mut pixel_shader = None;
     unsafe { device.CreatePixelShader(ps_bytes, None, Some(&mut pixel_shader)) }
         .map_err(win_error)?;
+    // `Vertex`: position, uv, colour, mode, params, device position and state index.
     let elements = [
         D3D11_INPUT_ELEMENT_DESC {
             SemanticName: PCSTR(b"POSITION\0".as_ptr()),
@@ -5006,81 +5239,9 @@ fn create_shaders(
         D3D11_INPUT_ELEMENT_DESC {
             SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
             SemanticIndex: 4,
-            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
+            Format: DXGI_FORMAT_R32_UINT,
             InputSlot: 0,
             AlignedByteOffset: 60,
-            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
-            InstanceDataStepRate: 0,
-        },
-        D3D11_INPUT_ELEMENT_DESC {
-            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
-            SemanticIndex: 5,
-            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
-            InputSlot: 0,
-            AlignedByteOffset: 76,
-            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
-            InstanceDataStepRate: 0,
-        },
-        D3D11_INPUT_ELEMENT_DESC {
-            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
-            SemanticIndex: 6,
-            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
-            InputSlot: 0,
-            AlignedByteOffset: 92,
-            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
-            InstanceDataStepRate: 0,
-        },
-        D3D11_INPUT_ELEMENT_DESC {
-            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
-            SemanticIndex: 7,
-            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
-            InputSlot: 0,
-            AlignedByteOffset: 108,
-            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
-            InstanceDataStepRate: 0,
-        },
-        D3D11_INPUT_ELEMENT_DESC {
-            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
-            SemanticIndex: 8,
-            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
-            InputSlot: 0,
-            AlignedByteOffset: 124,
-            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
-            InstanceDataStepRate: 0,
-        },
-        D3D11_INPUT_ELEMENT_DESC {
-            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
-            SemanticIndex: 9,
-            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
-            InputSlot: 0,
-            AlignedByteOffset: 140,
-            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
-            InstanceDataStepRate: 0,
-        },
-        D3D11_INPUT_ELEMENT_DESC {
-            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
-            SemanticIndex: 10,
-            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
-            InputSlot: 0,
-            AlignedByteOffset: 156,
-            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
-            InstanceDataStepRate: 0,
-        },
-        D3D11_INPUT_ELEMENT_DESC {
-            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
-            SemanticIndex: 11,
-            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
-            InputSlot: 0,
-            AlignedByteOffset: 172,
-            InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
-            InstanceDataStepRate: 0,
-        },
-        D3D11_INPUT_ELEMENT_DESC {
-            SemanticName: PCSTR(b"TEXCOORD\0".as_ptr()),
-            SemanticIndex: 12,
-            Format: DXGI_FORMAT_R32G32B32A32_FLOAT,
-            InputSlot: 0,
-            AlignedByteOffset: 188,
             InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
             InstanceDataStepRate: 0,
         },
