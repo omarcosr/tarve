@@ -1,6 +1,6 @@
 import type { AppHandle } from "@tarve/core";
 import type { NativeEvent } from "@tarve/core/protocol";
-import { documentInstance, isFocusable, moveFocus, layout, restyleAll, scheduleIntersections, setFocusHook, setMediaHook, TEvent, windowInstance, windowToClient, capturedElement, releasePointerCapture, setPointerCaptureHook, type TElement } from "./dom";
+import { documentInstance, isFocusable, moveFocus, layout, restyleAll, scheduleIntersections, setFocusHook, setMediaHook, TEvent, windowInstance, windowToClient, capturedElement, releasePointerCapture, setPointerCaptureHook, setScrollHook, type TElement } from "./dom";
 import { resizeRestyles, usesDisplayMode } from "./css";
 import { elementForNativeId, nativeIdOf, setPointerPosition } from "./render";
 
@@ -12,6 +12,7 @@ let buttons = 0;
 export function connectNativeEvents(app: AppHandle): () => void {
   setFocusHook(element => { if (element) app.focus(nativeIdOf(element)); });
   setPointerCaptureHook(element => app.capturePointer(element ? nativeIdOf(element) : null));
+  setScrollHook((element, x, y, smooth) => app.scrollTo(nativeIdOf(element), { x, y, smooth }));
   setMediaHook((element, action, value) => {
     const media = app.media(nativeIdOf(element));
     if (action === "seek") media.seek(value ?? 0);
@@ -84,7 +85,7 @@ export function connectNativeEvents(app: AppHandle): () => void {
       }
     }
   });
-  return () => { off(); offFullscreen(); setFocusHook(undefined); setPointerCaptureHook(undefined); setMediaHook(undefined); };
+  return () => { off(); offFullscreen(); setFocusHook(undefined); setPointerCaptureHook(undefined); setScrollHook(undefined); setMediaHook(undefined); };
 }
 
 /** The window's content size changed: `window.innerWidth`, `bind:innerWidth`, `onresize`. */

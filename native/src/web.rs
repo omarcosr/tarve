@@ -134,6 +134,11 @@ impl WebTree {
                     Err(message) => self.events.push(crate::protocol::error(message)),
                 }
             }
+            Command::ScrollTo { id, x, y, smooth } => {
+                if let Err(message) = self.tree.request_scroll_to(&id, x, y, smooth) {
+                    self.events.push(crate::protocol::error(message));
+                }
+            }
             Command::FrameOverlay { enabled } => {
                 self.tree.set_frame_overlay(enabled);
             }

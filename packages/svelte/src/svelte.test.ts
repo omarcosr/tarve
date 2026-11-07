@@ -555,6 +555,27 @@ describe("@tarve/svelte", () => {
     await settle();
     expect(seen().split(" ").slice(-2)).toEqual(["a:100", "b:25"]);
   });
+  test("scrollTop, scrollTo and scrollHeight reach a native scroll area", async () => {
+    const { bridge, mounted } = start(Visible);
+    await mounted.app.ready;
+    await settle();
+    const pane = mounted.target.querySelector("#pane")!;
+    bridge.emit({ type: "size", id: "pane", width: 200, height: 100, x: 0, y: 0, borderWidth: 200, borderHeight: 100 } as NativeEvent);
+    bridge.emit({ type: "scroll", id: "pane", offset: 0, max: 60 } as NativeEvent);
+    await settle();
+    expect(pane.scrollHeight).toBe(160);
+    // The chat idiom: native clamps to the end after the next layout; known reach clamps now.
+    pane.scrollTop = pane.scrollHeight;
+    await settle();
+    expect(bridge.commands.at(-1)).toEqual({ type: "scrollTo", id: "pane", y: 160 });
+    expect(pane.scrollTop).toBe(60);
+    pane.scrollTo({ top: 10, behavior: "smooth" });
+    await settle();
+    expect(bridge.commands.at(-1)).toEqual({ type: "scrollTo", id: "pane", y: 10, smooth: true });
+    pane.scrollBy(0, 5);
+    await settle();
+    expect(bridge.commands.at(-1)).toEqual({ type: "scrollTo", id: "pane", x: 0, y: 15 });
+  });
   test("layout reads are synchronous: onMount and right after a change", async () => {
     const bridge = new SyncBridge();
     bridge.boxes.measured = { width: 200, height: 20, x: 0, y: 0, borderWidth: 200, borderHeight: 20 };

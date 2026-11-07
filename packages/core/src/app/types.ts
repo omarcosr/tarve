@@ -212,6 +212,11 @@ export interface AppHandle {
   capturePointer(id: string | null): void;
   /** Scrolls a variable VirtualList to an item; `smooth` eases there like CSS `scroll-behavior: smooth`. */
   scrollToItem(id: string, index: number, offset?: number, options?: { smooth?: boolean }): void;
+  /**
+   * Scrolls a `<Scroll>` (DOM `scrollTo`): `y: "end"` reaches the bottom, after the layout of
+   * an update sent just before. A missing axis keeps its offset.
+   */
+  scrollTo(id: string, position: { x?: number | "start" | "end"; y?: number | "start" | "end"; smooth?: boolean }): void;
   registerHotkey(shortcut: string, handler: HotkeyHandler): () => void;
   show(): void;
   hide(): void;

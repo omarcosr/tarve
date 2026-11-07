@@ -703,6 +703,24 @@ describe("controlled native reconciliation", () => {
     }
   });
 
+  test("scrollTo sends a scroll area's offsets and Scroll followTail reaches native", async () => {
+    const bridge = new FakeBridge();
+    const app = createApp(() => (
+      <Window>
+        <ScrollArea id="chat" followTail><Text>Hello</Text></ScrollArea>
+      </Window>
+    ), { bridge });
+    await app.ready;
+    expect(JSON.stringify(bridge.document)).toContain("\"followTail\":true");
+    app.scrollTo("chat", { y: "end" });
+    expect(bridge.commands.at(-1)).toEqual({ type: "scrollTo", id: "chat", y: Number.MAX_VALUE });
+    app.scrollTo("chat", { x: 10, y: "start", smooth: true });
+    expect(bridge.commands.at(-1)).toEqual({ type: "scrollTo", id: "chat", x: 10, y: 0, smooth: true });
+    expect(() => app.scrollTo("chat", { y: Number.NaN })).toThrow(RangeError);
+    expect(() => app.scrollTo("", { y: 0 })).toThrow(TypeError);
+    app.close();
+  });
+
   test("scrollToItem uses a generation-tagged variable-list request and acknowledges through scroll", async () => {
     const bridge = new FakeBridge();
     let offset = 0;

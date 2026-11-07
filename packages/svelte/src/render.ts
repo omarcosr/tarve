@@ -19,7 +19,7 @@ const TEXT_CONTAINERS = new Set(["p", "span", "h1", "h2", "h3", "h4", "h5", "h6"
 /** Intrinsics the reconciler expands; any other tag (section, header, nav…) is a block `div`. */
 const KNOWN = new Set(["div", "audio", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "img", "form", "audio", "canvas", "input", "textarea", "button", "a", "svg", "label", "select", "progress", "hr",
   "pre", "blockquote", "meter", "fieldset", "legend", "ul", "ol", "li", "dl", "dt", "dd", "table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption", "details", "summary", ...INLINE]);
-const BOOLEAN = new Set(["disabled", "checked", "selected", "required", "readonly", "multiple", "hidden", "open", "autofocus", "draggable", "drag-region", "focusable"]);
+const BOOLEAN = new Set(["disabled", "checked", "selected", "required", "readonly", "multiple", "hidden", "open", "autofocus", "draggable", "drag-region", "focusable", "follow-tail"]);
 const SKIPPED = new Set(["class", "style", "role", "xmlns"]);
 /** Elements the pointer is over (per native's reports): kept across rebuilds of their handlers. */
 const pointerInside = new WeakSet<TElement>();
@@ -192,8 +192,9 @@ function addEvents(element: TElement, tag: string, out: Record<string, any>): vo
   if (element._resizeObservers?.size || element._measured) out.onSize = () => {};
   if (element.hasAttribute("draggable") || wanted.has("drop") || wanted.has("dragover") || wanted.has("dragenter")) addDragAndDrop(element, wanted, out);
   if (wanted.has("scroll") || element._scrollTracked) {
-    out.onScroll = (offset: number) => {
-      element.scrollTop = offset;
+    out.onScroll = (offset: number, max: number) => {
+      element._scrollTop = offset;
+      element._scrollMaxY = max;
       scheduleIntersections();
       if (wanted.has("scroll")) fire(element, "scroll", { bubbles: false });
     };

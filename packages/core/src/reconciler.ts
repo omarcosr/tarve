@@ -118,7 +118,7 @@ const TEXT_KINDS = new Set(["text", "button", "input", "textarea", "markdown", "
 
 /** Props copied to the native node unchanged when they are set. */
 const COPIED_PROPS = [
-  "value", "placeholder", "inputType", "scrollSpeed", "scrollOrientation", "virtualList", "disabled", "modal",
+  "value", "placeholder", "inputType", "scrollSpeed", "scrollOrientation", "followTail", "virtualList", "disabled", "modal",
   "portal", "dismissOnOutside", "focusable", "dragRegion", "draggable", "dropTarget", "fileDropTarget", "windowAction",
 ] as const;
 

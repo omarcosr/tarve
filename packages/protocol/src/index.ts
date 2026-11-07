@@ -269,6 +269,8 @@ export interface NativeNode {
   submitOnEnter?: boolean;
   scrollSpeed?: number;
   scrollOrientation?: ScrollOrientation;
+  /** A scroll area keeps its end in view while content grows, while it is at the end. */
+  followTail?: boolean;
   virtualList?: VirtualListLayout;
   control?: Control | null;
   modal?: boolean; focusable?: boolean;
@@ -417,6 +419,8 @@ export type NativeCommand =
   | { type: "focus"; id: string }
   | { type: "capturePointer"; id: string | null }
   | { type: "scrollToItem"; id: string; index: number; offset?: number; smooth?: boolean }
+  /** A scroll area's offsets, applied after the next layout; a missing axis stays, offsets clamp to the end. */
+  | { type: "scrollTo"; id: string; x?: number; y?: number; smooth?: boolean }
   | { type: "inspect"; requestId: string }
   /** The focused text field and its selection, as UTF-8 offsets (answered synchronously). */
   | { type: "selection"; requestId: string }
@@ -444,7 +448,11 @@ export type NativeCommand =
   | { type: "authenticate"; requestId: string; reason: string }
   | { type: "input"; action: "move" | "down" | "up" | "wheel" | "text" | "key"; x?: number; y?: number; delta?: number; deltaX?: number; deltaY?: number; text?: string };
 /** A node's laid-out box, like its `size` event: the content size, and the border box in the window. */
-export interface LayoutBox { width: number; height: number; x: number; y: number; borderWidth: number; borderHeight: number }
+export interface LayoutBox {
+  width: number; height: number; x: number; y: number; borderWidth: number; borderHeight: number;
+  /** A scroll area's offsets and how far each axis scrolls (DOM scrollTop, scrollHeight − clientHeight). */
+  scrollX?: number; scrollY?: number; scrollMaxX?: number; scrollMaxY?: number;
+}
 export interface NodeSnapshot {
   id: string; kind: NodeKind; x: number; y: number; width: number; height: number;
   scroll: number; scrollMax: number; text: string;

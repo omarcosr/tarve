@@ -4830,6 +4830,102 @@ fn scroll_speed_scales_wheel_delta() {
 }
 
 #[test]
+fn follow_tail_keeps_the_end_in_view_until_the_user_scrolls_away() {
+    let log = |rows: usize| {
+        let rows = (0..rows)
+            .map(|index| {
+                node(
+                    &format!("row{index}"),
+                    "view",
+                    json!({"height":40,"shrink":0}),
+                    vec![],
+                )
+            })
+            .collect();
+        let mut scroll = node("log", "scroll", json!({"height":100}), rows);
+        scroll.follow_tail = true;
+        root(vec![scroll])
+    };
+    let mut tree = Tree::new(log(5));
+    tree.compute(200.0, 120.0).unwrap();
+    // New and short of its end: it opens at the end.
+    assert_eq!(tree.entries["log"].scroll, 100.0);
+    tree.take_layout_events();
+    tree.update(log(6));
+    tree.compute(200.0, 120.0).unwrap();
+    assert_eq!(tree.entries["log"].scroll, 140.0);
+    let events = tree.take_layout_events();
+    let scroll = events
+        .iter()
+        .find(|event| event["type"] == "scroll")
+        .expect("a scroll event");
+    assert_eq!(scroll["source"], "layout");
+    assert_eq!(scroll["offsetY"], 140.0);
+    // Scrolled up: growth no longer moves it.
+    tree.pointer_move(50.0, 50.0);
+    tree.wheel_2d(0.0, -60.0);
+    let away = tree.entries["log"].scroll;
+    assert!(away < 140.0);
+    tree.update(log(8));
+    tree.compute(200.0, 120.0).unwrap();
+    assert_eq!(tree.entries["log"].scroll, away);
+}
+
+#[test]
+fn scroll_to_applies_after_the_layout_that_grew_the_content() {
+    let list = |rows: usize| {
+        let rows = (0..rows)
+            .map(|index| {
+                node(
+                    &format!("row{index}"),
+                    "view",
+                    json!({"height":40,"shrink":0}),
+                    vec![],
+                )
+            })
+            .collect();
+        root(vec![node("list", "scroll", json!({"height":100}), rows)])
+    };
+    let mut tree = Tree::new(list(5));
+    tree.compute(200.0, 120.0).unwrap();
+    tree.update(list(10));
+    // Sent with the update, before its layout: the end is the new one.
+    tree.request_scroll_to("list", None, Some(f64::MAX), false)
+        .unwrap();
+    tree.compute(200.0, 120.0).unwrap();
+    assert_eq!(tree.entries["list"].scroll, 300.0);
+    let events = tree.take_layout_events();
+    let scroll = events
+        .iter()
+        .find(|event| event["type"] == "scroll")
+        .unwrap();
+    assert_eq!(scroll["source"], "program");
+    assert_eq!(
+        tree.layout_boxes(&["list".into()])["list"]["scrollMaxY"],
+        300.0
+    );
+    tree.request_scroll_to("list", None, Some(40.0), false)
+        .unwrap();
+    tree.compute(200.0, 120.0).unwrap();
+    assert_eq!(tree.entries["list"].scroll, 40.0);
+    // Smooth: eases there over frames.
+    tree.request_scroll_to("list", None, Some(0.0), true)
+        .unwrap();
+    tree.compute(200.0, 120.0).unwrap();
+    assert_eq!(tree.entries["list"].scroll, 40.0);
+    tree.advance_motion(tree.motion_time_ms() + 2000.0);
+    assert_eq!(tree.entries["list"].scroll, 0.0);
+    assert!(
+        tree.request_scroll_to("list", Some(f64::NAN), None, false)
+            .is_err()
+    );
+    // An unknown id is a no-op.
+    tree.request_scroll_to("missing", None, Some(10.0), false)
+        .unwrap();
+    tree.compute(200.0, 120.0).unwrap();
+}
+
+#[test]
 fn leaving_the_window_while_dragging_does_not_reset_a_slider() {
     let mut slider = node("slider", "slider", json!({"width":120,"height":24}), vec![]);
     slider.control = Some(

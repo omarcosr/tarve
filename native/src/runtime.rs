@@ -3703,6 +3703,11 @@ impl ApplicationHandler<Command> for App {
                     Err(message) => self.events.push(error(message)),
                 }
             }
+            Command::ScrollTo { id, x, y, smooth } => {
+                if let Err(message) = self.tree.request_scroll_to(&id, x, y, smooth) {
+                    self.events.push(error(message));
+                }
+            }
             Command::Selection { request_id } => {
                 let focused = self.tree.focused.clone();
                 let selection = focused

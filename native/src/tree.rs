@@ -1613,6 +1613,8 @@ pub struct Tree {
     released_images: HashSet<String>,
     /// Smooth `scrollToItem` requests in flight, by list id.
     scroll_animations: HashMap<String, ScrollAnimation>,
+    /// `scrollTo` requests, applied after the next layout: (id, x, y, smooth).
+    scroll_requests: Vec<(String, Option<f64>, Option<f64>, bool)>,
     /// The scroll areas a pixel-scroll gesture (a swipe and its fling) moves, per axis, fixed
     /// by its first event: content sliding under a still finger never takes the scroll over.
     pub(crate) wheel_latch: Option<[Option<String>; 2]>,
@@ -1936,6 +1938,7 @@ impl Tree {
             surface_frames: HashMap::default(),
             released_images: HashSet::default(),
             scroll_animations: HashMap::default(),
+            scroll_requests: Vec::new(),
             wheel_latch: None,
             wheel_latch_at: None,
             overscroll: overscroll::State::default(),
@@ -3728,6 +3731,66 @@ impl Tree {
         std::mem::take(&mut self.pending_interaction_events)
     }
     pub fn compute(&mut self, width: f32, height: f32) -> Result<(), String> {
+        self.compute_layout(width, height)?;
+        if !self.scroll_requests.is_empty() {
+            self.apply_scroll_requests();
+        }
+        Ok(())
+    }
+
+    /// DOM `scrollTo` on a scroll area (or a textarea, code block): queued until the next
+    /// layout, so a request sent with the update that grew the content reaches its new end.
+    pub fn request_scroll_to(
+        &mut self,
+        id: &str,
+        x: Option<f64>,
+        y: Option<f64>,
+        smooth: bool,
+    ) -> Result<(), String> {
+        if x.is_some_and(|x| x.is_nan()) || y.is_some_and(|y| y.is_nan()) {
+            return Err("scrollTo offsets must be numbers".into());
+        }
+        self.scroll_requests.push((id.to_string(), x, y, smooth));
+        // A frame runs `compute`, which applies it.
+        self.dirty.paint = true;
+        Ok(())
+    }
+
+    fn apply_scroll_requests(&mut self) {
+        for (id, x, y, smooth) in std::mem::take(&mut self.scroll_requests) {
+            // Not on screen (another page, a collapsed panel): nowhere to scroll.
+            let Some(entry) = self.entries.get(&id) else {
+                continue;
+            };
+            let next_x = x.unwrap_or(entry.scroll_x).clamp(0.0, entry.scroll_max_x);
+            let next_y = y.unwrap_or(entry.scroll).clamp(0.0, entry.scroll_max);
+            let from = entry.scroll;
+            self.scroll_animations.remove(&id);
+            let mut events = if smooth && (next_y - from).abs() > 1e-6 {
+                let events = self.scroll_to_2d(&id, next_x, from);
+                let duration_ms = (300.0 + (next_y - from).abs().sqrt() * 6.0).min(900.0);
+                self.scroll_animations.insert(
+                    id,
+                    ScrollAnimation {
+                        from,
+                        to: next_y,
+                        start_ms: self.motion_time_ms,
+                        duration_ms,
+                        wheel: false,
+                    },
+                );
+                events
+            } else {
+                self.scroll_to_2d(&id, next_x, next_y)
+            };
+            for event in &mut events {
+                event["source"] = json!("program");
+            }
+            self.pending_layout_events.extend(events);
+        }
+    }
+
+    fn compute_layout(&mut self, width: f32, height: f32) -> Result<(), String> {
         if !self.dirty.layout && !self.dirty.text {
             if self.highlight_dirty {
                 self.resolve_highlights();
@@ -3990,14 +4053,19 @@ impl Tree {
                 (entry.rect.width() - f64::from(pad[1] + pad[3] + border[1] + border[3])).max(0.0);
             let height =
                 (entry.rect.height() - f64::from(pad[0] + pad[2] + border[0] + border[2])).max(0.0);
-            boxes.insert(
-                id.clone(),
-                json!({
-                    "width":round(width), "height":round(height),
-                    "x":round(entry.rect.x0), "y":round(entry.rect.y0),
-                    "borderWidth":round(entry.rect.width()), "borderHeight":round(entry.rect.height())
-                }),
-            );
+            let mut layout_box = json!({
+                "width":round(width), "height":round(height),
+                "x":round(entry.rect.x0), "y":round(entry.rect.y0),
+                "borderWidth":round(entry.rect.width()), "borderHeight":round(entry.rect.height())
+            });
+            // A scroll area's offsets and reach (DOM scrollTop, scrollHeight), after any scrollTo.
+            if entry.scroll_max > 0.0 || entry.scroll_max_x > 0.0 || entry.node.kind == "scroll" {
+                layout_box["scrollX"] = json!(round(entry.scroll_x));
+                layout_box["scrollY"] = json!(round(entry.scroll));
+                layout_box["scrollMaxX"] = json!(round(entry.scroll_max_x));
+                layout_box["scrollMaxY"] = json!(round(entry.scroll_max));
+            }
+            boxes.insert(id.clone(), layout_box);
         }
         boxes
     }
@@ -4099,6 +4167,18 @@ impl Tree {
             .layout
             .layout(entry.layout_id.unwrap())
             .map_err(|e| e.to_string())?;
+        // `followTail`: a scroll area at its end (or new) stays there as its content grows.
+        let follow = entry.node.follow_tail
+            && entry.node.kind == "scroll"
+            && entry.node.virtual_list.is_none();
+        let horizontal = entry.node.scroll_orientation == "horizontal";
+        let (before_x, before_y) = (entry.scroll_x, entry.scroll);
+        let at_end = follow
+            && if horizontal {
+                entry.scroll_x >= entry.scroll_max_x - 0.5
+            } else {
+                entry.scroll >= entry.scroll_max - 0.5
+            };
         entry.rect = BoxRect::from_origin_size(
             (origin.0.round(), origin.1.round()),
             (layout.size.width as f64, layout.size.height as f64),
@@ -4136,8 +4216,31 @@ impl Tree {
         } else {
             0.0
         };
+        if at_end && horizontal {
+            entry.scroll_x = entry.scroll_max_x;
+        } else if at_end {
+            entry.scroll = entry.scroll_max;
+        }
         entry.scroll_x = entry.scroll_x.clamp(0.0, entry.scroll_max_x);
         entry.scroll = entry.scroll.clamp(0.0, entry.scroll_max);
+        if follow
+            && ((entry.scroll_x - before_x).abs() > 1e-6 || (entry.scroll - before_y).abs() > 1e-6)
+        {
+            let (offset, max) = if horizontal {
+                (entry.scroll_x, entry.scroll_max_x)
+            } else {
+                (entry.scroll, entry.scroll_max)
+            };
+            let event = json!({
+                "type":"scroll", "id":id, "offset":offset, "max":max,
+                "offsetX":entry.scroll_x, "offsetY":entry.scroll,
+                "maxX":entry.scroll_max_x, "maxY":entry.scroll_max,
+                "source":"layout"
+            });
+            self.pending_layout_events.push(event);
+            self.dirty.full_paint = true;
+        }
+        let entry = self.entries.get_mut(id).unwrap();
         let children = entry.children.clone();
         let clips = clips_overflow(&entry.node);
         // A blurred box paints three standard deviations past its edge.

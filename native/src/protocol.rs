@@ -392,6 +392,10 @@ pub struct Node {
     pub scroll_speed: f64,
     #[serde(default = "default_scroll_orientation")]
     pub scroll_orientation: String,
+    /// A scroll area that keeps its end in view while the content grows, as long as it was
+    /// at the end (a chat, a log). Scrolling away stops it; scrolling back resumes it.
+    #[serde(default)]
+    pub follow_tail: bool,
     pub virtual_list: Option<Box<VirtualListLayout>>,
     pub control: Option<Box<Control>>,
     #[serde(default)]
@@ -968,6 +972,15 @@ pub enum Command {
         id: String,
         index: usize,
         offset: Option<f64>,
+        #[serde(default)]
+        smooth: bool,
+    },
+    /// DOM `scrollTo`: a scroll area's offsets, applied after the next layout (so content
+    /// added just before is in reach). A missing axis keeps its offset; offsets clamp to the end.
+    ScrollTo {
+        id: String,
+        x: Option<f64>,
+        y: Option<f64>,
         #[serde(default)]
         smooth: bool,
     },

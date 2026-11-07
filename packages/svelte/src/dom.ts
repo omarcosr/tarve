@@ -643,8 +643,15 @@ export class TElement extends TNode {
   _cssVariables?: { version: number; map: Map<string, string> | undefined };
   /** The CSS `animation` running on this element, keyed by its parsed shorthand. */
   _cssAnimation?: { key: string; animation: unknown };
-  scrollTop = 0;
-  scrollLeft = 0;
+  /** Scroll offsets and reach as native last reported them (scroll events, layout reads). */
+  _scrollTop = 0;
+  _scrollLeft = 0;
+  _scrollMaxX = 0;
+  _scrollMaxY = 0;
+  get scrollTop(): number { return this._scrollTop; }
+  set scrollTop(value: number) { this.scrollTo({ top: value }); }
+  get scrollLeft(): number { return this._scrollLeft; }
+  set scrollLeft(value: number) { this.scrollTo({ left: value }); }
   constructor(tag: string, namespace = HTML_NAMESPACE) {
     super();
     this.namespaceURI = namespace;
@@ -828,8 +835,14 @@ export class TElement extends TNode {
     this._measure();
     readLayout(this, withParent);
   }
-  _sized(size: { width: number; height: number; x?: number; y?: number; borderWidth?: number; borderHeight?: number }): void {
+  _sized(size: { width: number; height: number; x?: number; y?: number; borderWidth?: number; borderHeight?: number; scrollX?: number; scrollY?: number; scrollMaxX?: number; scrollMaxY?: number }): void {
     this._boxEpoch = layout.rendered;
+    if (size.scrollY !== undefined) {
+      this._scrollLeft = size.scrollX ?? 0;
+      this._scrollTop = size.scrollY;
+      this._scrollMaxX = size.scrollMaxX ?? 0;
+      this._scrollMaxY = size.scrollMaxY ?? 0;
+    }
     const previous = this._size;
     this._size = { width: size.width, height: size.height };
     if (size.x !== undefined && size.y !== undefined) this._box = { x: size.x, y: size.y, width: size.borderWidth ?? size.width, height: size.borderHeight ?? size.height };
@@ -878,8 +891,8 @@ export class TElement extends TNode {
   get offsetLeft(): number { this._layout(true); return (this._box?.x ?? 0) - (this.parentElement?._box?.x ?? 0); }
   get offsetTop(): number { this._layout(true); return (this._box?.y ?? 0) - (this.parentElement?._box?.y ?? 0); }
   get offsetParent(): TElement | null { return this.parentElement; }
-  get scrollWidth(): number { return this.clientWidth; }
-  get scrollHeight(): number { return this.clientHeight; }
+  get scrollWidth(): number { const width = this.clientWidth; return width + this._scrollMaxX; }
+  get scrollHeight(): number { const height = this.clientHeight; return height + this._scrollMaxY; }
   /** input/textarea selection, read from native while the field has focus. */
   get selectionStart(): number | null { return this._textSelection()?.start ?? this._valueLength(); }
   get selectionEnd(): number | null { return this._textSelection()?.end ?? this._valueLength(); }
@@ -893,7 +906,24 @@ export class TElement extends TNode {
   }
   get innerText(): string { return this.textContent ?? ""; }
   set innerText(value: string) { this.textContent = value; }
-  scrollTo(): void {}
+  /** DOM scrollTo(x, y) or scrollTo({ left, top, behavior }): native scrolls after the next layout. */
+  scrollTo(first?: number | { left?: number; top?: number; behavior?: string }, second?: number): void {
+    const options = typeof first === "object" && first ? first : first === undefined ? {} : { left: Number(first), top: Number(second ?? 0) };
+    const left = options.left === undefined ? undefined : Number(options.left);
+    const top = options.top === undefined ? undefined : Number(options.top);
+    if ((left !== undefined && Number.isNaN(left)) || (top !== undefined && Number.isNaN(top))) return;
+    // Known now: clamped to the reach native last reported (it applies the exact end after layout).
+    const clamp = (value: number, max: number) => Math.max(0, max > 0 ? Math.min(value, max) : value);
+    if (left !== undefined) this._scrollLeft = clamp(left, this._scrollMaxX);
+    if (top !== undefined) this._scrollTop = clamp(top, this._scrollMaxY);
+    // Layout reads after this see native's offsets, not the guess above.
+    this._boxEpoch = -1;
+    scrollHook?.(this, left, top, options.behavior === "smooth");
+  }
+  scrollBy(first?: number | { left?: number; top?: number; behavior?: string }, second?: number): void {
+    const options = typeof first === "object" && first ? first : { left: Number(first ?? 0), top: Number(second ?? 0) };
+    this.scrollTo({ left: this._scrollLeft + Number(options.left ?? 0), top: this._scrollTop + Number(options.top ?? 0), behavior: options.behavior });
+  }
   scrollIntoView(): void {}
   querySelector(selector: string): TElement | null { return query(this, selector, true)[0] ?? null; }
   querySelectorAll(selector: string): TElement[] { return query(this, selector, false); }
@@ -1390,6 +1420,9 @@ export function isFocusable(element: TElement): boolean {
 
 let pointerCapture: TElement | undefined;
 let pointerCaptureHook: ((element: TElement | null) => void) | undefined;
+let scrollHook: ((element: TElement, left: number | undefined, top: number | undefined, smooth: boolean) => void) | undefined;
+/** Element scrollTo, scrollTop = … reach native; the mount sets this. */
+export function setScrollHook(hook: typeof scrollHook): void { scrollHook = hook; }
 /** Native pointer capture follows `setPointerCapture`; the mount sets this. */
 export function setPointerCaptureHook(hook: ((element: TElement | null) => void) | undefined): void { pointerCaptureHook = hook; }
 /** The element holding pointer capture: pointer events go to it. */

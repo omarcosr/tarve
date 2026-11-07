@@ -797,6 +797,20 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (!Number.isFinite(offset)) throw new RangeError("scrollToItem offset must be finite");
       if (!ended) sendAfterRender({ type: "scrollToItem", id, index, ...(offset !== 0 ? { offset } : {}), ...(options.smooth ? { smooth: true } : {}) });
     },
+    scrollTo(id: string, position: { x?: number | "start" | "end"; y?: number | "start" | "end"; smooth?: boolean }): void {
+      if (!id) throw new TypeError("scrollTo requires a scroll area id");
+      // JSON has no Infinity: the end is the largest finite offset, which native clamps.
+      const axis = (value: number | "start" | "end" | undefined, name: string) => {
+        if (value === undefined) return undefined;
+        if (value === "start") return 0;
+        if (value === "end" || value === Infinity) return Number.MAX_VALUE;
+        if (typeof value !== "number" || Number.isNaN(value)) throw new RangeError(`scrollTo ${name} must be a number, "start" or "end"`);
+        return Math.max(0, value);
+      };
+      const x = axis(position.x, "x");
+      const y = axis(position.y, "y");
+      if (!ended) sendAfterRender({ type: "scrollTo", id, ...(x !== undefined ? { x } : {}), ...(y !== undefined ? { y } : {}), ...(position.smooth ? { smooth: true } : {}) });
+    },
     show(): void {
       if (!ended) sendPublic({ type: "window", action: "show" });
     },
