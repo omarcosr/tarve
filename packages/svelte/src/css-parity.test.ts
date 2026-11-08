@@ -16,6 +16,10 @@ import { parseCss, registerCss, resetCss } from "./css";
 import { beginRender, documentInstance, endRender, setScheduler, windowInstance } from "./dom";
 import { canvasBackground, canvasText, rootChildren } from "./render";
 import { connectNativeEvents } from "./events";
+import { nativePath } from "../../core/src/bridge/runtime";
+
+/** It opens a native window: skipped where the library is not built (unit tests before build:native). */
+const nativeBuilt = (() => { try { return existsSync(nativePath()); } catch { return false; } })();
 
 /** Case name → the boxes Tarve still lays out differently from Chrome, and why. */
 const DIVERGENCES: Record<string, { boxes: string[]; reason: string }> = {
@@ -110,7 +114,7 @@ const MAX_TILE_DELTA = 25;
 /** Known paint differences: case name → why (asserted to still exceed its threshold). */
 const VISUAL_DIVERGENCES: Record<string, string> = {};
 
-describe("CSS layout parity with Chrome", () => {
+describe.skipIf(!nativeBuilt)("CSS layout parity with Chrome", () => {
   beforeAll(async () => {
     windowInstance.innerWidth = VIEWPORT.width;
     windowInstance.innerHeight = VIEWPORT.height;
