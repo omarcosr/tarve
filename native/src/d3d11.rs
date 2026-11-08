@@ -2125,13 +2125,8 @@ impl D3d11Graphics {
         for (index, command) in self.commands.iter().enumerate() {
             let b = bounds[index];
             // An empty box draws nothing (`tile_hashes_of` skips it too).
-            if b[0] < area[2]
-                && b[2] > area[0]
-                && b[1] < area[3]
-                && b[3] > area[1]
-                && b[0] < b[2]
-                && b[1] < b[3]
-            {
+            let drawn = b[0] < b[2] && b[1] < b[3];
+            if drawn && b[0] < area[2] && b[2] > area[0] && b[1] < area[3] && b[3] > area[1] {
                 hash = mix_hash(mix_hash(hash, clip_depth), command_hashes[index]);
             }
             match command {
@@ -4837,9 +4832,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         for glyph in glyphs {
             let baseline = transform * Point::new(f64::from(glyph.x), f64::from(glyph.y));
             let (base_x, subpixel_x) = quantize_glyph_position(baseline.x as f32);
-            // Horizontal text sits on whole pixels vertically, as the CPU blit and Skia
-            // place it: a fractional scroll offset then reuses every glyph it has, instead
-            // of rasterizing the visible text again at each quarter-pixel baseline.
+            // Whole pixels vertically (as the CPU blit): fractional scrolls reuse the glyphs.
             let base_y = (baseline.y as f32).round();
             let subpixel_y = 0u8;
             let cleartype_entry = if cleartype {

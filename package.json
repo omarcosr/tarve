@@ -127,7 +127,7 @@
     "release:build": "bun scripts/release.ts",
     "version:check": "bun scripts/version-policy.ts --check",
     "version:set": "bun scripts/version-policy.ts --set",
-    "test": "bun test packages/core packages/svelte scripts/playground.test.ts && cargo test --manifest-path native/Cargo.toml",
+    "test": "bun run build:native && bun test packages/core packages/svelte scripts/playground.test.ts && cargo test --manifest-path native/Cargo.toml",
     "test:headless": "bun test packages/headless packages/test",
     "test:package-clean": "bun test scripts/package-output.test.ts",
     "test:release-policy": "bun test scripts/version-policy.test.ts scripts/release-policy.test.ts",
