@@ -2124,7 +2124,14 @@ impl D3d11Graphics {
         let mut clip_depth = 0_u64;
         for (index, command) in self.commands.iter().enumerate() {
             let b = bounds[index];
-            if b[0] < area[2] && b[2] > area[0] && b[1] < area[3] && b[3] > area[1] {
+            // An empty box draws nothing (`tile_hashes_of` skips it too).
+            if b[0] < area[2]
+                && b[2] > area[0]
+                && b[1] < area[3]
+                && b[3] > area[1]
+                && b[0] < b[2]
+                && b[1] < b[3]
+            {
                 hash = mix_hash(mix_hash(hash, clip_depth), command_hashes[index]);
             }
             match command {

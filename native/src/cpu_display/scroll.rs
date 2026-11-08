@@ -115,26 +115,30 @@ fn contains(outer: Rect, inner: Rect) -> bool {
 /// The box a device-space path surely covers: its bounding box, less its rounded corners
 /// (a rectangle keeps the whole box; any other shape is estimated generously).
 fn covered_box(transform: Affine, path: &BezPath) -> Rect {
+    use vello::kurbo::ParamCurve;
     let device = transform * path.clone();
     let bounds = device.bounding_box();
-    let mut corner: f64 = 0.0;
-    for element in device.elements() {
-        let points: &[vello::kurbo::Point] = match element {
-            PathEl::MoveTo(p) | PathEl::LineTo(p) => std::slice::from_ref(p),
-            PathEl::QuadTo(a, b) => &[*a, *b],
-            PathEl::CurveTo(a, b, c) => &[*a, *b, *c],
-            PathEl::ClosePath => &[],
-        };
-        for p in points {
-            let x = (p.x - bounds.x0).min(bounds.x1 - p.x);
-            let y = (p.y - bounds.y0).min(bounds.y1 - p.y);
-            corner = corner.max(x.min(y));
+    // A rounded corner's curve passes about 0.29 r from the box's corner at its midpoint
+    // (1 - 1/√2): the deepest midpoint gives the largest radius. Lines along the edges
+    // stay on them; a line anywhere else makes the shape no box at all.
+    let mut radius: f64 = 0.0;
+    for segment in device.segments() {
+        let middle = segment.eval(0.5);
+        let x = (middle.x - bounds.x0).min(bounds.x1 - middle.x);
+        let y = (middle.y - bounds.y0).min(bounds.y1 - middle.y);
+        let depth = x.min(y);
+        if depth <= 1e-6 {
+            continue;
+        }
+        match segment {
+            vello::kurbo::PathSeg::Line(_) => return Rect::ZERO,
+            _ => radius = radius.max(depth / (1.0 - std::f64::consts::FRAC_1_SQRT_2)),
         }
     }
-    if corner <= 1e-6 {
+    if radius <= 1e-6 {
         bounds
     } else {
-        bounds.inflate(-(corner * 2.5 + 1.0), -(corner * 2.5 + 1.0))
+        bounds.inflate(-(radius + 1.0), -(radius + 1.0))
     }
 }
 
