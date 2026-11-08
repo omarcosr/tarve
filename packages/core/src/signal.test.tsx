@@ -3,6 +3,7 @@ import type { NativeCommand, NativeEvent, NativeNode, SceneDocument } from "./pr
 import { createApp } from "./app";
 import type { NativeBridge } from "./bridge";
 import { Text, View, Window } from "./components";
+import { Slider } from "./controls";
 import { batch, signal } from "./signal";
 
 class FakeBridge implements NativeBridge {
@@ -42,6 +43,40 @@ describe("signals", () => {
       { id: "box", style: { background: "#00ff00" } },
     ] }]);
     // A later render reads the signals and finds nothing new to send for them.
+    bridge.commands.length = 0;
+    app.update();
+    await flush();
+    expect(bridge.commands.filter(command => command.type === "patch" || command.type === "mutate")).toEqual([]);
+    app.close();
+  });
+
+  test("a media time signal moves a bound slider and clock without a render", async () => {
+    let emit: (event: NativeEvent) => void = () => {};
+    const bridge = new FakeBridge();
+    const start = bridge.start.bind(bridge);
+    bridge.start = (document, onEvent) => { emit = onEvent; start(document, onEvent); };
+    const time = signal(0);
+    let renders = 0;
+    const app = createApp(() => {
+      renders++;
+      return <Window title="s">
+        <audio id="song" src="song.m4a" time={time} />
+        <Text id="clock">{time}</Text>
+        <Slider id="seek" value={time} min={0} max={10} />
+      </Window>;
+    }, { bridge });
+    await app.ready;
+    bridge.commands.length = 0;
+    emit({ type: "media", id: "song", event: "timeupdate", time: 3 } as NativeEvent);
+    await flush();
+    expect(time.value).toBe(3);
+    expect(renders).toBe(1);
+    const patch = bridge.commands.find(command => command.type === "patch") as { nodes: NativeNode[] } | undefined;
+    expect(patch?.nodes.map(node => [node.id, node.control?.value])).toEqual([["seek", 3]]);
+    expect(bridge.commands.some(command => command.type === "setNodes")).toBe(true);
+    // Past `max` the thumb stays at the end; a later render finds nothing to send.
+    time.value = 12;
+    await flush();
     bridge.commands.length = 0;
     app.update();
     await flush();

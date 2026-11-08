@@ -1,9 +1,9 @@
-import type { SceneDocument, LayoutBox, NativeEvent, NativeCommand, Snapshot } from "./protocol";
+import type { SceneDocument, LayoutBox, NativeEvent, NativeCommand, NativeNode, Snapshot } from "./protocol";
 import { readFileSync } from "node:fs";
 import { environmentKey, initialViewport, setEnvironment, trackViewport } from "./viewport";
-import { applyMediaEvent, type MediaController } from "./media-element";
+import { applyMediaEvent, quietMediaEvent, type MediaController } from "./media-element";
 import { BunFfiBridge, type NativeBridge } from "./bridge";
-import { boundText, compileTree, resolveBoundStyle, type CompiledTree, type NodeBinding, invalidateMemos } from "./reconciler";
+import { boundControlValue, boundText, compileTree, resolveBoundStyle, type CompiledTree, type NodeBinding, invalidateMemos } from "./reconciler";
 import type { Signal } from "./signal";
 import { NodeSetsCommand } from "./app/node-sets";
 import { noteFlushedValues } from "./app/gc-pacer";
@@ -388,6 +388,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     for (const entry of changed) entry.queued = false;
     if (ended || closing || !committed) return;
     const command = new NodeSetsCommand();
+    /** Nodes whose control a signal set: sent as a patch (`setNodes` carries style and text). */
+    let patched: NativeNode[] | undefined;
     const nodes = committed.nodes, shadows = observed?.nodes;
     for (const entry of changed) {
       const targets = entry.targets;
@@ -397,6 +399,15 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         if (!node) continue;
         const shadow = shadows?.get(id);
         const ownShadow = shadow && shadow !== node ? shadow : undefined;
+        if (binding.control) {
+          if (!node.control) continue;
+          const value = boundControlValue(binding.signal.value, node.control);
+          if (node.control.value === value && (!ownShadow?.control || ownShadow.control.value === value)) continue;
+          node.control = { ...node.control, value };
+          if (ownShadow?.control) ownShadow.control = { ...ownShadow.control, value };
+          (patched ??= []).push(node);
+          continue;
+        }
         let text: string | undefined;
         if (binding.text) {
           text = boundText(binding.text);
@@ -428,6 +439,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         command.add(id, style, text);
       }
     }
+    if (patched) sendInternal({ type: "patch", nodes: patched }, { source: "bridge", event: "setNodes" });
     if (!command.length) return;
     sendInternal(command as unknown as NativeCommand, { source: "bridge", event: "setNodes" });
     noteFlushedValues(command.length);
@@ -634,11 +646,13 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     if (event.type === "surface") trackSurfaceHandles(surfaceHandles, event);
 
     if (!ended && event.type === "media") {
-      const handler = applyMediaEvent(event, committed?.media?.get(event.id), renderScope);
+      const request = committed?.media?.get(event.id);
+      const handler = applyMediaEvent(event, request, renderScope);
       if (handler) {
         try { handler(); } catch (error) { reportError(error, { source: "event-handler", event: `media:${event.event}`, targetId: event.id }); }
       }
-      update();
+      // The position alone (a bound `time` signal) updates its nodes without a render.
+      if (handler || !quietMediaEvent(event.event, request, event.id, renderScope)) update();
     }
 
     if (!ended && event.type === "shortcut") {

@@ -6,7 +6,7 @@ import { lineAt, lyricsFor, type Lyrics } from "./youtube-music-lyrics";
 import { distinct, sameSong, shuffled, songKey, spread } from "./youtube-music-queue";
 import * as source from "./youtube-music-source";
 import type { Song } from "./youtube-music-source";
-import { AUDIO_ID, LYRICS_LIST, lyricsShown, state, type Page } from "./youtube-music-view";
+import { AUDIO_ID, clock, clockText, LYRICS_LIST, lyricsShown, playTime, state, type Page } from "./youtube-music-view";
 
 /** Waits before retrying a song the bot check refused (VPN exits change; the block often lifts). */
 const BLOCKED_RETRIES = [20_000, 60_000, 180_000];
@@ -78,6 +78,18 @@ export function connect(app: ReturnType<typeof createApp>): void {
     followed = line;
     app.scrollToItem(LYRICS_LIST, Math.max(0, line), -Math.round((state.stage?.height ?? 600) * 0.3), { smooth });
   };
+
+  // The clock and the seek bar follow `playTime` on their own; the view renders again only
+  // when the lyric line being sung changes (the line it highlights).
+  let shownLine = -1;
+  playTime.subscribe(() => {
+    clockText.value = clock(playTime.value);
+    state.followLyrics();
+    const song = state.queue[state.index];
+    const lines = state.page.kind === "playing" && state.lyrics?.id === song?.id ? state.lyrics?.data?.lines : null;
+    const line = lines ? lineAt(lines, playTime.value) : -1;
+    if (line !== shownLine) { shownLine = line; refresh(); }
+  });
 
   // Lyrics load for the song playing while the now-playing page is open. A song
   // without lyrics is remembered; one whose lookup failed is tried again later.

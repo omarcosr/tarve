@@ -44,6 +44,14 @@ export interface NodeBinding {
   /** The style key, and the theme and viewport the node compiled with (`resolveBoundStyle`). */
   style?: { key: string; theme: ThemeDefinition; viewport: [number, number] };
   text?: unknown[];
+  /** A control field (a slider's `value`), set by a patch of the node. */
+  control?: "value";
+}
+/** A bound control value as the control takes it: a number within its `min` and `max`. */
+export function boundControlValue(value: unknown, control: { min?: number; max?: number }): number {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return control.min ?? 0;
+  return Math.max(control.min ?? -Infinity, Math.min(number, control.max ?? Infinity));
 }
 const noop = () => {};
 /** Writes the style values a bound signal's `value` stands for into `out`, resolved like the rest of the style. */
@@ -686,7 +694,14 @@ export function compileTree(
     if (p.oldText !== undefined) node.oldText = p.oldText;
     if (p.newText !== undefined) node.newText = p.newText;
     if (p.svg !== undefined) node.svg = p.svg;
-    if (control) node.control = control;
+    if (control) {
+      if (isSignal(control.value)) {
+        const signal = control.value as Signal<unknown>;
+        (nodeBindings ??= []).push({ signal, control: "value" });
+        control.value = boundControlValue(signal.value, control);
+      }
+      node.control = control;
+    }
     // CSS object-fit: a video keeps its ratio inside its box by default.
     if (nativeType === "video") node.fit = p.fit ?? "contain";
     if (nativeType === "surface" && p.native === true) node.native = true;

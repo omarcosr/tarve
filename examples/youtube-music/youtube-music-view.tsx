@@ -1,10 +1,14 @@
-import { Column, darkTheme, DropdownMenu, Image, Input, memo, Modal, Path, Pressable, Row, Scroll, Slider, Svg, Text, Theme, TitleBar, Tooltip, View, VirtualList, Window, type Child, type MediaController, type ScrollInfo } from "@tarve/core";
+import { Column, darkTheme, DropdownMenu, Image, Input, memo, Modal, Path, Pressable, Row, Scroll, signal, Slider, Svg, Text, Theme, TitleBar, Tooltip, View, VirtualList, Window, type Child, type MediaController, type ScrollInfo } from "@tarve/core";
 import { lineAt, type Lyrics } from "./youtube-music-lyrics";
 import { compact, MobileNav, MobilePlayerBar, phone } from "./youtube-music-mobile";
 import type { Collection, Item, Shelf, Song } from "./youtube-music-source";
 import { clock } from "./youtube-music-format";
 export { clock };
 export const AUDIO_ID = "ytm-audio";
+/** Where the song is, set by `<audio time>` several times a second without a render. */
+export const playTime = signal(0);
+/** `playTime` as the player bar's clock (youtube-music-actions.ts keeps it in step). */
+export const clockText = signal(clock(0));
 export type Page = { kind: "home" } | { kind: "search"; query: string } | { kind: "library" } | { kind: "collection"; entry: Collection } | { kind: "playing" };
 export type Repeat = "off" | "all" | "one";
 
@@ -38,7 +42,9 @@ export const state = {
   /** Where to continue once a re-resolved stream has loaded. */
   resumeAt: 0,
   playing: false,
-  time: 0,
+  /** The playback position: `playTime`, which the clock and the seek bar show without a render. */
+  get time(): number { return playTime.value; },
+  set time(value: number) { playTime.value = value; },
   duration: 0,
   volume: 0.8,
   muted: false,
@@ -539,8 +545,8 @@ function Content({ lyricLine }: { lyricLine: number }) {
   return <CollectionPage entry={page.entry} />;
 }
 
-// Each region renders again only when what it shows changes: the clock ticking
-// four times a second re-renders the player bar, not the song list.
+// Each region renders again only when what it shows changes. The clock and the seek bar
+// are bound to `playTime`, so playback alone renders nothing.
 const SidebarRegion = memo((_: { page: Page; library: Collection[] | null; signedIn: boolean; source: string; playing: boolean; current: string | undefined }) => <Sidebar />);
 const ContentRegion = memo((props: {
   page: Page; shelves: Shelf[] | null; results: Song[] | null; opened: unknown; library: Collection[] | null; signedIn: boolean;
@@ -655,8 +661,8 @@ function PlayerBar() {
             onClick={() => { state.repeat = state.repeat === "off" ? "all" : state.repeat === "all" ? "one" : "off"; }} />
         </Row>
         <Row gap={10} align="center" style={{ width: "100%", maxWidth: 560 }}>
-          <Text id="time" size={11} color={c.muted} style={{ width: 36, textAlign: "end", shrink: 0 }}>{clock(song ? state.time : null)}</Text>
-          <Slider id="progress" label="Position" value={Math.min(state.time, duration)} min={0} max={Math.max(duration, 0.001)} step={0.1}
+          <Text id="time" size={11} color={c.muted} style={{ width: 36, textAlign: "end", shrink: 0 }}>{song ? clockText : clock(null)}</Text>
+          <Slider id="progress" label="Position" value={playTime} min={0} max={Math.max(duration, 0.001)} step={0.1}
             disabled={!ready} onValueChange={value => { state.time = value; state.media()?.seek(value); }}
             style={{ flex: 1, minWidth: 0, width: "auto", foreground: c.accent }} />
           <Text size={11} color={c.muted} style={{ width: 36, shrink: 0 }}>{clock(song ? duration : null)}</Text>
@@ -711,7 +717,7 @@ function SignInDialog() {
 
 export function YouTubeMusicView() {
   const song = state.queue[state.index];
-  // Only the line index reaches the content region, so the clock ticking re-renders it once per line.
+  // Rendered once per lyric line while playing (youtube-music-actions.ts asks), not per clock tick.
   const synced = state.page.kind === "playing" && state.lyrics?.id === song?.id ? state.lyrics?.data?.lines : null;
   const lyricLine = synced ? lineAt(synced, state.time) : -1;
   return (
@@ -720,8 +726,7 @@ export function YouTubeMusicView() {
       <audio id={AUDIO_ID} src={state.path} autoPlay volume={state.volume} muted={state.muted} loop={state.repeat === "one"}
         onPlay={() => { state.playing = true; state.played(); }}
         onPause={() => { state.playing = false; }}
-        onTimeUpdate={info => { state.time = info.currentTime; state.followLyrics(); }}
-        onSeeked={info => { state.time = info.currentTime; state.followLyrics(); }}
+        time={playTime}
         onLoadedMetadata={info => {
           if (info.duration !== null) state.duration = info.duration;
           if (state.resumeAt > 0) { state.media()?.seek(state.resumeAt); state.time = state.resumeAt; state.resumeAt = 0; }

@@ -10,6 +10,7 @@ import type { MediaErrorCode } from "./protocol";
 import { cueAt, loadSubtitles, nextCueChange, scheduleCueRender, type SubtitleTrack } from "./subtitles";
 export type { SubtitleTrack } from "./subtitles";
 import { scopedState, currentRenderScope } from "./render-scope";
+import type { Signal } from "./signal";
 
 /**
  * `<audio>` and `<video>`: HTMLMediaElements played by the native runtime. Attributes are
@@ -35,6 +36,12 @@ export interface MediaElementProps {
   className?: string;
   class?: string;
   ariaLabel?: string;
+  /**
+   * Bound to the playback position (seconds): set on every report, without a render. Bind it to
+   * a `Text` or a `Slider` `value` for a clock and a seek bar that move while the view stays put;
+   * `subscribe` to it for what follows the time (lyrics, a system media position).
+   */
+  time?: Signal<number>;
   onLoadedMetadata?: (event: MediaEventInfo) => void;
   onPlay?: (event: MediaEventInfo) => void;
   onPause?: (event: MediaEventInfo) => void;
@@ -356,6 +363,16 @@ function centerOverlay(props: VideoElementProps, id: string): VNode | null {
   ] } as never);
 }
 
+/**
+ * A `timeupdate` or `progress` (several a second) with no handler changes nothing a render
+ * shows unless the element draws its own state (controls, subtitles): then it renders nothing.
+ */
+export function quietMediaEvent(event: string, request: MediaRequest | undefined, id: string, scope: object): boolean {
+  if (!request || (event !== "timeupdate" && event !== "progress")) return false;
+  const props = request.handlers as VideoElementProps;
+  return !props.controls && !props.subtitles && mediaState(id, scope).cueText === undefined;
+}
+
 /** Applies a native media event to the element's state; returns the handler to call. */
 export function applyMediaEvent(event: { id: string; event: string; time?: number; duration?: number | null; paused?: boolean; message?: string; code?: MediaErrorCode; videoWidth?: number; videoHeight?: number; buffered?: number; filename?: string; audioTracks?: MediaAudioTrack[]; textTracks?: MediaTextTrack[]; cueText?: string }, request: MediaRequest | undefined, scope: object): (() => void) | undefined {
   const known = mediaState(event.id, scope);
@@ -377,6 +394,7 @@ export function applyMediaEvent(event: { id: string; event: string; time?: numbe
   if (event.event === "loadedmetadata") next.loaded = true;
   if (event.event === "seeked" || event.event === "ended" || event.event === "loadedmetadata") next.waiting = false;
   states(scope).set(event.id, next);
+  if (request?.handlers.time) request.handlers.time.value = next.time;
   const info: MediaEventInfo = { audioTracks: next.audioTracks ?? [], textTracks: next.textTracks ?? [], cueText: next.cueText ?? "", currentTime: next.time, duration: next.duration, paused: next.paused, videoWidth: next.videoWidth ?? 0, videoHeight: next.videoHeight ?? 0,
     buffered: next.buffered ?? 0, ...(next.filename !== undefined ? { filename: next.filename } : {}), waiting: next.stalled === true, seeking: next.seeking === true };
   const h = request?.handlers;

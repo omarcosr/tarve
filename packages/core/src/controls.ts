@@ -2,6 +2,7 @@ import type { Style } from "./protocol";
 import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
 import { Column, Icon, Pressable, Row, Text, View, type ViewProps } from "./components";
 import { theme } from "./theme";
+import { isSignal, type Bindable } from "./signal";
 
 const c = theme.colors;
 
@@ -77,7 +78,8 @@ export function RadioGroup({ value, options, orientation = "vertical", disabled,
 }
 
 export interface SliderProps extends BaseProps {
-  value: number;
+  /** A signal moves the thumb as it changes, without a render (a seek bar bound to a media `time`). */
+  value: Bindable<number>;
   min?: number;
   max?: number;
   step?: number;
@@ -87,11 +89,13 @@ export interface SliderProps extends BaseProps {
   onValueChange?: (value: number) => void;
 }
 export function Slider({ value, min = 0, max = 100, step = 1, label, orientation = "horizontal", disabled, onValueChange, style, ...props }: SliderProps): VNode {
-  if (![value, min, max, step].every(Number.isFinite) || max <= min || step <= 0) {
+  const bound = isSignal(value);
+  const now = bound ? value.value : value;
+  if (![now, min, max, step].every(Number.isFinite) || max <= min || step <= 0) {
     throw new RangeError("Slider requires finite values, max > min and step > 0");
   }
   return jsx("slider", { ...props, disabled, onValueChange,
-    control: { role: "slider", label, orientation, value: Math.max(min, Math.min(value, max)), min, max, step },
+    control: { role: "slider", label, orientation, value: bound ? value : Math.max(min, Math.min(now, max)), min, max, step } as never,
     style: { width: orientation === "horizontal" ? 160 : 24, height: orientation === "horizontal" ? 24 : 160,
       shrink: 0, foreground: disabled ? c.disabledForeground : c.primary,
       borderColor: c.border, thumbColor: c.sliderThumb,

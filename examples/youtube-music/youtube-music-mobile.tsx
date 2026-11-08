@@ -2,7 +2,7 @@
 // a bottom navigation bar instead of the sidebar, and a two-row player without the desktop's
 // volume and queue.
 import { Column, Pressable, Row, Slider, Text, viewport } from "@tarve/core";
-import { Art, c, clock, ellipsis, Glyph, IconButton, icons, state, togglePlaying } from "./youtube-music-view";
+import { Art, c, clock, clockText, ellipsis, Glyph, IconButton, icons, playTime, state, togglePlaying } from "./youtube-music-view";
 
 /** Android: sign-in in the system WebView, no tray. */
 export const phone = typeof process !== "undefined" && (process.platform as string) === "android";
@@ -55,8 +55,8 @@ export function MobilePlayerBar() {
         <IconButton id="next" d={icons.next} label="Next" size={20} fill box={40} onClick={state.next} />
       </Row>
       <Row gap={8} align="center">
-        <Text id="time" size={11} color={c.muted} style={{ width: 44, shrink: 0, whiteSpace: "nowrap" }}>{clock(state.time)}</Text>
-        <Slider id="progress" label="Position" value={Math.min(state.time, duration)} min={0} max={Math.max(duration, 0.001)} step={0.1}
+        <Text id="time" size={11} color={c.muted} style={{ width: 44, shrink: 0, whiteSpace: "nowrap" }}>{clockText}</Text>
+        <Slider id="progress" label="Position" value={playTime} min={0} max={Math.max(duration, 0.001)} step={0.1}
           disabled={!ready} onValueChange={value => { state.time = value; state.media()?.seek(value); }}
           style={{ flex: 1, minWidth: 0, width: "auto", foreground: c.accent }} />
         <Text size={11} color={c.muted} style={{ width: 44, shrink: 0, textAlign: "end", whiteSpace: "nowrap" }}>{clock(duration)}</Text>
