@@ -8,7 +8,7 @@ mod inset_shadow;
 use vello::kurbo::Point;
 use vello::{
     Glyph, Scene,
-    kurbo::{Affine, Rect, RoundedRect, Shape, Stroke},
+    kurbo::{Affine, Rect, RoundedRect, Shape, Stroke, Vec2},
     peniko::{
         Blob, Color, ColorStop, Extend, Fill, FontData, Gradient, ImageAlphaType, ImageBrush,
         ImageData, ImageFormat, color::DynamicColor,
@@ -297,6 +297,17 @@ pub(crate) trait PaintTarget {
     /// What was just painted cannot be reused in another frame (it reads more than the
     /// subtree's own state: an image, a video, a glass backdrop).
     fn cache_taint(&mut self) {}
+    /// Retained scrolling. A scroll container's content starts: `clip` is the device rect it
+    /// shows (in the coordinates the painter is in), `offset` its scroll in whole device
+    /// pixels. True when the target places the content itself: the painter then paints it
+    /// unscrolled (content coordinates) and the target moves everything by `-offset`, so a
+    /// frame that only scrolls finds the content it painted before, only moved. Closed by
+    /// `scroll_end`. Targets that move nothing answer false and get scrolled geometry.
+    fn scroll_begin(&mut self, _key: u64, _clip: Rect, _offset: Vec2) -> bool {
+        false
+    }
+    /// Ends the content `scroll_begin` started (and answered true for).
+    fn scroll_end(&mut self) {}
     /// An inset shadow without blur: `area` minus the rounded `hole`, an even-odd ring.
     fn sharp_inset_shadow(
         &mut self,
@@ -390,6 +401,8 @@ pub(crate) trait PaintTarget {
 pub(crate) struct TransformTarget<'a, P: PaintTarget> {
     inner: &'a mut P,
     stack: Vec<Affine>,
+    /// Open scroll containers: whether the inner target took each one.
+    scrolls: Vec<bool>,
 }
 
 impl<'a, P: PaintTarget> TransformTarget<'a, P> {
@@ -397,6 +410,7 @@ impl<'a, P: PaintTarget> TransformTarget<'a, P> {
         Self {
             inner,
             stack: Vec::new(),
+            scrolls: Vec::new(),
         }
     }
 
@@ -478,6 +492,20 @@ impl<P: PaintTarget> PaintTarget for TransformTarget<'_, P> {
 
     fn cache_taint(&mut self) {
         self.inner.cache_taint();
+    }
+
+    fn scroll_begin(&mut self, key: u64, clip: Rect, offset: Vec2) -> bool {
+        // Under a transform the clip is not a device rect: the content paints scrolled.
+        let taken = self.map(Affine::IDENTITY) == Affine::IDENTITY
+            && self.inner.scroll_begin(key, clip, offset);
+        self.scrolls.push(taken);
+        taken
+    }
+
+    fn scroll_end(&mut self) {
+        if self.scrolls.pop() == Some(true) {
+            self.inner.scroll_end();
+        }
     }
 
     fn box_shadow(

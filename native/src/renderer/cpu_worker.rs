@@ -18,10 +18,11 @@ pub(super) struct CpuRaster {
     pub(super) threads: u16,
 }
 
-/// One frame to rasterize: the region of `list` that changed.
+/// One frame to rasterize: scrolled pixels to move, then the regions of `list` that changed.
 pub(super) struct CpuJob {
     pub(super) list: Arc<DisplayList>,
-    pub(super) region: vello::kurbo::Rect,
+    pub(super) regions: Vec<vello::kurbo::Rect>,
+    pub(super) blits: Vec<ScrollBlit>,
     pub(super) size: (u16, u16),
     pub(super) background: vello::peniko::Color,
     pub(super) alpha: bool,
@@ -32,12 +33,14 @@ impl CpuRaster {
     fn draw(&mut self, job: &CpuJob) -> Result<vello::kurbo::Rect, String> {
         let (width, height) = (usize::from(job.size.0), usize::from(job.size.1));
         let full = vello::kurbo::Rect::new(0.0, 0.0, width as f64, height as f64);
-        let mut region = job.region;
+        let mut regions = job.regions.clone();
+        let mut blits = job.blits.as_slice();
         if self.size != job.size || self.pixels.len() != width * height {
             self.pixels.clear();
             self.pixels.resize(width * height, 0);
             self.size = job.size;
-            region = full;
+            regions = vec![full];
+            blits = &[];
             // A window resized across the helper threshold rasterizes with its new count.
             let settings = cpu_render_settings(width * height);
             if settings.num_threads != self.threads {
@@ -45,23 +48,35 @@ impl CpuRaster {
                 self.context = CpuRenderContext::new_with(job.size.0, job.size.1, settings);
             }
         }
-        rasterize_cpu_region(
-            &mut self.context,
-            &mut self.resources,
-            &job.list,
-            CpuFrame {
-                pixels: &mut self.pixels,
-                width,
-                height,
-                alpha: job.alpha,
-            },
-            &mut self.scratch,
-            Some(&mut self.shadows),
-            region,
-            job.background,
-            Some(job.scale),
-            Some(&mut self.masks),
-        );
+        for blit in blits {
+            blit.apply(&mut self.pixels, width, height);
+        }
+        for region in &regions {
+            rasterize_cpu_region(
+                &mut self.context,
+                &mut self.resources,
+                &job.list,
+                CpuFrame {
+                    pixels: &mut self.pixels,
+                    width,
+                    height,
+                    alpha: job.alpha,
+                },
+                &mut self.scratch,
+                Some(&mut self.shadows),
+                *region,
+                job.background,
+                Some(job.scale),
+                Some(&mut self.masks),
+            );
+        }
+        // What changed on screen: the regions drawn and the pixels moved.
+        let region = regions
+            .iter()
+            .copied()
+            .chain(blits.iter().map(|blit| blit.rect))
+            .reduce(|all, rect| all.union(rect))
+            .unwrap_or(vello::kurbo::Rect::ZERO);
         if region != full && cpu_damage_check() {
             check_partial_redraw(
                 &mut self.context,

@@ -210,6 +210,23 @@ jobs:
           TARVE_RELEASE_TAG: ${{ github.ref_name }}
         run: bun run release:build
 
+      # Prebuilt example app (Bun runtime), so trying it needs no toolchain. `tarve build`
+      # from the checkout embeds the runtimes staged above (native/win32-x64, native/linux-x64).
+      - name: Build example executables
+        shell: pwsh
+        env:
+          TARVE_NATIVE_FEATURES: all
+        run: |
+          bun run setup:examples
+          if ($LASTEXITCODE -ne 0) { throw "setup:examples failed." }
+          Push-Location examples
+          try {
+            bun ../packages/core/cli.ts build youtube-music/youtube-music.tsx --runtime bun --outfile ../dist/YouTubeMusic-windows-x64.exe
+            if ($LASTEXITCODE -ne 0) { throw "YouTube Music Windows build failed." }
+            bun ../packages/core/cli.ts build youtube-music/youtube-music.tsx --runtime bun --target linux-x64 --outfile ../dist/YouTubeMusic-linux-x64
+            if ($LASTEXITCODE -ne 0) { throw "YouTube Music Linux build failed." }
+          } finally { Pop-Location }
+
       - name: Upload release artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -256,6 +273,8 @@ jobs:
             "native/linux-x64/libtarve_native.so",
             "dist/libtarve_native-android-arm64-v8a.so",
             "dist/libtarve_native-android-x86_64.so",
+            "dist/YouTubeMusic-windows-x64.exe",
+            "dist/YouTubeMusic-linux-x64",
             "--verify-tag",
             "--generate-notes",
             "--title", "Tarve $env:GITHUB_REF_NAME"

@@ -1,7 +1,9 @@
 #[cfg(target_os = "windows")]
 use crate::d3d11::{D3d11Error, D3d11Graphics, D3d11PaintTarget};
 use crate::{
-    cpu_display::{CpuRecorder, DisplayList, ShadowCache, damage},
+    cpu_display::{
+        CpuRecorder, DisplayList, ScrollBlit, ShadowCache, damage, merge_regions, scroll_damage,
+    },
     paint::CpuCachedImage,
     protocol::RendererPreference,
 };
@@ -29,6 +31,8 @@ mod gpu_report;
 mod pipeline_cache;
 mod pixels;
 mod resolution;
+#[cfg(test)]
+mod scroll_tests;
 use cpu_raster::{
     CpuFrame, check_partial_redraw, cpu_damage_check, cpu_redraw_region, rasterize_cpu_region,
 };
@@ -708,6 +712,8 @@ struct CpuGraphics {
     /// The recorded frame, and the region that differs from what the raster thread drew.
     list: Option<Arc<DisplayList>>,
     damage: CpuDamage,
+    /// Scrolled containers' pixels to move in the retained frame before `damage` is drawn.
+    blits: Vec<ScrollBlit>,
     /// What the retained frame was drawn for.
     frame_background: Option<[u8; 4]>,
     frame_size: (u16, u16),
@@ -722,10 +728,10 @@ struct CpuGraphics {
 }
 
 /// What of the retained frame must be rasterized again.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum CpuDamage {
     None,
-    Region(vello::kurbo::Rect),
+    Regions(Vec<vello::kurbo::Rect>),
     Full,
 }
 
@@ -734,7 +740,10 @@ impl CpuDamage {
         match (self, other) {
             (CpuDamage::Full, _) | (_, CpuDamage::Full) => CpuDamage::Full,
             (CpuDamage::None, other) | (other, CpuDamage::None) => other,
-            (CpuDamage::Region(a), CpuDamage::Region(b)) => CpuDamage::Region(a.union(b)),
+            (CpuDamage::Regions(mut a), CpuDamage::Regions(b)) => {
+                a.extend(b);
+                CpuDamage::Regions(a)
+            }
         }
     }
 }
@@ -777,6 +786,7 @@ impl CpuGraphics {
             prepared: false,
             list: None,
             damage: CpuDamage::Full,
+            blits: Vec::new(),
             frame_background: None,
             frame_size: (0, 0),
             unshown: None,
@@ -804,12 +814,30 @@ impl CpuGraphics {
             recorder.finish()
         };
         let changed = match &self.list {
-            Some(previous) if !resized => {
-                damage(previous, &list).map_or(CpuDamage::None, CpuDamage::Region)
-            }
+            Some(previous) if !resized => match scroll_damage(previous, &list) {
+                // Scrolled containers move the pixels drawn before; what an earlier prepare
+                // left to draw there moves along.
+                Some((blits, regions)) if self.damage != CpuDamage::Full => {
+                    if let CpuDamage::Regions(pending) = &mut self.damage {
+                        for blit in &blits {
+                            let carried: Vec<_> =
+                                pending.iter().filter_map(|rect| blit.carry(*rect)).collect();
+                            pending.extend(carried);
+                        }
+                    }
+                    self.blits.extend(blits);
+                    CpuDamage::Regions(regions)
+                }
+                Some(_) => CpuDamage::Full,
+                None => damage(previous, &list)
+                    .map_or(CpuDamage::None, |rect| CpuDamage::Regions(vec![rect])),
+            },
             _ => CpuDamage::Full,
         };
-        self.damage = self.damage.add(changed);
+        self.damage = std::mem::replace(&mut self.damage, CpuDamage::None).add(changed);
+        if self.damage == CpuDamage::Full {
+            self.blits.clear();
+        }
         self.list = Some(Arc::new(list));
         self.prepared = true;
         Ok(())
@@ -823,6 +851,7 @@ impl CpuGraphics {
         self.height = height;
         self.prepared = false;
         self.damage = CpuDamage::Full;
+        self.blits.clear();
         true
     }
 
@@ -908,28 +937,37 @@ impl CpuGraphics {
         let background_bytes = background.to_rgba8().to_u8_array();
         let full = vello::kurbo::Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
         self.settle()?;
-        let mut damage = self.damage;
-        if self.frame_background != Some(background_bytes) || self.frame_size != (width, height) {
+        let mut damage = std::mem::replace(&mut self.damage, CpuDamage::None);
+        let mut blits = std::mem::take(&mut self.blits);
+        // Glass reads what lies under it: a frame with glass is drawn whole.
+        if self.frame_background != Some(background_bytes)
+            || self.frame_size != (width, height)
+            || self.list.as_ref().is_some_and(|list| list.has_glass())
+        {
             damage = CpuDamage::Full;
         }
-        let region = match damage {
-            CpuDamage::None => None,
-            CpuDamage::Full => Some(full),
-            CpuDamage::Region(rect) => Some(cpu_redraw_region(rect, self.width, self.height)),
+        let mut regions = match damage {
+            CpuDamage::None => Vec::new(),
+            CpuDamage::Full => vec![full],
+            CpuDamage::Regions(rects) => merge_regions(rects)
+                .into_iter()
+                .map(|rect| cpu_redraw_region(rect, self.width, self.height))
+                .collect(),
         };
-        // Glass reads what lies under it: a frame with glass is drawn whole.
-        let region = region.map(|region| {
-            if self.list.as_ref().is_some_and(|list| list.has_glass()) {
-                full
-            } else {
-                region
-            }
-        });
+        // Several passes over most of the frame cost more than one over all of it.
+        let area: f64 = regions.iter().map(|rect| rect.area()).sum();
+        if regions.contains(&full) || area >= full.area() * 0.6 {
+            regions = vec![full];
+        }
+        if regions == [full] {
+            blits.clear();
+        }
         let showed = self.show(false)?;
-        let job = match (region, &self.list) {
-            (Some(region), Some(list)) => Some(cpu_worker::CpuJob {
+        let job = match &self.list {
+            Some(list) if !regions.is_empty() || !blits.is_empty() => Some(cpu_worker::CpuJob {
                 list: list.clone(),
-                region,
+                regions,
+                blits,
                 size: (width, height),
                 background,
                 alpha: self.alpha,
@@ -939,7 +977,6 @@ impl CpuGraphics {
         };
         self.frame_background = Some(background_bytes);
         self.frame_size = (width, height);
-        self.damage = CpuDamage::None;
         let Some(job) = job else {
             if showed {
                 return Ok(PresentResult::Shown);
@@ -1004,6 +1041,7 @@ impl CpuGraphics {
         }
         // The next presented frame cannot reuse the rasterizer's state.
         self.damage = CpuDamage::Full;
+        self.blits.clear();
         flatten_rgba_bytes(&mut pixels, background);
         image::save_buffer(
             path,

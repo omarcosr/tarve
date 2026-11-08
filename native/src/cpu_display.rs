@@ -9,7 +9,7 @@ use std::{
 };
 
 use vello::{
-    kurbo::{Affine, BezPath, PathEl, Rect, Shape, Stroke},
+    kurbo::{Affine, BezPath, PathEl, Rect, Shape, Stroke, Vec2},
     peniko::{Color, Fill, FontData, Gradient, ImageData},
 };
 use vello_cpu::{
@@ -19,7 +19,9 @@ use vello_cpu::{
 use crate::glass::{GlassCall, GlassPlan};
 mod glyph_blit;
 mod replay;
+mod scroll;
 pub(crate) use glyph_blit::{GlyphBlits, GlyphMasks};
+pub(crate) use scroll::{ScrollBlit, merge_regions, scroll_damage};
 
 use crate::paint::{
     CpuCachedImage, GlassParams, PaintGlyph, PaintGradient, PaintTarget, cached_cpu_pixmap,
@@ -143,6 +145,9 @@ enum Op {
 struct Recorded {
     op: Op,
     hash: u64,
+    /// `hash` without the scroll of the outermost scroll container the op is in (see
+    /// `ScrollGroup`): equal for content that only scrolled. `hash` elsewhere.
+    content: u64,
     /// Device pixels the op can change. For a layer: its shape and everything inside it.
     bounds: Rect,
 }
@@ -156,6 +161,28 @@ pub(crate) struct DisplayList {
     /// The frame's glass boxes in paint order, and the op of the first one.
     glass: Vec<GlassCall>,
     first_glass: usize,
+    /// The outermost scroll containers' content, in paint order.
+    scroll_groups: Vec<ScrollGroup>,
+}
+
+/// A scroll container's content (`PaintTarget::scroll_begin`): its ops are recorded where
+/// they show, and their `content` hashes as if unscrolled.
+#[derive(Clone, Debug)]
+struct ScrollGroup {
+    key: u64,
+    /// Device rect the content shows in.
+    clip: Rect,
+    /// Its scroll, in whole device pixels.
+    offset: Vec2,
+    ops: std::ops::Range<usize>,
+}
+
+/// A scroll container open while recording.
+struct OpenScroll {
+    key: u64,
+    clip: Rect,
+    offset: Vec2,
+    start: usize,
 }
 
 impl DisplayList {
@@ -165,8 +192,10 @@ impl DisplayList {
     }
 }
 
-/// Recorded spans by key. Keys are hashes already: they index the table as they are.
-type SpanMap = HashMap<u64, std::ops::Range<usize>, std::hash::BuildHasherDefault<KeyHasher>>;
+/// Recorded spans by key, with the scroll their ops were moved by (they are reused only
+/// where it is the same). Keys are hashes already: they index the table as they are.
+type SpanMap =
+    HashMap<u64, (std::ops::Range<usize>, Vec2), std::hash::BuildHasherDefault<KeyHasher>>;
 
 #[derive(Default)]
 struct KeyHasher(u64);
@@ -273,6 +302,9 @@ pub(crate) struct CpuRecorder<'a> {
     glass: Vec<GlassCall>,
     /// Opacity of the open layers (a fading merged glass shape shrinks away).
     opacity: Vec<f32>,
+    /// Scroll containers open, outermost first, and the outermost ones recorded.
+    scrolls: Vec<OpenScroll>,
+    scroll_groups: Vec<ScrollGroup>,
 }
 
 impl<'a> CpuRecorder<'a> {
@@ -298,13 +330,45 @@ impl<'a> CpuRecorder<'a> {
             used_images: HashSet::new(),
             glass: Vec::new(),
             opacity: Vec::new(),
+            scrolls: Vec::new(),
+            scroll_groups: Vec::new(),
         }
     }
 
+    /// The scroll the open scroll containers move their content by.
+    fn scrolled(&self) -> Vec2 {
+        self.scrolls
+            .iter()
+            .fold(Vec2::ZERO, |all, scroll| all + scroll.offset)
+    }
+
+    /// `transform` as recorded (moved by the open scroll containers) and as hashed (moved
+    /// by all but the outermost one, whose scroll `push` mixes into `hash` only).
+    fn mapped(&self, transform: Affine) -> (Affine, Affine) {
+        let Some(outer) = self.scrolls.first() else {
+            return (transform, transform);
+        };
+        let all = self.scrolled();
+        (
+            Affine::translate(-all) * transform,
+            Affine::translate(-(all - outer.offset)) * transform,
+        )
+    }
+
     fn push(&mut self, op: Op, hasher: DefaultHasher, bounds: Rect) {
+        let content = hasher.finish();
+        let hash = match self.scrolls.first() {
+            Some(outer) => {
+                let mut hasher = DefaultHasher::new();
+                (content, outer.offset.x.to_bits(), outer.offset.y.to_bits()).hash(&mut hasher);
+                hasher.finish()
+            }
+            None => content,
+        };
         self.ops.push(Arc::new(Recorded {
             op,
-            hash: hasher.finish(),
+            hash,
+            content,
             bounds,
         }));
     }
@@ -313,6 +377,9 @@ impl<'a> CpuRecorder<'a> {
         // A layer left open by the painter still closes at the end of the frame.
         while !self.open.is_empty() {
             self.pop_layer();
+        }
+        while !self.scrolls.is_empty() {
+            self.scroll_end();
         }
         self.images.retain(|key, _| self.used_images.contains(key));
         let first_glass = self
@@ -325,6 +392,7 @@ impl<'a> CpuRecorder<'a> {
             spans: self.spans,
             glass: self.glass,
             first_glass,
+            scroll_groups: self.scroll_groups,
         }
     }
 
@@ -342,10 +410,11 @@ impl<'a> CpuRecorder<'a> {
 
 impl PaintTarget for CpuRecorder<'_> {
     fn fill<S: Shape>(&mut self, fill: Fill, transform: Affine, color: Color, shape: &S) {
+        let (transform, hashed) = self.mapped(transform);
         let path = FillShape::of(shape);
         let mut hasher = DefaultHasher::new();
         (0u8, fill as u8).hash(&mut hasher);
-        hash_affine(&mut hasher, transform);
+        hash_affine(&mut hasher, hashed);
         hash_color(&mut hasher, color);
         path.hash(&mut hasher);
         let bounds = device(transform, shape.bounding_box());
@@ -362,11 +431,12 @@ impl PaintTarget for CpuRecorder<'_> {
     }
 
     fn fill_gradient<S: Shape>(&mut self, transform: Affine, gradient: &PaintGradient, shape: &S) {
+        let (transform, hashed) = self.mapped(transform);
         let path = FillShape::of(shape);
         let (brush, brush_transform) = gradient.brush();
         let mut hasher = DefaultHasher::new();
         1u8.hash(&mut hasher);
-        hash_affine(&mut hasher, transform);
+        hash_affine(&mut hasher, hashed);
         format!("{gradient:?}").hash(&mut hasher);
         path.hash(&mut hasher);
         let bounds = device(transform, shape.bounding_box());
@@ -383,10 +453,11 @@ impl PaintTarget for CpuRecorder<'_> {
     }
 
     fn stroke<S: Shape>(&mut self, stroke: &Stroke, transform: Affine, color: Color, shape: &S) {
+        let (transform, hashed) = self.mapped(transform);
         let path = shape.to_path(0.1);
         let mut hasher = DefaultHasher::new();
         2u8.hash(&mut hasher);
-        hash_affine(&mut hasher, transform);
+        hash_affine(&mut hasher, hashed);
         hash_color(&mut hasher, color);
         format!("{stroke:?}").hash(&mut hasher);
         hash_path(&mut hasher, &path);
@@ -406,10 +477,11 @@ impl PaintTarget for CpuRecorder<'_> {
     }
 
     fn push_clip<S: Shape>(&mut self, fill: Fill, transform: Affine, shape: &S) {
+        let (transform, hashed) = self.mapped(transform);
         let path = shape.to_path(0.1);
         let mut hasher = DefaultHasher::new();
         (3u8, fill as u8).hash(&mut hasher);
-        hash_affine(&mut hasher, transform);
+        hash_affine(&mut hasher, hashed);
         hash_path(&mut hasher, &path);
         let bounds = device(transform, shape.bounding_box());
         self.push_layer(
@@ -425,12 +497,13 @@ impl PaintTarget for CpuRecorder<'_> {
     }
 
     fn push_opacity<S: Shape>(&mut self, alpha: f32, transform: Affine, shape: &S) {
+        let (transform, hashed) = self.mapped(transform);
         let path = shape.to_path(0.1);
         let alpha = alpha.clamp(0.0, 1.0);
         let mut hasher = DefaultHasher::new();
         4u8.hash(&mut hasher);
         alpha.to_bits().hash(&mut hasher);
-        hash_affine(&mut hasher, transform);
+        hash_affine(&mut hasher, hashed);
         hash_path(&mut hasher, &path);
         let bounds = device(transform, shape.bounding_box());
         self.push_layer(
@@ -450,15 +523,16 @@ impl PaintTarget for CpuRecorder<'_> {
     }
 
     fn pop_mask(&mut self, transform: Affine, rect: Rect, mask: &PaintGradient) {
+        let (stored, hashed) = self.mapped(transform);
         let path = rect.to_path(0.1);
         let mut hasher = DefaultHasher::new();
         11u8.hash(&mut hasher);
-        hash_affine(&mut hasher, transform);
+        hash_affine(&mut hasher, hashed);
         hash_path(&mut hasher, &path);
-        let bounds = device(transform, rect);
+        let bounds = device(stored, rect);
         self.push_layer(
             Op::PushMask {
-                transform,
+                transform: stored,
                 path,
                 close: 0,
             },
@@ -503,9 +577,10 @@ impl PaintTarget for CpuRecorder<'_> {
         std_dev: f64,
         invert: bool,
     ) {
+        let (transform, hashed) = self.mapped(transform);
         let mut hasher = DefaultHasher::new();
         6u8.hash(&mut hasher);
-        hash_affine(&mut hasher, transform);
+        hash_affine(&mut hasher, hashed);
         hash_rect(&mut hasher, area);
         hash_rect(&mut hasher, rect);
         hash_color(&mut hasher, color);
@@ -527,13 +602,28 @@ impl PaintTarget for CpuRecorder<'_> {
     }
 
     fn cache_begin(&mut self, key: u64, reuse: bool) -> bool {
+        let scrolled = self.scrolled();
+        // Recorded ops sit where they showed: only a span moved by the same scroll fits.
         if reuse
             && let Some(previous) = self.previous
-            && let Some(span) = previous.spans.get(&key)
+            && let Some((span, offset)) = previous.spans.get(&key)
+            && *offset == scrolled
         {
             let start = self.ops.len();
             self.ops.extend(previous.ops[span.clone()].iter().cloned());
-            self.spans.insert(key, start..self.ops.len());
+            // Scroll containers inside the span come along (they are outermost only outside
+            // any open one), so the next frame still finds their content.
+            if self.scrolls.is_empty() {
+                for group in &previous.scroll_groups {
+                    if group.ops.start >= span.start && group.ops.end <= span.end {
+                        let mut group = group.clone();
+                        group.ops = group.ops.start - span.start + start
+                            ..group.ops.end - span.start + start;
+                        self.scroll_groups.push(group);
+                    }
+                }
+            }
+            self.spans.insert(key, (start..self.ops.len(), scrolled));
             return true;
         }
         self.recording.push((key, self.ops.len()));
@@ -547,7 +637,35 @@ impl PaintTarget for CpuRecorder<'_> {
         // Only a span whose layers close inside it, with nothing that cannot be reused.
         let balanced = self.open.last().is_none_or(|open| *open < start);
         if balanced && self.tainted <= start {
-            self.spans.insert(key, start..self.ops.len());
+            let scrolled = self.scrolled();
+            self.spans.insert(key, (start..self.ops.len(), scrolled));
+        }
+    }
+
+    fn scroll_begin(&mut self, key: u64, clip: Rect, offset: Vec2) -> bool {
+        // `clip` is in the coordinates of the content around it: where it shows is moved by
+        // the scroll containers already open.
+        let clip = clip - self.scrolled();
+        self.scrolls.push(OpenScroll {
+            key,
+            clip,
+            offset,
+            start: self.ops.len(),
+        });
+        true
+    }
+
+    fn scroll_end(&mut self) {
+        let Some(scroll) = self.scrolls.pop() else {
+            return;
+        };
+        if self.scrolls.is_empty() {
+            self.scroll_groups.push(ScrollGroup {
+                key: scroll.key,
+                clip: scroll.clip,
+                offset: scroll.offset,
+                ops: scroll.start..self.ops.len(),
+            });
         }
     }
 
@@ -556,6 +674,7 @@ impl PaintTarget for CpuRecorder<'_> {
     }
 
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine) {
+        let (transform, hashed) = self.mapped(transform);
         self.cache_taint();
         let Some(pixmap) = cached_cpu_pixmap(self.images, &mut self.used_images, key, image) else {
             return;
@@ -564,7 +683,7 @@ impl PaintTarget for CpuRecorder<'_> {
         7u8.hash(&mut hasher);
         key.hash(&mut hasher);
         (image.data.id(), image.width, image.height).hash(&mut hasher);
-        hash_affine(&mut hasher, transform);
+        hash_affine(&mut hasher, hashed);
         let bounds = device(
             transform,
             Rect::new(0.0, 0.0, f64::from(image.width), f64::from(image.height)),
@@ -589,6 +708,7 @@ impl PaintTarget for CpuRecorder<'_> {
         tint: Color,
         glass: &GlassParams,
     ) {
+        let (transform, _) = self.mapped(transform);
         self.cache_taint();
         let opacity = self.opacity.last().copied().unwrap_or(1.0);
         let Some(call) = GlassCall::new(transform, rect, radius, tint, glass, opacity) else {
@@ -611,6 +731,7 @@ impl PaintTarget for CpuRecorder<'_> {
         color: Color,
         glyphs: &[PaintGlyph],
     ) {
+        let (transform, hashed) = self.mapped(transform);
         if glyphs.is_empty() {
             return;
         }
@@ -618,7 +739,7 @@ impl PaintTarget for CpuRecorder<'_> {
         8u8.hash(&mut hasher);
         (font.data.id(), font.index, font_size.to_bits()).hash(&mut hasher);
         normalized_coords.hash(&mut hasher);
-        hash_affine(&mut hasher, transform);
+        hash_affine(&mut hasher, hashed);
         hash_color(&mut hasher, color);
         let (mut x0, mut y0, mut x1, mut y1) = (
             f64::INFINITY,
@@ -782,36 +903,12 @@ impl ShadowCache {
 /// disappears or changes damages where it was and where it is, and one that
 /// changes stacking order damages where it is.
 pub(crate) fn damage(previous: &DisplayList, next: &DisplayList) -> Option<Rect> {
-    let mut available: HashMap<u64, VecDeque<usize>> = HashMap::new();
-    for (index, op) in previous.ops.iter().enumerate() {
-        available.entry(op.hash).or_default().push_back(index);
-    }
-    let mut matched = vec![false; previous.ops.len()];
-    let mut region: Option<Rect> = None;
-    let mut add = |rect: Rect| {
-        if rect.area() > 0.0 {
-            region = Some(region.map_or(rect, |all| all.union(rect)));
-        }
-    };
-    let mut last = None;
-    for op in &next.ops {
-        match available.get_mut(&op.hash).and_then(VecDeque::pop_front) {
-            Some(index) => {
-                matched[index] = true;
-                if last.is_some_and(|last| index < last) {
-                    add(op.bounds);
-                    add(previous.ops[index].bounds);
-                }
-                last = Some(last.map_or(index, |last: usize| last.max(index)));
-            }
-            None => add(op.bounds),
-        }
-    }
-    for (index, op) in previous.ops.iter().enumerate() {
-        if !matched[index] {
-            add(op.bounds);
-        }
-    }
+    let mut rects = Vec::new();
+    damage_into(previous, next, |_| true, |_| true, &mut rects);
+    let mut region = rects
+        .into_iter()
+        .filter(|rect| rect.area() > 0.0)
+        .reduce(|all, rect| all.union(rect));
     // A glass box shows what changed under or around it.
     if let Some(changed) = region {
         for op in &next.ops {
@@ -821,4 +918,43 @@ pub(crate) fn damage(previous: &DisplayList, next: &DisplayList) -> Option<Rect>
         }
     }
     region
+}
+
+/// `damage` over the ops each frame keeps, as a list of the rects that differ.
+fn damage_into(
+    previous: &DisplayList,
+    next: &DisplayList,
+    keep_previous: impl Fn(usize) -> bool,
+    keep_next: impl Fn(usize) -> bool,
+    out: &mut Vec<Rect>,
+) {
+    let mut available: HashMap<u64, VecDeque<usize>> = HashMap::new();
+    for (index, op) in previous.ops.iter().enumerate() {
+        if keep_previous(index) {
+            available.entry(op.hash).or_default().push_back(index);
+        }
+    }
+    let mut matched = vec![false; previous.ops.len()];
+    let mut last = None;
+    for (index, op) in next.ops.iter().enumerate() {
+        if !keep_next(index) {
+            continue;
+        }
+        match available.get_mut(&op.hash).and_then(VecDeque::pop_front) {
+            Some(found) => {
+                matched[found] = true;
+                if last.is_some_and(|last| found < last) {
+                    out.push(op.bounds);
+                    out.push(previous.ops[found].bounds);
+                }
+                last = Some(last.map_or(found, |last: usize| last.max(found)));
+            }
+            None => out.push(op.bounds),
+        }
+    }
+    for (index, op) in previous.ops.iter().enumerate() {
+        if keep_previous(index) && !matched[index] {
+            out.push(op.bounds);
+        }
+    }
 }

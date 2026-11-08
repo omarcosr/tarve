@@ -3008,6 +3008,12 @@ impl App {
         if x < 0.0 || y < 0.0 || x > size.width || y > size.height {
             return None;
         }
+        // A scroll container flush with the window edge puts its scrollbar under the resize
+        // border: the scrollbar wins (or a press would start the OS resize loop and swallow
+        // the thumb drag). The corners past the track's ends still resize.
+        if self.tree.pointer_on_scrollbar() {
+            return None;
+        }
         let edge = 6.0;
         let left = x <= edge;
         let right = x >= size.width - edge;

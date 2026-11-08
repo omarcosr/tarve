@@ -72,6 +72,32 @@ if (!requestedRenderer) {
       );
     }
     console.log(`steady-frame ${label}: ${steady.frames - warm.frames} frames, glyph rasterizations ${warm.glyphRasterizations ?? "n/a"} → ${steady.glyphRasterizations ?? "n/a"}`);
+    // Dragging the scrollbar lands on fractional offsets: text already seen must not be
+    // rasterized again at each quarter-pixel baseline (that cost ~35 ms frames while dragging).
+    const list = steady.nodes.find((node: any) => node.id === "list");
+    assert.ok(list, `${label}: the list node is missing from the snapshot`);
+    app.debug({ type: "input", action: "move", x: list.x + list.width - 5, y: list.y + 12 });
+    await Bun.sleep(30);
+    app.debug({ type: "input", action: "down" });
+    await Bun.sleep(30);
+    for (let step = 1; step <= 40; step++) {
+      app.debug({ type: "input", action: "move", x: list.x + list.width - 5, y: list.y + 12 + step * 1.5 });
+      await Bun.sleep(8);
+    }
+    app.debug({ type: "input", action: "up" });
+    await Bun.sleep(150);
+    const dragged = await app.inspect();
+    const draggedOffset = offset(dragged);
+    assert.ok(draggedOffset > 0 && draggedOffset < offset(steady), `${label}: the scrollbar drag did not move the list (${offset(steady)} → ${draggedOffset})`);
+    assert.ok(dragged.frames - steady.frames >= 10, `${label}: the scrollbar drag presented only ${dragged.frames - steady.frames} frames`);
+    if (typeof steady.glyphRasterizations === "number") {
+      assert.equal(
+        dragged.glyphRasterizations,
+        steady.glyphRasterizations,
+        `${label}: dragging the scrollbar over seen text rasterized ${dragged.glyphRasterizations - steady.glyphRasterizations} glyphs over ${dragged.frames - steady.frames} frames`,
+      );
+    }
+    console.log(`steady-frame ${label}: scrollbar drag ${dragged.frames - steady.frames} frames, offset ${offset(steady)} → ${draggedOffset}, glyph rasterizations ${steady.glyphRasterizations ?? "n/a"} → ${dragged.glyphRasterizations ?? "n/a"}`);
   } finally {
     app.close();
   }

@@ -4830,7 +4830,11 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         for glyph in glyphs {
             let baseline = transform * Point::new(f64::from(glyph.x), f64::from(glyph.y));
             let (base_x, subpixel_x) = quantize_glyph_position(baseline.x as f32);
-            let (base_y, subpixel_y) = quantize_glyph_position(baseline.y as f32);
+            // Horizontal text sits on whole pixels vertically, as the CPU blit and Skia
+            // place it: a fractional scroll offset then reuses every glyph it has, instead
+            // of rasterizing the visible text again at each quarter-pixel baseline.
+            let base_y = (baseline.y as f32).round();
+            let subpixel_y = 0u8;
             let cleartype_entry = if cleartype {
                 self.graphics
                     .cleartype_entry(font, font_size, glyph.id, subpixel_x, subpixel_y, scale)

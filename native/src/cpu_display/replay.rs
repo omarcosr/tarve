@@ -445,6 +445,7 @@ mod tests {
                     glyphs,
                 },
                 hash: 0,
+                content: 0,
                 bounds: EVERYWHERE,
             })],
             ..Default::default()

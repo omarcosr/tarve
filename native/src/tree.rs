@@ -1717,6 +1717,8 @@ pub struct Tree {
     /// node being painted has.
     paint_holds_changed: HashSet<String>,
     paint_changed_depth: usize,
+    /// Scroll containers whose content is painting unscrolled (`PaintTarget::scroll_begin`).
+    paint_retained_scroll: usize,
     paint_reuse: bool,
     /// `paint_simple` for plain boxes and texts (TARVE_SIMPLE_PAINT=0 turns it off).
     pub(crate) simple_paint_enabled: bool,
@@ -2002,6 +2004,7 @@ impl Tree {
             paint_changed_most: false,
             paint_holds_changed: HashSet::default(),
             paint_changed_depth: 0,
+            paint_retained_scroll: 0,
             paint_reuse: false,
             simple_paint_enabled: std::env::var_os("TARVE_SIMPLE_PAINT")
                 .is_none_or(|value| value != "0"),
@@ -5387,7 +5390,15 @@ impl Tree {
         }
         let opacity_layer = opacity < 0.9999;
         if opacity_layer {
-            target.push_opacity(opacity, transform, &clip);
+            // The layer only bounds what fades. In unscrolled content the clip moves with every
+            // scroll step, which would make an unchanged fade look new: its box (and room for
+            // shadows) stays put instead.
+            let shape = if self.paint_retained_scroll > 0 {
+                bounds.inflate(256.0, 256.0)
+            } else {
+                clip
+            };
+            target.push_opacity(opacity, transform, &shape);
         }
         // CSS `mask-image`: a gradient whose alpha the box and its content keep.
         let mask = node
@@ -6122,17 +6133,40 @@ impl Tree {
         } else {
             clip
         };
+        let scrolled = Vec2::new(scroll_x, scroll) + overscroll;
+        // Retained scrolling (CPU renderer): the content paints unscrolled and the target
+        // moves it by the scroll, snapped to whole device pixels as browsers scroll, so a
+        // frame that only scrolls moves the pixels already drawn. A rounded clip would move
+        // its corners with them: those boxes paint scrolled geometry.
+        let device_scroll = Vec2::new((scrolled.x * scale).round(), (scrolled.y * scale).round());
+        let retained_scroll = node.kind == "scroll"
+            && clips_children
+            && inner_radii == (0.0, 0.0, 0.0, 0.0)
+            && target.scroll_begin(
+                scroll_paint_key(id),
+                BoxRect::new(
+                    child_clip.x0 * scale,
+                    child_clip.y0 * scale,
+                    child_clip.x1 * scale,
+                    child_clip.y1 * scale,
+                ),
+                device_scroll,
+            );
+        let (child_offset, child_clip) = if retained_scroll {
+            (offset, child_clip + device_scroll / scale)
+        } else {
+            (offset + scrolled, child_clip)
+        };
+        self.paint_retained_scroll += usize::from(retained_scroll);
         for child in &children {
             if self.entries[child].node.portal && !node.portal {
                 continue;
             }
-            self.paint_node(
-                child,
-                offset + Vec2::new(scroll_x, scroll) + overscroll,
-                scale,
-                child_clip,
-                target,
-            );
+            self.paint_node(child, child_offset, scale, child_clip, target);
+        }
+        self.paint_retained_scroll -= usize::from(retained_scroll);
+        if retained_scroll {
+            target.scroll_end();
         }
         if clip_layer {
             target.pop_layer();
@@ -10800,6 +10834,14 @@ pub(crate) fn parse_css_clip_path(value: &str) -> Option<(Fill, vello::kurbo::Be
 }
 
 /// `overflow: hidden | clip` (and scroll areas) clip their children.
+/// The key a scroll container's content is retained under from frame to frame.
+fn scroll_paint_key(id: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::hash::DefaultHasher::new();
+    ("scroll", id).hash(&mut hasher);
+    hasher.finish()
+}
+
 pub(crate) fn clips_overflow(node: &Node) -> bool {
     node.kind == "scroll" || matches!(node.string("overflow", "visible"), "hidden" | "clip")
 }
