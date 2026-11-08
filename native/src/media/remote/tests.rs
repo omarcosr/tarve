@@ -93,7 +93,9 @@ fn a_newer_seek_cuts_a_read_waiting_for_the_old_target() {
         let result = byte_at(&mut reader, 35);
         (result.is_err(), started.elapsed(), reader)
     });
-    std::thread::sleep(Duration::from_millis(300));
+    // Well inside the ~320 ms chunk 35 takes to arrive (8 pieces of 32 KB, 40 ms apart): at
+    // 300 ms a fast loopback (Linux) delivered it first and the read never waited.
+    std::thread::sleep(Duration::from_millis(100));
     assert!(!stream.cut(), "nothing cut before the seek");
     stream.interrupt();
     let (failed, after, mut old) = old.join().unwrap();

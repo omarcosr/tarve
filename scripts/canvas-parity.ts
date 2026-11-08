@@ -169,7 +169,8 @@ async function check(): Promise<number> {
     // Only anti-aliased edge pixels may differ.
     const ratio = different / (W * H);
     // The ink's centre of mass must agree within half a pixel, whatever the edges do.
-    const maxDrift = 0.5 + (snapsBaseline.has(name) && !Number.isInteger(scale) ? 1 / scale : 0);
+    // At 1x the snap can still land half a device pixel off Chromium's unhinted baseline.
+    const maxDrift = 0.5 + (snapsBaseline.has(name) ? (Number.isInteger(scale) ? 0.5 : 1 / scale) : 0);
     const bad = ratio > (tolerance[name] ?? 0.005) || drift > maxDrift;
     if (bad) failures++;
     console.log(`${bad ? "FAIL" : "ok  "} ${name}: ${(ratio * 100).toFixed(2)}% of pixels differ (max channel delta ${worst}), ink centre ${drift.toFixed(2)}px apart`);
