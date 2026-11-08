@@ -83,11 +83,21 @@ impl ScrollBlit {
 
 /// The whole pixels `rect` covers entirely, and those it touches.
 fn inner_pixels(rect: Rect) -> Rect {
-    Rect::new(rect.x0.ceil(), rect.y0.ceil(), rect.x1.floor(), rect.y1.floor())
+    Rect::new(
+        rect.x0.ceil(),
+        rect.y0.ceil(),
+        rect.x1.floor(),
+        rect.y1.floor(),
+    )
 }
 
 fn outer_pixels(rect: Rect) -> Rect {
-    Rect::new(rect.x0.floor(), rect.y0.floor(), rect.x1.ceil(), rect.y1.ceil())
+    Rect::new(
+        rect.x0.floor(),
+        rect.y0.floor(),
+        rect.x1.ceil(),
+        rect.y1.ceil(),
+    )
 }
 
 fn overlaps(a: Rect, b: Rect) -> bool {
@@ -197,77 +207,86 @@ fn movable(list: &DisplayList, group: &ScrollGroup, rect: Rect) -> bool {
             continue;
         }
         // A layer that clips everything it holds away from the rect draws nothing there.
-        if let Op::PushClip { transform, path, close, .. }
-        | Op::PushOpacity { transform, path, close, .. } = &recorded.op
+        if let Op::PushClip {
+            transform,
+            path,
+            close,
+            ..
+        }
+        | Op::PushOpacity {
+            transform,
+            path,
+            close,
+            ..
+        } = &recorded.op
             && index + close < group.ops.end
             && !overlaps((*transform * path.clone()).bounding_box(), rect)
         {
             index += close + 1;
             continue;
         }
-            let ok = match &recorded.op {
-                Op::Pop => true,
-                // A clip, or a uniform fade, over the whole rect: what it holds is checked op
-                // by op after it.
-                Op::PushClip {
-                    transform, path, ..
-                }
-                | Op::PushOpacity {
-                    transform, path, ..
-                } => contains(covered_box(*transform, path), rect),
-                // A border around the content (a frameless window's edge) inks only along
-                // its path: nothing inside, farther than the line reaches.
-                Op::Stroke {
-                    stroke,
-                    transform,
-                    path,
-                    ..
-                } => {
-                    let coeffs = transform.as_coeffs();
-                    let scale = (coeffs[0] * coeffs[3] - coeffs[1] * coeffs[2]).abs().sqrt();
-                    // Joins of a path along its box spike outward only: inward a line reaches
-                    // half its width, and pixels it does not cover get no coverage.
-                    let reach = stroke.width / 2.0 * scale;
-                    let inside = covered_box(*transform, path).inflate(-reach, -reach);
-                    box_like(*transform, path)
-                        && inside.width() > 0.0
-                        && inside.height() > 0.0
-                        && contains(inside, rect)
-                }
-                Op::Fill {
-                    transform,
-                    paint: Paint::Solid(_),
-                    path,
-                    ..
-                } => {
-                    let exact = match path {
-                        FillShape::Rect(local) => transform.transform_rect_bbox(*local),
-                        FillShape::RoundedRect(rounded) => {
-                            transform.transform_rect_bbox(rounded.rect())
-                        }
-                        FillShape::Path(path) => (*transform * path.clone()).bounding_box(),
-                    };
-                    let covered = match path {
-                        FillShape::Rect(_)
-                            if transform.as_coeffs()[1] == 0.0
-                                && transform.as_coeffs()[2] == 0.0 =>
-                        {
-                            exact
-                        }
-                        FillShape::Rect(local) => covered_box(*transform, &local.to_path(0.1)),
-                        FillShape::RoundedRect(rounded) => {
-                            covered_box(*transform, &rounded.to_path(0.1))
-                        }
-                        FillShape::Path(path) => covered_box(*transform, path),
-                    };
-                    !overlaps(exact, rect) || contains(covered, rect)
-                }
-                _ => false,
-            };
-            if !ok {
-                return false;
+        let ok = match &recorded.op {
+            Op::Pop => true,
+            // A clip, or a uniform fade, over the whole rect: what it holds is checked op
+            // by op after it.
+            Op::PushClip {
+                transform, path, ..
             }
-            index += 1;
+            | Op::PushOpacity {
+                transform, path, ..
+            } => contains(covered_box(*transform, path), rect),
+            // A border around the content (a frameless window's edge) inks only along
+            // its path: nothing inside, farther than the line reaches.
+            Op::Stroke {
+                stroke,
+                transform,
+                path,
+                ..
+            } => {
+                let coeffs = transform.as_coeffs();
+                let scale = (coeffs[0] * coeffs[3] - coeffs[1] * coeffs[2]).abs().sqrt();
+                // Joins of a path along its box spike outward only: inward a line reaches
+                // half its width, and pixels it does not cover get no coverage.
+                let reach = stroke.width / 2.0 * scale;
+                let inside = covered_box(*transform, path).inflate(-reach, -reach);
+                box_like(*transform, path)
+                    && inside.width() > 0.0
+                    && inside.height() > 0.0
+                    && contains(inside, rect)
+            }
+            Op::Fill {
+                transform,
+                paint: Paint::Solid(_),
+                path,
+                ..
+            } => {
+                let exact = match path {
+                    FillShape::Rect(local) => transform.transform_rect_bbox(*local),
+                    FillShape::RoundedRect(rounded) => {
+                        transform.transform_rect_bbox(rounded.rect())
+                    }
+                    FillShape::Path(path) => (*transform * path.clone()).bounding_box(),
+                };
+                let covered = match path {
+                    FillShape::Rect(_)
+                        if transform.as_coeffs()[1] == 0.0 && transform.as_coeffs()[2] == 0.0 =>
+                    {
+                        exact
+                    }
+                    FillShape::Rect(local) => covered_box(*transform, &local.to_path(0.1)),
+                    FillShape::RoundedRect(rounded) => {
+                        covered_box(*transform, &rounded.to_path(0.1))
+                    }
+                    FillShape::Path(path) => covered_box(*transform, path),
+                };
+                !overlaps(exact, rect) || contains(covered, rect)
+            }
+            _ => false,
+        };
+        if !ok {
+            return false;
+        }
+        index += 1;
     }
     true
 }

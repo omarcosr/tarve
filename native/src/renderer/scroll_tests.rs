@@ -80,7 +80,12 @@ impl Scene {
                 };
                 target.fill_gradient(Affine::IDENTITY, &gradient, &all);
             } else {
-                target.fill(Fill::NonZero, Affine::IDENTITY, Color::from_rgb8(30, 30, 36), &all);
+                target.fill(
+                    Fill::NonZero,
+                    Affine::IDENTITY,
+                    Color::from_rgb8(30, 30, 36),
+                    &all,
+                );
             }
             // A window border around everything, as a frameless window draws it.
             target.stroke(
@@ -155,7 +160,11 @@ fn assert_scroll_matches(before: &Scene, after: &Scene) -> f64 {
     let wrong: Vec<usize> = (0..W * H)
         .filter(|&i| delta(frame[i], expected[i]) > 1)
         .collect();
-    let worst = wrong.iter().map(|&i| delta(frame[i], expected[i])).max().unwrap_or(0);
+    let worst = wrong
+        .iter()
+        .map(|&i| delta(frame[i], expected[i]))
+        .max()
+        .unwrap_or(0);
     if let (Some(first), Some(last)) = (wrong.first(), wrong.last()) {
         panic!(
             "{} pixels differ from a full redraw (by up to {worst}), from {},{} to {},{} (regions {regions:?})",
@@ -206,7 +215,13 @@ fn a_backdrop_that_differs_from_pixel_to_pixel_cannot_move_with_the_content() {
 
 #[test]
 fn a_scroll_past_the_whole_view_redraws_instead_of_moving() {
-    assert!(scroll_damage(&Scene::at(0.0, 0.0).record(), &Scene::at(0.0, 400.0).record()).is_none());
+    assert!(
+        scroll_damage(
+            &Scene::at(0.0, 0.0).record(),
+            &Scene::at(0.0, 400.0).record()
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -214,13 +229,20 @@ fn pixel_moves_go_both_ways_without_reading_moved_pixels() {
     let (width, height) = (6, 5);
     let source: Vec<u32> = (0..(width * height) as u32).collect();
     let rect = Rect::new(1.0, 1.0, 5.0, 4.0);
-    for (dx, dy) in [(0.0, 1.0), (0.0, -1.0), (1.0, 0.0), (-2.0, 0.0), (1.0, -1.0)] {
+    for (dx, dy) in [
+        (0.0, 1.0),
+        (0.0, -1.0),
+        (1.0, 0.0),
+        (-2.0, 0.0),
+        (1.0, -1.0),
+    ] {
         let mut pixels = source.clone();
         ScrollBlit { rect, dx, dy }.apply(&mut pixels, width, height);
         for y in 0..height {
             for x in 0..width {
                 let (sx, sy) = (x as f64 - dx, y as f64 - dy);
-                let inside = |px: f64, py: f64| (1.0..5.0).contains(&px) && (1.0..4.0).contains(&py);
+                let inside =
+                    |px: f64, py: f64| (1.0..5.0).contains(&px) && (1.0..4.0).contains(&py);
                 let expected = if inside(x as f64, y as f64) && inside(sx, sy) {
                     source[sy as usize * width + sx as usize]
                 } else {

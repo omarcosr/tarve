@@ -820,8 +820,10 @@ impl CpuGraphics {
                 Some((blits, regions)) if self.damage != CpuDamage::Full => {
                     if let CpuDamage::Regions(pending) = &mut self.damage {
                         for blit in &blits {
-                            let carried: Vec<_> =
-                                pending.iter().filter_map(|rect| blit.carry(*rect)).collect();
+                            let carried: Vec<_> = pending
+                                .iter()
+                                .filter_map(|rect| blit.carry(*rect))
+                                .collect();
                             pending.extend(carried);
                         }
                     }
