@@ -50,6 +50,7 @@ fn full_frame(list: &DisplayList) -> Vec<u32> {
 /// their edges are antialiased) in content coordinates, and a thumb over them.
 struct Scene {
     offset: Vec2,
+    text: bool,
     gradient_backdrop: bool,
     changed_row: Option<usize>,
 }
@@ -58,6 +59,7 @@ impl Scene {
     fn at(x: f64, y: f64) -> Self {
         Self {
             offset: Vec2::new(x, y),
+            text: false,
             gradient_backdrop: false,
             changed_row: None,
         }
@@ -117,6 +119,35 @@ impl Scene {
                     &Circle::new((x + 12.0, y + 11.5), 6.0),
                 );
             }
+            if self.text {
+                let bytes =
+                    include_bytes!("../../../packages/headless/fonts/InterVariable.ttf").to_vec();
+                let ids: Vec<u32> = {
+                    let charmap = swash::FontRef::from_index(&bytes, 0)
+                        .expect("font")
+                        .charmap();
+                    "Message gjpqy"
+                        .chars()
+                        .map(|c| u32::from(charmap.map(c)))
+                        .collect()
+                };
+                let font = vello::peniko::FontData::new(
+                    vello::peniko::Blob::new(std::sync::Arc::new(bytes)),
+                    0,
+                );
+                for line in 0..20 {
+                    let glyphs: Vec<crate::paint::PaintGlyph> = ids
+                        .iter()
+                        .enumerate()
+                        .map(|(i, id)| crate::paint::PaintGlyph {
+                            id: *id,
+                            x: 30.0 + 8.3 * i as f32,
+                            y: 31.37 + line as f32 * 23.6,
+                        })
+                        .collect();
+                    target.draw_glyphs(&font, 13.0, &[], Affine::IDENTITY, Color::BLACK, &glyphs);
+                }
+            }
             target.scroll_end();
             target.pop_layer();
             let top = CLIP.y0 + 4.0 + self.offset.y * 0.1;
@@ -135,8 +166,12 @@ impl Scene {
 fn assert_scroll_matches(before: &Scene, after: &Scene) -> f64 {
     let (before, after) = (before.record(), after.record());
     let mut frame = full_frame(&before);
-    let (blits, regions) =
-        scroll_damage(&before, &after).expect("a frame that only scrolls moves pixels");
+    let (blits, regions) = scroll_damage(&before, &after).unwrap_or_else(|| {
+        panic!(
+            "a frame that only scrolls moves pixels ({} ops)",
+            after.len()
+        )
+    });
     for blit in &blits {
         blit.apply(&mut frame, W, H);
     }
@@ -251,5 +286,16 @@ fn pixel_moves_go_both_ways_without_reading_moved_pixels() {
                 assert_eq!(pixels[y * width + x], expected, "move {dx},{dy} at {x},{y}");
             }
         }
+    }
+}
+
+#[test]
+fn text_moved_by_any_whole_pixel_offset_matches_a_full_redraw() {
+    for (from, to) in [(0.0, 86.0), (86.0, 37.0), (37.0, 98.0), (5.0, 3.0)] {
+        let mut before = Scene::at(0.0, from);
+        before.text = true;
+        let mut after = Scene::at(0.0, to);
+        after.text = true;
+        assert_scroll_matches(&before, &after);
     }
 }

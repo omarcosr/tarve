@@ -444,6 +444,7 @@ pub(crate) fn scroll_damage(
     }
     let blits = pairs.iter().map(|pair| pair.2).collect();
     regions.retain(|rect| rect.width() > 0.0 && rect.height() > 0.0);
+    glyph_blit::grow_to_glyph_runs(next, &mut regions);
     Some((blits, regions))
 }
 

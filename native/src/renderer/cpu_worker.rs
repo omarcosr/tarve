@@ -77,7 +77,8 @@ impl CpuRaster {
             .chain(blits.iter().map(|blit| blit.rect))
             .reduce(|all, rect| all.union(rect))
             .unwrap_or(vello::kurbo::Rect::ZERO);
-        if region != full && cpu_damage_check() {
+        // Moved pixels are checked too, even when the move spans the whole frame.
+        if (region != full || !blits.is_empty()) && cpu_damage_check() {
             check_partial_redraw(
                 &mut self.context,
                 &mut self.resources,

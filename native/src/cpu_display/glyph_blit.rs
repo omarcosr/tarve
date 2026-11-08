@@ -339,47 +339,9 @@ impl DisplayList {
                 _ => {}
             }
         }
-        // What each op can touch: its bounds inside every layer shape around it (a clip, a
-        // fade or a mask layer cuts what it holds). Content scrolled past a clip then covers
-        // nothing outside it, as on screen.
-        let mut reach = Vec::with_capacity(self.ops.len());
-        let mut shapes: Vec<Rect> = Vec::new();
-        for recorded in &self.ops {
-            let inside = shapes.last().copied().unwrap_or(EVERYWHERE);
-            match &recorded.op {
-                Op::PushClip {
-                    transform, path, ..
-                }
-                | Op::PushOpacity {
-                    transform, path, ..
-                }
-                | Op::PushMask {
-                    transform, path, ..
-                } => {
-                    reach.push(recorded.bounds.intersect(inside));
-                    shapes.push(
-                        (*transform * path.clone())
-                            .bounding_box()
-                            .inflate(1.0, 1.0)
-                            .intersect(inside),
-                    );
-                }
-                Op::Pop => {
-                    shapes.pop();
-                    reach.push(Rect::ZERO);
-                }
-                _ => reach.push(recorded.bounds.intersect(inside)),
-            }
-        }
         // From the last op back: a run is blended in only when nothing drawn after it (and
         // not itself blended in) overlaps its ink.
-        // Over the runs' whole ink, not just the region: a run that crosses the region's edge
-        // decides as it does in a full redraw, so partial and full frames draw it alike.
-        let area = placed
-            .iter()
-            .flatten()
-            .fold(region, |all, (ink, _, _)| all.union(*ink));
-        let mut later = Grid::new(area);
+        let mut later = Grid::new(region);
         for index in (0..self.ops.len()).rev() {
             let recorded = &self.ops[index];
             if let Some((ink, _, _)) = &placed[index] {
@@ -392,7 +354,7 @@ impl DisplayList {
             match &recorded.op {
                 Op::PushClip { .. } | Op::Pop => {}
                 _ => {
-                    let bounds = reach[index].intersect(area);
+                    let bounds = recorded.bounds.intersect(region);
                     if bounds.area() > 0.0 {
                         later.insert(bounds);
                     }
@@ -405,5 +367,22 @@ impl DisplayList {
             .map(|(_, color, run)| (color, run))
             .collect();
         GlyphBlits { skip, runs }
+    }
+}
+
+/// Damage reaching a glyph run takes in the whole run. Whether a run is blended from cached
+/// masks or rasterized depends on what is drawn over it (`plan_glyph_blits`), and the two
+/// differ by a few levels: a change touching part of a run can switch it, and all of it must
+/// then be drawn the new way, or its untouched part keeps the old pixels.
+pub(super) fn grow_to_glyph_runs(list: &DisplayList, rects: &mut Vec<Rect>) {
+    let touched = rects.clone();
+    for op in &list.ops {
+        if matches!(op.op, Op::Glyphs { .. })
+            && touched
+                .iter()
+                .any(|rect| rect.intersect(op.bounds).area() > 0.0)
+        {
+            rects.push(op.bounds);
+        }
     }
 }

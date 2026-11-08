@@ -898,17 +898,17 @@ impl ShadowCache {
     }
 }
 
-/// The device-pixel region whose pixels can differ between two frames; None when
-/// the frames paint the same. Ops are matched by content: one that appears,
-/// disappears or changes damages where it was and where it is, and one that
-/// changes stacking order damages where it is.
+/// The device-pixel region whose pixels can differ between two frames; None when the frames
+/// paint the same. Ops are matched by content: one that appears, disappears or changes damages
+/// where it was and where it is, and one that changes stacking order damages where it is.
 pub(crate) fn damage(previous: &DisplayList, next: &DisplayList) -> Option<Rect> {
     let mut rects = Vec::new();
     damage_into(previous, next, |_| true, |_| true, &mut rects);
+    glyph_blit::grow_to_glyph_runs(next, &mut rects);
     let mut region = rects
         .into_iter()
-        .filter(|rect| rect.area() > 0.0)
-        .reduce(|all, rect| all.union(rect));
+        .filter(|r| r.area() > 0.0)
+        .reduce(|a, r| a.union(r));
     // A glass box shows what changed under or around it.
     if let Some(changed) = region {
         for op in &next.ops {
