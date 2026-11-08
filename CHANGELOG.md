@@ -11,15 +11,23 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless` an
 - `tarve build|package --trim` (`trim: true` in `build()`): Bun's `--compile --trim`, which leaves the Bun and Node.js APIs the app never calls out of the executable (`examples/counter`: 154.6 → 100.6 MB on Windows). Used when the running Bun supports it (1.4.4+); an older Bun warns and builds the full runtime. Node.js and txiki.js builds ignore it. `--aot` (`aot: true`, experimental) adds Bun's ahead-of-time compilation; with `--trim` Bun then also drops the JIT and the APIs it can prove unused (`examples/counter` 70.1 MB, `examples/components` 84.6 MB, both start normally). Tarve's `bun:ffi.dlopen` keeps the interpreter, so it goes no lower. With `--trim` the native library is packed at zstd level 19 instead of 12 (−0.45 MB, about 4 s more).
 - The native library's release profile uses fat LTO in one codegen unit (Windows core library 13.5 → 12.2 MB).
 - `<audio time={signal}>` / `<video time={signal}>`: the playback position written into a signal on every report, without a render, and `<Slider value={signal}>` moves its thumb as the signal changes. A `timeupdate` or `progress` with no handler on an element without `controls` or subtitles no longer renders the view, so a clock and a seek bar bound to the position cost no render while playing (`examples/youtube-music` renders once per lyric line instead of four times a second).
+- Signals bound to the view: `signal()` and `batch()`; a signal used as a text child or a style value is bound to its node, and a change sends only the bound fields to native (`setNodes`), with no render, compile or diff. Same-size text changes skip layout.
+- GitHub releases attach a prebuilt `examples/youtube-music` for Windows and Linux (`YouTubeMusic-windows-x64.exe`, `YouTubeMusic-linux-x64`), to try Tarve without a toolchain.
+- `examples/youtube-music`: each song plays once per queue (also across different uploads of it), shuffle and radio spread artists, hover actions to play next or add to the queue, an Autoplay switch, YouTube's keyboard shortcuts and the last session restored on reopen; the Go port is kept in parity.
 
 ### Changed
 
+- CPU renderer scrolling: a `<Scroll>` that moves shifts the pixels already drawn and rasterizes only the strip scrolled into view, content that changed and what paints over it, as browsers scroll (scroll offsets snap to whole device pixels). Dragging the scrollbar of the YouTube Music home went from about 36 ms between frames to about 5 ms; a backdrop other than a solid colour falls back to redrawing the area.
+- Faster updates and large animations: layout runs only inside fixed-size flex boundaries, paint is retained between frames on the CPU and D3D11 renderers, the CPU renderer rasterizes on its own thread with cached glyph masks, accessibility sends only changed nodes, unchanged list items made of pure components are memoized, and the first frame shows sooner.
 - Android builds target API 35 (was 34). API 35 draws edge-to-edge, so `TarveActivity` now reports the decor view's `WindowInsets` (system bars, display cutout, keyboard) to the runtime and the UI is laid out inside them: the window background still paints behind the status and navigation bars, while content stays clear of them and above the keyboard. Checked on the API 35 x86_64 emulator.
 
 ### Fixed
 
 - Windows `<video>` with a remote src: a seek made while another was still loading waited for the older target's data first (the download finished its 4 MB range request, the decoder its blocked read): about 15 s on a 600 KB/s link. Now the newer seek cancels the pending one at once — the download drops the range under way, a read waiting for the old target gives up and the decoder starts at the newest one — so it lands as fast as a single seek (2.3 s there; 1.9 s on the Media Engine path, which coalesces too). `seeking` fires per seek with `currentTime` at its target, `seeked` once for the last.
-
+- Dragging a scrollbar that lies along the edge of a frameless window started the window's resize loop and the list stuttered or did not move; the scrollbar now wins over the resize border (the corners still resize).
+- D3D11: text in a scroll area moved to a fractional offset (a scrollbar drag) was rasterized again on every frame (frames up to 35 ms); glyphs now sit on whole pixels vertically and reuse the glyph cache.
+- D3D11: the first picture of a video drawn in its own layer could use a state buffer not yet uploaded.
+- Windows: frameless (`TitleBar`) windows kept painting while minimized, since Windows reports a ~160×40 caption instead of 0×0; video memory grew while minimized.
 - Windows: apps without `appIdentity` get their own AppUserModelID (`Tarve.<title>`), so a Start menu shortcut to `bun.exe` no longer gives every app run with `bun app.tsx` its icon in the taskbar; no Start menu shortcut is written when running under bun, node or txiki.
 
 ## 0.9.0 — 2026-10-30

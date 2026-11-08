@@ -4,7 +4,7 @@
 
   let { version }: { version: string } = $props();
 
-  const c0 = "bunx tarve build app.tsx --outfile dist/App.exe                      # Bun\nnpx tarve build app.tsx --outfile dist/App.exe                       # Node.js\nbunx tarve build app.tsx --target linux-x64 --outfile dist/App\nbunx tarve build app.tsx --runtime txiki --outfile dist/App.exe      # a few MB";
+  const c0 = "bunx tarve build app.tsx --outfile dist/App.exe                      # Bun\nnpx tarve build app.tsx --outfile dist/App.exe                       # Node.js\nbunx tarve build app.tsx --target linux-x64 --outfile dist/App\nbunx tarve build app.tsx --runtime txiki --outfile dist/App.exe      # a few MB\nbunx tarve build app.tsx --trim --outfile dist/App.exe               # Bun 1.4.4+: leaves unused Bun APIs out";
   const c1 = "bunx tarve package dist/App --format deb,tar --version 1.2.0 --categories \"Utility;Office\"\nbunx tarve package app.tsx --format zip,msix --version 1.2.0 --publisher \"Acme Inc.\" --out dist/packages";
   const t2: string[][] = [["<code>deb</code>","<code>&lt;app>_&lt;version>_amd64.deb</code> with <code>/opt/&lt;app>/&lt;exe></code>, a <code>/usr/bin/&lt;app></code> symlink, a <code>.desktop</code> entry and a hicolor icon."],["<code>tar</code>","<code>&lt;app>-&lt;version>-linux-x64.tar.gz</code> with the executable, <code>.desktop</code>, icon and an <code>install.sh</code> for a per-user install into <code>~/.local</code>."],["<code>zip</code>","<code>&lt;App>-&lt;version>-windows-x64.zip</code>, a portable folder."],["<code>msix</code>","An MSIX folder with <code>AppxManifest.xml</code> and logos, packed into an unsigned <code>.msix</code> when <code>makeappx</code> is found (<code>TARVE_MAKEAPPX</code>). Sign it with <code>signtool</code> using a certificate whose subject is <code>CN=&lt;publisher></code>."],["<code>app-zip</code>","A zipped macOS <code>.app</code> bundle (preview, see below)."]];
   const c3 = "tarve build app.tsx --target android                                   # dist/App.apk\ntarve build app.tsx --target android --runtime bun                     # Bun on the device\ntarve build app.tsx --target android --format aab --keystore upload.jks # Google Play\ntarve build go/examples/counter --target android                       # a Go main package\nadb install dist/App.apk";
@@ -27,6 +27,7 @@
     <h2 id="build">Executables</h2>
     <div class="doc-prose"><p>The npm package carries the Windows x64 and Linux x64 runtimes, so either target builds from either machine without a Rust toolchain. Bun and Node.js builds produce GUI executables named and versioned after the app (<code>--name</code>, <code>--version</code>).</p></div>
     <CodeBlock code={c0} lang="sh" file="terminal" />
+    <div class="doc-prose"><p><code>--trim</code> (<code>trim: true</code> in <code>build()</code>) uses Bun's <code>--compile --trim</code>, which leaves the Bun and Node.js APIs the app never calls out of the executable: <code>examples/counter</code> goes from 154.6 to 100.6 MB on Windows. It needs Bun 1.4.4+; an older Bun warns and builds the full runtime, and Node.js and txiki.js builds ignore it. <code>--aot</code> (experimental) adds Bun's ahead-of-time compilation; with <code>--trim</code> it also drops the JIT (<code>examples/counter</code>: 70.1 MB).</p></div>
   </section>
 
   <section class="doc-section">

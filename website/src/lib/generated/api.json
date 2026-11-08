@@ -3,7 +3,7 @@
     {
       "name": "Accordion",
       "source": "packages/core/src/controls.ts",
-      "line": 179,
+      "line": 183,
       "generic": false,
       "propsType": "AccordionProps",
       "props": [
@@ -430,7 +430,7 @@
     {
       "name": "Badge",
       "source": "packages/core/src/controls.ts",
-      "line": 119,
+      "line": 123,
       "generic": false,
       "propsType": "BadgeProps",
       "props": [
@@ -551,7 +551,7 @@
     {
       "name": "Button",
       "source": "packages/core/src/components/button.ts",
-      "line": 102,
+      "line": 110,
       "generic": false,
       "propsType": "ButtonProps",
       "props": [
@@ -726,13 +726,19 @@
     {
       "name": "Card",
       "source": "packages/core/src/controls.ts",
-      "line": 107,
+      "line": 111,
       "generic": false,
       "propsType": "CardProps",
       "props": [
         {
           "name": "align",
           "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "children",
+          "type": "BindableChild",
           "optional": true,
           "from": "ViewProps"
         },
@@ -804,6 +810,13 @@
           "from": "ViewProps"
         },
         {
+          "name": "style",
+          "type": "Reactive<Style>",
+          "optional": true,
+          "doc": "Values may be signals: setting one restyles this box without a render.",
+          "from": "ViewProps"
+        },
+        {
           "name": "title",
           "type": "string",
           "optional": true
@@ -816,7 +829,6 @@
         }
       ],
       "common": [
-        "children",
         "class",
         "className",
         "dropTarget",
@@ -837,10 +849,12 @@
         "onPointerMove",
         "onSize",
         "onTransitionEnd",
-        "rovingGroup",
-        "style"
+        "rovingGroup"
       ],
-      "types": []
+      "types": [
+        "BindableChild",
+        "Reactive"
+      ]
     },
     {
       "name": "Carousel",
@@ -976,7 +990,7 @@
     {
       "name": "Checkbox",
       "source": "packages/core/src/controls.ts",
-      "line": 14,
+      "line": 15,
       "generic": false,
       "propsType": "CheckboxProps",
       "props": [
@@ -1160,13 +1174,18 @@
     {
       "name": "Column",
       "source": "packages/core/src/components/layout.ts",
-      "line": 45,
+      "line": 49,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
         {
           "name": "align",
           "type": "Style[\"align\"]",
+          "optional": true
+        },
+        {
+          "name": "children",
+          "type": "BindableChild",
           "optional": true
         },
         {
@@ -1218,13 +1237,18 @@
           "optional": true
         },
         {
+          "name": "style",
+          "type": "Reactive<Style>",
+          "optional": true,
+          "doc": "Values may be signals: setting one restyles this box without a render."
+        },
+        {
           "name": "windowAction",
           "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true
         }
       ],
       "common": [
-        "children",
         "class",
         "className",
         "dropTarget",
@@ -1245,10 +1269,12 @@
         "onPointerMove",
         "onSize",
         "onTransitionEnd",
-        "rovingGroup",
-        "style"
+        "rovingGroup"
       ],
-      "types": []
+      "types": [
+        "BindableChild",
+        "Reactive"
+      ]
     },
     {
       "name": "Combobox",
@@ -2444,6 +2470,12 @@
           "doc": "How far apart in px two merged boxes start bridging; read from the first box of the key. Default 32."
         },
         {
+          "name": "children",
+          "type": "BindableChild",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
@@ -2527,6 +2559,13 @@
           "default": "true"
         },
         {
+          "name": "style",
+          "type": "Reactive<Style>",
+          "optional": true,
+          "doc": "Values may be signals: setting one restyles this box without a render.",
+          "from": "ViewProps"
+        },
+        {
           "name": "tint",
           "type": "string",
           "optional": true,
@@ -2547,7 +2586,6 @@
         }
       ],
       "common": [
-        "children",
         "class",
         "className",
         "dropTarget",
@@ -2568,12 +2606,13 @@
         "onPointerMove",
         "onSize",
         "onTransitionEnd",
-        "rovingGroup",
-        "style"
+        "rovingGroup"
       ],
       "types": [
+        "BindableChild",
         "GlassMaterial",
-        "GlassVariant"
+        "GlassVariant",
+        "Reactive"
       ]
     },
     {
@@ -3091,7 +3130,7 @@
       "name": "Link",
       "summary": "Native hyperlink primitive. Opens `href` through the platform's registered URI handler.",
       "source": "packages/core/src/components/link.ts",
-      "line": 29,
+      "line": 30,
       "generic": false,
       "propsType": "LinkProps",
       "props": [
@@ -3105,6 +3144,11 @@
           "type": "Style[\"align\"]",
           "optional": true,
           "from": "ViewProps"
+        },
+        {
+          "name": "children",
+          "type": "Child",
+          "optional": true
         },
         {
           "name": "disabled",
@@ -3244,7 +3288,6 @@
         }
       ],
       "common": [
-        "children",
         "class",
         "className",
         "draggable",
@@ -3288,6 +3331,12 @@
           "from": "ViewProps"
         },
         {
+          "name": "children",
+          "type": "BindableChild",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
           "name": "dismissOnOutside",
           "type": "boolean",
           "optional": true,
@@ -3312,6 +3361,13 @@
           "type": "boolean",
           "optional": true,
           "from": "ViewProps"
+        },
+        {
+          "name": "followTail",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Stick to the end: while the area is at its end (or new), growing content keeps it there (a\nchat, a log). Scrolling away stops it; scrolling back to the end resumes it.",
+          "from": "ScrollProps"
         },
         {
           "name": "gap",
@@ -3384,6 +3440,13 @@
           "from": "ScrollProps"
         },
         {
+          "name": "style",
+          "type": "Reactive<Style>",
+          "optional": true,
+          "doc": "Values may be signals: setting one restyles this box without a render.",
+          "from": "ViewProps"
+        },
+        {
           "name": "windowAction",
           "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
@@ -3391,7 +3454,6 @@
         }
       ],
       "common": [
-        "children",
         "class",
         "className",
         "dropTarget",
@@ -3412,10 +3474,11 @@
         "onPointerMove",
         "onSize",
         "onTransitionEnd",
-        "rovingGroup",
-        "style"
+        "rovingGroup"
       ],
       "types": [
+        "BindableChild",
+        "Reactive",
         "ScrollInfo",
         "ScrollOrientation",
         "ScrollPosition"
@@ -4035,13 +4098,19 @@
     {
       "name": "Portal",
       "source": "packages/core/src/components/layout.ts",
-      "line": 51,
+      "line": 60,
       "generic": false,
       "propsType": "PortalProps",
       "props": [
         {
           "name": "align",
           "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "children",
+          "type": "BindableChild",
           "optional": true,
           "from": "ViewProps"
         },
@@ -4103,6 +4172,13 @@
           "from": "ViewProps"
         },
         {
+          "name": "style",
+          "type": "Reactive<Style>",
+          "optional": true,
+          "doc": "Values may be signals: setting one restyles this box without a render.",
+          "from": "ViewProps"
+        },
+        {
           "name": "windowAction",
           "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
@@ -4110,7 +4186,6 @@
         }
       ],
       "common": [
-        "children",
         "class",
         "className",
         "dropTarget",
@@ -4131,10 +4206,12 @@
         "onPointerMove",
         "onSize",
         "onTransitionEnd",
-        "rovingGroup",
-        "style"
+        "rovingGroup"
       ],
-      "types": []
+      "types": [
+        "BindableChild",
+        "Reactive"
+      ]
     },
     {
       "name": "Pressable",
@@ -4146,6 +4223,12 @@
         {
           "name": "align",
           "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "children",
+          "type": "BindableChild",
           "optional": true,
           "from": "ViewProps"
         },
@@ -4263,6 +4346,13 @@
           "from": "ViewProps"
         },
         {
+          "name": "style",
+          "type": "Reactive<Style>",
+          "optional": true,
+          "doc": "Values may be signals: setting one restyles this box without a render.",
+          "from": "ViewProps"
+        },
+        {
           "name": "windowAction",
           "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
@@ -4270,7 +4360,6 @@
         }
       ],
       "common": [
-        "children",
         "class",
         "className",
         "draggable",
@@ -4295,15 +4384,17 @@
         "onPointerMove",
         "onSize",
         "onTransitionEnd",
-        "rovingGroup",
-        "style"
+        "rovingGroup"
       ],
-      "types": []
+      "types": [
+        "BindableChild",
+        "Reactive"
+      ]
     },
     {
       "name": "Progress",
       "source": "packages/core/src/controls.ts",
-      "line": 140,
+      "line": 144,
       "generic": false,
       "propsType": "ProgressProps",
       "props": [
@@ -4424,7 +4515,7 @@
     {
       "name": "RadioGroup",
       "source": "packages/core/src/controls.ts",
-      "line": 58,
+      "line": 59,
       "generic": false,
       "propsType": "RadioGroupProps",
       "props": [
@@ -4561,13 +4652,18 @@
     {
       "name": "Row",
       "source": "packages/core/src/components/layout.ts",
-      "line": 41,
+      "line": 45,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
         {
           "name": "align",
           "type": "Style[\"align\"]",
+          "optional": true
+        },
+        {
+          "name": "children",
+          "type": "BindableChild",
           "optional": true
         },
         {
@@ -4619,13 +4715,18 @@
           "optional": true
         },
         {
+          "name": "style",
+          "type": "Reactive<Style>",
+          "optional": true,
+          "doc": "Values may be signals: setting one restyles this box without a render."
+        },
+        {
           "name": "windowAction",
           "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true
         }
       ],
       "common": [
-        "children",
         "class",
         "className",
         "dropTarget",
@@ -4646,21 +4747,29 @@
         "onPointerMove",
         "onSize",
         "onTransitionEnd",
-        "rovingGroup",
-        "style"
+        "rovingGroup"
       ],
-      "types": []
+      "types": [
+        "BindableChild",
+        "Reactive"
+      ]
     },
     {
       "name": "Scroll",
       "source": "packages/core/src/components/scroll.ts",
-      "line": 13,
+      "line": 18,
       "generic": false,
       "propsType": "ScrollProps",
       "props": [
         {
           "name": "align",
           "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "children",
+          "type": "BindableChild",
           "optional": true,
           "from": "ViewProps"
         },
@@ -4689,6 +4798,12 @@
           "type": "boolean",
           "optional": true,
           "from": "ViewProps"
+        },
+        {
+          "name": "followTail",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Stick to the end: while the area is at its end (or new), growing content keeps it there (a\nchat, a log). Scrolling away stops it; scrolling back to the end resumes it."
         },
         {
           "name": "gap",
@@ -4744,6 +4859,13 @@
           "default": "1"
         },
         {
+          "name": "style",
+          "type": "Reactive<Style>",
+          "optional": true,
+          "doc": "Values may be signals: setting one restyles this box without a render.",
+          "from": "ViewProps"
+        },
+        {
           "name": "windowAction",
           "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
@@ -4751,7 +4873,6 @@
         }
       ],
       "common": [
-        "children",
         "class",
         "className",
         "dropTarget",
@@ -4772,10 +4893,11 @@
         "onPointerMove",
         "onSize",
         "onTransitionEnd",
-        "rovingGroup",
-        "style"
+        "rovingGroup"
       ],
       "types": [
+        "BindableChild",
+        "Reactive",
         "ScrollInfo",
         "ScrollOrientation",
         "ScrollPosition"
@@ -4784,12 +4906,18 @@
     {
       "name": "ScrollArea",
       "source": "packages/core/src/components/scroll.ts",
-      "line": 24,
+      "line": 29,
       "generic": false,
       "props": [
         {
           "name": "align",
           "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "children",
+          "type": "BindableChild",
           "optional": true,
           "from": "ViewProps"
         },
@@ -4818,6 +4946,13 @@
           "type": "boolean",
           "optional": true,
           "from": "ViewProps"
+        },
+        {
+          "name": "followTail",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Stick to the end: while the area is at its end (or new), growing content keeps it there (a\nchat, a log). Scrolling away stops it; scrolling back to the end resumes it.",
+          "from": "ScrollProps"
         },
         {
           "name": "gap",
@@ -4875,6 +5010,13 @@
           "from": "ScrollProps"
         },
         {
+          "name": "style",
+          "type": "Reactive<Style>",
+          "optional": true,
+          "doc": "Values may be signals: setting one restyles this box without a render.",
+          "from": "ViewProps"
+        },
+        {
           "name": "windowAction",
           "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true,
@@ -4882,7 +5024,6 @@
         }
       ],
       "common": [
-        "children",
         "class",
         "className",
         "dropTarget",
@@ -4903,10 +5044,11 @@
         "onPointerMove",
         "onSize",
         "onTransitionEnd",
-        "rovingGroup",
-        "style"
+        "rovingGroup"
       ],
       "types": [
+        "BindableChild",
+        "Reactive",
         "ScrollInfo",
         "ScrollOrientation",
         "ScrollPosition"
@@ -4985,7 +5127,7 @@
     {
       "name": "Separator",
       "source": "packages/core/src/controls.ts",
-      "line": 134,
+      "line": 138,
       "generic": false,
       "propsType": "SeparatorProps",
       "props": [
@@ -5224,14 +5366,15 @@
     {
       "name": "Slider",
       "source": "packages/core/src/controls.ts",
-      "line": 89,
+      "line": 91,
       "generic": false,
       "propsType": "SliderProps",
       "props": [
         {
           "name": "value",
-          "type": "number",
-          "optional": false
+          "type": "Bindable<number>",
+          "optional": false,
+          "doc": "A signal moves the thumb as it changes, without a render (a seek bar bound to a media `time`)."
         },
         {
           "name": "disabled",
@@ -5290,7 +5433,9 @@
         "rovingGroup",
         "style"
       ],
-      "types": []
+      "types": [
+        "Bindable"
+      ]
     },
     {
       "name": "Spinner",
@@ -5331,6 +5476,47 @@
         "style"
       ],
       "types": []
+    },
+    {
+      "name": "Surface",
+      "summary": "`<surface>` as a component.",
+      "source": "packages/core/src/surface.ts",
+      "line": 53,
+      "generic": false,
+      "propsType": "SurfaceProps",
+      "props": [
+        {
+          "name": "native",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Linux on X11: an `X11Window` child the producer draws into instead of frames (faster; above the UI)."
+        },
+        {
+          "name": "onSurface",
+          "type": "(event: SurfaceEvent) => void",
+          "optional": true
+        }
+      ],
+      "common": [
+        "children",
+        "class",
+        "className",
+        "highlight",
+        "id",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "SurfaceEvent"
+      ]
     },
     {
       "name": "Svg",
@@ -5472,7 +5658,7 @@
     {
       "name": "Switch",
       "source": "packages/core/src/controls.ts",
-      "line": 35,
+      "line": 36,
       "generic": false,
       "propsType": "SwitchProps",
       "props": [
@@ -5574,7 +5760,7 @@
     {
       "name": "Tabs",
       "source": "packages/core/src/controls.ts",
-      "line": 156,
+      "line": 160,
       "generic": false,
       "propsType": "TabsProps",
       "props": [
@@ -5618,13 +5804,13 @@
     {
       "name": "Text",
       "source": "packages/core/src/components/text.ts",
-      "line": 12,
+      "line": 13,
       "generic": false,
       "propsType": "TextProps",
       "props": [
         {
           "name": "children",
-          "type": "Child",
+          "type": "BindableChild",
           "optional": true
         },
         {
@@ -5639,7 +5825,7 @@
         },
         {
           "name": "style",
-          "type": "IntrinsicStyle",
+          "type": "Reactive<IntrinsicStyle>",
           "optional": true
         },
         {
@@ -5663,7 +5849,10 @@
         "onTransitionEnd",
         "rovingGroup"
       ],
-      "types": []
+      "types": [
+        "BindableChild",
+        "Reactive"
+      ]
     },
     {
       "name": "TextArea",
@@ -5754,6 +5943,12 @@
           "type": "Style",
           "optional": true,
           "doc": "Style merged into each window control (minimize, maximize, close): size, radius, colours."
+        },
+        {
+          "name": "children",
+          "type": "BindableChild",
+          "optional": true,
+          "from": "ViewProps"
         },
         {
           "name": "dismissOnOutside",
@@ -5855,6 +6050,13 @@
           "default": "!MOBILE"
         },
         {
+          "name": "style",
+          "type": "Reactive<Style>",
+          "optional": true,
+          "doc": "Values may be signals: setting one restyles this box without a render.",
+          "from": "ViewProps"
+        },
+        {
           "name": "title",
           "type": "string",
           "optional": true
@@ -5867,7 +6069,6 @@
         }
       ],
       "common": [
-        "children",
         "class",
         "className",
         "dropTarget",
@@ -5888,11 +6089,12 @@
         "onPointerMove",
         "onSize",
         "onTransitionEnd",
-        "rovingGroup",
-        "style"
+        "rovingGroup"
       ],
       "types": [
-        "GlassVariant"
+        "BindableChild",
+        "GlassVariant",
+        "Reactive"
       ]
     },
     {
@@ -6299,13 +6501,18 @@
     {
       "name": "View",
       "source": "packages/core/src/components/layout.ts",
-      "line": 37,
+      "line": 41,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
         {
           "name": "align",
           "type": "Style[\"align\"]",
+          "optional": true
+        },
+        {
+          "name": "children",
+          "type": "BindableChild",
           "optional": true
         },
         {
@@ -6357,13 +6564,18 @@
           "optional": true
         },
         {
+          "name": "style",
+          "type": "Reactive<Style>",
+          "optional": true,
+          "doc": "Values may be signals: setting one restyles this box without a render."
+        },
+        {
           "name": "windowAction",
           "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
           "optional": true
         }
       ],
       "common": [
-        "children",
         "class",
         "className",
         "dropTarget",
@@ -6384,10 +6596,12 @@
         "onPointerMove",
         "onSize",
         "onTransitionEnd",
-        "rovingGroup",
-        "style"
+        "rovingGroup"
       ],
-      "types": []
+      "types": [
+        "BindableChild",
+        "Reactive"
+      ]
     },
     {
       "name": "VirtualList",
@@ -6520,6 +6734,12 @@
           "doc": "See through the window: `transparent` shows the desktop and windows behind it,\n`blur` blurs them (Acrylic on Windows, the system blur on macOS and KDE), `mica`\nand `acrylic` are the Windows 11 materials (`blur` elsewhere). The window\nbackground defaults to transparent; give it (or any box) an alpha colour to tint.\nSet when the window opens. Where the system or renderer has no alpha (Vello/DX12 on\nWindows, X11 without a compositor, the CPU renderer on Wayland and macOS) the window\nis opaque, its background drawn without alpha. Mica tints the desktop wallpaper, not\nthe windows behind; `blur` and `acrylic` blur those. As for the system's own\nwindows, Mica and Acrylic turn solid while the window is inactive (`blur` stays), and\nall three are solid while Windows \"Transparency effects\" is off\n(`app.inspect().transparencyEffects`; `app.onEvent` gets a `transparencyEffects` event\nwhen it changes). The material is light or dark after the window background's\nlightness (the app theme), not the system theme."
         },
         {
+          "name": "children",
+          "type": "BindableChild",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
           "name": "desktopWidget",
           "type": "DesktopWidget",
           "optional": true,
@@ -6637,6 +6857,13 @@
           "doc": "Keep the window off the taskbar and out of Alt+Tab (Windows) or the task switcher and pager (Linux, X11)."
         },
         {
+          "name": "style",
+          "type": "Reactive<Style>",
+          "optional": true,
+          "doc": "Values may be signals: setting one restyles this box without a render.",
+          "from": "ViewProps"
+        },
+        {
           "name": "theme",
           "type": "ThemeDefinition",
           "optional": true
@@ -6659,7 +6886,6 @@
         }
       ],
       "common": [
-        "children",
         "class",
         "className",
         "dropTarget",
@@ -6680,11 +6906,12 @@
         "onPointerMove",
         "onSize",
         "onTransitionEnd",
-        "rovingGroup",
-        "style"
+        "rovingGroup"
       ],
       "types": [
+        "BindableChild",
         "DesktopWidget",
+        "Reactive",
         "WindowBackdrop",
         "WindowCloseRequestEvent",
         "WindowLevel",
@@ -6868,6 +7095,8 @@
     "AccordionItem": "interface AccordionItem { value: string; title: string; content: Child; disabled?: boolean }",
     "AlertVariant": "type AlertVariant = \"default\" | \"destructive\" | \"success\";",
     "AttachmentStatus": "type AttachmentStatus = \"ready\" | \"uploading\" | \"error\";",
+    "Bindable": "type Bindable<T> = T | Signal<T>;",
+    "BindableChild": "type BindableChild = Child | Signal<unknown> | BindableChild[];",
     "BreadcrumbItem": "interface BreadcrumbItem {\n  label: string;\n  disabled?: boolean;\n  onClick?: () => void;\n}",
     "BubbleSide": "type BubbleSide = \"incoming\" | \"outgoing\";",
     "BubbleVariant": "type BubbleVariant = \"default\" | \"secondary\" | \"destructive\";",
@@ -6907,6 +7136,7 @@
     "QuestionnaireAnswer": "type QuestionnaireAnswer = string | string[];",
     "QuestionnaireQuestion": "interface QuestionnaireQuestion {\n  id: string;\n  title: string;\n  description?: string;\n  type: \"text\" | \"single\" | \"multiple\";\n  options?: readonly RadioOption[];\n  required?: boolean;\n  placeholder?: string;\n}",
     "RadioOption": "interface RadioOption { value: string; label: string; disabled?: boolean }",
+    "Reactive": "type Reactive<S> = { [K in keyof S]: S[K] | Signal<Exclude<S[K], undefined>> };",
     "ScrollInfo": "interface ScrollInfo { source: ScrollSource }",
     "ScrollOrientation": "type ScrollOrientation = \"vertical\" | \"horizontal\" | \"both\";",
     "ScrollPosition": "interface ScrollPosition { x: number; y: number; maxX: number; maxY: number; source: ScrollSource }",
@@ -6914,6 +7144,7 @@
     "SelectOption": "interface SelectOption { value: string; label: string; disabled?: boolean }",
     "SheetSide": "type SheetSide = \"left\" | \"right\" | \"top\" | \"bottom\";",
     "SidebarItem": "interface SidebarItem {\n  value: string;\n  label: string;\n  icon?: IconName;\n  disabled?: boolean;\n  badge?: Child;\n}",
+    "SurfaceEvent": "interface SurfaceEvent {\n  type: NativeSurfaceEvent[\"event\"];\n  /** Device pixels: the size to render at. */\n  width: number;\n  height: number;\n  /** Device pixels per layout pixel. */\n  scale: number;\n  /**\n   * `ready`, decimal: the `ISwapChainPanelNative*` producers call `SetSwapChain` on, the frames handle\n   * `tarve_surface_present` takes, or the X11 child window the producer draws into.\n   */\n  handle?: string;\n  handleType?: NonNullable<NativeSurfaceEvent[\"handleType\"]>;\n  /** `ready`: why the native view asked for could not be made (frames instead). */\n  message?: string;\n}",
     "SvgAttributes": "type SvgAttributes = Record<string, SvgAttributeValue>;",
     "SvgNode": "type SvgNode =\n  | readonly [SvgElementName, SvgAttributes]\n  | readonly [SvgElementName, SvgAttributes, readonly SvgNode[]];",
     "TabItem": "interface TabItem { value: string; label: string; content: Child; disabled?: boolean }",

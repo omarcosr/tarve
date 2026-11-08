@@ -8,6 +8,16 @@
 
   let { categories, commonProps, version }: { categories: CatalogCategory[]; commonProps: PropDoc[]; version: string } = $props();
   const total = $derived(categories.reduce((count, category) => count + category.items.length, 0));
+  const signals = `import { Text, Window, createApp, signal } from "@tarve/core";
+
+const time = signal(new Date().toLocaleTimeString());
+setInterval(() => { time.value = new Date().toLocaleTimeString(); }, 1000);
+
+createApp(() => (
+  <Window title="Clock">
+    <Text size={48}>{time}</Text>
+  </Window>
+));`;
 </script>
 
 <DocsShell name={undefined}>
@@ -61,6 +71,19 @@
       <p>
         Controls are <em>controlled</em>: pass the current value (<code>checked</code>, <code>value</code>, <code>open</code>…)
         and update it in the matching <code>on…Change</code> callback. An idle window presents zero frames.
+      </p>
+      <p>
+        For values that change many times a second (a clock, a progress bar, an animation), use a <code>signal()</code>.
+        Passed as a text child or a style value, it is bound to that node: setting <code>count.value</code> sends only that
+        field to the native runtime, with no render, diff or layout when the size stays the same. <code>batch()</code> groups
+        several changes into one update, and <code>&lt;audio time=&#123;position&#125;></code> writes the playback position into a signal.
+      </p>
+    </div>
+    <CodeBlock code={signals} file="clock.tsx" />
+    <div class="doc-prose">
+      <p>
+        <code>&lt;Scroll followTail></code> keeps a chat or a log at its end while content grows, until the user scrolls away;
+        <code>app.scrollTo(id, &#123; y: "end", smooth: true &#125;)</code> scrolls a <code>Scroll</code> after the next layout.
       </p>
       <p>
         Style anything with the <code>style</code> prop or with <a href="/docs/tailwind">Tailwind classes</a>:
