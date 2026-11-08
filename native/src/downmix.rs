@@ -2,6 +2,8 @@
 //! (ITU-R BS.775: centre and surrounds at -3 dB, LFE left out). rodio's own conversion
 //! keeps the first channels and drops the rest, and with them the centre, where films
 //! carry the dialogue.
+// Only the Windows video reader feeds it a source today; Linux audio goes through rodio.
+#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
 
 use rodio::{ChannelCount, Sample, SampleRate, Source};
 use std::time::Duration;

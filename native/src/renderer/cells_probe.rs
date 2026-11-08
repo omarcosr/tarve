@@ -282,7 +282,10 @@ fn font_startup_probe() {
 fn cells_probe() {
     #[cfg(windows)]
     let sampler = std::env::var_os("PROFILE").map(|_| sampler::Sampler::start());
+    #[cfg_attr(not(windows), allow(unused_variables))]
     let phase = std::env::var("PROFILE").unwrap_or_default();
+    // The sampler is Windows only: elsewhere the phases are not profiled.
+    #[cfg_attr(not(windows), allow(unused_variables))]
     let profiling = |name: &str, on: bool| {
         #[cfg(windows)]
         if phase == name {
