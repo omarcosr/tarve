@@ -52,12 +52,7 @@ pub(crate) fn show(
         Some(identity) => identity.id.clone(),
         None => {
             let name = notification.app_name;
-            let id = format!(
-                "Tarve.{}",
-                name.chars()
-                    .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-                    .collect::<String>()
-            );
+            let id = crate::smtc::default_app_id(name);
             if REGISTERED.with(|registered| registered.borrow().as_deref() != Some(&id)) {
                 crate::smtc::register_app_user_model_id(&id, name, None)?;
                 REGISTERED.with(|registered| *registered.borrow_mut() = Some(id.clone()));

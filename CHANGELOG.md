@@ -20,6 +20,8 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless` an
 
 - Windows `<video>` with a remote src: a seek made while another was still loading waited for the older target's data first (the download finished its 4 MB range request, the decoder its blocked read): about 15 s on a 600 KB/s link. Now the newer seek cancels the pending one at once — the download drops the range under way, a read waiting for the old target gives up and the decoder starts at the newest one — so it lands as fast as a single seek (2.3 s there; 1.9 s on the Media Engine path, which coalesces too). `seeking` fires per seek with `currentTime` at its target, `seeked` once for the last.
 
+- Windows: apps without `appIdentity` get their own AppUserModelID (`Tarve.<title>`), so a Start menu shortcut to `bun.exe` no longer gives every app run with `bun app.tsx` its icon in the taskbar; no Start menu shortcut is written when running under bun, node or txiki.
+
 ## 0.9.0 — 2026-10-30
 
 ### Added

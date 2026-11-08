@@ -1299,10 +1299,19 @@ pub fn run(
     let mut memory_stages = crate::stats::MemoryStages::default();
     memory_stages.record("start");
     #[cfg(target_os = "windows")]
-    if let Some(identity) = document.app_identity.as_ref()
-        && let Err(message) = crate::smtc::register_app_identity(identity)
     {
-        events.push(crate::protocol::error(format!("app identity: {message}")));
+        let registered = match document.app_identity.as_ref() {
+            Some(identity) => crate::smtc::register_app_identity(identity),
+            // Without an identity the taskbar would match the window to any Start menu
+            // shortcut of the same executable (bun.exe for every `bun app.tsx`) and show
+            // that shortcut's icon; an id of its own keeps the window's icon.
+            None => crate::smtc::set_process_app_id(&crate::smtc::default_app_id(
+                &document.window.title,
+            )),
+        };
+        if let Err(message) = registered {
+            events.push(crate::protocol::error(format!("app identity: {message}")));
+        }
     }
     let mut builder = EventLoop::<Command>::with_user_event();
     #[cfg(target_os = "windows")]

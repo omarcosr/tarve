@@ -17,6 +17,49 @@ use winit::event_loop::EventLoopProxy;
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
+/// The AppUserModelID an app without `appIdentity` runs under: `Tarve.<name>`, so the taskbar
+/// groups it (and takes its icon) by its own id instead of by its executable.
+pub(crate) fn default_app_id(name: &str) -> String {
+    let name: String = name
+        .trim()
+        .chars()
+        .take(100)
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect();
+    if name.is_empty() {
+        "Tarve.App".into()
+    } else {
+        format!("Tarve.{name}")
+    }
+}
+
+/// True when this process is a shared script runtime (`bun app.tsx`, `node app.js`) rather than
+/// the app's own executable. A shortcut to such a host would hand its icon to every other
+/// window that host opens, so none is written.
+fn shared_host_executable(exe: &std::path::Path) -> bool {
+    exe.file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| {
+            matches!(
+                stem.to_ascii_lowercase().as_str(),
+                "bun" | "node" | "tjs" | "deno" | "qjs"
+            )
+        })
+}
+
+/// Claims `id` as this process's AppUserModelID; must run before the first window is created.
+pub(crate) fn set_process_app_id(id: &str) -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+    let wide_id = wide(id);
+    let result = unsafe { SetCurrentProcessExplicitAppUserModelID(wide_id.as_ptr()) };
+    if result < 0 {
+        return Err(format!(
+            "could not set the AppUserModelID (HRESULT {result:#010x})"
+        ));
+    }
+    Ok(())
+}
+
 fn valid_app_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128
@@ -62,6 +105,9 @@ fn write_start_menu_shortcut(identity: &crate::protocol::AppIdentity) -> Result<
     let folder = std::path::Path::new(&appdata).join("Microsoft\\Windows\\Start Menu\\Programs");
     let path = folder.join(format!("{file_name}.lnk"));
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    if shared_host_executable(&exe) {
+        return Ok(());
+    }
     let arguments = std::env::args()
         .skip(1)
         .map(|arg| {
@@ -168,7 +214,6 @@ pub(crate) fn register_app_user_model_id(
 }
 
 pub(crate) fn register_app_identity(identity: &crate::protocol::AppIdentity) -> Result<(), String> {
-    use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
     if !valid_app_id(&identity.id) {
         return Err("appIdentity.id must be 1-128 characters without spaces or backslashes".into());
     }
@@ -177,14 +222,7 @@ pub(crate) fn register_app_identity(identity: &crate::protocol::AppIdentity) -> 
     }
     register_app_user_model_id(&identity.id, identity.name.trim(), identity.icon.as_deref())?;
     write_start_menu_shortcut(identity)?;
-    let id = wide(&identity.id);
-    let result = unsafe { SetCurrentProcessExplicitAppUserModelID(id.as_ptr()) };
-    if result < 0 {
-        return Err(format!(
-            "could not set the AppUserModelID (HRESULT {result:#010x})"
-        ));
-    }
-    Ok(())
+    set_process_app_id(&identity.id)
 }
 
 fn time_span(seconds: f64) -> TimeSpan {
@@ -415,5 +453,22 @@ mod tests {
         assert_eq!(time_span(-5.0).Duration, 0);
         assert_eq!(time_span(1.25).Duration, 12_500_000);
         assert_eq!(time_span(f64::INFINITY).Duration, 0);
+    }
+
+    #[test]
+    fn apps_without_identity_get_their_own_id_and_script_hosts_get_no_shortcut() {
+        assert_eq!(default_app_id("Rádio Eterna"), "Tarve.R_dio_Eterna");
+        assert_eq!(default_app_id("  "), "Tarve.App");
+        assert!(valid_app_id(&default_app_id(&"x".repeat(500))));
+        for host in [
+            "C:\\Users\\a\\.bun\\bin\\bun.exe",
+            "C:\\nodejs\\node.exe",
+            "tjs.exe",
+        ] {
+            assert!(shared_host_executable(std::path::Path::new(host)));
+        }
+        assert!(!shared_host_executable(std::path::Path::new(
+            "A:\\tarve\\examples\\dist\\YouTubeMusic.exe"
+        )));
     }
 }
