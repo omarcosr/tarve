@@ -150,7 +150,9 @@ float4 glassShade(PSIn i) {
     if (glassB.z > 0.5) {
         float2 centre = i.pos.xy - i.uv;
         float2 q = centre + i.uv * (1.0 - glassB.w);
-        float2 bend = n * glassA.z * curve;
+        // The sloped rim refracts toward the thick middle, as a real lens edge does: it shows the
+        // inside of the box squeezed outward, never what lies past its edge (a neighbouring control).
+        float2 bend = -n * min(glassA.z, band * 0.8) * curve;
         float3 c;
         c.r = backdropAt(q + bend * (1.0 + 0.05 * curve)).r;
         c.g = backdropAt(q + bend).g;
@@ -159,15 +161,16 @@ float4 glassShade(PSIn i) {
         c = lerp(luma.xxx, c, glassA.y);
         col = lerp(c, i.color.rgb, i.color.a); alpha = 1.0;
     } else { col = i.color.rgb; alpha = i.color.a; }
+    // The light comes from the top left; its reflection off the far side lights the bottom right.
     float2 light = float2(-0.55, -0.83);
     float facing = saturate(dot(n, light));
+    float spec = max(facing, saturate(dot(n, -light)) * 0.6);
     float fresnel = pow(curve, 2.5);
-    float reflect = glassA.w * fresnel * (0.10 + 0.55 * facing * facing);
-    float rim = saturate(1.0 - abs(sd + 1.0) / 1.25) * glassA.w * (0.30 + 0.70 * facing);
-    float farFace = saturate(1.0 - abs(sd + 3.0) / 1.5) * glassA.w * 0.08;
+    float reflect = glassA.w * fresnel * (0.04 + 0.30 * spec * spec);
+    float rim = saturate(1.0 - abs(sd + 0.8) / 1.1) * glassA.w * (0.55 + 0.45 * spec);
     float2 u = i.uv / half_size;
     float sheen = saturate(1.0 - length(u - float2(-0.35, -0.75)) / 1.1);
-    col += reflect + rim - farFace + glassA.w * 0.10 * sheen * sheen;
+    col += reflect + rim + glassA.w * 0.08 * sheen * sheen;
     return float4(col, alpha * opacity * coverage);
 }
 // A border whose sides differ: the rounded box minus the box inset by the border

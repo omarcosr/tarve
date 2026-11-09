@@ -328,7 +328,10 @@ pub(crate) fn shade(
         s0[0] + uv[0] * (1.0 - magnify),
         s0[1] + uv[1] * (1.0 - magnify),
     ];
-    let bend = [n[0] * refraction * curve, n[1] * refraction * curve];
+    // The sloped rim refracts toward the thick middle, as a real lens edge does: it shows the
+    // inside of the box squeezed outward, never what lies past its edge (a neighbouring control).
+    let strength = refraction.min(band * 0.8) * curve;
+    let bend = [-n[0] * strength, -n[1] * strength];
     let at = |f: f32| backdrop([q[0] + bend[0] * f, q[1] + bend[1] * f]);
     let mut c = [
         at(1.0 + 0.05 * curve)[0],
@@ -341,14 +344,16 @@ pub(crate) fn shade(
         let saturated = luma + (*channel - luma) * saturate;
         *channel = saturated * (1.0 - tint[3]) + tinted * tint[3];
     }
+    // The light comes from the top left; its reflection off the far side lights the bottom right.
     let facing = (n[0] * -0.55 + n[1] * -0.83).clamp(0.0, 1.0);
+    let spec = facing.max((n[0] * 0.55 + n[1] * 0.83).clamp(0.0, 1.0) * 0.6);
     let fresnel = curve.powf(2.5);
-    let reflect = highlight * fresnel * (0.10 + 0.55 * facing * facing);
-    let rim = (1.0 - (sd + 1.0).abs() / 1.25).clamp(0.0, 1.0) * highlight * (0.30 + 0.70 * facing);
-    let far_face = (1.0 - (sd + 3.0).abs() / 1.5).clamp(0.0, 1.0) * highlight * 0.08;
+    let reflect = highlight * fresnel * (0.04 + 0.30 * spec * spec);
+    // The rim is a line about a pixel wide: shaded at the atlas's lower resolution it would come
+    // out dashed, so the compositor adds it at the device's (`rim_light`).
     let u = [uv[0] / s0[2] + 0.35, uv[1] / s0[3] + 0.75];
     let sheen = (1.0 - u[0].hypot(u[1]) / 1.1).clamp(0.0, 1.0);
-    let light = reflect + rim - far_face + highlight * 0.10 * sheen * sheen;
+    let light = reflect + highlight * 0.08 * sheen * sheen;
     let edge = if surface.merged { 0.5 } else { 1.5 };
     [
         (c[0] + light).clamp(0.0, 1.0),
@@ -356,6 +361,24 @@ pub(crate) fn shade(
         (c[2] + light).clamp(0.0, 1.0),
         (edge - sd * k).clamp(0.0, 1.0),
     ]
+}
+
+/// The bright line along the glass's edge at device pixel `p`, as `shade` leaves it out: brightest
+/// where the edge faces the light (top left) and its reflection (bottom right).
+pub(crate) fn rim_light(surface: &GlassSurface, p: [f32; 2]) -> f32 {
+    let s0 = surface.shapes[0];
+    let uv = [p[0] - s0[0], p[1] - s0[1]];
+    let sd = sd_glass(surface, uv);
+    if !(-2.5..=1.0).contains(&sd) {
+        return 0.0;
+    }
+    let gx = sd_glass(surface, [uv[0] + 1.0, uv[1]]) - sd_glass(surface, [uv[0] - 1.0, uv[1]]);
+    let gy = sd_glass(surface, [uv[0], uv[1] + 1.0]) - sd_glass(surface, [uv[0], uv[1] - 1.0]);
+    let len = gx.hypot(gy).max(1e-4);
+    let n = [gx / len, gy / len];
+    let facing = (n[0] * -0.55 + n[1] * -0.83).clamp(0.0, 1.0);
+    let spec = facing.max((n[0] * 0.55 + n[1] * 0.83).clamp(0.0, 1.0) * 0.6);
+    (1.0 - (sd + 0.8).abs() / 1.1).clamp(0.0, 1.0) * surface.params[3] * (0.55 + 0.45 * spec)
 }
 
 #[cfg(test)]

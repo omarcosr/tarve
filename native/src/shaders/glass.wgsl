@@ -153,7 +153,9 @@ fn shade(@builtin(global_invocation_id) id: vec3<u32>) {
     let tt = clamp(1.0 + sd / band, 0.0, 1.0);
     let curve = 1.0 - sqrt(max(0.0, 1.0 - tt * tt));
     let q = a0.xy + uv * (1.0 - s.more.x);
-    let bend = n * s.params.z * curve;
+    // The sloped rim refracts toward the thick middle, as a real lens edge does: it shows the
+    // inside of the box squeezed outward, never what lies past its edge (a neighbouring control).
+    let bend = -n * min(s.params.z, band * 0.8) * curve;
     var c = vec3<f32>(
         backdrop(s, q + bend * (1.0 + 0.05 * curve)).r,
         backdrop(s, q + bend).g,
@@ -163,14 +165,16 @@ fn shade(@builtin(global_invocation_id) id: vec3<u32>) {
     c = mix(vec3<f32>(luma), c, s.params.y);
     c = mix(c, s.tint.rgb, s.tint.a);
     let hl = s.params.w;
+    // The light comes from the top left; its reflection off the far side lights the bottom right.
     let facing = clamp(dot(n, vec2<f32>(-0.55, -0.83)), 0.0, 1.0);
+    let back = clamp(dot(n, vec2<f32>(0.55, 0.83)), 0.0, 1.0);
+    let spec = max(facing, back * 0.6);
     let fresnel = pow(curve, 2.5);
-    let reflect = hl * fresnel * (0.10 + 0.55 * facing * facing);
-    let rim = clamp(1.0 - abs(sd + 1.0) / 1.25, 0.0, 1.0) * hl * (0.30 + 0.70 * facing);
-    let far_face = clamp(1.0 - abs(sd + 3.0) / 1.5, 0.0, 1.0) * hl * 0.08;
+    let reflect = hl * fresnel * (0.04 + 0.30 * spec * spec);
+    let rim = clamp(1.0 - abs(sd + 0.8) / 1.1, 0.0, 1.0) * hl * (0.55 + 0.45 * spec);
     let u = uv / a0.zw - vec2<f32>(-0.35, -0.75);
     let sheen = clamp(1.0 - length(u) / 1.1, 0.0, 1.0);
-    let light = reflect + rim - far_face + hl * 0.10 * sheen * sheen;
+    let light = reflect + rim + hl * 0.08 * sheen * sheen;
     var edge = 1.5;
     if (s.reach.z > 0.5) {
         edge = 0.5;

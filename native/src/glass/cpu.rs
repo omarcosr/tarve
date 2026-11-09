@@ -2,7 +2,7 @@
 //! glass box is rasterized, each surface is shaded from those pixels (read at the plan's lower
 //! resolution, blurred, bent, tinted, lit) and blended in at the device's resolution, and what
 //! comes after is rasterized on its own and laid over.
-use super::{GlassPlan, GlassSurface, shade};
+use super::{GlassPlan, GlassSurface, rim_light, shade};
 use crate::cpu_display::{DisplayList, ShadowCache};
 use vello::kurbo::Rect;
 use vello::peniko::Color;
@@ -206,7 +206,11 @@ fn composite_surface(
             if a <= 0.0 {
                 continue;
             }
-            let color = bilinear(&shaded, p);
+            let mut color = bilinear(&shaded, p);
+            if !inside {
+                let rim = rim_light(surface, p);
+                color = color.map(|c| c + rim);
+            }
             let dst = &mut line[x * 4..x * 4 + 4];
             for c in 0..3 {
                 let value = color[c].clamp(0.0, 1.0) * 255.0 * a + f32::from(dst[c]) * (1.0 - a);
