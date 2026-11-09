@@ -145,12 +145,9 @@ impl Tree {
         let Some(parent) = entry.parent.as_deref() else {
             return Vec2::ZERO;
         };
-        let mut ancestor = Some(parent);
-        while let Some(ancestor_id) = ancestor {
-            if self.entries[ancestor_id].node.portal {
-                return Vec2::ZERO;
-            }
-            ancestor = self.entries[ancestor_id].parent.as_deref();
+        // A portal its parent portal draws in place moves with that parent.
+        if !self.is_portal_root(id) {
+            return Vec2::ZERO;
         }
         let anchor = self.entries[parent].rect;
         let viewport = self.entries[&self.root].rect;

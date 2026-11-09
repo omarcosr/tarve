@@ -275,3 +275,52 @@ fn an_in_flow_box_dismisses_on_outside_too() {
     );
     assert!(tree.pointer_up().is_empty());
 }
+
+#[test]
+fn a_portal_nested_in_a_modal_portal_is_hit_above_it() {
+    // A Select's list in a Modal: overlay portal > panel > select (zIndex while open) > list portal.
+    let option = node("option", "button", json!({"width":100,"height":30}), vec![]);
+    let mut list = node(
+        "list",
+        "column",
+        json!({"position":"absolute","top":40,"left":0,"width":100,"height":30}),
+        vec![option],
+    );
+    list.portal = true;
+    list.dismiss_on_outside = true;
+    let select = node(
+        "select",
+        "column",
+        json!({"position":"relative","width":100,"height":30,"zIndex":100}),
+        vec![list],
+    );
+    let panel = node(
+        "panel",
+        "column",
+        json!({"width":160,"height":40}),
+        vec![select],
+    );
+    let mut overlay = node(
+        "overlay",
+        "button",
+        json!({"position":"absolute","top":0,"left":0,"right":0,"bottom":0}),
+        vec![panel],
+    );
+    overlay.portal = true;
+    let mut tree = Tree::new(root(vec![overlay]));
+    tree.compute(300.0, 200.0).unwrap();
+    let rect = tree.entries["option"].rect;
+    tree.pointer_move(rect.x0 + 10.0, rect.y0 + 10.0);
+    assert_eq!(
+        tree.hovered.as_deref(),
+        Some("option"),
+        "the list is hit, not the overlay"
+    );
+    tree.pointer_down();
+    let up = tree.pointer_up();
+    assert!(
+        up.iter()
+            .any(|event| event["type"] == "click" && event["id"] == "option"),
+        "the option is clicked: {up:?}"
+    );
+}

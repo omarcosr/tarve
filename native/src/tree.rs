@@ -1839,14 +1839,21 @@ impl Tree {
             .map(|(id, _)| id.clone())
             .collect();
         let mut portals = self.portal_roots();
-        portals.sort_by(|a, b| {
-            self.stacking
-                .get(a)
-                .copied()
-                .unwrap_or(0.0)
-                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
-        });
-        self.portal_order = portals;
+        // A portal inside another stacks at least as high (ties keep document order: inner above).
+        let level = |id: &String| {
+            let mut level = self.stacking.get(id).copied().unwrap_or(0.0);
+            let mut parent = self.entries[id].parent.as_deref();
+            while let Some(parent_id) = parent {
+                if self.entries[parent_id].node.portal {
+                    level = level.max(self.stacking.get(parent_id).copied().unwrap_or(0.0));
+                }
+                parent = self.entries[parent_id].parent.as_deref();
+            }
+            level
+        };
+        let mut levels: Vec<(f32, String)> = portals.drain(..).map(|id| (level(&id), id)).collect();
+        levels.sort_by(|a, b| a.0.total_cmp(&b.0));
+        self.portal_order = levels.into_iter().map(|(_, id)| id).collect();
     }
     /// Whether the hit-testing caches match a fresh rebuild and every node
     /// with a motion is tracked as animating.
@@ -1895,21 +1902,21 @@ impl Tree {
         }
         self.order
             .iter()
-            .filter(|id| {
-                if !self.entries[*id].node.portal {
-                    return false;
-                }
-                let mut parent = self.entries[*id].parent.as_deref();
-                while let Some(parent_id) = parent {
-                    if self.entries[parent_id].node.portal {
-                        return false;
-                    }
-                    parent = self.entries[parent_id].parent.as_deref();
-                }
-                true
-            })
+            .filter(|id| self.is_portal_root(id))
             .cloned()
             .collect()
+    }
+
+    /// A portal painted and hit-tested as its own layer: every portal but one whose parent
+    /// is a portal (that parent draws it in place). One nested deeper (a Select's list in a
+    /// Modal) is a layer too, after its ancestor's in document order, so it shows above it.
+    pub(super) fn is_portal_root(&self, id: &str) -> bool {
+        let entry = &self.entries[id];
+        entry.node.portal
+            && entry
+                .parent
+                .as_deref()
+                .is_none_or(|parent| !self.entries[parent].node.portal)
     }
 
     pub fn new(root: Node) -> Self {
@@ -4630,15 +4637,8 @@ impl Tree {
         let root_rect = self.entries[&self.root].rect;
         self.paint_node(&self.root.clone(), Vec2::ZERO, scale, root_rect, target);
         self.paint_status_bar_strip(scale, target);
-        let mut portals = self.portal_roots();
-        portals.sort_by(|a, b| {
-            self.stacking
-                .get(a)
-                .copied()
-                .unwrap_or(0.0)
-                .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
-        });
-        for portal in portals {
+        // In the order hit testing uses (`refresh_stacking`).
+        for portal in self.portal_order.clone() {
             let offset = self.ancestor_scroll_offset(&portal);
             self.paint_node(&portal, offset, scale, root_rect, target);
         }
