@@ -1,5 +1,10 @@
 import {
   AnimatePresence,
+  Button,
+  hoverLens,
+  resolveGlass,
+  ToggleGroup,
+  type GlassOptions,
   Column,
   Glass,
   Icon,
@@ -81,40 +86,36 @@ function Wallpaper(): VNode {
   );
 }
 
-function TabItem({ index, icon, label }: { index: number; icon: IconName; label: string }) {
-  const active = tab === index;
+/** The look every glass control here shares: the sheet's variant and appearance. */
+const glassLook = (): GlassOptions => ({ variant, appearance: dark ? "dark" : "light" });
+
+function TabLabel({ icon, label, active }: { icon: IconName; label: string; active: boolean }) {
+  const color = active ? "#007aff" : dark ? "#ffffffcc" : "#1c1c1ecc";
   return (
-    <Pressable id={`tab-${index}`} control={{ role: "tab", label, selected: active }} onClick={() => { tab = index; }}
-      style={{
-        flex: 1, height: 48, radius: 24, align: "center", justify: "center", gap: 2, direction: "column",
-        background: active ? (dark ? "#ffffff2e" : "#ffffffcc") : "#00000000",
-        transition: { background: { duration: 220, easing: "easeOut" } },
-        hover: { background: active ? (dark ? "#ffffff38" : "#ffffffdd") : (dark ? "#ffffff14" : "#ffffff55") }
-      }}>
-      <Icon name={icon} size={20} color={active ? "#007aff" : dark ? "#ffffffcc" : "#1c1c1ecc"} />
-      <Text size={10} weight={600} color={active ? "#007aff" : dark ? "#ffffffcc" : "#1c1c1ecc"}>{label}</Text>
-    </Pressable>
+    <Column gap={2} align="center">
+      <Icon name={icon} size={20} color={color} />
+      <Text size={10} weight={600} color={color}>{label}</Text>
+    </Column>
   );
 }
 
+const tabs: { icon: IconName; label: string }[] = [
+  { icon: "house", label: "Home" }, { icon: "star", label: "New" }, { icon: "folder", label: "Library" }, { icon: "user", label: "You" },
+];
+
 function TabBar() {
-  const appearance = dark ? "dark" : "light";
+  // The core glass ToggleGroup: one lens slides to the chosen tab, a drop of glass rises under the pointer.
   return (
     <Row id="tab-bar-row" style={{ position: "absolute", left: 16, right: 16, bottom: 22, gap: 10, align: "center" }}>
-      <Glass id="tab-bar" variant={variant} appearance={appearance} radius={30} style={{ flex: 1, height: 60, padding: 6, direction: "row", gap: 4 }}>
-        <TabItem index={0} icon="house" label="Home" />
-        <TabItem index={1} icon="star" label="New" />
-        <TabItem index={2} icon="folder" label="Library" />
-        <TabItem index={3} icon="user" label="You" />
-      </Glass>
+      <ToggleGroup id="tab-bar" glass={glassLook()} value={String(tab)} onValueChange={next => { if (next) tab = Number(next); }}
+        style={{ flex: 1, height: 60 }}
+        items={tabs.map((item, index) => ({ value: String(index), label: item.label, content: <TabLabel icon={item.icon} label={item.label} active={tab === index} /> }))} />
       <AnimatePresence id="search-presence" present={!searching} exit={{ opacity: 0, width: 0 }} enter={{ opacity: 0 }}
         transition={{ opacity: { duration: 180 }, width: { duration: 260, easing: "easeInOut" } }}>
-        <Glass id="search-button" variant={variant} appearance={appearance} radius={30} style={{ width: 60, height: 60, align: "center", justify: "center", overflow: "hidden" }}>
-          <Pressable id="search-open" control={{ role: "button", label: "Search" }} onClick={() => { searching = true; }}
-            style={{ width: 60, height: 60, radius: 30, align: "center", justify: "center", hover: { background: dark ? "#ffffff14" : "#ffffff55" } }}>
-            <Icon name="search" size={22} color={dark ? "#ffffffdd" : "#1c1c1edd"} />
-          </Pressable>
-        </Glass>
+        <Button id="search-open" glass={glassLook()} control={{ role: "button", label: "Search" }} onClick={() => { searching = true; }}
+          style={{ width: 60, height: 60, radius: 30, padding: 0 }}>
+          <Icon name="search" size={22} />
+        </Button>
       </AnimatePresence>
     </Row>
   );
@@ -140,13 +141,15 @@ function SearchSheet() {
 }
 
 function ToolButton({ id, icon, label, onClick, active }: { id: string; icon: IconName; label: string; onClick: () => void; active?: boolean }) {
+  // Inside a glass capsule: the pointer raises the core's drop of glass, pressing springs it.
   return (
     <Pressable id={id} control={{ role: "button", label }} onClick={onClick}
       style={{
-        width: 36, height: 36, radius: 18, align: "center", justify: "center",
-        background: active ? "#ff2d55" : "#00000000", transition: { background: { duration: 200 } },
-        hover: { background: active ? "#ff375f" : dark ? "#ffffff1a" : "#ffffff66" }, active: { background: active ? "#e0264c" : dark ? "#ffffff2e" : "#ffffff99" }
+        position: "relative", group: !active, width: 36, height: 36, radius: 18, align: "center", justify: "center",
+        background: active ? "#ff2d55" : "#00000000", transition: { background: { duration: 200 }, transform: { duration: 420, easing: "spring" } },
+        active: { transform: "scale(0.92)" },
       }}>
+      {active ? null : hoverLens(resolveGlass(glassLook())!, 18)}
       <Icon name={icon} size={18} color={active ? "#ffffff" : dark ? "#ffffffdd" : "#1c1c1edd"} />
     </Pressable>
   );
@@ -260,15 +263,6 @@ function Content() {
 function SettingsSheet() {
   const appearance = dark ? "dark" : "light";
   const fg = dark ? "#ffffff" : "#1c1c1e";
-  const chip = (value: GlassVariant) => (
-    <Pressable id={`variant-${value}`} control={{ role: "radio", label: value, checked: variant === value }} onClick={() => { variant = value; }}
-      style={{
-        height: 34, radius: 17, padding: { left: 14, right: 14 }, align: "center", justify: "center",
-        background: variant === value ? fg : dark ? "#ffffff1f" : "#ffffff99", transition: { background: { duration: 180 } }
-      }}>
-      <Text size={13} weight={600} color={variant === value ? (dark ? "#1c1c1e" : "#ffffff") : fg}>{value}</Text>
-    </Pressable>
-  );
   return (
     <AnimatePresence id="sheet-presence" present={sheet} exit={{ opacity: 0, top: 102 }} enter={{ opacity: 0, top: 102 }}
       transition={{ opacity: { duration: 220 }, top: { duration: 320, easing: "easeOut" } }}>
@@ -281,9 +275,10 @@ function SettingsSheet() {
             <Icon name="x" size={16} color={fg} />
           </Pressable>
         </Row>
-        <Row gap={8}>{chip("regular")}{chip("clear")}{chip("tinted")}</Row>
-        <Switch id="dark-switch" label="Dark appearance" checked={dark} onCheckedChange={next => { dark = next; }} style={{ foreground: fg }} />
-        <Switch id="bar-switch" label="Full-width glass title bar" checked={fullBar} onCheckedChange={next => { fullBar = next; }} style={{ foreground: fg }} />
+        <ToggleGroup id="variant" glass={glassLook()} value={variant} onValueChange={next => { if (next) variant = next as GlassVariant; }}
+          items={[{ value: "regular", label: "regular" }, { value: "clear", label: "clear" }, { value: "tinted", label: "tinted" }]} />
+        <Switch id="dark-switch" glass={glassLook()} label="Dark appearance" checked={dark} onCheckedChange={next => { dark = next; }} />
+        <Switch id="bar-switch" glass={glassLook()} label="Full-width glass title bar" checked={fullBar} onCheckedChange={next => { fullBar = next; }} />
         <Column gap={6}>
           <Text size={13} color={dark ? "#ffffffa0" : "#1c1c1ea0"}>Volume</Text>
           <Slider id="volume" label="Volume" value={volume} min={0} max={1} step={0.01} onValueChange={next => { volume = next; }}
