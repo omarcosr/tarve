@@ -79,6 +79,7 @@ pub(super) fn animation_tracks(
         "easeIn" => MotionEasing::EaseIn,
         "easeOut" => MotionEasing::EaseOut,
         "easeInOut" => MotionEasing::EaseInOut,
+        "spring" => MotionEasing::Spring,
         _ => MotionEasing::Ease,
     };
     for (property, start) in from {

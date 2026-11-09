@@ -950,6 +950,61 @@ fn css_cursor_keywords_and_grid_spans() {
 }
 
 #[test]
+fn equal_fr_columns_size_to_the_widest_item_and_an_absolute_child_fills_its_cell() {
+    // A segmented control: columns as wide as the widest segment, a lens in the chosen cell.
+    let cell = |id: &str, column: &str, width: f64| {
+        node(
+            id,
+            "view",
+            json!({"gridColumn": column, "gridRow": "1", "width": width, "height": 32}),
+            vec![],
+        )
+    };
+    // The lens shares the chosen item's cell (explicit placement may overlap) and stretches over it.
+    let lens = node(
+        "lens",
+        "view",
+        json!({"gridColumn":"3","gridRow":"1"}),
+        vec![],
+    );
+    let group = node(
+        "group",
+        "view",
+        json!({"display":"grid","columns":"repeat(3, 1fr)","rows":"32px","position":"relative","height":32}),
+        vec![
+            lens,
+            cell("a", "1", 30.0),
+            cell("b", "2", 80.0),
+            cell("c", "3", 40.0),
+        ],
+    );
+    let capsule = node(
+        "capsule",
+        "view",
+        json!({"direction":"row","padding":4}),
+        vec![group],
+    );
+    let row = node("row", "view", json!({"direction":"row"}), vec![capsule]);
+    let mut tree = Tree::new(root(vec![row]));
+    tree.compute(800.0, 600.0).unwrap();
+    let rect = |id: &str| tree.entries[id].rect;
+    assert!(
+        (rect("capsule").width() - 248.0).abs() < 0.5,
+        "3 × 80 + padding: {:?}",
+        rect("capsule")
+    );
+    let lens = rect("lens");
+    assert!(
+        (lens.x0 - (rect("group").x0 + 160.0)).abs() < 0.5,
+        "{lens:?}"
+    );
+    assert!(
+        (lens.width() - 80.0).abs() < 0.5 && (lens.height() - 32.0).abs() < 0.5,
+        "{lens:?}"
+    );
+}
+
+#[test]
 fn custom_window_chrome_border_is_suppressed_when_maximized_or_fullscreen() {
     let child = node(
         "child",
@@ -5617,7 +5672,7 @@ fn protocol_rejects_invalid_native_motion_values_without_tightening_static_opaci
     let invalid_transition = root(vec![node(
         "panel",
         "view",
-        json!({"transition":{"opacity":{"duration":100,"easing":"spring"}}}),
+        json!({"transition":{"opacity":{"duration":100,"easing":"bounce"}}}),
         vec![],
     )]);
     assert!(
@@ -6730,6 +6785,57 @@ fn hover_transitions_interpolate_colour_and_box_shadow_then_go_idle() {
     assert!(
         fill_near(&reversed, [0.5, 0.5, 0.5]),
         "re-entering mid-way starts from the displayed value"
+    );
+}
+
+#[test]
+fn hover_transitions_the_glass_lens_and_group_hover_transitions_too() {
+    // Glass whose lens deepens under the pointer: the change animates instead of switching.
+    let lens = node(
+        "lens",
+        "view",
+        json!({
+            "width": 120, "height": 60, "background": "#ffffff33",
+            "glass": {"blur": 8, "refraction": 10, "highlight": 0.5, "magnify": 0.05},
+            "hover": {"glass": {"blur": 8, "refraction": 30, "highlight": 1, "magnify": 0.15}},
+            "transition": {"glass": {"duration": 100, "easing": "spring"}}
+        }),
+        vec![],
+    );
+    // A drop inside a `group` row fades in when the row is hovered.
+    let drop = node(
+        "drop",
+        "view",
+        json!({
+            "width": 40, "height": 20, "opacity": 0, "groupHover": {"opacity": 1},
+            "transition": {"opacity": {"duration": 100, "easing": "linear"}}
+        }),
+        vec![],
+    );
+    let row = node(
+        "row",
+        "pressable",
+        json!({"width": 120, "height": 60, "group": true}),
+        vec![drop],
+    );
+    let mut tree = Tree::new(root(vec![lens, row]));
+    tree.compute(400.0, 400.0).unwrap();
+    tree.advance_motion(0.0);
+    tree.pointer_move(20.0, 15.0);
+    tree.advance_motion(0.0);
+    assert_eq!(
+        tree.active_motion_count(),
+        1,
+        "the lens animates to its hover glass"
+    );
+    tree.advance_motion(200.0);
+    assert_eq!(tree.active_motion_count(), 0);
+    tree.pointer_move(20.0, 75.0);
+    tree.advance_motion(200.0);
+    assert_eq!(
+        tree.active_motion_count(),
+        2,
+        "the drop fades in with the group, the lens goes back"
     );
 }
 

@@ -43,6 +43,7 @@ pub(super) const MOTION_PROPERTIES: &[&str] = &[
     "boxShadow",
     "textShadow",
     "transform",
+    "glass",
 ];
 
 /// One `positionTryFallbacks` option: mirror across the containing block on
@@ -152,7 +153,7 @@ pub(super) fn validate_motion(node: &Node) -> Result<(), String> {
                 };
                 if !matches!(
                     easing,
-                    "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut"
+                    "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut" | "spring"
                 ) {
                     return Err(format!(
                         "Unsupported transition easing on {}: {easing}",

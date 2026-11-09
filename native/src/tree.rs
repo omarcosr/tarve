@@ -146,10 +146,12 @@ const MOTION_PROPERTIES: &[&str] = &[
     "boxShadow",
     "textShadow",
     "transform",
+    "glass",
 ];
 /// Paint-only properties that can also transition when hover/active/focus/
 /// disabled changes. Layout properties only animate on JS updates.
 const STATE_MOTION_PROPERTIES: &[&str] = &[
+    "glass",
     "transform",
     "opacity",
     "radius",
@@ -171,6 +173,8 @@ enum MotionEasing {
     EaseIn,
     EaseOut,
     EaseInOut,
+    /// A damped spring settling within the duration: one soft overshoot, as Liquid Glass moves.
+    Spring,
 }
 
 #[derive(Clone, Debug)]
@@ -258,6 +262,7 @@ impl MotionTrack {
                     1.0 - (-2.0 * progress + 2.0).powi(3) / 2.0
                 }
             }
+            MotionEasing::Spring => spring(progress),
         };
         let value = self
             .from
@@ -271,6 +276,26 @@ impl MotionTrack {
     fn end_ms(&self) -> f64 {
         self.start_ms + self.duration_ms * self.repeat.map_or(1.0, |(iterations, _)| iterations)
     }
+}
+
+/// Damped spring over the unit interval: about 9% overshoot at 0.4, settled (within 0.3%) at 1.
+fn spring(progress: f64) -> f64 {
+    if progress >= 1.0 {
+        return 1.0;
+    }
+    1.0 - (-6.0 * progress).exp() * (std::f64::consts::PI * 2.5 * progress).cos()
+}
+
+#[cfg(test)]
+#[test]
+fn spring_overshoots_once_and_settles() {
+    assert_eq!(spring(0.0), 0.0);
+    assert_eq!(spring(1.0), 1.0);
+    let peak = (1..100)
+        .map(|i| spring(f64::from(i) / 100.0))
+        .fold(0.0, f64::max);
+    assert!(peak > 1.05 && peak < 1.12, "peak {peak}");
+    assert!((spring(0.95) - 1.0).abs() < 0.01);
 }
 
 fn motion_transition(node: &Node, property: &str) -> Option<(f64, f64, MotionEasing)> {
@@ -296,6 +321,7 @@ fn motion_transition(node: &Node, property: &str) -> Option<(f64, f64, MotionEas
         "easeIn" => MotionEasing::EaseIn,
         "easeOut" => MotionEasing::EaseOut,
         "easeInOut" => MotionEasing::EaseInOut,
+        "spring" => MotionEasing::Spring,
         _ => MotionEasing::Ease,
     };
     Some((duration, delay, easing))
@@ -387,6 +413,17 @@ fn motion_value(node: &Node, property: &str, state: VisualState) -> Option<Vec<f
         "transform" => Some(transform_vector(
             visual_value(node, "transform", state).as_object(),
         )),
+        // The lens of a glass box: blur, saturate, refraction, highlight, magnify. A box with no
+        // glass in a state has nothing to move from or to (the merge key never animates).
+        "glass" => glass_params(visual_value(node, "glass", state)).map(|glass| {
+            vec![
+                glass.blur,
+                glass.saturate,
+                glass.refraction,
+                glass.highlight,
+                glass.magnify,
+            ]
+        }),
         "textShadow" => Some(
             text_shadow(node, state)
                 .map(|(x, y, blur, colour)| {
@@ -2177,6 +2214,8 @@ impl Tree {
             .hovered
             .iter()
             .chain(self.hover_styled.iter())
+            // A `groupHover` change transitions as any state change does (CSS `.group:hover .x`).
+            .chain(self.group_hovered.iter())
             .chain(self.pressed.iter())
             .chain(self.focused.iter())
             .cloned()
@@ -5427,7 +5466,18 @@ impl Tree {
         let glass = if suppress_root_chrome {
             None
         } else {
-            glass_params(visual_value(&node, "glass", state))
+            let glass = glass_params(visual_value(&node, "glass", state));
+            match (glass, animated.get("glass")) {
+                (Some(mut glass), Some(lens)) if lens.len() == 5 => {
+                    glass.blur = lens[0].clamp(0.0, 64.0);
+                    glass.saturate = lens[1].clamp(0.0, 4.0);
+                    glass.refraction = lens[2].clamp(0.0, 48.0);
+                    glass.highlight = lens[3].clamp(0.0, 1.0);
+                    glass.magnify = lens[4].clamp(0.0, 0.3);
+                    Some(glass)
+                }
+                (glass, _) => glass,
+            }
         };
         // Inside its own offscreen pass the filter layer blurs it.
         let blur = if self.filtering.as_deref() == Some(id) {

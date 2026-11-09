@@ -7,8 +7,9 @@ export type Renderer = "auto" | "gpu" | "cpu";
 /** Numeric properties: usable in `motionFrom` and AnimatePresence enter/exit values. */
 export type NumericMotionProperty = "width" | "height" | "top" | "right" | "bottom" | "left" | "opacity" | "radius";
 /** Colour and shadow properties also transition on hover/active/focus/disabled changes. */
-export type MotionProperty = NumericMotionProperty | "background" | "foreground" | "borderColor" | "boxShadow" | "textShadow" | "transform";
-export type MotionEasing = "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut";
+export type MotionProperty = NumericMotionProperty | "background" | "foreground" | "borderColor" | "boxShadow" | "textShadow" | "transform" | "glass";
+/** `spring`: a damped spring with one soft overshoot, settled at the end of the duration. */
+export type MotionEasing = "linear" | "ease" | "easeIn" | "easeOut" | "easeInOut" | "spring";
 export interface MotionTransition {
   /** Duration in milliseconds. Defaults to 200 when omitted. */
   duration?: number;
