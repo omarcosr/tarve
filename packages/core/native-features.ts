@@ -77,7 +77,11 @@ export function nativeFeaturesFor(source: string, platform: string): NativeFeatu
   if (syntax) reasons.syntax = syntax;
   const media = ["Audio", "Video"].find(name => imports.has(name)) ?? ["audio", "video"].find(element);
   if (media) reasons.media = `<${media.toLowerCase()}>`;
-  const url = [...source.matchAll(/["'`](https?:\/\/[^"'`\s]*)/g)].map(match => match[1]!).find(url => !NAMESPACE.test(url));
+  // The native side loads URLs only as an image or media `src`: a URL string matters when
+  // something here can take one (a URL the app fetches itself goes through the runtime's fetch).
+  const loader = ["Image", "Avatar", "Markdown", "Audio", "Video"].find(name => imports.has(name))
+    ?? ["image", "img", "video", "audio", "markdown"].find(element);
+  const url = loader && [...source.matchAll(/["'`](https?:\/\/[^"'`\s]*)/g)].map(match => match[1]!).find(url => !NAMESPACE.test(url));
   if (url) reasons.net = url.length > 60 ? `${url.slice(0, 57)}...` : url;
   // Windows draws on D3D11 (CPU fallback); Vello over wgpu is the GPU renderer elsewhere.
   if (platform !== "win32" && !/\brenderer\s*:\s*["']cpu["']/.test(source)) reasons["vello-gpu"] = "GPU renderer";
@@ -88,15 +92,17 @@ export async function detectNativeFeatures(entrypoint: string, platform: string)
   return nativeFeaturesFor(await appSource(entrypoint), platform);
 }
 
-/** `all`, `auto`, or a comma list of features; `TARVE_NATIVE_FEATURES` and package.json `tarve.nativeFeatures` set the default. */
+/** `all`, `auto`, `core` (none of the optional features), or a comma list of features;
+ * `TARVE_NATIVE_FEATURES` and package.json `tarve.nativeFeatures` set the default. */
 export function parseNativeFeatures(value: string | readonly string[] | undefined): NativeFeature[] | "all" | "auto" {
   if (value === undefined) return "auto";
   const list = typeof value === "string" ? value.split(",") : [...value];
   const names = list.map(name => name.trim()).filter(Boolean);
   if (names.length === 1 && (names[0] === "all" || names[0] === "auto")) return names[0];
+  if (names.length === 1 && (names[0] === "core" || names[0] === "none")) return [];
   for (const name of names) {
     if (!(NATIVE_FEATURES as readonly string[]).includes(name)) {
-      throw new Error(`Unknown native feature: ${name}. Expected all, auto or a list of ${NATIVE_FEATURES.join(", ")}.`);
+      throw new Error(`Unknown native feature: ${name}. Expected all, auto, core or a list of ${NATIVE_FEATURES.join(", ")}.`);
     }
   }
   return NATIVE_FEATURES.filter(feature => names.includes(feature));

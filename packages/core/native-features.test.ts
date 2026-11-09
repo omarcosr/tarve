@@ -15,12 +15,20 @@ test("components, intrinsics and URLs pull their features", () => {
   expect(nativeFeaturesFor(`jsx("video", { src: "clip.mp4" })`, "win32").features).toEqual(["media"]);
   expect(nativeFeaturesFor(`jsx("img", { src: "https://example.com/a.png" })`, "win32").features).toEqual(["net"]);
   expect(nativeFeaturesFor(`jsx("svg", { xmlns: "http://www.w3.org/2000/svg" })`, "win32").features).toEqual([]);
+  expect(nativeFeaturesFor(`import { Image } from "@tarve/core";\nconst cover = "https://example.com/c.jpg";`, "win32").features).toEqual(["net"]);
+});
+
+test("URLs the app only fetches or lists need no native net (#19)", () => {
+  const source = `import { Button, Text } from "@tarve/core";\nconst mirrors = ["https://example.com/redis.zip"];\nawait fetch(mirrors[0]);`;
+  expect(nativeFeaturesFor(source, "win32").features).toEqual([]);
 });
 
 test("explicit feature lists are validated", () => {
   expect(parseNativeFeatures(undefined)).toBe("auto");
   expect(parseNativeFeatures("all")).toBe("all");
   expect(parseNativeFeatures("net, media")).toEqual(["net", "media"]);
+  expect(parseNativeFeatures("core")).toEqual([]);
+  expect(parseNativeFeatures("none")).toEqual([]);
   expect(() => parseNativeFeatures("gpu")).toThrow(/Unknown native feature/);
 });
 

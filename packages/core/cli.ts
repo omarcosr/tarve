@@ -48,7 +48,7 @@ function usage(target?: BuildTarget): string {
     "  --smol                          smaller JS heap, collected more often (bun, node)",
     "  --trim                          build (bun): leave unused Bun/Node.js APIs out of the executable, when Bun supports it",
     "  --aot                           build (bun, experimental): compile the app to machine code; with --trim also drops the JIT",
-    "  --native-features auto|all|<list> build: native subsystems (vello-gpu, syntax, markdown, net, media); auto = what the app uses",
+    "  --native-features auto|all|core|<list> build: native subsystems (vello-gpu, syntax, markdown, net, media); auto = what the app uses, core = none",
     "  --name App, --version 1.0.0     app metadata (executable, window, app identity)",
     "  --icon icon.png                 app icon: .png (square, 256 px+) or .ico",
     "  --app-id Acme.App               Windows AppUserModelID / Linux app id",
