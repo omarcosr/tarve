@@ -1,5 +1,6 @@
 import { _nativeJsx, type BaseProps, type VNode } from "../jsx-runtime";
 import { theme } from "../theme";
+import { glassControl, glassWash, resolveGlass, type GlassProp } from "./glass";
 
 export type InputType = "text" | "password" | "email" | "number" | "search" | "tel" | "url";
 
@@ -11,12 +12,16 @@ export interface InputProps extends BaseProps {
   onChange?: (value: string) => void;
   /** Enter (with or without modifiers) submits the current value. */
   onSubmit?: (value: string) => void;
+  /** A Liquid Glass capsule field. */
+  glass?: GlassProp;
 }
 
 const inputTypes = new Set<InputType>(["text", "password", "email", "number", "search", "tel", "url"]);
 const numberEditPattern = /^[+-]?(?:\.?|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d*)?)$/;
 
-export function Input({ type = "text", value, style, ...props }: InputProps): VNode {
+export function Input({ type = "text", value, glass, style, ...props }: InputProps): VNode {
+  const resolved = resolveGlass(glass);
+  const surface = resolved ? { ...resolved, tint: undefined } : undefined;
   if (!inputTypes.has(type)) throw new TypeError(`Unsupported Input type: ${String(type)}`);
   if (type === "number" && value !== undefined && !numberEditPattern.test(value)) {
     throw new TypeError("Input type=number value must be a valid numeric edit value");
@@ -40,6 +45,13 @@ export function Input({ type = "text", value, style, ...props }: InputProps): VN
       lineHeight: theme.font.lineHeight,
       fontSize: theme.font.size,
       userSelect: "text",
+      ...(surface ? {
+        ...glassControl(surface, 19, { press: false }),
+        padding: { left: 16, right: 16 },
+        placeholderColor: glassWash(surface, 50),
+        caretColor: resolved!.tint ?? "#007aff",
+        hover: {},
+      } : {}),
       ...style,
     },
   });

@@ -3,6 +3,8 @@ import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
 import { Column, Pressable, Row, Text, TextArea, Input, View, type ButtonProps } from "./components";
 import { Checkbox, RadioGroup, Slider, Switch } from "./controls";
 import { Select, type SelectOption } from "./select";
+import { scopedState } from "./render-scope";
+import { glassControl, glassInk, glassLens, hoverLens, over, resolveGlass, type GlassProp, type ResolvedGlass } from "./components/glass";
 import { theme } from "./theme";
 
 const c = theme.colors;
@@ -295,10 +297,43 @@ export interface ToggleProps extends BaseProps {
   variant?: "default" | "outline";
   size?: ButtonProps["size"];
   onPressedChange?: (pressed: boolean) => void;
+  /** Liquid Glass capsule; pressed, it fills with the tint (default: the theme's primary). */
+  glass?: GlassProp;
 }
-export function Toggle({ pressed, label, disabled, variant = "default", size = "default", onPressedChange,
+
+/** The pressed fill of glass toggles: the glass's tint, or the theme's primary. */
+function pressedGlass(glass: ResolvedGlass): { background: string; foreground: string } {
+  return glass.tint
+    ? { background: glass.tint, foreground: "#ffffff" }
+    : { background: `${c.primary}/88`, foreground: c.primaryForeground };
+}
+
+/** A glass toggle or toggle group item's label in the glass's ink. */
+function glassLabel(content: Child, ink: string): Child {
+  return typeof content === "string" || typeof content === "number"
+    ? jsx(Text, { weight: 600, color: ink, style: { transition: { foreground: { duration: 260, easing: "easeOut" } } }, children: content })
+    : content;
+}
+
+const LENS_POSITIONS = Symbol("tarve.glassLensPositions");
+export function Toggle({ pressed, label, disabled, variant = "default", size = "default", onPressedChange, glass,
   children, style, ...props }: ToggleProps): VNode {
   const height = { sm: 32, default: 36, lg: 40 }[size ?? "default"];
+  const resolved = resolveGlass(glass);
+  if (resolved) {
+    const fill = pressed ? pressedGlass(resolved) : undefined;
+    return jsx(Pressable, {
+      ...props,
+      disabled,
+      control: { role: "toggle", label, checked: pressed },
+      onClick: () => onPressedChange?.(!pressed),
+      // Off, plain glass: the tint is what pressing fills it with.
+      style: { ...glassControl({ ...resolved, tint: undefined }, height / 2), height, minWidth: height, padding: { left: 12, right: 12 },
+        direction: "row", gap: 6, align: "center", justify: "center", disabled: { opacity: 0.45 },
+        ...(fill ? { background: fill.background, foreground: fill.foreground, hover: { transform: "scale(1.02)" } } : {}), ...style },
+      children: glassLabel(children, fill?.foreground ?? glassInk(resolved)),
+    });
+  }
   return jsx(Pressable, {
     ...props,
     disabled,
@@ -325,8 +360,10 @@ export interface ToggleGroupProps extends BaseProps {
   items: readonly ToggleGroupItem[];
   disabled?: boolean;
   onValueChange?: (value: string | string[]) => void;
+  /** One Liquid Glass capsule holding the items; the chosen ones get a bright pill. */
+  glass?: GlassProp;
 }
-export function ToggleGroup({ type = "single", value, items, disabled, onValueChange, style, id, ...props }: ToggleGroupProps): VNode {
+export function ToggleGroup({ type = "single", value, items, disabled, onValueChange, style, id, glass, ...props }: ToggleGroupProps): VNode {
   if (new Set(items.map(item => item.value)).size !== items.length) throw new TypeError("ToggleGroup item values must be unique");
   if (type === "single" && Array.isArray(value)) throw new TypeError("ToggleGroup single value must be a string");
   if (type === "multiple" && !Array.isArray(value)) throw new TypeError("ToggleGroup multiple value must be an array");
@@ -338,6 +375,63 @@ export function ToggleGroup({ type = "single", value, items, disabled, onValueCh
     if (type === "single") onValueChange?.(selected.includes(item.value) ? "" : item.value);
     else onValueChange?.(selected.includes(item.value) ? selected.filter(entry => entry !== item.value) : [...selected, item.value]);
   };
+  const resolved = resolveGlass(glass);
+  if (resolved) {
+    const ink = glassInk({ ...resolved, tint: undefined });
+    // As the iOS 26 tab bar: the chosen item is lifted into a drop of glass and takes the accent;
+    // the pointer raises a fainter drop over the others.
+    const accent = resolved.tint ?? (resolved.appearance === "dark" ? "#0a84ff" : "#007aff");
+    // Every segment gets the same width, that of the widest label as laid out natively (a grid of
+    // equal `1fr` columns), so the system text size and real glyph widths decide it, never a guess.
+    // Every item is placed in its own column and the lens in the chosen one (explicit placements
+    // may share a cell): it stretches over its item, so it always lines up with it.
+    const at = items.findIndex(item => selected.includes(item.value));
+    const sliding = type === "single";
+    const surface = glassControl({ ...resolved, tint: undefined }, 20, { press: false });
+    // Drops inside the capsule read the backdrop from under it: they take its frost and veil, lighter.
+    const inside = { veil: surface.background as string, blur: (surface.glass as { blur: number }).blur };
+    // On a change the lens is laid out in its new cell and starts from where the old one was, one
+    // column width per step (`xPercent`, as columns are equal), stretched along the way: it springs
+    // over and gathers again on arrival, like a drop of gel.
+    const lenses = scopedState(LENS_POSITIONS, () => new Map<string, number>());
+    const key = id ?? items.map(item => item.value).join("|");
+    const from = lenses.get(key) ?? at;
+    if (at >= 0) lenses.set(key, at);
+    const step = at >= 0 ? from - at : 0;
+    // The capsule's height (40 by default, taller for a tab bar with icon over label) sets the row,
+    // and items, lens and hover drops are pills of the row's height, concentric with the capsule.
+    const height = typeof style?.height === "number" ? style.height : 40;
+    const pill = (height - 8) / 2;
+    const lens = sliding && at >= 0 ? jsx(View, {
+      ...(id ? { id: `${id}-lens-${at}` } : {}),
+      ...(step !== 0 ? { motionFrom: { transform: { xPercent: step * 100, scaleX: 1 + Math.min(0.24, 0.12 * Math.abs(step)), originX: step > 0 ? 1 : 0 } } } : {}),
+      // Stretched over its cell (the grid's default alignment), so it covers exactly its item.
+      style: { gridColumn: String(at + 1), gridRow: "1", radius: pill,
+        ...glassLens(resolved, "selected"), background: over(resolved.appearance === "dark" ? "#ffffff17" : "#ffffff59", inside.veil), pointerEvents: "none",
+        transition: { transform: { duration: 620, easing: "spring" } } },
+    }, `lens-${at}`) : null;
+    return jsx(Row, { ...props, ...(id ? { id } : {}),
+      control: type === "single" ? { role: "radiogroup", orientation: "horizontal" } : { role: "togglegroup", orientation: "horizontal" },
+      style: { ...surface, position: "relative", display: "grid", columns: `repeat(${items.length}, 1fr)`, rows: `${height - 8}px`, padding: 4, align: "stretch", shrink: 0, ...style, height, radius: height / 2 },
+      children: [lens, ...items.map((item, index) => {
+        const pressed = selected.includes(item.value);
+        const inactive = disabled || item.disabled;
+        return jsx(Pressable, {
+          ...(id ? { id: `${id}-item-${item.value}` } : {}),
+          disabled: inactive,
+          control: type === "single" ? { role: "radio", label: item.label, checked: pressed } : { role: "toggle", label: item.label, checked: pressed },
+          onClick: () => choose(item),
+          style: { position: "relative", gridColumn: String(index + 1), gridRow: "1", padding: { left: 16, right: 16 }, radius: pill, direction: "row", gap: 6, align: "center", justify: "center",
+            ...(pressed && !sliding ? glassLens(resolved, "selected") : { background: "#00000000" }),
+            group: !pressed && !inactive,
+            transition: { background: { duration: 220, easing: "easeOut" }, transform: { duration: 480, easing: "spring" } },
+            active: { transform: "scale(0.94)" },
+            disabled: { opacity: 0.4 } },
+          children: [pressed || inactive ? null : hoverLens(resolved, pill, inside), glassLabel(item.content ?? item.label, pressed ? accent : ink)],
+        }, item.value);
+      })],
+    });
+  }
   const children = items.map(item => {
     const pressed = selected.includes(item.value);
     const inactive = disabled || item.disabled;

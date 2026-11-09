@@ -6,8 +6,8 @@
  */
 export { View, Row, Column, Portal } from "./components/layout";
 export type { ViewProps, PortalProps } from "./components/layout";
-export { Glass, glassChrome, glassSurface, over } from "./components/glass";
-export type { GlassProps, GlassVariant } from "./components/glass";
+export { Glass, glassChrome, glassControl, glassInk, glassLens, glassPopup, hoverLens, glassSurface, glassWash, over, resolveGlass } from "./components/glass";
+export type { GlassAppearance, GlassOptions, GlassProp, GlassProps, GlassVariant, ResolvedGlass } from "./components/glass";
 export { Window } from "./components/window";
 export type { WindowProps, WindowCloseRequestEvent } from "./components/window";
 export { Pressable } from "./components/pressable";

@@ -4,6 +4,7 @@ import { _nativeJsx, jsx, type BaseProps, type Child, type VNode } from "../jsx-
 import { buttonVariants, theme, type ButtonVariant } from "../theme";
 import { Icon } from "./icon";
 import { Text } from "./text";
+import { glassControl, resolveGlass, type GlassProp } from "./glass";
 
 export interface ButtonProps extends BaseProps {
   variant?: ButtonVariant;
@@ -12,6 +13,11 @@ export interface ButtonProps extends BaseProps {
   control?: Control;
   onClick?: () => void;
   onHover?: (hovered: boolean) => void;
+  /**
+   * Liquid Glass capsule: `true`, a variant or options. `destructive` tints it red,
+   * `ghost` is clear glass without a shadow, `glass={{ tint }}` makes a prominent coloured one.
+   */
+  glass?: GlassProp;
 }
 
 function textOnlyContent(child: Child): boolean {
@@ -107,9 +113,32 @@ function composedContent(child: Child, foreground: string, fonts = true, font: {
 
 const BUTTON_HEIGHT = { sm: 32, default: 36, lg: 40 } as const;
 
-export function Button({ variant = "default", size = "default", style, disabled, control, children, ...props }: ButtonProps): VNode {
+/** The variant's look as glass: plain glass, red-tinted for `destructive`, clear for `ghost`. */
+function glassButton(glass: GlassProp, variant: ButtonVariant, height: number): Style {
+  const resolved = resolveGlass(glass)!;
+  const tint = resolved.tint ?? (variant === "destructive" ? `${theme.colors.destructive}/85` : undefined);
+  const ghost = variant === "ghost" && !tint;
+  return {
+    ...glassControl({ ...resolved, tint, ...(ghost ? { variant: "clear" as const } : {}) }, height / 2, { shadow: !ghost }),
+    padding: { left: Math.round(height * 0.45), right: Math.round(height * 0.45) },
+    disabled: { opacity: 0.45 },
+  };
+}
+
+export function Button({ variant = "default", size = "default", style, disabled, control, glass, children, ...props }: ButtonProps): VNode {
   const height = BUTTON_HEIGHT[size];
-  const buttonStyle: Style = {
+  const buttonStyle: Style = glass ? {
+    height,
+    fontSize: 14,
+    lineHeight: theme.font.lineHeight,
+    fontWeight: 600,
+    userSelect: "none",
+    align: "center",
+    justify: "center",
+    shrink: 0,
+    ...glassButton(glass, variant, height),
+    ...style,
+  } : {
     height,
     padding: { left: 14, right: 14 },
     radius: theme.radius.sm,

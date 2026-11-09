@@ -3,6 +3,7 @@ import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
 import { Column, Icon, Pressable, Row, Text, View, type ViewProps } from "./components";
 import { theme } from "./theme";
 import { isSignal, type Bindable } from "./signal";
+import { glassInk, glassWash, resolveGlass, type GlassProp } from "./components/glass";
 
 const c = theme.colors;
 
@@ -32,8 +33,31 @@ export interface SwitchProps extends BaseProps {
   label: string;
   disabled?: boolean;
   onCheckedChange?: (checked: boolean) => void;
+  /** The iOS 26 switch: a wide track (green, or the glass's tint, when on) under a glass knob. */
+  glass?: GlassProp;
 }
-export function Switch({ checked, label, disabled, onCheckedChange, style, ...props }: SwitchProps): VNode {
+export function Switch({ checked, label, disabled, onCheckedChange, glass, style, ...props }: SwitchProps): VNode {
+  const resolved = resolveGlass(glass);
+  if (resolved) {
+    const surface = { ...resolved, tint: undefined };
+    const ink = typeof style?.foreground === "string" ? style.foreground : glassInk(surface);
+    return jsx(Pressable, {
+      ...props, disabled, control: { role: "switch", label, checked },
+      onClick: () => onCheckedChange?.(!checked),
+      style: { direction: "row", align: "center", justify: "between", gap: 12, minHeight: 32, background: "#00000000",
+        disabled: { opacity: 0.45 }, ...style },
+      children: [
+        jsx(Text, { color: ink, children: label }),
+        jsx(View, { style: { position: "relative", width: 54, height: 26, shrink: 0, radius: 13,
+          background: checked ? resolved.tint ?? "#34c759" : glassWash(surface, 16),
+          transition: { background: { duration: 240, easing: "easeOut" } } },
+          children: jsx(View, { style: { position: "absolute", top: 2, left: checked ? 22 : 2, width: 30, height: 22, radius: 11,
+            background: "#fffffff2", glass: { blur: 0.5, saturate: 1, refraction: 10, highlight: 1, magnify: 0.12 },
+            boxShadow: [{ y: 2, blur: 6, color: "#00000033" }, { y: 0, blur: 1, color: "#0000001a" }],
+            transition: { left: { duration: 300, easing: "easeOut" } } } }) }),
+      ],
+    });
+  }
   return jsx(Pressable, {
     ...props, disabled, control: { role: "switch", label, checked },
     onClick: () => onCheckedChange?.(!checked),

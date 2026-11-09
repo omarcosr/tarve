@@ -7,7 +7,7 @@ import type { SvgNode } from "./svg";
 import { container, Row, type ViewProps } from "./layout";
 import { Pressable } from "./pressable";
 import { Text } from "./text";
-import { glassSurface, type GlassVariant } from "./glass";
+import { glassLens, glassSurface, type GlassVariant } from "./glass";
 
 export interface TitleBarProps extends ViewProps {
   title?: string;
@@ -102,7 +102,13 @@ export function TitleBar({
         foreground: appearance === "dark" ? "#ffffff" : "#1c1c1e",
       }
     : undefined;
-  const controlStyle: Style | undefined = glass ? { width: 36, height: 36, radius: 18, ...buttonStyle } : buttonStyle;
+  // On glass the controls answer the pointer with a drop of glass (close with a red one), as the
+  // rest of the glass controls do, instead of a flat wash.
+  const lens = glass ? glassLens({ variant: glass === true ? "regular" : glass, appearance }, "hover") : undefined;
+  const controlStyle: Style | undefined = glass ? { width: 36, height: 36, radius: 18, hover: lens, active: { ...lens, transform: "scale(0.94)" }, ...buttonStyle } : buttonStyle;
+  const closeStyle: Style | undefined = glass
+    ? { ...controlStyle, hover: { ...lens, background: theme.colors.windowCloseHover }, active: { ...lens, background: theme.colors.windowCloseActive, transform: "scale(0.94)" }, ...buttonStyle }
+    : buttonStyle;
   // The controls draw in the bar's foreground, so a dark bar on a light theme
   // (or the reverse) still shows them.
   const ink = typeof style?.foreground === "string" ? style.foreground : typeof surface?.foreground === "string" ? surface.foreground : theme.colors.foreground;
@@ -118,7 +124,7 @@ export function TitleBar({
     children: [
       showMinimize ? titleBarButton("minimize", minimizeIcon, ink, controlStyle) : null,
       showMaximize ? titleBarButton("toggleMaximize", maximizeIcon, ink, controlStyle) : null,
-      showClose ? titleBarButton("close", closeIcon, ink, controlStyle) : null,
+      showClose ? titleBarButton("close", closeIcon, ink, closeStyle) : null,
     ],
   });
   const content = children ?? (title ? jsx(Text, { size: MOBILE ? 18 : 13, weight: glass || MOBILE ? 600 : 500, color: glass ? ink : undefined, children: title }) : null);
