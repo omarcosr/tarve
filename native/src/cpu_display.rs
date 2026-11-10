@@ -20,6 +20,7 @@ use crate::glass::{GlassCall, GlassPlan};
 mod glyph_blit;
 mod replay;
 mod scroll;
+mod shadow_slices;
 pub(crate) use glyph_blit::{GlyphBlits, GlyphMasks};
 pub(crate) use scroll::{ScrollBlit, merge_regions, scroll_damage};
 
@@ -781,6 +782,8 @@ impl PaintTarget for CpuRecorder<'_> {
 pub(crate) struct ShadowCache {
     context: RenderContext,
     entries: HashMap<u64, CachedShadow>,
+    /// Prototypes of sliced shadows (`shadow_slices.rs`), by look.
+    slices: HashMap<u64, shadow_slices::ShadowSlices>,
     seen: HashMap<u64, u64>,
     frame: u64,
     bytes: usize,
@@ -802,10 +805,16 @@ impl ShadowCache {
         Self {
             context: crate::paint::single_threaded_context(1, 1),
             entries: HashMap::new(),
+            slices: HashMap::new(),
             seen: HashMap::new(),
             frame: 0,
             bytes: 0,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cached_bytes(&self) -> (usize, usize) {
+        (self.bytes, self.entries.len())
     }
 
     /// Call once per presented frame: ages entries and forgets shadows not seen lately.
@@ -821,7 +830,44 @@ impl ShadowCache {
             }
             keep
         });
+        self.slices.retain(|_, entry| {
+            let keep = frame - entry.used <= 120;
+            if !keep {
+                bytes -= entry.bytes();
+            }
+            keep
+        });
         self.bytes = bytes;
+    }
+
+    /// Drops the least recently used images until `size` more bytes fit the budget.
+    fn make_room(&mut self, size: usize) {
+        while self.bytes + size > SHADOW_CACHE_BYTES {
+            let oldest_image = self
+                .entries
+                .iter()
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(key, entry)| (*key, entry.used));
+            let oldest_slices = self
+                .slices
+                .iter()
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(key, entry)| (*key, entry.used));
+            match (oldest_image, oldest_slices) {
+                (Some((key, used)), slices) if slices.is_none_or(|(_, other)| used <= other) => {
+                    if let Some(entry) = self.entries.remove(&key) {
+                        self.bytes -=
+                            entry.pixmap.width() as usize * entry.pixmap.height() as usize * 4;
+                    }
+                }
+                (_, Some((key, _))) => {
+                    if let Some(entry) = self.slices.remove(&key) {
+                        self.bytes -= entry.bytes();
+                    }
+                }
+                _ => break,
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -858,19 +904,7 @@ impl ShadowCache {
         if size > SHADOW_CACHE_BYTES / 4 {
             return None;
         }
-        while self.bytes + size > SHADOW_CACHE_BYTES {
-            let Some(oldest) = self
-                .entries
-                .iter()
-                .min_by_key(|(_, entry)| entry.used)
-                .map(|(key, _)| *key)
-            else {
-                break;
-            };
-            if let Some(entry) = self.entries.remove(&oldest) {
-                self.bytes -= entry.pixmap.width() as usize * entry.pixmap.height() as usize * 4;
-            }
-        }
+        self.make_room(size);
         self.context.reset_and_resize(width as u16, height as u16);
         self.context.set_fill_rule(Fill::NonZero);
         self.context

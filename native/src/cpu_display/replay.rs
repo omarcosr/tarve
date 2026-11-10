@@ -253,6 +253,15 @@ impl DisplayList {
                     std_dev,
                     invert,
                 } => {
+                    if let Some(cache) = shadows.as_deref_mut()
+                        && cache.draw_sliced(
+                            context, resources, region, *transform, *area, *rect, *color, *radius,
+                            *std_dev, *invert,
+                        )
+                    {
+                        index += 1;
+                        continue;
+                    }
                     // Inset shadows draw only their edges (below): cheaper than a cached image.
                     let cached = shadows
                         .as_deref_mut()

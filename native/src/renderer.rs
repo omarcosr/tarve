@@ -25,6 +25,8 @@ mod cpu_raster;
 mod cpu_worker;
 #[cfg(feature = "vello-gpu")]
 mod glass_gpu;
+#[cfg(test)]
+mod glass_probe;
 #[cfg(feature = "vello-gpu")]
 mod gpu_report;
 #[cfg(feature = "vello-gpu")]
@@ -941,10 +943,13 @@ impl CpuGraphics {
         self.settle()?;
         let mut damage = std::mem::replace(&mut self.damage, CpuDamage::None);
         let mut blits = std::mem::take(&mut self.blits);
-        // Glass reads what lies under it: a frame with glass is drawn whole.
+        // Glass reads what lies under it: a frame with glass that changed is drawn whole.
+        // One with nothing new is not drawn again: the redraw that shows a pipelined frame
+        // would otherwise rasterize the whole frame once more, and so on while idle.
         if self.frame_background != Some(background_bytes)
             || self.frame_size != (width, height)
-            || self.list.as_ref().is_some_and(|list| list.has_glass())
+            || (!matches!(damage, CpuDamage::None)
+                && self.list.as_ref().is_some_and(|list| list.has_glass()))
         {
             damage = CpuDamage::Full;
         }
