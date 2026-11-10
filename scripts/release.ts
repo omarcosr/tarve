@@ -55,9 +55,12 @@ const svelte = join(root, "dist", svelteName);
 
 // @tarve/router, @tarve/test and create-tarve ship their sources as-is too; the docs
 // tell users to install them, so every release publishes them with @tarve/core.
+// @tarve/mcp also ships dist/ (its bin, for Node.js), built here: packing ignores scripts.
+await run([bun, "packages/mcp/build.ts"]);
 const extras = [
   { name: "@tarve/router", dir: "packages/router", file: `tarve-router-${policy.version}.tgz`, peers: ["@tarve/core"] },
   { name: "@tarve/test", dir: "packages/test", file: `tarve-test-${policy.version}.tgz`, peers: ["@tarve/core", "@tarve/headless"] },
+  { name: "@tarve/mcp", dir: "packages/mcp", file: `tarve-mcp-${policy.version}.tgz`, peers: ["@tarve/core"] },
   { name: "create-tarve", dir: "packages/create-tarve", file: `create-tarve-${policy.version}.tgz`, peers: [] },
 ] as const;
 for (const extra of extras) {
@@ -110,6 +113,10 @@ try {
     const badPeer = extra.peers.find(peer => packed.peerDependencies?.[peer] !== `^${policy.version}`);
     if (packed.name !== extra.name || packed.version !== policy.version || badPeer) {
       throw new Error(`Packed ${extra.name} is ${packed.name}@${packed.version}${badPeer ? ` (peer ${badPeer} ${packed.peerDependencies?.[badPeer]})` : ""}, expected ${extra.name}@${policy.version}.`);
+    }
+    const bin = (packed as { bin?: Record<string, string> }).bin;
+    for (const path of Object.values(bin ?? {})) {
+      if (!existsSync(join(directory, "package", path))) throw new Error(`Packed ${extra.name} lacks its bin ${path}`);
     }
   }
   const manifest = {

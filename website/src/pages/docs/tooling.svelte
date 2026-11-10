@@ -11,6 +11,8 @@
   const c4 = "const app = createApp(App, { frameOverlay: true }); // or TARVE_FRAME_OVERLAY=1\napp.setFrameOverlay(false);";
   const c5 = "bunx tarve dev app.tsx --inspect   # also: tarve run --inspect, npx tarve dev --inspect\nTARVE_INSPECTOR=1 bun app.tsx";
   const c6 = "const app = createApp(App, { dev: { inspector: true } });";
+  const c8 = '{\n  "mcpServers": {\n    "tarve": { "command": "bunx", "args": ["tarve-mcp", "src/app.tsx"] }\n  }\n}';
+  const t9: string[][] = [["Read","<code>app_status</code>, <code>inspect_tree</code>, <code>query_nodes</code>, <code>screenshot</code>, <code>wait_for</code>"],["Drive","<code>click</code>, <code>hover</code>, <code>type_text</code>, <code>press_key</code>, <code>scroll</code>, <code>drag</code>, <code>focus</code>: by visible text, id or window point, through native hit testing"],["Develop","<code>reload</code>, <code>get_metrics</code>, <code>get_events</code>, <code>get_logs</code>"]];
   const t7: string[][] = [["Tree","Components and the native nodes they returned, fragments grouped. <code>×N</code> is how often a component rendered; a reused <code>memo()</code> does not count."],["Details","Props of the selected node, its resolved style, its fields and the layout box computed by the native tree."],["Pick node","Highlights the node under the pointer in the app window; clicking selects it in the tree. Honors paint order, portals, <code>zIndex</code> and scroll clipping."],["Expand all / Collapse","Opens or folds the whole tree."],["Event log","Native events as the app receives them."]];
 </script>
 
@@ -23,7 +25,7 @@
   <header class="doc-head">
     <span class="eyebrow">Guide · v{version}</span>
     <h1>Project and dev tools</h1>
-    <p class="doc-lead">Scaffold a project with <code>create-tarve</code>, iterate with <code>tarve dev</code>, and look inside a running app with the visual inspector.</p>
+    <p class="doc-lead">Scaffold a project with <code>create-tarve</code>, iterate with <code>tarve dev</code>, look inside a running app with the visual inspector, and let AI agents drive it over MCP.</p>
   </header>
 
   <section class="doc-section">
@@ -76,6 +78,23 @@
       </table>
     </div>
     <div class="doc-prose"><p>The inspector is TypeScript only and uses existing protocol requests; windows opened with <code>app.openWindow</code> never get one of their own. <code>TARVE_INSPECT=&lt;file></code> is a different switch: automation that writes the tree to a file and exits.</p></div>
+  </section>
+
+  <section class="doc-section">
+    <h2 id="mcp">AI agents (MCP)</h2>
+    <div class="doc-prose"><p><code>@tarve/mcp</code> is a Model Context Protocol server: it starts your app with <code>tarve dev</code> and lets an agent (Claude, Cursor, VS Code…) see and drive the real window. Install it with <code>bun add -d @tarve/mcp</code> and add it to the client's config; <code>"args": ["tarve-mcp", "src/app.tsx", "--runtime", "node"]</code> runs the app on Node.js, and a built executable (<code>tarve-mcp dist/App.exe</code>, txiki.js too) runs as it is.</p></div>
+    <CodeBlock code={c8} lang="json" file="mcp.json" />
+    <div class="props-wrap">
+      <table class="props">
+        <thead><tr><th>Tools</th><th></th></tr></thead>
+        <tbody>
+          {#each t9 as row, i (i)}
+            <tr>{#each row as cell, j (j)}<td>{@html cell}</td>{/each}</tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+    <div class="doc-prose"><p>Development only: the app connects out to a private socket the server made, presents a random token, and listens on nothing; there is no <code>eval</code>. A normal launch, or <code>dev: false</code>, never connects.</p></div>
   </section>
 </article>
 </DocsShell>

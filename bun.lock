@@ -40,7 +40,17 @@
       "name": "@tarve/headless",
       "version": "0.10.0",
       "peerDependencies": {
-        "@tarve/core": "^0.8.0",
+        "@tarve/core": "^0.10.0",
+      },
+    },
+    "packages/mcp": {
+      "name": "@tarve/mcp",
+      "version": "0.10.0",
+      "bin": {
+        "tarve-mcp": "./dist/cli.js",
+      },
+      "peerDependencies": {
+        "@tarve/core": "^0.10.0",
       },
     },
     "packages/protocol": {
@@ -51,7 +61,7 @@
       "name": "@tarve/react-icons",
       "version": "0.10.0",
       "peerDependencies": {
-        "@tarve/core": "^0.8.0",
+        "@tarve/core": "^0.10.0",
       },
       "optionalPeers": [
         "@tarve/core",
@@ -61,7 +71,7 @@
       "name": "@tarve/router",
       "version": "0.10.0",
       "peerDependencies": {
-        "@tarve/core": "^0.8.0",
+        "@tarve/core": "^0.10.0",
       },
     },
     "packages/svelte": {
@@ -71,15 +81,15 @@
         "svelte": "^5.57.2",
       },
       "peerDependencies": {
-        "@tarve/core": "^0.8.0",
+        "@tarve/core": "^0.10.0",
       },
     },
     "packages/test": {
       "name": "@tarve/test",
       "version": "0.10.0",
       "peerDependencies": {
-        "@tarve/core": "^0.8.0",
-        "@tarve/headless": "^0.8.0",
+        "@tarve/core": "^0.10.0",
+        "@tarve/headless": "^0.10.0",
       },
     },
   },
@@ -148,11 +158,13 @@
 
     "@tailwindcss/node": ["@tailwindcss/node@4.3.3", "", { "dependencies": { "@jridgewell/remapping": "^2.3.5", "enhanced-resolve": "^5.24.1", "jiti": "^2.7.0", "lightningcss": "1.32.0", "magic-string": "^0.30.21", "source-map-js": "^1.2.1", "tailwindcss": "4.3.3" } }, "sha512-/T8IKEsf9VTU6tLjgC7+sv2mOPtQxzE2jMw7u4Tt40Tx+QSZxpzh95/H6cMKoja9XuW7iMdLJYBB0o9G1CaAgg=="],
 
-    "@tarve/core": ["@tarve/core@0.4.0", "", { "os": [ "linux", "win32", ], "cpu": "x64", "bin": { "tarve": "dist/npm/cli.js" } }, "sha512-w90kisue5M1jFXbMsZQDq/gvB7TyQtop1ZBsmfnKKD6KelNHo+z0KntGqD3BcQoij4jifL5zjG6pdQNsjnFpDg=="],
+    "@tarve/core": ["@tarve/core@0.10.0", "", { "dependencies": { "esbuild": "0.25.0", "resedit": "3.1.0" }, "os": [ "linux", "win32", ], "cpu": "x64", "bin": { "tarve": "dist/npm/cli.js" } }, "sha512-dM/p02YI5k8zno7PeW3/e0Iw5WhlIuuXT2j+iBcYWukhhOud17KMLXDzOxJWeLUmqeGQhvFPHFZpYcBkR9YSRg=="],
 
     "@tarve/core-internal": ["@tarve/core-internal@workspace:packages/core"],
 
     "@tarve/headless": ["@tarve/headless@workspace:packages/headless"],
+
+    "@tarve/mcp": ["@tarve/mcp@workspace:packages/mcp"],
 
     "@tarve/protocol": ["@tarve/protocol@workspace:packages/protocol"],
 

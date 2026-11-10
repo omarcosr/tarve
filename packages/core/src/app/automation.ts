@@ -117,7 +117,7 @@ export function findByText(snapshot: Snapshot, text: string): NodeSnapshot | und
 }
 
 /** Waits until the frame counters hold still, so each step sees the previous step's result. */
-async function settle(app: AutomatedApp, timeoutMs = 3000): Promise<Snapshot> {
+export async function settle(app: AutomatedApp, timeoutMs = 3000): Promise<Snapshot> {
   const deadline = performance.now() + timeoutMs;
   let previous = await app.inspect();
   while (previous.frames === 0 && performance.now() < deadline) {

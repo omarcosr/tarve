@@ -30,6 +30,7 @@ import { applySavedState, windowStateStore } from "./window-state";
 import { nativeAssetPath } from "./embedded-assets";
 import { readAutomation, runAutomation } from "./app/automation";
 import { createInspector, INSPECTOR_SLOT, type Inspector } from "./devtools/inspector";
+import { attachControl, readControlAddress } from "./devtools/control";
 export type { DevOptions } from "./devtools/inspector";
 
 /** Bridges of windows opened with `openWindow`: they never get an inspector of their own. */
@@ -68,6 +69,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     automationClaimed = true;
     options = { ...options, debug: true };
   }
+  // A development tool (`@tarve/mcp`) drives this app: capture and diagnostic input need debug.
+  const controlAddress = options.bridge || options.dev === false ? undefined : readControlAddress();
+  if (controlAddress) options = { ...options, debug: true };
   const bridge = options.bridge ?? new BunFfiBridge();
   /** Event listeners of the windows opened with `openWindow`, by window id. */
   const windows = new Map<string, (event: NativeEvent) => void>();
@@ -1035,6 +1039,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     settleClosed();
   }
 
+  if (controlAddress && !ended) attachControl(controlAddress, { app, root: () => committed?.document.root });
   if (automation && !ended) void runAutomation(app, automation);
   return app;
 }

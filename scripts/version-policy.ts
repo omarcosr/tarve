@@ -12,6 +12,7 @@ export interface ProductVersionState {
   svelte: string;
   router: string;
   test: string;
+  mcp: string;
   createTarve: string;
   bunCore: string;
   bunProtocol: string;
@@ -20,6 +21,7 @@ export interface ProductVersionState {
   bunSvelte: string;
   bunRouter: string;
   bunTest: string;
+  bunMcp: string;
   bunCreateTarve: string;
   native: string;
   cargoLock: string;
@@ -96,6 +98,7 @@ const MANIFESTS = [
   { path: "packages/svelte", key: "svelte", lock: "bunSvelte" },
   { path: "packages/router", key: "router", lock: "bunRouter" },
   { path: "packages/test", key: "test", lock: "bunTest" },
+  { path: "packages/mcp", key: "mcp", lock: "bunMcp" },
   { path: "packages/create-tarve", key: "createTarve", lock: "bunCreateTarve" },
 ] as const satisfies readonly { path: string; key: keyof ProductVersionState; lock: keyof ProductVersionState }[];
 

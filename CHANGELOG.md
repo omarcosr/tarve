@@ -1,6 +1,12 @@
 # Changelog
 
-All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless` and `@tarve/svelte` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
+All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `@tarve/svelte` and `@tarve/mcp` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
+
+## Unreleased
+
+### Added
+
+- `@tarve/mcp`: a Model Context Protocol server (stdio) for AI agents in development. `tarve-mcp app.tsx` starts the app with `tarve dev` (`--runtime node`, or a built executable, txiki.js included) and offers tools to read it (`inspect_tree`, `query_nodes`, `screenshot`, `wait_for`, `app_status`), drive it through native hit testing (`click`, `hover`, `type_text`, `press_key`, `scroll`, `drag`, `focus`) and develop (`reload`, `get_metrics`, `get_events`, `get_logs`). The app connects out to a private socket with a token (`TARVE_CONTROL`, `packages/core/src/devtools/control.ts`) and listens on nothing; no `eval`. `bun run smoke:mcp` (`:node`, `:txiki`) checks it against a real window.
 
 ## 0.10.0 — 2026-11-08
 

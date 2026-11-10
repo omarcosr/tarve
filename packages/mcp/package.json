@@ -1,0 +1,57 @@
+{
+  "name": "@tarve/mcp",
+  "version": "0.10.0",
+  "description": "Model Context Protocol server for Tarve apps: lets AI agents inspect, screenshot, drive and reload a running app in development",
+  "license": "Apache-2.0",
+  "keywords": [
+    "tarve",
+    "mcp",
+    "model-context-protocol",
+    "devtools",
+    "ai",
+    "agent"
+  ],
+  "homepage": "https://github.com/omarcosr/tarve/tree/main/packages/mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/omarcosr/tarve.git",
+    "directory": "packages/mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/omarcosr/tarve/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "bun": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "tarve-mcp": "./dist/cli.js"
+  },
+  "files": [
+    "src",
+    "dist",
+    "!src/**/*.test.ts",
+    "!src/fixtures",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "build": "bun build.ts",
+    "prepack": "bun build.ts"
+  },
+  "peerDependencies": {
+    "@tarve/core": "^0.10.0"
+  },
+  "engines": {
+    "bun": ">=1.4.0",
+    "node": ">=26.10.0"
+  }
+}
