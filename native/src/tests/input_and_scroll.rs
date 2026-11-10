@@ -574,3 +574,583 @@ pub(super) fn a_wheel_notch_eases_to_its_offset_and_notches_that_follow_extend_t
     }
     assert_eq!(offset(&tree), 1900.0);
 }
+
+/// A text area under an overlay that covers the window; `overlay` adds to the overlay
+/// node (its `style`, `modal`).
+fn text_area_under(overlay: serde_json::Value) -> Tree {
+    let text: String = (0..200).map(|line| format!("line {line}\n")).collect();
+    let mut cover = json!({
+        "id":"overlay","kind":"view","children":[],
+        "style":{"position":"absolute","top":0,"right":0,"bottom":0,"left":0}
+    });
+    if let Some(style) = overlay.get("style").and_then(|s| s.as_object()) {
+        for (key, value) in style {
+            cover["style"][key] = value.clone();
+        }
+    }
+    if let Some(modal) = overlay.get("modal") {
+        cover["modal"] = modal.clone();
+    }
+    let root: Node = serde_json::from_value(json!({
+        "id":"root","kind":"window","children":[
+            {"id":"editor","kind":"textarea","value":text,"style":{"width":200,"height":100},"children":[]},
+            cover
+        ]
+    }))
+    .unwrap();
+    let mut tree = Tree::new(root);
+    tree.compute(240.0, 120.0).unwrap();
+    tree.scene(1.0);
+    assert!(
+        tree.entries["editor"].scroll_max > 100.0,
+        "the text area scrolls"
+    );
+    tree
+}
+
+/// Wheel, scrollbar hover and a thumb drag over the text area: (scroll after the
+/// wheel, bar under the pointer, scroll the drag added).
+fn poke_text_area(tree: &mut Tree) -> (f64, bool, f64) {
+    tree.pointer_move(50.0, 50.0);
+    tree.wheel_2d(0.0, 40.0);
+    let wheeled = tree.entries["editor"].scroll;
+    tree.pointer_move(196.0, 20.0);
+    let on_bar = tree.pointer_on_scrollbar();
+    tree.pointer_down();
+    tree.pointer_move(196.0, 90.0);
+    tree.pointer_up();
+    (wheeled, on_bar, tree.entries["editor"].scroll - wheeled)
+}
+
+#[test]
+pub(super) fn a_plain_box_over_a_text_area_lets_wheel_and_scrollbar_through() {
+    // Unlike CSS, where `pointer-events: auto` stops at the frontmost box, a plain
+    // view takes no pointer: the text area behind it still scrolls.
+    let mut tree = text_area_under(json!({"style":{"background":"#00000080"}}));
+    let (wheeled, on_bar, dragged) = poke_text_area(&mut tree);
+    assert_eq!(wheeled, 40.0, "the wheel reaches the text area");
+    assert!(on_bar, "its scrollbar is hit through the box");
+    assert!(dragged > 0.0, "and can be dragged");
+}
+
+#[test]
+pub(super) fn a_blocking_overlay_makes_the_text_area_behind_it_untouchable() {
+    for (label, overlay) in [
+        (
+            "pointerEvents: block",
+            json!({"style":{"pointerEvents":"block"}}),
+        ),
+        ("modal", json!({"modal": true})),
+        (
+            "the core Modal overlay",
+            json!({"modal": true, "style":{"pointerEvents":"block","background":"#00000080"}}),
+        ),
+    ] {
+        let mut tree = text_area_under(overlay);
+        let (wheeled, on_bar, dragged) = poke_text_area(&mut tree);
+        assert_eq!(wheeled, 0.0, "{label}: the wheel stops at the overlay");
+        assert!(!on_bar, "{label}: no scrollbar under the overlay");
+        assert_eq!(dragged, 0.0, "{label}: no thumb drag through it");
+    }
+}
+
+fn editor(extra: serde_json::Value, value: &str) -> Tree {
+    let mut area = json!({"id":"editor","kind":"textarea","value":value,"style":{"width":200,"height":100},"children":[]});
+    for (key, field) in extra.as_object().unwrap() {
+        area[key] = field.clone();
+    }
+    let root: Node =
+        serde_json::from_value(json!({"id":"root","kind":"window","children":[area]})).unwrap();
+    let mut tree = Tree::new(root);
+    tree.compute(240.0, 120.0).unwrap();
+    tree.focus("editor");
+    tree
+}
+
+#[test]
+pub(super) fn a_read_only_text_area_keeps_its_value() {
+    let mut tree = editor(json!({"readOnly": true}), "hello");
+    tree.key("End");
+    assert!(tree.type_text("x").is_empty(), "typing is dropped");
+    assert!(tree.key("Backspace").is_empty(), "so is deleting");
+    assert!(tree.key("Enter").is_empty(), "and a new line");
+    assert_eq!(tree.entries["editor"].node.value.as_deref(), Some("hello"));
+    assert!(
+        !crate::runtime::ime_allowed_for_node(Some(&tree.entries["editor"].node)),
+        "no IME composition"
+    );
+}
+
+#[test]
+pub(super) fn max_length_cuts_a_paste_to_fit_and_drops_typing_past_it() {
+    let mut tree = editor(json!({"maxLength": 5}), "ab");
+    tree.key("End");
+    tree.type_text("çdefgh");
+    assert_eq!(
+        tree.entries["editor"].node.value.as_deref(),
+        Some("abçde"),
+        "cut to five characters"
+    );
+    assert!(tree.type_text("z").is_empty(), "full: typing is dropped");
+    tree.key("Backspace");
+    tree.type_text("z");
+    assert_eq!(tree.entries["editor"].node.value.as_deref(), Some("abçdz"));
+    // A longer value from the app is kept and can still shrink.
+    let mut long = editor(json!({"maxLength": 3}), "abcdef");
+    long.key("End");
+    assert!(long.type_text("x").is_empty());
+    long.key("Backspace");
+    assert_eq!(long.entries["editor"].node.value.as_deref(), Some("abcde"));
+}
+
+#[test]
+pub(super) fn a_follow_tail_text_area_keeps_its_end_in_view_as_the_value_grows() {
+    let lines =
+        |count: usize| -> String { (0..count).map(|line| format!("line {line}\n")).collect() };
+    let node_with = |count: usize| -> Node {
+        serde_json::from_value(json!({"id":"root","kind":"window","children":[
+            {"id":"log","kind":"textarea","readOnly":true,"followTail":true,"value":lines(count),"style":{"width":200,"height":100},"children":[]}
+        ]}))
+        .unwrap()
+    };
+    let mut tree = Tree::new(node_with(3));
+    tree.compute(240.0, 120.0).unwrap();
+    assert_eq!(tree.entries["log"].scroll, 0.0, "short: nothing to scroll");
+    tree.update(node_with(50));
+    tree.compute(240.0, 120.0).unwrap();
+    let max = tree.entries["log"].scroll_max;
+    assert!(max > 0.0);
+    assert_eq!(tree.entries["log"].scroll, max, "it followed the new lines");
+    tree.pointer_move(50.0, 50.0);
+    tree.wheel_2d(0.0, -60.0);
+    let away = tree.entries["log"].scroll;
+    assert!(away < max);
+    tree.update(node_with(80));
+    tree.compute(240.0, 120.0).unwrap();
+    assert_eq!(tree.entries["log"].scroll, away, "scrolled up: it stays");
+}
+
+#[test]
+#[ignore = "benchmark: cargo test --lib bench_text_area_append -- --ignored --nocapture"]
+pub(super) fn bench_text_area_append() {
+    let doc = |value: &str| -> Node {
+        serde_json::from_value(json!({"id":"root","kind":"window","children":[
+            {"id":"log","kind":"textarea","readOnly":true,"followTail":true,"value":value,"style":{"width":600,"height":400},"children":[]}
+        ]}))
+        .unwrap()
+    };
+    for lines in [1_000usize, 5_000, 20_000] {
+        let mut value: String = (0..lines)
+            .map(|i| format!("[{i:06}] INFO request handled in 12ms path=/api/items?page={i}\n"))
+            .collect();
+        let mut tree = Tree::new(doc(&value));
+        tree.compute(640.0, 440.0).unwrap();
+        tree.scene(1.0);
+        let rounds = 20;
+        let (mut update, mut compute, mut scene) = (0.0, 0.0, 0.0);
+        let start = std::time::Instant::now();
+        for round in 0..rounds {
+            value.push_str(&format!("[append {round}] new line\n"));
+            let t = std::time::Instant::now();
+            tree.update(doc(&value));
+            update += t.elapsed().as_secs_f64();
+            let t = std::time::Instant::now();
+            tree.compute(640.0, 440.0).unwrap();
+            compute += t.elapsed().as_secs_f64();
+            let t = std::time::Instant::now();
+            tree.scene(1.0);
+            scene += t.elapsed().as_secs_f64();
+        }
+        let ms = |s: f64| s * 1000.0 / rounds as f64;
+        let per = ms(start.elapsed().as_secs_f64());
+        println!(
+            "{lines:>6} lines ({:>5} KB): {per:.2} ms per append (update {:.2}, compute {:.2}, scene {:.2})",
+            value.len() / 1024,
+            ms(update),
+            ms(compute),
+            ms(scene)
+        );
+    }
+}
+
+/// A text area long enough to be shaped in chunks, laid out with or without them.
+fn long_text_area(value: &str, chunked: bool) -> Tree {
+    let root: Node = serde_json::from_value(json!({"id":"root","kind":"window","children":[
+        {"id":"log","kind":"textarea","value":value,"style":{"width":300,"height":200},"children":[]}
+    ]}))
+    .unwrap();
+    let mut tree = Tree::new(root);
+    if !chunked {
+        tree.text.chunked_text_area_bytes = usize::MAX;
+    }
+    tree.compute(340.0, 240.0).unwrap();
+    tree.scene(1.0);
+    tree
+}
+
+fn log_lines(range: std::ops::Range<usize>) -> String {
+    range
+        .map(|i| {
+            if i % 7 == 0 {
+                "\n".to_string()
+            } else {
+                format!(
+                    "[{i:05}] a line long enough to wrap at three hundred pixels wide, number {i}\n"
+                )
+            }
+        })
+        .collect()
+}
+
+#[test]
+pub(super) fn a_chunked_text_area_lays_out_like_one_layout() {
+    let value = log_lines(0..1200);
+    assert!(value.len() > 3 * crate::text::CHUNKED_TEXT_AREA_BYTES_FOR_TESTS);
+    let mut chunked = long_text_area(&value, true);
+    let mut whole = long_text_area(&value, false);
+    let width = Some(chunked.entries["log"].rect.width() as f32);
+    for w in [width, None] {
+        assert_eq!(
+            chunked.text.measure("log", w),
+            whole.text.measure("log", w),
+            "size at {w:?}"
+        );
+    }
+    assert_eq!(
+        chunked.entries["log"].scroll_max,
+        whole.entries["log"].scroll_max
+    );
+    let close = |a: f64, b: f64| (a - b).abs() < 0.01;
+    let breaks = value.match_indices('\n').map(|(i, _)| i);
+    let some_breaks: Vec<usize> = breaks
+        .clone()
+        .step_by(97)
+        .chain(breaks.clone().rev().take(3))
+        .collect();
+    let indices: Vec<usize> = [
+        0,
+        1,
+        80,
+        81,
+        4095,
+        4096,
+        4097,
+        9000,
+        value.len() / 2,
+        value.len(),
+    ]
+    .into_iter()
+    // Line starts; a caret on a line break itself is left out: one long layout puts
+    // some of those at the end of the text (a Parley lookup), a chunk where they are.
+    .chain(some_breaks.iter().map(|i| *i + 1))
+    .filter(|i| value.as_bytes().get(*i) != Some(&b'\n'))
+    // One Parley layout puts every caret past about 60,000 characters at the end of
+    // the text; chunks, each far shorter, do not.
+    .filter(|i| *i < 50_000)
+    .collect();
+    for index in indices {
+        let index = (0..=index)
+            .rev()
+            .find(|i| value.is_char_boundary(*i))
+            .unwrap();
+        let a = chunked.text.caret_rect("log", index, width).unwrap();
+        let b = whole.text.caret_rect("log", index, width).unwrap();
+        assert!(
+            close(a.x0, b.x0) && close(a.y0, b.y0) && close(a.y1, b.y1),
+            "caret {index}: {a:?} vs {b:?}"
+        );
+        let (x, y) = (a.x0 as f32 + 0.5, (a.y0 + a.y1) as f32 / 2.0);
+        assert_eq!(
+            chunked.text.index_at("log", x, y, width),
+            whole.text.index_at("log", x, y, width),
+            "hit at {index}"
+        );
+    }
+    // Past 65,536 bytes one layout's offsets wrap around: compare the lines above that.
+    let limit = chunked.text.caret_rect("log", 50_000, width).unwrap().y0;
+    let lines = |tree: &mut Tree| -> Vec<(std::ops::Range<usize>, i64)> {
+        tree.text
+            .accessibility_lines("log", &value, width)
+            .into_iter()
+            .filter(|line| line.byte_range.end < 50_000 && line.y0 < limit)
+            .map(|line| (line.byte_range, (line.y0 * 100.0).round() as i64))
+            .collect()
+    };
+    assert_eq!(lines(&mut chunked), lines(&mut whole));
+}
+
+#[test]
+pub(super) fn appending_to_a_chunked_text_area_shapes_only_its_end() {
+    let mut value = log_lines(0..1200);
+    let mut tree = long_text_area(&value, true);
+    let doc = |value: &str| -> Node {
+        serde_json::from_value(json!({"id":"root","kind":"window","children":[
+            {"id":"log","kind":"textarea","value":value,"style":{"width":300,"height":200},"children":[]}
+        ]}))
+        .unwrap()
+    };
+    for round in 0..50 {
+        value.push_str(&format!("appended {round}\n"));
+        tree.update(doc(&value));
+        tree.compute(340.0, 240.0).unwrap();
+        tree.scene(1.0);
+    }
+    // A mid edit and an edit at the start reuse the rest too.
+    value.insert_str(value.len() / 2, "inserted ");
+    value.insert_str(0, "first ");
+    tree.update(doc(&value));
+    tree.compute(340.0, 240.0).unwrap();
+    let whole = long_text_area(&value, false);
+    assert_eq!(
+        tree.entries["log"].scroll_max, whole.entries["log"].scroll_max,
+        "the reused chunks lay out as the whole text"
+    );
+    let width = Some(tree.entries["log"].rect.width() as f32);
+    let mut whole = whole;
+    for index in [0, 6, 20_000, 45_000] {
+        let index = (0..=index)
+            .rev()
+            .find(|i| value.is_char_boundary(*i))
+            .unwrap();
+        let a = tree.text.caret_rect("log", index, width).unwrap();
+        let b = whole.text.caret_rect("log", index, width).unwrap();
+        assert!(
+            (a.y0 - b.y0).abs() < 0.01 && (a.x0 - b.x0).abs() < 0.01,
+            "caret {index}: {a:?} vs {b:?}"
+        );
+    }
+    let height = tree.text.measure("log", width).1 as f64;
+    let end = tree.text.caret_rect("log", value.len(), width).unwrap();
+    assert!(
+        (end.y1 - height).abs() < 1.0,
+        "the caret at the end is on the last line: {end:?}, {height}"
+    );
+    assert!(tree.text.chunk_count("log") > 1, "chunked");
+    assert!(
+        tree.text.chunk_count("log") < value.len() / 1024,
+        "one-line appends merge into chunks: {}",
+        tree.text.chunk_count("log")
+    );
+}
+
+#[test]
+#[ignore = "benchmark: cargo test --lib bench_rich_append -- --ignored --nocapture"]
+pub(super) fn bench_rich_append() {
+    fn time(
+        label: &str,
+        lines: usize,
+        make: &dyn Fn(&str) -> serde_json::Value,
+        line: &dyn Fn(usize) -> String,
+    ) {
+        let mut value: String = (0..lines).map(line).collect();
+        let doc = |value: &str| -> Node {
+            let mut n = make(value);
+            n["id"] = json!("n");
+            n["children"] = json!([]);
+            serde_json::from_value(json!({"id":"root","kind":"window","children":[
+                {"id":"s","kind":"scroll","style":{"width":600,"height":400},"children":[n]}
+            ]}))
+            .unwrap()
+        };
+        let mut tree = Tree::new(doc(&value));
+        tree.compute(640.0, 440.0).unwrap();
+        tree.scene(1.0);
+        let rounds = 10;
+        let (mut update, mut compute, mut scene) = (0.0, 0.0, 0.0);
+        for round in 0..rounds {
+            value.push_str(&line(lines + round));
+            let t = std::time::Instant::now();
+            tree.update(doc(&value));
+            update += t.elapsed().as_secs_f64();
+            let t = std::time::Instant::now();
+            tree.compute(640.0, 440.0).unwrap();
+            compute += t.elapsed().as_secs_f64();
+            let t = std::time::Instant::now();
+            tree.scene(1.0);
+            scene += t.elapsed().as_secs_f64();
+        }
+        let ms = |s: f64| s * 1000.0 / rounds as f64;
+        println!(
+            "{label:<14} {lines:>6} lines ({:>5} KB): {:.2} ms (update {:.2}, compute {:.2}, scene {:.2})",
+            value.len() / 1024,
+            ms(update + compute + scene),
+            ms(update),
+            ms(compute),
+            ms(scene)
+        );
+    }
+    let log =
+        |i: usize| format!("[{i:06}] INFO request handled in 12ms path=/api/items?page={i}\n");
+    let rust =
+        |i: usize| format!("    let value_{i} = compute(\"item\", {i}) + offset; // step {i}\n");
+    let md = |i: usize| {
+        if i.is_multiple_of(10) {
+            format!("\n## Section {i}\n\n")
+        } else {
+            format!("Paragraph {i} with **bold**, `code` and a [link](https://x.y/{i}).\n")
+        }
+    };
+    for lines in [1_000usize, 5_000] {
+        time(
+            "text",
+            lines,
+            &|v| json!({"kind":"text","text":v,"style":{"width":580}}),
+            &log,
+        );
+        time(
+            "code",
+            lines,
+            &|v| json!({"kind":"code","text":v,"language":"rust"}),
+            &rust,
+        );
+        time(
+            "code+gutter",
+            lines,
+            &|v| json!({"kind":"code","text":v,"language":"rust","showLineNumbers":true}),
+            &rust,
+        );
+        time(
+            "markdown",
+            lines,
+            &|v| json!({"kind":"markdown","source":v,"style":{"width":580}}),
+            &md,
+        );
+        time(
+            "diff",
+            lines,
+            &|v| {
+                let old: String = v.lines().step_by(2).map(|l| format!("{l}\n")).collect();
+                json!({"kind":"diff","oldText":old,"newText":v,"path":"a.rs"})
+            },
+            &rust,
+        );
+    }
+}
+
+/// A long leaf (`code`, `text`) in a scroll area, shaped in chunks or as one layout.
+fn long_leaf(leaf: serde_json::Value, chunked: bool) -> Tree {
+    let mut leaf = leaf;
+    leaf["id"] = json!("leaf");
+    leaf["children"] = json!([]);
+    let root: Node = serde_json::from_value(json!({"id":"root","kind":"window","children":[
+        {"id":"s","kind":"scroll","style":{"width":400,"height":300},"children":[leaf]}
+    ]}))
+    .unwrap();
+    let mut tree = Tree::new(root);
+    if !chunked {
+        tree.text.chunked_text_area_bytes = usize::MAX;
+    }
+    tree.compute(440.0, 340.0).unwrap();
+    tree.scene(1.0);
+    tree
+}
+
+fn same_geometry(leaf: serde_json::Value, value: &str, width: Option<f32>) {
+    let mut chunked = long_leaf(leaf.clone(), true);
+    let mut whole = long_leaf(leaf, false);
+    assert!(chunked.text.chunk_count("leaf") > 1, "chunked");
+    assert_eq!(whole.text.chunk_count("leaf"), 0);
+    for w in [width, None] {
+        assert_eq!(
+            chunked.text.measure("leaf", w),
+            whole.text.measure("leaf", w),
+            "size at {w:?}"
+        );
+    }
+    assert_eq!(chunked.entries["leaf"].rect, whole.entries["leaf"].rect);
+    let close = |a: f64, b: f64| (a - b).abs() < 0.01;
+    let breaks = value.match_indices('\n').map(|(i, _)| i + 1);
+    let indices: Vec<usize> = [0, 1, 80, 4095, 4096, 9000, 30_000]
+        .into_iter()
+        .chain(breaks.step_by(53))
+        .filter(|i| *i < 50_000 && *i <= value.len() && value.as_bytes().get(*i) != Some(&b'\n'))
+        .collect();
+    for index in indices {
+        let index = (0..=index)
+            .rev()
+            .find(|i| value.is_char_boundary(*i))
+            .unwrap();
+        let a = chunked.text.caret_rect("leaf", index, width).unwrap();
+        let b = whole.text.caret_rect("leaf", index, width).unwrap();
+        assert!(
+            close(a.x0, b.x0) && close(a.y0, b.y0) && close(a.y1, b.y1),
+            "caret {index}: {a:?} vs {b:?}"
+        );
+        let (x, y) = (a.x0 as f32 + 0.5, (a.y0 + a.y1) as f32 / 2.0);
+        assert_eq!(
+            chunked.text.index_at("leaf", x, y, width),
+            whole.text.index_at("leaf", x, y, width),
+            "hit at {index}"
+        );
+        let end = (index + 30).min(value.len());
+        let end = (0..=end)
+            .rev()
+            .find(|i| value.is_char_boundary(*i))
+            .unwrap();
+        let ra = chunked.text.range_rects("leaf", index, end, width);
+        let rb = whole.text.range_rects("leaf", index, end, width);
+        let rows = |rects: &[parley::BoundingBox]| -> Vec<(i64, i64)> {
+            rects
+                .iter()
+                .filter(|r| r.x1 > r.x0)
+                .map(|r| ((r.y0 * 10.0).round() as i64, (r.x1 * 10.0).round() as i64))
+                .collect()
+        };
+        assert_eq!(rows(&ra), rows(&rb), "selection {index}..{end}");
+    }
+}
+
+#[test]
+pub(super) fn a_chunked_code_block_lays_out_like_one_layout() {
+    let value: String = (0..900)
+        .map(|i| match i % 9 {
+            0 => format!("/* block comment {i}\n"),
+            1 => "   still a comment */\n".to_string(),
+            2 => "\n".to_string(),
+            3 => format!("\tlet tabbed_{i} = \"tab\";\n"),
+            _ => format!("    let value_{i} = compute(\"item\", {i}) + offset; // step {i}\n"),
+        })
+        .collect();
+    for numbers in [false, true] {
+        same_geometry(
+            json!({"kind":"code","text":value,"language":"rust","showLineNumbers":numbers}),
+            &value,
+            None,
+        );
+    }
+    let mut tree = long_leaf(
+        json!({"kind":"code","text":value,"language":"rust","showLineNumbers":true}),
+        true,
+    );
+    assert_eq!(
+        tree.text.code_gutter_layouts["leaf"].len(),
+        value.split('\n').count()
+    );
+    // Growing reuses the numbers and the chunks before the end.
+    let grown = format!("{value}fn appended() {{}}\n");
+    tree.update(serde_json::from_value(json!({"id":"root","kind":"window","children":[
+        {"id":"s","kind":"scroll","style":{"width":400,"height":300},"children":[
+            {"id":"leaf","kind":"code","text":grown,"language":"rust","showLineNumbers":true,"children":[]}
+        ]}
+    ]})).unwrap());
+    tree.compute(440.0, 340.0).unwrap();
+    let whole = long_leaf(
+        json!({"kind":"code","text":grown,"language":"rust","showLineNumbers":true}),
+        false,
+    );
+    assert_eq!(tree.entries["leaf"].rect, whole.entries["leaf"].rect);
+    assert_eq!(
+        tree.text.code_gutter_layouts["leaf"].len(),
+        grown.split('\n').count()
+    );
+}
+
+#[test]
+pub(super) fn a_chunked_plain_text_lays_out_like_one_layout() {
+    let value = log_lines(0..1200);
+    same_geometry(
+        json!({"kind":"text","text":value,"style":{"width":360}}),
+        &value,
+        Some(360.0),
+    );
+}

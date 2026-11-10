@@ -497,3 +497,112 @@ fn diff_column_measure_covers_shaped_wide_rows_without_shaping_every_row() {
         );
     }
 }
+
+#[derive(Default)]
+struct GlyphTarget {
+    glyphs: Vec<(u32, i64, i64)>,
+    clips: usize,
+    pops: usize,
+}
+
+impl PaintTarget for GlyphTarget {
+    fn box_shadow(&mut self, _: Affine, _: Rect, _: Rect, _: Color, _: f64, _: f64, _: bool) {}
+    fn fill<S: vello::kurbo::Shape>(&mut self, _: Fill, _: Affine, _: Color, _: &S) {}
+    fn stroke<S: vello::kurbo::Shape>(&mut self, _: &Stroke, _: Affine, _: Color, _: &S) {}
+    fn push_clip<S: vello::kurbo::Shape>(&mut self, _: Fill, _: Affine, _: &S) {
+        self.clips += 1;
+    }
+    fn push_opacity<S: vello::kurbo::Shape>(&mut self, _: f32, _: Affine, _: &S) {}
+    fn pop_layer(&mut self) {
+        self.pops += 1;
+    }
+    fn draw_image(&mut self, _: &str, _: &vello::peniko::ImageData, _: Affine) {}
+    fn draw_glyphs(
+        &mut self,
+        _: &vello::peniko::FontData,
+        _: f32,
+        _: &[i16],
+        transform: Affine,
+        _: Color,
+        glyphs: &[PaintGlyph],
+    ) {
+        let [.., x, y] = transform.as_coeffs();
+        for glyph in glyphs {
+            self.glyphs.push((
+                glyph.id,
+                ((x + f64::from(glyph.x)) * 100.0).round() as i64,
+                ((y + f64::from(glyph.y)) * 100.0).round() as i64,
+            ));
+        }
+    }
+}
+
+#[test]
+fn chunked_code_paints_the_visible_glyphs_and_numbers_of_one_layout() {
+    let text: String = (0..2000)
+        .map(|i| format!("let value_{i} = compute(\"x\", {i}); // {i}\n"))
+        .collect();
+    let mut node: Node = serde_json::from_value(serde_json::json!({
+        "id":"code", "kind":"code", "showLineNumbers":true, "text":text, "language":"rust",
+        "style":{"fontFamily":"Consolas","fontSize":13,"lineHeight":1.5}
+    }))
+    .unwrap();
+    node.rich = Some(Arc::new(crate::rich::code(&node.text, Some("rust"), None)));
+    let paint = |chunked: bool, visible_y: (f64, f64)| {
+        let mut engine = TextEngine::new();
+        if !chunked {
+            engine.chunked_text_area_bytes = usize::MAX;
+        }
+        engine.prepare(&node);
+        engine.measure("code", None);
+        assert_eq!(engine.chunk_count("code") > 1, chunked);
+        let mut target = GlyphTarget::default();
+        engine.draw(
+            &mut target,
+            &node,
+            TextDrawArea {
+                origin: (11.0, 17.0),
+                width: 300.0,
+                visible_y,
+                scroll_x: 24.0,
+            },
+            Color::from_rgb8(0, 0, 0),
+            1.0,
+        );
+        assert_eq!(target.clips, target.pops, "balanced clips");
+        target
+    };
+    for visible in [(0.0, 400.0), (20_000.0, 20_400.0), (38_000.0, 38_400.0)] {
+        let chunked = paint(true, visible);
+        let whole = paint(false, visible);
+        let window = |target: &GlyphTarget| -> Vec<(u32, i64, i64)> {
+            let (top, bottom) = (
+                ((visible.0 + 17.0 + 40.0) * 100.0) as i64,
+                ((visible.1 + 17.0 - 40.0) * 100.0) as i64,
+            );
+            let mut glyphs: Vec<_> = target
+                .glyphs
+                .iter()
+                .copied()
+                .filter(|g| g.2 >= top && g.2 <= bottom)
+                .collect();
+            glyphs.sort_unstable();
+            glyphs
+        };
+        assert!(!window(&chunked).is_empty());
+        let (a, b) = (window(&chunked), window(&whole));
+        if a != b {
+            let only_a: Vec<_> = a.iter().filter(|g| !b.contains(g)).take(5).collect();
+            let only_b: Vec<_> = b.iter().filter(|g| !a.contains(g)).take(5).collect();
+            panic!(
+                "glyphs in {visible:?}: {} vs {}, chunked only {only_a:?}, whole only {only_b:?}",
+                a.len(),
+                b.len()
+            );
+        }
+        assert!(
+            chunked.glyphs.len() * 4 < whole.glyphs.len(),
+            "only the visible chunks are painted"
+        );
+    }
+}

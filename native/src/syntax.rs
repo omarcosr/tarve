@@ -439,6 +439,29 @@ fn kind_for_stack(stack: &ScopeStack) -> Option<HighlightKind> {
     best
 }
 
+/// Parser state saved every this many lines, so a later highlight of a source sharing
+/// those lines (a file being edited, a log or a streamed answer growing) resumes there.
+#[cfg(feature = "syntax")]
+const CHECKPOINT_LINES: usize = 64;
+/// Sources kept for resuming, the most recent first.
+#[cfg(feature = "syntax")]
+const RESUMABLE_SOURCES: usize = 8;
+
+#[cfg(feature = "syntax")]
+struct Resumable {
+    language: LanguageId,
+    line_hashes: Vec<u64>,
+    lines: Vec<Vec<HighlightSpan>>,
+    /// The parser before line `index * CHECKPOINT_LINES`.
+    checkpoints: Vec<(ParseState, ScopeStack)>,
+}
+
+// Per thread: a parser state holds regex scratch space that is not `Send`.
+#[cfg(feature = "syntax")]
+thread_local! {
+    static RESUMABLE: std::cell::RefCell<Vec<Resumable>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 #[cfg(feature = "syntax")]
 fn highlight(language: LanguageId, source: &str) -> Option<HighlightedDocument> {
     if source.len() > DEFAULT_MAX_SOURCE_BYTES {
@@ -446,17 +469,54 @@ fn highlight(language: LanguageId, source: &str) -> Option<HighlightedDocument> 
     }
     let syntax = syntax_for_language(language)?;
     let set = syntax_set();
-    let mut parse_state = ParseState::new(syntax);
-    let mut stack = ScopeStack::new();
-    let mut lines = Vec::with_capacity(source.lines().count().max(1));
-    let mut total_spans = 0usize;
-
     if source.is_empty() {
-        lines.push(Vec::new());
-        return Some(HighlightedDocument { language, lines });
+        return Some(HighlightedDocument {
+            language,
+            lines: vec![Vec::new()],
+        });
     }
-
-    for line in source.split_inclusive('\n') {
+    let source_lines: Vec<&str> = source.split_inclusive('\n').collect();
+    let line_hashes: Vec<u64> = source_lines.iter().map(|line| hash64(line)).collect();
+    // The earlier source with the most leading lines in common: those keep their spans and
+    // the parse resumes at the last checkpoint inside them.
+    let mut sources = RESUMABLE.with(|sources| std::mem::take(&mut *sources.borrow_mut()));
+    let mut lines = Vec::with_capacity(source_lines.len());
+    let mut checkpoints = Vec::with_capacity(source_lines.len() / CHECKPOINT_LINES + 1);
+    let mut state = (ParseState::new(syntax), ScopeStack::new());
+    if let Some((index, shared)) = sources
+        .iter()
+        .enumerate()
+        .filter(|(_, earlier)| earlier.language == language)
+        .map(|(index, earlier)| {
+            let shared = earlier
+                .line_hashes
+                .iter()
+                .zip(&line_hashes)
+                .take_while(|(a, b)| a == b)
+                .count();
+            (index, shared)
+        })
+        .max_by_key(|(_, shared)| *shared)
+        && shared >= CHECKPOINT_LINES
+    {
+        let earlier = sources.remove(index);
+        let resume = (shared / CHECKPOINT_LINES).min(earlier.checkpoints.len() - 1);
+        let start = resume * CHECKPOINT_LINES;
+        let mut earlier_lines = earlier.lines;
+        earlier_lines.truncate(start);
+        lines = earlier_lines;
+        let mut earlier_checkpoints = earlier.checkpoints;
+        earlier_checkpoints.truncate(resume + 1);
+        state = earlier_checkpoints.pop()?;
+        checkpoints = earlier_checkpoints;
+    }
+    let earlier_sources = sources;
+    let mut total_spans: usize = lines.iter().map(Vec::len).sum();
+    let (parse_state, stack) = &mut state;
+    for (index, line) in source_lines.iter().enumerate().skip(lines.len()) {
+        if index % CHECKPOINT_LINES == 0 {
+            checkpoints.push((parse_state.clone(), stack.clone()));
+        }
         let operations = parse_state.parse_line(line, set).ok()?;
         let mut spans = Vec::new();
         for (range, operation) in ScopeRangeIterator::new(&operations, line) {
@@ -464,7 +524,7 @@ fn highlight(language: LanguageId, source: &str) -> Option<HighlightedDocument> 
             if range.is_empty() {
                 continue;
             }
-            let Some(kind) = kind_for_stack(&stack) else {
+            let Some(kind) = kind_for_stack(stack) else {
                 continue;
             };
             spans.push(HighlightSpan { range, kind });
@@ -475,7 +535,23 @@ fn highlight(language: LanguageId, source: &str) -> Option<HighlightedDocument> 
         }
         lines.push(spans);
     }
-    Some(HighlightedDocument { language, lines })
+    let document = HighlightedDocument {
+        language,
+        lines: lines.clone(),
+    };
+    let mut sources = earlier_sources;
+    sources.insert(
+        0,
+        Resumable {
+            language,
+            line_hashes,
+            lines,
+            checkpoints,
+        },
+    );
+    sources.truncate(RESUMABLE_SOURCES);
+    RESUMABLE.with(|kept| *kept.borrow_mut() = sources);
+    Some(document)
 }
 
 /// Built without the native "syntax" feature: code renders unhighlighted.
@@ -555,5 +631,38 @@ mod tests {
         let first = highlight_cached(source, Some("rust"), None).unwrap();
         let second = highlight_cached(source, Some("rust"), None).unwrap();
         assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn a_resumed_highlight_matches_a_fresh_one() {
+        let line = |i: usize| match i % 5 {
+            0 => format!("/* comment {i}\n"),
+            1 => format!("   still in the comment */ let s{i} = \"str\";\n"),
+            2 => format!("fn f{i}(x: u32) -> u32 {{ x + {i} }}\n"),
+            3 => format!("let t{i} = r#\"raw\n"),
+            _ => format!("string\"#; // {i}\n"),
+        };
+        let source: String = (0..400).map(line).collect();
+        let fresh = |source: &str| {
+            RESUMABLE.with(|sources| sources.borrow_mut().clear());
+            highlight(LanguageId::Rust, source).unwrap()
+        };
+        let mut grown = source.clone();
+        let first = fresh(&grown);
+        for i in 400..470 {
+            grown.push_str(&line(i));
+            let resumed = highlight(LanguageId::Rust, &grown).unwrap();
+            assert_eq!(resumed, fresh(&grown), "after appending line {i}");
+            highlight(LanguageId::Rust, &grown).unwrap();
+        }
+        // An edit that opens a comment changes every line after it.
+        let edited = source.replacen("fn f202", "/* fn f202", 1);
+        highlight(LanguageId::Rust, &source).unwrap();
+        let resumed = highlight(LanguageId::Rust, &edited).unwrap();
+        assert_eq!(resumed, fresh(&edited));
+        assert_ne!(
+            resumed.lines[203], first.lines[203],
+            "the line after is in the comment"
+        );
     }
 }

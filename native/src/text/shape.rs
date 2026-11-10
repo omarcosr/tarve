@@ -18,7 +18,7 @@ impl TextEngine {
                 continue;
             }
             let content = node.display_text();
-            if content.contains('\t') {
+            if content.contains('\t') || self.chunkable(node, &content) {
                 continue;
             }
             let signature = (hash_text(&content), self.style_hash(node));
@@ -61,8 +61,15 @@ impl TextEngine {
                     scope.spawn(move || {
                         part.iter()
                             .map(|(key, node, content)| {
-                                let mut layout =
-                                    shape_text(fonts, context, node, content, content.len(), None);
+                                let mut layout = shape_text(
+                                    fonts,
+                                    context,
+                                    node,
+                                    content,
+                                    content.len(),
+                                    None,
+                                    None,
+                                );
                                 // Layout asks a text for its min-content size (wrapped at 0) first.
                                 let min_content = (node.kind == "text"
                                     && !text_nowrap(node)
@@ -162,6 +169,18 @@ impl TextEngine {
         content: &str,
         run_limit: usize,
     ) -> Layout<TextBrush> {
+        self.build_text_layout_at(node, content, run_limit, None)
+    }
+    /// `build_text_layout` of the part of the node's text starting at byte `offset` (a
+    /// chunk): only the rich spans over that part, moved to its start. With it, whether
+    /// the spans are sorted by position (`spans_sorted`).
+    pub(super) fn build_text_layout_at(
+        &mut self,
+        node: &Node,
+        content: &str,
+        run_limit: usize,
+        offset: Option<(usize, bool)>,
+    ) -> Layout<TextBrush> {
         // A tab has no glyph (fonts draw it as a missing-glyph box): shape it as a
         // space, one byte as well so offsets stay those of `content`, widened to
         // `tabSize` spaces (CSS `tab-size`, default 8).
@@ -189,6 +208,7 @@ impl TextEngine {
             content,
             run_limit,
             tab_spacing.map(|spacing| (spacing, tabs)),
+            offset,
         )
     }
     /// The advance of a space in the node's font, for tab widths.
@@ -216,6 +236,7 @@ pub(super) fn shape_text(
     content: &str,
     run_limit: usize,
     tabs: Option<(f32, Vec<usize>)>,
+    offset: Option<(usize, bool)>,
 ) -> Layout<TextBrush> {
     let mut builder = context.ranged_builder(fonts, content, 1.0, true);
     builder.push_default(StyleProperty::FontSize(node.font_size(14.0)));
@@ -254,8 +275,21 @@ pub(super) fn shape_text(
     if let Some(rich) = &node.rich
         && let RichContent::Text { spans, .. } = rich.as_ref()
     {
-        for span in spans {
-            push_span(&mut builder, span, node, node.font_size(14.0));
+        match offset {
+            None => {
+                for span in spans {
+                    push_span(&mut builder, span, node, node.font_size(14.0));
+                }
+            }
+            Some((offset, sorted)) => {
+                let end = offset + content.len();
+                for span in spans_over(spans, offset..end, sorted) {
+                    let mut local = span.clone();
+                    local.range =
+                        span.range.start.max(offset) - offset..span.range.end.min(end) - offset;
+                    push_span(&mut builder, &local, node, node.font_size(14.0));
+                }
+            }
         }
     }
     for run in text_runs(node, run_limit.min(content.len()), content) {
@@ -276,4 +310,27 @@ pub(super) fn shape_text(
         }
     }
     compact(builder.build(content))
+}
+
+/// Whether spans are sorted by start and end: code highlights are.
+pub(super) fn spans_sorted(spans: &[Span]) -> bool {
+    spans.is_sorted_by_key(|span| span.range.start) && spans.is_sorted_by_key(|span| span.range.end)
+}
+
+/// The spans over `range` (non-empty overlap), in order: found by search when `sorted`
+/// (`spans_sorted`), by a scan otherwise.
+pub(super) fn spans_over(
+    spans: &[Span],
+    range: Range<usize>,
+    sorted: bool,
+) -> impl Iterator<Item = &Span> {
+    let first = if sorted {
+        spans.partition_point(|span| span.range.end <= range.start)
+    } else {
+        0
+    };
+    spans[first..]
+        .iter()
+        .take_while(move |span| !sorted || span.range.start < range.end)
+        .filter(move |span| span.range.start.max(range.start) < span.range.end.min(range.end))
 }

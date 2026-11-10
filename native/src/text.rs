@@ -263,7 +263,11 @@ struct TaskMarkerPaintStyle {
     check_color: Color,
 }
 
+mod chunks;
 mod shape;
+use chunks::{CHUNKED_TEXT_AREA_BYTES, ChunkedText};
+#[cfg(test)]
+pub(crate) const CHUNKED_TEXT_AREA_BYTES_FOR_TESTS: usize = CHUNKED_TEXT_AREA_BYTES;
 use shape::{Preshaped, ShapeKey};
 
 fn draw_task_markers<P: PaintTarget>(
@@ -692,6 +696,137 @@ pub(crate) fn prewarm() {
     });
 }
 
+/// The visual lines of a broken layout of `value`, per run, for AccessKit.
+fn layout_accessibility_lines(
+    layout: &Layout<TextBrush>,
+    value: &str,
+) -> Vec<AccessibilityTextLine> {
+    let lines: Vec<_> = layout
+        .lines()
+        .enumerate()
+        .map(|(line_index, line)| {
+            let line_range = line.text_range();
+            let mut runs: Vec<_> = line
+                .runs()
+                .map(|run| (run.text_range(), run.is_rtl()))
+                .collect();
+            runs.sort_by_key(|(range, _)| range.start);
+            if runs.is_empty() {
+                runs.push((line_range.clone(), layout.is_rtl()));
+            } else if let Some((range, _)) = runs.iter_mut().max_by_key(|(range, _)| range.end)
+                && range.end < line_range.end
+            {
+                // Parley may keep a hard line break outside the shaped glyph run. AccessKit
+                // requires that break to live on the final TextRun for the visual line.
+                range.end = line_range.end;
+            }
+            (line_index, line_range, *line.metrics(), runs)
+        })
+        .collect();
+    let mut result = Vec::with_capacity(lines.len().max(1));
+
+    for (line_index, line_range, metrics, runs) in lines {
+        let y0 = f64::from(metrics.block_min_coord);
+        let y1 = f64::from(metrics.block_max_coord);
+        for (mut range, right_to_left) in runs {
+            range.start = range.start.max(line_range.start).min(value.len());
+            range.end = range
+                .end
+                .min(line_range.end)
+                .min(value.len())
+                .max(range.start);
+            let Some(run_value) = value.get(range.clone()) else {
+                continue;
+            };
+            let mut geometry = Vec::new();
+
+            for (local_start, grapheme) in run_value.grapheme_indices(true) {
+                let start = range.start + local_start;
+                let end = start + grapheme.len();
+                let start_cursor = Cursor::from_byte_index(layout, start, Affinity::Downstream)
+                    .geometry(layout, 1.0);
+                let is_line_break = matches!(grapheme, "\n" | "\r" | "\r\n");
+                let selection = if is_line_break {
+                    None
+                } else {
+                    let anchor = Cursor::from_byte_index(layout, start, Affinity::Downstream);
+                    let focus = Cursor::from_byte_index(layout, end, Affinity::Upstream);
+                    Selection::new(anchor, focus)
+                        .geometry(layout)
+                        .into_iter()
+                        .map(|(rect, _)| rect)
+                        .find(|rect| rect.y1 >= y0 && rect.y0 <= y1)
+                };
+                let (character_x0, character_x1) = selection
+                    .map(|rect| (rect.x0.min(rect.x1), rect.x0.max(rect.x1)))
+                    .unwrap_or((start_cursor.x0, start_cursor.x0));
+                geometry.push((character_x0, character_x1));
+            }
+
+            let fallback_x = f64::from(metrics.offset + metrics.inline_min_coord);
+            let x0 = geometry
+                .iter()
+                .map(|(x0, _)| *x0)
+                .fold(f64::INFINITY, f64::min);
+            let x1 = geometry
+                .iter()
+                .map(|(_, x1)| *x1)
+                .fold(f64::NEG_INFINITY, f64::max);
+            let (x0, x1) = if x0.is_finite() && x1.is_finite() {
+                (x0.min(x1), x0.max(x1))
+            } else {
+                (fallback_x, fallback_x)
+            };
+            let character_positions = geometry
+                .iter()
+                .map(|(character_x0, character_x1)| {
+                    if right_to_left {
+                        (x1 - character_x1).max(0.0) as f32
+                    } else {
+                        (character_x0 - x0).max(0.0) as f32
+                    }
+                })
+                .collect();
+            let character_widths = geometry
+                .iter()
+                .map(|(character_x0, character_x1)| (character_x1 - character_x0).max(0.0) as f32)
+                .collect();
+
+            result.push(AccessibilityTextLine {
+                line_index,
+                byte_range: range,
+                x0,
+                y0,
+                x1,
+                y1,
+                character_positions,
+                character_widths,
+                right_to_left,
+            });
+        }
+    }
+    result.sort_by_key(|run| (run.byte_range.start, run.byte_range.end));
+    result
+}
+
+/// What shapes a markdown line besides the node's style: its text, wrapping and spans.
+fn markdown_line_key(value: &str, nowrap: bool, spans: &[Span]) -> u64 {
+    let mut hasher = std::hash::DefaultHasher::new();
+    value.hash(&mut hasher);
+    nowrap.hash(&mut hasher);
+    for span in spans {
+        span.range.hash(&mut hasher);
+        span.size.map(f32::to_bits).hash(&mut hasher);
+        span.weight.map(f32::to_bits).hash(&mut hasher);
+        (span.italic, span.mono, span.underline, span.strike).hash(&mut hasher);
+        span.font_family.hash(&mut hasher);
+        span.role.map(|role| role.key()).hash(&mut hasher);
+        span.syntax.map(|kind| kind.key()).hash(&mut hasher);
+        span.href.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 /// Short plain texts `TextEngine::recent` keeps shaped, and the longest it keeps.
 const RECENT_SHAPES: usize = 1024;
 const RECENT_SHAPE_BYTES: usize = 32;
@@ -733,12 +868,16 @@ pub struct TextEngine {
     /// the node hold one copy; mutating one (`Arc::make_mut`) copies it only while shared.
     pub layouts: HashMap<String, Arc<Layout<TextBrush>>>,
     markdown_lines: HashMap<String, Vec<MarkdownLine>>,
+    /// The style hash each markdown's lines were shaped with.
+    markdown_styles: HashMap<String, u64>,
     markdown_scroll: HashMap<(String, usize), f32>,
     markdown_metrics: HashMap<String, (Option<f32>, (f32, f32))>,
     markdown_block_widths: HashMap<String, HashMap<usize, f32>>,
     pub(crate) diff_layouts: HashMap<String, HashMap<usize, DiffRowLayouts>>,
     pub(crate) code_gutter_layouts: HashMap<String, Vec<Layout<TextBrush>>>,
     code_gutter_widths: HashMap<String, f32>,
+    /// The style hash each code gutter's numbers were shaped with.
+    code_gutter_styles: HashMap<String, u64>,
     /// `Code` blocks, which are measured unwrapped and scroll sideways.
     unwrapped_code: HashSet<String>,
     diff_column_widths: HashMap<String, (String, f32, f32)>,
@@ -781,9 +920,21 @@ pub struct TextEngine {
     style_hashes: HashMap<String, (crate::protocol::NodeStyle, u64)>,
     /// Ellipsized layout per text node and paint width; `None` when it fits.
     truncated: HashMap<String, (u32, Option<Layout<TextBrush>>)>,
+    /// Long text areas shaped in chunks of whole lines (`chunks.rs`); their `layouts` entry is empty.
+    chunked: HashMap<String, ChunkedText>,
+    /// The length from which a text area is chunked (tests compare with one layout).
+    pub(crate) chunked_text_area_bytes: usize,
 }
 
+/// A markdown line's layout, the width it is broken at and its height, kept for reuse.
+type ReusedLine = (Layout<TextBrush>, Option<Option<u32>>, f32);
+
 struct MarkdownLine {
+    /// Hash of what shaped `layout` (its text, spans and wrapping): an equal line of the
+    /// next content reuses it instead of shaping again.
+    key: u64,
+    /// The wrap width `layout` is broken at (`None` inside: unwrapped).
+    broken: Option<Option<u32>>,
     range: Range<usize>,
     content_end: usize,
     nowrap: bool,
@@ -1261,12 +1412,14 @@ impl TextEngine {
             context: LayoutContext::new(),
             layouts: HashMap::default(),
             markdown_lines: HashMap::default(),
+            markdown_styles: HashMap::default(),
             markdown_scroll: HashMap::default(),
             markdown_metrics: HashMap::default(),
             markdown_block_widths: HashMap::default(),
             diff_layouts: HashMap::default(),
             code_gutter_layouts: HashMap::default(),
             code_gutter_widths: HashMap::default(),
+            code_gutter_styles: HashMap::default(),
             unwrapped_code: HashSet::default(),
             nowrap: HashSet::default(),
             clamps: HashMap::default(),
@@ -1288,6 +1441,8 @@ impl TextEngine {
             shadow_images: HashMap::default(),
             ink_images: HashMap::default(),
             scale_context: swash::scale::ScaleContext::new(),
+            chunked: HashMap::default(),
+            chunked_text_area_bytes: CHUNKED_TEXT_AREA_BYTES,
         }
     }
     pub fn prepare(&mut self, node: &Node) {
@@ -1312,7 +1467,7 @@ impl TextEngine {
             {
                 self.markdown_scroll.retain(|(id, _), _| id != &node.id);
             }
-            self.prepare_markdown_lines(node, &content);
+            self.prepare_markdown_lines(node, &content, signature.1);
             let mut placeholder = self.context.ranged_builder(&mut self.fonts, "", 1.0, true);
             placeholder.push_default(StyleProperty::FontSize(node.font_size(14.0)));
             self.drawn.remove(&node.id);
@@ -1324,6 +1479,26 @@ impl TextEngine {
             self.shapes += 1;
             return;
         }
+        if self.chunkable(node, &content) {
+            self.prepare_chunks(node, &content, signature.1);
+            self.prepare_code_gutter(node, &content, signature.1);
+            self.unwrapped_code.remove(&node.id);
+            self.nowrap.remove(&node.id);
+            self.clamps.remove(&node.id);
+            self.drawn.remove(&node.id);
+            self.truncated.remove(&node.id);
+            self.unwrapped.remove(&node.id);
+            self.prealigned.remove(&node.id);
+            self.markdown_lines.remove(&node.id);
+            // No span reaches into an empty window: none is pushed.
+            let empty = Arc::new(self.build_text_layout_at(node, "", 0, Some((0, true))));
+            put_id(&mut self.layouts, &node.id, empty);
+            put_id(&mut self.signatures, &node.id, signature);
+            put_id(&mut self.alignments, &node.id, alignment_for_node(node));
+            self.shapes += 1;
+            return;
+        }
+        self.chunked.remove(&node.id);
         // Plain text and buttons shape the same from content and style alone; copy an equal one.
         let shareable = matches!(node.kind.as_str(), "text" | "button")
             && node.rich.is_none()
@@ -1419,42 +1594,7 @@ impl TextEngine {
                 cache.sizes.push((Some(0.0_f32.to_bits()), min));
             }
         }
-        if node.kind == "code" && node.show_line_numbers {
-            // Keep the gutter on the exact same typographic grid as the code.
-            // A smaller standalone layout can share the mathematical baseline
-            // and still look vertically offset because its glyph box and line
-            // box use different metrics.
-            let gutter_size = node.font_size(13.0);
-            let gutter_line_height = node.number("lineHeight", 1.5);
-            let gutter_weight = node.number("fontWeight", 400.0);
-            let family = node.string("fontFamily", "monospace").to_string();
-            let line_count = content.split('\n').count().max(1);
-            let mut gutters = Vec::with_capacity(line_count);
-            for line in 1..=line_count {
-                let number = line.to_string();
-                let mut gutter = self
-                    .context
-                    .ranged_builder(&mut self.fonts, &number, 1.0, true);
-                gutter.push_default(StyleProperty::FontSize(gutter_size));
-                gutter.push_default(StyleProperty::FontWeight(FontWeight::new(gutter_weight)));
-                gutter.push_default(StyleProperty::FontFamily(font_family_from_name(&family)));
-                gutter.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
-                    gutter_line_height,
-                )));
-                let mut gutter = compact(gutter.build(&number));
-                gutter.break_all_lines(None);
-                gutters.push(gutter);
-            }
-            let widest_number = gutters.iter().map(Layout::width).fold(0.0_f32, f32::max);
-            self.code_gutter_widths.insert(
-                node.id.clone(),
-                (widest_number + CODE_GUTTER_PADDING * 2.0).ceil(),
-            );
-            self.code_gutter_layouts.insert(node.id.clone(), gutters);
-        } else {
-            self.code_gutter_layouts.remove(&node.id);
-            self.code_gutter_widths.remove(&node.id);
-        }
+        self.prepare_code_gutter(node, &content, signature.1);
         if node.kind == "code" {
             // A `Code` block is measured as its own content and scrolls
             // sideways. Recording that here keeps measurement, paint and the
@@ -1473,6 +1613,52 @@ impl TextEngine {
         put_id(&mut self.signatures, &node.id, signature);
         put_id(&mut self.alignments, &node.id, alignment_for_node(node));
         self.shapes += 1;
+    }
+    /// A `Code` block's line numbers, one layout each. A number looks the same whatever its
+    /// line holds: those of the last prepare (same style) are kept, the new ones shaped.
+    fn prepare_code_gutter(&mut self, node: &Node, content: &str, style: u64) {
+        if node.kind != "code" || !node.show_line_numbers {
+            self.code_gutter_layouts.remove(&node.id);
+            self.code_gutter_widths.remove(&node.id);
+            self.code_gutter_styles.remove(&node.id);
+            return;
+        }
+        // Keep the gutter on the exact same typographic grid as the code.
+        // A smaller standalone layout can share the mathematical baseline
+        // and still look vertically offset because its glyph box and line
+        // box use different metrics.
+        let gutter_size = node.font_size(13.0);
+        let gutter_line_height = node.number("lineHeight", 1.5);
+        let gutter_weight = node.number("fontWeight", 400.0);
+        let family = node.string("fontFamily", "monospace").to_string();
+        let line_count = content.split('\n').count().max(1);
+        let mut gutters = match self.code_gutter_layouts.remove(&node.id) {
+            Some(gutters) if self.code_gutter_styles.get(&node.id) == Some(&style) => gutters,
+            _ => Vec::with_capacity(line_count),
+        };
+        gutters.truncate(line_count);
+        for line in gutters.len() + 1..=line_count {
+            let number = line.to_string();
+            let mut gutter = self
+                .context
+                .ranged_builder(&mut self.fonts, &number, 1.0, true);
+            gutter.push_default(StyleProperty::FontSize(gutter_size));
+            gutter.push_default(StyleProperty::FontWeight(FontWeight::new(gutter_weight)));
+            gutter.push_default(StyleProperty::FontFamily(font_family_from_name(&family)));
+            gutter.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
+                gutter_line_height,
+            )));
+            let mut gutter = compact(gutter.build(&number));
+            gutter.break_all_lines(None);
+            gutters.push(gutter);
+        }
+        let widest_number = gutters.iter().map(Layout::width).fold(0.0_f32, f32::max);
+        self.code_gutter_widths.insert(
+            node.id.clone(),
+            (widest_number + CODE_GUTTER_PADDING * 2.0).ceil(),
+        );
+        self.code_gutter_layouts.insert(node.id.clone(), gutters);
+        put_id(&mut self.code_gutter_styles, &node.id, style);
     }
     /// Width and line count of the ellipsized layout painted for `id`.
     #[cfg(test)]
@@ -1555,83 +1741,143 @@ impl TextEngine {
         self.truncated
             .insert(node.id.clone(), (width.to_bits(), result));
     }
-    fn prepare_markdown_lines(&mut self, node: &Node, content: &str) {
+    /// One layout per source line. A line whose text, spans and wrapping are those of a line
+    /// of the previous content (same style) keeps that line's layout: a document that grows
+    /// (a streamed answer) shapes only its new lines.
+    fn prepare_markdown_lines(&mut self, node: &Node, content: &str, style: u64) {
         let Some(RichContent::Text { spans, blocks, .. }) = node.rich.as_deref() else {
             return;
         };
+        let mut reusable: HashMap<u64, Vec<ReusedLine>> = HashMap::default();
+        if self.markdown_styles.get(&node.id) == Some(&style)
+            && let Some(old) = self.markdown_lines.remove(&node.id)
+        {
+            for line in old.into_iter().rev() {
+                reusable
+                    .entry(line.key)
+                    .or_default()
+                    .push((line.layout, line.broken, line.height));
+            }
+        }
+        put_id(&mut self.markdown_styles, &node.id, style);
+        let parts: Vec<(usize, usize, usize)> = {
+            let mut start = 0;
+            content
+                .split_inclusive('\n')
+                .map(|part| {
+                    let end = start + part.len();
+                    let line = (start, end, end - usize::from(part.ends_with('\n')));
+                    start = end;
+                    line
+                })
+                .collect()
+        };
+        // Spans and code/table blocks by line, in the order they were pushed before: each
+        // line looks at its own instead of every span after it.
         let mut spans_by_end: Vec<_> = spans.iter().collect();
         spans_by_end.sort_by_key(|span| span.range.end);
-        let mut blocks_by_end: Vec<_> = blocks.iter().collect();
-        blocks_by_end.sort_by_key(|block| block.range.end);
-        let mut lines = Vec::new();
-        let mut start = 0;
-        for part in content.split_inclusive('\n') {
-            let end = start + part.len();
-            let content_end = end - usize::from(part.ends_with('\n'));
-            let value = &content[start..content_end];
-            let block_start = blocks_by_end
-                [blocks_by_end.partition_point(|block| block.range.end <= start)..]
-                .iter()
-                .find(|block| {
-                    block.range.start <= start
-                        && start < block.range.end
-                        && matches!(
-                            block.kind,
-                            MarkdownBlockKind::Code | MarkdownBlockKind::Table { .. }
-                        )
-                })
-                .map(|block| block.range.start);
-            let nowrap = block_start.is_some();
-            let mut builder = self
-                .context
-                .ranged_builder(&mut self.fonts, value, 1.0, true);
-            builder.push_default(StyleProperty::FontSize(node.font_size(14.0)));
-            builder.push_default(StyleProperty::FontWeight(FontWeight::new(
-                node.number("fontWeight", 400.0),
-            )));
-            builder.push_default(StyleProperty::FontFamily(node_font_family(
-                node,
-                default_ui_generic_family(),
-            )));
-            builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
-                node.number("lineHeight", 1.5),
-            )));
-            for span in
-                &spans_by_end[spans_by_end.partition_point(|span| span.range.end <= start)..]
+        let mut line_spans: Vec<Vec<&Span>> = vec![Vec::new(); parts.len()];
+        for span in spans_by_end {
+            let first = parts.partition_point(|(_, end, _)| *end <= span.range.start);
+            let last = parts.partition_point(|(start, _, _)| *start < span.range.end);
+            for (index, (start, _, content_end)) in parts.iter().enumerate().take(last).skip(first)
             {
-                let clipped = span.range.start.max(start)..span.range.end.min(content_end);
-                if clipped.start < clipped.end {
-                    let mut local = (*span).clone();
-                    local.range = clipped.start - start..clipped.end - start;
-                    push_span(&mut builder, &local, node, node.font_size(14.0));
+                if span.range.start.max(*start) < span.range.end.min(*content_end) {
+                    line_spans[index].push(span);
                 }
             }
-            let layout = compact(builder.build(value));
+        }
+        let mut blocks_by_end: Vec<_> = blocks
+            .iter()
+            .filter(|block| {
+                matches!(
+                    block.kind,
+                    MarkdownBlockKind::Code | MarkdownBlockKind::Table { .. }
+                )
+            })
+            .collect();
+        blocks_by_end.sort_by_key(|block| block.range.end);
+        let mut line_blocks: Vec<Option<usize>> = vec![None; parts.len()];
+        for block in blocks_by_end {
+            let first = parts.partition_point(|(start, _, _)| *start < block.range.start);
+            let last = parts.partition_point(|(start, _, _)| *start < block.range.end);
+            for slot in &mut line_blocks[first..last.max(first)] {
+                slot.get_or_insert(block.range.start);
+            }
+        }
+        let mut lines = Vec::with_capacity(parts.len() + 1);
+        for (index, (start, end, content_end)) in parts.iter().copied().enumerate() {
+            let value = &content[start..content_end];
+            let block_start = line_blocks[index];
+            let nowrap = block_start.is_some();
+            let local: Vec<Span> = line_spans[index]
+                .iter()
+                .map(|span| {
+                    let mut local = (*span).clone();
+                    local.range = span.range.start.max(start) - start
+                        ..span.range.end.min(content_end) - start;
+                    local
+                })
+                .collect();
+            let key = markdown_line_key(value, nowrap, &local);
+            let (layout, broken, height) = match reusable.get_mut(&key).and_then(Vec::pop) {
+                Some(reused) => reused,
+                None => {
+                    let mut builder =
+                        self.context
+                            .ranged_builder(&mut self.fonts, value, 1.0, true);
+                    builder.push_default(StyleProperty::FontSize(node.font_size(14.0)));
+                    builder.push_default(StyleProperty::FontWeight(FontWeight::new(
+                        node.number("fontWeight", 400.0),
+                    )));
+                    builder.push_default(StyleProperty::FontFamily(node_font_family(
+                        node,
+                        default_ui_generic_family(),
+                    )));
+                    builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
+                        node.number("lineHeight", 1.5),
+                    )));
+                    for span in &local {
+                        push_span(&mut builder, span, node, node.font_size(14.0));
+                    }
+                    (compact(builder.build(value)), None, 0.0)
+                }
+            };
             lines.push(MarkdownLine {
+                key,
+                broken,
                 range: start..end,
                 content_end,
                 nowrap,
                 block_start,
                 layout,
                 y: 0.0,
-                height: 0.0,
+                height,
             });
-            start = end;
         }
         if content.is_empty() || content.ends_with('\n') {
-            let mut builder = self.context.ranged_builder(&mut self.fonts, "", 1.0, true);
-            builder.push_default(StyleProperty::FontSize(node.font_size(14.0)));
-            builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
-                node.number("lineHeight", 1.5),
-            )));
+            let key = !markdown_line_key("", false, &[]);
+            let (layout, broken, height) = match reusable.get_mut(&key).and_then(Vec::pop) {
+                Some(reused) => reused,
+                None => {
+                    let mut builder = self.context.ranged_builder(&mut self.fonts, "", 1.0, true);
+                    builder.push_default(StyleProperty::FontSize(node.font_size(14.0)));
+                    builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
+                        node.number("lineHeight", 1.5),
+                    )));
+                    (builder.build(""), None, 0.0)
+                }
+            };
             lines.push(MarkdownLine {
+                key,
+                broken,
                 range: content.len()..content.len(),
                 content_end: content.len(),
                 nowrap: false,
                 block_start: None,
-                layout: builder.build(""),
+                layout,
                 y: 0.0,
-                height: 0.0,
+                height,
             });
         }
         self.markdown_lines.insert(node.id.clone(), lines);
@@ -1652,10 +1898,14 @@ impl TextEngine {
         let mut max_width: f32 = 0.0;
         let mut block_widths = HashMap::<usize, f32>::default();
         for line in lines {
-            line.layout
-                .break_all_lines(if line.nowrap { None } else { width });
+            let wrap = if line.nowrap { None } else { width };
+            let key = wrap.map(f32::to_bits);
+            if line.broken != Some(key) {
+                line.layout.break_all_lines(wrap);
+                line.broken = Some(key);
+                line.height = line.layout.height().max(1.0);
+            }
             line.y = y;
-            line.height = line.layout.height().max(1.0);
             y += line.height;
             max_width = max_width.max(line.layout.width());
             if let Some(block) = line.block_start {
@@ -1785,6 +2035,7 @@ impl TextEngine {
         self.layouts.retain(|id, _| keep(id));
         self.measure_cache.retain(|id, _| keep(id));
         self.markdown_lines.retain(|id, _| keep(id));
+        self.markdown_styles.retain(|id, _| keep(id));
         self.markdown_scroll.retain(|(id, _), _| keep(id));
         self.markdown_metrics.retain(|id, _| keep(id));
         self.markdown_block_widths.retain(|id, _| keep(id));
@@ -1796,8 +2047,10 @@ impl TextEngine {
         self.diff_layouts.retain(|id, _| keep(id));
         self.code_gutter_layouts.retain(|id, _| keep(id));
         self.code_gutter_widths.retain(|id, _| keep(id));
+        self.code_gutter_styles.retain(|id, _| keep(id));
         self.unwrapped_code.retain(|id| keep(id));
         self.diff_column_widths.retain(|id, _| keep(id));
+        self.chunked.retain(|id, _| keep(id));
     }
     pub fn measure(&mut self, id: &str, width: Option<f32>) -> (f32, f32) {
         if let Some((measured_width, height)) =
@@ -1807,6 +2060,9 @@ impl TextEngine {
                 width.map_or(measured_width, |w| measured_width.min(w)),
                 height,
             );
+        }
+        if let Some(size) = self.measure_chunks(id, width) {
+            return size;
         }
         let Some(layout) = self.layouts.get(id) else {
             return (0.0, 0.0);
@@ -2056,6 +2312,10 @@ impl TextEngine {
                     }
                 }
             }
+            return;
+        }
+        if self.chunked.contains_key(&node.id) {
+            self.draw_chunks(target, node, &area, color, scale);
             return;
         }
         let gutter_width = self.code_gutter_width(node);
@@ -2790,6 +3050,9 @@ impl TextEngine {
         index: usize,
         width: Option<f32>,
     ) -> Option<parley::BoundingBox> {
+        if self.chunked.contains_key(id) {
+            return self.chunk_caret_rect(id, index, width);
+        }
         let align = self
             .alignments
             .get(id)
@@ -2818,6 +3081,9 @@ impl TextEngine {
     ) -> Vec<parley::BoundingBox> {
         if start >= end {
             return vec![];
+        }
+        if self.chunked.contains_key(id) {
+            return self.chunk_range_rects(id, start, end, width);
         }
         if self.markdown_lines.contains_key(id) {
             self.layout_markdown_lines(id, width);
@@ -2893,6 +3159,9 @@ impl TextEngine {
             .collect()
     }
     pub fn index_at(&mut self, id: &str, x: f32, y: f32, width: Option<f32>) -> Option<usize> {
+        if self.chunked.contains_key(id) {
+            return self.chunk_index_at(id, x, y, width);
+        }
         if self.markdown_lines.contains_key(id) {
             self.layout_markdown_lines(id, width);
             let lines = self.markdown_lines.get(id)?;
@@ -2928,6 +3197,9 @@ impl TextEngine {
         value: &str,
         width: Option<f32>,
     ) -> Vec<AccessibilityTextLine> {
+        if self.chunked.contains_key(id) {
+            return self.chunk_accessibility_lines(id, value, width);
+        }
         if self.markdown_lines.contains_key(id) {
             self.layout_markdown_lines(id, width);
             let mut result = Vec::new();
@@ -2972,114 +3244,7 @@ impl TextEngine {
         };
         layout.break_all_lines(width.map(|width| width.max(0.0)));
         layout.align(align, parley::AlignmentOptions::default());
-        let lines: Vec<_> = layout
-            .lines()
-            .enumerate()
-            .map(|(line_index, line)| {
-                let line_range = line.text_range();
-                let mut runs: Vec<_> = line
-                    .runs()
-                    .map(|run| (run.text_range(), run.is_rtl()))
-                    .collect();
-                runs.sort_by_key(|(range, _)| range.start);
-                if runs.is_empty() {
-                    runs.push((line_range.clone(), layout.is_rtl()));
-                } else if let Some((range, _)) = runs.iter_mut().max_by_key(|(range, _)| range.end)
-                    && range.end < line_range.end
-                {
-                    // Parley may keep a hard line break outside the shaped glyph run. AccessKit
-                    // requires that break to live on the final TextRun for the visual line.
-                    range.end = line_range.end;
-                }
-                (line_index, line_range, *line.metrics(), runs)
-            })
-            .collect();
-        let mut result = Vec::with_capacity(lines.len().max(1));
-
-        for (line_index, line_range, metrics, runs) in lines {
-            let y0 = f64::from(metrics.block_min_coord);
-            let y1 = f64::from(metrics.block_max_coord);
-            for (mut range, right_to_left) in runs {
-                range.start = range.start.max(line_range.start).min(value.len());
-                range.end = range
-                    .end
-                    .min(line_range.end)
-                    .min(value.len())
-                    .max(range.start);
-                let Some(run_value) = value.get(range.clone()) else {
-                    continue;
-                };
-                let mut geometry = Vec::new();
-
-                for (local_start, grapheme) in run_value.grapheme_indices(true) {
-                    let start = range.start + local_start;
-                    let end = start + grapheme.len();
-                    let start_cursor = Cursor::from_byte_index(layout, start, Affinity::Downstream)
-                        .geometry(layout, 1.0);
-                    let is_line_break = matches!(grapheme, "\n" | "\r" | "\r\n");
-                    let selection = if is_line_break {
-                        None
-                    } else {
-                        let anchor = Cursor::from_byte_index(layout, start, Affinity::Downstream);
-                        let focus = Cursor::from_byte_index(layout, end, Affinity::Upstream);
-                        Selection::new(anchor, focus)
-                            .geometry(layout)
-                            .into_iter()
-                            .map(|(rect, _)| rect)
-                            .find(|rect| rect.y1 >= y0 && rect.y0 <= y1)
-                    };
-                    let (character_x0, character_x1) = selection
-                        .map(|rect| (rect.x0.min(rect.x1), rect.x0.max(rect.x1)))
-                        .unwrap_or((start_cursor.x0, start_cursor.x0));
-                    geometry.push((character_x0, character_x1));
-                }
-
-                let fallback_x = f64::from(metrics.offset + metrics.inline_min_coord);
-                let x0 = geometry
-                    .iter()
-                    .map(|(x0, _)| *x0)
-                    .fold(f64::INFINITY, f64::min);
-                let x1 = geometry
-                    .iter()
-                    .map(|(_, x1)| *x1)
-                    .fold(f64::NEG_INFINITY, f64::max);
-                let (x0, x1) = if x0.is_finite() && x1.is_finite() {
-                    (x0.min(x1), x0.max(x1))
-                } else {
-                    (fallback_x, fallback_x)
-                };
-                let character_positions = geometry
-                    .iter()
-                    .map(|(character_x0, character_x1)| {
-                        if right_to_left {
-                            (x1 - character_x1).max(0.0) as f32
-                        } else {
-                            (character_x0 - x0).max(0.0) as f32
-                        }
-                    })
-                    .collect();
-                let character_widths = geometry
-                    .iter()
-                    .map(|(character_x0, character_x1)| {
-                        (character_x1 - character_x0).max(0.0) as f32
-                    })
-                    .collect();
-
-                result.push(AccessibilityTextLine {
-                    line_index,
-                    byte_range: range,
-                    x0,
-                    y0,
-                    x1,
-                    y1,
-                    character_positions,
-                    character_widths,
-                    right_to_left,
-                });
-            }
-        }
-        result.sort_by_key(|run| (run.byte_range.start, run.byte_range.end));
-        result
+        layout_accessibility_lines(layout, value)
     }
 
     /// Horizontal space reserved for a `Code` line-number gutter.
