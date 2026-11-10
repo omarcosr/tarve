@@ -48,6 +48,9 @@ describe("tailwind classes", () => {
     expect(tw("text-[13px] font-mono font-[500] line-clamp-2 underline")).toEqual({
       fontSize: 13, fontFamily: "monospace", fontWeight: 500, lineClamp: 2, overflow: "hidden", textDecoration: "underline",
     });
+    // CSS: text-left/right are physical (never flipped for right-to-left text); text-start/end are logical.
+    expect([tw("text-left"), tw("text-right"), tw("text-start"), tw("text-end"), tw("text-justify")].map(s => s.textAlign))
+      .toEqual(["left", "right", "start", "end", "justify"]);
   });
 
   test("borders, radius, shadow, opacity, cursor, transforms, transitions", () => {

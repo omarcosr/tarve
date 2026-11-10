@@ -8,6 +8,18 @@ var handlerProps = set("onClick", "onMarkdownLink", "onToggleFile", "onShowMore"
 	"onSize", "onPointerMove", "onPointerLeave", "onHover", "onError")
 var inheritedFont = []string{"fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "fontVariantNumeric", "fontFeatureSettings", "fontSize", "fontWeight", "lineHeight", "foreground", "textAlign", "textTransform", "whiteSpace"}
 var inheritedFontSet = set(inheritedFont...)
+
+// matchParentTextAlign is the computed value of text-align: match-parent under a parent
+// whose computed value is parent.
+func matchParentTextAlign(parent any) any {
+	switch parent {
+	case nil, "start", "match-parent":
+		return "left"
+	case "end":
+		return "right"
+	}
+	return parent
+}
 var controlFont = []string{"fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "textTransform"}
 var variantKeys = []string{"first", "last", "odd", "even", "sm", "md", "lg", "xl", "2xl", "portrait", "landscape", "pointerCoarse", "pointerFine", "motionReduce", "motionSafe", "dark"}
 

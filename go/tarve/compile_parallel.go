@@ -56,6 +56,11 @@ func (c *compiler) derive(key derivedKey) *derivedEntry {
 		put("focusVisible", resolveThemeStyle(S{"focusVisible": c.defaultFocusRing()}, c.theme)["focusVisible"])
 	}
 	parent := key.font.style
+	// CSS text-align: match-parent computes to the parent's value with start/end resolved
+	// against the parent's direction (left-to-right), so descendants inherit left/right.
+	if resolved["textAlign"] == "match-parent" {
+		put("textAlign", matchParentTextAlign(parent["textAlign"]))
+	}
 	switch key.class {
 	case 1:
 		init := c.initial()

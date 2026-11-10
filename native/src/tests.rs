@@ -18,6 +18,7 @@ mod long_press;
 mod popups;
 mod slider;
 mod style_inheritance;
+mod text_align;
 
 #[test]
 fn abi_and_json_protocol_versions_fail_independently() {

@@ -1176,6 +1176,12 @@ fn input_display_index(node: &Node, value: &str, actual_index: usize) -> usize {
     }
 }
 
+/// The width a field's text lays out in: its content box. A `textarea` wraps at it; an `input`
+/// keeps one line (shaped `NoWrap`) and aligns in it (`textAlign`).
+fn field_wrap_width(node: &Node, available: f32) -> Option<f32> {
+    matches!(node.kind.as_str(), "input" | "textarea").then_some(available)
+}
+
 fn input_actual_index(node: &Node, value: &str, display_index: usize) -> usize {
     if node.kind == "input" && node.input_type == "password" {
         let graphemes = display_index / '•'.len_utf8();
@@ -1403,6 +1409,8 @@ pub struct Entry {
     pub scroll_max_x: f64,
     pub scroll: f64,
     pub scroll_max: f64,
+    /// Sideways scroll of a single-line `Input`'s text in its content box (see `input_scroll_x`).
+    pub(crate) input_scroll_x: f64,
     virtual_anchor: Option<VirtualRowAnchor>,
     virtual_following_tail: bool,
     virtual_initial_layout: bool,
@@ -2759,6 +2767,7 @@ impl Tree {
                 scroll_max_x: previous.as_ref().map(|e| e.scroll_max_x).unwrap_or(0.0),
                 scroll,
                 scroll_max: previous.as_ref().map(|e| e.scroll_max).unwrap_or(0.0),
+                input_scroll_x: previous.as_ref().map(|e| e.input_scroll_x).unwrap_or(0.0),
                 virtual_anchor,
                 virtual_following_tail,
                 virtual_initial_layout,
@@ -5660,6 +5669,9 @@ impl Tree {
             let available_width =
                 (rect.width() - pad[1] as f64 - pad[3] as f64 - border[1] - border[3]).max(0.0)
                     as f32;
+            // An `Input`'s one line aligns in its content box and scrolls in it (caret in view).
+            let field_scroll = self.input_scroll_x(id);
+            let content_left = rect.x0 + pad[3] as f64 + border[3];
             let (tw, th) = self.text.measure(
                 &render_node.id,
                 if matches!(node.kind.as_str(), "text" | "markdown" | "textarea") {
@@ -5670,7 +5682,8 @@ impl Tree {
             );
             let gutter = f64::from(self.text.code_gutter_width(&node));
             let mut x = rect.x0 + pad[3] as f64 + border[3] + gutter
-                - if node.kind == "code" { scroll_x } else { 0.0 };
+                - if node.kind == "code" { scroll_x } else { 0.0 }
+                - field_scroll;
             let y = if matches!(node.kind.as_str(), "text" | "markdown" | "code") {
                 rect.y0 + pad[0] as f64 + border[0]
             } else if node.kind == "textarea" {
@@ -5755,6 +5768,18 @@ impl Tree {
             if text_clip && ink_overflow {
                 let reach = f64::from(node.font_size(14.0));
                 target.push_clip(Fill::NonZero, transform, &rect.inflate(reach, reach));
+            } else if text_clip
+                && node.kind == "input"
+                && self.input_overflows(&render_node.id, available_width)
+            {
+                // A line wider than the field scrolls inside its content box, as in a browser
+                // (the padding stays clear on both sides).
+                let right = (rect.x1 - pad[1] as f64 - border[1]).max(content_left);
+                target.push_clip(
+                    Fill::NonZero,
+                    transform,
+                    &BoxRect::new(content_left, rect.y0, right, rect.y1),
+                );
             } else if text_clip {
                 target.push_clip(Fill::NonZero, transform, &shape);
             }
@@ -5843,7 +5868,7 @@ impl Tree {
                 && ime_display.is_none()
                 && let Some((start, end)) = self.selected_range()
             {
-                let wrap_width = (node.kind == "textarea").then_some(available_width);
+                let wrap_width = field_wrap_width(&node, available_width);
                 for selection in self.selection_rects(id, start, end, wrap_width) {
                     target.fill(
                         Fill::NonZero,
@@ -5859,7 +5884,7 @@ impl Tree {
                 }
             }
             if let Some(display) = &ime_display {
-                let wrap_width = (node.kind == "textarea").then_some(available_width);
+                let wrap_width = field_wrap_width(&node, available_width);
                 if let Some((anchor, caret)) = display.cursor_range
                     && anchor != caret
                 {
@@ -5935,8 +5960,11 @@ impl Tree {
                 }
                 let display_text = render_node.display_text();
                 if !display_text.is_empty() {
-                    let wrap_width = matches!(node.kind.as_str(), "text" | "markdown" | "textarea")
-                        .then_some(available_width);
+                    let wrap_width = matches!(
+                        node.kind.as_str(),
+                        "text" | "markdown" | "textarea" | "input"
+                    )
+                    .then_some(available_width);
                     let thickness = f64::from((node.font_size(14.0) * 0.06).clamp(1.0, 2.0));
                     for line in
                         self.text
@@ -5980,14 +6008,16 @@ impl Tree {
                         .as_ref()
                         .map(|display| display.value.as_str())
                         .unwrap_or_else(|| node.value.as_deref().unwrap_or(""));
-                    let display_index = input_display_index(&render_node, value, caret);
-                    let wrap_width = (node.kind == "textarea").then_some(available_width);
-                    if let Some(cursor) =
-                        self.text
-                            .caret_rect(&render_node.id, display_index, wrap_width)
-                    {
+                    let edit = EditLayout {
+                        node: render_node.clone(),
+                        value: value.to_string(),
+                        caret,
+                    };
+                    let wrap_width = field_wrap_width(&node, available_width);
+                    if let Some(cursor) = self.field_caret_rect(&edit, wrap_width) {
                         let content_right = rect.x1 - pad[1] as f64 - border[1];
-                        let cx = (x + cursor.x0).clamp(x, content_right.max(x));
+                        let cx =
+                            (x + cursor.x0).clamp(content_left, content_right.max(content_left));
                         let cy0 = y + cursor.y0;
                         let cy1 = y + cursor.y1;
                         target.fill(
@@ -7881,25 +7911,106 @@ impl Tree {
         let multiline = entry.node.kind == "textarea";
         let available_width =
             (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
+        let field_scroll = self.input_scroll_x(&id);
         let layout = self.prepare_edit_layout(&id)?;
-        let wrap_width = multiline.then_some(available_width);
-        let (_, text_height) = self.text.measure(&layout.node.id, wrap_width);
-        let display_index = input_display_index(&layout.node, &layout.value, layout.caret);
-        let cursor = self
+        let (_, text_height) = self
             .text
-            .caret_rect(&layout.node.id, display_index, wrap_width)?;
+            .measure(&layout.node.id, multiline.then_some(available_width));
+        let wrap_width = field_wrap_width(&layout.node, available_width);
+        let cursor = self.field_caret_rect(&layout, wrap_width)?;
         let origin_x = visible.x0 + pad[3] as f64 + border[3] as f64;
+        let content_left = origin_x;
+        let origin_x = origin_x - field_scroll;
         let origin_y = if multiline {
             visible.y0 + pad[0] as f64 + border[0] as f64 - scroll
         } else {
             visible.y0 + (visible.height() - text_height as f64) / 2.0
         };
         let content_right = visible.x1 - pad[1] as f64 - border[1] as f64;
-        let x = (origin_x + cursor.x0).clamp(origin_x, content_right.max(origin_x));
+        let x = (origin_x + cursor.x0).clamp(content_left, content_right.max(content_left));
         let y = origin_y + cursor.y0;
         let width = (cursor.x1 - cursor.x0).max(1.0);
         let height = (cursor.y1 - cursor.y0).max(1.0);
         Some(BoxRect::new(x, y, x + width, y + height))
+    }
+
+    /// The caret of an edited field in its text layout's coordinates. An empty field shows its
+    /// placeholder, but CSS puts the caret where an empty line aligns, not at the placeholder's start.
+    fn field_caret_rect(
+        &mut self,
+        layout: &EditLayout,
+        wrap_width: Option<f32>,
+    ) -> Option<parley::BoundingBox> {
+        let display_index = input_display_index(&layout.node, &layout.value, layout.caret);
+        let mut cursor = self
+            .text
+            .caret_rect(&layout.node.id, display_index, wrap_width)?;
+        if layout.value.is_empty()
+            && let Some(width) = wrap_width
+        {
+            let x = self.text.empty_caret_x(&layout.node.id, width);
+            cursor.x1 = x + (cursor.x1 - cursor.x0);
+            cursor.x0 = x;
+        }
+        Some(cursor)
+    }
+
+    /// Sideways scroll of a single-line `Input`, in its aligned text's coordinates: the content
+    /// box shows `[scroll, scroll + width]`. Like a browser's inner editor, a focused field scrolls
+    /// just enough to keep the caret in view and a blurred one rests at its start (`0`; a
+    /// right-to-left line that overflows starts left of `0`, where `textAlign` placed it).
+    pub(crate) fn input_scroll_x(&mut self, id: &str) -> f64 {
+        let Some(entry) = self.entries.get(id) else {
+            return 0.0;
+        };
+        if entry.node.kind != "input" {
+            return 0.0;
+        }
+        let pad = entry.node.insets("padding");
+        let border = entry.node.insets("borderWidth");
+        let width =
+            (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0);
+        let previous = entry.input_scroll_x;
+        let focused = self.focused.as_deref() == Some(id);
+        let Some(layout) = self.prepare_edit_layout(id) else {
+            return 0.0;
+        };
+        let wrap_width = Some(width as f32);
+        let (mut low, mut high) = (0.0_f64, width);
+        let length = layout.node.display_text().len();
+        for rect in self
+            .text
+            .range_rects(&layout.node.id, 0, length, wrap_width)
+        {
+            low = low.min(rect.x0);
+            high = high.max(rect.x1);
+        }
+        let mut scroll = if focused { previous } else { 0.0 };
+        if focused && let Some(cursor) = self.field_caret_rect(&layout, wrap_width) {
+            // One pixel for the caret itself, which paints right of its x.
+            if cursor.x0 < scroll {
+                scroll = cursor.x0;
+            } else if cursor.x0 + 1.0 > scroll + width {
+                scroll = cursor.x0 + 1.0 - width;
+            }
+        }
+        let scroll = scroll.clamp(low, (high - width).max(low));
+        if let Some(entry) = self.entries.get_mut(id) {
+            entry.input_scroll_x = scroll;
+        }
+        scroll
+    }
+
+    /// Whether a single-line `Input`'s text is wider than its content box.
+    fn input_overflows(&mut self, id: &str, width: f32) -> bool {
+        let Some(layout) = self.prepare_edit_layout(id) else {
+            return false;
+        };
+        let length = layout.node.display_text().len();
+        self.text
+            .range_rects(&layout.node.id, 0, length, Some(width))
+            .iter()
+            .any(|rect| rect.x0 < -0.5 || rect.x1 > f64::from(width) + 0.5)
     }
 
     fn clear_ime_layout(&mut self, target: &str) {
@@ -7946,7 +8057,7 @@ impl Tree {
         let border = entry.node.insets("borderWidth");
         let available_width =
             (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
-        let wrap_width = (entry.node.kind == "textarea").then_some(available_width);
+        let wrap_width = field_wrap_width(&entry.node, available_width);
         self.text.prepare(&display.node);
         self.text_range_rects(
             &display.node,
@@ -8804,10 +8915,11 @@ impl Tree {
         let multiline = node.kind == "textarea";
         let available_width =
             (rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
-        let wrap_width = multiline.then_some(available_width);
+        let field_scroll = self.input_scroll_x(id);
         self.text.prepare(&node);
-        let (_, text_height) = self.text.measure(id, wrap_width);
-        let origin_x = visible.x0 + pad[3] as f64 + border[3] as f64;
+        let (_, text_height) = self.text.measure(id, multiline.then_some(available_width));
+        let wrap_width = field_wrap_width(&node, available_width);
+        let origin_x = visible.x0 + pad[3] as f64 + border[3] as f64 - field_scroll;
         let origin_y = if multiline {
             visible.y0 + pad[0] as f64 + border[0] as f64 - scroll
         } else {
@@ -9229,11 +9341,13 @@ impl Tree {
         let multiline = node.kind == "textarea";
         let available_width =
             (rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
-        let wrap_width = multiline.then_some(available_width);
+        let field_scroll = self.input_scroll_x(id);
         self.text.prepare(&node);
-        let (_, text_height) = self.text.measure(id, wrap_width);
-        let cursor = self.text.caret_rect(id, display_byte, wrap_width)?;
-        let origin_x = visible.x0 + pad[3] as f64 + border[3] as f64;
+        let (_, text_height) = self.text.measure(id, multiline.then_some(available_width));
+        let cursor =
+            self.text
+                .caret_rect(id, display_byte, field_wrap_width(&node, available_width))?;
+        let origin_x = visible.x0 + pad[3] as f64 + border[3] as f64 - field_scroll;
         let origin_y = if multiline {
             visible.y0 + pad[0] as f64 + border[0] as f64 - scroll
         } else {
@@ -9566,13 +9680,16 @@ impl Tree {
     }
 
     fn place_text_caret_from_pointer(&mut self, id: &str) {
+        // The point is in the field's scrolled, aligned line: the same origin paint draws it at.
+        let field_scroll = self.input_scroll_x(id);
         let entry = &self.entries[id];
         let pad = entry.node.insets("padding");
         let border = entry.node.insets("borderWidth");
         let rect = self.visible_rect(id).unwrap_or(entry.rect);
         let width =
             (entry.rect.width() - (pad[1] + pad[3] + border[1] + border[3]) as f64).max(0.0) as f32;
-        let x = (self.mouse.0 - rect.x0 - pad[3] as f64 - border[3] as f64).max(0.0) as f32;
+        let x = ((self.mouse.0 - rect.x0 - pad[3] as f64 - border[3] as f64).max(0.0)
+            + field_scroll) as f32;
         let multiline = entry.node.kind == "textarea";
         let y = if multiline {
             (self.mouse.1 - rect.y0 - pad[0] as f64 - border[0] as f64 + entry.scroll).max(0.0)
@@ -9581,7 +9698,8 @@ impl Tree {
             0.0
         };
         let value = entry.node.value.as_deref().unwrap_or("");
-        if let Some(index) = self.text.index_at(id, x, y, multiline.then_some(width)) {
+        let wrap_width = field_wrap_width(&entry.node, width);
+        if let Some(index) = self.text.index_at(id, x, y, wrap_width) {
             self.caret = input_actual_index(&entry.node, value, index);
             self.dirty.paint = true;
             self.dirty.full_paint = true;

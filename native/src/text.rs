@@ -916,6 +916,13 @@ fn alignment_for_node(node: &Node) -> parley::Alignment {
         "center" => parley::Alignment::Center,
         "end" => parley::Alignment::End,
         "justify" => parley::Alignment::Justify,
+        // Physical edges: they do not flip for right-to-left text.
+        "left" => parley::Alignment::Left,
+        "right" => parley::Alignment::Right,
+        // The front ends resolve `match-parent` to the parent's value; one that reaches the
+        // tree unresolved has no parent value, so it is the initial `start` against the
+        // initial left-to-right direction.
+        "match-parent" => parley::Alignment::Left,
         _ => parley::Alignment::Start,
     }
 }
@@ -2062,7 +2069,11 @@ impl TextEngine {
                 .truncated
                 .get(&node.id)
                 .is_some_and(|(_, layout)| layout.is_some());
-        let wrap = if matches!(node.kind.as_str(), "text" | "markdown" | "textarea") && !nowrap {
+        let wrap = if matches!(
+            node.kind.as_str(),
+            "text" | "markdown" | "textarea" | "input"
+        ) && !nowrap
+        {
             Some(width.max(0.0))
         } else {
             None
@@ -2097,7 +2108,10 @@ impl TextEngine {
             let Some(layout) = layout else {
                 return;
             };
-            let fits = unwrapped && wrap.is_none_or(|width| width >= layout.width());
+            // An `Input` aligns in its content box, not at its own width: always break it there.
+            let fits = unwrapped
+                && node.kind != "input"
+                && wrap.is_none_or(|width| width >= layout.width());
             if !fits {
                 layout.break_all_lines(wrap);
             }
@@ -2753,6 +2767,22 @@ impl TextEngine {
         layouts.content.break_all_lines(None);
         let local = Cursor::from_point(&layouts.content, content_x, line_height * 0.5).index();
         Some(row.range.start + row.content_offset() + local.min(row.content_text().len()))
+    }
+    /// Where the caret of an empty field sits in a line box `width` wide: CSS lays the empty
+    /// line out in the field's (left-to-right) direction, at its `textAlign` edge or centre,
+    /// whatever its placeholder's direction.
+    pub fn empty_caret_x(&self, id: &str, width: f32) -> f64 {
+        let width = f64::from(width.max(0.0));
+        match self
+            .alignments
+            .get(id)
+            .copied()
+            .unwrap_or(parley::Alignment::Start)
+        {
+            parley::Alignment::Center => width / 2.0,
+            parley::Alignment::End | parley::Alignment::Right => (width - 1.0).max(0.0),
+            _ => 0.0,
+        }
     }
     pub fn caret_rect(
         &mut self,

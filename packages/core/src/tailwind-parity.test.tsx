@@ -259,7 +259,6 @@ function normalize(prop: string, raw: string): string {
   value = value.replace(/(-?\d*\.?\d+)em/g, (_, n) => `${Math.round(Number(n) * FONT * 100) / 100}`);
   value = value.replace(/(-?\d*\.?\d+)px/g, "$1");
   if (prop === "opacity" || prop.startsWith("--tw-scale")) value = value.replace(/^(-?\d*\.?\d+)%$/, (_, n) => String(Number(n) / 100));
-  if (prop === "text-align") value = value === "left" ? "start" : value === "right" ? "end" : value;
   if (prop === "justify-self" || prop === "justify-items") value = value.replace(/^flex-/, "");
   if (prop === "transform-origin") {
     const keywords: Record<string, string> = { center: "50% 50%", top: "50% 0%", bottom: "50% 100%", left: "0% 50%", right: "100% 50%", "top left": "0% 0%", "top right": "100% 0%", "bottom left": "0% 100%", "bottom right": "100% 100%" };

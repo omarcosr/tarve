@@ -1056,6 +1056,17 @@ impl From<accesskit_winit::Event> for Command {
 
 pub fn validate(root: &Node) -> Result<(), String> {
     fn validate_style(n: &Node) -> Result<(), String> {
+        if let Some(value) = n.style.get("textAlign") {
+            let Some(value) = value.as_str() else {
+                return Err(format!("textAlign must be a string on {}", n.id));
+            };
+            if !matches!(
+                value,
+                "start" | "center" | "end" | "justify" | "left" | "right" | "match-parent"
+            ) {
+                return Err(format!("Invalid textAlign on {}: {value}", n.id));
+            }
+        }
         if let Some(value) = n.style.get("userSelect") {
             let Some(value) = value.as_str() else {
                 return Err(format!("userSelect must be a string on {}", n.id));

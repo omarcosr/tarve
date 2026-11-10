@@ -118,6 +118,12 @@ function focusOutlineOverrides(style: NonNullable<NativeNode["style"]["focus"]> 
  */
 const INHERITED_FONT = ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "fontVariantNumeric", "fontFeatureSettings", "fontSize", "fontWeight", "lineHeight", "foreground", "textAlign", "textTransform", "whiteSpace", "textShadow"] as const;
 const INHERITED_FONT_SET: ReadonlySet<string> = new Set(INHERITED_FONT);
+/** The computed value of `text-align: match-parent` under a parent whose computed value is `parent`. */
+export function matchParentTextAlign(parent: unknown): string {
+  if (parent === undefined || parent === "start" || parent === "match-parent") return "left";
+  if (parent === "end") return "right";
+  return String(parent);
+}
 /** Inherited font values that controls (buttons, inputs, code) take too. */
 const CONTROL_FONT = ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "textTransform"] as const;
 /** Kinds whose text takes every inherited value; controls keep their own size, weight and colour. */
@@ -614,6 +620,9 @@ export function compileTree(
       : undefined;
     const parentFont = inheritedFont;
     const fontStyle = style as Record<string, unknown>;
+    // CSS `text-align: match-parent` computes to the parent's value, with start/end resolved against the
+    // parent's direction (left-to-right: there is no `direction` property), so descendants inherit left/right.
+    if (fontStyle.textAlign === "match-parent") fontStyle.textAlign = matchParentTextAlign(parentFont.textAlign);
     if (INHERITING_TEXT.has(nativeType)) {
       const initial = initialFont();
       for (let index = 0; index < INHERITED_FONT.length; index++) {

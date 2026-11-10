@@ -200,7 +200,15 @@ export interface Style extends StateStyle {
   /** CSS `overflow`: `hidden`/`clip` clip children to the box and let it shrink below its content. */
   overflow?: "visible" | "hidden" | "clip";
   /** Line height as a multiple of the font size (CSS unitless `line-height`), not px. */
-  lineHeight?: number; textAlign?: "start" | "center" | "end" | "justify";
+  lineHeight?: number;
+  /**
+   * CSS `text-align`. `start`/`end` follow the text direction; `left`/`right` are physical and never flip
+   * for right-to-left text; `match-parent` takes the parent's value with `start`/`end` resolved against the
+   * parent's direction (left-to-right: Tarve has no `direction` property), so it computes to `left`/`right`.
+   * A single-line `Input` aligns its one line (and its placeholder and caret) in its content box, where
+   * `justify` is `start` as on any last line; a line wider than the box scrolls sideways to keep the caret in view.
+   */
+  textAlign?: "start" | "center" | "end" | "justify" | "left" | "right" | "match-parent";
   taskMarkerColor?: string; taskMarkerCheckColor?: string;
   markdownCodeBackground?: string; markdownQuoteBackground?: string; markdownQuoteAccent?: string;
   markdownTableHeaderBackground?: string; markdownTableRule?: string;

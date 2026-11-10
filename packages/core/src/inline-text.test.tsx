@@ -94,6 +94,23 @@ test("colour, size, weight and line height are inherited by text, as in CSS", ()
   expect(style("initial")).toMatchObject({ fontSize: 14, fontWeight: 400, lineHeight: 1.5 });
 });
 
+test("text-align left/right pass through and match-parent computes to the parent's value against its direction", () => {
+  const tree = compileTree(<Window>
+    <div style={{ textAlign: "right" }}><p id="right">a</p><p id="match-right" style={{ textAlign: "match-parent" }}>b</p></div>
+    <div style={{ textAlign: "left" }}><p id="left">c</p></div>
+    <div style={{ textAlign: "start" }}><p id="match-start" style={{ textAlign: "match-parent" }}>d</p></div>
+    <div style={{ textAlign: "end" }}>
+      <div id="box" style={{ textAlign: "match-parent" }}><p id="through-box">e</p></div>
+    </div>
+    <div style={{ textAlign: "center" }}><p id="match-center" style={{ textAlign: "match-parent" }}>f</p></div>
+    <div style={{ textAlign: "justify" }}><p id="match-justify" style={{ textAlign: "match-parent" }}>g</p></div>
+    <p id="match-root" style={{ textAlign: "match-parent" }}>h</p>
+  </Window>);
+  const align = (id: string) => tree.nodes.get(id)!.style.textAlign;
+  expect(["right", "match-right", "left", "match-start", "box", "through-box", "match-center", "match-justify", "match-root"].map(align))
+    .toEqual(["right", "right", "left", "left", "right", "right", "center", "justify", "left"]);
+});
+
 test("sub and sup shift the baseline like Chromium and nest", () => {
   const node = textOf(<Window><p id="t" style={{ fontSize: 18 }}>x<sup>n<sup>k</sup></sup>H<sub>2</sub></p></Window>, "t");
   const styles = Object.fromEntries(node.runs!.map(run => [node.text!.slice(run.start, run.end), run.style]));

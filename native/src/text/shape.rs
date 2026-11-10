@@ -232,6 +232,11 @@ pub(super) fn shape_text(
     builder.push_default(StyleProperty::LineHeight(LineHeight::FontSizeRelative(
         node.number("lineHeight", 1.5),
     )));
+    // A single-line `Input` breaks at its content box (so `textAlign` has a line box to
+    // align in) but never wraps: an overflowing line scrolls sideways instead.
+    if node.kind == "input" {
+        builder.push_default(StyleProperty::TextWrapMode(parley::TextWrapMode::NoWrap));
+    }
     if matches!(node.string("fontStyle", "normal"), "italic" | "oblique") {
         builder.push_default(StyleProperty::FontStyle(FontStyle::Italic));
     }

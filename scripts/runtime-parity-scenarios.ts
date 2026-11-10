@@ -116,6 +116,45 @@ await parity(app, async () => {
 const FFI: Record<string, string> = { bun: "bun", node: "node", txiki: "txiki" };
 
 export const SCENARIOS: Record<string, Scenario> = {
+  // A single-line Input's textAlign (left, center, right, a right-to-left start, a centred
+  // placeholder) and the sideways scroll of a focused line wider than its field.
+  "input-align": {
+    source: String.raw`import { Input, View, Window, createApp } from "@tarve/core";
+const LONG = "The quick brown fox jumps over the lazy dog 0123456789";
+const rows = [
+  ["left", 10, "MMMM", "left", undefined], ["center", 52, "MMMM", "center", undefined], ["right", 94, "MMMM", "right", undefined],
+  ["rtl", 136, "שלום עולם", "start", undefined], ["placeholder", 178, "", "center", "Search"], ["overflow", 220, LONG, "center", undefined],
+] as const;
+function View_() {
+  return (
+    <Window title="Input align parity" width={320} height={266} resizable={false} style={{ background: "#d4d4d8" }}>
+      <View style={{ position: "relative", flex: 1 }}>
+        {rows.map(([id, top, value, textAlign, placeholder]) => (
+          <Input id={id} value={value} placeholder={placeholder}
+            style={{ position: "absolute", left: 20, top, width: 240, height: 36, padding: { left: 8, right: 8 }, borderWidth: 0,
+              radius: 0, background: "#ffffff", foreground: "#000000", placeholderColor: "#0000ff", caretColor: "#ffffff",
+              outlineWidth: 0, fontSize: 18, textAlign }} />
+        ))}
+      </View>
+    </Window>
+  );
+}
+const app = createApp(View_, { renderer: "cpu", debug: true });
+await parity(app, async () => {
+  await settle(app);
+  await stage(app, "initial");
+  app.debug({ type: "input", action: "move", x: 140, y: 238 });
+  app.debug({ type: "input", action: "down" });
+  app.debug({ type: "input", action: "up" });
+  app.debug({ type: "input", action: "key", text: "End" });
+  await wait(300);
+  await stage(app, "scrolled");
+  const focused = (await app.inspect()).nodes.find((n: any) => n.id === "overflow");
+  return { overflow: !!focused };
+});
+`,
+  },
+
   // @tarve/router: <Link> pushes, a button pushes, Escape goes back, a button pops to the root,
   // a tab switch keeps each stack, and router.back() from code.
   router: {
