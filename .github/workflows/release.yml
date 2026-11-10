@@ -240,6 +240,7 @@ jobs:
             dist/tarve-svelte-*.tgz
             dist/tarve-router-*.tgz
             dist/tarve-test-*.tgz
+            dist/tarve-mcp-*.tgz
             dist/create-tarve-*.tgz
             dist/release-manifest.json
             native/win32-x64/tarve_native.dll
@@ -267,6 +268,7 @@ jobs:
             (Get-ChildItem -LiteralPath dist -Filter "tarve-svelte-*.tgz" -File | Select-Object -First 1).FullName,
             (Get-ChildItem -LiteralPath dist -Filter "tarve-router-*.tgz" -File | Select-Object -First 1).FullName,
             (Get-ChildItem -LiteralPath dist -Filter "tarve-test-*.tgz" -File | Select-Object -First 1).FullName,
+            (Get-ChildItem -LiteralPath dist -Filter "tarve-mcp-*.tgz" -File | Select-Object -First 1).FullName,
             (Get-ChildItem -LiteralPath dist -Filter "create-tarve-*.tgz" -File | Select-Object -First 1).FullName,
             "dist/release-manifest.json",
             "native/win32-x64/tarve_native.dll",
@@ -320,7 +322,7 @@ jobs:
           dist_tag=latest
           case "${version}" in *-*) dist_tag=next ;; esac
           # @tarve/core first, then @tarve/headless: the other packages declare them as peers.
-          for pair in "@tarve/core:tarve-core" "@tarve/headless:tarve-headless" "@tarve/react-icons:tarve-react-icons" "@tarve/svelte:tarve-svelte" "@tarve/router:tarve-router" "@tarve/test:tarve-test" "create-tarve:create-tarve"; do
+          for pair in "@tarve/core:tarve-core" "@tarve/headless:tarve-headless" "@tarve/react-icons:tarve-react-icons" "@tarve/svelte:tarve-svelte" "@tarve/router:tarve-router" "@tarve/test:tarve-test" "@tarve/mcp:tarve-mcp" "create-tarve:create-tarve"; do
             name="${pair%%:*}"
             tarball="release/dist/${pair#*:}-${version}.tgz"
             if [ ! -f "${tarball}" ]; then
