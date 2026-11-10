@@ -305,9 +305,13 @@ export interface NativeNode {
   value?: string; placeholder?: string;
   inputType?: "text" | "password" | "email" | "number" | "search" | "tel" | "url";
   submitOnEnter?: boolean;
+  /** An `input`/`textarea` the user can focus, select and copy but not edit. */
+  readOnly?: boolean;
+  /** The most characters the user can bring an `input`/`textarea` to; a paste is cut to fit. */
+  maxLength?: number;
   scrollSpeed?: number;
   scrollOrientation?: ScrollOrientation;
-  /** A scroll area keeps its end in view while content grows, while it is at the end. */
+  /** A scroll area (or a `textarea`) keeps its end in view while content grows, while it is at the end. */
   followTail?: boolean;
   virtualList?: VirtualListLayout;
   control?: Control | null;

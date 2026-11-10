@@ -498,4 +498,18 @@ describe("control kit", () => {
     expect(area?.style.focusVisible?.outlineStyle).toBe("solid");
     expect(tree.handlers.get("notes")?.onChange).toBeFunction();
   });
+
+  test("TextArea passes readOnly, maxLength and followTail to the native node", () => {
+    const tree = compileTree(
+      <Window>
+        <TextArea id="log" value="a" readOnly maxLength={10} followTail />
+        <TextArea id="plain" value="b" />
+      </Window>,
+    );
+    const log = tree.nodes.get("log") as Record<string, unknown> | undefined;
+    expect(log?.readOnly).toBe(true);
+    expect(log?.maxLength).toBe(10);
+    expect(log?.followTail).toBe(true);
+    expect((tree.nodes.get("plain") as Record<string, unknown> | undefined)?.followTail).toBeUndefined();
+  });
 });

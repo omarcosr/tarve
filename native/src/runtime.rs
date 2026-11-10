@@ -289,7 +289,7 @@ use winit::{
 pub(crate) use cursor::{css_cursor, cursor_for_node};
 
 pub(crate) fn ime_allowed_for_node(node: Option<&Node>) -> bool {
-    node.is_some_and(|node| matches!(node.kind.as_str(), "input" | "textarea"))
+    node.is_some_and(|node| matches!(node.kind.as_str(), "input" | "textarea") && !node.read_only)
 }
 
 /// Keys a focused text field uses for typing, editing and moving the caret.

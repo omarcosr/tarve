@@ -9,6 +9,10 @@ export interface InputProps extends BaseProps {
   value?: string;
   placeholder?: string;
   disabled?: boolean;
+  /** Focusable, selectable and copyable, but the user cannot edit it (HTML `readonly`). The app can still change `value`. */
+  readOnly?: boolean;
+  /** The most characters the user can bring the value to (HTML `maxlength`): typing past it is dropped, a paste is cut to fit. */
+  maxLength?: number;
   onChange?: (value: string) => void;
   /** Enter (with or without modifiers) submits the current value. */
   onSubmit?: (value: string) => void;
@@ -61,6 +65,12 @@ export interface TextAreaProps extends BaseProps {
   value?: string;
   placeholder?: string;
   disabled?: boolean;
+  /** Focusable, selectable, copyable and scrollable, but the user cannot edit it (HTML `readonly`): a log or a preview. The app can still change `value`. */
+  readOnly?: boolean;
+  /** The most characters the user can bring the value to (HTML `maxlength`): typing past it is dropped, a paste is cut to fit. */
+  maxLength?: number;
+  /** Keeps the end in view as `value` grows while the area is scrolled to its end, as `<Scroll followTail>`: scrolling up stops it, scrolling back to the end resumes it. */
+  followTail?: boolean;
   /** Line breaks of `value` become `\n` (`\r\n` and `\r` too), as in an HTML textarea; `onChange` reports `\n`. A tab is drawn `style.tabSize` spaces wide (default 8). */
   /** When true, Enter submits and Shift+Enter inserts a newline. Ctrl/Cmd+Enter always submits. */
   submitOnEnter?: boolean;
@@ -68,9 +78,10 @@ export interface TextAreaProps extends BaseProps {
   onSubmit?: (value: string) => void;
 }
 
-export function TextArea({ style, value, ...props }: TextAreaProps): VNode {
+export function TextArea({ style, value, followTail, ...props }: TextAreaProps): VNode {
   return _nativeJsx("textarea", {
     ...props,
+    ...(followTail ? { followTail: true } : {}),
     // Line breaks are \n, as an HTML textarea's value: a Windows file's \r\n would
     // draw an empty line after every line and give the caret a stop in between.
     ...(value !== undefined ? { value: value.includes("\r") ? value.replace(/\r\n?/g, "\n") : value } : {}),

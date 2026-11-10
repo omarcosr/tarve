@@ -355,7 +355,7 @@ func Diff(p Props) *VNode {
 	return jsx("diff", q)
 }
 
-// TextArea props: value, placeholder, disabled, submitOnEnter, onChange(string), onSubmit(string), style.
+// TextArea props: value, placeholder, disabled, readOnly, maxLength, followTail, submitOnEnter, onChange(string), onSubmit(string), style.
 func TextArea(p Props) *VNode {
 	q := copyProps(p)
 	if v, ok := p["value"].(string); ok {

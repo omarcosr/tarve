@@ -132,7 +132,7 @@ const TEXT_KINDS = new Set(["text", "button", "input", "textarea", "markdown", "
 
 /** Props copied to the native node unchanged when they are set. */
 const COPIED_PROPS = [
-  "value", "placeholder", "inputType", "scrollSpeed", "scrollOrientation", "followTail", "virtualList", "disabled", "modal",
+  "value", "placeholder", "inputType", "scrollSpeed", "scrollOrientation", "followTail", "maxLength", "virtualList", "disabled", "modal",
   "portal", "dismissOnOutside", "focusable", "dragRegion", "draggable", "dropTarget", "fileDropTarget", "windowAction",
 ] as const;
 
@@ -724,6 +724,7 @@ export function compileTree(
     // Props has a few keys; COPIED_PROPS has fifteen.
     for (const key in p) if (COPIED_PROP_SET.has(key) && p[key] !== undefined) optional[key] = p[key];
     if (p.submitOnEnter !== undefined) node.submitOnEnter = p.submitOnEnter === true;
+    if (p.readOnly !== undefined) node.readOnly = p.readOnly === true;
     if (rovingGroup) node.rovingGroup = rovingGroup;
     if (nativeType === "window" && p.onCloseRequest !== undefined) node.closeIntercept = true;
     if (p.motionFrom !== undefined) {

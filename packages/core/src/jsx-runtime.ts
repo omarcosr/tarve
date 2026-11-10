@@ -189,6 +189,10 @@ export interface IntrinsicInputProps extends Omit<BaseProps, "style" | "children
   disabled?: boolean;
   onChange?: (value: string) => void;
   onSubmit?: (value: string) => void;
+  /** Focusable and selectable but not editable, as HTML `readonly`. */
+  readOnly?: boolean;
+  /** The most characters the user can bring the value to, as HTML `maxlength`. */
+  maxLength?: number;
 }
 export interface IntrinsicTextareaProps extends Omit<BaseProps, "style" | "children"> {
   style?: IntrinsicStyle;
@@ -208,6 +212,12 @@ export interface IntrinsicTextareaProps extends Omit<BaseProps, "style" | "child
   richText?: Child;
   onChange?: (value: string) => void;
   onSubmit?: (value: string) => void;
+  /** Focusable, selectable and scrollable but not editable, as HTML `readonly`. */
+  readOnly?: boolean;
+  /** The most characters the user can bring the value to, as HTML `maxlength`. */
+  maxLength?: number;
+  /** Keeps the end in view as the value grows while scrolled to the end. */
+  followTail?: boolean;
 }
 export interface IntrinsicButtonProps extends Omit<BaseProps, "style"> {
   style?: IntrinsicStyle;

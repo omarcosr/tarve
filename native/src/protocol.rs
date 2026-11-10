@@ -388,6 +388,15 @@ pub struct Node {
     pub input_type: String,
     #[serde(default)]
     pub submit_on_enter: bool,
+    /// An `input`/`textarea` the user can focus, select, copy and scroll but not edit
+    /// (HTML `readonly`); the app can still change its `value`.
+    #[serde(default)]
+    pub read_only: bool,
+    /// The most characters (Unicode scalar values) the user can bring an `input`/`textarea`
+    /// to (HTML `maxlength`): typing past it is dropped and a paste is cut to fit. A longer
+    /// `value` set by the app is kept and can only shrink.
+    #[serde(default)]
+    pub max_length: Option<usize>,
     #[serde(default = "default_scroll_speed")]
     pub scroll_speed: f64,
     #[serde(default = "default_scroll_orientation")]

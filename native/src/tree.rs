@@ -4228,8 +4228,8 @@ impl Tree {
             .map_err(|e| e.to_string())?;
         // `followTail`: a scroll area at its end (or new) stays there as its content grows.
         let follow = entry.node.follow_tail
-            && entry.node.kind == "scroll"
-            && entry.node.virtual_list.is_none();
+            && ((entry.node.kind == "scroll" && entry.node.virtual_list.is_none())
+                || entry.node.kind == "textarea");
         let horizontal = entry.node.scroll_orientation == "horizontal";
         let (before_x, before_y) = (entry.scroll_x, entry.scroll);
         let at_end = follow
@@ -8072,10 +8072,9 @@ impl Tree {
     pub(crate) fn ime_preedit(&mut self, target: &str, text: &str, cursor: Option<(usize, usize)>) {
         self.touch_caret();
         if self.focused.as_deref() != Some(target)
-            || !self
-                .entries
-                .get(target)
-                .is_some_and(|entry| matches!(entry.node.kind.as_str(), "input" | "textarea"))
+            || !self.entries.get(target).is_some_and(|entry| {
+                matches!(entry.node.kind.as_str(), "input" | "textarea") && !entry.node.read_only
+            })
         {
             return;
         }
@@ -8744,6 +8743,19 @@ impl Tree {
             .chars()
             .filter(|c| !c.is_control() || (multiline && matches!(c, '\n' | '\t')))
             .collect();
+        // `maxLength`: only what fits after the selection it replaces goes in.
+        let text = match self.entries[&id].node.max_length {
+            Some(max) => {
+                let room = max.saturating_sub(value.chars().count());
+                text.chars().take(room).collect()
+            }
+            None => text,
+        };
+        if text.is_empty() && value == before {
+            self.caret = origin.0;
+            self.selection_anchor = origin.1;
+            return vec![];
+        }
         value.insert_str(self.caret, &text);
         if self.entries[&id].node.kind == "input"
             && self.entries[&id].node.input_type == "number"
@@ -8774,6 +8786,18 @@ impl Tree {
         kind: EditKind,
         boundary: bool,
     ) -> Vec<Value> {
+        let node = &self.entries[&id].node;
+        // A read-only field, or an edit that would grow a field past `maxLength`, keeps
+        // its value and the caret it had (IME, accessibility and keys all land here).
+        let too_long = node.max_length.is_some_and(|max| {
+            let count = value.chars().count();
+            count > max && count > before.chars().count()
+        });
+        if node.read_only || too_long {
+            self.caret = origin.0;
+            self.selection_anchor = origin.1;
+            return vec![];
+        }
         if before != value {
             let now = self.motion_time_ms;
             let history = self.edit_history.entry(id.clone()).or_default();
@@ -8829,6 +8853,9 @@ impl Tree {
     }
     fn undo_edit(&mut self, id: &str, redo: bool) -> Vec<Value> {
         self.vertical_goal = None;
+        if self.entries[id].node.read_only {
+            return vec![];
+        }
         let current = self.entries[id].node.value.clone().unwrap_or_default();
         let Some(history) = self.edit_history.get_mut(id) else {
             return vec![];

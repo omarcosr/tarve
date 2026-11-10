@@ -657,6 +657,9 @@ impl AccessibilityTree {
                     node.set_label(&tarve_node.text)
                 }
                 "input" | "textarea" => {
+                    if tarve_node.read_only {
+                        node.set_read_only();
+                    }
                     if !tarve_node.placeholder.is_empty() {
                         node.set_placeholder(&tarve_node.placeholder);
                     }

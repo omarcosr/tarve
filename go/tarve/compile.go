@@ -443,7 +443,7 @@ func (c *compiler) visitNode(child *VNode, path, group string, out []*NNode) []*
 			setField(k, v)
 		case "language", "path", "showLineNumbers", "wordDiff", "maxLines", "highlight", "oldText", "newText", "svg",
 			"collapsedPaths", "value", "placeholder", "inputType", "scrollSpeed", "scrollOrientation", "virtualList", "disabled", "modal",
-			"portal", "dismissOnOutside", "dragRegion", "draggable", "windowAction", "motionFrom":
+			"portal", "dismissOnOutside", "dragRegion", "draggable", "windowAction", "motionFrom", "maxLength":
 			setField(k, v)
 		case "dropTarget":
 			hasDropTarget = true
@@ -451,7 +451,7 @@ func (c *compiler) visitNode(child *VNode, path, group string, out []*NNode) []*
 		case "fileDropTarget":
 			hasFileDropTarget = true
 			setField(k, v)
-		case "submitOnEnter":
+		case "submitOnEnter", "readOnly", "followTail":
 			setField(k, v == true)
 		case "uaMargin":
 			uaMargin, _ = num(v)
