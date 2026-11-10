@@ -940,13 +940,35 @@ pub(crate) fn damage(previous: &DisplayList, next: &DisplayList) -> Option<Rect>
     damage_into(previous, next, |_| true, |_| true, &mut rects);
     glyph_blit::grow_to_glyph_runs(next, &mut rects);
     let mut region = rects
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|r| r.area() > 0.0)
         .reduce(|a, r| a.union(r));
-    // A glass box shows what changed under or around it.
-    if let Some(changed) = region {
+    let changed = region?;
+    // A glass box shows what changed under or around it. With the same glass boxes, only a
+    // change to the ops before the first of them (the backdrop every surface is shaded from,
+    // glass/cpu.rs) reaches the glass: what is painted over it (a slider on a glass card)
+    // keeps its damage small.
+    let mut reaches = if previous.glass == next.glass {
+        rects.clear();
+        damage_into(
+            previous,
+            next,
+            |index| index < previous.first_glass,
+            |index| index < next.first_glass,
+            &mut rects,
+        );
+        rects
+            .into_iter()
+            .filter(|r| r.area() > 0.0)
+            .reduce(|a, r| a.union(r))
+    } else {
+        Some(changed)
+    };
+    if let Some(mut under) = reaches.take() {
         for op in &next.ops {
-            if matches!(op.op, Op::Glass { .. }) && op.bounds.intersect(changed).area() > 0.0 {
+            if matches!(op.op, Op::Glass { .. }) && op.bounds.intersect(under).area() > 0.0 {
+                under = under.union(op.bounds);
                 region = region.map(|all| all.union(op.bounds));
             }
         }

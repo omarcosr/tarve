@@ -943,14 +943,9 @@ impl CpuGraphics {
         self.settle()?;
         let mut damage = std::mem::replace(&mut self.damage, CpuDamage::None);
         let mut blits = std::mem::take(&mut self.blits);
-        // Glass reads what lies under it: a frame with glass that changed is drawn whole.
-        // One with nothing new is not drawn again: the redraw that shows a pipelined frame
-        // would otherwise rasterize the whole frame once more, and so on while idle.
-        if self.frame_background != Some(background_bytes)
-            || self.frame_size != (width, height)
-            || (!matches!(damage, CpuDamage::None)
-                && self.list.as_ref().is_some_and(|list| list.has_glass()))
-        {
+        // A frame with glass redraws only its damage when its backdrop is unchanged; the
+        // raster thread, which holds that backdrop, draws it whole otherwise (cpu_worker.rs).
+        if self.frame_background != Some(background_bytes) || self.frame_size != (width, height) {
             damage = CpuDamage::Full;
         }
         let mut regions = match damage {

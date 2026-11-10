@@ -70,6 +70,8 @@ ureq = { version = "3", default-features = false, features = ["rustls"], optiona
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 # The CPU renderer rasterizes a frame's strips on helper threads (`cpu_render_settings`).
 vello_cpu = { version = "=0.2.0", default-features = false, features = ["multithreading"] }
+# CPU glass shades its surfaces on rayon's kept threads (already in the tree through vello_cpu).
+rayon = "=1.12.0"
 
 # Android: winit over NativeActivity (android-activity); the app's JS or Go runs in the same process.
 [target.'cfg(target_os = "android")'.dependencies]
@@ -90,6 +92,7 @@ accesskit_android = { version = "=0.8.0", features = ["embedded-dex"] }
 # The CPU renderer rasterizes on every core: a phone's single core cannot fill a 1080 px wide
 # frame per vsync, and phones draw on the CPU when an app asks for `lowPower` or `renderer: "cpu"`.
 vello_cpu = { version = "=0.2.0", default-features = false, features = ["multithreading"] }
+rayon = "=1.12.0"
 
 # Browser build (bun run build:web): no windowing, clipboard or C regex engine.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

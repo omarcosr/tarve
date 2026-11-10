@@ -37,7 +37,8 @@ impl DisplayList {
     }
 
     /// Rasterizes the ops before the first glass box (`before`) or from it on into a context
-    /// the size of the frame; glass ops paint nothing (glass/cpu.rs composites the glass).
+    /// the size of `frame` (the whole frame, or a region of it drawn at the context's origin);
+    /// glass ops paint nothing (glass/cpu.rs composites the glass).
     pub(crate) fn replay_around_glass(
         &self,
         context: &mut RenderContext,
@@ -65,17 +66,29 @@ impl DisplayList {
         if !paints {
             return false;
         }
+        // A region of the frame (`glass::cpu::rasterize_region`) is drawn at the context's origin.
         self.replay_ops(
             context,
             resources,
             frame,
-            Affine::IDENTITY,
+            Affine::translate((-frame.x0, -frame.y0)),
             range,
             shadows,
             true,
             None,
         );
         true
+    }
+
+    /// What the ops before the first glass box paint, in order: two frames with equal lists
+    /// rasterize the same backdrop (op hashes are what `damage` compares too).
+    pub(crate) fn backdrop_ops(&self, out: &mut Vec<(u64, Rect)>) {
+        out.clear();
+        out.extend(
+            self.ops[..self.first_glass.min(self.ops.len())]
+                .iter()
+                .map(|op| (op.hash, op.bounds)),
+        );
     }
 
     pub(crate) fn has_glass(&self) -> bool {

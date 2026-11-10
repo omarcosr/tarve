@@ -4014,6 +4014,7 @@ dependencies = [
  "notify-rust",
  "parley",
  "pollster",
+ "rayon",
  "resvg",
  "rfd",
  "rodio",

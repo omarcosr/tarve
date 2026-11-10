@@ -35,6 +35,7 @@ pub(super) fn check_partial_redraw(
     region: vello::kurbo::Rect,
     background: vello::peniko::Color,
     alpha: bool,
+    glass_scale: Option<f64>,
 ) -> Result<(), RenderError> {
     let mut expected = vec![0_u32; width * height];
     rasterize_cpu_region(
@@ -51,7 +52,7 @@ pub(super) fn check_partial_redraw(
         None,
         vello::kurbo::Rect::new(0.0, 0.0, width as f64, height as f64),
         background,
-        None,
+        glass_scale,
         Some(&mut crate::cpu_display::GlyphMasks::new()),
     );
     let mut wrong = 0;
@@ -156,6 +157,34 @@ pub(super) fn rasterize_cpu_region(
     let raster =
         vello::kurbo::Rect::new(region.x0 - margin as f64, region.y0, region.x1, region.y1);
     let raster_width = region_width + margin;
+    // A region of a frame with glass whose backdrop is cached (the caller checked,
+    // `glass::cpu::backdrop_reusable`): the backdrop's pixels with what is over the glass.
+    if !full
+        && glass_scale.is_some()
+        && list.has_glass()
+        && crate::glass::cpu::rasterize_region(
+            context,
+            resources,
+            list,
+            scratch,
+            raster,
+            shadows.as_deref_mut(),
+        )
+    {
+        for row in 0..region_height {
+            let source = &scratch[(row * raster_width + margin) * 4..(row + 1) * raster_width * 4];
+            let start = (y0 + row) * width + x0;
+            let target = &mut frame.pixels[start..start + region_width];
+            for (pixel, rgba) in target.iter_mut().zip(source.as_chunks::<4>().0) {
+                *pixel = u32::from_ne_bytes(*rgba);
+            }
+            // As the whole-frame glass path: only an opaque Android frame is drawn packed.
+            if !(cfg!(target_os = "android") && !frame.alpha) {
+                pack(target, color);
+            }
+        }
+        return;
+    }
     context.reset_and_resize(raster_width as u16, region_height as u16);
     let opaque =
         pixels::fill_opaque_background(context, frame.alpha, color, raster_width, region_height);

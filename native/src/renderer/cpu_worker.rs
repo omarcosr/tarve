@@ -48,6 +48,22 @@ impl CpuRaster {
                 self.context = CpuRenderContext::new_with(job.size.0, job.size.1, settings);
             }
         }
+        // Glass reads what lies under it: a region alone is drawn only over the backdrop the
+        // last frame cached, when nothing under the glass changed (and nothing scrolled).
+        if job.list.has_glass()
+            && regions != [full]
+            && (!blits.is_empty()
+                || !crate::glass::cpu::backdrop_reusable(
+                    &job.list,
+                    (u32::from(job.size.0), u32::from(job.size.1)),
+                    job.background,
+                    cfg!(target_os = "android") && !job.alpha,
+                    job.scale,
+                ))
+        {
+            regions = vec![full];
+            blits = &[];
+        }
         for blit in blits {
             blit.apply(&mut self.pixels, width, height);
         }
@@ -89,6 +105,7 @@ impl CpuRaster {
                 region,
                 job.background,
                 job.alpha,
+                Some(job.scale),
             )
             .map_err(|error| match error {
                 RenderError::Fatal(message) | RenderError::RecoverDevice(message) => message,
