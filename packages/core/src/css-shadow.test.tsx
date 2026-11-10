@@ -146,6 +146,22 @@ describe("CSS gradients", () => {
     expect(painted.hover?.borderColor).toMatchObject({ type: "radial" });
   });
 
+  test("slider track and thumb paints take gradients and the thumb a CSS shadow, in states too", () => {
+    const slider = resolveThemeStyle({
+      trackBackground: "linear-gradient(to right, red, blue)",
+      thumbColor: "radial-gradient(#fff, #000)",
+      thumbBorderColor: "rgb(255 0 0)",
+      thumbShadow: "0 2px 6px rgba(0,0,0,.5)",
+      active: { thumbColor: "linear-gradient(red, blue)", thumbShadow: "none" },
+    }, lightTheme);
+    expect(slider.trackBackground).toEqual({ type: "linear", to: "right", stops: [{ color: "#ff0000" }, { color: "#0000ff" }] });
+    expect(slider.thumbColor).toMatchObject({ type: "radial" });
+    expect(slider.thumbBorderColor).toBe("#ff0000ff");
+    expect(slider.thumbShadow).toEqual([{ x: 0, y: 2, blur: 6, spread: 0, color: "#00000080" }]);
+    expect(slider.active?.thumbColor).toMatchObject({ type: "linear" });
+    expect(slider.active?.thumbShadow).toEqual([]);
+  });
+
   test("every CSS named colour resolves", () => {
     expect(cssColor("lime")).toBe("#00ff00");
     expect(cssColor("RebeccaPurple")).toBe("#663399");

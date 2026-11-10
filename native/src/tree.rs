@@ -37,6 +37,7 @@ mod long_press;
 mod overscroll;
 mod paint_values;
 mod popup;
+mod slider;
 mod touch_target;
 mod wheel;
 use css_layout::{apply_css_flex, grid_line, grid_template};
@@ -4299,7 +4300,13 @@ impl Tree {
         } else {
             0.0
         };
-        let mut bounds = entry.rect.inset(3.0 + filter_blur(&entry.node) * 3.0 + ink);
+        // A slider's thumb (and its shadow) may reach past the box.
+        let thumb = if entry.node.kind == "slider" {
+            slider::slider_overflow(&entry.node, entry.rect)
+        } else {
+            0.0
+        };
+        let mut bounds = entry.rect.inset(3.0 + filter_blur(&entry.node) * 3.0 + ink + thumb);
         for child in children {
             let child_bounds = self.positions(&child, origin)?;
             if !clips {
@@ -6013,20 +6020,7 @@ impl Tree {
             );
         }
         if node.kind == "slider" {
-            crate::controls::slider(
-                target,
-                &node,
-                rect,
-                scale,
-                color(visual_string(
-                    &node,
-                    "foreground",
-                    if node.disabled { "#a1a1aa" } else { "#18181b" },
-                    state,
-                )),
-                color(visual_string(&node, "borderColor", "#e4e4e7", state)),
-                color(visual_string(&node, "thumbColor", "#ffffff", state)),
-            );
+            slider::paint_slider(target, &node, rect, transform, state, &animated, radii);
         }
         if node.kind == "image" {
             // Only images that reach the screen are fetched, like `loading="lazy"`.
@@ -6978,16 +6972,11 @@ impl Tree {
         else {
             return vec![];
         };
-        let inset = 8.0;
-        let ratio = if control.orientation == "vertical" {
-            let span = (rect.height() - 2.0 * inset).max(1.0);
-            ((rect.y1 - inset - self.mouse.1) / span).clamp(0.0, 1.0)
-        } else {
-            let span = (rect.width() - 2.0 * inset).max(1.0);
-            ((self.mouse.0 - rect.x0 - inset) / span).clamp(0.0, 1.0)
+        let (min, max) = (control.min, control.max);
+        let Some(ratio) = self.slider_ratio_at_pointer(id, rect) else {
+            return vec![];
         };
-        let value = control.min + (control.max - control.min) * ratio;
-        self.set_slider(id, value)
+        self.set_slider(id, min + (max - min) * ratio)
     }
     fn splitter_from_pointer(&mut self, id: &str) -> Vec<Value> {
         let Some(entry) = self.entries.get(id) else {
@@ -9921,7 +9910,12 @@ struct BoxShadow {
 
 /// `boxShadow` as one object or a list; the first entry paints on top, as in CSS.
 fn box_shadows(node: &Node, state: VisualState) -> Vec<BoxShadow> {
-    let value = visual_value(node, "boxShadow", state);
+    box_shadows_of(node, "boxShadow", state)
+}
+
+/// A shadow list in `boxShadow`'s shape under `key` (`boxShadow`, a slider's `thumbShadow`).
+fn box_shadows_of(node: &Node, key: &str, state: VisualState) -> Vec<BoxShadow> {
+    let value = visual_value(node, key, state);
     let entries: Vec<&Value> = match value {
         Value::Array(items) => items.iter().collect(),
         Value::Object(_) => vec![value],

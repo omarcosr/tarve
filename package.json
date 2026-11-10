@@ -137,6 +137,7 @@
     "smoke:virtual-list": "bun run build:native && bun run setup:examples && bun scripts/smoke-virtual-list.ts",
     "smoke:rich-content": "bun run build:native && bun scripts/smoke-rich-content.ts",
     "smoke:motion": "bun run build:native && bun scripts/smoke-motion.tsx",
+    "smoke:slider": "bun run build:native && bun scripts/smoke-slider.tsx",
     "smoke:editor": "bun run build:native && bun scripts/smoke-editor.tsx",
     "smoke:steady-frames": "bun run build:native && bun scripts/smoke-steady-frames.tsx",
     "smoke:idle": "bun run build:native && bun scripts/smoke-idle.tsx",

@@ -309,7 +309,7 @@ func resolveGradients(style S, t *Theme) {
 			style["background"] = parts[len(parts)-1]
 		}
 	}
-	for _, key := range []string{"background", "foreground", "borderColor", "maskImage"} {
+	for _, key := range []string{"background", "foreground", "borderColor", "maskImage", "trackBackground", "thumbColor", "thumbBorderColor"} {
 		if v, ok := style[key]; ok && v != nil {
 			if s, isString := v.(string); isString && !gradient.MatchString(s) {
 				continue

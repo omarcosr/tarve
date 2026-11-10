@@ -1288,6 +1288,66 @@ pub fn validate_file_dialog(mode: &str, options: &FileDialogOptions) -> Result<(
     Ok(())
 }
 
+/// A slider's track and thumb keys: lengths are finite and >= 0, paints a colour string
+/// or a gradient object, `trackThickness` a length or `"fill"`.
+fn validate_slider_style(id: &str, style: &Value) -> Result<(), String> {
+    let length = |value: &Value| value.as_f64().is_some_and(|n| n.is_finite() && n >= 0.0);
+    for key in [
+        "trackInset",
+        "thumbSize",
+        "thumbWidth",
+        "thumbHeight",
+        "thumbRadius",
+        "thumbBorderWidth",
+    ] {
+        if let Some(value) = style.get(key)
+            && !value.is_null()
+            && !length(value)
+        {
+            return Err(format!("{key} on {id} must be a number >= 0"));
+        }
+    }
+    if let Some(value) = style.get("trackThickness")
+        && !value.is_null()
+        && !length(value)
+        && value.as_str() != Some("fill")
+    {
+        return Err(format!(
+            "trackThickness on {id} must be a number >= 0 or \"fill\""
+        ));
+    }
+    if let Some(value) = style.get("trackRadius")
+        && !value.is_null()
+        && !length(value)
+        && !value.as_object().is_some_and(|corners| {
+            corners.iter().all(|(corner, radius)| {
+                matches!(
+                    corner.as_str(),
+                    "topLeft" | "topRight" | "bottomRight" | "bottomLeft"
+                ) && length(radius)
+            })
+        })
+    {
+        return Err(format!(
+            "trackRadius on {id} must be a number >= 0 or {{ topLeft?, topRight?, bottomRight?, bottomLeft? }}"
+        ));
+    }
+    for key in ["trackBackground", "thumbColor", "thumbBorderColor"] {
+        if let Some(value) = style.get(key)
+            && !value.is_null()
+            && !value.is_string()
+            && !value
+                .get("stops")
+                .is_some_and(|stops| stops.as_array().is_some_and(|stops| !stops.is_empty()))
+        {
+            return Err(format!(
+                "{key} on {id} must be a colour or a gradient with stops"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_control(node: &Node) -> Result<(), String> {
     if matches!(node.kind.as_str(), "markdown" | "code" | "diff") && !node.children.is_empty() {
         return Err(format!("{} must be a leaf node", node.kind));
@@ -1400,6 +1460,17 @@ fn validate_control(node: &Node) -> Result<(), String> {
                 node.id
             ));
         }
+    }
+    for shadow in styles.iter().filter_map(|style| style.get("thumbShadow")) {
+        if !valid_box_shadow(shadow) {
+            return Err(format!(
+                "Invalid thumbShadow on {}: expected {{ x?, y?, blur?, spread?, color, inset? }} or a list of up to {MAX_BOX_SHADOWS} (blur must be >= 0)",
+                node.id
+            ));
+        }
+    }
+    for style in &styles {
+        validate_slider_style(&node.id, style)?;
     }
     for shadow in styles.iter().filter_map(|style| style.get("textShadow")) {
         let valid = shadow.as_object().is_some_and(|shadow| {

@@ -228,12 +228,15 @@ export function resolveThemeColor(value: string, selected: ThemeDefinition): str
 
 /** Normalizes CSS shadow strings and CSS colours (rgba(), hsl(), names) and resolves theme tokens. */
 /** Style keys that take a colour or a gradient. */
-const PAINT_KEYS = ["background", "foreground", "borderColor"] as const;
+const PAINT_KEYS = ["background", "foreground", "borderColor", "trackBackground", "thumbColor", "thumbBorderColor"] as const;
+
+/** Style keys in `boxShadow`'s shape. */
+const SHADOW_KEYS = ["boxShadow", "thumbShadow"] as const;
 
 function resolveShadowColors(style: StateStyle, selected: ThemeDefinition): void {
   // Nothing to resolve in the common case: no transform, shadow or object/gradient paint.
   if (style.transform === undefined && style.textShadow === undefined && style.boxShadow === undefined
-    && plainPaint(style.background) && plainPaint(style.foreground) && plainPaint(style.borderColor)) return;
+    && style.thumbShadow === undefined && PAINT_KEYS.every(key => plainPaint(style[key]))) return;
   if (typeof style.transform === "string") style.transform = parseTransform(style.transform);
   const colour = (value: string) => resolveThemeColor(cssColor(value), selected);
   if (typeof style.textShadow === "string") {
@@ -249,11 +252,13 @@ function resolveShadowColors(style: StateStyle, selected: ThemeDefinition): void
     const gradient = typeof value === "string" && GRADIENT.test(value) ? parseGradient(value) : value;
     if (gradient && typeof gradient === "object") style[key] = normalizeGradient(gradient, colour);
   }
-  const box = typeof style.boxShadow === "string" ? parseBoxShadow(style.boxShadow) : style.boxShadow;
-  if (box !== undefined) {
-    style.boxShadow = Array.isArray(box)
-      ? box.map(shadow => ({ ...shadow, color: colour(shadow.color) }))
-      : { ...(box as BoxShadow), color: colour((box as BoxShadow).color) };
+  for (const key of SHADOW_KEYS) {
+    const box = typeof style[key] === "string" ? parseBoxShadow(style[key]) : style[key];
+    if (box !== undefined) {
+      style[key] = Array.isArray(box)
+        ? box.map(shadow => ({ ...shadow, color: colour(shadow.color) }))
+        : { ...(box as BoxShadow), color: colour((box as BoxShadow).color) };
+    }
   }
 }
 

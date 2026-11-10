@@ -88,7 +88,36 @@ export interface StateStyle {
   opacity?: number;
   outlineWidth?: number; outlineColor?: string; outlineOffset?: number; outlineRadius?: number; outlineStyle?: OutlineStyle;
   placeholderColor?: string; selectionColor?: string; caretColor?: string;
-  scrollbarColor?: string; placeholderBackground?: string; thumbColor?: string;
+  scrollbarColor?: string; placeholderBackground?: string;
+  /**
+   * Slider (`<Slider>`, `<input type="range">`) parts, as CSS `::-webkit-slider-runnable-track` and
+   * `::-webkit-slider-thumb`. `foreground` is the filled part (`accent-color`); it and `trackBackground` take a
+   * colour or a gradient laid over the whole track, so the gradient stays put while the value moves. Every
+   * key also works in `hover`, `active`, `focus` and `disabled`. Painted the same by D3D11, Vello and CPU.
+   *
+   * `trackBackground` is the track's paint: colour, gradient object or CSS gradient string. Default `borderColor`.
+   */
+  trackBackground?: string | Gradient;
+  /** Track thickness across the slider in px (default 4), or `"fill"`: the whole box, an iOS-style brightness capsule. */
+  trackThickness?: number | "fill";
+  /** Track (and fill) corner radius; default half the thickness, the box's `radius` with `"fill"`. */
+  trackRadius?: CornerRadius;
+  /** Gap in px between the box's ends and the track's (default 8, 0 with `trackThickness: "fill"`). */
+  trackInset?: number;
+  /** The thumb's paint: colour, gradient object or CSS gradient string. Default white. */
+  thumbColor?: string | Gradient;
+  /** Thumb diameter in px (default 14); `0` hides the thumb and the fill reaches both ends. */
+  thumbSize?: number;
+  /** Thumb width / height in px, over `thumbSize` (a pill thumb). */
+  thumbWidth?: number; thumbHeight?: number;
+  /** Thumb corner radius in px; default round (half its shorter side). */
+  thumbRadius?: number;
+  /** Thumb ring width in px (default 1.5, `0` for none), centred on its edge. */
+  thumbBorderWidth?: number;
+  /** Thumb ring paint, colour or gradient; default the fill's (`foreground`). */
+  thumbBorderColor?: string | Gradient;
+  /** Thumb shadows, as `boxShadow` (object, list or CSS string; `inset` paints inside the thumb). */
+  thumbShadow?: BoxShadow | readonly BoxShadow[] | string;
   textDecoration?: TextDecoration;
   /** Text, button, Input and TextArea text. Offset copy, optionally blurred. */
   /** Object form, or CSS text-shadow syntax such as "1px 2px 4px #0006". */

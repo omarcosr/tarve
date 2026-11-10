@@ -16,6 +16,7 @@ mod gestures;
 mod input_and_scroll;
 mod long_press;
 mod popups;
+mod slider;
 mod style_inheritance;
 
 #[test]

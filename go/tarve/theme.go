@@ -292,6 +292,10 @@ var (
 	resolvedStrings = map[resolveKey]string{}
 )
 
+// Style keys that take a colour or a gradient (a slider's track and thumb among them).
+var paintKeys = map[string]bool{"background": true, "foreground": true, "borderColor": true,
+	"trackBackground": true, "thumbColor": true, "thumbBorderColor": true}
+
 func resolveStyleString(key, value string, t *Theme) string {
 	k := resolveKey{t, key, value}
 	resolvedMu.Lock()
@@ -300,7 +304,7 @@ func resolveStyleString(key, value string, t *Theme) string {
 	if ok {
 		return r
 	}
-	if (key == "background" || key == "foreground" || key == "borderColor") && gradient.MatchString(value) {
+	if paintKeys[key] && gradient.MatchString(value) {
 		r = value
 	} else if key == "foreground" && strings.EqualFold(strings.TrimSpace(value), "currentColor") {
 		// The runtime takes the nearest ancestor's foreground, as CSS currentColor.
@@ -399,16 +403,21 @@ func resolvePaint(style S, t *Theme) {
 			delete(style, "textShadow")
 		}
 	}
-	if v, ok := style["boxShadow"].(string); ok {
+	// A slider's thumbShadow takes boxShadow's syntax.
+	for _, key := range []string{"boxShadow", "thumbShadow"} {
+		v, ok := style[key].(string)
+		if !ok {
+			continue
+		}
 		layers := parseShadow(v, true, t)
 		if len(layers) == 0 {
-			delete(style, "boxShadow")
+			delete(style, key)
 		} else {
 			list := make([]any, len(layers))
 			for i, layer := range layers {
 				list[i] = layer
 			}
-			style["boxShadow"] = list
+			style[key] = list
 		}
 	}
 }
