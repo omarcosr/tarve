@@ -143,6 +143,17 @@ export function nativeVariantPath(libraryDirectory: string, variant: string, nat
 const repository = resolve(import.meta.dirname, "../..");
 const manifest = join(repository, "native/Cargo.toml");
 
+/**
+ * Cargo profile for optimized native builds. TARVE_NATIVE_PROFILE=release-dev picks the thin-LTO
+ * profile (native/Cargo.toml): half the build time for a library over twice the size.
+ */
+export function nativeReleaseProfile(): "release" | "release-dev" {
+  const profile = process.env.TARVE_NATIVE_PROFILE?.trim();
+  if (!profile || profile === "release") return "release";
+  if (profile === "release-dev") return profile;
+  throw new Error(`Unknown TARVE_NATIVE_PROFILE: ${profile}. Expected release or release-dev.`);
+}
+
 /** Whether this Tarve checkout can compile a trimmed native library for `target`. */
 export function canTrimNative(target: BuildTarget): boolean {
   return target === hostBuildTarget() && existsSync(manifest) && spawnSync("cargo", ["--version"], { stdio: "ignore", shell: process.platform === "win32" }).status === 0;
@@ -152,6 +163,7 @@ export function canTrimNative(target: BuildTarget): boolean {
 export async function buildTrimmedNative(target: BuildTarget, features: readonly NativeFeature[]): Promise<string> {
   const config = targetConfig(target);
   const key = features.length ? [...features].sort().join("+") : "core";
+  const profile = nativeReleaseProfile();
   const targetDirectory = join(repository, "native/target-features");
   const env = { ...process.env };
   if (config.platform === "win32") {
@@ -159,7 +171,7 @@ export async function buildTrimmedNative(target: BuildTarget, features: readonly
     env.RUSTFLAGS = `${env.RUSTFLAGS ?? ""} -Ctarget-feature=+crt-static`.trim();
   }
   const args = [
-    "build", "--release", "--locked", "--manifest-path", manifest, "--target-dir", targetDirectory,
+    "build", "--profile", profile, "--locked", "--manifest-path", manifest, "--target-dir", targetDirectory,
     "--no-default-features", "--features", ["mimalloc", "fxhash", ...features].join(","),
   ];
   const cargo = spawn("cargo", args, { cwd: repository, env, stdio: ["ignore", "inherit", "inherit"], shell: process.platform === "win32" });
@@ -168,6 +180,6 @@ export async function buildTrimmedNative(target: BuildTarget, features: readonly
   const output = join(repository, "native/bin-features", key);
   await mkdir(output, { recursive: true });
   const library = join(output, config.nativeName);
-  await copyFile(join(targetDirectory, "release", config.nativeName), library);
+  await copyFile(join(targetDirectory, profile, config.nativeName), library);
   return library;
 }

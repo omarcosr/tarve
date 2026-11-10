@@ -99,18 +99,18 @@ wasm-bindgen = "=0.2.129"
 
 [target.'cfg(windows)'.dependencies]
 # `#[implement]` (the `<video>` engine callback) names this crate.
-windows-core = "=0.61.2"
+windows-core = "=0.62.2"
 # DirectComposition video layers take a numerics matrix.
-windows-numerics = "=0.2.0"
-# WinRT async results and collections of `windows` 0.61 (already in its tree): Windows Hello's
+windows-numerics = "=0.3.1"
+# WinRT async results and collections of `windows` 0.62 (already in its tree): Windows Hello's
 # IAsyncOperation and the share UI's IIterable<IStorageItem> (src/device.rs).
-windows-future = "=0.2.1"
-windows-collections = "=0.2.0"
+windows-future = "=0.3.2"
+windows-collections = "=0.3.2"
 accesskit = "=0.25.0"
 accesskit_winit = { version = "=0.34.0", default-features = false, features = ["rwh_06"] }
 lyon_tessellation = "=1.0.22"
 rfd = { version = "=0.17.2", default-features = false, features = ["common-controls-v6"] }
-windows = { version = "=0.61.3", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc", "Win32_Graphics_Direct3D11", "Win32_Graphics_DirectWrite", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Foundation", "Media", "Win32_Media_MediaFoundation", "Win32_Graphics_DirectComposition", "Storage_Streams", "Win32_System_WinRT", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging", "Win32_System_Ole", "Win32_Storage_EnhancedStorage", "UI_Notifications", "Data_Xml_Dom", "ApplicationModel_DataTransfer", "Devices_Geolocation", "Foundation_Collections", "Security_Credentials_UI", "Storage"] }
+windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc", "Win32_Graphics_Direct3D11", "Win32_Graphics_DirectWrite", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Foundation", "Media", "Win32_Media_MediaFoundation", "Win32_Graphics_DirectComposition", "Storage_Streams", "Win32_System_WinRT", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging", "Win32_System_Ole", "Win32_Storage_EnhancedStorage", "UI_Notifications", "Data_Xml_Dom", "ApplicationModel_DataTransfer", "Devices_Geolocation", "Foundation_Collections", "Security_Credentials_UI", "Storage"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_System_Registry", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -160,6 +160,8 @@ required-features = ["qjs-prototype"]
 
 [profile.dev]
 opt-level = 1
+# Backtraces keep file:line; no variable info. Clean build 149 → 108 s, incremental 7.1 → 5.5 s.
+debug = "line-tables-only"
 
 [profile.release]
 # Fat LTO in one codegen unit: the Windows core library 13.5 → 12.2 MB (zstd 19: 4.0 → 3.85 MB),
@@ -167,3 +169,11 @@ opt-level = 1
 lto = "fat"
 codegen-units = 1
 strip = true
+
+# Local optimized builds (TARVE_NATIVE_PROFILE=release-dev): thin LTO over 16 codegen units.
+# Clean build 225 → 118 s (tarve_native itself 131 → 32 s); the Windows library is 29.3 MB instead
+# of 27.0 MB. Never shipped: scripts/package.ts always builds `release`.
+[profile.release-dev]
+inherits = "release"
+lto = "thin"
+codegen-units = 16

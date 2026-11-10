@@ -35,6 +35,8 @@ if (typeof packageMetadata.version !== "string" || packageMetadata.version.lengt
   throw new Error("Tarve package version is missing.");
 }
 const compatibility = await createNativeCompatibilityManifest(root, packageMetadata.version);
+// Published libraries always take the fat-LTO `release` profile.
+delete process.env.TARVE_NATIVE_PROFILE;
 // Native compilation is intentionally host-native. Release automation builds each
 // runtime on its own OS, then assembles one universal Tarve package containing both.
 const library = await buildNative(true);

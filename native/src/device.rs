@@ -292,7 +292,7 @@ mod windows_impl {
             let mut items: Vec<Option<IStorageItem>> = Vec::new();
             for path in &request.files {
                 let file =
-                    StorageFile::GetFileFromPathAsync(&HSTRING::from(path.as_str()))?.get()?;
+                    StorageFile::GetFileFromPathAsync(&HSTRING::from(path.as_str()))?.join()?;
                 items.push(Some(file.cast::<IStorageItem>()?));
             }
             // The handler may run on another thread: the items cross it as an agile reference.
@@ -392,7 +392,7 @@ mod windows_impl {
     fn allowed() -> bool {
         // RequestAccessAsync fails in some unpackaged processes: then try the fix itself.
         Geolocator::RequestAccessAsync()
-            .and_then(|operation| operation.get())
+            .and_then(|operation| operation.join())
             .map(|status| status == GeolocationAccessStatus::Allowed)
             .unwrap_or(true)
     }
@@ -493,7 +493,7 @@ mod windows_impl {
                             span(request.maximum_age_ms, 0.0),
                             span(request.timeout_ms, 30_000.0),
                         )?
-                        .get()
+                        .join()
                 });
                 events.push(match result.and_then(|position| fix(&position)) {
                     Ok(position) => location_event(&id, false, Some(position), None, None),
@@ -545,7 +545,7 @@ mod windows_impl {
         let spawned = std::thread::Builder::new()
             .name("tarve-hello".into())
             .spawn(move || {
-                let event = match operation.get() {
+                let event = match operation.join() {
                     Ok(UserConsentVerificationResult::Verified) => {
                         authenticate_event(&id, true, None, None)
                     }

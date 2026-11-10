@@ -1,5 +1,6 @@
 import { join, resolve } from "node:path";
 import { hostBuildTarget, targetConfig } from "../packages/core/targets";
+import { nativeReleaseProfile } from "../packages/core/native-features";
 
 const root = resolve(import.meta.dir, "..");
 
@@ -47,11 +48,12 @@ export async function buildNative(release: boolean, features?: readonly string[]
     else env.RUSTFLAGS = `${env.RUSTFLAGS ?? ""} -Ctarget-feature=+crt-static`.trim();
   }
   const targetDirectory = join(root, features ? "native/target-variants" : "native/target");
+  const profile = release ? nativeReleaseProfile() : "dev";
   const cargo = Bun.spawn([
     cargoExecutable!, "build", "--locked", "--manifest-path", join(root, "native/Cargo.toml"),
-    "--target-dir", targetDirectory, ...(release ? ["--release"] : []),
+    "--target-dir", targetDirectory, "--profile", profile,
     ...(features ? ["--no-default-features", "--features", ["mimalloc", "fxhash", ...features].join(",")] : []),
   ], { cwd: root, env, stdout: "inherit", stderr: "inherit" });
   if (await cargo.exited !== 0) throw new Error("Native build failed");
-  return join(targetDirectory, release ? "release" : "debug", config.nativeName);
+  return join(targetDirectory, release ? profile : "debug", config.nativeName);
 }
