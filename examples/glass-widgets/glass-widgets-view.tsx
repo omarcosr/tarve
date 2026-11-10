@@ -1,4 +1,4 @@
-import { Column, Glass, Icon, Input, Pressable, Row, Slider, Switch, Text, View, Window, type IconName, type VNode, Image } from "@tarve/core";
+import { Column, Glass, Icon, Input, Pressable, Row, Slider, Switch, Text, View, Window, memo, type IconName, type VNode, Image } from "@tarve/core";
 import type { SvgNode } from "@tarve/core";
 
 /** 160x24 RGBA noise, deterministic, mostly transparent: the grain of the budget bar. */
@@ -396,18 +396,34 @@ function Lighting(): VNode {
   );
 }
 
+/**
+ * Each widget renders again only when what it reads changes (passed as props) or a handler
+ * inside it ran: dragging the brightness slider renders the Lighting widget, not the whole
+ * dashboard.
+ */
+type Reads = { dark: boolean; a?: unknown; b?: unknown; c?: unknown };
+const MWallpaper = memo((_: Reads) => Wallpaper());
+const MHeader = memo((_: Reads) => Header());
+const MWeather = memo((_: Reads) => Weather());
+const MClimate = memo((_: Reads) => Climate());
+const MCalendar = memo((_: Reads) => Calendar());
+const MBudget = memo((_: Reads) => Budget());
+const MHome = memo((_: Reads) => Home());
+const MLighting = memo((_: Reads) => Lighting());
+const MBatteries = memo((_: Reads) => Batteries());
+
 export function App(): VNode {
   return (
     <Window title="Glass Widgets" width={WIDTH} height={HEIGHT} minWidth={WIDTH} minHeight={HEIGHT} resizable={false}
       style={{ background: dark ? "#050b1d" : "#e9f1ff", radius: 0, borderWidth: 0 }}>
       <View id="stage" style={{ position: "relative", flex: 1, overflow: "hidden" }}>
-        <Wallpaper />
+        <MWallpaper dark={dark} />
         <Column style={{ position: "absolute", top: 0, left: 0, width: WIDTH, height: HEIGHT, padding: 28, gap: 22 }}>
-          <Header />
+          <MHeader dark={dark} a={query} b={unread} c={menu} />
           <Row gap={20} align="stretch" style={{ flex: 1 }}>
-            <Column gap={20} style={{ flex: 1 }}><Weather /><Climate /></Column>
-            <Column gap={20} style={{ flex: 1 }}><Calendar /><Budget /></Column>
-            <Column gap={20} style={{ flex: 1 }}><Home /><Lighting /><Batteries /></Column>
+            <Column gap={20} style={{ flex: 1 }}><MWeather dark={dark} /><MClimate dark={dark} a={thermostat} /></Column>
+            <Column gap={20} style={{ flex: 1 }}><MCalendar dark={dark} /><MBudget dark={dark} /></Column>
+            <Column gap={20} style={{ flex: 1 }}><MHome dark={dark} /><MLighting dark={dark} a={brightness} /><MBatteries dark={dark} /></Column>
           </Row>
         </Column>
         <Menu />
