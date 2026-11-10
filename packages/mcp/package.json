@@ -1,6 +1,6 @@
 {
   "name": "@tarve/mcp",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Model Context Protocol server for Tarve apps: lets AI agents inspect, screenshot, drive and reload a running app in development",
   "license": "Apache-2.0",
   "keywords": [
@@ -48,7 +48,7 @@
     "prepack": "bun build.ts"
   },
   "peerDependencies": {
-    "@tarve/core": "^0.10.0"
+    "@tarve/core": "^0.11.0"
   },
   "engines": {
     "bun": ">=1.4.0",
