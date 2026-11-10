@@ -426,6 +426,12 @@ struct RecordedSpan {
     commands: (usize, usize),
     indices: (usize, usize),
     vertices: (usize, usize),
+    /// The shader clip and the stencil clips open where the span starts. Its geometry
+    /// assumes them: a nested clip can move an enclosing rounded clip from the shader
+    /// to the stencil for the rest of its layer (`push_clip`), and the same subtree
+    /// then paints different vertices and clip commands.
+    clip: ShaderClip,
+    stencil: usize,
 }
 
 #[derive(Clone)]
@@ -3665,6 +3671,19 @@ impl D3d11PaintTarget<'_> {
 /// The intersection of two shader clips when it is still one rounded rectangle:
 /// either has square corners and holds the other, or both are square. Scroll
 /// areas inside rounded cards, rounded cards inside scroll areas.
+/// Stencil clips open in `layers` (see `RecordedSpan::stencil`).
+fn stencil_clips(layers: &[D3d11PaintLayer]) -> usize {
+    layers
+        .iter()
+        .filter(|layer| {
+            matches!(
+                layer,
+                D3d11PaintLayer::Clip(Some(_)) | D3d11PaintLayer::AnalyticClip(_, Some(_))
+            )
+        })
+        .count()
+}
+
 fn combine_clips(current: ShaderClip, next: ShaderClip) -> Option<ShaderClip> {
     if current == NO_CLIP {
         return Some(next);
@@ -3782,10 +3801,14 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             commands: (graphics.commands.len(), graphics.commands.len()),
             indices: (graphics.indices.len(), graphics.indices.len()),
             vertices: (graphics.vertices.len(), graphics.vertices.len()),
+            clip: graphics.clip,
+            stencil: stencil_clips(&self.layers),
         };
         if reuse
             && self.suppressed_clips == 0
             && let Some(span) = graphics.previous.spans.get(&key).copied()
+            && span.clip == start.clip
+            && span.stencil == start.stencil
         {
             // The span's vertices carry the clip, mask and opacity they were painted
             // under: the same, as nothing above this subtree changed (the key and the
@@ -3856,6 +3879,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                     commands: (start.commands.0, graphics.commands.len()),
                     indices: (start.indices.0, graphics.indices.len()),
                     vertices: (start.vertices.0, graphics.vertices.len()),
+                    ..start
                 },
             );
             graphics.previous = previous;
@@ -3883,6 +3907,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                     commands: (start.commands.0, graphics.commands.len()),
                     indices: (start.indices.0, graphics.indices.len()),
                     vertices: (start.vertices.0, graphics.vertices.len()),
+                    ..start
                 },
             );
         }
@@ -4523,6 +4548,14 @@ impl PaintTarget for D3d11PaintTarget<'_> {
             {
                 if let D3d11PaintLayer::AnalyticClip(_, slot) = &mut self.layers[layer] {
                     *slot = Some(stencil);
+                }
+                // The stencil is pushed inside the spans recording since that layer opened
+                // and popped outside them: they cannot be reused (their copy would push
+                // a clip that nothing pops, hiding everything painted after it).
+                for (_, _, layers, keep) in &mut self.graphics.recording {
+                    if *layers > layer {
+                        *keep = false;
+                    }
                 }
                 self.layers
                     .push(D3d11PaintLayer::AnalyticClip(NO_CLIP, None));
