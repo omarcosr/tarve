@@ -24,28 +24,28 @@
     },
     "packages/core": {
       "name": "@tarve/core-internal",
-      "version": "0.11.0",
+      "version": "0.11.1",
       "dependencies": {
         "@tarve/protocol": "workspace:*",
       },
     },
     "packages/create-tarve": {
       "name": "create-tarve",
-      "version": "0.11.0",
+      "version": "0.11.1",
       "bin": {
         "create-tarve": "./index.js",
       },
     },
     "packages/headless": {
       "name": "@tarve/headless",
-      "version": "0.11.0",
+      "version": "0.11.1",
       "peerDependencies": {
         "@tarve/core": "^0.10.0",
       },
     },
     "packages/mcp": {
       "name": "@tarve/mcp",
-      "version": "0.11.0",
+      "version": "0.11.1",
       "bin": {
         "tarve-mcp": "./dist/cli.js",
       },
@@ -55,11 +55,11 @@
     },
     "packages/protocol": {
       "name": "@tarve/protocol",
-      "version": "0.11.0",
+      "version": "0.11.1",
     },
     "packages/react-icons": {
       "name": "@tarve/react-icons",
-      "version": "0.11.0",
+      "version": "0.11.1",
       "peerDependencies": {
         "@tarve/core": "^0.10.0",
       },
@@ -69,14 +69,14 @@
     },
     "packages/router": {
       "name": "@tarve/router",
-      "version": "0.11.0",
+      "version": "0.11.1",
       "peerDependencies": {
         "@tarve/core": "^0.10.0",
       },
     },
     "packages/svelte": {
       "name": "@tarve/svelte",
-      "version": "0.11.0",
+      "version": "0.11.1",
       "dependencies": {
         "svelte": "^5.57.2",
       },
@@ -86,7 +86,7 @@
     },
     "packages/test": {
       "name": "@tarve/test",
-      "version": "0.11.0",
+      "version": "0.11.1",
       "peerDependencies": {
         "@tarve/core": "^0.10.0",
         "@tarve/headless": "^0.10.0",

@@ -2,6 +2,12 @@
 
 All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `@tarve/svelte` and `@tarve/mcp` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
+## 0.11.1 — 2026-11-10
+
+### Fixed
+
+- The release workflow publishes `@tarve/mcp` (0.11.0 shipped every other package but not it).
+
 ## 0.11.0 — 2026-11-10
 
 ### Added
