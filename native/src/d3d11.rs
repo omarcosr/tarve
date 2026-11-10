@@ -948,7 +948,7 @@ impl D3d11Graphics {
         // Keep this frame's geometry for the next one: its unchanged subtrees reuse it.
         // Positions are in this size's device coordinates, and glyph quads point into
         // the atlas pages: a new size or atlas makes the old spans unusable.
-        let reusable = same_size && !self.glyph_atlas_exhausted;
+        let reusable = same_size && !self.glyph_atlas_exhausted && !span_reuse_disabled();
         std::mem::swap(&mut self.vertices, &mut self.previous.vertices);
         std::mem::swap(&mut self.states, &mut self.previous.states);
         self.reset_states();
@@ -3869,8 +3869,27 @@ impl PaintTarget for D3d11PaintTarget<'_> {
                             first: shift(*first),
                             count: *count,
                         },
-                        // Never recorded: glass taints its span.
-                        other => other.clone(),
+                        // Unmerged glass only (merged glass taints its span): its
+                        // passes point into the copied indices.
+                        DrawCommand::Glass {
+                            blur_h,
+                            blur_v,
+                            quad,
+                            region,
+                            params,
+                            merge,
+                            blend,
+                            shapes,
+                        } => DrawCommand::Glass {
+                            blur_h: (shift(blur_h.0), blur_h.1),
+                            blur_v: (shift(blur_v.0), blur_v.1),
+                            quad: (shift(quad.0), quad.1),
+                            region: *region,
+                            params: *params,
+                            merge: *merge,
+                            blend: *blend,
+                            shapes: shapes.clone(),
+                        },
                     }),
             );
             graphics.spans.insert(
@@ -4483,7 +4502,13 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         tint: Color,
         glass: &GlassParams,
     ) {
-        self.cache_taint();
+        // A glass command holds only its quads and parameters (the GPU blurs what lies
+        // under it when the frame draws), so a span holding one can be copied like any
+        // other. Merged glass cannot: `merge_glass` folds later commands into the first
+        // and removes them once the frame is recorded, which moves the spans after them.
+        if glass.merge != 0 {
+            self.cache_taint();
+        }
         if self.suppressed_clips > 0 {
             return;
         }
@@ -5923,6 +5948,12 @@ pub(crate) fn merge_rects(mut rects: Vec<[f32; 4]>) -> Vec<[f32; 4]> {
         }
     }
     rects
+}
+
+/// TARVE_GPU_NO_REUSE=1: record every subtree anew each frame (A/B of reused spans).
+fn span_reuse_disabled() -> bool {
+    static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *OFF.get_or_init(|| std::env::var_os("TARVE_GPU_NO_REUSE").is_some_and(|value| value == "1"))
 }
 
 /// TARVE_GPU_DAMAGE_CHECK=1: compare every partial redraw with a full one.

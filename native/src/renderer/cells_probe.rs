@@ -203,6 +203,66 @@ fn retained_paint_reuses_unchanged_subtrees_and_matches_a_fresh_paint() {
     assert_retained_matches_fresh(&mut tree, &third);
 }
 
+#[test]
+fn a_dragged_slider_repaints_alone_and_matches_a_fresh_paint() {
+    let icon = r#"<svg viewBox="0 0 24 24"><path d="M4 12h16M12 4v16" stroke="currentColor" stroke-width="2"/></svg>"#;
+    let doc: Node = serde_json::from_value(json!({"id": "root", "kind": "window", "style": {"foreground": "#202020"}, "children": [
+        {"id": "card", "kind": "view", "style": {"width": 360, "padding": 16, "gap": 10, "radius": 20, "background": "#ffffff60",
+            "glass": {"blur": 12, "saturate": 1.5, "refraction": 10, "highlight": 0.8}}, "children": [
+            {"id": "head", "kind": "row", "style": {"gap": 8, "align": "center"}, "children": [
+                {"id": "icon", "kind": "svg", "svg": icon, "style": {"width": 18, "height": 18}, "children": []},
+                {"id": "title", "kind": "text", "text": "Brightness", "style": {"fontSize": 15}, "children": []},
+                {"id": "value", "kind": "text", "text": "70%", "style": {"fontSize": 15}, "children": []}
+            ]},
+            {"id": "toggle", "kind": "pressable", "style": {"width": 44, "height": 24, "radius": 12, "background": "#30c060"}, "children": [
+                {"id": "knob", "kind": "view", "style": {"width": 20, "height": 20, "radius": 10, "background": "#ffffff", "margin": {"left": 22, "top": 2}}, "children": []}
+            ]},
+            {"id": "slider", "kind": "slider", "control": {"role": "slider", "label": "Brightness", "value": 0.7, "min": 0, "max": 1, "step": 0.01},
+                "style": {"width": 300, "height": 30, "trackThickness": "fill", "thumbSize": 0, "foreground": "#ffb02e"}, "children": []}
+        ]},
+        {"id": "other", "kind": "view", "style": {"width": 200, "height": 60, "radius": 12, "background": "#2050ff"}, "children": [
+            {"id": "other-icon", "kind": "svg", "svg": icon, "style": {"width": 18, "height": 18}, "children": []}
+        ]}
+    ]}))
+    .unwrap();
+    let mut tree = crate::tree::Tree::new(doc);
+    tree.compute(WIDTH, HEIGHT).unwrap();
+    let mut list = record(&mut tree);
+    let rect = tree.entries["slider"].rect;
+    let y = (rect.y0 + rect.y1) / 2.0;
+    tree.pointer_move(rect.x0 + rect.width() * 0.7, y);
+    tree.pointer_down();
+    tree.compute(WIDTH, HEIGHT).unwrap();
+    list = assert_retained_matches_fresh(&mut tree, &list);
+    for step in 0..8 {
+        let x = rect.x0 + rect.width() * (0.1 + 0.1 * f64::from(step));
+        let events = tree.pointer_move(x, y);
+        assert!(
+            events.iter().any(|e| e["type"] == "valueChange"),
+            "step {step} moves the value"
+        );
+        assert!(
+            !tree.dirty.full_paint,
+            "a value change repaints the slider only"
+        );
+        tree.compute(WIDTH, HEIGHT).unwrap();
+        list = assert_retained_matches_fresh(&mut tree, &list);
+    }
+    // The text beside it changes too (what the app sends back), and an icon's colour comes
+    // from an ancestor that changes.
+    let value: Node = serde_json::from_value(json!({"id": "value", "kind": "text", "text": "80%", "style": {"fontSize": 15}, "children": []})).unwrap();
+    tree.patch(vec![value]).unwrap();
+    tree.compute(WIDTH, HEIGHT).unwrap();
+    list = assert_retained_matches_fresh(&mut tree, &list);
+    let other: Node = serde_json::from_value(json!({"id": "other", "kind": "view", "style": {"width": 200, "height": 60, "radius": 12, "background": "#2050ff", "foreground": "#ff0000"}, "children": []})).unwrap();
+    tree.patch(vec![other]).unwrap();
+    tree.compute(WIDTH, HEIGHT).unwrap();
+    list = assert_retained_matches_fresh(&mut tree, &list);
+    tree.pointer_up();
+    tree.compute(WIDTH, HEIGHT).unwrap();
+    assert_retained_matches_fresh(&mut tree, &list);
+}
+
 /// Live heap bytes of the native tree for the cells scene, stage by stage:
 ///   CELLS=3000 cargo test --release --lib --no-default-features --features fxhash memory_probe -- --ignored --nocapture
 #[cfg(not(feature = "mimalloc"))]

@@ -96,7 +96,19 @@ const LAYOUT_KEYS: &[&str] = &[
 
 /// Node kinds whose paint depends only on their own state, their ancestors' and their
 /// layout: their subtrees may reuse what they recorded the last frame (`Tree::paint_node`).
-const RETAINED_KINDS: &[&str] = &["view", "row", "column", "text", "button", "stack"];
+/// An `svg` paints its compiled scene in its box with the inherited foreground (an ancestor
+/// that changes re-records its subtree); a `pressable` paints as a view, its pressed and
+/// hovered states repainting the frame whole.
+const RETAINED_KINDS: &[&str] = &[
+    "view",
+    "row",
+    "column",
+    "text",
+    "button",
+    "stack",
+    "svg",
+    "pressable",
+];
 
 /// Whether a `LAYOUT_KEYS` and whether a `TEXT_KEYS` value differs between two styles (an
 /// absent key reads as null). Interned equal styles share one allocation; otherwise only
@@ -4315,7 +4327,9 @@ impl Tree {
         } else {
             0.0
         };
-        let mut bounds = entry.rect.inset(3.0 + filter_blur(&entry.node) * 3.0 + ink + thumb);
+        let mut bounds = entry
+            .rect
+            .inset(3.0 + filter_blur(&entry.node) * 3.0 + ink + thumb);
         for child in children {
             let child_bounds = self.positions(&child, origin)?;
             if !clips {
@@ -6987,8 +7001,10 @@ impl Tree {
             return vec![];
         }
         control.value = next;
+        // Only the slider paints its value: the rest of the frame (glass cards around it,
+        // a dashboard's other widgets) is reused while it is dragged.
         self.dirty.paint = true;
-        self.dirty.full_paint = true;
+        self.mark_paint_changed(id);
         vec![json!({"type":"valueChange", "id":id, "value":next})]
     }
     fn slider_from_pointer(&mut self, id: &str) -> Vec<Value> {
