@@ -274,8 +274,18 @@ fn a_fill_shorter_than_both_rounded_ends_is_cut_by_the_track_not_shrunk() {
         }),
     );
     for (node, inside, outside, colour) in [
-        (horizontal, (20 + 19, 20 + 17), (20 + 7, 20 + 1), [0, 0, 255]),
-        (vertical, (20 + 12, 20 + 155), (20 + 1, 20 + 155), [255, 255, 255]),
+        (
+            horizontal,
+            (20 + 19, 20 + 17),
+            (20 + 7, 20 + 1),
+            [0, 0, 255],
+        ),
+        (
+            vertical,
+            (20 + 12, 20 + 155),
+            (20 + 1, 20 + 155),
+            [255, 255, 255],
+        ),
     ] {
         let mut tree = Tree::new(black_root(vec![node]));
         tree.compute(f32::from(W), f32::from(H)).unwrap();
