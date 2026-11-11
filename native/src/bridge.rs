@@ -552,6 +552,9 @@ pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
         crate::d3d11::set_text_rendering(document.text_rendering.as_deref());
         crate::renderer::prewarm(document.renderer);
         let events = Arc::new(Events::new()?);
+        for event in entry_points::take_pending_plugin_events() {
+            events.push(event);
+        }
         let out = events.clone();
         let (tx, rx) = mpsc::sync_channel(1);
         let window = move || {

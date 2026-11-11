@@ -83,6 +83,8 @@ export interface PluginContext {
   /**
    * The address of `tarve_plugin_emit` (`int32_t (*)(const char *channel, const uint8_t *data, size_t len)`),
    * to hand to the library once (a `ptr` argument): it reports through it without linking Tarve.
+   * Valid in `setup`: events the library sends before the window starts are held and delivered
+   * once it does, after the listeners `setup` registered.
    */
   emitAddress(): bigint;
 }

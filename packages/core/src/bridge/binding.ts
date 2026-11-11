@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { nativePath } from "#tarve/runtime";
 import { remoteLibrary } from "./remote";
 
 type NativeSymbols = Record<"tarve_start" | "tarve_send" | "tarve_event_pipe_name" | "tarve_poll_event" | "tarve_open_external" | "tarve_last_error", (buffer: Uint8Array, length: number) => number> & { tarve_abi_version(): number; tarve_join(): number; tarve_allow_foreground(pid: number): number; tarve_prewarm?(renderer: number): number };
@@ -32,11 +33,13 @@ let emitAddress: bigint | undefined;
 /**
  * The address of the running app's `tarve_plugin_emit` (native/src/bridge/entry_points.rs), which a
  * plugin's library calls to report events (`ctx.events`). Bun, Node.js 26.10+, txiki.js and the
- * Android QuickJS runtime; not Bun on Android, whose library lives in another process.
+ * Android QuickJS runtime; not Bun on Android, whose library lives in another process. Valid from a
+ * plugin's setup on: before the app starts it is the library the app will start from.
  */
 export function pluginEmitAddress(): bigint {
   if (emitAddress !== undefined) return emitAddress;
-  if (!startedPath) throw new Error("plugin events: the app has not started");
+  // A plugin's setup runs before the window starts: the library the app will start from.
+  const path = startedPath ?? nativePath();
   if (process.platform === "android" && Number.isInteger(Number(process.env.TARVE_ANDROID_BRIDGE_FD))) {
     throw new Error("plugin events need the QuickJS runtime on Android: with --runtime bun the native library runs in another process");
   }
@@ -45,11 +48,11 @@ export function pluginEmitAddress(): bigint {
   const require = createRequire(import.meta.url);
   const txikiFfi = (globalThis as { __tarveTxikiFfi?: { dlopen(path: string, symbols: typeof definitions): Opened } }).__tarveTxikiFfi;
   let address: bigint | number;
-  if (txikiFfi) address = txikiFfi.dlopen(startedPath, definitions).symbols.tarve_plugin_emit_address();
-  else if (process.versions.bun) address = ((require("bun:ffi") as typeof import("bun:ffi")).dlopen(startedPath, definitions) as unknown as Opened).symbols.tarve_plugin_emit_address();
+  if (txikiFfi) address = txikiFfi.dlopen(path, definitions).symbols.tarve_plugin_emit_address();
+  else if (process.versions.bun) address = ((require("bun:ffi") as typeof import("bun:ffi")).dlopen(path, definitions) as unknown as Opened).symbols.tarve_plugin_emit_address();
   else {
     const { dlopen } = require("node:ffi") as { dlopen(path: string, definitions: Record<string, { arguments: string[]; return: string }>): { functions: { tarve_plugin_emit_address(): bigint | number } } };
-    address = dlopen(startedPath, { tarve_plugin_emit_address: { arguments: [], return: "uint64" } }).functions.tarve_plugin_emit_address();
+    address = dlopen(path, { tarve_plugin_emit_address: { arguments: [], return: "uint64" } }).functions.tarve_plugin_emit_address();
   }
   emitAddress = BigInt(address);
   return emitAddress;

@@ -126,8 +126,8 @@ pub unsafe extern "C" fn tarve_zlib_gunzip(
 
 /// A plugin's native library reports to its JavaScript (`ctx.events(channel)`) from any thread:
 /// `channel` is NUL-terminated UTF-8 (1-128 bytes), the `len` bytes at `data` are copied and
-/// arrive as a Uint8Array. Returns 0, or -1 (tarve_last_error) when the app is not running or an
-/// argument is invalid. The library gets this function's address from `ctx.emitAddress()`.
+/// arrive as a Uint8Array. Events sent before the app started (from a plugin's setup) are held and
+/// delivered once it starts. Returns 0, or -1 (tarve_last_error) when an argument is invalid. The library gets this function's address from `ctx.emitAddress()`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn tarve_plugin_emit(
     channel: *const std::ffi::c_char,
@@ -148,20 +148,43 @@ pub unsafe extern "C" fn tarve_plugin_emit(
         }
         let len = u32::try_from(len).map_err(|_| "tarve_plugin_emit: more than 4 GiB")?;
         let bytes = unsafe { input(data, len)? };
-        let events = host()
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .as_ref()
-            .ok_or("tarve_plugin_emit: the app is not running")?
-            .events
-            .clone();
-        events.push(serde_json::json!({
+        let event = serde_json::json!({
             "type": "pluginEvent",
             "channel": channel,
             "data": base64::engine::general_purpose::STANDARD.encode(bytes),
-        }));
+        });
+        let state = host().lock().unwrap_or_else(|p| p.into_inner());
+        match state.as_ref() {
+            Some(host) => host.events.push(event),
+            // Before tarve_start (a plugin's setup runs first): held until the app starts.
+            None => {
+                let mut pending = PENDING_PLUGIN_EVENTS
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
+                if pending.len() >= MAX_PENDING_PLUGIN_EVENTS {
+                    return Err(
+                        "tarve_plugin_emit: more than 4096 events before the app started".into(),
+                    );
+                }
+                pending.push(event);
+            }
+        }
         Ok(0)
     })
+}
+
+/// Plugin events sent before the app started, queued by tarve_start in order.
+static PENDING_PLUGIN_EVENTS: std::sync::Mutex<Vec<serde_json::Value>> =
+    std::sync::Mutex::new(Vec::new());
+const MAX_PENDING_PLUGIN_EVENTS: usize = 4096;
+
+/// The plugin events sent before tarve_start, for the app's queue.
+pub(super) fn take_pending_plugin_events() -> Vec<serde_json::Value> {
+    std::mem::take(
+        &mut *PENDING_PLUGIN_EVENTS
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()),
+    )
 }
 
 /// The address of `tarve_plugin_emit`, which JavaScript hands to a plugin's library
