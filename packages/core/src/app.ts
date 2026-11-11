@@ -17,6 +17,7 @@ import { createNativeRequests } from "./app/requests";
 import { editShadowNode, nativeShadow, reconciliationCommand } from "./app/shadow";
 import { createTrayController, type TrayHandle, type TrayOptions } from "./app/tray";
 import { createMenuBarController, withMenuBar, type MenuBarItem, type MenuBarOptions } from "./app/menu-bar";
+import { onToastsChange, withToasts } from "./toast";
 import { AppMenuBar, menuBarState } from "./menu-bar";
 import { withRenderScope } from "./render-scope";
 export type { MenuBarItem, MenuBarOptions } from "./app/menu-bar";
@@ -97,6 +98,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       } : {}),
     };
   }
+  /** A window opened with openWindow: its opener shows the toasts and takes uncaught errors. */
+  const openedWindow = !!(options.bridge && childWindowBridges.has(options.bridge));
   let renderScope: object = {};
   let currentView = view;
   const devMode = options.dev === undefined ? envFlag("TARVE_DEV") : options.dev !== false;
@@ -154,7 +157,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     const drawnMenu = menus.drawn();
     const size = viewport ?? initialViewport() ?? { width: appWindow?.width ?? 1120, height: appWindow?.height ?? 760 };
     const compile = () => compileTree(
-      drawnMenu ? withMenuBar(currentView(), jsx(AppMenuBar, { id: APP_MENU_BAR_ID, items: drawnMenu, onSelect: (id: string) => onNativeEvent({ type: "menu", id }) })) : currentView(), options.debug, renderer, options.componentAdapters, scope, !options.headless, viewport,
+      (openedWindow ? (view: VNode) => view : withToasts)(drawnMenu ? withMenuBar(currentView(), jsx(AppMenuBar, { id: APP_MENU_BAR_ID, items: drawnMenu, onSelect: (id: string) => onNativeEvent({ type: "menu", id }) })) : currentView()), options.debug, renderer, options.componentAdapters, scope, !options.headless, viewport,
     );
     const tracked = trackViewport(size, () => withRenderScope(scope, () => inspector ? inspector.compile(compile) : compile()));
     const tree = tracked.value;
@@ -203,9 +206,11 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   // Share, location and biometrics: created with the bridge's requests (below).
   let device!: DeviceRequests;
   void closed.then(() => { device?.dispose(); notifications.dispose(); });
+  // toast(): every app re-renders its Toaster when the queue changes.
+  if (!openedWindow) void closed.then(onToastsChange(() => { if (started && !ended) update(); }));
   // With onError, uncaught errors are the app's (Node and Bun would otherwise exit, closing the
   // window); a window opened with openWindow leaves them to its opener.
-  if (options.onError && !(options.bridge && childWindowBridges.has(options.bridge))) {
+  if (options.onError && !openedWindow) {
     const events = (globalThis as { process?: { on?(event: string, listener: (...args: any[]) => void): unknown; off?(event: string, listener: (...args: any[]) => void): unknown } }).process;
     if (typeof events?.on === "function" && typeof events.off === "function") {
       const onRejection = (reason: unknown) => { reportError(reason, { source: "process", event: "unhandledRejection" }); };

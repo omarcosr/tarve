@@ -8,6 +8,8 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 
 - Native plugins on Android: `tarve build --target android` packs each plugin's `tarve.native` library for `android-arm64`/`android-x64` as `lib/<abi>/lib<name>.so` and registers it, and the QuickJS runtime gains an FFI (`native/src/android/qjs/ffi.rs`) so `ctx.loadLibrary` opens and calls it (up to 8 integer/pointer and 8 floating-point arguments on arm64, 6 and 8 on x86_64). With `--runtime bun`, the libraries are extracted beside the executable and opened by bun:ffi. 64-bit results past 2^53 come back as `BigInt`, which includes arm64 Android's tagged heap pointers, so a `ptr` survives the round trip.
 
+- `toast(title, { tone, description, duration, action, id })` shows a message over the app's window and dismisses it after `duration` (4 s, 6 s for `tone: "error"`, `null` to keep it); no toast array to own. Returns `{ id, dismiss() }`; the same `id` updates a toast in place. Also `dismissToast(id)`, `setToastPosition(corner)` and `activeToasts()`. `<Toaster toasts>` stays for apps that own their list.
+
 ### Fixed
 
 - On Android, `ctx.loadLibrary` no longer gets Tarve's own runtime symbols whatever library it names; `tjs:ffi`'s `dlopen` opens real libraries instead of throwing.
