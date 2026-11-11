@@ -56,7 +56,10 @@ const objectHandler: ProxyHandler<object> = {
     const next = toRaw(value);
     const had = Object.prototype.hasOwnProperty.call(target, key);
     const previous = (target as Record<PropertyKey, unknown>)[key];
-    const done = Reflect.set(target, key, next, receiver);
+    // Straight onto the target when the store itself is the receiver: with the proxy as receiver
+    // the set goes through the defineProperty trap, and QuickJS (Android) then rejects an array's
+    // `push` with "inconsistent defineProperty".
+    const done = receiver === proxies.get(target) ? Reflect.set(target, key, next) : Reflect.set(target, key, next, receiver);
     if (done && (!had || !Object.is(previous, next))) changed();
     return done;
   },
