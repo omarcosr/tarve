@@ -600,8 +600,8 @@ export function compileTree(
     }
     // CSS: `display: flex` lays a div's children in a row unless flex-direction says otherwise.
     if (isIntrinsicDiv && rawStyle.display === "flex" && rawStyle.direction === undefined) rawStyle.direction = "row";
-    if ((interactiveKinds.has(nativeType) && p.focusable !== false) || control?.role === "otpSlot") {
     if (p.autoFocus === true && interactiveKinds.has(nativeType) && p.focusable !== false && !p.disabled) autoFocus.push(id);
+    if ((interactiveKinds.has(nativeType) && p.focusable !== false) || control?.role === "otpSlot") {
       rawStyle.focusVisible = p.style?.focus === undefined && p.style?.focusVisible === undefined
         ? defaultFocusRing()
         : {
