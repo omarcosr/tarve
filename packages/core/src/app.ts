@@ -747,6 +747,22 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
   function syncMedia(): void {
     if (!ended && committed) syncLoadedMedia(committed);
+    syncAutoFocus();
+  }
+
+  /** `autoFocus` controls already focused, kept while their node stays in the tree. */
+  const autoFocused = new Set<string>();
+  function syncAutoFocus(): void {
+    if (ended || !committed) return;
+    for (const id of autoFocused) if (!committed.nodes.has(id)) autoFocused.delete(id);
+    let last: string | undefined;
+    for (const id of committed.autoFocus ?? []) {
+      if (autoFocused.has(id)) continue;
+      autoFocused.add(id);
+      last = id;
+    }
+    // Several appeared together: the last one in document order wins, as in a browser.
+    if (last !== undefined) sendInternal({ type: "focus", id: last }, { source: "bridge", event: "autoFocus", targetId: last });
   }
 
   function onNativeEvent(event: NativeEvent): void {

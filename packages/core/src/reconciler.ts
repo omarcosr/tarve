@@ -99,6 +99,8 @@ export interface CompiledTree {
   readsViewportSize?: boolean;
   /** The environment key the render read (viewport.ts), when it read one: a change re-renders. */
   environment?: string;
+  /** Ids of controls rendered with `autoFocus`: the app focuses each once, when it first appears. */
+  autoFocus?: string[];
 }
 const kinds = new Set(["window", "titlebar", "view", "row", "column", "text", "markdown", "code", "diff", "button", "image", "svg", "scroll", "input", "textarea", "pressable", "slider", "splitter", "video", "surface"]);
 const interactiveKinds = new Set(["button", "input", "textarea", "pressable", "slider", "splitter"]);
@@ -241,6 +243,7 @@ export function compileTree(
   let inheritedFont: Record<string, unknown> = {};
   let currentForm: FormContext | undefined;
   const media = new Map<string, MediaRequest>();
+  const autoFocus: string[] = [];
   let memoStore: Map<string, MemoEntry> | undefined;
   if (renderScope) {
     memoStore = memoStores.get(renderScope);
@@ -597,6 +600,7 @@ export function compileTree(
     // CSS: `display: flex` lays a div's children in a row unless flex-direction says otherwise.
     if (isIntrinsicDiv && rawStyle.display === "flex" && rawStyle.direction === undefined) rawStyle.direction = "row";
     if ((interactiveKinds.has(nativeType) && p.focusable !== false) || control?.role === "otpSlot") {
+    if (p.autoFocus === true && interactiveKinds.has(nativeType) && p.focusable !== false && !p.disabled) autoFocus.push(id);
       rawStyle.focusVisible = p.style?.focus === undefined && p.style?.focusVisible === undefined
         ? defaultFocusRing()
         : {
@@ -765,5 +769,5 @@ export function compileTree(
   // The root reports its size so the app can re-render when the window crosses a breakpoint.
   if (usesViewport) roots[0].reportSize = true;
   setViewportHook(outerViewportHook);
-  return { document: { version: PROTOCOL_VERSION, renderer, window: windowOptions, root: roots[0] }, handlers, nodes, media, usesViewport, ...bindings.size ? { bindings } : {} };
+  return { document: { version: PROTOCOL_VERSION, renderer, window: windowOptions, root: roots[0] }, handlers, nodes, media, usesViewport, ...bindings.size ? { bindings } : {}, ...autoFocus.length ? { autoFocus } : {} };
 }

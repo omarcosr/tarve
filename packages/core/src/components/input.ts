@@ -18,6 +18,8 @@ export interface InputProps extends BaseProps {
   onSubmit?: (value: string) => void;
   /** A Liquid Glass capsule field. */
   glass?: GlassProp;
+  /** Focus the field when it first appears (HTML `autofocus`), e.g. in a dialog that just opened. */
+  autoFocus?: boolean;
 }
 
 const inputTypes = new Set<InputType>(["text", "password", "email", "number", "search", "tel", "url"]);
@@ -74,6 +76,8 @@ export interface TextAreaProps extends BaseProps {
   /** Line breaks of `value` become `\n` (`\r\n` and `\r` too), as in an HTML textarea; `onChange` reports `\n`. A tab is drawn `style.tabSize` spaces wide (default 8). */
   /** When true, Enter submits and Shift+Enter inserts a newline. Ctrl/Cmd+Enter always submits. */
   submitOnEnter?: boolean;
+  /** Focus the area when it first appears (HTML `autofocus`). */
+  autoFocus?: boolean;
   onChange?: (value: string) => void;
   onSubmit?: (value: string) => void;
 }

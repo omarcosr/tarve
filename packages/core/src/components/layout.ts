@@ -23,6 +23,8 @@ export interface ViewProps extends Omit<BaseProps, "style" | "children">, DropTa
   dragRegion?: boolean;
   windowAction?: "minimize" | "toggleMaximize" | "toggleFullscreen" | "close";
   focusable?: boolean;
+  /** Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable). */
+  autoFocus?: boolean;
 }
 
 /** Internal helper shared by the primitive container components. */

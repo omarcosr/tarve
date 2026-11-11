@@ -10,6 +10,9 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 
 - `toast(title, { tone, description, duration, action, id })` shows a message over the app's window and dismisses it after `duration` (4 s, 6 s for `tone: "error"`, `null` to keep it); no toast array to own. Returns `{ id, dismiss() }`; the same `id` updates a toast in place. Also `dismissToast(id)`, `setToastPosition(corner)` and `activeToasts()`. `<Toaster toasts>` stays for apps that own their list.
 
+- `autoFocus` on `Input`, `TextArea` and `Pressable` (HTML `autofocus`): the control is focused once when it first appears, and again only after it left the tree and came back.
+- `keepAlive({ title, text })` keeps an Android app running in the background with an ongoing notification until `release()`; `secureStore.seal/open/has/delete` keeps secrets only this app on this device can open (Android Keystore, Windows DPAPI); `moveToBackground()` sends the app behind the launcher on Android and minimizes elsewhere. Also on `AppHandle`.
+
 ### Fixed
 
 - On Android, `ctx.loadLibrary` no longer gets Tarve's own runtime symbols whatever library it names; `tjs:ffi`'s `dlopen` opens real libraries instead of throwing.
