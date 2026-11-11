@@ -49,7 +49,7 @@ let automationClaimed = false;
 export type { TrayAvailability, TrayMenuItem, TrayOptions, TrayHandle } from "./app/tray";
 export type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, NotifyOptions, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle, NotifyResult, NotificationPlace } from "./app/types";
 import type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle } from "./app/types";
-const DEV_OVERLAY_SOURCES = new Set<AppErrorSource>(["render", "event-handler", "listener", "hotkey"]);
+const DEV_OVERLAY_SOURCES = new Set<AppErrorSource>(["render", "event-handler", "listener", "hotkey", "process"]);
 const DEV_APP_KEY = Symbol.for("tarve.devApp");
 // <input type="file"> and <audio controls> reach the app that is rendering or
 // handling an event through this slot, as DOM elements reach their document.
@@ -203,6 +203,18 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   // Share, location and biometrics: created with the bridge's requests (below).
   let device!: DeviceRequests;
   void closed.then(() => { device?.dispose(); notifications.dispose(); });
+  // With onError, uncaught errors are the app's (Node and Bun would otherwise exit, closing the
+  // window); a window opened with openWindow leaves them to its opener.
+  if (options.onError && !(options.bridge && childWindowBridges.has(options.bridge))) {
+    const events = (globalThis as { process?: { on?(event: string, listener: (...args: any[]) => void): unknown; off?(event: string, listener: (...args: any[]) => void): unknown } }).process;
+    if (typeof events?.on === "function" && typeof events.off === "function") {
+      const onRejection = (reason: unknown) => { reportError(reason, { source: "process", event: "unhandledRejection" }); };
+      const onException = (error: unknown) => { reportError(error, { source: "process", event: "uncaughtException" }); };
+      events.on("unhandledRejection", onRejection);
+      events.on("uncaughtException", onException);
+      void closed.then(() => { events.off!("unhandledRejection", onRejection); events.off!("uncaughtException", onException); });
+    }
+  }
   /** Plugin setups and commands; a window opened with `openWindow` reuses its opener's. */
   let pluginHost: PluginHost | undefined = options.bridge ? childPluginHosts.get(options.bridge) : undefined;
 

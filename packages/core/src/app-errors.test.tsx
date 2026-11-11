@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { NativeCommand, NativeEvent, SceneDocument } from "./protocol";
 import { createApp, type AppErrorEvent } from "./app";
 import type { NativeBridge } from "./bridge";
-import { Image, Window } from "./components";
+import { Image, Text, Window } from "./components";
 
 class FakeBridge implements NativeBridge {
   commands: NativeCommand[] = [];
@@ -36,5 +36,35 @@ describe("app errors from native element events", () => {
     await Bun.sleep(0);
     expect(errors.map(event => [event.source, event.event, event.targetId, event.error.message])).toEqual([["native", "imageError", "bare", "Image 'https://example.com/c.png': http status: 404"]]);
     app.close();
+  });
+});
+
+describe("errors nothing caught", () => {
+  test("with onError the app takes the process's unhandled rejections and uncaught exceptions until it closes", async () => {
+    const bridge = new FakeBridge();
+    const errors: AppErrorEvent[] = [];
+    const before = [process.listenerCount("unhandledRejection"), process.listenerCount("uncaughtException")];
+    const app = createApp(() => <Window><Text>hi</Text></Window>, { bridge, onError: event => errors.push(event) });
+    await app.ready;
+    expect(process.listenerCount("unhandledRejection")).toBe(before[0]! + 1);
+    process.emit("unhandledRejection", new Error("lost promise"), Promise.resolve());
+    process.emit("uncaughtException", new Error("thrown in a timer"), "uncaughtException");
+    expect(errors.map(event => [event.source, event.event, event.error.message])).toEqual([
+      ["process", "unhandledRejection", "lost promise"],
+      ["process", "uncaughtException", "thrown in a timer"],
+    ]);
+    bridge.emit({ type: "closed" });
+    await app.closed;
+    expect([process.listenerCount("unhandledRejection"), process.listenerCount("uncaughtException")]).toEqual(before);
+  });
+
+  test("without onError the process keeps its own behaviour", async () => {
+    const bridge = new FakeBridge();
+    const before = process.listenerCount("unhandledRejection");
+    const app = createApp(() => <Window><Text>hi</Text></Window>, { bridge });
+    await app.ready;
+    expect(process.listenerCount("unhandledRejection")).toBe(before);
+    bridge.emit({ type: "closed" });
+    await app.closed;
   });
 });

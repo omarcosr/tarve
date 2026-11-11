@@ -11,6 +11,8 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 ### Fixed
 
 - On Android, `ctx.loadLibrary` no longer gets Tarve's own runtime symbols whatever library it names; `tjs:ffi`'s `dlopen` opens real libraries instead of throwing.
+- `createApp({ onError })` also receives the process's unhandled rejections and uncaught exceptions (source `"process"`) until the app closes, on Bun, Node.js, txiki.js and Android, so a lost promise no longer ends the process and its window. Without `onError` nothing changes.
+- The focus ring (`focusVisible`) shows only for navigation keys (Tab, arrows, Home/End/PageUp/PageDown, Enter/Space on a non-editable control); typing into a pointer-focused view no longer rings it.
 
 ## 0.11.1 — 2026-11-10
 

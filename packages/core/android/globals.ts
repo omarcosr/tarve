@@ -4,6 +4,7 @@
  * process. Backed by `__tarveHost` (native/src/android/qjs.rs).
  */
 import { host } from "./host";
+import { EventEmitter } from "../txiki/shims/events";
 
 export {};
 
@@ -55,9 +56,16 @@ globals.console = {
   group() {}, groupCollapsed() {}, groupEnd() {},
 };
 
+// process "uncaughtException" / "unhandledRejection", as Node emits them: with a listener the
+// error is the listener's (createApp's onError), otherwise it is logged.
+const processEvents = new EventEmitter();
 function reportError(error: unknown): void {
+  if (processEvents.listenerCount("uncaughtException") && processEvents.emit("uncaughtException", error, "uncaughtException")) return;
   host.log(2, `Uncaught ${show(error)}`);
 }
+/** Called by the engine's rejection tracker (native/src/android/qjs.rs): true when a listener took it. */
+globals.__tarveUnhandledRejection = (reason: unknown, promise: Promise<unknown>): boolean =>
+  processEvents.listenerCount("unhandledRejection") > 0 && processEvents.emit("unhandledRejection", reason, promise);
 globals.reportError ??= reportError;
 
 // Timers: the host loop calls __tarveTick and sleeps until the delay it returns.
@@ -491,12 +499,12 @@ globals.process = {
   memoryUsage: Object.assign(() => ({ rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0 }), { rss: () => 0 }),
   nextTick: (callback: (...args: unknown[]) => void, ...args: unknown[]) => globals.queueMicrotask(() => callback(...args)),
   emitWarning: (warning: unknown) => host.log(1, show(warning)),
-  on() { return this; },
-  once() { return this; },
-  off() { return this; },
-  addListener() { return this; },
-  removeListener() { return this; },
-  removeAllListeners() { return this; },
-  emit() { return false; },
-  listenerCount() { return 0; },
+  on(event: string, listener: (...args: any[]) => void) { processEvents.on(event, listener); return this; },
+  once(event: string, listener: (...args: any[]) => void) { processEvents.once(event, listener); return this; },
+  off(event: string, listener: (...args: any[]) => void) { processEvents.off(event, listener); return this; },
+  addListener(event: string, listener: (...args: any[]) => void) { processEvents.on(event, listener); return this; },
+  removeListener(event: string, listener: (...args: any[]) => void) { processEvents.off(event, listener); return this; },
+  removeAllListeners(event?: string) { processEvents.removeAllListeners(event); return this; },
+  emit: (event: string, ...args: unknown[]) => processEvents.listenerCount(event) > 0 && processEvents.emit(event, ...args),
+  listenerCount: (event: string) => processEvents.listenerCount(event),
 };

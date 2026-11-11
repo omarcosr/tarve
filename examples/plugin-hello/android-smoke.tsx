@@ -8,6 +8,7 @@ import { Column, Text, Window, createApp, openPluginLibrary } from "@tarve/core"
 import hello from "./plugin";
 
 const checks: Record<string, unknown> = {};
+const caught: string[] = [];
 const check = (name: string, run: () => unknown, expected: unknown) => {
   try {
     const actual = run();
@@ -24,7 +25,7 @@ const app = createApp(() => (
       {Object.entries(checks).map(([name, ok]) => <Text key={name}>{`${ok === true ? "ok" : "FAIL"} ${name}${ok === true ? "" : `: ${ok}`}`}</Text>)}
     </Column>
   </Window>
-), { plugins: [hello] });
+), { plugins: [hello], onError: event => { caught.push(`${event.source}:${event.event}:${event.error.message}`); } });
 
 await app.ready;
 const client = hello.client(app);
@@ -70,6 +71,12 @@ libc.close();
 check("closed library throws", () => { try { libc.symbols.abs(1); return "no error"; } catch (error) { return (error as Error).message; } }, "abs: the library was closed");
 check("missing library throws", () => { try { openPluginLibrary("libdoes_not_exist.so", { f: { args: [] } }); return "no error"; } catch (error) { return (error as Error).message.includes("could not load native library"); } }, true);
 
+// Nothing catches these: createApp's onError takes them instead of the engine's log.
+void Promise.reject(new Error("lost promise"));
+setTimeout(() => { throw new Error("thrown in a timer"); }, 0);
+await new Promise(resolve => setTimeout(resolve, 100));
+checks["onError: unhandled rejection"] = caught.includes("process:unhandledRejection:lost promise") || caught.join(" | ");
+checks["onError: uncaught exception"] = caught.includes("process:uncaughtException:thrown in a timer") || caught.join(" | ");
 const failed = Object.entries(checks).filter(([, ok]) => ok !== true);
 console.log(`tarve-plugin-smoke ${JSON.stringify({ ok: failed.length === 0, checks })}`);
 app.update();

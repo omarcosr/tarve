@@ -23,7 +23,9 @@ export type AppErrorSource =
   | "native"
   | "request"
   | "file-dialog"
-  | "plugin";
+  | "plugin"
+  /** An error nothing caught: process "uncaughtException" (event) or "unhandledRejection". */
+  | "process";
 
 export interface AppErrorEvent {
   error: Error;
@@ -41,6 +43,11 @@ export interface AppOptions {
   /** Optional adapters that translate foreign component types into Tarve VNodes. */
   componentAdapters?: readonly ComponentAdapter[];
   bridge?: NativeBridge;
+  /**
+   * Errors the app did not catch: render, event handlers, listeners, native and plugins. With it,
+   * the app also takes the process's uncaught exceptions and unhandled rejections (source
+   * "process") until it closes, so one failed promise no longer ends the process and its window.
+   */
   onError?: (event: AppErrorEvent) => void;
   /**
    * Development mode: runtime errors render an in-window overlay and render() remounts in the same window. Defaults to TARVE_DEV=1.

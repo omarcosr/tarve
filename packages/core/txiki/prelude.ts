@@ -10,6 +10,7 @@ import path from "tjs:path";
 import { createFetch } from "./fetch";
 import { installIntl } from "./intl";
 import { Buffer } from "./shims/buffer";
+import { EventEmitter } from "./shims/events";
 
 declare const TARVE_TXIKI_PLATFORM: "win32" | "linux";
 declare const TARVE_TXIKI_NATIVE_NAME: string;
@@ -52,11 +53,34 @@ const process = {
   chdir: (directory: string) => tjs.chdir(directory),
   memoryUsage: () => ({ rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0 }),
   nextTick: (callback: (...args: unknown[]) => void, ...args: unknown[]) => queueMicrotask(() => callback(...args)),
-  on() { return this; },
-  once() { return this; },
-  off() { return this; },
+  on(event: string, listener: (...args: any[]) => void) { processEvents.on(event, listener); return this; },
+  once(event: string, listener: (...args: any[]) => void) { processEvents.once(event, listener); return this; },
+  off(event: string, listener: (...args: any[]) => void) { processEvents.off(event, listener); return this; },
+  removeListener(event: string, listener: (...args: any[]) => void) { processEvents.off(event, listener); return this; },
+  emit: (event: string, ...args: unknown[]) => processEvents.listenerCount(event) > 0 && processEvents.emit(event, ...args),
+  listenerCount: (event: string) => processEvents.listenerCount(event),
 };
 globals.process = process;
+// txiki.js reports uncaught errors and unhandled rejections as window events; Node's process
+// events (createApp's onError listens to them) take them when they have a listener.
+const processEvents = new EventEmitter();
+const windowEvents = globalThis as unknown as { addEventListener?(type: string, listener: (event: Event & { reason?: unknown; promise?: unknown; error?: unknown }) => void): void };
+windowEvents.addEventListener?.("unhandledrejection", event => {
+  if (processEvents.listenerCount("unhandledRejection") && processEvents.emit("unhandledRejection", event.reason, event.promise)) event.preventDefault();
+});
+// A timer callback that throws ends txiki.js without an event: with an "uncaughtException"
+// listener the error is the listener's, as in Node; without one it still ends the process.
+for (const name of ["setTimeout", "setInterval"] as const) {
+  const schedule = globals[name] as (callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => unknown;
+  globals[name] = (callback: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => schedule((...values: unknown[]) => {
+    try {
+      callback(...values);
+    } catch (error) {
+      if (!processEvents.listenerCount("uncaughtException")) throw error;
+      processEvents.emit("uncaughtException", error, "uncaughtException");
+    }
+  }, delay, ...args);
+}
 
 async function readAt(file: TjsFileHandle, position: number, length: number): Promise<Uint8Array> {
   const bytes = new Uint8Array(length);
