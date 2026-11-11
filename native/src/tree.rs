@@ -541,6 +541,20 @@ fn utf16_to_byte(text: &str, offset: usize) -> Option<usize> {
 /// Case-insensitive search folds each char to a single lowercase char (the
 /// same simple folding a case-insensitive regex uses), searches the folded
 /// text with `str::match_indices` and maps the hits back to original offsets.
+/// Whether a key shows the focus ring (CSS `:focus-visible`), the browsers' heuristic:
+/// keys that move focus or a selection, and Enter/Space activating a non-editable
+/// control. Typing, Backspace and Mod chords do not: an app that takes keystrokes on a
+/// focused view (a terminal, a canvas) keeps the ring off while the user types.
+pub(crate) fn key_reveals_focus(key: &str, editable_focus: bool) -> bool {
+    let unshifted = key.strip_prefix("Shift").filter(|rest| !rest.is_empty()).unwrap_or(key);
+    match unshifted {
+        "Tab" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Home" | "End"
+        | "PageUp" | "PageDown" => true,
+        "Enter" | "Space" => !editable_focus,
+        _ => false,
+    }
+}
+
 pub(crate) fn find_literal(content: &str, query: &str, case_sensitive: bool) -> Vec<Range<usize>> {
     if query.is_empty() {
         return Vec::new();
@@ -8318,7 +8332,6 @@ impl Tree {
         if key == "Escape" && self.pointer_drag.as_ref().is_some_and(|drag| drag.active) {
             return self.cancel_pointer_drag();
         }
-        self.set_focus_visible(true);
         let editable_focus = self
             .focused
             .as_deref()
@@ -8342,6 +8355,9 @@ impl Tree {
         };
         if key == "Tab" || key == "ShiftTab" {
             let ids = self.focus_order();
+        if key_reveals_focus(key, editable_focus) {
+            self.set_focus_visible(true);
+        }
             if !ids.is_empty() {
                 let index = self
                     .focused

@@ -1216,6 +1216,31 @@ fn focus_visible_distinguishes_pointer_focus_from_keyboard_focus() {
 }
 
 #[test]
+fn typing_on_a_pointer_focused_control_keeps_the_ring_off() {
+    let button = node(
+        "pane",
+        "button",
+        json!({"width":200,"height":100,"focusVisible":{"outlineWidth":2}}),
+        vec![],
+    );
+    let mut tree = Tree::new(root(vec![button]));
+    tree.compute(300.0, 200.0).unwrap();
+    tree.pointer_move(20.0, 15.0);
+    tree.pointer_down();
+    tree.pointer_up();
+    for key in ["l", "s", "Backspace", "Escape", "ModC", "ModV", "Delete"] {
+        tree.key(key);
+        assert!(!tree.focus_visible, "{key} must not show the focus ring");
+    }
+    tree.key("ArrowDown");
+    assert!(tree.focus_visible, "arrow navigation shows the ring");
+    assert!(crate::tree::key_reveals_focus("ShiftTab", false));
+    assert!(crate::tree::key_reveals_focus("Space", false));
+    assert!(!crate::tree::key_reveals_focus("Space", true));
+    assert!(!crate::tree::key_reveals_focus("Shift", false));
+}
+
+#[test]
 fn semantic_link_foreground_and_hover_inherit_into_nested_text() {
     let root: Node = serde_json::from_value(json!({
         "id":"root","kind":"window","style":{},"children":[
