@@ -8337,6 +8337,9 @@ impl Tree {
             .as_deref()
             .and_then(|id| self.entries.get(id))
             .is_some_and(|entry| matches!(entry.node.kind.as_str(), "input" | "textarea"));
+        if key_reveals_focus(key, editable_focus) {
+            self.set_focus_visible(true);
+        }
         let key = if !editable_focus && matches!(key, "ShiftEnter" | "ModEnter") {
             "Enter"
         } else if !editable_focus {
@@ -8355,9 +8358,6 @@ impl Tree {
         };
         if key == "Tab" || key == "ShiftTab" {
             let ids = self.focus_order();
-        if key_reveals_focus(key, editable_focus) {
-            self.set_focus_visible(true);
-        }
             if !ids.is_empty() {
                 let index = self
                     .focused
