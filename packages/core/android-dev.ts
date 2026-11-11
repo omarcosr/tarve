@@ -14,7 +14,8 @@ import { createInterface } from "node:readline";
 import { metadataOverrides, type BuildOptions } from "./build";
 import { buildMetadata } from "./package-metadata";
 import { bundleAndroidJs } from "./android-bundle";
-import { buildAndroid, type AndroidBuildOptions, type AndroidTarget } from "./android-build";
+import { abisOf, buildAndroid, type AndroidBuildOptions, type AndroidTarget } from "./android-build";
+import { androidPluginNatives } from "./plugins-build";
 import { androidPackageName, androidSdk, exe } from "./android-sdk";
 
 export interface AndroidDevOptions extends AndroidBuildOptions {
@@ -107,11 +108,13 @@ export async function devAndroid(options: AndroidDevOptions): Promise<number> {
   const temporary = mkdtempSync(join(tmpdir(), "tarve-android-dev-"));
   try {
     let start = performance.now();
-    const first = await bundleAndroidJs(options as BuildOptions, define, temporary);
+    const pluginNatives = androidPluginNatives(options.entrypoint, abisOf(target));
+    const plugins = pluginNatives.map(planned => planned.embed);
+    const first = await bundleAndroidJs(options as BuildOptions, define, temporary, plugins);
     // Files the APK carries; a later bundle's new imports are pushed beside its app.js.
     const pushed = new Set(first.assets.map(asset => asset.name));
     let current = digest(first.bundle);
-    const apk = await buildAndroid({ ...options, target, format: "apk", dev: true, bundled: first, outfile: options.outfile ?? join(temporary, "dev.apk") });
+    const apk = await buildAndroid({ ...options, target, format: "apk", dev: true, bundled: first, pluginNatives, outfile: options.outfile ?? join(temporary, "dev.apk") });
     console.log(`tarve dev: built ${packageName} for ${target} (${since(start)})`);
     start = performance.now();
     await adb("install", "-r", apk).catch(error => {
@@ -158,7 +161,7 @@ export async function devAndroid(options: AndroidDevOptions): Promise<number> {
         const at = changedAt;
         changedAt = undefined;
         try {
-          const next = await bundleAndroidJs(options as BuildOptions, define, temporary);
+          const next = await bundleAndroidJs(options as BuildOptions, define, temporary, plugins);
           const hash = digest(next.bundle);
           failure = undefined;
           if (hash === current) continue;

@@ -651,7 +651,7 @@ export default definePlugin({
 });
 ```
 
-`ctx.request(command, { expect })` sends a protocol request to the Tarve runtime and checks the answer type (what `app`'s own dialogs and permissions use). `ctx.loadLibrary(symbols)` or `ctx.loadLibrary({ "win32-x64": "…", "linux-x64": "…" }, symbols)` opens the library with the runtime's FFI: `bun:ffi` on Bun, `node:ffi` on Node.js 26.10+, `tjs:ffi` on txiki.js; elsewhere it throws `PluginFfiUnsupportedError`. Symbol types are `i8`…`u64`, `f32`, `f64`, `bool`, `ptr`, `buffer` (arguments) and `void`; the returned `symbols` are typed from the declaration.
+`ctx.request(command, { expect })` sends a protocol request to the Tarve runtime and checks the answer type (what `app`'s own dialogs and permissions use). `ctx.loadLibrary(symbols)` or `ctx.loadLibrary({ "win32-x64": "…", "linux-x64": "…" }, symbols)` opens the library with the runtime's FFI: `bun:ffi` on Bun, `node:ffi` on Node.js 26.10+, `tjs:ffi` on txiki.js and on Android's QuickJS-ng (whose APK packs the `android-arm64`/`android-x64` library as `lib/<abi>/lib<name>.so`; up to 8 integer/pointer and 8 floating-point arguments, no variadic functions, 64-bit results and tagged heap pointers above 2^53 as `BigInt`); elsewhere it throws `PluginFfiUnsupportedError`. Symbol types are `i8`…`u64`, `f32`, `f64`, `bool`, `ptr`, `buffer` (arguments) and `void`; the returned `symbols` are typed from the declaration.
 
 **package.json.** The `tarve` field makes a package discoverable (`discoverPlugins`, `loadPlugins`) and tells `tarve build` which library to embed per target:
 

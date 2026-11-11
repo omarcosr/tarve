@@ -53,7 +53,14 @@ const symbols = {
   tarve_join: () => 0,
   tarve_allow_foreground: () => 0,
 };
-globals.__tarveTxikiFfi = { dlopen: () => ({ symbols, close() {} }) };
+// Tarve's own library is the runtime the activity loaded: its symbols are the host calls above.
+// Any other library (a plugin's ctx.loadLibrary) goes through the host's FFI.
+globals.__tarveTxikiFfi = {
+  dlopen(path: string, definitions: Parameters<typeof host.dlopen>[1]) {
+    if (path.replace(/^.*[\\/]/, "") === globals.__tarveNativePath) return { symbols, close() {} };
+    return host.dlopen(path, definitions);
+  },
+};
 // The loop calls this when the runtime queues events: the bridge's wake socket fires.
 globals.__tarveWake = () => {
   for (const socket of [...wakeSockets]) socket.wake();

@@ -18,6 +18,11 @@ export interface AndroidHost {
   poll(): Uint8Array | undefined;
   lastError(): string;
   openExternal(target: string): number;
+  /**
+   * Opens a plugin's native library (`libplugin.so` resolves inside the APK) and binds the
+   * declared symbols, bun:ffi style (native/src/android/qjs/ffi.rs).
+   */
+  dlopen(path: string, definitions: Record<string, { args?: readonly string[]; returns?: string }>): { symbols: Record<string, (...args: unknown[]) => unknown>; close(): void };
 
   encode(text: string): Uint8Array;
   decode(bytes: Uint8Array): string;

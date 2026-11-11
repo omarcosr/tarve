@@ -24,6 +24,8 @@ use winit::platform::android::activity::AndroidApp;
 mod bytecode;
 mod dev;
 mod fetch;
+mod ffi;
+mod foreign_call;
 #[allow(unused_imports)]
 pub(crate) use bytecode::*;
 
@@ -521,6 +523,9 @@ fn install<'js>(
             },
         )?,
     )?;
+
+    // Plugins' native libraries (ctx.loadLibrary).
+    ffi::install(ctx, &host)?;
 
     let files = Object::new(ctx.clone())?;
     for (name, path) in assets {

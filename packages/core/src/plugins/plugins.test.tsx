@@ -10,7 +10,7 @@ import { createPluginHost, definePlugin, PLUGIN_API_VERSION, registerEmbeddedPlu
 import { discoverPlugins, readPluginManifest } from "./discovery";
 import { validateSymbols } from "./ffi";
 import { hostPluginTarget, isPluginTarget, nativeLibraryFileName, pluginTargetForBuild } from "./targets";
-import { planPluginNatives, pluginNativeRuntimeLines } from "../../plugins-build";
+import { androidPluginNatives, planPluginNatives, pluginNativeRuntimeLines } from "../../plugins-build";
 
 const scratch = mkdtempSync(join(tmpdir(), "tarve-plugins-"));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -304,6 +304,29 @@ describe("tarve build plugin embedding", () => {
     expect(planPluginNatives(entry, "darwin-x64").withoutTarget).toEqual(["with-native", "other-targets"]);
   });
 
+  test("Android: each ABI's library packs under lib/<abi>/ and registers by file name", () => {
+    const root = appWith("android-app", { term: { plugin: "./p.js", native: { "android-arm64": "./arm64/libterm.so", "android-x64": "./x64/libterm.so" } } });
+    for (const abi of ["arm64", "x64"]) {
+      mkdirSync(join(root, "node_modules", "term", abi), { recursive: true });
+      writeFileSync(join(root, "node_modules", "term", abi, "libterm.so"), abi);
+    }
+    const planned = androidPluginNatives(join(root, "app.tsx"), ["arm64-v8a", "x86_64"]);
+    expect(planned.map(({ abi, embed }) => [abi, embed.target, embed.fileName])).toEqual([["arm64-v8a", "android-arm64", "libterm.so"], ["x86_64", "android-x64", "libterm.so"]]);
+    const registry: Record<string, Record<string, () => string>> = {};
+    new Function("globalThis", pluginNativeRuntimeLines(planned.map(({ embed }) => embed), "apk").join("\n").replace("globalThis[Symbol.for(\"tarve.pluginNatives\")] ??= {}", "globalThis"))(registry);
+    expect(registry.term!["android-arm64"]!()).toBe("libterm.so");
+    expect(registry.term!["android-x64"]!()).toBe("libterm.so");
+    const beside = pluginNativeRuntimeLines([planned[0]!.embed], "executable").join("\n");
+    expect(beside).toContain(`join(dirname(process.execPath), "libterm.so")`);
+  });
+
+  test("Android refuses library names the package manager would not install", () => {
+    const root = appWith("android-bad", { bad: { plugin: "./p.js", native: { "android-arm64": "./term.bin" } }, clash: { plugin: "./p.js", native: { "android-x64": "./libtarve_native.so" } } });
+    writeFileSync(join(root, "node_modules", "bad", "term.bin"), "x");
+    writeFileSync(join(root, "node_modules", "clash", "libtarve_native.so"), "x");
+    expect(() => androidPluginNatives(join(root, "app.tsx"), ["arm64-v8a"])).toThrow("lib<name>.so");
+    expect(() => androidPluginNatives(join(root, "app.tsx"), ["x86_64"])).toThrow("Tarve's own Android libraries");
+  });
   test("a declared library that was not built fails the build", () => {
     const root = appWith("unbuilt-app", { unbuilt: { plugin: "./p.js", native: { "linux-x64": "./missing.so" } } });
     expect(() => planPluginNatives(join(root, "app.tsx"), "linux-x64")).toThrow("native library for linux-x64 is missing");

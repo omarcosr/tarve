@@ -6,6 +6,7 @@
  */
 import { join } from "node:path";
 import type { BuildOptions } from "./build";
+import { pluginNativeRuntimeLines, type PluginNativeEmbed } from "./plugins-build";
 import { bundleQuickJs, type EmbeddedFile } from "./txiki-build";
 
 export interface AndroidBundle {
@@ -15,7 +16,8 @@ export interface AndroidBundle {
   assets: EmbeddedFile[];
 }
 
-export async function bundleAndroidJs(options: BuildOptions, define: Record<string, string>, temporary: string): Promise<AndroidBundle> {
+/** `plugins`: the plugin libraries the APK packs in lib/<abi>/ (androidPluginNatives), registered for ctx.loadLibrary. */
+export async function bundleAndroidJs(options: BuildOptions, define: Record<string, string>, temporary: string, plugins: readonly PluginNativeEmbed[] = []): Promise<AndroidBundle> {
   const root = import.meta.dirname;
   const shims: Record<string, string> = {
     fs: join(root, "android/shims/fs.ts"),
@@ -34,6 +36,7 @@ export async function bundleAndroidJs(options: BuildOptions, define: Record<stri
     label: "Android",
     prelude: join(root, "android/prelude.ts"),
     runtimeModule: join(root, "android/runtime.ts"),
+    runtimeExtra: pluginNativeRuntimeLines(plugins, "apk").join("\n"),
     shims,
     tjs: { "tjs:ffi": join(root, "android/tjs-ffi.ts") },
     // intl.ts reads LANG on "linux"; the host sets it from the device locale.

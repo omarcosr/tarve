@@ -17,6 +17,7 @@ import { metadataOverrides, type BuildOptions } from "./build";
 import { buildMetadata } from "./package-metadata";
 import { cacheRoot } from "./node-target";
 import { bundleAndroidJs, type AndroidBundle } from "./android-bundle";
+import { androidPluginNatives, pluginNativeRuntimeLines, type PluginNativeEmbed } from "./plugins-build";
 import { androidFileIntentFilters, androidIntentFilters, type FileTypeAssociation } from "./src/associations";
 import { resolveAppAssociations } from "./associations-config";
 import { type ZipEntry, readZip, zipEntry, writeZip } from "./android-zip";
@@ -54,6 +55,8 @@ export interface AndroidBuildOptions extends Omit<BuildOptions, "target" | "runt
   dev?: boolean;
   /** The JS bundle, already built (`tarve dev` bundles first); bundled here when absent. */
   bundled?: AndroidBundle;
+  /** Plugin libraries to pack, as `bundled` registered them (androidPluginNatives); planned here when absent. */
+  pluginNatives?: { abi: string; embed: PluginNativeEmbed }[];
 }
 
 export type AndroidFormat = "apk" | "aab";
@@ -369,7 +372,7 @@ const BUN_ANDROID_TARGETS: Record<AndroidAbi, string> = { "arm64-v8a": "bun-linu
  * lib/<abi>/libtarvebun.so. The activity starts it and serves the C ABI over a socket
  * (native/src/android/bun_host.rs, src/bridge/remote.ts). Needs Bun to build.
  */
-async function compileBunApp(options: AndroidBuildOptions, abi: AndroidAbi, outfile: string, define: Record<string, string>): Promise<void> {
+async function compileBunApp(options: AndroidBuildOptions, abi: AndroidAbi, outfile: string, define: Record<string, string>, plugins: readonly PluginNativeEmbed[]): Promise<void> {
   if (!process.versions.bun) throw new Error("Android builds with --runtime bun need Bun: run them with bunx tarve (or bun run).");
   const { frameworkPlugins } = await import("./framework-plugins");
   const sourceDirectory = join(import.meta.dirname, "src");
@@ -393,7 +396,12 @@ async function compileBunApp(options: AndroidBuildOptions, abi: AndroidAbi, outf
       builder.onResolve({ filter: /^#tarve\/runtime$/ }, () => ({ path: "runtime", namespace: "tarve-android" }));
       builder.onLoad({ filter: /^runtime$/, namespace: "tarve-android" }, () => ({
         loader: "ts",
-        contents: `export function nativePath() { return process.env.TARVE_NATIVE ?? "libtarve_native.so"; }`,
+        // Plugin libraries are extracted beside the executable (extractNativeLibs), in the app's native library directory.
+      contents: [
+        ...plugins.length ? [`import { dirname, join } from "node:path";`] : [],
+        `export function nativePath() { return process.env.TARVE_NATIVE ?? "libtarve_native.so"; }`,
+        ...pluginNativeRuntimeLines(plugins, "executable"),
+      ].join("\n"),
       }));
     },
   };
@@ -449,6 +457,9 @@ export async function buildAndroid(options: AndroidBuildOptions): Promise<string
   const outfile = resolve(options.outfile ?? `dist/${metadata.name}.${format}`);
   const packageName = androidPackageName(metadata.appId, metadata.name);
 
+  // Go apps load no JavaScript plugins.
+  const pluginNatives = go ? [] : options.pluginNatives ?? androidPluginNatives(options.entrypoint, abis);
+  const plugins = pluginNatives.map(planned => planned.embed);
   const temporary = mkdtempSync(join(tmpdir(), "tarve-android-build-"));
   try {
     const entries: ZipEntry[] = [];
@@ -463,12 +474,12 @@ export async function buildAndroid(options: AndroidBuildOptions): Promise<string
       for (const abi of abis) {
         const executable = join(temporary, abi, "libtarvebun.so");
         mkdirSync(dirname(executable), { recursive: true });
-        await compileBunApp(options, abi, executable, define);
+        await compileBunApp(options, abi, executable, define, plugins);
         // Compressed: the package manager extracts it (extractNativeLibs) so it can run.
         entries.push(zipEntry(`lib/${abi}/libtarvebun.so`, readFileSync(executable), true));
       }
     } else {
-      const { bundle, assets } = options.bundled ?? await bundleAndroidJs(options as BuildOptions, define, temporary);
+      const { bundle, assets } = options.bundled ?? await bundleAndroidJs(options as BuildOptions, define, temporary, plugins);
       if (options.dev) entries.push(zipEntry("assets/tarve/dev", new Uint8Array(), false));
       if (process.env.TARVE_ANDROID_DEBUG) writeFileSync(process.env.TARVE_ANDROID_DEBUG, readFileSync(bundle));
       entries.push(zipEntry("assets/tarve/app.js", readFileSync(bundle), true));
@@ -476,6 +487,8 @@ export async function buildAndroid(options: AndroidBuildOptions): Promise<string
       for (const asset of assets) entries.push(zipEntry(`assets/tarve/files/${asset.name}`, asset.data, !/\.(?:png|jpe?g|webp|gif|woff2?)$/i.test(asset.name)));
     }
     for (const [abi, library] of libraries) entries.push(zipEntry(`lib/${abi}/libtarve_native.so`, readFileSync(library), false));
+    // Plugins' native libraries (ctx.loadLibrary), stored like the runtime; Bun's are extracted with its executable.
+    for (const { abi, embed } of pluginNatives) entries.push(zipEntry(`lib/${abi}/${embed.fileName}`, readFileSync(embed.path), bun));
     entries.push(zipEntry("classes.dex", compileJava({ javac, java, tools, androidJar, temporary }), true));
 
     // Manifest and the launcher icon through aapt2.

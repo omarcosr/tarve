@@ -91,11 +91,13 @@ export function pluginNativeModule(embeds: readonly PluginNativeEmbed[], assetsM
 
 /**
  * Lines for the generated `#tarve/runtime` module of an executable that register the
- * embedded libraries. `frameworks`: macOS bundles, whose libraries sit in Contents/Frameworks
- * (the module must import `dirname`/`join` from node:path); otherwise the module must import
- * `materializeAsset`.
+ * embedded libraries. `frameworks`: macOS bundles, whose libraries sit in Contents/Frameworks;
+ * `executable`: beside the executable (Android's `--runtime bun`, extracted into the app's
+ * native library directory); both need `dirname`/`join` imported from node:path. `apk`: the
+ * APK's lib/<abi>/, which the app's linker namespace opens by file name. `embedded`: the
+ * module must import `materializeAsset`.
  */
-export function pluginNativeRuntimeLines(embeds: readonly PluginNativeEmbed[], layout: "embedded" | "frameworks"): string[] {
+export function pluginNativeRuntimeLines(embeds: readonly PluginNativeEmbed[], layout: "embedded" | "frameworks" | "executable" | "apk"): string[] {
   if (!embeds.length) return [];
   const lines = [`const __tarvePlugins = (globalThis[Symbol.for("tarve.pluginNatives")] ??= {});`];
   embeds.forEach((embed, index) => {
@@ -104,6 +106,10 @@ export function pluginNativeRuntimeLines(embeds: readonly PluginNativeEmbed[], l
     const fileName = JSON.stringify(embed.fileName);
     if (layout === "frameworks") {
       lines.push(`__tarvePlugins[${name}] = { ...__tarvePlugins[${name}], [${target}]: () => join(dirname(process.execPath), "..", "Frameworks", ${fileName}) };`);
+    } else if (layout === "executable") {
+      lines.push(`__tarvePlugins[${name}] = { ...__tarvePlugins[${name}], [${target}]: () => join(dirname(process.execPath), ${fileName}) };`);
+    } else if (layout === "apk") {
+      lines.push(`__tarvePlugins[${name}] = { ...__tarvePlugins[${name}], [${target}]: () => ${fileName} };`);
     } else {
       const digest = JSON.stringify({ sha256: embed.sha256, size: embed.size });
       lines.unshift(`import __tarvePluginLibrary${index} from ${JSON.stringify(embed.path)} with { type: "file" };`);
@@ -111,4 +117,25 @@ export function pluginNativeRuntimeLines(embeds: readonly PluginNativeEmbed[], l
     }
   });
   return lines;
+}
+
+/** File names the APK's lib/<abi>/ already uses for Tarve itself. */
+const ANDROID_RESERVED_LIBRARIES = new Set(["libtarve_native.so", "libtarveapp.so", "libtarvebun.so"]);
+
+/**
+ * The plugin libraries an APK packs as lib/<abi>/<fileName>, one plan per ABI
+ * (`arm64-v8a`, `x86_64`). Android installs only `lib*.so` files from lib/, so other
+ * names are refused here rather than missing on the device.
+ */
+export function androidPluginNatives(entrypoint: string, abis: readonly string[]): { abi: string; embed: PluginNativeEmbed }[] {
+  const planned = abis.flatMap(abi => pluginNativesForBuild(entrypoint, abi).embeds.map(embed => ({ abi, embed })));
+  for (const { embed } of planned) {
+    if (!/^lib[A-Za-z0-9_.+-]+\.so$/.test(embed.fileName)) {
+      throw new Error(`Plugin ${embed.plugin}: Android installs native libraries named lib<name>.so; ${embed.fileName} (${embed.target}) is not one.`);
+    }
+    if (ANDROID_RESERVED_LIBRARIES.has(embed.fileName)) {
+      throw new Error(`Plugin ${embed.plugin}: ${embed.fileName} is a name Tarve's own Android libraries use; rename the plugin's library.`);
+    }
+  }
+  return planned;
 }
