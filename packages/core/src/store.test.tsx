@@ -56,4 +56,17 @@ describe("store()", () => {
     expect(JSON.stringify(state)).toBe(JSON.stringify(data));
     expect(() => store(new Date() as never)).toThrow(TypeError);
   });
+
+  test("indexOf, lastIndexOf and includes find an element by its plain object or its tracking view", () => {
+    const tab = { name: "one" };
+    const other = { name: "two" };
+    const ui = store({ tabs: [] as { name: string }[] });
+    ui.tabs.push(tab, other, tab);
+    expect(ui.tabs.indexOf(tab)).toBe(0);
+    expect(ui.tabs.lastIndexOf(tab)).toBe(2);
+    expect(ui.tabs.includes(other)).toBe(true);
+    expect(ui.tabs.indexOf(ui.tabs[1]!)).toBe(1);
+    expect(ui.tabs.includes({ name: "one" })).toBe(false);
+    expect(ui.tabs.find(item => toRaw(item) === tab)).toBe(ui.tabs[0]);
+  });
 });

@@ -40,9 +40,16 @@ function wrap<T>(value: T): T {
   return proxy as T;
 }
 
+/** Array searches by identity: on the plain elements, with plain arguments, so the object pushed and the one found match. */
+const IDENTITY_SEARCHES = new Set<PropertyKey>(["indexOf", "lastIndexOf", "includes"]);
+
 const objectHandler: ProxyHandler<object> = {
   get(target, key, receiver) {
     if (key === RAW) return target;
+    if (Array.isArray(target) && IDENTITY_SEARCHES.has(key)) {
+      const search = (Array.prototype as unknown as Record<PropertyKey, (...args: unknown[]) => unknown>)[key as string]!;
+      return (...args: unknown[]) => search.apply(target, args.map(toRaw));
+    }
     return wrap(Reflect.get(target, key, receiver));
   },
   set(target, key, value, receiver) {
@@ -121,7 +128,10 @@ function collection(target: Map<unknown, unknown> | Set<unknown>): object {
 /**
  * State that renders the app again when it changes: `const state = store({ tabs: [], open: false })`,
  * then `state.open = true` or `state.tabs.push(tab)` from anywhere (a timer, a plugin event) and
- * the view shows it. Returns a tracking view of `value`, which stays the data underneath.
+ * the view shows it. Returns a tracking view of `value`, which stays the data underneath: keep
+ * and change what `store()` (and its properties) return, not the original objects, whose changes
+ * render nothing. Reads hand back tracking views, so compare by identity with `toRaw(a) === toRaw(b)`;
+ * `indexOf`, `lastIndexOf` and `includes` already match either.
  */
 export function store<T extends object>(value: T): T {
   if (!trackable(value)) throw new TypeError("store() takes a plain object, an array, a Map or a Set");
