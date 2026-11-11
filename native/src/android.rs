@@ -369,8 +369,23 @@ pub(crate) fn with_env<T>(
     let activity = unsafe { JObject::from_raw(object.cast()) };
     let result = f(&mut env, &activity);
     if env.exception_check().unwrap_or(false) {
+        // The Java exception's own message ("SecurityException: …"), not jni's "Java exception
+        // was thrown": the caller reports it to the app.
+        let throwable = env.exception_occurred().ok();
         let _ = env.exception_describe();
         let _ = env.exception_clear();
+        let message = throwable
+            .and_then(|throwable| {
+                env.call_method(&throwable, "toString", "()Ljava/lang/String;", &[])
+                    .ok()?
+                    .l()
+                    .ok()
+            })
+            .and_then(|text| env.get_string(&text.into()).ok().map(String::from));
+        let _ = env.exception_clear();
+        if let (Err(_), Some(message)) = (&result, message) {
+            return Err(message);
+        }
     }
     result.map_err(|e| e.to_string())
 }
