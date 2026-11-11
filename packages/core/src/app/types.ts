@@ -302,6 +302,14 @@ export interface AppHandle {
   /** Sends the app to the background (Android: the task goes behind the launcher), else minimizes the window. */
   moveToBackground(): void;
   /**
+   * Back navigation: Android's Back button or gesture, and Escape on desktops when no open
+   * overlay takes it. The topmost open Modal, Sheet, Popover or CommandPalette closes first, on its
+   * own; then listeners run, highest `priority` first (default 0, then the latest added), until
+   * one returns `true`. When none does, Android goes on to the Window's `onCloseRequest` (or
+   * closes). Returns the function that removes the listener.
+   */
+  onBack(handler: () => boolean | void, options?: { priority?: number }): () => void;
+  /**
    * Calls a plugin command (`"<namespace>.<command>"`, see `definePlugin`); rejects when no
    * installed plugin registered it. `plugin.client(app)` gives typed calls.
    */

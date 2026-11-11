@@ -167,6 +167,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     if (tracked.readEnvironment) tree.environment = environmentKey();
     appWindow = tree.document.window;
     if (options.closeBehavior === "hide") tree.document.root.closeIntercept = true;
+    // Android Back closes the app unless JS intercepts it: it does while an overlay can close or onBack listens.
+    if (ANDROID_BACK && !tree.document.root.closeIntercept && (backHandlers.length || topEscape(tree))) tree.document.root.closeIntercept = true;
     Object.assign(tree.document, appIdentityDocument());
     if (options.msaa !== undefined) tree.document.msaa = options.msaa;
     else if (options.lowPower) tree.document.msaa = 0;
@@ -176,6 +178,27 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     if (options.memoryTrimDelay !== undefined) tree.document.memoryTrimDelay = options.memoryTrimDelay === false ? -1 : options.memoryTrimDelay;
     if (options.lowPower) tree.document.lowPower = true;
     return tree;
+  }
+
+  /** Android: the system Back arrives as a close request (native/src/runtime/android_input.rs). */
+  const ANDROID_BACK = process.platform === "android";
+  /** `app.onBack` listeners; the highest priority, then the latest, runs first. */
+  const backHandlers: { handler: () => boolean | void; priority: number; order: number }[] = [];
+  let backOrder = 0;
+  /** The topmost open overlay's close (Modal, Sheet, Popover, CommandPalette set onEscape). */
+  function topEscape(tree: CompiledTree): [string, () => void] | undefined {
+    const item = [...tree.handlers.entries()].reverse().find(([, handlers]) => handlers.onEscape);
+    return item ? [item[0], item[1].onEscape!] : undefined;
+  }
+  /** Runs onBack listeners until one returns true. */
+  function runBackHandlers(): boolean {
+    const ordered = [...backHandlers].sort((a, b) => b.priority - a.priority || b.order - a.order);
+    for (const entry of ordered) {
+      let taken: boolean;
+      try { taken = entry.handler() === true; } catch (error) { reportError(error, { source: "event-handler", event: "back" }); taken = true; }
+      if (taken) { update(); return true; }
+    }
+    return false;
   }
 
   function dismissDevError(): void {
@@ -616,10 +639,22 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     if (!ended && committed && observed && event.type === "escape") {
       const item = [...committed.handlers.entries()].reverse().find(([, handlers]) => handlers.onEscape);
       const handler = item?.[1].onEscape;
-      if (handler && invokeHandler("escape", item?.[0], handler)) update();
+      if (handler) {
+        if (invokeHandler("escape", item?.[0], handler)) update();
+      } else runBackHandlers();
     }
 
-    if (!ended && committed && event.type === "closeRequest") {
+    // Android Back: the topmost overlay closes, else an onBack listener takes it, else the window's close request.
+    let backTaken = false;
+    if (!ended && committed && event.type === "closeRequest" && ANDROID_BACK) {
+      const overlay = topEscape(committed);
+      if (overlay) {
+        backTaken = true;
+        if (invokeHandler("back", overlay[0], overlay[1])) update();
+      } else backTaken = runBackHandlers();
+      if (backTaken) sendInternal({ type: "cancelCloseRequest" }, { source: "bridge", event: "cancelCloseRequest:back", targetId: committed.document.root.id });
+    }
+    if (!ended && committed && event.type === "closeRequest" && !backTaken) {
       const targetId = committed.document.root.id;
       const handler = committed.handlers.get(targetId)?.onCloseRequest;
       if (!handler) {
@@ -938,6 +973,25 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     watchPosition: (callback, positionOptions) => device.watchPosition(callback, positionOptions),
     authenticate: authOptions => device.authenticate(authOptions),
     recognizeSpeech: speechOptions => device.recognizeSpeech(speechOptions),
+    keepAlive: keepAliveOptions => device.keepAlive(keepAliveOptions),
+    onBack(handler, backOptions = {}) {
+      if (typeof handler !== "function") throw new TypeError("onBack needs a function");
+      const priority = backOptions.priority ?? 0;
+      if (!Number.isFinite(priority)) throw new TypeError("onBack priority must be a finite number");
+      const entry = { handler, priority, order: backOrder++ };
+      backHandlers.push(entry);
+      if (backHandlers.length === 1) update();
+      return () => {
+        const index = backHandlers.indexOf(entry);
+        if (index < 0) return;
+        backHandlers.splice(index, 1);
+        if (!backHandlers.length) update();
+      };
+    },
+    get secureStore() { return device.secureStore; },
+    moveToBackground(): void {
+      if (!ended) sendPublic({ type: "window", action: "minimize" });
+    },
     invoke<R = unknown>(command: string, ...args: unknown[]): Promise<R> {
       if (!pluginHost) return Promise.reject(new Error(`Unknown plugin command: ${command} (the app has no plugins)`));
       return pluginHost.invoke(command, args) as Promise<R>;
@@ -954,11 +1008,6 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         throw error;
       }
       return event.snapshot;
-    keepAlive: keepAliveOptions => device.keepAlive(keepAliveOptions),
-    get secureStore() { return device.secureStore; },
-    moveToBackground(): void {
-      if (!ended) sendPublic({ type: "window", action: "minimize" });
-    },
     },
     async stats(statsOptions: { reset?: boolean } = {}): Promise<AppStats> {
       if (queued) await flushQueuedUpdate();
