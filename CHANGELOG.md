@@ -27,6 +27,13 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 - On Android, `ctx.loadLibrary` no longer gets Tarve's own runtime symbols whatever library it names; `tjs:ffi`'s `dlopen` opens real libraries instead of throwing.
 - `createApp({ onError })` also receives the process's unhandled rejections and uncaught exceptions (source `"process"`) until the app closes, on Bun, Node.js, txiki.js and Android, so a lost promise no longer ends the process and its window. Without `onError` nothing changes.
 - The focus ring (`focusVisible`) shows only for navigation keys (Tab, arrows, Home/End/PageUp/PageDown, Enter/Space on a non-editable control); typing into a pointer-focused view no longer rings it.
+- `store()` on QuickJS (Android, txiki.js): pushing to a tracked array no longer throws "inconsistent defineProperty".
+- Android: `keepAlive()` released right after it started, or without `FOREGROUND_SERVICE_SPECIAL_USE` declared, no longer ends the process; errors from Android APIs carry the Java exception's message.
+- A `<surface>` being resized (a soft keyboard opening) draws its last frame at its own scale, clipped, instead of stretching it until the next frame.
+
+### Changed
+
+- Android's QuickJS runtime is QuickJS-ng 0.16 on mimalloc.
 
 ## 0.11.1 — 2026-11-10
 
