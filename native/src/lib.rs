@@ -24,10 +24,6 @@ use accesskit_winit as accessibility_adapter;
 #[cfg(target_os = "android")]
 mod android;
 // The Android plugin FFI's call path (same ABIs on Linux), tested where `cargo test` runs.
-#[cfg(all(test, target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
-#[allow(dead_code)]
-#[path = "android/qjs/foreign_call.rs"]
-mod foreign_call;
 #[cfg(not(target_arch = "wasm32"))]
 mod bridge;
 mod controls;
@@ -44,6 +40,14 @@ mod device;
 #[cfg(all(not(target_arch = "wasm32"), feature = "media"))]
 mod downmix;
 mod environment;
+#[cfg(all(
+    test,
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+#[allow(dead_code)]
+#[path = "android/qjs/foreign_call.rs"]
+mod foreign_call;
 mod glass;
 #[cfg(target_os = "windows")]
 mod gpu_timer;

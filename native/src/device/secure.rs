@@ -56,8 +56,7 @@ pub(crate) fn valid_alias(alias: &str) -> bool {
 
 /// Answers a `secureStore` request: `data` (base64) for `seal` and `open`, none for `delete`.
 pub(crate) fn secure_store(request: &SecureStore) -> Value {
-    let mut event =
-        json!({"type":"secureStore", "requestId":request.request_id, "supported":true});
+    let mut event = json!({"type":"secureStore", "requestId":request.request_id, "supported":true});
     match run(request) {
         Ok(Some(bytes)) => event["data"] = json!(STANDARD.encode(bytes)),
         Ok(None) => {}
@@ -81,7 +80,11 @@ fn run(request: &SecureStore) -> Result<Option<Vec<u8>>, Failure> {
             .decode(request.data.as_deref().unwrap_or(""))
             .map_err(|error| Failure::Failed(format!("secureStore data is not base64: {error}")))?,
         "delete" => Vec::new(),
-        other => return Err(Failure::Failed(format!("unknown secureStore action {other}"))),
+        other => {
+            return Err(Failure::Failed(format!(
+                "unknown secureStore action {other}"
+            )));
+        }
     };
     if super::fake::enabled() {
         return fake(&request.action, &request.alias, &data);
@@ -200,7 +203,15 @@ mod dpapi {
         // allocates `output` with LocalAlloc, freed below.
         let ok = unsafe {
             if protect {
-                CryptProtectData(&input, null(), &entropy, null(), null(), UI_FORBIDDEN, &mut output)
+                CryptProtectData(
+                    &input,
+                    null(),
+                    &entropy,
+                    null(),
+                    null(),
+                    UI_FORBIDDEN,
+                    &mut output,
+                )
             } else {
                 CryptUnprotectData(
                     &input,
@@ -215,13 +226,17 @@ mod dpapi {
         };
         if ok == 0 {
             let name = if protect { "seal" } else { "open" };
-            return Err(format!("Could not {name} the data: {}", std::io::Error::last_os_error()));
+            return Err(format!(
+                "Could not {name} the data: {}",
+                std::io::Error::last_os_error()
+            ));
         }
         if output.data.is_null() {
             return Ok(Vec::new());
         }
         // SAFETY: DPAPI answered `len` bytes at `data`, ours until LocalFree.
-        let bytes = unsafe { std::slice::from_raw_parts(output.data, output.len as usize) }.to_vec();
+        let bytes =
+            unsafe { std::slice::from_raw_parts(output.data, output.len as usize) }.to_vec();
         unsafe { LocalFree(output.data.cast()) };
         Ok(bytes)
     }
@@ -279,7 +294,10 @@ mod tests {
         let sealed = fake("seal", "a", b"secret").unwrap().unwrap();
         assert_ne!(sealed, b"secret");
         assert_eq!(fake("open", "a", &sealed).unwrap().unwrap(), b"secret");
-        assert!(matches!(fake("open", "b", &sealed), Err(Failure::Failed(_))));
+        assert!(matches!(
+            fake("open", "b", &sealed),
+            Err(Failure::Failed(_))
+        ));
         assert_eq!(fake("delete", "a", &[]), Ok(None));
         assert_eq!(fake("seal", "unsupported", b"x"), Err(Failure::Unsupported));
     }
@@ -301,7 +319,10 @@ mod tests {
     fn dpapi_seals_for_this_user_and_alias() {
         let sealed = dpapi::call("termio.test", b"secret", true).unwrap();
         assert!(!sealed.windows(6).any(|window| window == b"secret"));
-        assert_eq!(dpapi::call("termio.test", &sealed, false).unwrap(), b"secret");
+        assert_eq!(
+            dpapi::call("termio.test", &sealed, false).unwrap(),
+            b"secret"
+        );
         assert!(dpapi::call("other", &sealed, false).is_err());
         let event = secure_store(&request("open", "termio.test", Some(&sealed)));
         assert_eq!(event["data"], json!(STANDARD.encode(b"secret")));

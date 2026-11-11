@@ -542,7 +542,9 @@ fn install<'js>(
     ffi::install(ctx, &host)?;
     host.set(
         "pluginEmitAddress",
-        Function::new(ctx.clone(), || crate::bridge::entry_points::tarve_plugin_emit_address() as f64)?,
+        Function::new(ctx.clone(), || {
+            crate::bridge::entry_points::tarve_plugin_emit_address() as f64
+        })?,
     )?;
 
     let files = Object::new(ctx.clone())?;

@@ -546,7 +546,10 @@ fn utf16_to_byte(text: &str, offset: usize) -> Option<usize> {
 /// control. Typing, Backspace and Mod chords do not: an app that takes keystrokes on a
 /// focused view (a terminal, a canvas) keeps the ring off while the user types.
 pub(crate) fn key_reveals_focus(key: &str, editable_focus: bool) -> bool {
-    let unshifted = key.strip_prefix("Shift").filter(|rest| !rest.is_empty()).unwrap_or(key);
+    let unshifted = key
+        .strip_prefix("Shift")
+        .filter(|rest| !rest.is_empty())
+        .unwrap_or(key);
     match unshifted {
         "Tab" | "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight" | "Home" | "End"
         | "PageUp" | "PageDown" => true,
@@ -6220,7 +6223,13 @@ impl Tree {
                 );
                 let resizing = !(fits_x && fits_y) && scale > 0.0;
                 if resizing {
-                    let uniform = if fits_x { sx } else if fits_y { sy } else { 1.0 / scale };
+                    let uniform = if fits_x {
+                        sx
+                    } else if fits_y {
+                        sy
+                    } else {
+                        1.0 / scale
+                    };
                     (sx, sy) = (uniform, uniform);
                     let clip_rect = BoxRect::new(rect.x0, rect.y0, rect.x1, rect.y1);
                     target.push_clip(Fill::NonZero, transform, &clip_rect);

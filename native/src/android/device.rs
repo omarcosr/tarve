@@ -258,7 +258,12 @@ fn keystore_key<'local>(
     let store = keystore(env)?;
     let name = env.new_string(alias)?;
     if env
-        .call_method(&store, "containsAlias", "(Ljava/lang/String;)Z", &[JValue::Object(&name)])?
+        .call_method(
+            &store,
+            "containsAlias",
+            "(Ljava/lang/String;)Z",
+            &[JValue::Object(&name)],
+        )?
         .z()?
     {
         let key = env
@@ -307,7 +312,12 @@ fn keystore_key<'local>(
         &[JValue::Object(&paddings)],
     )?;
     let spec = env
-        .call_method(&builder, "build", "()Landroid/security/keystore/KeyGenParameterSpec;", &[])?
+        .call_method(
+            &builder,
+            "build",
+            "()Landroid/security/keystore/KeyGenParameterSpec;",
+            &[],
+        )?
         .l()?;
     env.call_method(
         &generator,
@@ -315,7 +325,10 @@ fn keystore_key<'local>(
         "(Ljava/security/spec/AlgorithmParameterSpec;)V",
         &[JValue::Object(&spec)],
     )?;
-    Ok(Some(env.call_method(&generator, "generateKey", "()Ljavax/crypto/SecretKey;", &[])?.l()?))
+    Ok(Some(
+        env.call_method(&generator, "generateKey", "()Ljavax/crypto/SecretKey;", &[])?
+            .l()?,
+    ))
 }
 
 fn gcm_cipher<'local>(env: &mut JNIEnv<'local>) -> jni::errors::Result<JObject<'local>> {
@@ -334,11 +347,17 @@ pub(crate) fn seal(alias: &str, plain: &[u8]) -> Result<Vec<u8>, String> {
     with_env(|env, _| {
         let key = keystore_key(env, alias, true)?.expect("created");
         let cipher = gcm_cipher(env)?;
-        env.call_method(&cipher, "init", "(ILjava/security/Key;)V", &[JValue::Int(1), JValue::Object(&key)])?;
+        env.call_method(
+            &cipher,
+            "init",
+            "(ILjava/security/Key;)V",
+            &[JValue::Int(1), JValue::Object(&key)],
+        )?;
         let iv = JByteArray::from(env.call_method(&cipher, "getIV", "()[B", &[])?.l()?);
         let input = env.byte_array_from_slice(plain)?;
         let sealed = JByteArray::from(
-            env.call_method(&cipher, "doFinal", "([B)[B", &[JValue::Object(&input)])?.l()?,
+            env.call_method(&cipher, "doFinal", "([B)[B", &[JValue::Object(&input)])?
+                .l()?,
         );
         let mut out = env.convert_byte_array(&iv)?;
         out.extend(env.convert_byte_array(&sealed)?);
@@ -371,12 +390,15 @@ pub(crate) fn open(alias: &str, sealed: &[u8]) -> Result<Vec<u8>, String> {
         )?;
         let input = env.byte_array_from_slice(&sealed[12..])?;
         let plain = JByteArray::from(
-            env.call_method(&cipher, "doFinal", "([B)[B", &[JValue::Object(&input)])?.l()?,
+            env.call_method(&cipher, "doFinal", "([B)[B", &[JValue::Object(&input)])?
+                .l()?,
         );
         Ok(Some(env.convert_byte_array(&plain)?))
     })
     .map_err(|error| format!("Could not open the sealed data: {error}"))?
-    .ok_or_else(|| "the key that sealed this data is gone (the app was reinstalled or its data cleared)".into())
+    .ok_or_else(|| {
+        "the key that sealed this data is gone (the app was reinstalled or its data cleared)".into()
+    })
 }
 
 /// Deletes the Keystore key `alias`: what it sealed can never be opened again.
@@ -384,7 +406,12 @@ pub(crate) fn forget(alias: &str) -> Result<(), String> {
     with_env(|env, _| {
         let store = keystore(env)?;
         let name = env.new_string(alias)?;
-        env.call_method(&store, "deleteEntry", "(Ljava/lang/String;)V", &[JValue::Object(&name)])?;
+        env.call_method(
+            &store,
+            "deleteEntry",
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(&name)],
+        )?;
         Ok(())
     })
     .map_err(|error| format!("Could not delete the key: {error}"))

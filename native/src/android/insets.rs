@@ -51,7 +51,10 @@ extern "system" fn native_text(mut env: JNIEnv, _: JClass, text: jni::objects::J
     if text.is_empty() {
         return;
     }
-    COMMITTED.lock().unwrap_or_else(|p| p.into_inner()).push(text);
+    COMMITTED
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push(text);
     if let Some(app) = super::app() {
         app.create_waker().wake();
     }
