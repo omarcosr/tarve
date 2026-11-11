@@ -1038,6 +1038,8 @@ pub enum Command {
     Speech(requests::Speech),
     ScheduleNotification(notifications::ScheduleNotification),
     Authenticate(requests::Authenticate),
+    KeepAlive(requests::KeepAlive),
+    SecureStore(requests::SecureStore),
     Input {
         action: String,
         x: Option<f64>,

@@ -94,3 +94,62 @@ test.skipIf(!hasNative)("TARVE_DEVICE=fake answers every device request determin
     rmSync(directory, { recursive: true, force: true });
   }
 }, 60_000);
+
+const storeEntry = (core: string) => `import { createApp, keepAlive, secureStore, Window } from "${core}/index.ts";
+import { jsx } from "${core}/jsx-runtime.ts";
+const app = createApp(() => jsx(Window, {}), { headless: true, renderer: "cpu" });
+await app.ready;
+const result: Record<string, unknown> = {};
+const hold = keepAlive({ title: "T", text: "1 session open" });
+result.keep = await hold.result;
+result.keepUpdated = await hold.update({ text: "2 sessions open" });
+await hold.release();
+result.keepReleased = await hold.update({}).then(() => "updated", (error: Error) => error.message);
+result.sealed = await secureStore.seal("vault.password", "hunter2");
+result.has = secureStore.has("vault.password");
+const opened = await secureStore.open("vault.password");
+result.opened = { ...opened, data: opened.data && new TextDecoder().decode(opened.data) };
+result.missing = await secureStore.open("nothing");
+result.unsupported = await secureStore.seal("unsupported", new Uint8Array([1]));
+result.deleted = await secureStore.delete("vault.password");
+result.hasAfterDelete = secureStore.has("vault.password");
+result.badAlias = await secureStore.seal("../escape", "x").then(() => "sealed", (error: Error) => error.name);
+console.log("RESULT " + JSON.stringify(result));
+app.close();
+await app.closed;
+process.exit(0);
+`;
+
+test.skipIf(!hasNative)("TARVE_DEVICE=fake: keepAlive holds and secureStore seals to the app's config directory", async () => {
+  const work = join(root, "work");
+  mkdirSync(work, { recursive: true });
+  const directory = mkdtempSync(join(work, "device-store-"));
+  try {
+    const file = join(directory, "device-store.ts");
+    writeFileSync(file, storeEntry(resolve(import.meta.dirname).replaceAll("\\", "/")));
+    const config = join(directory, "config");
+    const child = Bun.spawn([process.execPath, file], {
+      cwd: root, env: { ...process.env, TARVE_DEVICE: "fake", APPDATA: config, XDG_CONFIG_HOME: config, HOME: config }, stdout: "pipe", stderr: "pipe",
+    });
+    const timer = setTimeout(() => child.kill(), 30_000);
+    const [output, errors] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    clearTimeout(timer);
+    const line = output.split("\n").find(text => text.startsWith("RESULT "));
+    expect(line, errors).toBeDefined();
+    expect(JSON.parse(line!.slice(7))).toEqual({
+      keep: { supported: true },
+      keepUpdated: { supported: true },
+      keepReleased: "keepAlive was released",
+      sealed: { supported: true },
+      has: true,
+      opened: { supported: true, data: "hunter2" },
+      missing: { supported: true },
+      unsupported: { supported: false, error: "secure storage is not available on this platform" },
+      deleted: { supported: true },
+      hasAfterDelete: false,
+      badAlias: "TypeError",
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 60_000);

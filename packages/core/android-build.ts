@@ -181,6 +181,9 @@ ${androidIntentFilters(options.protocols)}${androidFileIntentFilters(options.fil
       </intent-filter>
     </receiver>
     <service android:name="dev.tarve.TarveMediaService" android:exported="false" android:foregroundServiceType="mediaPlayback"/>
+    <service android:name="dev.tarve.TarveKeepAlive" android:exported="false" android:foregroundServiceType="specialUse">
+      <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Keeps the app's open network sessions running in the background"/>
+    </service>
     <provider android:name="dev.tarve.TarveFileProvider" android:authorities="${options.packageName}.tarve.files" android:exported="false" android:grantUriPermissions="true"/>
   </application>
 </manifest>

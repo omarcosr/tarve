@@ -488,6 +488,10 @@ export type NativeCommand =
   | { type: "scheduleNotification"; action: "set" | "cancel"; id: string; title?: string; body?: string; at?: number; place?: { latitude: number; longitude: number; radius: number; leave?: boolean } }
   /** Biometric or device-credential check (Android BiometricPrompt, Windows Hello); answered by `authenticate`. */
   | { type: "authenticate"; requestId: string; reason: string }
+  /** Android: keep the process running in the background (a foreground service and its notification) while `active`; answered by `keepAlive`. */
+  | { type: "keepAlive"; requestId: string; active: boolean; title?: string; text?: string }
+  /** Seal (`data`, base64) with a key only this app and device can use, open what was sealed, or delete the key; answered by `secureStore`. */
+  | { type: "secureStore"; requestId: string; action: "seal" | "open" | "delete"; alias: string; data?: string }
   | { type: "input"; action: "move" | "down" | "up" | "wheel" | "text" | "key"; x?: number; y?: number; delta?: number; deltaX?: number; deltaY?: number; text?: string };
 /** A node's laid-out box, like its `size` event: the content size, and the border box in the window. */
 export interface LayoutBox {
@@ -619,6 +623,9 @@ export type NativeEvent =
   /** A dictation session's progress; `phase: "result"` is the last one (`text`, or `code`). */
   | { type: "speech"; sessionId: string; phase: "ready" | "partial" | "level" | "end" | "result"; supported?: boolean; text?: string; level?: number; code?: SpeechErrorCode; error?: string }
   | { type: "authenticate"; requestId: string; supported: boolean; success: boolean; code?: AuthErrorCode; error?: string }
+  | { type: "keepAlive"; requestId: string; supported: boolean; error?: string }
+  /** `data` (base64): the sealed bytes for "seal", the plain ones for "open". */
+  | { type: "secureStore"; requestId: string; supported: boolean; data?: string; error?: string }
   /** Links and files the OS asked the app to open (Android VIEW intents); `initial` for the launch's own. */
   | { type: "open"; urls: string[]; files: string[]; initial: boolean }
   | { type: "frame"; frames: number };

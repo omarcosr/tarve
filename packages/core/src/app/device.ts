@@ -1,7 +1,9 @@
 // Device services with the same shape on every OS: the share sheet, location and the biometric
 // check. Where a platform has none the answer is `{ supported: false }`, never an exception.
-import { isAbsolute, resolve } from "node:path";
+import { isAbsolute, resolve, join } from "node:path";
 import type { AuthErrorCode, GeoErrorCode, GeoPosition, NativeCommand, NativeEvent, PermissionState, SpeechErrorCode } from "../protocol";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { appConfigDirectory } from "../window-state";
 
 export type { AuthErrorCode, GeoErrorCode, GeoPosition, SpeechErrorCode } from "../protocol";
 
@@ -61,17 +63,60 @@ export interface SpeechSession {
 /** Android asks for this before dictation; desktops answer "granted" at once. */
 export const SPEECH_PERMISSIONS = ["RECORD_AUDIO"] as const;
 
+export interface KeepAliveOptions {
+  /** The notification's title; the app's name when empty. */
+  title?: string;
+  /** The notification's text, e.g. "2 sessions open". */
+  text?: string;
+}
+/**
+ * `supported: false` where nothing is needed (desktops never suspend a running app); `error` when
+ * Android could not start the service (declare FOREGROUND_SERVICE and
+ * FOREGROUND_SERVICE_SPECIAL_USE in package.json tarve.android.permissions).
+ */
+export interface KeepAliveResult { supported: boolean; error?: string }
+/**
+ * A hold on the app running in the background. While any is held Android keeps the process
+ * alive with an ongoing notification (the most recently updated hold's title and text); the last
+ * `release()` ends it.
+ */
+export interface KeepAlive {
+  readonly result: Promise<KeepAliveResult>;
+  update(options: KeepAliveOptions): Promise<KeepAliveResult>;
+  release(): Promise<void>;
+}
+
+/** `supported: false` where the platform has no secure storage (macOS and Linux for now). */
+export interface SecureStoreResult { supported: boolean; error?: string }
+/** `data` is what `seal` stored under the alias; absent when nothing is (or on `error`). */
+export interface SecureStoreOpenResult extends SecureStoreResult { data?: Uint8Array }
+/**
+ * Secrets sealed with a key only this app on this device can use (Android Keystore, Windows
+ * DPAPI): a copied data folder cannot be opened elsewhere. Aliases are 1-64 letters, digits,
+ * `.`, `_` or `-`. Pair it with `authenticate()` to ask for a fingerprint before `open`.
+ */
+export interface SecureStore {
+  seal(alias: string, data: Uint8Array | string): Promise<SecureStoreResult>;
+  open(alias: string): Promise<SecureStoreOpenResult>;
+  /** Something is sealed under `alias`. */
+  has(alias: string): boolean;
+  /** Forgets `alias`: the sealed bytes and, on Android, the key. */
+  delete(alias: string): Promise<SecureStoreResult>;
+}
+
 export interface DeviceRequests {
   share(options: ShareOptions): Promise<ShareResult>;
   getCurrentPosition(options?: PositionOptions): Promise<PositionResult>;
   watchPosition(callback: (result: PositionResult) => void, options?: Omit<PositionOptions, "timeoutMs" | "maximumAgeMs">): () => void;
   authenticate(options: AuthenticateOptions): Promise<AuthenticateResult>;
   recognizeSpeech(options?: SpeechOptions): SpeechSession;
+  keepAlive(options?: KeepAliveOptions): KeepAlive;
+  readonly secureStore: SecureStore;
   /** Routes a `speech` event to its session. */
   speech(event: NativeEvent): void;
   /** Routes a `position` event to its watch. */
   position(event: NativeEvent): void;
-  /** Stops every watch (the app closed). */
+  /** Stops every watch and keep-alive hold (the app closed). */
   dispose(): void;
 }
 
@@ -80,6 +125,21 @@ export interface DeviceRequestsOptions {
   permissions(action: "request", names: readonly string[]): Promise<Record<string, PermissionState>>;
   send(command: NativeCommand): void;
   report(error: unknown, event: string): void;
+  /** Where `secureStore` keeps the sealed bytes; `<app config>/secure-store` by default. */
+  secureDirectory?: string;
+}
+
+const ALIAS = /^[A-Za-z0-9._-]{1,64}$/;
+
+function checkAlias(alias: string): void {
+  if (typeof alias !== "string" || !ALIAS.test(alias)) throw new TypeError("secureStore alias must be 1-64 letters, digits, '.', '_' or '-'");
+}
+
+function checkKeepAlive(options: KeepAliveOptions): KeepAliveOptions {
+  for (const name of ["title", "text"] as const) {
+    if (options[name] !== undefined && typeof options[name] !== "string") throw new TypeError(`keepAlive ${name} must be a string`);
+  }
+  return { title: options.title ?? "", text: options.text ?? "" };
 }
 
 /** Android asks for these before the first fix; desktops answer "granted" at once. */
@@ -96,7 +156,57 @@ function result<T extends { type: string }>(event: NativeEvent, type: T["type"])
   return event as unknown as T;
 }
 
-export function createDeviceRequests({ request, permissions, send, report }: DeviceRequestsOptions): DeviceRequests {
+export function createDeviceRequests({ request, permissions, send, report, secureDirectory }: DeviceRequestsOptions): DeviceRequests {
+  const holds = new Map<object, KeepAliveOptions>();
+  let asked = false;
+  async function syncKeepAlive(): Promise<KeepAliveResult> {
+    const shown = [...holds.values()].at(-1);
+    // Android 13+ shows the notification only with POST_NOTIFICATIONS; the service runs either way.
+    if (shown && !asked) {
+      asked = true;
+      await permissions("request", ["POST_NOTIFICATIONS"]).catch(() => undefined);
+    }
+    const command = { type: "keepAlive", requestId: crypto.randomUUID(), active: !!shown, title: shown?.title ?? "", text: shown?.text ?? "" } as const;
+    const event = result<Extract<NativeEvent, { type: "keepAlive" }>>(await request(command, 10_000), "keepAlive");
+    return { supported: event.supported, ...event.error ? { error: event.error } : {} };
+  }
+
+  const sealedPath = (alias: string) => join(secureDirectory ?? join(appConfigDirectory(), "secure-store"), `${alias}.sealed`);
+  async function store(action: "seal" | "open" | "delete", alias: string, data?: Uint8Array) {
+    const command = { type: "secureStore", requestId: crypto.randomUUID(), action, alias, ...data ? { data: Buffer.from(data).toString("base64") } : {} } as const;
+    return result<Extract<NativeEvent, { type: "secureStore" }>>(await request(command, 30_000), "secureStore");
+  }
+  const outcome = (event: { supported: boolean; error?: string }): SecureStoreResult => ({ supported: event.supported, ...event.error ? { error: event.error } : {} });
+  const secureStore: SecureStore = {
+    async seal(alias, data) {
+      checkAlias(alias);
+      if (typeof data !== "string" && !(data instanceof Uint8Array)) throw new TypeError("secureStore.seal data must be a string or a Uint8Array");
+      const event = await store("seal", alias, typeof data === "string" ? new TextEncoder().encode(data) : data);
+      if (event.data === undefined || event.error) return outcome(event);
+      const path = sealedPath(alias);
+      mkdirSync(join(path, ".."), { recursive: true });
+      writeFileSync(`${path}.tmp`, Buffer.from(event.data, "base64"));
+      renameSync(`${path}.tmp`, path);
+      return outcome(event);
+    },
+    async open(alias) {
+      checkAlias(alias);
+      const path = sealedPath(alias);
+      if (!existsSync(path)) return { supported: true };
+      const event = await store("open", alias, new Uint8Array(readFileSync(path)));
+      return { ...outcome(event), ...event.data !== undefined && !event.error ? { data: new Uint8Array(Buffer.from(event.data, "base64")) } : {} };
+    },
+    has(alias) {
+      checkAlias(alias);
+      return existsSync(sealedPath(alias));
+    },
+    async delete(alias) {
+      checkAlias(alias);
+      rmSync(sealedPath(alias), { force: true });
+      return outcome(await store("delete", alias));
+    },
+  };
+
   const watches = new Map<string, (result: PositionResult) => void>();
   const sessions = new Map<string, { options: SpeechOptions; finish: (result: SpeechResult) => void }>();
   const call = (callback: (result: PositionResult) => void, value: PositionResult) => {
@@ -117,6 +227,29 @@ export function createDeviceRequests({ request, permissions, send, report }: Dev
   });
 
   return {
+    secureStore,
+
+    keepAlive(options = {}) {
+      const hold = {};
+      holds.set(hold, checkKeepAlive(options));
+      let released = false;
+      return {
+        result: syncKeepAlive(),
+        update(next) {
+          if (released) return Promise.reject(new Error("keepAlive was released"));
+          holds.delete(hold);
+          holds.set(hold, checkKeepAlive(next ?? {}));
+          return syncKeepAlive();
+        },
+        async release() {
+          if (released) return;
+          released = true;
+          holds.delete(hold);
+          await syncKeepAlive().catch((error: unknown) => report(error, "keepAlive"));
+        },
+      };
+    },
+
     async share({ title, text, url, files }) {
       if (text === undefined && url === undefined && !files?.length) throw new TypeError("share needs text, a url or files");
       for (const [name, value] of [["title", title], ["text", text], ["url", url]] as const) {
@@ -251,6 +384,10 @@ export function createDeviceRequests({ request, permissions, send, report }: Dev
 
     dispose() {
       watches.clear();
+      if (holds.size) {
+        holds.clear();
+        try { send({ type: "keepAlive", requestId: crypto.randomUUID(), active: false }); } catch { /* the app has closed */ }
+      }
       for (const session of [...sessions.values()]) session.finish({ supported: true, code: "unavailable", error: "The app closed" });
     },
   };

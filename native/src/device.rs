@@ -4,8 +4,10 @@
 //! share UI, `Geolocator`, Windows Hello). Elsewhere each request answers `supported: false`.
 //! `TARVE_DEVICE=fake` swaps every platform for the deterministic `fake` provider (tests, CI).
 mod fake;
+mod secure;
 mod speech;
 
+pub(crate) use secure::{keep_alive, secure_store};
 pub(crate) use speech::{speech, speech_event};
 
 use crate::protocol::requests::{Authenticate, Location, Share};

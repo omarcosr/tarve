@@ -98,6 +98,32 @@ pub struct Authenticate {
     pub reason: String,
 }
 
+/// `keepAlive(...)`: Android keeps the process running in the background (a foreground service
+/// with an ongoing notification) while `active`; answered by a `keepAlive` event.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub struct KeepAlive {
+    pub request_id: String,
+    pub active: bool,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub text: String,
+}
+
+/// `secureStore`: `seal` encrypts `data` (base64) with a key only this app and device can use,
+/// `open` decrypts what `seal` made, `delete` drops the key. Answered by a `secureStore` event.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SecureStore {
+    pub request_id: String,
+    pub action: String,
+    pub alias: String,
+    #[serde(default)]
+    pub data: Option<String>,
+}
+
 /// Android: a sign-in page in the system WebView; answered by a `webSignIn` event.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -9,7 +9,7 @@ use super::{LOG_WARN, log, with_env};
 use crate::device::{authenticate_event, location_event, position_json, speech_event};
 use crate::protocol::requests::{Authenticate, Location, Share, Speech};
 use jni::JNIEnv;
-use jni::objects::{JClass, JDoubleArray, JObject, JString, JValue};
+use jni::objects::{JByteArray, JClass, JDoubleArray, JObject, JString, JValue};
 use jni::sys::{jboolean, jdouble};
 
 fn optional_string(env: &mut JNIEnv, value: &JString) -> Option<String> {
@@ -198,6 +198,196 @@ pub(crate) fn authenticate(request: &Authenticate) -> Result<(), String> {
         log(LOG_WARN, &format!("tarve: authenticate: {error}"));
         format!("Could not show the biometric prompt: {error}")
     })
+}
+
+/// Starts, refreshes or (`active` false) ends `dev.tarve.TarveKeepAlive`, the foreground service
+/// that keeps the process running in the background. The app declares
+/// FOREGROUND_SERVICE_SPECIAL_USE (and POST_NOTIFICATIONS to show the notification).
+pub(crate) fn keep_alive(active: bool, title: &str, text: &str) -> Result<(), String> {
+    with_env(|env, activity| {
+        let class = load_class(env, activity, "dev.tarve.TarveKeepAlive")?;
+        let title = env.new_string(title)?;
+        let text = env.new_string(text)?;
+        env.call_static_method(
+            &class,
+            "update",
+            "(Landroid/content/Context;ZLjava/lang/String;Ljava/lang/String;)V",
+            &[
+                JValue::Object(activity),
+                JValue::Bool(active.into()),
+                JValue::Object(&title),
+                JValue::Object(&text),
+            ],
+        )?;
+        Ok(())
+    })
+    .map_err(|error| {
+        log(LOG_WARN, &format!("tarve: keepAlive: {error}"));
+        format!("Could not keep the app running: {error}")
+    })
+}
+
+const KEYSTORE: &str = "AndroidKeyStore";
+
+fn keystore<'local>(env: &mut JNIEnv<'local>) -> jni::errors::Result<JObject<'local>> {
+    let provider = env.new_string(KEYSTORE)?;
+    let store = env
+        .call_static_method(
+            "java/security/KeyStore",
+            "getInstance",
+            "(Ljava/lang/String;)Ljava/security/KeyStore;",
+            &[JValue::Object(&provider)],
+        )?
+        .l()?;
+    env.call_method(
+        &store,
+        "load",
+        "(Ljava/security/KeyStore$LoadStoreParameter;)V",
+        &[JValue::Object(&JObject::null())],
+    )?;
+    Ok(store)
+}
+
+/// The AES key `alias` in the Android Keystore, made on first use (`create`). It never leaves
+/// the secure hardware: the app can only ask it to encrypt and decrypt.
+fn keystore_key<'local>(
+    env: &mut JNIEnv<'local>,
+    alias: &str,
+    create: bool,
+) -> jni::errors::Result<Option<JObject<'local>>> {
+    let store = keystore(env)?;
+    let name = env.new_string(alias)?;
+    if env
+        .call_method(&store, "containsAlias", "(Ljava/lang/String;)Z", &[JValue::Object(&name)])?
+        .z()?
+    {
+        let key = env
+            .call_method(
+                &store,
+                "getKey",
+                "(Ljava/lang/String;[C)Ljava/security/Key;",
+                &[JValue::Object(&name), JValue::Object(&JObject::null())],
+            )?
+            .l()?;
+        return Ok(Some(key));
+    }
+    if !create {
+        return Ok(None);
+    }
+    let provider = env.new_string(KEYSTORE)?;
+    let algorithm = env.new_string("AES")?;
+    let generator = env
+        .call_static_method(
+            "javax/crypto/KeyGenerator",
+            "getInstance",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljavax/crypto/KeyGenerator;",
+            &[JValue::Object(&algorithm), JValue::Object(&provider)],
+        )?
+        .l()?;
+    // PURPOSE_ENCRYPT | PURPOSE_DECRYPT
+    let builder = env.new_object(
+        "android/security/keystore/KeyGenParameterSpec$Builder",
+        "(Ljava/lang/String;I)V",
+        &[JValue::Object(&name), JValue::Int(3)],
+    )?;
+    let gcm = env.new_string("GCM")?;
+    let modes = env.new_object_array(1, "java/lang/String", &gcm)?;
+    env.call_method(
+        &builder,
+        "setBlockModes",
+        "([Ljava/lang/String;)Landroid/security/keystore/KeyGenParameterSpec$Builder;",
+        &[JValue::Object(&modes)],
+    )?;
+    let none = env.new_string("NoPadding")?;
+    let paddings = env.new_object_array(1, "java/lang/String", &none)?;
+    env.call_method(
+        &builder,
+        "setEncryptionPaddings",
+        "([Ljava/lang/String;)Landroid/security/keystore/KeyGenParameterSpec$Builder;",
+        &[JValue::Object(&paddings)],
+    )?;
+    let spec = env
+        .call_method(&builder, "build", "()Landroid/security/keystore/KeyGenParameterSpec;", &[])?
+        .l()?;
+    env.call_method(
+        &generator,
+        "init",
+        "(Ljava/security/spec/AlgorithmParameterSpec;)V",
+        &[JValue::Object(&spec)],
+    )?;
+    Ok(Some(env.call_method(&generator, "generateKey", "()Ljavax/crypto/SecretKey;", &[])?.l()?))
+}
+
+fn gcm_cipher<'local>(env: &mut JNIEnv<'local>) -> jni::errors::Result<JObject<'local>> {
+    let name = env.new_string("AES/GCM/NoPadding")?;
+    env.call_static_method(
+        "javax/crypto/Cipher",
+        "getInstance",
+        "(Ljava/lang/String;)Ljavax/crypto/Cipher;",
+        &[JValue::Object(&name)],
+    )?
+    .l()
+}
+
+/// Encrypts `plain` with the Keystore key `alias`: the 12-byte nonce, then ciphertext and tag.
+pub(crate) fn seal(alias: &str, plain: &[u8]) -> Result<Vec<u8>, String> {
+    with_env(|env, _| {
+        let key = keystore_key(env, alias, true)?.expect("created");
+        let cipher = gcm_cipher(env)?;
+        env.call_method(&cipher, "init", "(ILjava/security/Key;)V", &[JValue::Int(1), JValue::Object(&key)])?;
+        let iv = JByteArray::from(env.call_method(&cipher, "getIV", "()[B", &[])?.l()?);
+        let input = env.byte_array_from_slice(plain)?;
+        let sealed = JByteArray::from(
+            env.call_method(&cipher, "doFinal", "([B)[B", &[JValue::Object(&input)])?.l()?,
+        );
+        let mut out = env.convert_byte_array(&iv)?;
+        out.extend(env.convert_byte_array(&sealed)?);
+        Ok(out)
+    })
+    .map_err(|error| format!("Could not seal the data: {error}"))
+}
+
+/// Decrypts what `seal` made with the same key.
+pub(crate) fn open(alias: &str, sealed: &[u8]) -> Result<Vec<u8>, String> {
+    if sealed.len() < 12 + 16 {
+        return Err("the sealed data is too short".into());
+    }
+    with_env(|env, _| {
+        let Some(key) = keystore_key(env, alias, false)? else {
+            return Ok(None);
+        };
+        let cipher = gcm_cipher(env)?;
+        let iv = env.byte_array_from_slice(&sealed[..12])?;
+        let spec = env.new_object(
+            "javax/crypto/spec/GCMParameterSpec",
+            "(I[B)V",
+            &[JValue::Int(128), JValue::Object(&iv)],
+        )?;
+        env.call_method(
+            &cipher,
+            "init",
+            "(ILjava/security/Key;Ljava/security/spec/AlgorithmParameterSpec;)V",
+            &[JValue::Int(2), JValue::Object(&key), JValue::Object(&spec)],
+        )?;
+        let input = env.byte_array_from_slice(&sealed[12..])?;
+        let plain = JByteArray::from(
+            env.call_method(&cipher, "doFinal", "([B)[B", &[JValue::Object(&input)])?.l()?,
+        );
+        Ok(Some(env.convert_byte_array(&plain)?))
+    })
+    .map_err(|error| format!("Could not open the sealed data: {error}"))?
+    .ok_or_else(|| "the key that sealed this data is gone (the app was reinstalled or its data cleared)".into())
+}
+
+/// Deletes the Keystore key `alias`: what it sealed can never be opened again.
+pub(crate) fn forget(alias: &str) -> Result<(), String> {
+    with_env(|env, _| {
+        let store = keystore(env)?;
+        let name = env.new_string(alias)?;
+        env.call_method(&store, "deleteEntry", "(Ljava/lang/String;)V", &[JValue::Object(&name)])?;
+        Ok(())
+    })
+    .map_err(|error| format!("Could not delete the key: {error}"))
 }
 
 #[allow(clippy::too_many_arguments)]
