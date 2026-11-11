@@ -6206,16 +6206,34 @@ impl Tree {
         if node.kind == "surface" && rect.width() > 0.0 && rect.height() > 0.0 {
             // Frames fill the box: the producer renders at its size in device pixels.
             if let Some((frame, flipped)) = self.surface_frames.get(&node.id) {
-                let (sx, sy) = (
+                let (mut sx, mut sy) = (
                     rect.width() / f64::from(frame.width.max(1)),
                     rect.height() / f64::from(frame.height.max(1)),
                 );
+                // While the box is being resized (a soft keyboard opening or closing) the last
+                // picture is the old size until the producer renders the new one. Stretched, it
+                // jumped; it is drawn at its own pixel scale instead, from the top-left, cut to the
+                // box, and the next frame fills the box again.
+                let (fits_x, fits_y) = (
+                    (f64::from(frame.width) - rect.width() * scale).abs() <= 2.0,
+                    (f64::from(frame.height) - rect.height() * scale).abs() <= 2.0,
+                );
+                let resizing = !(fits_x && fits_y) && scale > 0.0;
+                if resizing {
+                    let uniform = if fits_x { sx } else if fits_y { sy } else { 1.0 / scale };
+                    (sx, sy) = (uniform, uniform);
+                    let clip_rect = BoxRect::new(rect.x0, rect.y0, rect.x1, rect.y1);
+                    target.push_clip(Fill::NonZero, transform, &clip_rect);
+                }
                 let place = if *flipped {
                     Affine::translate((rect.x0, rect.y1)) * Affine::scale_non_uniform(sx, -sy)
                 } else {
                     Affine::translate((rect.x0, rect.y0)) * Affine::scale_non_uniform(sx, sy)
                 };
                 target.draw_image(&format!("surface:{}", node.id), frame, transform * place);
+                if resizing {
+                    target.pop_layer();
+                }
             }
             target.draw_surface(
                 &node.id,
