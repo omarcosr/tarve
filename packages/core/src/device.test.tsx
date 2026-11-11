@@ -4,7 +4,7 @@ import type { NativeCommand, NativeEvent, PermissionState, SceneDocument } from 
 import { createApp } from "./app";
 import type { NativeBridge } from "./bridge";
 import { Window } from "./components";
-import { authenticate, getCurrentPosition, keepAlive, moveToBackground, secureStore, share, watchPosition } from "./device";
+import { authenticate, clipboard, getCurrentPosition, keepAlive, moveToBackground, secureStore, share, watchPosition } from "./device";
 import type { OpenEvent } from "./app/open-requests";
 
 /** Answers `permissions` with `permission`; everything else waits for the test. */
@@ -146,6 +146,32 @@ describe("device services", () => {
     bridge.emit({ type: "secureStore", requestId: command.requestId, supported: false });
     expect(await sealed).toMatchObject({ supported: false });
     expect(() => app.secureStore.has("bad alias!")).toThrow(TypeError);
+    app.close();
+  });
+
+  test("clipboard reads and writes text, and rejects when the system clipboard is out of reach", async () => {
+    const bridge = new DeviceBridge();
+    const app = createApp(() => <Window />, { bridge });
+    await app.ready;
+    const written = clipboard.writeText("ls -la");
+    await tick();
+    const write = bridge.last("clipboard");
+    expect([write.action, write.text]).toEqual(["write", "ls -la"]);
+    bridge.emit({ type: "clipboard", requestId: write.requestId, supported: true });
+    await written;
+    const read = app.clipboard.readText();
+    await tick();
+    bridge.emit({ type: "clipboard", requestId: bridge.last("clipboard").requestId, supported: true, text: "ls -la" });
+    expect(await read).toBe("ls -la");
+    const empty = app.clipboard.readText();
+    await tick();
+    bridge.emit({ type: "clipboard", requestId: bridge.last("clipboard").requestId, supported: true });
+    expect(await empty).toBeUndefined();
+    const failed = app.clipboard.readText();
+    await tick();
+    bridge.emit({ type: "clipboard", requestId: bridge.last("clipboard").requestId, supported: false, error: "no display" });
+    await expect(failed).rejects.toThrow("no display");
+    await expect(app.clipboard.writeText(1 as never)).rejects.toThrow(TypeError);
     app.close();
   });
 

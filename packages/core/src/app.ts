@@ -320,6 +320,13 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     reportError,
     closedError: () => (ended ? terminalError ?? new Error("Native window is closed") : undefined),
   });
+  /** The system clipboard's text (native/src/runtime/clipboard.rs); rejects when it is unreachable. */
+  async function clipboardRequest(action: "read" | "write", text?: string): Promise<string | undefined> {
+    const event = await requests.request({ type: "clipboard", requestId: crypto.randomUUID(), action, ...(text !== undefined ? { text } : {}) });
+    if (event.type !== "clipboard") throw reportError(new Error("Unexpected native clipboard response"), { source: "request", event: "clipboard" });
+    if (!event.supported || event.error) throw new Error(`clipboard ${action}: ${event.error ?? "not supported"}`);
+    return event.text;
+  }
   device = createDeviceRequests({
     request: (command, timeoutMs) => requests.request(command, timeoutMs),
     permissions: (action, names) => requests.permissions(action, names),
@@ -974,6 +981,13 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     authenticate: authOptions => device.authenticate(authOptions),
     recognizeSpeech: speechOptions => device.recognizeSpeech(speechOptions),
     keepAlive: keepAliveOptions => device.keepAlive(keepAliveOptions),
+    clipboard: {
+      readText: () => clipboardRequest("read"),
+      async writeText(text: string): Promise<void> {
+        if (typeof text !== "string") throw new TypeError("clipboard.writeText takes a string");
+        await clipboardRequest("write", text);
+      },
+    },
     onBack(handler, backOptions = {}) {
       if (typeof handler !== "function") throw new TypeError("onBack needs a function");
       const priority = backOptions.priority ?? 0;

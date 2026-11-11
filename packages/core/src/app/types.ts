@@ -27,6 +27,11 @@ export type AppErrorSource =
   /** An error nothing caught: process "uncaughtException" (event) or "unhandledRejection". */
   | "process";
 
+export interface AppClipboard {
+  readText(): Promise<string | undefined>;
+  writeText(text: string): Promise<void>;
+}
+
 export interface AppErrorEvent {
   error: Error;
   source: AppErrorSource;
@@ -299,6 +304,12 @@ export interface AppHandle {
   keepAlive(options?: KeepAliveOptions): KeepAlive;
   /** Secrets sealed with a key only this app on this device can use: Android Keystore, Windows DPAPI. */
   readonly secureStore: SecureStore;
+  /**
+   * The system clipboard's text: the activity's ClipboardManager on Android, the OS clipboard on
+   * desktops. `readText` resolves `undefined` when it holds no text; both reject when the clipboard
+   * cannot be reached (a Linux session without a display server).
+   */
+  readonly clipboard: AppClipboard;
   /** Sends the app to the background (Android: the task goes behind the launcher), else minimizes the window. */
   moveToBackground(): void;
   /**

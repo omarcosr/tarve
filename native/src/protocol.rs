@@ -1040,6 +1040,7 @@ pub enum Command {
     Authenticate(requests::Authenticate),
     KeepAlive(requests::KeepAlive),
     SecureStore(requests::SecureStore),
+    Clipboard(requests::Clipboard),
     Input {
         action: String,
         x: Option<f64>,

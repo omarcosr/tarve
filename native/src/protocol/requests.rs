@@ -124,6 +124,17 @@ pub struct SecureStore {
     pub data: Option<String>,
 }
 
+/// `clipboard.readText()` / `writeText(text)`: the system clipboard's text (arboard on desktops,
+/// the activity's ClipboardManager on Android); answered by a `clipboard` event.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Clipboard {
+    pub request_id: String,
+    pub action: String,
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
 /// Android: a sign-in page in the system WebView; answered by a `webSignIn` event.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -13,6 +13,9 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 - `autoFocus` on `Input`, `TextArea` and `Pressable` (HTML `autofocus`): the control is focused once when it first appears, and again only after it left the tree and came back.
 - `keepAlive({ title, text })` keeps an Android app running in the background with an ongoing notification until `release()`; `secureStore.seal/open/has/delete` keeps secrets only this app on this device can open (Android Keystore, Windows DPAPI); `moveToBackground()` sends the app behind the launcher on Android and minimizes elsewhere. Also on `AppHandle`.
 
+- `app.onBack(handler, { priority })`: back navigation without a hand-written chain. Android's Back first closes the topmost open Modal, Sheet, Popover or CommandPalette, then runs listeners (highest priority, then the latest) until one returns `true`, and only then reaches `onCloseRequest`; on desktops Escape with no open overlay runs the same listeners. Previously Back closed an Android app even with a dialog open unless the Window had `onCloseRequest`.
+- `clipboard.readText()` / `clipboard.writeText(text)` (also `app.clipboard`): the system clipboard's text on Windows, macOS, Linux and Android (the activity's ClipboardManager); `readText` resolves `undefined` when it holds no text and both reject when the clipboard cannot be reached.
+
 ### Fixed
 
 - On Android, `ctx.loadLibrary` no longer gets Tarve's own runtime symbols whatever library it names; `tjs:ffi`'s `dlopen` opens real libraries instead of throwing.

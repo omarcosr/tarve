@@ -13,6 +13,7 @@
  * "comprar pão amanhã" (partials word by word) and answers once stopped. See native/src/device/fake.rs.
  */
 import type { AppHandle } from "./app";
+import type { AppClipboard } from "./app/types";
 import type { KeepAlive, KeepAliveOptions, SecureStore, AuthenticateOptions, AuthenticateResult, PositionOptions, PositionResult, ShareOptions, ShareResult, SpeechOptions, SpeechSession } from "./app/device";
 
 export type { KeepAlive, KeepAliveOptions, KeepAliveResult, SecureStore, SecureStoreResult, SecureStoreOpenResult, AuthenticateOptions, AuthenticateResult, AuthErrorCode, GeoErrorCode, GeoPosition, PositionOptions, PositionResult, ShareOptions, ShareResult, SpeechErrorCode, SpeechOptions, SpeechResult, SpeechSession } from "./app/device";
@@ -59,6 +60,12 @@ export function keepAlive(options?: KeepAliveOptions): KeepAlive {
 export function moveToBackground(): void {
   activeApp().moveToBackground();
 }
+
+/** The system clipboard's text, through the running app (`app.clipboard`). */
+export const clipboard: AppClipboard = {
+  readText: () => activeApp().clipboard.readText(),
+  writeText: text => activeApp().clipboard.writeText(text),
+};
 
 /** Secrets only this app on this device can open: Android Keystore, Windows DPAPI. */
 export const secureStore: SecureStore = {

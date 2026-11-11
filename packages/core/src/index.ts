@@ -44,7 +44,8 @@ export { checkForUpdate, downloadUpdate, installUpdate, canInstallUpdate, cleanu
 export type { Update, UpdateArtifact, UpdatePack, UpdateManifest, SignedUpdateManifest, CheckForUpdateOptions, DownloadUpdateOptions, InstallUpdateOptions } from "./updates";
 export type { AppErrorEvent, AppErrorSource, AppHandle, AppJsStats, AppOptions, AppStats, MenuBarItem, MenuBarOptions, NotifyOptions, NotifyResult, NotificationPlace, OpenEvent, OpenFilesListener, OpenUrlListener, OpenWindowOptions, SystemMediaSession, TrayAvailability, TrayHandle, TrayMenuItem, TrayOptions } from "./app";
 export type { WebSignInOptions } from "./app/requests";
-export { share, getCurrentPosition, watchPosition, authenticate, recognizeSpeech, keepAlive, moveToBackground, secureStore } from "./device";
+export { share, getCurrentPosition, watchPosition, authenticate, recognizeSpeech, keepAlive, moveToBackground, secureStore, clipboard } from "./device";
+export type { AppClipboard } from "./app/types";
 export type { KeepAlive, KeepAliveOptions, KeepAliveResult, SecureStore, SecureStoreResult, SecureStoreOpenResult, AuthenticateOptions, AuthenticateResult, AuthErrorCode, GeoErrorCode, GeoPosition, PositionOptions, PositionResult, ShareOptions, ShareResult, SpeechErrorCode, SpeechOptions, SpeechResult, SpeechSession } from "./device";
 export { definePlugin, isTarvePlugin, loadPlugins, PLUGIN_API_VERSION, PLUGIN_TARGETS } from "./plugins";
 export type { NativeLibrarySource, PluginClient, PluginCommand, PluginCommands, PluginContext, PluginDefinition, PluginRequest, PluginRequestOptions, TarvePlugin } from "./plugins";

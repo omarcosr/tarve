@@ -3901,6 +3901,7 @@ impl ApplicationHandler<Command> for App {
             Command::Authenticate(request) => self.authenticate(request),
             Command::KeepAlive(request) => self.events.push(crate::device::keep_alive(&request)),
             Command::SecureStore(request) => self.events.push(crate::device::secure_store(&request)),
+            Command::Clipboard(request) => self.events.push(clipboard::request(&request)),
             Command::FileDialog(crate::protocol::requests::FileDialog {
                 mode,
                 options,
