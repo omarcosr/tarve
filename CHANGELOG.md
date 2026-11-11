@@ -18,6 +18,8 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 
 - Plugin events from native code: a plugin's library calls `tarve_plugin_emit(channel, data, len)` from any thread (its address from `ctx.emitAddress()`), and `ctx.events(channel).on(bytes => …)` receives each payload in order on the JS thread, woken like any native event: no polling. Bun, Node.js, txiki.js and Android's QuickJS runtime (not `--runtime bun` on Android). `examples/plugin-hello` shows it (`ticks`).
 
+- `store(value)`: state that renders the app again when it changes, with no `app.update()` calls. Nested plain objects, arrays, Maps and Sets are tracked; changes in one task render once; `toRaw(state)` is the plain data underneath.
+
 ### Fixed
 
 - txiki.js: plugin symbols declared with `i64`, `u64` or `ptr` arguments take BigInt and raw addresses (tjs:ffi accepts neither; values up to 2^53).

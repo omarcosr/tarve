@@ -18,6 +18,7 @@ import { editShadowNode, nativeShadow, reconciliationCommand } from "./app/shado
 import { createTrayController, type TrayHandle, type TrayOptions } from "./app/tray";
 import { createMenuBarController, withMenuBar, type MenuBarItem, type MenuBarOptions } from "./app/menu-bar";
 import { onToastsChange, withToasts } from "./toast";
+import { onStoreChange } from "./store";
 import { AppMenuBar, menuBarState } from "./menu-bar";
 import { withRenderScope } from "./render-scope";
 export type { MenuBarItem, MenuBarOptions } from "./app/menu-bar";
@@ -231,6 +232,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   void closed.then(() => { device?.dispose(); notifications.dispose(); });
   // toast(): every app re-renders its Toaster when the queue changes.
   if (!openedWindow) void closed.then(onToastsChange(() => { if (started && !ended) update(); }));
+  // store(): a change anywhere renders every open window again (update() batches the renders).
+  void closed.then(onStoreChange(() => { if (started && !ended) update(); }));
   // With onError, uncaught errors are the app's (Node and Bun would otherwise exit, closing the
   // window); a window opened with openWindow leaves them to its opener.
   if (options.onError && !openedWindow) {
