@@ -13,9 +13,9 @@
  * "comprar pão amanhã" (partials word by word) and answers once stopped. See native/src/device/fake.rs.
  */
 import type { AppHandle } from "./app";
-import type { AuthenticateOptions, AuthenticateResult, PositionOptions, PositionResult, ShareOptions, ShareResult, SpeechOptions, SpeechSession } from "./app/device";
+import type { KeepAlive, KeepAliveOptions, SecureStore, AuthenticateOptions, AuthenticateResult, PositionOptions, PositionResult, ShareOptions, ShareResult, SpeechOptions, SpeechSession } from "./app/device";
 
-export type { AuthenticateOptions, AuthenticateResult, AuthErrorCode, GeoErrorCode, GeoPosition, PositionOptions, PositionResult, ShareOptions, ShareResult, SpeechErrorCode, SpeechOptions, SpeechResult, SpeechSession } from "./app/device";
+export type { KeepAlive, KeepAliveOptions, KeepAliveResult, SecureStore, SecureStoreResult, SecureStoreOpenResult, AuthenticateOptions, AuthenticateResult, AuthErrorCode, GeoErrorCode, GeoPosition, PositionOptions, PositionResult, ShareOptions, ShareResult, SpeechErrorCode, SpeechOptions, SpeechResult, SpeechSession } from "./app/device";
 
 const ACTIVE_APP_KEY = Symbol.for("tarve.activeApp");
 
@@ -49,3 +49,21 @@ export function recognizeSpeech(options?: SpeechOptions): SpeechSession {
 export async function authenticate(options: AuthenticateOptions): Promise<AuthenticateResult> {
   return activeApp().authenticate(options);
 }
+
+/** Keeps the app running in the background while held (Android: a foreground service and its notification). */
+export function keepAlive(options?: KeepAliveOptions): KeepAlive {
+  return activeApp().keepAlive(options);
+}
+
+/** Sends the app to the background (Android), else minimizes its window. */
+export function moveToBackground(): void {
+  activeApp().moveToBackground();
+}
+
+/** Secrets only this app on this device can open: Android Keystore, Windows DPAPI. */
+export const secureStore: SecureStore = {
+  seal: (alias, data) => activeApp().secureStore.seal(alias, data),
+  open: alias => activeApp().secureStore.open(alias),
+  has: alias => activeApp().secureStore.has(alias),
+  delete: alias => activeApp().secureStore.delete(alias),
+};

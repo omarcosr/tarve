@@ -4,7 +4,7 @@ import type { NativeCommand, NativeEvent, PermissionState, SceneDocument } from 
 import { createApp } from "./app";
 import type { NativeBridge } from "./bridge";
 import { Window } from "./components";
-import { authenticate, getCurrentPosition, share, watchPosition } from "./device";
+import { authenticate, getCurrentPosition, keepAlive, moveToBackground, secureStore, share, watchPosition } from "./device";
 import type { OpenEvent } from "./app/open-requests";
 
 /** Answers `permissions` with `permission`; everything else waits for the test. */
@@ -124,6 +124,28 @@ describe("device services", () => {
     bridge.emit({ type: "authenticate", requestId: bridge.last("authenticate").requestId, supported: true, success: false, code: "canceled", error: "Canceled" });
     expect(await canceled).toEqual({ supported: true, success: false, code: "canceled", error: "Canceled" });
     await expect(app.authenticate({ reason: " " })).rejects.toThrow(TypeError);
+    app.close();
+  });
+
+  test("keepAlive, moveToBackground and secureStore reach the runtime through the running app", async () => {
+    const bridge = new DeviceBridge();
+    const app = createApp(() => <Window />, { bridge });
+    await app.ready;
+    const hold = keepAlive({ title: "Termio", text: "2 sessions" });
+    await tick();
+    const started = bridge.last("keepAlive");
+    expect([started.active, started.title, started.text]).toEqual([true, "Termio", "2 sessions"]);
+    bridge.emit({ type: "keepAlive", requestId: started.requestId, supported: true });
+    expect(await hold.result).toEqual({ supported: true });
+    moveToBackground();
+    expect(bridge.commands.at(-1)).toMatchObject({ type: "window", action: "minimize" });
+    const sealed = secureStore.seal("vault", "secret");
+    await tick();
+    const command = bridge.last("secureStore");
+    expect([command.action, command.alias, command.data]).toEqual(["seal", "vault", Buffer.from("secret").toString("base64")]);
+    bridge.emit({ type: "secureStore", requestId: command.requestId, supported: false });
+    expect(await sealed).toMatchObject({ supported: false });
+    expect(() => app.secureStore.has("bad alias!")).toThrow(TypeError);
     app.close();
   });
 

@@ -938,6 +938,11 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         throw error;
       }
       return event.snapshot;
+    keepAlive: keepAliveOptions => device.keepAlive(keepAliveOptions),
+    get secureStore() { return device.secureStore; },
+    moveToBackground(): void {
+      if (!ended) sendPublic({ type: "window", action: "minimize" });
+    },
     },
     async stats(statsOptions: { reset?: boolean } = {}): Promise<AppStats> {
       if (queued) await flushQueuedUpdate();

@@ -11,7 +11,7 @@ import type { ComponentAdapter } from "../component-adapter";
 import { type DevOptions } from "../devtools/inspector";
 import { type TarvePlugin } from "../plugins";
 import { type OpenFilesListener, type OpenUrlListener } from "./open-requests";
-import { type AuthenticateOptions, type AuthenticateResult, type PositionOptions, type PositionResult, type ShareOptions, type ShareResult, type SpeechOptions, type SpeechSession } from "./device";
+import { type KeepAlive, type KeepAliveOptions, type SecureStore, type AuthenticateOptions, type AuthenticateResult, type PositionOptions, type PositionResult, type ShareOptions, type ShareResult, type SpeechOptions, type SpeechSession } from "./device";
 import type { FileTypeAssociation } from "../associations";
 
 export type AppErrorSource =
@@ -291,6 +291,16 @@ export interface AppHandle {
   recognizeSpeech(options?: SpeechOptions): SpeechSession;
   /** A biometric (or device PIN) check: Android BiometricPrompt, Windows Hello. `{ supported: false }` on Linux. */
   authenticate(options: AuthenticateOptions): Promise<AuthenticateResult>;
+  /**
+   * Keeps the app running in the background while held: on Android a foreground service with an
+   * ongoing notification (the latest `update`'s title and text) until the last `release()`.
+   * `{ supported: false }` on desktops, which never suspend a running app.
+   */
+  keepAlive(options?: KeepAliveOptions): KeepAlive;
+  /** Secrets sealed with a key only this app on this device can use: Android Keystore, Windows DPAPI. */
+  readonly secureStore: SecureStore;
+  /** Sends the app to the background (Android: the task goes behind the launcher), else minimizes the window. */
+  moveToBackground(): void;
   /**
    * Calls a plugin command (`"<namespace>.<command>"`, see `definePlugin`); rejects when no
    * installed plugin registered it. `plugin.client(app)` gives typed calls.
