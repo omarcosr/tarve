@@ -183,7 +183,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   /** Android: the system Back arrives as a close request (native/src/runtime/android_input.rs). */
   const ANDROID_BACK = process.platform === "android";
   /** `app.onBack` listeners; the highest priority, then the latest, runs first. */
-  const backHandlers: { handler: () => boolean | void; priority: number; order: number }[] = [];
+  const backHandlers: { handler: () => boolean | void; priority: number; order: number; escape: boolean }[] = [];
   let backOrder = 0;
   /** The topmost open overlay's close (Modal, Sheet, Popover, CommandPalette set onEscape). */
   function topEscape(tree: CompiledTree): [string, () => void] | undefined {
@@ -191,8 +191,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     return item ? [item[0], item[1].onEscape!] : undefined;
   }
   /** Runs onBack listeners until one returns true. */
-  function runBackHandlers(): boolean {
-    const ordered = [...backHandlers].sort((a, b) => b.priority - a.priority || b.order - a.order);
+  function runBackHandlers(fromEscape = false): boolean {
+    const ordered = backHandlers.filter(entry => !fromEscape || entry.escape).sort((a, b) => b.priority - a.priority || b.order - a.order);
     for (const entry of ordered) {
       let taken: boolean;
       try { taken = entry.handler() === true; } catch (error) { reportError(error, { source: "event-handler", event: "back" }); taken = true; }
@@ -652,7 +652,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       const handler = item?.[1].onEscape;
       if (handler) {
         if (invokeHandler("escape", item?.[0], handler)) update();
-      } else runBackHandlers();
+      } else runBackHandlers(true);
     }
 
     // Android Back: the topmost overlay closes, else an onBack listener takes it, else the window's close request.
@@ -996,7 +996,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (typeof handler !== "function") throw new TypeError("onBack needs a function");
       const priority = backOptions.priority ?? 0;
       if (!Number.isFinite(priority)) throw new TypeError("onBack priority must be a finite number");
-      const entry = { handler, priority, order: backOrder++ };
+      const entry = { handler, priority, order: backOrder++, escape: backOptions.escape === true };
       backHandlers.push(entry);
       if (backHandlers.length === 1) update();
       return () => {

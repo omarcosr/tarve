@@ -50,16 +50,19 @@ describe("app.onBack", () => {
     expect(bridge.types()).toContain("close");
   });
 
-  test("desktop: Escape with no overlay runs onBack; the close button never does", async () => {
+  test("desktop: Escape runs only escape: true listeners; the close button never runs any", async () => {
     const bridge = new FakeBridge();
     const app = createApp(() => <Window onCloseRequest={event => event.preventDefault()}><Text>x</Text></Window>, { bridge });
     await app.ready;
     let backs = 0;
-    app.onBack(() => { backs++; return true; });
+    let plain = 0;
+    app.onBack(() => { plain++; return true; });
+    app.onBack(() => { backs++; return true; }, { escape: true });
     bridge.emit({ type: "escape" });
     bridge.emit({ type: "closeRequest" });
     await tick();
     expect(backs).toBe(1);
+    expect(plain).toBe(0);
     expect(() => app.onBack(1 as never)).toThrow(TypeError);
     app.close();
   });
