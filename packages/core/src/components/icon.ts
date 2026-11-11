@@ -1,6 +1,7 @@
 import { type BaseProps, type VNode } from "../jsx-runtime";
 import { theme } from "../theme";
 import { Svg, type SvgNode } from "./svg";
+import { markPure } from "../memo";
 
 export type IconName =
   | "check" | "x" | "plus" | "minus"
@@ -53,5 +54,8 @@ export function Icon({ name, iconNode, size = 16, color = theme.colors.foregroun
   if (!nodes) throw new Error("Icon requires either name or iconNode.");
   return Svg({ ...props, size, color, strokeWidth, nodes, viewBox: [0, 0, 24, 24], fill: "none", stroke: "currentColor", style });
 }
+
+// Its output is its props and the constant icon set (see markPure).
+markPure(Icon);
 
 export { icons as iconNodes };

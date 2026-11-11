@@ -5,6 +5,7 @@ import { buttonVariants, theme, type ButtonVariant } from "../theme";
 import { Icon } from "./icon";
 import { Text } from "./text";
 import { glassControl, resolveGlass, type GlassProp } from "./glass";
+import { markPure } from "../memo";
 
 export interface ButtonProps extends BaseProps {
   variant?: ButtonVariant;
@@ -195,3 +196,6 @@ export function Button({ variant = "default", size = "default", style, disabled,
     },
   });
 }
+// Its output is its props and the theme's constant tokens (see markPure): an unchanged list
+// item holding a button is reused instead of compiled again.
+markPure(Button);

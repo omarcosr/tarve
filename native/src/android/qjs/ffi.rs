@@ -166,7 +166,7 @@ fn bind<'js>(
                 Returned::Signed(value) if value.unsigned_abs() <= MAX_SAFE => {
                     Value::new_number(ctx, value as f64)
                 }
-                Returned::Signed(value) => Value::new_big_int(ctx, value),
+                Returned::Signed(value) => Value::new_big_int(ctx, value)?,
                 Returned::Unsigned(value) if value <= MAX_SAFE => {
                     Value::new_number(ctx, value as f64)
                 }
@@ -212,10 +212,10 @@ fn integer(value: &Value) -> Option<i64> {
 fn buffer_address(value: &Value) -> Option<u64> {
     let object = value.as_object()?;
     if let Some(buffer) = ArrayBuffer::from_object(object.clone()) {
-        return Some(buffer.as_raw()?.ptr.as_ptr() as u64);
+        return Some(buffer.as_raw()?.cast::<u8>().as_ptr() as u64);
     }
     let buffer: ArrayBuffer = object.get("buffer").ok()?;
     let offset: f64 = object.get("byteOffset").ok()?;
     let raw = buffer.as_raw()?;
-    (offset as usize <= raw.len).then(|| raw.ptr.as_ptr() as u64 + offset as u64)
+    (offset as usize <= raw.len()).then(|| raw.cast::<u8>().as_ptr() as u64 + offset as u64)
 }

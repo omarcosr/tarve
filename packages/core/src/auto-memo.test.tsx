@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Text, View, Window } from "./index";
+import { Button, Text, View, Window } from "./index";
 import { compileTree } from "./reconciler";
 
 describe("automatic memo of list items", () => {
@@ -42,5 +42,18 @@ describe("automatic memo of list items", () => {
     const next = compileTree(view("b"), false, "auto", [], scope);
     for (const handlers of next.handlers.values()) handlers.onClick?.();
     expect(calls).toEqual(["b", "b"]);
+  });
+
+  test("an unchanged item with a button is reused, and a changed label compiles again", () => {
+    const scope = {};
+    const onClick = () => {};
+    const view = (label: string) => <Window title="b"><View>{[0, 1].map(i => <View key={i}><Button size="sm" onClick={onClick}>{i === 0 ? label : "Open"}</Button></View>)}</View></Window>;
+    compileTree(view("a"), false, "auto", [], scope);
+    const first = compileTree(view("a"), false, "auto", [], scope);
+    const next = compileTree(view("b"), false, "auto", [], scope);
+    const id = (i: number) => `root/children/children/k:${i}`;
+    expect(next.nodes.get(id(1))).toBe(first.nodes.get(id(1)));
+    expect(next.nodes.get(id(0))).not.toBe(first.nodes.get(id(0)));
+    expect([...next.nodes.values()].some(node => node.kind === "button" && node.text === "b")).toBe(true);
   });
 });

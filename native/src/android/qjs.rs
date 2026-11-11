@@ -21,6 +21,8 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 use winit::platform::android::activity::AndroidApp;
 
+#[cfg(feature = "mimalloc")]
+mod alloc;
 mod bytecode;
 mod dev;
 mod fetch;
@@ -55,6 +57,9 @@ pub(super) fn run(app: &AndroidApp) -> Result<(), String> {
     if let Some(directory) = &dev {
         dev::add_dev_assets(directory, &mut assets);
     }
+    #[cfg(feature = "mimalloc")]
+    let runtime = alloc::runtime().map_err(|e| e.to_string())?;
+    #[cfg(not(feature = "mimalloc"))]
     let runtime = Runtime::new().map_err(|e| e.to_string())?;
     // The app thread has a 32 MB stack (android_main).
     runtime.set_max_stack_size(24 << 20);
@@ -535,15 +540,15 @@ fn install<'js>(
 
     // Plugins' native libraries (ctx.loadLibrary), and the function they report events through.
     ffi::install(ctx, &host)?;
+    host.set(
+        "pluginEmitAddress",
+        Function::new(ctx.clone(), || crate::bridge::entry_points::tarve_plugin_emit_address() as f64)?,
+    )?;
 
     let files = Object::new(ctx.clone())?;
     for (name, path) in assets {
         files.set(name.as_str(), path.as_str())?;
     }
-    host.set(
-        "pluginEmitAddress",
-        Function::new(ctx.clone(), || crate::bridge::entry_points::tarve_plugin_emit_address() as f64)?,
-    )?;
     let globals = ctx.globals();
     globals.set("__tarveAssets", files)?;
     globals.set("__tarveHost", host)?;

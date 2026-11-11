@@ -9,6 +9,9 @@ pub(super) fn bytecode_cache(files_dir: &Path, bundle: &[u8]) -> Option<PathBuf>
     let mut hasher = std::hash::DefaultHasher::new();
     bundle.hash(&mut hasher);
     env!("CARGO_PKG_VERSION").hash(&mut hasher);
+    // The engine's own version too: QuickJS's bytecode format changes between releases.
+    // SAFETY: JS_GetVersion returns a static NUL-terminated string.
+    unsafe { std::ffi::CStr::from_ptr(rquickjs::qjs::JS_GetVersion()) }.hash(&mut hasher);
     let directory = files_dir.parent()?.join("cache");
     Some(directory.join(format!("tarve-app-{:016x}.qbc", hasher.finish())))
 }
@@ -152,5 +155,7 @@ pub(super) fn io_error(
 }
 
 pub(super) fn bytes_of<'a>(array: &'a TypedArray<'_, u8>) -> &'a [u8] {
-    array.as_bytes().unwrap_or_default()
+    // SAFETY: the bytes are read while `array` is borrowed and no JS runs, so the buffer can
+    // neither be detached nor resized under the slice.
+    unsafe { array.as_bytes() }.unwrap_or_default()
 }

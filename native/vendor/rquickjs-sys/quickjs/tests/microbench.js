@@ -411,21 +411,21 @@ function global_read(n)
     return n * 4;
 }
 
-var global_write =
-    (1, eval)(`(function global_write(n)
-           {
-               var j;
-               for(j = 0; j < n; j++) {
-                   global_var0 = j;
-                   global_var0 = j;
-                   global_var0 = j;
-                   global_var0 = j;
-               }
-               return n * 4;
-           })`);
+function global_write(n)
+{
+    var j;
+    for(j = 0; j < n; j++) {
+        global_var0 = j;
+        global_var0 = j;
+        global_var0 = j;
+        global_var0 = j;
+    }
+    return n * 4;
+}
 
 function global_write_strict(n)
 {
+    "use strict";
     var j;
     for(j = 0; j < n; j++) {
         global_var0 = j;
@@ -453,22 +453,22 @@ function local_destruct(n)
 var global_v1, global_v2, global_v3, global_v4;
 var global_a, global_b, global_c, global_d;
 
-var global_destruct =
-    (1, eval)(`(function global_destruct(n)
-           {
-               var j, v1, v2, v3, v4;
-               var array = [ 1, 2, 3, 4, 5 ];
-               var o = { a:1, b:2, c:3, d:4 };
-               var a, b, c, d;
-               for(j = 0; j < n; j++) {
-                   [ global_v1, global_v2,, global_v3, ...global_v4] = array;
-                   ({ a: global_a, b: global_b, c: global_c, d: global_d } = o);
-               }
-               return n * 8;
-          })`);
+function global_destruct(n)
+{
+    var j, v1, v2, v3, v4;
+    var array = [ 1, 2, 3, 4, 5 ];
+    var o = { a:1, b:2, c:3, d:4 };
+    var a, b, c, d;
+    for(j = 0; j < n; j++) {
+        [ global_v1, global_v2,, global_v3, ...global_v4] = array;
+        ({ a: global_a, b: global_b, c: global_c, d: global_d } = o);
+    }
+    return n * 8;
+}
 
 function global_destruct_strict(n)
 {
+    "use strict";
     var j, v1, v2, v3, v4;
     var array = [ 1, 2, 3, 4, 5 ];
     var o = { a:1, b:2, c:3, d:4 };
@@ -830,6 +830,37 @@ function string_slice3(n)
     return n * 1000;
 }
 
+function string_concat(n, r)
+{
+    var i, f, xs;
+    // generate a function on the fly; splatting the arguments with
+    // "x".concat(...xs) spends too much time inside the splat itself
+    xs = "x".repeat(r).split("").map(_ => "'x'");
+    f = new Function("", `'x'.concat(${ xs.join(",") })`);
+    for (i = 0; i < n; i++)
+        f();
+    return n;
+}
+
+function string_concat0(n) {
+    return string_concat(n, 0);
+}
+
+function string_concat1(n)
+{
+    return string_concat(n, 1);
+}
+
+function string_concat2(n)
+{
+    return string_concat(n, 32);
+}
+
+function string_concat3(n)
+{
+    return string_concat(n, 256);
+}
+
 /* sort bench */
 
 function sort_bench(text) {
@@ -1147,6 +1178,10 @@ function main(argc, argv, g)
         string_build2,
         //string_build3,
         //string_build4,
+        string_concat0,
+        string_concat1,
+        string_concat2,
+        string_concat3,
         string_slice1,
         string_slice2,
         string_slice3,

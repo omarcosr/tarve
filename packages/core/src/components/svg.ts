@@ -2,6 +2,8 @@ import type { SvgAttributes, SvgNode } from "../protocol";
 import { Fragment, _nativeJsx, jsx, type BaseProps, type Child, type VNode } from "../jsx-runtime";
 import { theme } from "../theme";
 
+import { markPure } from "../memo";
+
 const SVG_ELEMENT = "__tarve_svg_element";
 const SVG_INTRINSIC_ELEMENTS = new Set(["path", "circle", "ellipse", "g", "line", "polygon", "polyline", "rect"]);
 
@@ -161,5 +163,8 @@ export function Svg({
     svg: serializeSvg(normalizedViewBox, fill, stroke, strokeWidth, strokeLinecap, strokeLinejoin, elements),
   });
 }
+
+// Its output is its props (see markPure).
+markPure(Svg);
 
 export type { SvgAttributes, SvgNode };

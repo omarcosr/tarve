@@ -244,7 +244,7 @@ pub(crate) fn process_video_memory() -> Option<f64> {
     None
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub(crate) fn process_memory() -> Option<ProcessMemory> {
     let status = std::fs::read_to_string("/proc/self/status").ok()?;
     let field = |name: &str| -> Option<f64> {
@@ -263,7 +263,7 @@ pub(crate) fn process_memory() -> Option<ProcessMemory> {
     })
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+#[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "android")))]
 pub(crate) fn process_memory() -> Option<ProcessMemory> {
     None
 }
@@ -301,7 +301,11 @@ mod tests {
         let mut stages = MemoryStages::default();
         stages.record("start");
         let summary = stages.summary();
-        if cfg!(any(target_os = "windows", target_os = "linux")) {
+        if cfg!(any(
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "android"
+        )) {
             assert!(summary["current"]["workingSetMb"].as_f64().unwrap() > 1.0);
             assert_eq!(summary["stages"][0]["label"], "start");
         }

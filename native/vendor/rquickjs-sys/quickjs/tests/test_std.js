@@ -213,6 +213,32 @@ function test_os()
     assert(fd < 0);
 
     assert(os.remove(fdir) === 0);
+
+    if (!isWin) {
+        [fdir, err] = os.mkdtemp();
+        assert(err, 0);
+        assert(fdir.startsWith("tmp"));
+        assert(fdir.length, 9);
+
+        [fpath, fd] = os.mkstemp(`${fdir}/XXXXXX`);
+        assert(fdir.startsWith(`${fdir}`));
+        assert(fd >= 0);
+
+        const f = std.fdopen(fd, "w+");
+        f.write("xyzzy");
+        f.flush();
+        const b = new Uint8Array(5);
+        f.seek(0, std.SEEK_SET);
+        assert(5, f.read(b.buffer));
+        const s = [...b].map(c => String.fromCharCode(c)).join("");
+        assert(s, "xyzzy");
+        f.seek(0, std.SEEK_SET);
+        assert(0, f.read(b.buffer, 5, 42));
+        f.close();
+
+        assert(os.remove(fpath), 0);
+        assert(os.remove(fdir), 0);
+    }
 }
 
 function test_os_exec()

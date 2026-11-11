@@ -2,6 +2,7 @@ import type { Control } from "../protocol";
 import type { DraggableProps, VNode } from "../jsx-runtime";
 import { theme } from "../theme";
 import { container, type ViewProps } from "./layout";
+import { markPure } from "../memo";
 
 export interface PressableProps extends ViewProps, DraggableProps {
   disabled?: boolean;
@@ -23,3 +24,5 @@ export interface PressableProps extends ViewProps, DraggableProps {
 export function Pressable(props: PressableProps): VNode {
   return container("pressable", props, { radius: theme.radius.sm, userSelect: "none" });
 }
+// Its output is its props (see markPure).
+markPure(Pressable);

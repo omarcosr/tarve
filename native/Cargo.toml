@@ -51,7 +51,7 @@ rustc-hash = { version = "2", optional = true }
 # Synchronous zlib (src/zlib.rs): node:zlib deflateSync/inflateSync on txiki.js and Android,
 # and @tarve/headless's PNG encoder. Already in the tree through the png crate.
 miniz_oxide = "0.8"
-rquickjs = { version = "0.10", default-features = false, optional = true }
+rquickjs = { version = "0.14", default-features = false, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 winit = "0.30.12"
@@ -80,7 +80,8 @@ jni = "0.21"
 ndk-context = "0.1"
 ndk = "0.9"
 # The JS app's engine: QuickJS-ng, the engine of txiki.js (src/android/qjs.rs).
-rquickjs = { version = "0.10", default-features = false }
+# disable-assertions: NDEBUG, so the interpreter's hot paths skip QuickJS's internal asserts.
+rquickjs = { version = "0.14", default-features = false, features = ["disable-assertions"] }
 # node:crypto createHash for the QuickJS app.
 sha1 = "0.10"
 sha2 = "0.10"
@@ -141,7 +142,7 @@ accesskit_windows = { path = "vendor/accesskit_windows" }
 # Taffy 0.14 with one fix: an auto-sized flex container counts its items' automatic
 # minimum size (see vendor/taffy/src/compute/flexbox.rs, "Tarve patch").
 taffy = { path = "vendor/taffy" }
-# rquickjs-sys 0.10 with pregenerated bindings for Android (aarch64, x86_64): the same
+# rquickjs-sys 0.14 (QuickJS-ng 0.16) with pregenerated bindings for Android (aarch64, x86_64): the same
 # LP64 layout as the Linux GNU bindings they are copied from (src/bindings/*-linux-android.rs).
 rquickjs-sys = { path = "vendor/rquickjs-sys" }
 # android-activity 0.6.1 with one change: NativeActivity hover events (TalkBack's touch

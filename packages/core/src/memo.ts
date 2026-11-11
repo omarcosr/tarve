@@ -29,48 +29,74 @@ export function markPure<T extends Function>(component: T): T {
  * with {@link markPure}. Anything else, a component that may read state included, is never the same.
  */
 export function sameVNode(a: VNode, b: VNode, pureElement: (vnode: VNode) => boolean): boolean {
-  const pure = (node: VNode): boolean => typeof node.type === "string"
-    ? pureElement(node)
-    : typeof node.type === "function" && (node.type as unknown as Record<symbol, unknown>)[PURE] === true;
-  const isVNodeLike = (value: object): value is VNode => "type" in value && "props" in value && "key" in value;
-  const everyVNode = (child: unknown): boolean => {
-    if (Array.isArray(child)) return child.every(everyVNode);
-    if (typeof child === "object" && child !== null && isVNodeLike(child)) {
-      if (!pure(child)) return false;
-      for (const key in child.props) if (!everyVNode(child.props[key])) return false;
-    }
+  const outer = pureCheck;
+  pureCheck = pureElement;
+  try {
+    return sameNode(a, b);
+  } finally {
+    pureCheck = outer;
+  }
+}
+
+// Module-level helpers rather than closures made per call: an interpreter (QuickJS on Android)
+// pays for every closure and `for…in`, and a list compares thousands of items per render.
+let pureCheck: (vnode: VNode) => boolean = () => false;
+const hasOwn = Object.prototype.hasOwnProperty;
+
+function isPure(node: VNode): boolean {
+  const type = node.type;
+  return typeof type === "string"
+    ? pureCheck(node)
+    : typeof type === "function" && (type as unknown as Record<symbol, unknown>)[PURE] === true;
+}
+
+function isVNodeLike(value: object): value is VNode {
+  return "type" in value && "props" in value && "key" in value;
+}
+
+function everyVNode(child: unknown): boolean {
+  if (typeof child !== "object" || child === null) return true;
+  if (Array.isArray(child)) {
+    for (let index = 0; index < child.length; index++) if (!everyVNode(child[index])) return false;
     return true;
-  };
-  // Plain data equal by value: what a pure subtree's output can depend on. Functions only by identity.
-  const sameData = (x: unknown, y: unknown): boolean => {
-    // The same object: equal, but a VNode in it must still be pure.
-    if (Object.is(x, y)) return typeof x !== "object" || x === null || everyVNode(x);
-    if (typeof x !== "object" || typeof y !== "object" || x === null || y === null) return false;
-    if (Array.isArray(x)) {
-      if (!Array.isArray(y) || x.length !== y.length) return false;
-      for (let index = 0; index < x.length; index++) if (!sameData(x[index], y[index])) return false;
-      return true;
-    }
-    if (Array.isArray(y)) return false;
-    if (isVNodeLike(x) || isVNodeLike(y)) return isVNodeLike(x) && isVNodeLike(y) && sameNode(x, y);
-    const prototype = Object.getPrototypeOf(x);
-    if ((prototype !== Object.prototype && prototype !== null) || Object.getPrototypeOf(y) !== prototype) return false;
-    const p = x as Record<string, unknown>, q = y as Record<string, unknown>;
-    let count = 0;
-    for (const key in p) {
-      if (!Object.prototype.hasOwnProperty.call(p, key)) continue;
-      count++;
-      if (!Object.prototype.hasOwnProperty.call(q, key) || !sameData(p[key], q[key])) return false;
-    }
-    for (const key in q) if (Object.prototype.hasOwnProperty.call(q, key)) count--;
-    return count === 0;
-  };
-  const sameNode = (x: VNode, y: VNode): boolean => {
-    if (x === y) return everyVNode(x);
-    if (x.type !== y.type || x.key !== y.key || !pure(x)) return false;
-    return sameData(x.props, y.props);
-  };
-  return sameNode(a, b);
+  }
+  if (isVNodeLike(child)) {
+    if (!isPure(child)) return false;
+    const props = child.props as Record<string, unknown>;
+    for (const key in props) if (!everyVNode(props[key])) return false;
+  }
+  return true;
+}
+
+/** Plain data equal by value: what a pure subtree's output can depend on. Functions only by identity. */
+function sameData(x: unknown, y: unknown): boolean {
+  // The same object: equal, but a VNode in it must still be pure.
+  if (Object.is(x, y)) return typeof x !== "object" || x === null || everyVNode(x);
+  if (typeof x !== "object" || typeof y !== "object" || x === null || y === null) return false;
+  if (Array.isArray(x)) {
+    if (!Array.isArray(y) || x.length !== y.length) return false;
+    for (let index = 0; index < x.length; index++) if (!sameData(x[index], y[index])) return false;
+    return true;
+  }
+  if (Array.isArray(y)) return false;
+  const xNode = isVNodeLike(x), yNode = isVNodeLike(y);
+  if (xNode || yNode) return xNode && yNode && sameNode(x, y);
+  const prototype = Object.getPrototypeOf(x);
+  if ((prototype !== Object.prototype && prototype !== null) || Object.getPrototypeOf(y) !== prototype) return false;
+  const p = x as Record<string, unknown>, q = y as Record<string, unknown>;
+  const keys = Object.keys(p);
+  if (keys.length !== Object.keys(q).length) return false;
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index]!;
+    if (!hasOwn.call(q, key) || !sameData(p[key], q[key])) return false;
+  }
+  return true;
+}
+
+function sameNode(x: VNode, y: VNode): boolean {
+  if (x === y) return everyVNode(x);
+  if (x.type !== y.type || x.key !== y.key || !isPure(x)) return false;
+  return sameData(x.props, y.props);
 }
 
 /** Object.is on every own prop, like React.memo's default comparison. */

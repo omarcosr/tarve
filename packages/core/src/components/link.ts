@@ -5,6 +5,7 @@ import { canonicalizeIntrinsicStyle } from "../intrinsic-style";
 import { theme } from "../theme";
 import { Pressable, type PressableProps } from "./pressable";
 import { Text } from "./text";
+import { markPure } from "../memo";
 
 export interface LinkProps extends Omit<PressableProps, "control" | "style" | "children"> {
   href: string;
@@ -63,3 +64,5 @@ export function Link({ href, label, children, style, disabled, onClick, ...props
     },
   });
 }
+// Its output is its props (see markPure); the click handler only reads them.
+markPure(Link);

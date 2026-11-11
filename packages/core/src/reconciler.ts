@@ -250,6 +250,12 @@ export function compileTree(
     if (!memoStore) memoStores.set(renderScope, memoStore = new Map());
   }
   const memoSeen = new Set<string>();
+  /** memoSeen in insertion order: a memo entry's nested paths are a slice, not a walk of the whole set. */
+  const memoOrder: string[] = [];
+  function seeMemo(path: string): void {
+    if (memoSeen.has(path)) return;
+    memoSeen.add(path); memoOrder.push(path);
+  }
   let autoMemo: AutoMemoState | undefined;
   if (renderScope && memoStore && (typeof process === "undefined" || process.env?.TARVE_AUTO_MEMO !== "0")) {
     autoMemo = autoMemoStates.get(renderScope);
@@ -271,13 +277,7 @@ export function compileTree(
     };
     return { ids: own, nodes: pick(nodes), handlers: pick(handlers), media: pick(media), bindings: pick(bindings) };
   }
-  function added(set: Set<string>, skip: number): string[] {
-    // Only reached on a cache miss; Sets iterate in insertion order.
-    const out: string[] = [];
-    let index = 0;
-    for (const value of set) if (index++ >= skip) out.push(value);
-    return out.length ? out : EMPTY_ENTRIES as unknown as string[];
-  }
+
   function restore<T>(map: Map<string, T>, entries: [string, T][]): void {
     for (let index = 0; index < entries.length; index++) {
       const entry = entries[index]!;
@@ -298,7 +298,7 @@ export function compileTree(
   }
   function visitMemo(store: Map<string, MemoEntry>, info: MemoInfo<object>, props: object, path: string, group?: string, position?: Position): NativeNode[] {
     const at = position ? position.index + "/" + position.count : "";
-    memoSeen.add(path);
+    seeMemo(path);
     const previous = store.get(path);
     if (previous && previous.render === info.render && previous.group === group && previous.theme === selectedTheme
       && previous.form === currentForm && sameValue(previous.font, inheritedFont)
@@ -320,11 +320,11 @@ export function compileTree(
       restore(media, previous.media);
       restore(bindings, previous.bindings);
       // Memoized components nested in a reused subtree stay cached too.
-      for (let index = 0; index < previous.nested.length; index++) memoSeen.add(previous.nested[index]!);
+      for (let index = 0; index < previous.nested.length; index++) seeMemo(previous.nested[index]!);
       previous.props = props;
       return previous.result;
     }
-    const seenBefore = memoSeen.size;
+    const seenBefore = memoOrder.length;
     const before = { log: idLog.length, labels: labelAssociations.size, labelable: labelableTargets.size, window: windowOptions };
     const font = inheritedFont;
     const theme = selectedTheme;
@@ -359,7 +359,8 @@ export function compileTree(
       store.set(path, {
         render: info.render, props, group, theme, font, form, result,
         ...claimedSince(before.log),
-        nested: added(memoSeen, seenBefore),
+        // Only reached on a cache miss: what this subtree's compile saw first.
+        nested: memoOrder.length > seenBefore ? memoOrder.slice(seenBefore) : EMPTY_ENTRIES as unknown as string[],
         ...readViewport ? { breakpoint: currentBreakpoint(readExact) } : {},
         ...readPosition && at ? { position: at } : {},
       });
