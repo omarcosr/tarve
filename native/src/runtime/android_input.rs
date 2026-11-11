@@ -114,6 +114,16 @@ impl App {
     /// Background playback follows the media; the system bars and keyboard arrive as a content
     /// rect, not a resize.
     pub(super) fn android_about_to_wait(&mut self) {
+        // A paste or suggestion from the soft keyboard, typed like a desktop Ctrl+V.
+        for text in crate::android::insets::take_committed_text() {
+            let events = self.tree.type_text(&text);
+            if !events.is_empty() {
+                self.emit(events);
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+        }
         if self.is_main {
             crate::android::media::sync(&self.media.playing(), &self.event_proxy);
             // The status bar's icons sit over the top bar when there is one, else the app.

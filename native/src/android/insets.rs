@@ -40,17 +40,46 @@ pub(crate) fn current() -> [i32; 4] {
     *INSETS.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-/// Registers `nativeInsets` and has the activity report the insets it already has.
+/// Text the soft keyboard committed at once (a clipboard paste, a suggestion), waiting for the
+/// event loop to type it into the focused field.
+static COMMITTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+extern "system" fn native_text(mut env: JNIEnv, _: JClass, text: jni::objects::JString) {
+    let Ok(text) = env.get_string(&text).map(String::from) else {
+        return;
+    };
+    if text.is_empty() {
+        return;
+    }
+    COMMITTED.lock().unwrap_or_else(|p| p.into_inner()).push(text);
+    if let Some(app) = super::app() {
+        app.create_waker().wake();
+    }
+}
+
+/// The text committed since the last call, in order.
+pub(crate) fn take_committed_text() -> Vec<String> {
+    std::mem::take(&mut *COMMITTED.lock().unwrap_or_else(|p| p.into_inner()))
+}
+
+/// Registers `nativeInsets` and `nativeText`, and has the activity report the insets it already has.
 pub(crate) fn attach() {
     let attached = with_env(|env, activity| {
         let class = load_class(env, activity, "dev.tarve.TarveActivity")?;
         env.register_native_methods(
             &class,
-            &[jni::NativeMethod {
-                name: "nativeInsets".into(),
-                sig: "(IIII)V".into(),
-                fn_ptr: native_insets as *mut std::ffi::c_void,
-            }],
+            &[
+                jni::NativeMethod {
+                    name: "nativeInsets".into(),
+                    sig: "(IIII)V".into(),
+                    fn_ptr: native_insets as *mut std::ffi::c_void,
+                },
+                jni::NativeMethod {
+                    name: "nativeText".into(),
+                    sig: "(Ljava/lang/String;)V".into(),
+                    fn_ptr: native_text as *mut std::ffi::c_void,
+                },
+            ],
         )?;
         env.call_static_method(&class, "attachInsets", "()V", &[])?;
         Ok(())

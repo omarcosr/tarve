@@ -598,6 +598,16 @@ impl InputIteratorInner<'_> {
                             | crate::input::MotionAction::HoverExit
                     )
                 );
+                // Tarve: text a soft keyboard commits in one go (a clipboard paste, a suggestion)
+                // arrives as ACTION_MULTIPLE with an unknown key code. Its characters exist only in
+                // Java, so it goes on to the activity's dispatchKeyEvent (dev.tarve.TarveActivity).
+                if let input::InputEvent::KeyEvent(e) = &event {
+                    if e.action() == crate::input::KeyAction::Multiple && e.key_code() == crate::input::Keycode::Unknown {
+                        let input::InputEvent::KeyEvent(e) = event else { unreachable!() };
+                        queue.finish_event(ndk::event::InputEvent::KeyEvent(e.into_ndk_event()), false);
+                        return true;
+                    }
+                }
                 let result = std::panic::catch_unwind(AssertUnwindSafe(|| callback(&event)));
 
                 let ndk_event = match event {

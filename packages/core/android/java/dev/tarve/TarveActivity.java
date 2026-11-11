@@ -10,6 +10,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.util.Log;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowInsets;
 import java.io.File;
@@ -32,6 +33,7 @@ import java.util.List;
 public class TarveActivity extends NativeActivity {
     static native void nativeOpen(String[] urls, String[] files, boolean initial);
     static native void nativeInsets(int left, int top, int right, int bottom);
+    static native void nativeText(String text);
 
     private static final Object insetsLock = new Object();
     private static boolean insetsAttached;
@@ -46,6 +48,24 @@ public class TarveActivity extends NativeActivity {
         watchInsets();
         // A re-created activity already reported its intent.
         if (state == null) open(getIntent(), true);
+    }
+
+    /**
+     * Text a soft keyboard commits at once (its clipboard paste, a suggestion, a glide-typed word)
+     * comes as one ACTION_MULTIPLE event whose characters only Java can read; the native input
+     * queue passes it on unhandled (vendor/android-activity) and it is typed into the focused field.
+     */
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_MULTIPLE && event.getKeyCode() == KeyEvent.KEYCODE_UNKNOWN) {
+            String text = event.getCharacters();
+            if (text != null && !text.isEmpty()) {
+                try {
+                    nativeText(text);
+                    return true;
+                } catch (UnsatisfiedLinkError ignored) { }
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     @Override protected void onNewIntent(Intent intent) {
