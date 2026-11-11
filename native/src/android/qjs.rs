@@ -533,13 +533,17 @@ fn install<'js>(
         )?,
     )?;
 
-    // Plugins' native libraries (ctx.loadLibrary).
+    // Plugins' native libraries (ctx.loadLibrary), and the function they report events through.
     ffi::install(ctx, &host)?;
 
     let files = Object::new(ctx.clone())?;
     for (name, path) in assets {
         files.set(name.as_str(), path.as_str())?;
     }
+    host.set(
+        "pluginEmitAddress",
+        Function::new(ctx.clone(), || crate::bridge::entry_points::tarve_plugin_emit_address() as f64)?,
+    )?;
     let globals = ctx.globals();
     globals.set("__tarveAssets", files)?;
     globals.set("__tarveHost", host)?;

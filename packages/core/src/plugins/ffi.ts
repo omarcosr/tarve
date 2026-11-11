@@ -89,6 +89,29 @@ function bunDefinitions(symbols: FfiSymbols) {
   return Object.fromEntries(Object.entries(symbols).map(([name, symbol]) => [name, { args: [...symbol.args], returns: symbol.returns ?? "void" }]));
 }
 
+/** tjs:ffi declarations: `ptr` (a raw address) as u64. */
+function txikiDefinitions(symbols: FfiSymbols) {
+  const raw = (type: FfiType) => type === "ptr" ? "u64" : type;
+  return Object.fromEntries(Object.entries(symbols).map(([name, symbol]) => [name, { args: symbol.args.map(raw), returns: raw(symbol.returns ?? "void") }]));
+}
+
+/** tjs:ffi functions taking BigInt and null where the declaration allows them: 64-bit values pass as numbers. */
+function txikiFunctions(functions: Record<string, unknown>, symbols: FfiSymbols): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(symbols).map(([name, symbol]) => {
+    const call = functions[name] as (...args: unknown[]) => unknown;
+    const wide = symbol.args.map(type => type === "i64" || type === "u64" || type === "ptr");
+    if (!wide.includes(true)) return [name, call];
+    return [name, (...args: unknown[]) => call(...args.map((value, index) => {
+      if (!wide[index]) return value;
+      if (value === null || value === undefined) return 0;
+      if (typeof value !== "bigint") return value;
+      const number = Number(value);
+      if (!Number.isSafeInteger(number)) throw new RangeError(`${name}: argument ${index} (${value}) does not fit txiki.js FFI's 53-bit integers`);
+      return number;
+    }))];
+  }));
+}
+
 /** Which FFI this process offers plugins, or why it offers none. */
 export function detectFfi(): { backend: FfiBackend } | { backend: undefined; reason: string } {
   if ((globalThis as { __tarveTxikiFfi?: unknown }).__tarveTxikiFfi) return { backend: "txiki" };
@@ -117,8 +140,11 @@ export function openPluginLibrary<const S extends FfiSymbols>(path: string, symb
       const ffi = detected.backend === "txiki"
         ? (globalThis as unknown as { __tarveTxikiFfi: { dlopen(path: string, symbols: unknown): { symbols: Record<string, unknown>; close(): void } } }).__tarveTxikiFfi
         : require("bun:ffi") as { dlopen(path: string, symbols: unknown): { symbols: Record<string, unknown>; close(): void } };
-      const library = ffi.dlopen(path, bunDefinitions(symbols));
-      functions = library.symbols;
+      // txiki.js's own tjs:ffi (not the Android host's) takes 64-bit integers as numbers and `ptr` only
+      // as a TypedArray: raw addresses go as u64 numbers there.
+      const txiki = detected.backend === "txiki" && typeof (globalThis as { tjs?: { version?: unknown } }).tjs?.version === "string";
+      const library = ffi.dlopen(path, txiki ? txikiDefinitions(symbols) : bunDefinitions(symbols));
+      functions = txiki ? txikiFunctions(library.symbols, symbols) : library.symbols;
       close = () => library.close();
     } else {
       let nodeFfi: { dlopen(path: string, definitions: unknown): { functions: Record<string, unknown>; lib: { close(): void } } };

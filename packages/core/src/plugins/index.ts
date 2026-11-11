@@ -14,6 +14,7 @@ import type { NativeCommand, NativeEvent } from "../protocol";
 import { discoverPlugins, findPackageRoot, PLUGIN_API_VERSION, readPluginManifest, type DiscoverPluginsOptions, type PluginManifest } from "./discovery";
 import { openPluginLibrary, PluginFfiUnsupportedError, type FfiSymbols, type PluginLibrary } from "./ffi";
 import { hostPluginTarget, PLUGIN_TARGETS, type PluginTarget } from "./targets";
+import { pluginEmitAddress } from "../bridge/binding";
 
 export { PLUGIN_API_VERSION } from "./discovery";
 
@@ -73,6 +74,21 @@ export interface PluginContext {
   loadLibrary<const S extends FfiSymbols>(source: NativeLibrarySource | undefined, symbols: S): PluginLibrary<S>;
   /** Where `loadLibrary` would open the library from, without opening it. */
   resolveLibrary(source?: NativeLibrarySource): string;
+  /**
+   * Events the plugin's native library sends with `tarve_plugin_emit(channel, data, len)`, from
+   * any thread; each arrives here as a Uint8Array, in order, on the app's JS thread. Returns
+   * `on`, whose result removes the listener. Prefix channels with the namespace to keep them apart.
+   */
+  events(channel: string): PluginEventChannel;
+  /**
+   * The address of `tarve_plugin_emit` (`int32_t (*)(const char *channel, const uint8_t *data, size_t len)`),
+   * to hand to the library once (a `ptr` argument): it reports through it without linking Tarve.
+   */
+  emitAddress(): bigint;
+}
+
+export interface PluginEventChannel {
+  on(listener: (data: Uint8Array) => void): () => void;
 }
 
 export interface PluginDefinition<C extends PluginCommands = {}> {
@@ -170,6 +186,8 @@ export interface PluginHostOptions {
   manifest?(plugin: TarvePlugin): PluginManifest | undefined;
   /** Default `hostPluginTarget()`. */
   target?: PluginTarget | undefined;
+  /** Address of the runtime's `tarve_plugin_emit`; default the running app's library (bridge/binding.ts). */
+  emitAddress?(): bigint;
 }
 
 export interface PluginHost {
@@ -178,6 +196,8 @@ export interface PluginHost {
   invoke(command: string, args: readonly unknown[]): Promise<unknown>;
   /** Registered command ids. */
   commands(): string[];
+  /** Delivers a native `pluginEvent` to the channel's listeners. */
+  event(channel: string, data: Uint8Array): void;
 }
 
 interface CommandEntry { plugin: string; handler: PluginCommand }
@@ -201,6 +221,7 @@ export function createPluginHost(plugins: readonly TarvePlugin[], options: Plugi
   const readyListeners = new Set<() => MaybePromise<void>>();
   const closedListeners = new Set<() => MaybePromise<void>>();
   const libraries = new Set<PluginLibrary<FfiSymbols>>();
+  const channels = new Map<string, Set<(data: Uint8Array) => void>>();
   let readyFired = false;
   let closedFired = false;
   const call = async (listener: () => MaybePromise<void>, event: string) => {
@@ -282,6 +303,20 @@ export function createPluginHost(plugins: readonly TarvePlugin[], options: Plugi
         return library;
       },
       resolveLibrary,
+      events(channel: string): PluginEventChannel {
+        if (typeof channel !== "string" || !channel || new TextEncoder().encode(channel).length > 128) throw new TypeError(`Plugin ${plugin.name}: an event channel is 1-128 bytes of text`);
+        return {
+          on(listener) {
+            if (typeof listener !== "function") throw new TypeError(`Plugin ${plugin.name}: events(${channel}).on needs a function`);
+            let listeners = channels.get(channel);
+            if (!listeners) channels.set(channel, listeners = new Set());
+            const own = (data: Uint8Array) => listener(data);
+            listeners.add(own);
+            return () => { listeners!.delete(own); if (!listeners!.size && channels.get(channel) === listeners) channels.delete(channel); };
+          },
+        };
+      },
+      emitAddress: () => (options.emitAddress ?? pluginEmitAddress)(),
     };
     return ctx;
   }
@@ -318,6 +353,7 @@ export function createPluginHost(plugins: readonly TarvePlugin[], options: Plugi
     }
     libraries.clear();
     commands.clear();
+    channels.clear();
     readyListeners.clear();
     closedListeners.clear();
   });
@@ -341,6 +377,11 @@ export function createPluginHost(plugins: readonly TarvePlugin[], options: Plugi
       return await (entry.handler as (...args: unknown[]) => unknown)(...args);
     },
     commands: () => [...commands.keys()],
+    event(channel, data) {
+      for (const listener of [...channels.get(channel) ?? []]) {
+        try { listener(data); } catch (error) { options.report(error, `event:${channel}`); }
+      }
+    },
   };
 }
 

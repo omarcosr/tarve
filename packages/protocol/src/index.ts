@@ -630,6 +630,8 @@ export type NativeEvent =
   | { type: "secureStore"; requestId: string; supported: boolean; data?: string; error?: string }
   /** `text`: what `read` found (absent when the clipboard holds no text). */
   | { type: "clipboard"; requestId: string; supported: boolean; text?: string; error?: string }
+  /** A plugin's native library called `tarve_plugin_emit` (`data`: base64). */
+  | { type: "pluginEvent"; channel: string; data: string }
   /** Links and files the OS asked the app to open (Android VIEW intents); `initial` for the launch's own. */
   | { type: "open"; urls: string[]; files: string[]; initial: boolean }
   | { type: "frame"; frames: number };

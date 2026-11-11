@@ -268,6 +268,25 @@ describe("plugin native libraries", () => {
     expect(() => ctx.resolveLibrary()).toThrow("tarve.native");
   });
 
+  test("ctx.events delivers a channel's native events to its listeners until they unsubscribe", async () => {
+    let ctx!: PluginContext;
+    const reports: string[] = [];
+    const fakeApp = { ready: Promise.resolve(), closed: new Promise<void>(() => {}), onOpenUrl: () => () => {}, onOpenFiles: () => () => {} } as never;
+    const pluginHost = createPluginHost([definePlugin({ name: "events-plugin", version: "1.0.0", setup(c) { ctx = c; } })], { app: fakeApp, request: () => Promise.reject(new Error("no")), report: (_error, event) => reports.push(event), emitAddress: () => 0x1234n });
+    await pluginHost.ready;
+    const seen: number[][] = [];
+    const off = ctx.events("events.tick").on(data => seen.push([...data]));
+    ctx.events("events.tick").on(() => { throw new Error("listener failed"); });
+    pluginHost.event("events.tick", new Uint8Array([1, 2]));
+    pluginHost.event("other", new Uint8Array([9]));
+    off();
+    pluginHost.event("events.tick", new Uint8Array([3]));
+    expect(seen).toEqual([[1, 2]]);
+    expect(reports).toEqual(["event:events.tick", "event:events.tick"]);
+    expect(ctx.emitAddress()).toBe(0x1234n);
+    expect(() => ctx.events("")).toThrow(TypeError);
+  });
+
   test("symbol declarations are validated before any FFI is touched", () => {
     expect(() => validateSymbols({})).toThrow("at least one");
     expect(() => validateSymbols({ "bad-name": { args: [] } })).toThrow("Invalid native symbol");

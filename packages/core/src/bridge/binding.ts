@@ -27,6 +27,34 @@ export function surfacePresentSymbol(): SurfacePresent {
   return surfacePresent;
 }
 
+let emitAddress: bigint | undefined;
+
+/**
+ * The address of the running app's `tarve_plugin_emit` (native/src/bridge/entry_points.rs), which a
+ * plugin's library calls to report events (`ctx.events`). Bun, Node.js 26.10+, txiki.js and the
+ * Android QuickJS runtime; not Bun on Android, whose library lives in another process.
+ */
+export function pluginEmitAddress(): bigint {
+  if (emitAddress !== undefined) return emitAddress;
+  if (!startedPath) throw new Error("plugin events: the app has not started");
+  if (process.platform === "android" && Number.isInteger(Number(process.env.TARVE_ANDROID_BRIDGE_FD))) {
+    throw new Error("plugin events need the QuickJS runtime on Android: with --runtime bun the native library runs in another process");
+  }
+  const definitions = { tarve_plugin_emit_address: { args: [], returns: "u64" } } as const;
+  type Opened = { symbols: { tarve_plugin_emit_address(): bigint | number } };
+  const require = createRequire(import.meta.url);
+  const txikiFfi = (globalThis as { __tarveTxikiFfi?: { dlopen(path: string, symbols: typeof definitions): Opened } }).__tarveTxikiFfi;
+  let address: bigint | number;
+  if (txikiFfi) address = txikiFfi.dlopen(startedPath, definitions).symbols.tarve_plugin_emit_address();
+  else if (process.versions.bun) address = ((require("bun:ffi") as typeof import("bun:ffi")).dlopen(startedPath, definitions) as unknown as Opened).symbols.tarve_plugin_emit_address();
+  else {
+    const { dlopen } = require("node:ffi") as { dlopen(path: string, definitions: Record<string, { arguments: string[]; return: string }>): { functions: { tarve_plugin_emit_address(): bigint | number } } };
+    address = dlopen(startedPath, { tarve_plugin_emit_address: { arguments: [], return: "uint64" } }).functions.tarve_plugin_emit_address();
+  }
+  emitAddress = BigInt(address);
+  return emitAddress;
+}
+
 export interface SurfaceGlSymbols {
   tarve_surface_gl_make_current(): number;
   tarve_surface_gl_begin(handle: bigint, fbo: Uint32Array, width: Uint32Array, height: Uint32Array): number;

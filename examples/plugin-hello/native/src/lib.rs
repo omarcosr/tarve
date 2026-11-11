@@ -17,6 +17,31 @@ pub extern "C" fn hello_add(a: i32, b: i32) -> i32 {
     a.wrapping_add(b)
 }
 
+/// `tarve_plugin_emit`, whose address the plugin hands over (`ctx.emitAddress()`).
+type Emit =
+    unsafe extern "C" fn(channel: *const std::ffi::c_char, data: *const u8, len: usize) -> i32;
+
+/// Sends `count` events `"hello.tick"` (the tick number, little-endian u32) from a thread of
+/// its own, `interval_ms` apart: native work reporting to JavaScript without polling.
+/// Returns 0, or -1 when `emit` is null.
+#[no_mangle]
+pub extern "C" fn hello_start_ticks(emit: usize, count: u32, interval_ms: u32) -> i32 {
+    if emit == 0 {
+        return -1;
+    }
+    // SAFETY: the plugin passes the address ctx.emitAddress() returned.
+    let emit: Emit = unsafe { std::mem::transmute::<usize, Emit>(emit) };
+    std::thread::spawn(move || {
+        for tick in 1..=count {
+            std::thread::sleep(std::time::Duration::from_millis(interval_ms.into()));
+            let bytes = tick.to_le_bytes();
+            // SAFETY: a NUL-terminated channel and 4 live bytes, copied by the call.
+            unsafe { emit(c"hello.tick".as_ptr(), bytes.as_ptr(), bytes.len()) };
+        }
+    });
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

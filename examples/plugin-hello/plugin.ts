@@ -10,6 +10,7 @@ import { definePlugin } from "@tarve/core";
 export const HELLO_SYMBOLS = {
   hello_abi_version: { args: [], returns: "u32" },
   hello_add: { args: ["i32", "i32"], returns: "i32" },
+  hello_start_ticks: { args: ["ptr", "u32", "u32"], returns: "i32" },
 } as const;
 
 const hello = definePlugin({
@@ -33,6 +34,15 @@ const hello = definePlugin({
         return library.symbols.hello_add(a, b);
       },
       info: () => ({ target: ctx.target, ffi: library.ffi, library: library.path, ready: readyAt !== undefined }),
+      /** Resolves with the tick numbers the library sent from its own thread (`ctx.events`). */
+      ticks: (count: number, intervalMs = 10): Promise<number[]> => new Promise((resolve, reject) => {
+        const seen: number[] = [];
+        const off = ctx.events("hello.tick").on(data => {
+          seen.push(new DataView(data.buffer, data.byteOffset, data.byteLength).getUint32(0, true));
+          if (seen.length === count) { off(); resolve(seen); }
+        });
+        if (library.symbols.hello_start_ticks(ctx.emitAddress(), count, intervalMs) !== 0) { off(); reject(new Error("hello_start_ticks failed")); }
+      }),
     };
   },
 });

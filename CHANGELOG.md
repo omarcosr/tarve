@@ -16,7 +16,11 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 - `app.onBack(handler, { priority })`: back navigation without a hand-written chain. Android's Back first closes the topmost open Modal, Sheet, Popover or CommandPalette, then runs listeners (highest priority, then the latest) until one returns `true`, and only then reaches `onCloseRequest`; on desktops Escape with no open overlay runs the same listeners. Previously Back closed an Android app even with a dialog open unless the Window had `onCloseRequest`.
 - `clipboard.readText()` / `clipboard.writeText(text)` (also `app.clipboard`): the system clipboard's text on Windows, macOS, Linux and Android (the activity's ClipboardManager); `readText` resolves `undefined` when it holds no text and both reject when the clipboard cannot be reached.
 
+- Plugin events from native code: a plugin's library calls `tarve_plugin_emit(channel, data, len)` from any thread (its address from `ctx.emitAddress()`), and `ctx.events(channel).on(bytes => …)` receives each payload in order on the JS thread, woken like any native event: no polling. Bun, Node.js, txiki.js and Android's QuickJS runtime (not `--runtime bun` on Android). `examples/plugin-hello` shows it (`ticks`).
+
 ### Fixed
+
+- txiki.js: plugin symbols declared with `i64`, `u64` or `ptr` arguments take BigInt and raw addresses (tjs:ffi accepts neither; values up to 2^53).
 
 - On Android, `ctx.loadLibrary` no longer gets Tarve's own runtime symbols whatever library it names; `tjs:ffi`'s `dlopen` opens real libraries instead of throwing.
 - `createApp({ onError })` also receives the process's unhandled rejections and uncaught exceptions (source `"process"`) until the app closes, on Bun, Node.js, txiki.js and Android, so a lost promise no longer ends the process and its window. Without `onError` nothing changes.

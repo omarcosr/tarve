@@ -638,6 +638,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     if (event.type === "windowState" && rememberKey) {
       windowStateStore().set(rememberKey, { x: event.x, y: event.y, width: event.width, height: event.height, maximized: event.maximized, ...(event.physical ? { physical: true } : {}) });
     }
+    if (event.type === "pluginEvent") {
+      pluginHost?.event(event.channel, Buffer.from(event.data, "base64"));
+      return;
+    }
     if (event.type === "closed") {
       if (rememberKey) windowStateStore().flush();
       finishClosed();

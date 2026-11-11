@@ -124,6 +124,53 @@ pub unsafe extern "C" fn tarve_zlib_gunzip(
     })
 }
 
+/// A plugin's native library reports to its JavaScript (`ctx.events(channel)`) from any thread:
+/// `channel` is NUL-terminated UTF-8 (1-128 bytes), the `len` bytes at `data` are copied and
+/// arrive as a Uint8Array. Returns 0, or -1 (tarve_last_error) when the app is not running or an
+/// argument is invalid. The library gets this function's address from `ctx.emitAddress()`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tarve_plugin_emit(
+    channel: *const std::ffi::c_char,
+    data: *const u8,
+    len: usize,
+) -> i32 {
+    use base64::Engine;
+    guard(|| {
+        if channel.is_null() {
+            return Err("tarve_plugin_emit: null channel".into());
+        }
+        // SAFETY: the caller passes a NUL-terminated string for this call.
+        let channel = unsafe { std::ffi::CStr::from_ptr(channel) }
+            .to_str()
+            .map_err(|_| "tarve_plugin_emit: the channel is not UTF-8")?;
+        if channel.is_empty() || channel.len() > 128 {
+            return Err("tarve_plugin_emit: the channel must be 1-128 bytes".into());
+        }
+        let len = u32::try_from(len).map_err(|_| "tarve_plugin_emit: more than 4 GiB")?;
+        let bytes = unsafe { input(data, len)? };
+        let events = host()
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .ok_or("tarve_plugin_emit: the app is not running")?
+            .events
+            .clone();
+        events.push(serde_json::json!({
+            "type": "pluginEvent",
+            "channel": channel,
+            "data": base64::engine::general_purpose::STANDARD.encode(bytes),
+        }));
+        Ok(0)
+    })
+}
+
+/// The address of `tarve_plugin_emit`, which JavaScript hands to a plugin's library
+/// (`ctx.emitAddress()`): the library calls it without linking against this one.
+#[unsafe(no_mangle)]
+pub extern "C" fn tarve_plugin_emit_address() -> u64 {
+    tarve_plugin_emit as *const () as usize as u64
+}
+
 /// Queues an event for the app from outside the event loop (an Android activity's result).
 #[cfg(target_os = "android")]
 pub(crate) fn emit(event: serde_json::Value) {

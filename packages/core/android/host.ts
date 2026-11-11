@@ -18,6 +18,8 @@ export interface AndroidHost {
   poll(): Uint8Array | undefined;
   lastError(): string;
   openExternal(target: string): number;
+  /** The address of the runtime's `tarve_plugin_emit` (ctx.emitAddress()). */
+  pluginEmitAddress(): number;
   /**
    * Opens a plugin's native library (`libplugin.so` resolves inside the APK) and binds the
    * declared symbols, bun:ffi style (native/src/android/qjs/ffi.rs).

@@ -37,6 +37,9 @@ const info = await client.info();
 checks["info.ffi"] = info.ffi === "txiki" || info.ffi;
 checks["info.target"] = info.target === "android-arm64" || String(info.target);
 checks["info.library"] = info.library === "libtarve_plugin_hello.so" || info.library;
+// The library's own thread reports through tarve_plugin_emit (ctx.events).
+const ticks = await Promise.race([client.ticks(3, 5), new Promise<string>(resolve => setTimeout(() => resolve("timeout"), 3000))]).catch((error: Error) => error.message);
+checks["ctx.events from a native thread"] = JSON.stringify(ticks) === "[1,2,3]" || JSON.stringify(ticks);
 
 // Every argument/return class through Bionic's libc, as a plugin would call its own library.
 const libc = openPluginLibrary("libc.so", {

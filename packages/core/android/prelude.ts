@@ -51,6 +51,7 @@ const symbols = {
     return error.length;
   },
   tarve_join: () => 0,
+  tarve_plugin_emit_address: () => BigInt(host.pluginEmitAddress()),
   tarve_allow_foreground: () => 0,
 };
 // Tarve's own library is the runtime the activity loaded: its symbols are the host calls above.
