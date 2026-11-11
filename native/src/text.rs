@@ -3265,6 +3265,22 @@ impl TextEngine {
     pub fn code_gutter_inset(&self, node: &Node) -> f32 {
         self.code_gutter_width(node)
     }
+
+    /// The first line's baseline from the top of the text's content box, as last broken by
+    /// `measure`: what `align: baseline` lines up. `None` before the text has lines.
+    pub fn first_baseline(&self, id: &str) -> Option<f32> {
+        if let Some(lines) = self.markdown_lines.get(id) {
+            let line = lines.first()?;
+            return Some(line.y + line.layout.lines().next()?.metrics().baseline);
+        }
+        let layout = self.layouts.get(id)?;
+        let baseline = layout.lines().next()?.metrics().baseline;
+        // Raised runs on the first line grow it upward and move its baseline down.
+        let shift = shifted_line_extents(layout)
+            .and_then(|extents| extents.first().map(|(top, _)| *top))
+            .unwrap_or(0.0);
+        Some(baseline + shift)
+    }
 }
 
 /// Origin offsets that make each gutter number share the exact baseline of the

@@ -1442,7 +1442,7 @@ fn measure_leaf(
     context: Option<&mut String>,
     style: &Style,
 ) -> taffy::tree::LayoutOutput {
-    taffy::compute_leaf_layout(
+    let mut output = taffy::compute_leaf_layout(
         inputs,
         style,
         |_, _| 0.0,
@@ -1501,7 +1501,21 @@ fn measure_leaf(
                 height: known.height.unwrap_or(measured.height),
             }
         },
-    )
+    );
+    // Text reports its first line's baseline, so `align: baseline` lines text up by it
+    // rather than by the box's bottom edge (Taffy's fallback for a leaf without one).
+    if inputs.run_mode == taffy::RunMode::PerformLayout
+        && let Some(id) = context.as_deref()
+        && nodes[id].node.is_text()
+        && let Some(baseline) = text.first_baseline(id)
+    {
+        use taffy::ResolveOrZero;
+        let width = inputs.parent_size.width;
+        let top = style.padding.top.resolve_or_zero(width, |_, _| 0.0)
+            + style.border.top.resolve_or_zero(width, |_, _| 0.0);
+        output.baselines.first = Some(top + baseline);
+    }
+    output
 }
 
 fn motion_tracks_for_node(
