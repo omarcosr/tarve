@@ -36,6 +36,12 @@ public final class TarveKeepAlive extends Service {
 
     public static void update(final Context context, final boolean isActive, final String newTitle, final String newText) {
         final Context app = context.getApplicationContext();
+        // Without the permission startForeground throws after startForegroundService, and Android
+        // then ends the whole process (ForegroundServiceDidNotStartInTimeException): refuse here.
+        if (isActive && Build.VERSION.SDK_INT >= 34
+                && app.checkSelfPermission("android.permission.FOREGROUND_SERVICE_SPECIAL_USE") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            throw new IllegalStateException("keepAlive needs FOREGROUND_SERVICE_SPECIAL_USE in package.json tarve.android.permissions");
+        }
         MAIN.post(new Runnable() {
             @Override public void run() {
                 active = isActive;
@@ -69,11 +75,10 @@ public final class TarveKeepAlive extends Service {
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
-        if (!active) {
-            shutdown();
-            return START_NOT_STICKY;
-        }
+        // A service started with startForegroundService must call startForeground even when the
+        // hold was released before it ran, or Android ends the process.
         refresh();
+        if (!active) shutdown();
         return START_NOT_STICKY;
     }
 

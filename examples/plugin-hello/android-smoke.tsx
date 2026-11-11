@@ -1,10 +1,12 @@
 // Android smoke for native plugins: the APK packs libtarve_plugin_hello.so and the QuickJS
 // runtime's FFI opens it (native/src/android/qjs/ffi.rs). Build and run:
 //   cargo ndk -t arm64-v8a -P 26 build --release --manifest-path native/Cargo.toml
-//   bun ../../packages/core/cli.ts build android-smoke.tsx --target android-arm64 --name PluginSmoke --app-id dev.tarve.pluginsmoke --outfile ../../dist/PluginSmoke.apk
+//   bun ../../packages/core/cli.ts build android-smoke.tsx --target android-arm64 --name PluginSmoke --app-id dev.tarve.pluginsmoke --permission FOREGROUND_SERVICE_SPECIAL_USE --outfile ../../dist/PluginSmoke.apk
 //   adb install -r ../../dist/PluginSmoke.apk && adb shell am start -n dev.tarve.pluginsmoke/dev.tarve.TarveActivity
 // It logs one "tarve-plugin-smoke <json>" line (adb logcat -s tarve): each check `true` or what went wrong.
-import { Column, Text, Window, createApp, openPluginLibrary } from "@tarve/core";
+// Twice it logs "tarve-plugin-smoke-ready-back" and waits for a real Back (`adb shell input keyevent 4`):
+// the first must close the open Modal, the second must reach app.onBack; the app stays open.
+import { Column, Modal, Text, Window, clipboard, createApp, keepAlive, openPluginLibrary, store, toast } from "@tarve/core";
 import hello from "./plugin";
 
 const checks: Record<string, unknown> = {};
@@ -18,11 +20,14 @@ const check = (name: string, run: () => unknown, expected: unknown) => {
   }
 };
 
+const ui = store({ dialog: false, phase: "checks" });
+let dialogClosed!: () => void;
 const app = createApp(() => (
   <Window title="Plugin smoke">
     <Column style={{ padding: 24, gap: 8 }}>
-      <Text>Native plugin on Android</Text>
+      <Text>{`Native plugin on Android: ${ui.phase}`}</Text>
       {Object.entries(checks).map(([name, ok]) => <Text key={name}>{`${ok === true ? "ok" : "FAIL"} ${name}${ok === true ? "" : `: ${ok}`}`}</Text>)}
+      {ui.dialog ? <Modal id="dialog" open onOpenChange={open => { if (!open) { ui.dialog = false; dialogClosed(); } }}><Text>Press Back</Text></Modal> : null}
     </Column>
   </Window>
 ), { plugins: [hello], onError: event => { caught.push(`${event.source}:${event.event}:${event.error.message}`); } });
@@ -80,6 +85,29 @@ setTimeout(() => { throw new Error("thrown in a timer"); }, 0);
 await new Promise(resolve => setTimeout(resolve, 100));
 checks["onError: unhandled rejection"] = caught.includes("process:unhandledRejection:lost promise") || caught.join(" | ");
 checks["onError: uncaught exception"] = caught.includes("process:uncaughtException:thrown in a timer") || caught.join(" | ");
+// The system clipboard through the activity, restored afterwards.
+const previous = await clipboard.readText().catch(() => undefined);
+const written = `tarve smoke ${Date.now()}`;
+checks["clipboard round trip"] = await clipboard.writeText(written).then(() => clipboard.readText()).then(read => read === written || String(read), (error: Error) => error.message);
+if (previous !== undefined) await clipboard.writeText(previous).catch(() => undefined);
+
+// A foreground service while held.
+const hold = keepAlive({ title: "Plugin smoke", text: "keeping alive" });
+checks["keepAlive"] = await hold.result.then(result => (result.supported && !result.error) || JSON.stringify(result), (error: Error) => error.message);
+await hold.release();
+
+toast("Checks done", { tone: "ok" });
+
+// Back: the open Modal closes first, then app.onBack takes it; the app keeps running.
+const backTimeout = (label: string) => new Promise<string>(resolve => setTimeout(() => resolve(`${label}: no Back within 30 s`), 30_000));
+ui.dialog = true;
+ui.phase = "press Back (dialog)";
+const first = await Promise.race([new Promise<true>(resolve => { dialogClosed = () => resolve(true); }), (async () => { await new Promise(resolve => setTimeout(resolve, 300)); console.log("tarve-plugin-smoke-ready-back"); return backTimeout("dialog"); })()]);
+checks["Back closes the open Modal"] = first;
+ui.phase = "press Back (onBack)";
+const second = await Promise.race([new Promise<true>(resolve => { const off = app.onBack(() => { off(); resolve(true); return true; }); setTimeout(() => console.log("tarve-plugin-smoke-ready-back"), 300); }), backTimeout("onBack")]);
+checks["Back reaches app.onBack"] = second;
+ui.phase = "done";
 const failed = Object.entries(checks).filter(([, ok]) => ok !== true);
 console.log(`tarve-plugin-smoke ${JSON.stringify({ ok: failed.length === 0, checks })}`);
 app.update();
