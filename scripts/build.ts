@@ -1,4 +1,4 @@
-import { mkdir, copyFile, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, copyFile, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, parse, resolve, join } from "node:path";
@@ -55,6 +55,7 @@ if (!release) {
   const temporary = join(directory, `${randomUUID()}.json`);
   await writeFile(temporary, JSON.stringify({ target: hostTarget, library }));
   await rename(temporary, join(directory, "current.json"));
+  await pruneDevelopmentLibraries(directory, parse(name), library);
 } else if (executable) {
   await mkdir(join(root, "dist"), { recursive: true });
   const metadata = await Bun.file(join(root, "package.json")).json();
@@ -66,3 +67,20 @@ if (!release) {
   await copyFile(nativeArtifact, output);
 }
 console.log(`Tarve native ${release ? "release" : "debug"} build ready.`);
+
+// Each debug build publishes a new hashed copy. Drop the ones `current.json` no longer names; a copy still
+// loaded by a running app stays locked on Windows and is removed by a later build.
+async function pruneDevelopmentLibraries(directory: string, artifact: { name: string; ext: string }, current: string): Promise<void> {
+  const prefix = `${artifact.name}-`;
+  for (const entry of await readdir(directory)) {
+    if (entry === current || !entry.startsWith(prefix) || !entry.endsWith(artifact.ext)) continue;
+    if (!/^[0-9a-f]{20}$/.test(entry.slice(prefix.length, entry.length - artifact.ext.length))) continue;
+    try {
+      await rm(join(directory, entry));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOENT") throw error;
+    }
+  }
+}
+
