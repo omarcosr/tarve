@@ -64,15 +64,15 @@ pub(super) fn run(app: &AndroidApp) -> Result<(), String> {
     // The app thread has a 32 MB stack (android_main).
     runtime.set_max_stack_size(24 << 20);
     runtime.set_host_promise_rejection_tracker(Some(Box::new(|ctx, promise, reason, handled| {
-        // process.on("unhandledRejection") (createApp's onError) takes it first (globals.ts).
-        let taken = !handled
-            && ctx
-                .globals()
-                .get::<_, Function>("__tarveUnhandledRejection")
-                .is_ok_and(|emit| {
-                    emit.call::<_, bool>((reason.clone(), promise))
-                        .unwrap_or(false)
-                });
+        // globals.ts holds a rejection until the jobs have run and drops it when a handler is
+        // attached meanwhile (`handled`), then hands it to process.on("unhandledRejection").
+        let taken = ctx
+            .globals()
+            .get::<_, Function>("__tarveUnhandledRejection")
+            .is_ok_and(|emit| {
+                emit.call::<_, bool>((reason.clone(), promise, handled))
+                    .unwrap_or(false)
+            });
         if !handled && !taken {
             log(
                 LOG_ERROR,

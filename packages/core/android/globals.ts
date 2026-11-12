@@ -63,9 +63,32 @@ function reportError(error: unknown): void {
   if (processEvents.listenerCount("uncaughtException") && processEvents.emit("uncaughtException", error, "uncaughtException")) return;
   host.log(2, `Uncaught ${show(error)}`);
 }
-/** Called by the engine's rejection tracker (native/src/android/qjs.rs): true when a listener took it. */
-globals.__tarveUnhandledRejection = (reason: unknown, promise: Promise<unknown>): boolean =>
-  processEvents.listenerCount("unhandledRejection") > 0 && processEvents.emit("unhandledRejection", reason, promise);
+/**
+ * Called by the engine's rejection tracker (native/src/android/qjs.rs) for every rejection without
+ * a handler, and again with `handled` when one is attached later. QuickJS reports at the moment of
+ * rejection: `const p = f(); …; await p` inside a try/catch rejects before the `await` attaches.
+ * As Node does, a rejection is reported only if it is still unhandled once the jobs have run (a
+ * zero-delay timer, after every microtask). Returns true: this side reports it.
+ */
+const pendingRejections = new Map<Promise<unknown>, unknown>();
+let rejectionFlush: Timeout | undefined;
+function flushRejections(): void {
+  rejectionFlush = undefined;
+  const pending = [...pendingRejections];
+  pendingRejections.clear();
+  for (const [promise, reason] of pending) {
+    if (processEvents.listenerCount("unhandledRejection") && processEvents.emit("unhandledRejection", reason, promise)) continue;
+    host.log(2, `Unhandled promise rejection: ${show(reason)}`);
+  }
+}
+globals.__tarveUnhandledRejection = (reason: unknown, promise: Promise<unknown>, handled?: boolean): boolean => {
+  if (handled) pendingRejections.delete(promise);
+  else {
+    pendingRejections.set(promise, reason);
+    rejectionFlush ??= schedule(flushRejections, 0, [], false);
+  }
+  return true;
+};
 globals.reportError ??= reportError;
 
 // Timers: the host loop calls __tarveTick and sleeps until the delay it returns.
