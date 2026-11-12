@@ -22,6 +22,7 @@
     </nav>
   {/if}
   <div class="nav-actions">
+    <a href="/showcase" class:active={section === "showcase"} aria-current={section === "showcase" ? "page" : undefined}>Showcase</a>
     <a href="/docs" class:active={section === "docs"} aria-current={section === "docs" ? "page" : undefined}>Docs</a>
     <a href={repo}>GitHub</a>
     <a href="https://www.npmjs.com/package/@tarve/core">npm</a>

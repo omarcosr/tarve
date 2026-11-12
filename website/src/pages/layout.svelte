@@ -16,6 +16,7 @@
     from the runtime or live in WebAssembly.
   </p>
   <nav aria-label="Footer">
+    <a href="/showcase">Showcase</a>
     <a href="/docs">Docs</a>
     <a href={repo}>GitHub</a>
     <a href="https://www.npmjs.com/package/@tarve/core">npm</a>

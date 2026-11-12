@@ -48,6 +48,15 @@ app.get("/", (c) => {
   return c.render("index", { title, data: { version, section: "home" }, head: meta("/", title, description) });
 });
 
+app.get("/showcase", (c) => {
+  const title = "Showcase — Tarve";
+  return c.render("showcase", {
+    title,
+    data: { version, section: "showcase" },
+    head: meta("/showcase", title, "Apps built with Tarve: Termio, a YouTube Music client, Tarve Studio and more, each screenshot painted by Tarve itself."),
+  });
+});
+
 app.get("/docs", (c) => {
   const title = "Documentation — Tarve";
   return c.render("docs/index", {

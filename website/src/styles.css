@@ -1927,6 +1927,123 @@ h3 {
   color: var(--paper-3);
 }
 
+/* ---------- showcase ---------- */
+
+.showcase-hero h1 {
+  font-size: clamp(56px, 9vw, 128px);
+  font-weight: 800;
+  font-stretch: 68%;
+  line-height: 0.9;
+  text-transform: uppercase;
+}
+
+.showcase-hero .lead {
+  margin-top: 28px;
+}
+
+.showcase-app {
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+  column-gap: 48px;
+  align-items: start;
+  margin-top: 96px;
+  padding-top: 14px;
+  border-top: 1px solid var(--screen-border);
+}
+
+.showcase-hero + .showcase-app {
+  margin-top: 0;
+}
+
+.showcase-app .sheet-head {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.showcase-app .sheet-head,
+.showcase-submit .sheet-head {
+  margin-bottom: 0;
+  row-gap: 0;
+}
+
+.showcase-app .sheet-head > :not(.sec),
+.showcase-submit .sheet-head > :not(.sec) {
+  grid-column: 2;
+}
+
+.showcase-app .eyebrow {
+  margin-bottom: 6px;
+}
+
+.showcase-app .sheet-head h2 {
+  font-size: clamp(30px, 3.4vw, 44px);
+}
+
+.showcase-app.wide {
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 32px;
+}
+
+.showcase-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.showcase-tags li {
+  padding: 3px 8px;
+  border: 1px solid var(--screen-border);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.showcase-links {
+  align-items: center;
+  margin-top: 24px;
+}
+
+.showcase-run {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.showcase-shots {
+  display: grid;
+  gap: 16px;
+}
+
+.showcase-app.wide .showcase-shots {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.showcase-shots figure {
+  margin: 0;
+  border: 1px solid var(--screen-border);
+  background: var(--screen);
+}
+
+.showcase-shots img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+@media (max-width: 920px) {
+  .showcase-app,
+  .showcase-app.wide .showcase-shots {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .showcase-shots {
+    margin-top: 32px;
+  }
+}
+
 /* ---------- 404 ---------- */
 
 .notfound {
