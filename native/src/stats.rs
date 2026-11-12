@@ -69,12 +69,26 @@ impl FrameStats {
             "present": self.present.summary(),
             "frame": self.frame.summary(),
             "gpu": self.gpu.summary(),
+            "eventWait": EVENT_WAIT.lock().unwrap_or_else(|p| p.into_inner()).summary(),
         })
     }
 
     pub(crate) fn reset(&mut self) {
         *self = Self::default();
+        *EVENT_WAIT.lock().unwrap_or_else(|p| p.into_inner()) = Samples::default();
     }
+}
+
+/// How long native events (input, IME text, timers' replies) waited in the queue before JS took
+/// them: a JS thread busy elsewhere shows up here as keys arriving in bursts.
+static EVENT_WAIT: std::sync::Mutex<Samples> = std::sync::Mutex::new(Samples(VecDeque::new()));
+
+pub(crate) fn record_event_wait(queued: std::time::Instant) {
+    let ms = queued.elapsed().as_secs_f64() * 1000.0;
+    EVENT_WAIT
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .push(ms);
 }
 
 /// Process memory and elapsed time at named startup stages, plus a current reading on request.

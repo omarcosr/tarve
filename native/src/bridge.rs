@@ -282,7 +282,8 @@ mod wake_pipe {
 use wake_pipe::WakePipe;
 
 pub struct Events {
-    queue: Mutex<VecDeque<Vec<u8>>>,
+    /// Each event with when it was queued: the wait until JS takes it is a stat (`eventWait`).
+    queue: Mutex<VecDeque<(std::time::Instant, Vec<u8>)>>,
     wake: Condvar,
     wake_pipe: Mutex<WakePipe>,
 }
@@ -299,7 +300,7 @@ impl Events {
         let should_wake = {
             let mut queue = self.queue.lock().unwrap_or_else(|p| p.into_inner());
             let was_empty = queue.is_empty();
-            queue.push_back(event.to_string().into_bytes());
+            queue.push_back((std::time::Instant::now(), event.to_string().into_bytes()));
             was_empty
         };
         self.wake.notify_one();
@@ -665,11 +666,12 @@ pub unsafe extern "C" fn tarve_wait_event(ptr: *mut u8, capacity: u32) -> i32 {
         while queue.is_empty() {
             queue = events.wake.wait(queue).map_err(|e| e.to_string())?;
         }
-        let data = queue.front().unwrap();
+        let data = &queue.front().unwrap().1;
         if data.len() > capacity as usize {
             return Ok(-(data.len() as i32));
         }
-        let data = queue.pop_front().unwrap();
+        let (queued, data) = queue.pop_front().unwrap();
+        crate::stats::record_event_wait(queued);
         // SAFETY: caller owns a writable buffer of capacity bytes; length checked above.
         unsafe {
             std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
@@ -694,13 +696,14 @@ pub unsafe extern "C" fn tarve_poll_event(ptr: *mut u8, capacity: u32) -> i32 {
             .events
             .clone();
         let mut queue = events.queue.lock().map_err(|e| e.to_string())?;
-        let Some(data) = queue.front() else {
+        let Some((_, data)) = queue.front() else {
             return Ok(0);
         };
         if data.len() > capacity as usize {
             return Ok(-(data.len() as i32));
         }
-        let data = queue.pop_front().unwrap();
+        let (queued, data) = queue.pop_front().unwrap();
+        crate::stats::record_event_wait(queued);
         // SAFETY: caller owns a writable buffer of capacity bytes; length checked above.
         unsafe {
             std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
