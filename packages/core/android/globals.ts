@@ -274,8 +274,61 @@ uint8.fromBase64 ??= (text: string, options: { alphabet?: string } = {}): Uint8A
   return out.subarray(0, written);
 };
 
-// Web Crypto: random values (crypto.subtle is not provided).
+// Web Crypto: random values, and the crypto.subtle subset Tarve's updater and packs use
+// (SHA digests, Ed25519 verify, AES-GCM) on the runtime's native crypto.
 globals.crypto ??= {};
+const cryptoKeys = new WeakMap<object, { algorithm: string; raw: Uint8Array }>();
+const algorithmName = (algorithm: unknown): string => (typeof algorithm === "string" ? algorithm : (algorithm as { name?: string })?.name ?? "").toUpperCase();
+const cryptoBytes = (data: unknown): Uint8Array => {
+  if (data instanceof ArrayBuffer) return new Uint8Array(data);
+  if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  throw new TypeError("Expected an ArrayBuffer or a typed array");
+};
+const notSupported = (what: string) => Object.assign(new Error(`${what} is not supported on Android`), { name: "NotSupportedError" });
+const keyOf = (key: unknown, algorithm: string): Uint8Array => {
+  const entry = cryptoKeys.get(key as object);
+  if (!entry || entry.algorithm !== algorithm) throw Object.assign(new Error(`The key is not an ${algorithm} key`), { name: "InvalidAccessError" });
+  return entry.raw;
+};
+const owned = (bytes: Uint8Array): ArrayBuffer => bytes.slice().buffer as ArrayBuffer;
+// The native call takes the additional data only when there is some (no `undefined` argument).
+const aesGcm = (encrypt: boolean, key: unknown, algorithm: { iv: unknown; additionalData?: unknown }, data: unknown): Uint8Array => {
+  const args = [encrypt, keyOf(key, "AES-GCM"), cryptoBytes(algorithm.iv), cryptoBytes(data)] as const;
+  return algorithm.additionalData === undefined ? host.aesGcm(...args) : host.aesGcm(...args, cryptoBytes(algorithm.additionalData));
+};
+const DIGESTS: Record<string, string> = { "SHA-1": "sha1", "SHA-256": "sha256", "SHA-384": "sha384", "SHA-512": "sha512" };
+globals.crypto.subtle ??= {
+  async digest(algorithm: unknown, data: unknown): Promise<ArrayBuffer> {
+    const name = DIGESTS[algorithmName(algorithm)];
+    if (!name) throw notSupported(`digest ${algorithmName(algorithm)}`);
+    return owned(host.hash(name, cryptoBytes(data)));
+  },
+  async importKey(format: string, keyData: unknown, algorithm: unknown, extractable: boolean, usages: string[]): Promise<object> {
+    const name = algorithmName(algorithm);
+    if (format !== "raw" || (name !== "ED25519" && name !== "AES-GCM")) throw notSupported(`importKey ${format} ${name}`);
+    const raw = cryptoBytes(keyData).slice();
+    if (name === "ED25519" && raw.length !== 32) throw Object.assign(new Error("Ed25519 public key must be 32 bytes"), { name: "DataError" });
+    const key = { type: name === "ED25519" ? "public" : "secret", extractable, algorithm: { name: name === "ED25519" ? "Ed25519" : "AES-GCM", ...(name === "AES-GCM" ? { length: raw.length * 8 } : {}) }, usages: [...usages] };
+    cryptoKeys.set(key, { algorithm: name, raw });
+    return key;
+  },
+  async verify(algorithm: unknown, key: unknown, signature: unknown, data: unknown): Promise<boolean> {
+    if (algorithmName(algorithm) !== "ED25519") throw notSupported(`verify ${algorithmName(algorithm)}`);
+    return host.ed25519Verify(keyOf(key, "ED25519"), cryptoBytes(signature), cryptoBytes(data));
+  },
+  async encrypt(algorithm: { name: string; iv: unknown; additionalData?: unknown }, key: unknown, data: unknown): Promise<ArrayBuffer> {
+    if (algorithmName(algorithm) !== "AES-GCM") throw notSupported(`encrypt ${algorithmName(algorithm)}`);
+    return owned(aesGcm(true, key, algorithm, data));
+  },
+  async decrypt(algorithm: { name: string; iv: unknown; additionalData?: unknown }, key: unknown, data: unknown): Promise<ArrayBuffer> {
+    if (algorithmName(algorithm) !== "AES-GCM") throw notSupported(`decrypt ${algorithmName(algorithm)}`);
+    try {
+      return owned(aesGcm(false, key, algorithm, data));
+    } catch (error) {
+      throw Object.assign(new Error((error as Error).message), { name: "OperationError" });
+    }
+  },
+};
 globals.crypto.getRandomValues = <T extends ArrayBufferView>(array: T): T => {
   bytesOf(array).set(host.random(array.byteLength));
   return array;

@@ -4019,6 +4019,7 @@ dependencies = [
  "rayon",
  "resvg",
  "rfd",
+ "ring",
  "rodio",
  "rquickjs",
  "rustc-hash 2.1.3",

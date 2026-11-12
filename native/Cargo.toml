@@ -85,6 +85,8 @@ rquickjs = { version = "0.14", default-features = false, features = ["disable-as
 # node:crypto createHash for the QuickJS app.
 sha1 = "0.10"
 sha2 = "0.10"
+# crypto.subtle (Ed25519 verify, AES-GCM): the ring rustls already builds (src/android/qjs/subtle.rs).
+ring = "0.17"
 md-5 = "0.10"
 # TalkBack: AccessKit's Android provider injected into the NativeActivity view (src/accessibility/android.rs).
 accesskit = "=0.25.0"

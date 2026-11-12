@@ -28,6 +28,7 @@ mod dev;
 mod fetch;
 mod ffi;
 mod foreign_call;
+mod subtle;
 #[allow(unused_imports)]
 pub(crate) use bytecode::*;
 
@@ -553,6 +554,7 @@ fn install<'js>(
     }
     let globals = ctx.globals();
     globals.set("__tarveAssets", files)?;
+    subtle::install(ctx, &host)?;
     globals.set("__tarveHost", host)?;
     Ok(())
 }

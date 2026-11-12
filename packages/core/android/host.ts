@@ -42,6 +42,10 @@ export interface AndroidHost {
   readDir(path: string): string[];
 
   hash(algorithm: string, data: Uint8Array): Uint8Array;
+  /** crypto.subtle primitives (native/src/android/qjs/subtle.rs). */
+  ed25519Verify(key: Uint8Array, signature: Uint8Array, data: Uint8Array): boolean;
+  /** AES-GCM with a 128-bit tag; decryption throws when the tag does not match. */
+  aesGcm(encrypt: boolean, key: Uint8Array, iv: Uint8Array, data: Uint8Array, additionalData?: Uint8Array): Uint8Array;
   /** zlib-wrapped deflate ("deflate", with a level 0–9) or inflate ("inflate"); gzip members ("gzip", "gunzip"). */
   zlib(op: "deflate" | "inflate" | "gzip" | "gunzip", data: Uint8Array, level?: number): Uint8Array;
   random(size: number): Uint8Array;
