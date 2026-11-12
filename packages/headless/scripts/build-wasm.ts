@@ -22,7 +22,9 @@ function run(command: string[], env: Record<string, string | undefined>): void {
 
 for (const build of builds) {
   const env = { ...process.env, RUSTFLAGS: [process.env.RUSTFLAGS, build.rustflags].filter(Boolean).join(" ") };
-  run(["cargo", "build", "--release", "--target", "wasm32-unknown-unknown", "--target-dir", build.targetDir, "--no-default-features", "--features", "fxhash", "--lib"], env);
+  // syntax and markdown: <Code>, <Diff> and <Markdown> render as they do on the desktop.
+  // Without them the source shows as plain text (native/Cargo.toml features).
+  run(["cargo", "build", "--release", "--target", "wasm32-unknown-unknown", "--target-dir", build.targetDir, "--no-default-features", "--features", "fxhash,syntax,markdown", "--lib"], env);
   run([
     "wasm-bindgen",
     resolve(build.targetDir, "wasm32-unknown-unknown/release/tarve_native.wasm"),

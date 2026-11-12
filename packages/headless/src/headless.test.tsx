@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { deflateSync, inflateSync } from "node:zlib";
-import { Button, Card, Column, Image, Input, Row, Spinner, Text, View, Window, darkTheme, readPngRgba, type RgbaImage } from "@tarve/core";
+import { Button, Card, Code, Column, Image, Input, Markdown, Row, Spinner, Text, View, Window, darkTheme, readPngRgba, type RgbaImage } from "@tarve/core";
 import { createHeadlessApp, createHeadlessTestRenderer, loadHeadlessRuntime, matchImageSnapshot, renderToPng, renderToRgba } from "./index";
 
 const snapshots = resolve(import.meta.dirname, "../__snapshots__");
@@ -96,6 +96,38 @@ describe("@tarve/headless", () => {
     } finally {
       renderer.close();
     }
+  });
+
+  // The website playground runs this build: without the native "markdown" and "syntax"
+  // features a Markdown shows its raw source and Code has no highlighting.
+  test("Markdown is parsed and Code is highlighted, as on the desktop", async () => {
+    const renderer = await createHeadlessTestRenderer(() => (
+      <Window width={320} height={200}>
+        <Markdown id="md" source={"# Title\n\n**Bold** body"} />
+      </Window>
+    ));
+    try {
+      const snapshot = await renderer.inspect();
+      expect(snapshot.nodes.find((node) => node.id === "md")?.text).toBe("Title\n\nBold body");
+    } finally {
+      renderer.close();
+    }
+    // Coloured ink: syntax colours are chromatic; the plain foreground (and its antialiasing) is grey.
+    const chromatic = (image: RgbaImage) => {
+      let count = 0;
+      for (let y = 0; y < image.height; y++) {
+        for (let x = 0; x < image.width; x++) {
+          const [r, g, b] = pixel(image, x, y);
+          if (Math.max(r, g, b) - Math.min(r, g, b) > 80) count++;
+        }
+      }
+      return count;
+    };
+    const source = "export const answer = 42;";
+    const code = await renderToRgba(<Window width={360} height={60} theme={darkTheme}><Code code={source} language="ts" /></Window>);
+    const plain = await renderToRgba(<Window width={360} height={60} theme={darkTheme}><Code code={source} language="text" /></Window>);
+    expect(chromatic(plain)).toBeLessThan(20);
+    expect(chromatic(code)).toBeGreaterThan(100);
   });
 
   test("time only moves with advanceMotion: transitions are reproducible", async () => {

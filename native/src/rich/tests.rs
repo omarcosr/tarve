@@ -425,6 +425,31 @@ fn word_diff_pairs_only_runs_of_equal_length() {
 }
 
 #[test]
+fn generated_diff_emphasis_covers_the_inserted_text() {
+    let (_, rich) = diff(
+        "",
+        Some("const greeting = 'hello';\nconsole.log(greeting);\n"),
+        Some("const greeting = 'hello, tarve';\nconsole.log(greeting);\n"),
+        true,
+        &[],
+        None,
+    )
+    .unwrap();
+    let RichContent::Diff { rows, .. } = rich else {
+        panic!("expected diff")
+    };
+    let added = rows
+        .iter()
+        .find(|row| row.kind == DiffRowKind::Added)
+        .unwrap();
+    assert_eq!(&added.text[added.emphasis[0].clone()], ", tarve");
+    // The painter slices the emphasis out of the content (the text after the marker).
+    let offset = added.content_offset();
+    let range = added.emphasis[0].start - offset..added.emphasis[0].end - offset;
+    assert_eq!(&added.content_text()[range], ", tarve");
+}
+
+#[test]
 fn diff_reports_added_deleted_renamed_and_binary_files() {
     let patch = concat!(
         "diff --git a/new.rs b/new.rs\nnew file mode 100644\n--- /dev/null\n+++ b/new.rs\n@@ -0,0 +1 @@\n+added\n",
