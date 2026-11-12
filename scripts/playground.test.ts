@@ -11,9 +11,26 @@ import { NODE_BUILTINS, playgroundBunPlugin } from "../website/src/lib/playgroun
 const root = resolve(import.meta.dir, "..");
 const docs = resolve(root, "website/src/lib/docs");
 const out = resolve(root, "website/scripts/previews/.generated/playground-test");
-const names = readdirSync(resolve(docs, "examples")).filter(file => file.endsWith(".tsx")).map(file => file.slice(0, -4));
+/** What website/src/lib/Playground.svelte mounts: component examples and guide snippets. */
+const sources = ["examples", "guides"].flatMap(dir => readdirSync(resolve(docs, dir)).filter(file => file.endsWith(".tsx")).map(file => resolve(docs, dir, file)));
+const names = sources.map(path => path.slice(docs.length + 1, -4).replace(/\\/g, "/"));
 
 afterAll(() => rmSync(out, { recursive: true, force: true }));
+
+const sleep = Bun.sleep;
+/**
+ * A browser has no `process`: an unguarded `process.x` in core passes under Bun yet stops every
+ * live example on the site. Loading and rendering the examples run with it hidden, as on the page.
+ */
+async function withoutProcess<T>(run: () => Promise<T>): Promise<T> {
+  const host = Object.getOwnPropertyDescriptor(globalThis, "process")!;
+  delete (globalThis as { process?: unknown }).process;
+  try {
+    return await run();
+  } finally {
+    Object.defineProperty(globalThis, "process", host);
+  }
+}
 
 async function bundle(entry: string): Promise<Record<string, any>> {
   mkdirSync(out, { recursive: true });
@@ -22,7 +39,7 @@ async function bundle(entry: string): Promise<Record<string, any>> {
   writeFileSync(source, entry);
   const result = await Bun.build({ entrypoints: [source], outdir: out, naming: "bundle.mjs", target: "browser", format: "esm", throw: false, plugins: [playgroundBunPlugin()] });
   if (!result.success) throw new Error(result.logs.map(log => log.message).join("\n"));
-  return import(resolve(out, "bundle.mjs"));
+  return withoutProcess(() => import(resolve(out, "bundle.mjs")));
 }
 
 class RecordingBridge {
@@ -53,13 +70,14 @@ test("every Node built-in core imports has a playground stub", () => {
 test("@tarve/core and every documentation example build for the browser and render", async () => {
   const entry = [
     `import { Column, Window, createApp, darkTheme } from "@tarve/core";`,
-    ...names.map((name, index) => `import * as e${index} from ${JSON.stringify(resolve(docs, "examples", name + ".tsx"))};`),
+    ...sources.map((path, index) => `import * as e${index} from ${JSON.stringify(path)};`),
     `export const examples = { ${names.map((name, index) => `${JSON.stringify(name)}: e${index}`).join(", ")} };`,
     `export { Column, Window, createApp, darkTheme };`,
   ].join("\n");
   const built = await bundle(entry);
   const { createApp, Column, Window, darkTheme } = built;
   const failures: string[] = [];
+  await withoutProcess(async () => {
   for (const name of names) {
     const example = built.examples[name];
     const bridge = new RecordingBridge();
@@ -70,7 +88,7 @@ test("@tarve/core and every documentation example build for the browser and rend
         ? () => { const root = example.preview(); return root.type === Window ? { ...root, props: { ...root.props, theme: darkTheme } } : root; }
         : () => ({ type: Window, props: { title: "Example", theme: darkTheme, children: { type: Column, props: { flex: 1, align: "center", justify: "center", padding: 40, children: example.preview() } } } });
       const app = createApp(view, { bridge, renderer: "cpu", onError: (event: { error: unknown }) => errors.push(String(event.error)) });
-      await Promise.race([app.ready, Bun.sleep(5000).then(() => { throw new Error("app.ready timed out"); })]);
+      await Promise.race([app.ready, sleep(5000).then(() => { throw new Error("app.ready timed out"); })]);
       if (!bridge.document) errors.push("no document sent to the bridge");
       app.close();
     } catch (error) {
@@ -78,6 +96,7 @@ test("@tarve/core and every documentation example build for the browser and rend
     }
     if (errors.length) failures.push(`${name}: ${errors.join("; ")}`);
   }
+  });
   expect(failures).toEqual([]);
   expect(names.length).toBeGreaterThan(90);
 }, 120_000);

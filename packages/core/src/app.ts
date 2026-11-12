@@ -182,7 +182,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   }
 
   /** Android: the system Back arrives as a close request (native/src/runtime/android_input.rs). */
-  const ANDROID_BACK = process.platform === "android";
+  // No `process` in a browser (the WebAssembly playground).
+  const ANDROID_BACK = (globalThis as { process?: NodeJS.Process }).process?.platform === "android";
   /** `app.onBack` listeners; the highest priority, then the latest, runs first. */
   const backHandlers: { handler: () => boolean | void; priority: number; order: number; escape: boolean }[] = [];
   let backOrder = 0;
