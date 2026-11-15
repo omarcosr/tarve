@@ -1,4 +1,4 @@
-import type { DesktopWidget, WindowBackdrop, WindowLevel, WindowPosition } from "../protocol";
+import type { DesktopWidget, WindowBackdrop, WindowChrome, WindowLevel, WindowPosition } from "../protocol";
 import type { VNode } from "../jsx-runtime";
 import { theme, type ThemeDefinition } from "../theme";
 import { container, type ViewProps } from "./layout";
@@ -22,6 +22,19 @@ export interface WindowProps extends ViewProps {
   skipTaskbar?: boolean;
   /** No native frame or title bar, without needing a `TitleBar`. Pair with a `dragRegion` to move it. */
   frameless?: boolean;
+  /**
+   * What a `frameless` window keeps of the system frame on Windows 11: `"system"` (default) the
+   * rounded corners and the 1 px border (the root's `borderColor`), `"none"` square corners and no
+   * border, for shapes the app draws itself (a dock, a pill, an overlay). Set when the window opens.
+   */
+  chrome?: WindowChrome;
+  /**
+   * `false` opens the window hidden (nothing flashes on screen); `app.show()` or `app.activate()`
+   * shows it later. Default `true`.
+   */
+  visible?: boolean;
+  /** The whole window's opacity, 0–1 (Windows and X11), applied by the system compositor. Can change while the app runs. */
+  opacity?: number;
   /**
    * Make the window a desktop widget, `columns` × `rows` cells: frameless, below
    * every window (unless `level` says otherwise) and off the taskbar.

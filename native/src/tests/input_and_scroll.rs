@@ -289,6 +289,11 @@ pub(super) fn translucent_window_border_blends_over_the_background_for_dwm() {
     assert_eq!(opaque_border_rgb("#ffffff14", "#030303"), 0x171717);
     assert_eq!(opaque_border_rgb("#27272a", "#000000"), 0x27272a);
     assert_eq!(opaque_border_rgb("red", "#000000"), 0xe4e4e7);
+    // A see-through window (backdrop) clears to its colour at alpha 0: a dark hairline stays dark
+    // instead of blending with the clear colour as if it were opaque (a white frame).
+    assert_eq!(opaque_border_rgb("#ffffff14", "#ffffff00"), 0x141414);
+    assert_eq!(opaque_border_rgb("#ffffff14", "#09090b00"), 0x141414);
+    assert_eq!(opaque_border_rgb("#e4e4e7", "#ffffff00"), 0xe4e4e7);
 }
 
 /// A column of auto height whose child grows from a zero basis (`flex: 1`) is

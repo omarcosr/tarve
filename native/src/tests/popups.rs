@@ -324,3 +324,32 @@ fn a_portal_nested_in_a_modal_portal_is_hit_above_it() {
         "the option is clicked: {up:?}"
     );
 }
+
+#[test]
+fn deactivating_the_window_dismisses_the_open_popup_like_a_system_menu() {
+    let mut popup = node(
+        "popup",
+        "column",
+        json!({"position":"absolute","top":40,"left":20,"width":80,"height":30,"zIndex":1000}),
+        vec![],
+    );
+    popup.portal = true;
+    popup.dismiss_on_outside = true;
+    let background = node(
+        "background",
+        "view",
+        json!({"width":200,"height":120}),
+        vec![],
+    );
+    let mut tree = Tree::new(root(vec![background.clone(), popup]));
+    tree.compute(220.0, 140.0).unwrap();
+    // Even with the pointer over it: the click went to another window.
+    tree.pointer_move(40.0, 50.0);
+    assert_eq!(
+        tree.outside_dismissal_on_deactivate(),
+        vec![json!({"type":"outside", "id":"popup"})]
+    );
+    let mut closed = Tree::new(root(vec![background]));
+    closed.compute(220.0, 140.0).unwrap();
+    assert!(closed.outside_dismissal_on_deactivate().is_empty());
+}

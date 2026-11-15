@@ -98,3 +98,55 @@ pub(crate) fn pointer_in_window(window: &Window) -> Option<(f64, f64)> {
         }
     })
 }
+
+/// The X11 window id, or `None` on Wayland.
+fn x11_id(window: &Window) -> Result<Option<u32>, String> {
+    let handle = window.window_handle().map_err(|error| error.to_string())?;
+    Ok(match handle.as_raw() {
+        RawWindowHandle::Xlib(handle) => Some(handle.window as u32),
+        RawWindowHandle::Xcb(handle) => Some(handle.window.get()),
+        _ => None,
+    })
+}
+
+/// Whole-window opacity through `_NET_WM_WINDOW_OPACITY` (read by X11 compositors).
+pub(crate) fn set_opacity(window: &Window, opacity: f64) -> Result<(), String> {
+    let Some(id) = x11_id(window)? else {
+        return Err("window opacity is not supported on Wayland".into());
+    };
+    let (connection, _) = RustConnection::connect(None).map_err(|error| error.to_string())?;
+    let property = connection
+        .intern_atom(false, b"_NET_WM_WINDOW_OPACITY")
+        .map_err(|error| error.to_string())?
+        .reply()
+        .map_err(|error| error.to_string())?
+        .atom;
+    let cookie = if opacity >= 1.0 {
+        connection
+            .delete_property(id, property)
+            .map_err(|error| error.to_string())?
+    } else {
+        let value = (opacity * f64::from(u32::MAX)).round() as u32;
+        connection
+            .change_property32(
+                PropMode::REPLACE,
+                id,
+                property,
+                AtomEnum::CARDINAL,
+                &[value],
+            )
+            .map_err(|error| error.to_string())?
+    };
+    cookie.check().map_err(|error| error.to_string())
+}
+
+/// The pointer's position on the X11 screen; `None` on Wayland or without a display.
+pub(crate) fn cursor_position() -> Option<(i32, i32)> {
+    let (connection, screen) = RustConnection::connect(None).ok()?;
+    let root = x11rb::connection::Connection::setup(&connection)
+        .roots
+        .get(screen)?
+        .root;
+    let reply = connection.query_pointer(root).ok()?.reply().ok()?;
+    Some((i32::from(reply.root_x), i32::from(reply.root_y)))
+}

@@ -13,6 +13,8 @@ export type PastePayload =
   | { kind: "files"; files: string[] }
   | { kind: "image"; width: number; height: number; rgba: Uint8Array };
 /** A pinch step: `scale` is cumulative (1 at "start"); `x`, `y` are the fingers' midpoint. */
+/** `onSize`: the content box, and the border box (padding and border included). */
+export interface SizeEvent { width: number; height: number; borderBox: { width: number; height: number } }
 export interface PinchEvent {
   phase: "start" | "move" | "end";
   scale: number;
@@ -72,8 +74,12 @@ export interface BaseProps {
   onTransitionEnd?: (event: { property: MotionProperty }) => void;
   /** Receives non-text clipboard content (files or a bitmap) pasted while focused. */
   onPaste?: (payload: PastePayload) => void;
-  /** Content-box size after layout, on mount and whenever it changes (a ResizeObserver). */
-  onSize?: (size: { width: number; height: number }) => void;
+  /**
+   * Size after layout, on mount and whenever it changes (a ResizeObserver): `width`/`height` the
+   * content box (without padding and border, as `contentRect`), `borderBox` the whole box with them
+   * (`borderBoxSize`).
+   */
+  onSize?: (size: SizeEvent) => void;
   /** Pointer position inside this node (like DOM `offsetX`/`offsetY`) while it is over it or its children. */
   onPointerMove?: (point: { x: number; y: number }) => void;
   /** The pointer left this node and its children (DOM `pointerleave`). */

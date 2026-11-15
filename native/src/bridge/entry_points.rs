@@ -187,6 +187,48 @@ pub(super) fn take_pending_plugin_events() -> Vec<serde_json::Value> {
     )
 }
 
+/// The sessions `tarve_media_sessions` read that did not fit the caller's buffer, handed to the
+/// next call (made with the capacity asked for) instead of listing them again.
+static PENDING_MEDIA_SESSIONS: std::sync::Mutex<Option<Vec<u8>>> = std::sync::Mutex::new(None);
+
+/// Other apps' media sessions (Windows GlobalSystemMediaTransportControlsSessionManager) as a
+/// JSON array of `ExternalMediaSession` into `out`; `[]` elsewhere. Returns its length, below -1
+/// the capacity it needs (the list is kept for the next call, which should pass that much), or
+/// -1 with tarve_last_error set.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tarve_media_sessions(out: *mut u8, capacity: u32) -> i32 {
+    guard(|| {
+        let mut pending = PENDING_MEDIA_SESSIONS
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let json = match pending.take() {
+            Some(json) => json,
+            None => serde_json::to_vec(&crate::media_sessions::sessions()?)
+                .map_err(|error| error.to_string())?,
+        };
+        let written = unsafe { output(&json, out, capacity)? };
+        if written < -1 {
+            *pending = Some(json);
+        }
+        Ok(written)
+    })
+}
+
+/// Asks the first media session of the app whose AppUserModelID is the UTF-8 at `ptr` to play
+/// (`action` 0), pause (1), toggle (2), skip to the next (3) or previous (4) track. Returns 1
+/// when the app accepted, 0 when it refused or no session has that id (always 0 off Windows),
+/// or -1 with tarve_last_error set.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tarve_media_session_control(action: u32, ptr: *const u8, len: u32) -> i32 {
+    guard(|| {
+        let action = crate::media_sessions::MediaAction::from_code(action)
+            .ok_or_else(|| format!("tarve_media_session_control: unknown action {action}"))?;
+        let app_id = std::str::from_utf8(unsafe { input(ptr, len)? })
+            .map_err(|_| "tarve_media_session_control: the app id is not UTF-8")?;
+        Ok(i32::from(crate::media_sessions::control(app_id, action)?))
+    })
+}
+
 /// The address of `tarve_plugin_emit`, which JavaScript hands to a plugin's library
 /// (`ctx.emitAddress()`): the library calls it without linking against this one.
 #[unsafe(no_mangle)]

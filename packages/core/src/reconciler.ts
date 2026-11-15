@@ -550,7 +550,13 @@ export function compileTree(
       windowOptions = { title: p.title ?? "Tarve", width, height,
         minWidth: p.minWidth ?? Math.min(780, width), minHeight: p.minHeight ?? Math.min(580, height),
         background: resolveStyleString("background", p.style?.background ?? theme.colors.background, selectedTheme),
-        decorations: !p.frameless, resizable: p.resizable ?? true, position: p.position ?? "center", debug, visible };
+        decorations: !p.frameless, resizable: p.resizable ?? true, position: p.position ?? "center", debug,
+          visible: visible && p.visible !== false };
+        if (p.chrome === "none") windowOptions.chrome = "none";
+        if (p.opacity !== undefined) {
+          if (typeof p.opacity !== "number" || !Number.isFinite(p.opacity)) throw new RangeError("Window opacity must be a number from 0 to 1");
+          if (p.opacity < 1) windowOptions.opacity = Math.max(0, p.opacity);
+        }
       if (p.level && p.level !== "normal") windowOptions.level = p.level;
       if (p.maximized) windowOptions.maximized = true;
       if (p.skipTaskbar) windowOptions.skipTaskbar = true;

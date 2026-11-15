@@ -1,4 +1,4 @@
-import { jsx, type BaseProps, type Child, type VNode } from "./jsx-runtime";
+import { jsx, type BaseProps, type Child, type SizeEvent, type VNode } from "./jsx-runtime";
 import type { ScrollInfo, VirtualListMeasurement } from "./protocol";
 import { Column, Row, Scroll } from "./components";
 import { currentRenderEpoch, currentRenderScope } from "./render-scope";
@@ -610,7 +610,7 @@ export function VirtualList<T>(props: VirtualListProps<T> | VariableVirtualListP
     const id = props.id;
     const store = heights;
     const onSize = props.onSize;
-    const measured = { ...props, height: store.get(id) ?? FILL_ESTIMATE, onSize: (size: { width: number; height: number }) => {
+    const measured = { ...props, height: store.get(id) ?? FILL_ESTIMATE, onSize: (size: SizeEvent) => {
       if (size.height > 0) store.set(id, size.height);
       onSize?.(size);
     } };

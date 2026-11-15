@@ -357,9 +357,13 @@ export type WindowPosition = WindowPositionPreset | { x: number; y: number; phys
 export interface WindowOptions {
   title: string; width: number; height: number; minWidth: number; minHeight: number;
   background: string; decorations: boolean; resizable: boolean; position?: WindowPosition; debug?: boolean;
-  /** Test/runtime option: keep the native desktop window hidden. */
+  /** `false` creates the window hidden; `app.show()` shows it later. */
   visible?: boolean;
   level?: WindowLevel;
+  /** Frameless windows: keep the system corners and border (`system`, default) or drop them (`none`). */
+  chrome?: WindowChrome;
+  /** Whole-window opacity, 0–1 (default 1). */
+  opacity?: number;
   /** No taskbar button or task switcher entry (Windows; Linux on X11). */
   skipTaskbar?: boolean;
   /** A desktop widget `columns` × `rows` cells (the icon grid on Windows; 80 × 100 cells on Linux). */
@@ -383,6 +387,19 @@ export type WindowBackdrop = "none" | "transparent" | "blur" | "mica" | "acrylic
 export interface DesktopWidget { columns: number; rows: number }
 /** Stacking: `alwaysOnBottom` keeps the window under every other one, like a desktop widget. */
 export type WindowLevel = "normal" | "alwaysOnTop" | "alwaysOnBottom";
+/**
+ * The frame a frameless window keeps from the system: `system` (default) the Windows 11 rounded
+ * corners and 1 px border (in the root's `borderColor`), `none` square corners and no border.
+ */
+export type WindowChrome = "system" | "none";
+export type AppBarEdge = "top" | "bottom" | "left" | "right";
+/** A monitor, in physical screen px; `workArea` leaves out the taskbar and docked AppBars. */
+export interface ScreenInfo {
+  name?: string; x: number; y: number; width: number; height: number;
+  workArea: { x: number; y: number; width: number; height: number };
+  /** Device pixels per logical px (DPI / 96 on Windows). */
+  scale: number; primary: boolean;
+}
 export type TextRendering = "grayscale" | "cleartype";
 export interface SceneDocument {
   version: number; renderer: Renderer; window: WindowOptions; root: NativeNode;
@@ -446,6 +463,20 @@ export type NativeCommand =
   | { type: "window"; action: WindowAction }
   | { type: "windowLevel"; level: WindowLevel }
   | { type: "windowTitle"; title: string }
+  /**
+   * Moves and/or resizes the window: `x`/`y` its outer top-left, `width`/`height` its client size,
+   * in logical px (physical screen px with `physical`). A missing field keeps its value.
+   */
+  | { type: "windowBounds"; x?: number; y?: number; width?: number; height?: number; physical?: boolean }
+  /** The whole window's opacity, 0–1 (Windows: a layered window; Linux X11: _NET_WM_WINDOW_OPACITY). */
+  | { type: "windowOpacity"; opacity: number }
+  /**
+   * Windows: makes the window an application desktop toolbar (AppBar) docked to `edge`, `size` logical px
+   * thick, with the screen space reserved so maximized windows stop at it; `edge: null` releases it.
+   */
+  | { type: "appBar"; edge: AppBarEdge | null; size?: number }
+  /** The monitors and the pointer's screen position; answered by `screens`. */
+  | { type: "screens"; requestId: string }
   | { type: "tray"; tray: NativeTrayOptions | null }
   /** The window's native menu bar (Windows); null removes it. */
   | { type: "menuBar"; menu: NativeTrayMenuItem[] | null }
@@ -541,7 +572,12 @@ export interface NativeStats {
 }
 export interface NativeSurfaceEvent { type: "surface"; id: string; event: "ready" | "resize" | "destroyed" | "unsupported"; width: number; height: number; scale: number; handle?: string; handleType?: "ISwapChainPanelNative" | "TarveGL" | "TarveFrames" | "X11Window"; /** Why an `unsupported` surface could not be made. */ message?: string }
 export type NativeEvent =
-  | { type: "ready" | "closed" }
+  /** The first frame is on screen; `handle` is the native window (HWND on Windows, XID on X11) as a decimal string. */
+  | { type: "ready"; handle?: string }
+  | { type: "closed" }
+  /** The window gained or lost the keyboard focus (became or stopped being the active window). */
+  | { type: "windowFocus"; focused: boolean }
+  | { type: "screens"; requestId: string; screens: ScreenInfo[]; cursor: { x: number; y: number } | null }
   | { type: "closeRequest" }
   | { type: "tray"; action: "click" | "doubleClick" }
   | { type: "systemMedia"; action: "play" | "pause" | "next" | "previous" | "seek"; time?: number }

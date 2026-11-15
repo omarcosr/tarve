@@ -75,3 +75,48 @@ fn packed_node_updates_parse_as_their_json_does() {
     assert!(Command::from_packed_sets(&packed[..packed.len() - 3]).is_err());
     assert!(Command::from_packed_sets(&[1, 9, 0, 0, 0, 0]).is_err());
 }
+
+#[test]
+fn window_commands_and_options_parse() {
+    use crate::protocol::{AppBarEdge, Command, WindowChrome, WindowOptions};
+    let bounds = Command::from_json(br#"{"type":"windowBounds","x":-10,"width":300}"#).unwrap();
+    assert!(matches!(
+        bounds,
+        Command::WindowBounds { x: Some(x), y: None, width: Some(w), height: None, physical: false }
+            if x == -10.0 && w == 300.0
+    ));
+    assert!(matches!(
+        Command::from_json(br#"{"type":"windowOpacity","opacity":0.5}"#).unwrap(),
+        Command::WindowOpacity { opacity } if opacity == 0.5
+    ));
+    assert!(matches!(
+        Command::from_json(br#"{"type":"appBar","edge":"bottom","size":56}"#).unwrap(),
+        Command::AppBar { edge: Some(AppBarEdge::Bottom), size: Some(size) } if size == 56.0
+    ));
+    assert!(matches!(
+        Command::from_json(br#"{"type":"appBar","edge":null}"#).unwrap(),
+        Command::AppBar {
+            edge: None,
+            size: None
+        }
+    ));
+    assert!(matches!(
+        Command::from_json(br#"{"type":"screens","requestId":"r"}"#).unwrap(),
+        Command::Screens { request_id } if request_id == "r"
+    ));
+    let base =
+        r##""title":"t","width":1,"height":1,"minWidth":1,"minHeight":1,"background":"#000""##;
+    let plain: WindowOptions = serde_json::from_str(&format!("{{{base}}}")).unwrap();
+    assert_eq!(
+        (plain.chrome, plain.opacity, plain.visible),
+        (WindowChrome::System, None, true)
+    );
+    let custom: WindowOptions = serde_json::from_str(&format!(
+        r#"{{{base},"chrome":"none","opacity":0.25,"visible":false}}"#
+    ))
+    .unwrap();
+    assert_eq!(
+        (custom.chrome, custom.opacity, custom.visible),
+        (WindowChrome::None, Some(0.25), false)
+    );
+}

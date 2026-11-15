@@ -126,6 +126,15 @@ function allowForeground(pid: number): void {
   } catch {}
 }
 
+/**
+ * The pid a first instance answered with: a positive integer, or nothing when the answer is
+ * garbled or empty (a process going away mid-reply), which is no first instance.
+ */
+export function liveInstancePid(answer: string): number | undefined {
+  const pid = Number(answer.trim());
+  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
+
 /** Hands this launch to a running first instance; its pid, or undefined when none answers. */
 function forward(address: string, launch: InstanceLaunch, timeoutMs = 2000): Promise<number | undefined> {
   return new Promise(resolve => {
@@ -138,7 +147,9 @@ function forward(address: string, launch: InstanceLaunch, timeoutMs = 2000): Pro
     socket.on("data", chunk => {
       reply += chunk;
       const line = reply.indexOf("\n");
-      if (line >= 0) done(Number(reply.slice(0, line)));
+      // Only a live first instance's pid counts: a garbled or empty answer (a process going
+      // away mid-reply) is no instance, so this launch goes on to become the first one.
+      if (line >= 0) done(liveInstancePid(reply.slice(0, line)));
     });
     socket.on("error", () => done());
     socket.on("close", () => done());
@@ -201,7 +212,11 @@ export async function requestSingleInstance(options: SingleInstanceOptions = {})
       try { listener({ ...next, urls }); } catch (error) { console.error("[tarve] onSecondInstance", error); }
     }
   };
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // A first instance that was just killed can leave its pipe or socket behind for a moment: nobody
+  // answers, yet listening fails too. Retry with a growing pause (about 2.5 s in all) instead of
+  // giving up on the first round.
+  for (let attempt = 0; attempt < 8; attempt++) {
+    if (attempt > 1) await new Promise(resolve => setTimeout(resolve, Math.min(50 * 2 ** (attempt - 2), 800)));
     const pid = await forward(address, launch);
     if (pid !== undefined) {
       allowForeground(pid);

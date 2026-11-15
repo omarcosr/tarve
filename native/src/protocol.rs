@@ -586,6 +586,31 @@ pub struct WindowOptions {
     /// Report the window's restored bounds and maximized state as `windowState` events.
     #[serde(default)]
     pub report_window_state: bool,
+    /// Frameless windows: the system's rounded corners and border, or none.
+    #[serde(default)]
+    pub chrome: WindowChrome,
+    /// Whole-window opacity, 0–1.
+    #[serde(default)]
+    pub opacity: Option<f64>,
+}
+
+/// What a frameless window keeps of the system frame (Windows 11 corners and border).
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WindowChrome {
+    #[default]
+    System,
+    None,
+}
+
+/// The screen edge an AppBar docks to.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AppBarEdge {
+    Top,
+    Bottom,
+    Left,
+    Right,
 }
 
 /// What a window shows behind its translucent pixels.
@@ -900,6 +925,28 @@ pub enum Command {
     },
     WindowTitle {
         title: String,
+    },
+    /// Moves and/or resizes the window (logical px, or physical screen px with `physical`).
+    WindowBounds {
+        x: Option<f64>,
+        y: Option<f64>,
+        width: Option<f64>,
+        height: Option<f64>,
+        #[serde(default)]
+        physical: bool,
+    },
+    WindowOpacity {
+        opacity: f64,
+    },
+    /// Windows: dock the window as an AppBar on `edge` (`None` releases it).
+    AppBar {
+        edge: Option<AppBarEdge>,
+        size: Option<f64>,
+    },
+    /// The monitors and the pointer position, answered by a `screens` event.
+    Screens {
+        #[serde(rename = "requestId")]
+        request_id: String,
     },
     Tray {
         tray: Option<TrayOptions>,

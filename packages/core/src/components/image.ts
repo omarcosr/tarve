@@ -291,6 +291,17 @@ export function clearImageSourceCache(): void {
   failedSources.clear();
 }
 
+/**
+ * Displays a raster image (PNG, JPEG, WebP, ICO), an SVG, an HTTP(S) URL or in-memory bytes.
+ *
+ * On Windows, `src` may also name an executable, library or shortcut (`.exe`, `.dll`, `.lnk`):
+ * the image is the file's shell icon as Explorer draws it (a shortcut shows its target's icon),
+ * 256 px when the file carries a jumbo icon, else 48 or 32 px. Other platforms decode those paths
+ * as ordinary images, so they fail and fire `onError` (or show `fallbackSrc`).
+ *
+ * @example
+ * <Image src="C:\\Windows\\System32\\notepad.exe" width={48} height={48} />
+ */
 export function Image({ width, height, style, fallbackSrc, onError, ...props }: ImageProps): VNode {
   const failed = fallbackSrc !== undefined && typeof props.src === "string" && failedSources.has(props.src);
   const src = props.src;

@@ -5,6 +5,7 @@ import { List } from "./list";
 import { Select } from "./select";
 import { VirtualList } from "./virtual-list";
 import { compileTree, diffTrees } from "./reconciler";
+import { darkTheme, lightTheme } from "./theme";
 
 describe("control kit", () => {
   test("uses the portable system UI family for default text", () => {
@@ -28,6 +29,19 @@ describe("control kit", () => {
     expect(initial.nodes.get("progress")?.control?.role).toBe("progress");
     expect(JSON.stringify(initial.document)).not.toContain("onCheckedChange");
     expect(diffTrees(initial, view(true, 25))?.map(node => node.id)).toContain("slider");
+  });
+
+  test("a checked Switch keeps its thumb visible on the track in both themes", () => {
+    for (const theme of [lightTheme, darkTheme]) {
+      for (const checked of [false, true]) {
+        const tree = compileTree(<Window theme={theme} backdrop="mica"><Switch id="switch" checked={checked} label="Wi-Fi" /></Window>);
+        const nodes = [...tree.nodes.values()];
+        const track = nodes.find(node => node.style.width === 36 && node.style.height === 20);
+        const thumb = nodes.find(node => node.style.width === 16 && node.style.height === 16);
+        expect(track?.style.background).toBeDefined();
+        expect(thumb?.style.background).not.toBe(track?.style.background);
+      }
+    }
   });
 
   test("groups radio and tab choices and rejects invalid slider ranges", () => {

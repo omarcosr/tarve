@@ -28,9 +28,9 @@ describe("VirtualList without a height", () => {
     const first = compileTree(view(), false, "auto", [], scope);
     // Before layout: an estimate of 800px (40 rows + overscan).
     expect(rows(first)).toBe(42);
-    first.handlers.get("list")!.onSize!({ width: 300, height: 200 });
+    first.handlers.get("list")!.onSize!({ width: 300, height: 200, borderBox: { width: 300, height: 200 } });
     expect(rows(compileTree(view(), false, "auto", [], scope))).toBe(12);
-    first.handlers.get("list")!.onSize!({ width: 300, height: 1000 });
+    first.handlers.get("list")!.onSize!({ width: 300, height: 1000, borderBox: { width: 300, height: 1000 } });
     expect(rows(compileTree(view(), false, "auto", [], scope))).toBe(52);
   });
 

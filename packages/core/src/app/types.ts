@@ -1,4 +1,4 @@
-import type { FileDialogOptions, LayoutBox, NativeEvent, NativeCommand, NativeStats, NativeSystemMediaSession, PermissionState, PhaseSummary, Renderer, Snapshot, TextRendering } from "../protocol";
+import type { AppBarEdge, ScreenInfo, FileDialogOptions, LayoutBox, NativeEvent, NativeCommand, NativeStats, NativeSystemMediaSession, PermissionState, PhaseSummary, Renderer, Snapshot, TextRendering } from "../protocol";
 import { type MediaController } from "../media-element";
 import { type SurfaceController } from "../surface";
 import { type NativeBridge } from "../bridge";
@@ -244,6 +244,30 @@ export interface AppHandle {
   isFullscreen(): boolean;
   /** Called when the window enters or leaves full screen, however it happened. Returns the unsubscribe. */
   onFullscreenChange(listener: (fullscreen: boolean) => void): () => void;
+  /** Whether the window is the active one (has the keyboard focus), as its `windowFocus` events report it. */
+  isFocused(): boolean;
+  /** Called when the window becomes or stops being the active window (DOM `window` focus/blur). Returns the unsubscribe. */
+  onFocusChange(listener: (focused: boolean) => void): () => void;
+  /**
+   * The native window: HWND on Windows, XID on X11 (`wl_surface*` on Wayland, `NSView*` on macOS),
+   * as a decimal string for FFI. `undefined` until `ready`.
+   */
+  nativeHandle(): string | undefined;
+  /**
+   * Moves and/or resizes the window after it opened: `x`/`y` its outer top-left, `width`/`height`
+   * its client size, in logical px (physical screen px with `physical: true`). Missing fields keep their value.
+   */
+  setBounds(bounds: { x?: number; y?: number; width?: number; height?: number; physical?: boolean }): void;
+  /** The whole window's opacity, 0–1 (Windows and X11). The Window's `opacity` prop sets it declaratively. */
+  setOpacity(opacity: number): void;
+  /**
+   * Windows: docks the window to a screen edge as an AppBar, `size` logical px thick (default 48),
+   * reserving that space (maximized windows and the desktop stop at it); `null` releases it.
+   * Released on close too. Pair with `frameless` and `skipTaskbar`.
+   */
+  appBar(edge: AppBarEdge | null, options?: { size?: number }): void;
+  /** Every monitor (physical px, work area, scale, primary) and the pointer's screen position (`null` where unknown, e.g. Wayland). */
+  screens(): Promise<{ screens: ScreenInfo[]; cursor: { x: number; y: number } | null }>;
   /** Shows a system tray icon (Windows, Linux); `onAvailability` / `availability()` say whether it can be seen. A second call replaces the first tray. */
   tray(options: TrayOptions): TrayHandle;
   /**

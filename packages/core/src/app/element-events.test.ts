@@ -99,4 +99,31 @@ describe("createElementDispatcher", () => {
     dispatch({ type: "dragCancel", id: "card" } as ElementEvent);
     expect(log).toEqual(["leave a", "end:null:true"]);
   });
+
+  test("a drag source removed or re-keyed mid-drag still gets its onDragEnd", () => {
+    const log: string[] = [];
+    const table: Record<string, Handlers> = {
+      card: { onDragMove: event => { log.push(`move ${event.x}`); }, onDragEnd: event => { log.push(`end:${event.target}:${event.cancelled}`); } },
+    };
+    const { dispatch } = harness(table);
+    dispatch({ type: "dragStart", id: "card", x: 0, y: 0 });
+    // A render dropped the node: its id has no handlers any more.
+    delete table.card;
+    dispatch({ type: "dragMove", id: "card", x: 5, y: 5, over: null });
+    dispatch({ type: "drop", id: "card", target: null, x: 6, y: 6 });
+    expect(log).toEqual(["move 5", "end:null:false"]);
+    log.length = 0;
+    table.card = { onDragEnd: () => { log.push("end"); } };
+    dispatch({ type: "dragStart", id: "card", x: 0, y: 0 });
+    delete table.card;
+    dispatch({ type: "dragCancel", id: "card" } as ElementEvent);
+    expect(log).toEqual(["end"]);
+  });
+
+  test("onSize carries the content box and the border box", () => {
+    const seen: unknown[] = [];
+    const { dispatch } = harness({ box: { onSize: size => { seen.push(size); } } });
+    dispatch({ type: "size", id: "box", width: 80, height: 20, x: 0, y: 0, borderWidth: 100, borderHeight: 40 });
+    expect(seen).toEqual([{ width: 80, height: 20, borderBox: { width: 100, height: 40 } }]);
+  });
 });

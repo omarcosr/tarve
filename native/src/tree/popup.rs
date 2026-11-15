@@ -183,7 +183,9 @@ impl Tree {
         .unwrap_or(Vec2::ZERO)
     }
 
-    pub(super) fn outside_dismissal_at_pointer(&self) -> Option<String> {
+    /// The open popup a press outside would dismiss: the topmost dismissable portal, else
+    /// (no popup open) the dismissable in-flow boxes that are shown, topmost first.
+    fn dismissable_layers(&self) -> Vec<String> {
         let mut portals: Vec<_> = self
             .portal_roots()
             .into_iter()
@@ -196,36 +198,48 @@ impl Tree {
                 .unwrap_or(0.0)
                 .total_cmp(&self.stacking.get(b).copied().unwrap_or(0.0))
         });
-        let Some(portal) = portals.last() else {
-            // No open popup: an in-flow box (a menu inside the page) dismisses the same way.
-            return self
-                .order
-                .iter()
-                .rev()
-                .filter(|id| {
-                    let node = &self.entries[*id].node;
-                    if !node.dismiss_on_outside || node.portal {
+        if let Some(portal) = portals.last() {
+            return vec![portal.clone()];
+        }
+        // No open popup: an in-flow box (a menu inside the page) dismisses the same way.
+        self.order
+            .iter()
+            .rev()
+            .filter(|id| {
+                let node = &self.entries[*id].node;
+                if !node.dismiss_on_outside || node.portal {
+                    return false;
+                }
+                let mut current = Some(id.as_str());
+                while let Some(key) = current {
+                    let entry = &self.entries[key];
+                    if entry.node.string("display", "flex") == "none" {
                         return false;
                     }
-                    let mut current = Some(id.as_str());
-                    while let Some(key) = current {
-                        let entry = &self.entries[key];
-                        if entry.node.string("display", "flex") == "none" {
-                            return false;
-                        }
-                        current = entry.parent.as_deref();
-                    }
-                    true
-                })
-                .find(|id| {
-                    let offset = self.ancestor_scroll_offset(id);
-                    let bounds = self.entries[*id].bounds + Vec2::new(-offset.x, -offset.y);
-                    !bounds.contains(self.mouse)
-                })
-                .cloned();
-        };
-        let offset = self.ancestor_scroll_offset(portal);
-        let bounds = self.entries[portal].bounds + Vec2::new(-offset.x, -offset.y);
-        (!bounds.contains(self.mouse)).then(|| portal.clone())
+                    current = entry.parent.as_deref();
+                }
+                true
+            })
+            .cloned()
+            .collect()
+    }
+
+    pub(super) fn outside_dismissal_at_pointer(&self) -> Option<String> {
+        self.dismissable_layers().into_iter().find(|id| {
+            let offset = self.ancestor_scroll_offset(id);
+            let bounds = self.entries[id].bounds + Vec2::new(-offset.x, -offset.y);
+            !bounds.contains(self.mouse)
+        })
+    }
+
+    /// The window stopped being the active one (a click in another window or app): like a
+    /// system menu, the topmost open popup or menu is dismissed as by a press outside it.
+    pub fn outside_dismissal_on_deactivate(&self) -> Vec<serde_json::Value> {
+        self.dismissable_layers()
+            .into_iter()
+            .next()
+            .map(|id| serde_json::json!({"type":"outside", "id":id}))
+            .into_iter()
+            .collect()
     }
 }

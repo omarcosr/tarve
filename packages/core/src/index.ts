@@ -66,13 +66,14 @@ export type { ComponentAdapter, ComponentAdapterInput } from "./component-adapte
 export { theme, Theme, lightTheme, darkTheme, createTheme, buttonVariants } from "./theme";
 export type { ThemeColors, ThemeFocusOutline, ThemeDefinition, ThemeOverrides, ButtonVariant } from "./theme";
 export { Style } from "./style";
-export type { StateStyle, OutlineStyle, BorderStyle, TextShadow, BoxShadow, Transform, Gradient, GradientStop, GradientSide, GradientLength, GradientCentre, RadialExtent, LinearGradient, RadialGradient, ConicGradient, ConicGradientStop, UserSelect, TextDecoration, GlassMaterial, Renderer, TextRendering, WindowPosition, WindowPositionPreset, WindowLevel, WindowBackdrop, DesktopWidget, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition, ScrollSource, ScrollInfo, MotionProperty, NumericMotionProperty, MotionEasing, MotionTransition, MotionTransitions, MotionValues, MemoryReading, NativeStats, PhaseSummary } from "./protocol";
-export type { VNode, Child, PastePayload, DragPosition, DragMoveEvent, DragEndEvent, DropEvent, DraggableProps, DropTargetProps, FileDropEvent, FileDropTargetProps } from "./jsx-runtime";
+export type { StateStyle, OutlineStyle, BorderStyle, TextShadow, BoxShadow, Transform, Gradient, GradientStop, GradientSide, GradientLength, GradientCentre, RadialExtent, LinearGradient, RadialGradient, ConicGradient, ConicGradientStop, UserSelect, TextDecoration, GlassMaterial, Renderer, TextRendering, WindowPosition, WindowPositionPreset, WindowLevel, WindowBackdrop, WindowChrome, AppBarEdge, ScreenInfo, DesktopWidget, FileDialogFilter, FileDialogOptions, ScrollOrientation, ScrollPosition, ScrollSource, ScrollInfo, MotionProperty, NumericMotionProperty, MotionEasing, MotionTransition, MotionTransitions, MotionValues, MemoryReading, NativeStats, PhaseSummary } from "./protocol";
+export type { VNode, Child, PastePayload, DragPosition, DragMoveEvent, DragEndEvent, DropEvent, SizeEvent, DraggableProps, DropTargetProps, FileDropEvent, FileDropTargetProps } from "./jsx-runtime";
 export { BunFfiBridge, openExternal } from "./bridge";
 export type { NativeBridge, BunFfiBridgeOptions } from "./bridge";
 export { CanvasRenderingContext2D, CanvasGradient, parseCanvasFont } from "./canvas";
 export type { MediaAudioTrack, MediaTextTrack, MediaController, MediaElementProps, MediaErrorInfo, MediaEventInfo, SubtitleTrack } from "./media-element";
 export { Surface, type SurfaceController, type SurfaceEvent, type SurfaceGl, type SurfacePixelFormat, type SurfaceProps } from "./surface";
 export { parseSubtitles } from "./subtitles";
+export { systemMediaSessions, controlSystemMediaSession, type ExternalMediaSession, type SystemMediaSessionAction } from "./media-sessions";
 export { extendTailwind, tw } from "./tailwind";
 

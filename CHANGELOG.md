@@ -7,6 +7,26 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 ### Added
 
 - `tarve package --format setup`: a Windows installer that is itself a Tarve app, built for the same runtime as the app (txiki.js gives a ~20 MB installer), from any OS and without Inno Setup, NSIS or WiX. A wizard in the app's icon and colours (welcome and language, install folder, options, progress, done) installs per user into `%LOCALAPPDATA%\Programs`, writes Start menu and desktop shortcuts with the AppUserModelID, the Apps & features entry, deep links and file types, and installs a `Uninstall.exe` that removes it all. Configured by package.json `tarve.installer`: which options show and their defaults (desktop shortcut, start with Windows, open when done, app-defined checkboxes with install/uninstall commands), `beforeInstall`/`afterInstall`/`beforeUninstall` hooks run by the app's own executable, texts per language (English and Brazilian Portuguese built in) and traces of a previous installer to remove. `/S`, `--dir=`, `--lang=`, `--[no-]<option>` for silent installs. Also `packageSetup()` from `@tarve/core/package`, and `--entry` to read the metadata of an already built executable's app. Self-updates keep the Apps & features entry true: `checkForUpdate` moves its version (and size) to the running executable or app pack. Uninstalling also removes downloaded app packs, and the wizard refuses a folder the user cannot write to.
+- Desktop shell windows (docks, bars, overlays):
+  - `app.nativeHandle()` returns the native window (HWND on Windows, XID on X11) as a decimal string for FFI, from `ready` on. It works for windows from `openWindow` too; the `ready` event carries it as `handle`.
+  - `app.setBounds({ x, y, width, height, physical })` moves and resizes a window after it opened. Coordinates are logical px, or physical screen px with `physical: true`; a field you leave out keeps its value.
+  - `<Window visible={false}>` opens the window hidden, so nothing flashes on screen; `app.show()` or `app.activate()` shows it later. Before this, `visible` was a test-only option.
+  - `<Window chrome="none">` (with `frameless`) drops the Windows 11 rounded corners and 1 px border for shapes the app draws itself. The default stays `"system"`.
+  - `app.isFocused()` and `app.onFocusChange(listener)`, plus a `windowFocus` event: the window became or stopped being the active one (DOM window focus/blur).
+  - `<Window opacity>` (it can change while the app runs) and `app.setOpacity(n)` set the whole window's opacity on Windows (layered window) and X11 (`_NET_WM_WINDOW_OPACITY`).
+  - `app.appBar(edge, { size })` docks a window to a screen edge as a Windows AppBar and reserves the space, so maximized windows and the desktop stop at it. It re-docks when the taskbar or another bar moves, and the space is released by `appBar(null)` or when the window closes.
+  - `app.screens()` returns every monitor (physical bounds, work area, scale, primary) and the pointer's screen position, so there is no need to poll `GetCursorPos`, `GetDpiForWindow` or `MonitorFromWindow` over FFI.
+- `onSize` also reports `borderBox: { width, height }`, the size with padding and border (`ResizeObserverEntry.borderBoxSize`). `width`/`height` stay the content box. New `SizeEvent` type.
+- Windows: `<Image src>` accepts `.exe`, `.dll` and `.lnk` paths and shows the file's shell icon (256 px when available, else 48/32 px). A shortcut shows its target's icon.
+- `systemMediaSessions()` and `controlSystemMediaSession(appId, action)` read and control other apps' media sessions on Windows (title, artist, album, artwork, playback state, timeline; play/pause/toggle/next/previous). Other platforms resolve `[]` / `false`.
+
+### Fixed
+
+- The DWM border of a frameless see-through window (`backdrop`) no longer comes out light. Its colour used to blend with the root's clear colour as if it were opaque, so the dark theme's `#ffffff14` hairline was drawn near-white.
+- A drag whose source a render removed or re-keyed mid-drag now ends: `onDragEnd` (and `onDragMove`) reach the handlers the source had at `dragStart`. Before, the drag never ended for the app.
+- The `Switch` thumb takes `primaryForeground` on the checked track. In the dark theme both were near-white, which drew one white blob.
+- Open popovers, menus and selects close when their window stops being the active one (a click in another window or app), as system menus do. Before, `dismissOnOutside` only reacted to presses inside the same window.
+- `requestSingleInstance` no longer fails right after the first instance was killed, when its pipe or socket lingers and neither answers nor can be taken. It now retries for about 2.5 s, and an empty or garbled answer no longer counts as a running instance.
 
 ## 0.12.0 — 2026-11-12
 

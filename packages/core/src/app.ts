@@ -1,4 +1,4 @@
-import type { SceneDocument, LayoutBox, NativeEvent, NativeCommand, NativeNode, Snapshot } from "./protocol";
+import type { AppBarEdge, ScreenInfo, SceneDocument, LayoutBox, NativeEvent, NativeCommand, NativeNode, Snapshot } from "./protocol";
 import { readFileSync } from "node:fs";
 import { environmentKey, initialViewport, setEnvironment, trackViewport } from "./viewport";
 import { applyMediaEvent, quietMediaEvent, type MediaController } from "./media-element";
@@ -551,6 +551,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     if ((committed.document.window.level ?? "normal") !== level) {
       sendInternal({ type: "windowLevel", level }, { source: "bridge", event: "windowLevel" });
     }
+    const opacity = next.document.window.opacity ?? 1;
+    if ((committed.document.window.opacity ?? 1) !== opacity) {
+      sendInternal({ type: "windowOpacity", opacity }, { source: "bridge", event: "windowOpacity" });
+    }
     // The title is a window option: native sets it at creation, later renders send it.
     const title = next.document.window.title;
     if (committed.document.window.title !== title) {
@@ -621,10 +625,24 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   /** The window's full screen state, as its `fullscreen` events report it. */
   let fullscreen = false;
   const fullscreenListeners = new Set<(fullscreen: boolean) => void>();
+  /** Whether the window is the active one, as its `windowFocus` events report it. */
+  let windowFocused = false;
+  const focusListeners = new Set<(focused: boolean) => void>();
+  /** The native window handle the `ready` event carried. */
+  let windowHandle: string | undefined;
 
   function dispatchNativeEvent(event: NativeEvent): void {
     (globalThis as Record<symbol, unknown>)[ACTIVE_APP_KEY] = app;
-    if (event.type === "ready") settleReadySuccess();
+    if (event.type === "ready") {
+      if (event.handle) windowHandle = event.handle;
+      settleReadySuccess();
+    }
+    if (event.type === "windowFocus" && event.focused !== windowFocused) {
+      windowFocused = event.focused;
+      for (const listener of [...focusListeners]) {
+        try { listener(windowFocused); } catch (error) { reportError(error, { source: "listener", event: "windowFocus" }); }
+      }
+    }
 
     if (event.type === "error") {
       const error = new Error(event.message);
@@ -939,6 +957,43 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     onFullscreenChange(listener: (fullscreen: boolean) => void): () => void {
       fullscreenListeners.add(listener);
       return () => { fullscreenListeners.delete(listener); };
+    },
+    isFocused(): boolean {
+      return windowFocused;
+    },
+    onFocusChange(listener: (focused: boolean) => void): () => void {
+      focusListeners.add(listener);
+      return () => { focusListeners.delete(listener); };
+    },
+    nativeHandle(): string | undefined {
+      return windowHandle;
+    },
+    setBounds(bounds: { x?: number; y?: number; width?: number; height?: number; physical?: boolean }): void {
+      const command: Extract<NativeCommand, { type: "windowBounds" }> = { type: "windowBounds" };
+      for (const key of ["x", "y", "width", "height"] as const) {
+        const value = bounds[key];
+        if (value === undefined) continue;
+        if (typeof value !== "number" || !Number.isFinite(value)) throw new RangeError(`setBounds ${key} must be a finite number`);
+        if ((key === "width" || key === "height") && value <= 0) throw new RangeError(`setBounds ${key} must be positive`);
+        command[key] = value;
+      }
+      if (bounds.physical) command.physical = true;
+      if (!ended) sendPublic(command);
+    },
+    setOpacity(opacity: number): void {
+      if (typeof opacity !== "number" || !Number.isFinite(opacity)) throw new RangeError("setOpacity takes a number from 0 to 1");
+      if (!ended) sendPublic({ type: "windowOpacity", opacity: Math.min(1, Math.max(0, opacity)) });
+    },
+    appBar(edge: AppBarEdge | null, appBarOptions: { size?: number } = {}): void {
+      if (edge !== null && !["top", "bottom", "left", "right"].includes(edge)) throw new RangeError(`appBar edge must be "top", "bottom", "left", "right" or null`);
+      const size = appBarOptions.size;
+      if (size !== undefined && !(typeof size === "number" && Number.isFinite(size) && size > 0)) throw new RangeError("appBar size must be a positive number");
+      if (!ended) sendPublic({ type: "appBar", edge, ...(size !== undefined ? { size } : {}) });
+    },
+    async screens(): Promise<{ screens: ScreenInfo[]; cursor: { x: number; y: number } | null }> {
+      const event = await requests.request({ type: "screens", requestId: crypto.randomUUID() });
+      if (event.type !== "screens") throw reportError(new Error("Unexpected native response"), { source: "request", event: "screens" });
+      return { screens: event.screens, cursor: event.cursor };
     },
     tray(initial: TrayOptions): TrayHandle {
       return trays.tray(initial);

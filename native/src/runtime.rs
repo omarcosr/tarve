@@ -445,7 +445,12 @@ pub(crate) fn opaque_border_rgb(border: &str, background: &str) -> u32 {
     let Some([r, g, b, a]) = parse(border) else {
         return 0x00e4e4e7;
     };
-    let [br, bg, bb, _] = parse(background).unwrap_or([255.0; 4]);
+    // A see-through background shows the desktop or the system material: weigh its colour by
+    // its alpha (over black) instead of taking a fully clear white as opaque white.
+    let [br, bg, bb] = match parse(background) {
+        Some([r, g, b, a]) => [r * a / 255.0, g * a / 255.0, b * a / 255.0],
+        None => [255.0; 3],
+    };
     let t = a / 255.0;
     let mix = |fg: f32, bg: f32| (fg * t + bg * (1.0 - t)).round() as u32;
     (mix(r, br) << 16) | (mix(g, bg) << 8) | mix(b, bb)
@@ -1081,6 +1086,12 @@ impl Host {
     /// earliest wake-up any window needs.
     fn settle(&mut self, event_loop: &ActiveEventLoop) {
         if self.main.exit_requested {
+            for window in std::iter::once(&self.main)
+                .chain(self.others.iter().map(|(_, app)| app))
+                .filter_map(|app| app.window.as_deref())
+            {
+                crate::window_ext::release_window(window);
+            }
             event_loop.exit();
             return;
         }
@@ -1093,6 +1104,7 @@ impl Host {
             }
             app.events.push(json!({"type": "closed"}));
             if let Some(window) = &app.window {
+                crate::window_ext::release_window(window);
                 let id = u64::from(window.id());
                 WINDOW_LOGICAL_SIZE.with(|sizes| sizes.borrow_mut().remove(&id));
             }
@@ -1672,7 +1684,8 @@ impl App {
                 &self.root_color("borderColor", "#e4e4e7"),
                 &self.root_color("background", "#ffffff"),
             ),
-            self.window_chrome_suppressed(),
+            self.window_chrome_suppressed()
+                || self.document.window.chrome == crate::protocol::WindowChrome::None,
         ) {
             self.events
                 .push(error(format!("Custom window chrome: {chrome_error}")));
@@ -1935,6 +1948,15 @@ impl App {
     /// Hides the window and gives its GPU device, swap chain and textures back,
     /// with the working set: an app in the tray costs memory and CPU for its
     /// state only. `unpark` builds them again from the retained tree.
+    /// Windows: winit rewrites the extended window style on every visibility, level and
+    /// maximize change, dropping the layered style that carries `opacity`; put it back.
+    fn keep_window_opacity(&self) {
+        if let (Some(window), Some(opacity)) = (&self.window, self.document.window.opacity)
+            && opacity < 1.0
+        {
+            crate::window_ext::keep_opacity(window, opacity);
+        }
+    }
     fn park(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(window) = &self.window {
             window.set_visible(false);
@@ -2064,6 +2086,7 @@ impl App {
         if !background_windows() {
             window.focus_window();
         }
+        self.keep_window_opacity();
         self.redraw_frame(event_loop);
         self.sync_control_flow(event_loop);
     }
@@ -2886,7 +2909,7 @@ impl App {
                 if !self.ready_emitted {
                     self.ready_emitted = true;
                     self.memory_stages.record("firstFrame");
-                    self.events.push(json!({"type":"ready"}));
+                    self.events.push(json!({"type":"ready", "handle": self.window.as_deref().and_then(crate::window_ext::native_handle)}));
                 }
                 self.sync_control_flow(event_loop);
             }
@@ -2904,7 +2927,7 @@ impl App {
                 self.graphics_stable_since = None;
                 if !self.ready_emitted {
                     self.ready_emitted = true;
-                    self.events.push(json!({"type":"ready"}));
+                    self.events.push(json!({"type":"ready", "handle": self.window.as_deref().and_then(crate::window_ext::native_handle)}));
                 }
                 self.sync_control_flow(event_loop);
             }
@@ -3262,6 +3285,12 @@ impl ApplicationHandler<Command> for App {
                             self.attach_desktop_widget(&window);
                         }
                         self.sync_custom_window_chrome();
+                        if let Some(opacity) = self.document.window.opacity
+                            && let Err(message) = crate::window_ext::set_opacity(&window, opacity)
+                        {
+                            self.events
+                                .push(error(format!("window opacity: {message}")));
+                        }
                         if let Err(error) = self.prepare() {
                             self.handle_render_error(event_loop, error);
                             return;
@@ -3285,6 +3314,7 @@ impl ApplicationHandler<Command> for App {
                             // Activates it (or not, for a background window) now that it shows.
                             window.set_visible(true);
                         }
+                        self.keep_window_opacity();
                         crate::stats::trace("visible");
                         if self.is_main && self.document.window.skip_taskbar {
                             hide_from_task_switcher(&window);
@@ -3428,6 +3458,81 @@ impl ApplicationHandler<Command> for App {
                     self.events.push(error(format!("menu bar: {message}")));
                 }
             }
+            Command::WindowBounds {
+                x,
+                y,
+                width,
+                height,
+                physical,
+            } => {
+                if let Some(window) = &self.window {
+                    let finite = |value: Option<f64>| value.filter(|value| value.is_finite());
+                    let (x, y) = (finite(x), finite(y));
+                    if x.is_some() || y.is_some() {
+                        let current = window.outer_position().unwrap_or_default();
+                        let scale = window.scale_factor();
+                        let position = if physical {
+                            PhysicalPosition::new(
+                                x.unwrap_or(f64::from(current.x)),
+                                y.unwrap_or(f64::from(current.y)),
+                            )
+                        } else {
+                            let logical = current.to_logical::<f64>(scale);
+                            winit::dpi::LogicalPosition::new(
+                                x.unwrap_or(logical.x),
+                                y.unwrap_or(logical.y),
+                            )
+                            .to_physical(scale)
+                        };
+                        window.set_outer_position(position);
+                    }
+                    let (width, height) = (
+                        finite(width).filter(|value| *value > 0.0),
+                        finite(height).filter(|value| *value > 0.0),
+                    );
+                    if width.is_some() || height.is_some() {
+                        let scale = window.scale_factor();
+                        let current = window.inner_size();
+                        let size = if physical {
+                            winit::dpi::PhysicalSize::new(
+                                width.unwrap_or(f64::from(current.width)),
+                                height.unwrap_or(f64::from(current.height)),
+                            )
+                        } else {
+                            let logical = current.to_logical::<f64>(scale);
+                            LogicalSize::new(
+                                width.unwrap_or(logical.width),
+                                height.unwrap_or(logical.height),
+                            )
+                            .to_physical(scale)
+                        };
+                        let _ = window.request_inner_size(size);
+                    }
+                }
+            }
+            Command::WindowOpacity { opacity } => {
+                self.document.window.opacity = Some(opacity);
+                if let Some(window) = &self.window
+                    && let Err(message) = crate::window_ext::set_opacity(window, opacity)
+                {
+                    self.events
+                        .push(error(format!("window opacity: {message}")));
+                }
+            }
+            Command::AppBar { edge, size } => {
+                if let Some(window) = &self.window
+                    && let Err(message) =
+                        crate::window_ext::app_bar(window, edge, size.unwrap_or(48.0))
+                {
+                    self.events.push(error(format!("appBar: {message}")));
+                }
+            }
+            Command::Screens { request_id } => {
+                let mut answer = crate::window_ext::screens(event_loop);
+                answer["type"] = json!("screens");
+                answer["requestId"] = json!(request_id);
+                self.events.push(answer);
+            }
             Command::WindowTitle { title } => {
                 if let Some(window) = &self.window {
                     window.set_title(&title);
@@ -3442,6 +3547,7 @@ impl ApplicationHandler<Command> for App {
                 if let Some(window) = &self.window {
                     window.set_window_level(winit_window_level(level));
                 }
+                self.keep_window_opacity();
             }
             Command::Window { action } => {
                 if let Some(window) = &self.window {
@@ -4418,7 +4524,12 @@ impl ApplicationHandler<Command> for App {
                     accessibility_changed = true;
                 }
             }
+            WindowEvent::Focused(true) => {
+                events.push(json!({"type":"windowFocus", "focused":true}));
+            }
             WindowEvent::Focused(false) => {
+                events.push(json!({"type":"windowFocus", "focused":false}));
+                events.extend(self.tree.outside_dismissal_on_deactivate());
                 self.ime_enabled = false;
                 self.ime_target = None;
                 events.extend(self.tree.cancel_pointer_drag());
@@ -4443,6 +4554,8 @@ impl ApplicationHandler<Command> for App {
             self.layout_hidden_window();
         }
         self.sync_cursor();
+        // A maximize, minimize or restore by the user rewrites the window styles.
+        self.keep_window_opacity();
         self.redraw();
     }
 }

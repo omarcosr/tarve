@@ -40,6 +40,8 @@ mod device;
 #[cfg(all(not(target_arch = "wasm32"), feature = "media"))]
 mod downmix;
 mod environment;
+#[cfg(target_os = "windows")]
+mod exe_icon;
 #[cfg(all(
     test,
     target_os = "linux",
@@ -56,6 +58,8 @@ mod media;
 #[cfg(all(not(target_arch = "wasm32"), not(feature = "media")))]
 #[path = "media_off.rs"]
 mod media;
+#[cfg(not(target_arch = "wasm32"))]
+mod media_sessions;
 #[cfg(not(target_arch = "wasm32"))]
 mod menu_bar;
 #[cfg(not(target_arch = "wasm32"))]
@@ -94,6 +98,8 @@ mod text;
 mod tray;
 mod tree;
 mod video;
+#[cfg(not(target_arch = "wasm32"))]
+mod window_ext;
 // Browser build: the same tree, layout, text and CPU paint, driven from JavaScript.
 #[cfg(target_arch = "wasm32")]
 mod web;

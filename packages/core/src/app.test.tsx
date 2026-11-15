@@ -59,6 +59,54 @@ describe("controlled native reconciliation", () => {
     app.close();
   });
 
+  test("window focus, native handle, bounds, opacity, AppBar and screens", async () => {
+    const bridge = new FakeBridge();
+    let opacity = 1;
+    const app = createApp(() => <Window frameless chrome="none" visible={false} opacity={opacity}><Text>x</Text></Window>, { bridge });
+    await app.ready;
+    expect(bridge.document?.window).toMatchObject({ decorations: false, chrome: "none", visible: false });
+    expect(bridge.document?.window.opacity).toBeUndefined();
+    expect(app.nativeHandle()).toBeUndefined();
+    bridge.emit({ type: "ready", handle: "132456" });
+    expect(app.nativeHandle()).toBe("132456");
+    const focus: boolean[] = [];
+    const stop = app.onFocusChange(focused => focus.push(focused));
+    bridge.emit({ type: "windowFocus", focused: true });
+    bridge.emit({ type: "windowFocus", focused: true });
+    expect(app.isFocused()).toBe(true);
+    bridge.emit({ type: "windowFocus", focused: false });
+    stop();
+    bridge.emit({ type: "windowFocus", focused: true });
+    expect(focus).toEqual([true, false]);
+    bridge.commands.length = 0;
+    app.setBounds({ x: -10, width: 300 });
+    app.setBounds({ y: 20, height: 40, physical: true });
+    expect(() => app.setBounds({ width: 0 })).toThrow(RangeError);
+    expect(() => app.setBounds({ x: Number.NaN })).toThrow(RangeError);
+    app.setOpacity(1.5);
+    app.appBar("bottom", { size: 56 });
+    app.appBar(null);
+    expect(() => app.appBar("middle" as never)).toThrow(RangeError);
+    expect(bridge.commands).toEqual([
+      { type: "windowBounds", x: -10, width: 300 },
+      { type: "windowBounds", y: 20, height: 40, physical: true },
+      { type: "windowOpacity", opacity: 1 },
+      { type: "appBar", edge: "bottom", size: 56 },
+      { type: "appBar", edge: null },
+    ]);
+    opacity = 0.5;
+    app.update();
+    await Promise.resolve();
+    expect(bridge.commands.at(-1)).toEqual({ type: "windowOpacity", opacity: 0.5 });
+    const asked = app.screens();
+    const request = bridge.commands.at(-1) as Extract<NativeCommand, { type: "screens" }>;
+    expect(request.type).toBe("screens");
+    const screen = { x: 0, y: 0, width: 1920, height: 1080, workArea: { x: 0, y: 0, width: 1920, height: 1040 }, scale: 1.5, primary: true };
+    bridge.emit({ type: "screens", requestId: request.requestId, screens: [screen], cursor: { x: 5, y: 6 } });
+    expect(await asked).toEqual({ screens: [screen], cursor: { x: 5, y: 6 } });
+    app.close();
+  });
+
   test("a Window title change reaches the running window", async () => {
     const bridge = new FakeBridge();
     let title = "First";

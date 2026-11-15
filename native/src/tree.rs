@@ -810,6 +810,11 @@ fn load_image_path(path: &str) -> Result<ImageData, String> {
     if extension.eq_ignore_ascii_case("svg") {
         return load_svg_image(path);
     }
+    #[cfg(target_os = "windows")]
+    if crate::exe_icon::is_icon_path(path) {
+        let (width, height, rgba) = crate::exe_icon::load(path)?;
+        return rgba_image_data(width, height, rgba, true);
+    }
     let bytes = fs::read(path).map_err(|error| error.to_string())?;
     decode_raster_image(&bytes)
 }

@@ -27,8 +27,12 @@ function pastePayload(event: Extract<NativeEvent, { type: "paste" }>): PastePayl
  * declared. `handlersOf` resolves other nodes (drop targets).
  */
 export function createElementDispatcher(invoke: InvokeHandler, handlersOf: (id: string) => Handlers | undefined): (event: ElementEvent, handlers: Handlers | undefined) => DispatchResult {
-  /** Last known pointer position and drop target per in-flight drag source. */
-  const drags = new Map<string, { x: number; y: number; over: string | null }>();
+  /**
+   * Last known pointer position and drop target per in-flight drag source, and the source's
+   * handlers at dragStart: a render that removes or re-keys the source mid-drag still gets its
+   * onDragMove/onDragEnd (or the drag would never end for the app).
+   */
+  const drags = new Map<string, { x: number; y: number; over: string | null; handlers: Handlers | undefined }>();
 
   function dispatchDrag(event: Extract<NativeEvent, { type: "dragStart" | "dragMove" | "drop" | "dragCancel" }>, handlers: Handlers | undefined): DispatchResult {
     let handled = false;
@@ -40,13 +44,15 @@ export function createElementDispatcher(invoke: InvokeHandler, handlersOf: (id: 
     };
     const source = event.id;
     if (event.type === "dragStart") {
-      drags.set(source, { x: event.x, y: event.y, over: null });
+      drags.set(source, { x: event.x, y: event.y, over: null, handlers });
       call("dragStart", source, handlers?.onDragStart as never, { x: event.x, y: event.y });
       return { handled, succeeded };
     }
-    const state = drags.get(source) ?? { x: 0, y: 0, over: null };
+    const state = drags.get(source) ?? { x: 0, y: 0, over: null, handlers: undefined };
+    if (handlers) state.handlers = handlers;
+    else handlers = state.handlers;
     if (event.type === "dragMove") {
-      drags.set(source, { x: event.x, y: event.y, over: event.over });
+      drags.set(source, { x: event.x, y: event.y, over: event.over, handlers });
       if (state.over !== event.over) {
         if (state.over) call("dragLeave", state.over, handlersOf(state.over)?.onDragLeave as never, source);
         if (event.over) call("dragEnter", event.over, handlersOf(event.over)?.onDragEnter as never, source);
@@ -102,7 +108,10 @@ export function createElementDispatcher(invoke: InvokeHandler, handlersOf: (id: 
         });
         break;
       case "virtualListLayout": run("virtualListLayout", handlers?.onVirtualListLayout as never, event.items); break;
-      case "size": run("size", handlers?.onSize as never, { width: event.width, height: event.height }); break;
+      case "size": run("size", handlers?.onSize as never, {
+        width: event.width, height: event.height,
+        borderBox: { width: event.borderWidth ?? event.width, height: event.borderHeight ?? event.height },
+      }); break;
       case "surface": run("surface", handlers?.onSurface as never, surfaceEvent(event)); break;
       case "pointerMove": run("pointerMove", handlers?.onPointerMove as never, { x: event.x, y: event.y }); break;
       case "pointerLeave": run("pointerLeave", handlers?.onPointerLeave as never); break;

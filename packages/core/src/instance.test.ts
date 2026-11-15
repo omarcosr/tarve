@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { desktopQuote, instanceAddress, quote, requestSingleInstance, urlsOf } from "./instance";
+import { desktopQuote, instanceAddress, liveInstancePid, quote, requestSingleInstance, urlsOf } from "./instance";
 
 describe("single instance", () => {
   test("links are picked out of the arguments, not paths or drives", () => {
@@ -13,6 +13,15 @@ describe("single instance", () => {
     expect(quote('say "hi"')).toBe('"say \\"hi\\""');
     expect(quote("C:\\dir\\")).toBe('"C:\\dir\\\\"');
     expect(desktopQuote('/opt/my app/$x "y" 100%')).toBe('"/opt/my app/\\$x \\"y\\" 100%%"');
+  });
+
+  test("only a pid counts as a first instance's answer", () => {
+    expect(liveInstancePid(`${process.pid}`)).toBe(process.pid);
+    expect(liveInstancePid("")).toBeUndefined();
+    expect(liveInstancePid("0")).toBeUndefined();
+    expect(liveInstancePid("-4")).toBeUndefined();
+    expect(liveInstancePid("garbage")).toBeUndefined();
+    expect(liveInstancePid("1.5")).toBeUndefined();
   });
 
   test("the address is per app and stable", () => {

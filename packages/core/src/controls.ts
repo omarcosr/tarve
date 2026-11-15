@@ -66,7 +66,9 @@ export function Switch({ checked, label, disabled, onCheckedChange, glass, style
       jsx(View, { style: { position: "relative", width: 36, height: 20, shrink: 0, radius: 10,
         background: disabled ? c.disabled : checked ? c.primary : c.border },
         children: jsx(View, { style: { position: "absolute", top: 2, left: checked ? 18 : 2,
-          width: 16, height: 16, radius: 8, background: c.sliderThumb } }) }),
+          // On the checked track (`primary`) the thumb takes `primaryForeground`: the dark theme's
+          // primary is near-white, the same as its thumb, which drew one white blob.
+          width: 16, height: 16, radius: 8, background: checked && !disabled ? c.primaryForeground : c.sliderThumb } }) }),
       jsx(Text, { color: disabled ? c.disabledForeground : typeof style?.foreground === "string" ? style.foreground : c.foreground, children: label }),
     ],
   });
