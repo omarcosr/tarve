@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -10,7 +11,30 @@ import { parseInstallerConfig, type SetupManifest } from "./manifest";
 
 const windows = process.platform === "win32";
 const root = mkdtempSync(join(tmpdir(), "tarve-setup-test-"));
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+const locked: string[] = [];
+afterAll(() => {
+  for (const folder of locked) unlock(folder);
+  rmSync(root, { recursive: true, force: true });
+});
+
+/** A folder nobody may create anything in, administrators included (an explicit deny ACE on Windows). */
+function lockedFolder(name: string): string {
+  const folder = join(root, name);
+  mkdirSync(folder, { recursive: true });
+  if (windows) {
+    const result = spawnSync("icacls", [folder, "/deny", "*S-1-1-0:(OI)(CI)(W,D,DC)"], { encoding: "utf8" });
+    if (result.status !== 0) throw new Error(`icacls failed: ${result.stdout}${result.stderr}`);
+  } else {
+    chmodSync(folder, 0o555);
+  }
+  locked.push(folder);
+  return folder;
+}
+
+function unlock(folder: string): void {
+  if (windows) spawnSync("icacls", [folder, "/remove:d", "*S-1-1-0"]);
+  else chmodSync(folder, 0o755);
+}
 
 interface FakeSystem extends SetupSystem {
   registry: Map<string, Map<string, string>>;
@@ -205,10 +229,12 @@ describe.skipIf(!windows)("install and uninstall", () => {
 
   test("folders the user cannot write to are refused before anything is copied", async () => {
     expect(directoryWritable(join(root, "new", "deeper"))).toBe(true);
-    expect(directoryWritable(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tarve-setup-test"))).toBe(false);
+    // A folder denied to everyone, not System32: CI runners run elevated and may write there.
+    const target = join(lockedFolder("locked"), "tarve-setup-test");
+    expect(directoryWritable(target)).toBe(false);
     const system = fakeSystem("protected");
     const m = manifest();
-    const choices = { ...defaultChoices(m, system, "en"), directory: join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tarve-setup-test") };
+    const choices = { ...defaultChoices(m, system, "en"), directory: target };
     await expect(install(m, payload("protected"), choices, system)).rejects.toMatchObject({ key: "directoryNotWritable" });
   });
 

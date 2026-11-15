@@ -44,25 +44,40 @@ function symbol<K extends "tarve_media_sessions" | "tarve_media_session_control"
   return found as NonNullable<Library["symbols"][K]>;
 }
 
+/** The session list, read through `library` (the native library, or a stand-in in tests). */
+export function readMediaSessions(library: Library): ExternalMediaSession[] {
+  const list = symbol(library, "tarve_media_sessions");
+  let buffer = new Uint8Array(256 * 1024);
+  let length = list(buffer, buffer.length);
+  // Below -1: the capacity the list needs; the native side keeps it for this second call.
+  if (length < -1) {
+    buffer = new Uint8Array(-length);
+    length = list(buffer, buffer.length);
+  }
+  if (length < 0) throw failure(library, "systemMediaSessions");
+  return JSON.parse(new TextDecoder().decode(buffer.subarray(0, length))) as ExternalMediaSession[];
+}
+
+/** Sends `action` to `appId`'s session through `library`: whether the app accepted. */
+export function sendMediaSessionAction(library: Library, appId: string, action: SystemMediaSessionAction): boolean {
+  const id = new TextEncoder().encode(appId);
+  const result = symbol(library, "tarve_media_session_control")(ACTIONS[action], id, id.length);
+  if (result < 0) throw failure(library, "controlSystemMediaSession");
+  return result === 1;
+}
+
+function checkAction(appId: string, action: SystemMediaSessionAction): void {
+  if (!Object.hasOwn(ACTIONS, action)) throw new TypeError(`controlSystemMediaSession: unknown action ${String(action)}`);
+  if (typeof appId !== "string" || appId.length === 0) throw new TypeError("controlSystemMediaSession: appId must be a non-empty string");
+}
+
 /**
  * The media sessions of every app on the system (what each one plays, whether it is playing),
  * the one media keys reach marked `current`. Windows only; resolves `[]` elsewhere.
  */
 export async function systemMediaSessions(): Promise<ExternalMediaSession[]> {
   if (process.platform !== "win32") return [];
-  const json = withLibrary(library => {
-    const list = symbol(library, "tarve_media_sessions");
-    let buffer = new Uint8Array(256 * 1024);
-    let length = list(buffer, buffer.length);
-    // Below -1: the capacity the list needs; the native side keeps it for this second call.
-    if (length < -1) {
-      buffer = new Uint8Array(-length);
-      length = list(buffer, buffer.length);
-    }
-    if (length < 0) throw failure(library, "systemMediaSessions");
-    return new TextDecoder().decode(buffer.subarray(0, length));
-  });
-  return JSON.parse(json) as ExternalMediaSession[];
+  return withLibrary(readMediaSessions);
 }
 
 /**
@@ -71,14 +86,7 @@ export async function systemMediaSessions(): Promise<ExternalMediaSession[]> {
  * false when it refused or no session has that id, and always false off Windows.
  */
 export async function controlSystemMediaSession(appId: string, action: SystemMediaSessionAction): Promise<boolean> {
-  const code = ACTIONS[action];
-  if (code === undefined || !Object.hasOwn(ACTIONS, action)) throw new TypeError(`controlSystemMediaSession: unknown action ${String(action)}`);
-  if (typeof appId !== "string" || appId.length === 0) throw new TypeError("controlSystemMediaSession: appId must be a non-empty string");
+  checkAction(appId, action);
   if (process.platform !== "win32") return false;
-  return withLibrary(library => {
-    const id = new TextEncoder().encode(appId);
-    const result = symbol(library, "tarve_media_session_control")(code, id, id.length);
-    if (result < 0) throw failure(library, "controlSystemMediaSession");
-    return result === 1;
-  });
+  return withLibrary(library => sendMediaSessionAction(library, appId, action));
 }

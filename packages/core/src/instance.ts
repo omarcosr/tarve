@@ -127,29 +127,30 @@ function allowForeground(pid: number): void {
 }
 
 /**
- * The pid a first instance answered with: a positive integer, or nothing when the answer is
- * garbled or empty (a process going away mid-reply), which is no first instance.
+ * The pid in a first instance's answer, when it is one (a positive integer): only used to let it
+ * take the foreground. Any full answer line means the first instance took the launch.
  */
-export function liveInstancePid(answer: string): number | undefined {
+export function answeredPid(answer: string): number | undefined {
   const pid = Number(answer.trim());
   return Number.isInteger(pid) && pid > 0 ? pid : undefined;
 }
 
-/** Hands this launch to a running first instance; its pid, or undefined when none answers. */
-function forward(address: string, launch: InstanceLaunch, timeoutMs = 2000): Promise<number | undefined> {
+/**
+ * Hands this launch to a running first instance: `{ pid }` once it answered (pid undefined
+ * when the answer carries none), or undefined when none answers.
+ */
+function forward(address: string, launch: InstanceLaunch, timeoutMs = 2000): Promise<{ pid: number | undefined } | undefined> {
   return new Promise(resolve => {
     let reply = "";
     let settled = false;
-    const done = (pid?: number) => { if (settled) return; settled = true; clearTimeout(timer); socket.destroy(); resolve(pid); };
+    const done = (answer?: { pid: number | undefined }) => { if (settled) return; settled = true; clearTimeout(timer); socket.destroy(); resolve(answer); };
     const timer = setTimeout(() => done(), timeoutMs);
     const socket: Socket = connect(address, () => socket.write(JSON.stringify(launch) + "\n"));
     socket.setEncoding("utf8");
     socket.on("data", chunk => {
       reply += chunk;
       const line = reply.indexOf("\n");
-      // Only a live first instance's pid counts: a garbled or empty answer (a process going
-      // away mid-reply) is no instance, so this launch goes on to become the first one.
-      if (line >= 0) done(liveInstancePid(reply.slice(0, line)));
+      if (line >= 0) done({ pid: answeredPid(reply.slice(0, line)) });
     });
     socket.on("error", () => done());
     socket.on("close", () => done());
@@ -217,9 +218,9 @@ export async function requestSingleInstance(options: SingleInstanceOptions = {})
   // giving up on the first round.
   for (let attempt = 0; attempt < 8; attempt++) {
     if (attempt > 1) await new Promise(resolve => setTimeout(resolve, Math.min(50 * 2 ** (attempt - 2), 800)));
-    const pid = await forward(address, launch);
-    if (pid !== undefined) {
-      allowForeground(pid);
+    const answer = await forward(address, launch);
+    if (answer) {
+      if (answer.pid !== undefined) allowForeground(answer.pid);
       return { primary: false, launch, onSecondInstance: () => () => {}, release() {} };
     }
     // Nobody answered: a Unix socket left by a crashed instance is in the way.

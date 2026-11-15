@@ -26,7 +26,7 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 - A drag whose source a render removed or re-keyed mid-drag now ends: `onDragEnd` (and `onDragMove`) reach the handlers the source had at `dragStart`. Before, the drag never ended for the app.
 - The `Switch` thumb takes `primaryForeground` on the checked track. In the dark theme both were near-white, which drew one white blob.
 - Open popovers, menus and selects close when their window stops being the active one (a click in another window or app), as system menus do. Before, `dismissOnOutside` only reacted to presses inside the same window.
-- `requestSingleInstance` no longer fails right after the first instance was killed, when its pipe or socket lingers and neither answers nor can be taken. It now retries for about 2.5 s, and an empty or garbled answer no longer counts as a running instance.
+- `requestSingleInstance` no longer fails right after the first instance was killed, when its pipe or socket lingers and neither answers nor can be taken. It now retries for about 2.5 s instead of giving up after three immediate tries.
 
 ## 0.12.0 — 2026-11-12
 

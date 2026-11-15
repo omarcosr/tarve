@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { desktopQuote, instanceAddress, liveInstancePid, quote, requestSingleInstance, urlsOf } from "./instance";
+import { desktopQuote, instanceAddress, answeredPid, quote, requestSingleInstance, urlsOf } from "./instance";
 
 describe("single instance", () => {
   test("links are picked out of the arguments, not paths or drives", () => {
@@ -15,13 +15,13 @@ describe("single instance", () => {
     expect(desktopQuote('/opt/my app/$x "y" 100%')).toBe('"/opt/my app/\\$x \\"y\\" 100%%"');
   });
 
-  test("only a pid counts as a first instance's answer", () => {
-    expect(liveInstancePid(`${process.pid}`)).toBe(process.pid);
-    expect(liveInstancePid("")).toBeUndefined();
-    expect(liveInstancePid("0")).toBeUndefined();
-    expect(liveInstancePid("-4")).toBeUndefined();
-    expect(liveInstancePid("garbage")).toBeUndefined();
-    expect(liveInstancePid("1.5")).toBeUndefined();
+  test("a first instance's answer gives its pid only when it is one", () => {
+    expect(answeredPid(`${process.pid}`)).toBe(process.pid);
+    expect(answeredPid("")).toBeUndefined();
+    expect(answeredPid("0")).toBeUndefined();
+    expect(answeredPid("-4")).toBeUndefined();
+    expect(answeredPid("garbage")).toBeUndefined();
+    expect(answeredPid("1.5")).toBeUndefined();
   });
 
   test("the address is per app and stable", () => {
