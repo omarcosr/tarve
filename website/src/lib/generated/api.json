@@ -3,7 +3,7 @@
     {
       "name": "Accordion",
       "source": "packages/core/src/controls.ts",
-      "line": 183,
+      "line": 209,
       "generic": false,
       "propsType": "AccordionProps",
       "props": [
@@ -47,7 +47,7 @@
     {
       "name": "Alert",
       "source": "packages/core/src/form-controls.ts",
-      "line": 24,
+      "line": 26,
       "generic": false,
       "propsType": "AlertProps",
       "props": [
@@ -275,7 +275,7 @@
     {
       "name": "AspectRatio",
       "source": "packages/core/src/form-controls.ts",
-      "line": 53,
+      "line": 55,
       "generic": false,
       "propsType": "AspectRatioProps",
       "props": [
@@ -430,7 +430,7 @@
     {
       "name": "Badge",
       "source": "packages/core/src/controls.ts",
-      "line": 123,
+      "line": 149,
       "generic": false,
       "propsType": "BadgeProps",
       "props": [
@@ -551,7 +551,7 @@
     {
       "name": "Button",
       "source": "packages/core/src/components/button.ts",
-      "line": 110,
+      "line": 129,
       "generic": false,
       "propsType": "ButtonProps",
       "props": [
@@ -564,6 +564,12 @@
           "name": "disabled",
           "type": "boolean",
           "optional": true
+        },
+        {
+          "name": "glass",
+          "type": "GlassProp",
+          "optional": true,
+          "doc": "Liquid Glass capsule: `true`, a variant or options. `destructive` tints it red,\n`ghost` is clear glass without a shadow, `glass={{ tint }}` makes a prominent coloured one."
         },
         {
           "name": "onClick",
@@ -606,13 +612,14 @@
         "style"
       ],
       "types": [
-        "ButtonVariant"
+        "ButtonVariant",
+        "GlassProp"
       ]
     },
     {
       "name": "ButtonGroup",
       "source": "packages/core/src/form-controls.ts",
-      "line": 63,
+      "line": 65,
       "generic": false,
       "propsType": "ButtonGroupProps",
       "props": [
@@ -726,7 +733,7 @@
     {
       "name": "Card",
       "source": "packages/core/src/controls.ts",
-      "line": 111,
+      "line": 137,
       "generic": false,
       "propsType": "CardProps",
       "props": [
@@ -734,6 +741,13 @@
           "name": "align",
           "type": "Style[\"align\"]",
           "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable).",
           "from": "ViewProps"
         },
         {
@@ -990,7 +1004,7 @@
     {
       "name": "Checkbox",
       "source": "packages/core/src/controls.ts",
-      "line": 15,
+      "line": 16,
       "generic": false,
       "propsType": "CheckboxProps",
       "props": [
@@ -1037,7 +1051,7 @@
     {
       "name": "Circle",
       "source": "packages/core/src/components/svg.ts",
-      "line": 46,
+      "line": 48,
       "generic": false,
       "props": [
         {
@@ -1174,7 +1188,7 @@
     {
       "name": "Column",
       "source": "packages/core/src/components/layout.ts",
-      "line": 49,
+      "line": 51,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
@@ -1182,6 +1196,12 @@
           "name": "align",
           "type": "Style[\"align\"]",
           "optional": true
+        },
+        {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable)."
         },
         {
           "name": "children",
@@ -2105,7 +2125,7 @@
       "name": "Direction",
       "summary": "Layout direction helper. RTL reverses visual horizontal flow while preserving logical/focus order. Text bidi is not changed.",
       "source": "packages/core/src/form-controls.ts",
-      "line": 401,
+      "line": 495,
       "generic": false,
       "propsType": "DirectionProps",
       "props": [
@@ -2312,7 +2332,7 @@
     {
       "name": "Ellipse",
       "source": "packages/core/src/components/svg.ts",
-      "line": 47,
+      "line": 49,
       "generic": false,
       "props": [
         {
@@ -2346,7 +2366,7 @@
     {
       "name": "Empty",
       "source": "packages/core/src/form-controls.ts",
-      "line": 74,
+      "line": 76,
       "generic": false,
       "propsType": "EmptyProps",
       "props": [
@@ -2393,7 +2413,7 @@
     {
       "name": "Field",
       "source": "packages/core/src/form-controls.ts",
-      "line": 123,
+      "line": 125,
       "generic": false,
       "propsType": "FieldProps",
       "props": [
@@ -2446,7 +2466,7 @@
       "name": "Glass",
       "summary": "A container made of Liquid Glass: what scrolls behind it shows through blurred,\nbent at the rounded edge, under a light veil, with a bright rim. Compose like a\n`View`; controls inside keep their own look.",
       "source": "packages/core/src/components/glass.ts",
-      "line": 111,
+      "line": 285,
       "generic": false,
       "propsType": "GlassProps",
       "props": [
@@ -2462,6 +2482,13 @@
           "optional": true,
           "doc": "Light or dark appearance of the rim and veil. Default `light`.",
           "default": "\"light\""
+        },
+        {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable).",
+          "from": "ViewProps"
         },
         {
           "name": "blend",
@@ -2674,7 +2701,7 @@
     {
       "name": "Icon",
       "source": "packages/core/src/components/icon.ts",
-      "line": 51,
+      "line": 52,
       "generic": false,
       "propsType": "IconProps",
       "props": [
@@ -2731,8 +2758,9 @@
     },
     {
       "name": "Image",
+      "summary": "Displays a raster image (PNG, JPEG, WebP, ICO), an SVG, an HTTP(S) URL or in-memory bytes.\n\nOn Windows, `src` may also name an executable, library or shortcut (`.exe`, `.dll`, `.lnk`):\nthe image is the file's shell icon as Explorer draws it (a shortcut shows its target's icon),\n256 px when the file carries a jumbo icon, else 48 or 32 px. Other platforms decode those paths\nas ordinary images, so they fail and fire `onError` (or show `fallbackSrc`).",
       "source": "packages/core/src/components/image.ts",
-      "line": 294,
+      "line": 305,
       "generic": false,
       "propsType": "ImageProps",
       "props": [
@@ -2796,14 +2824,32 @@
     {
       "name": "Input",
       "source": "packages/core/src/components/input.ts",
-      "line": 19,
+      "line": 28,
       "generic": false,
       "propsType": "InputProps",
       "props": [
         {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus the field when it first appears (HTML `autofocus`), e.g. in a dialog that just opened."
+        },
+        {
           "name": "disabled",
           "type": "boolean",
           "optional": true
+        },
+        {
+          "name": "glass",
+          "type": "GlassProp",
+          "optional": true,
+          "doc": "A Liquid Glass capsule field."
+        },
+        {
+          "name": "maxLength",
+          "type": "number",
+          "optional": true,
+          "doc": "The most characters the user can bring the value to (HTML `maxlength`): typing past it is dropped, a paste is cut to fit."
         },
         {
           "name": "onChange",
@@ -2820,6 +2866,12 @@
           "name": "placeholder",
           "type": "string",
           "optional": true
+        },
+        {
+          "name": "readOnly",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focusable, selectable and copyable, but the user cannot edit it (HTML `readonly`). The app can still change `value`."
         },
         {
           "name": "type",
@@ -2851,13 +2903,14 @@
         "style"
       ],
       "types": [
+        "GlassProp",
         "InputType"
       ]
     },
     {
       "name": "InputGroup",
       "source": "packages/core/src/form-controls.ts",
-      "line": 163,
+      "line": 165,
       "generic": false,
       "propsType": "InputGroupProps",
       "props": [
@@ -2899,7 +2952,7 @@
     {
       "name": "InputOTP",
       "source": "packages/core/src/form-controls.ts",
-      "line": 194,
+      "line": 196,
       "generic": false,
       "propsType": "InputOTPProps",
       "props": [
@@ -2965,7 +3018,7 @@
     {
       "name": "Item",
       "source": "packages/core/src/form-controls.ts",
-      "line": 249,
+      "line": 251,
       "generic": false,
       "propsType": "ItemProps",
       "props": [
@@ -3027,7 +3080,7 @@
     {
       "name": "Kbd",
       "source": "packages/core/src/form-controls.ts",
-      "line": 271,
+      "line": 273,
       "generic": false,
       "propsType": "KbdProps",
       "props": [],
@@ -3053,7 +3106,7 @@
     {
       "name": "Label",
       "source": "packages/core/src/form-controls.ts",
-      "line": 96,
+      "line": 98,
       "generic": false,
       "propsType": "LabelProps",
       "props": [
@@ -3095,7 +3148,7 @@
     {
       "name": "Line",
       "source": "packages/core/src/components/svg.ts",
-      "line": 48,
+      "line": 50,
       "generic": false,
       "props": [
         {
@@ -3130,7 +3183,7 @@
       "name": "Link",
       "summary": "Native hyperlink primitive. Opens `href` through the platform's registered URI handler.",
       "source": "packages/core/src/components/link.ts",
-      "line": 30,
+      "line": 31,
       "generic": false,
       "propsType": "LinkProps",
       "props": [
@@ -3143,6 +3196,13 @@
           "name": "align",
           "type": "Style[\"align\"]",
           "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable).",
           "from": "ViewProps"
         },
         {
@@ -3328,6 +3388,13 @@
           "name": "align",
           "type": "Style[\"align\"]",
           "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable).",
           "from": "ViewProps"
         },
         {
@@ -3801,7 +3868,7 @@
     {
       "name": "NativeSelect",
       "source": "packages/core/src/form-controls.ts",
-      "line": 287,
+      "line": 289,
       "generic": false,
       "propsType": "NativeSelectProps",
       "props": [
@@ -3975,7 +4042,7 @@
     {
       "name": "Path",
       "source": "packages/core/src/components/svg.ts",
-      "line": 45,
+      "line": 47,
       "generic": false,
       "props": [
         {
@@ -3991,7 +4058,7 @@
     {
       "name": "Polygon",
       "source": "packages/core/src/components/svg.ts",
-      "line": 50,
+      "line": 52,
       "generic": false,
       "props": [
         {
@@ -4007,7 +4074,7 @@
     {
       "name": "Polyline",
       "source": "packages/core/src/components/svg.ts",
-      "line": 49,
+      "line": 51,
       "generic": false,
       "props": [
         {
@@ -4098,7 +4165,7 @@
     {
       "name": "Portal",
       "source": "packages/core/src/components/layout.ts",
-      "line": 60,
+      "line": 62,
       "generic": false,
       "propsType": "PortalProps",
       "props": [
@@ -4106,6 +4173,13 @@
           "name": "align",
           "type": "Style[\"align\"]",
           "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable).",
           "from": "ViewProps"
         },
         {
@@ -4216,7 +4290,7 @@
     {
       "name": "Pressable",
       "source": "packages/core/src/components/pressable.ts",
-      "line": 23,
+      "line": 24,
       "generic": false,
       "propsType": "PressableProps",
       "props": [
@@ -4224,6 +4298,13 @@
           "name": "align",
           "type": "Style[\"align\"]",
           "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable).",
           "from": "ViewProps"
         },
         {
@@ -4394,7 +4475,7 @@
     {
       "name": "Progress",
       "source": "packages/core/src/controls.ts",
-      "line": 144,
+      "line": 170,
       "generic": false,
       "propsType": "ProgressProps",
       "props": [
@@ -4515,7 +4596,7 @@
     {
       "name": "RadioGroup",
       "source": "packages/core/src/controls.ts",
-      "line": 59,
+      "line": 85,
       "generic": false,
       "propsType": "RadioGroupProps",
       "props": [
@@ -4652,7 +4733,7 @@
     {
       "name": "Row",
       "source": "packages/core/src/components/layout.ts",
-      "line": 45,
+      "line": 47,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
@@ -4660,6 +4741,12 @@
           "name": "align",
           "type": "Style[\"align\"]",
           "optional": true
+        },
+        {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable)."
         },
         {
           "name": "children",
@@ -4765,6 +4852,13 @@
           "name": "align",
           "type": "Style[\"align\"]",
           "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable).",
           "from": "ViewProps"
         },
         {
@@ -4916,6 +5010,13 @@
           "from": "ViewProps"
         },
         {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable).",
+          "from": "ViewProps"
+        },
+        {
           "name": "children",
           "type": "BindableChild",
           "optional": true,
@@ -5057,7 +5158,7 @@
     {
       "name": "Select",
       "source": "packages/core/src/select.ts",
-      "line": 20,
+      "line": 23,
       "generic": false,
       "propsType": "SelectProps",
       "props": [
@@ -5076,6 +5177,12 @@
           "type": "boolean",
           "optional": true,
           "default": "false"
+        },
+        {
+          "name": "glass",
+          "type": "GlassProp",
+          "optional": true,
+          "doc": "Liquid Glass capsule trigger and glass list."
         },
         {
           "name": "onOpenChange",
@@ -5121,13 +5228,14 @@
         "style"
       ],
       "types": [
+        "GlassProp",
         "SelectOption"
       ]
     },
     {
       "name": "Separator",
       "source": "packages/core/src/controls.ts",
-      "line": 138,
+      "line": 164,
       "generic": false,
       "propsType": "SeparatorProps",
       "props": [
@@ -5366,7 +5474,7 @@
     {
       "name": "Slider",
       "source": "packages/core/src/controls.ts",
-      "line": 91,
+      "line": 117,
       "generic": false,
       "propsType": "SliderProps",
       "props": [
@@ -5521,7 +5629,7 @@
     {
       "name": "Svg",
       "source": "packages/core/src/components/svg.ts",
-      "line": 151,
+      "line": 153,
       "generic": false,
       "propsType": "SvgProps",
       "props": [
@@ -5612,7 +5720,7 @@
     {
       "name": "SvgRect",
       "source": "packages/core/src/components/svg.ts",
-      "line": 51,
+      "line": 53,
       "generic": false,
       "props": [
         {
@@ -5658,7 +5766,7 @@
     {
       "name": "Switch",
       "source": "packages/core/src/controls.ts",
-      "line": 36,
+      "line": 39,
       "generic": false,
       "propsType": "SwitchProps",
       "props": [
@@ -5676,6 +5784,12 @@
           "name": "disabled",
           "type": "boolean",
           "optional": true
+        },
+        {
+          "name": "glass",
+          "type": "GlassProp",
+          "optional": true,
+          "doc": "The iOS 26 switch: a wide track (green, or the glass's tint, when on) under a glass knob."
         },
         {
           "name": "onCheckedChange",
@@ -5700,7 +5814,9 @@
         "rovingGroup",
         "style"
       ],
-      "types": []
+      "types": [
+        "GlassProp"
+      ]
     },
     {
       "name": "Table",
@@ -5760,7 +5876,7 @@
     {
       "name": "Tabs",
       "source": "packages/core/src/controls.ts",
-      "line": 160,
+      "line": 186,
       "generic": false,
       "propsType": "TabsProps",
       "props": [
@@ -5857,14 +5973,32 @@
     {
       "name": "TextArea",
       "source": "packages/core/src/components/input.ts",
-      "line": 59,
+      "line": 85,
       "generic": false,
       "propsType": "TextAreaProps",
       "props": [
         {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus the area when it first appears (HTML `autofocus`)."
+        },
+        {
           "name": "disabled",
           "type": "boolean",
           "optional": true
+        },
+        {
+          "name": "followTail",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Keeps the end in view as `value` grows while the area is scrolled to its end, as `<Scroll followTail>`: scrolling up stops it, scrolling back to the end resumes it."
+        },
+        {
+          "name": "maxLength",
+          "type": "number",
+          "optional": true,
+          "doc": "The most characters the user can bring the value to (HTML `maxlength`): typing past it is dropped, a paste is cut to fit."
         },
         {
           "name": "onChange",
@@ -5880,6 +6014,12 @@
           "name": "placeholder",
           "type": "string",
           "optional": true
+        },
+        {
+          "name": "readOnly",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focusable, selectable, copyable and scrollable, but the user cannot edit it (HTML `readonly`): a log or a preview. The app can still change `value`."
         },
         {
           "name": "submitOnEnter",
@@ -5937,6 +6077,13 @@
           "optional": true,
           "doc": "Light or dark glass; sets the ink of the title and controls. Default `light`.",
           "default": "\"light\""
+        },
+        {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable).",
+          "from": "ViewProps"
         },
         {
           "name": "buttonStyle",
@@ -6207,7 +6354,7 @@
     {
       "name": "Toggle",
       "source": "packages/core/src/form-controls.ts",
-      "line": 299,
+      "line": 319,
       "generic": false,
       "propsType": "ToggleProps",
       "props": [
@@ -6220,6 +6367,12 @@
           "name": "disabled",
           "type": "boolean",
           "optional": true
+        },
+        {
+          "name": "glass",
+          "type": "GlassProp",
+          "optional": true,
+          "doc": "Liquid Glass capsule; pressed, it fills with the tint (default: the theme's primary)."
         },
         {
           "name": "label",
@@ -6262,13 +6415,14 @@
         "style"
       ],
       "types": [
-        "ButtonProps"
+        "ButtonProps",
+        "GlassProp"
       ]
     },
     {
       "name": "ToggleGroup",
       "source": "packages/core/src/form-controls.ts",
-      "line": 329,
+      "line": 366,
       "generic": false,
       "propsType": "ToggleGroupProps",
       "props": [
@@ -6286,6 +6440,12 @@
           "name": "disabled",
           "type": "boolean",
           "optional": true
+        },
+        {
+          "name": "glass",
+          "type": "GlassProp",
+          "optional": true,
+          "doc": "One Liquid Glass capsule holding the items; the chosen ones get a bright pill."
         },
         {
           "name": "onValueChange",
@@ -6317,6 +6477,7 @@
         "style"
       ],
       "types": [
+        "GlassProp",
         "ToggleGroupItem"
       ]
     },
@@ -6466,7 +6627,7 @@
     {
       "name": "Typography",
       "source": "packages/core/src/form-controls.ts",
-      "line": 372,
+      "line": 466,
       "generic": false,
       "propsType": "TypographyProps",
       "props": [
@@ -6501,7 +6662,7 @@
     {
       "name": "View",
       "source": "packages/core/src/components/layout.ts",
-      "line": 41,
+      "line": 43,
       "generic": false,
       "propsType": "ViewProps",
       "props": [
@@ -6509,6 +6670,12 @@
           "name": "align",
           "type": "Style[\"align\"]",
           "optional": true
+        },
+        {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable)."
         },
         {
           "name": "children",
@@ -6717,7 +6884,7 @@
     {
       "name": "Window",
       "source": "packages/core/src/components/window.ts",
-      "line": 61,
+      "line": 74,
       "generic": false,
       "propsType": "WindowProps",
       "props": [
@@ -6725,6 +6892,13 @@
           "name": "align",
           "type": "Style[\"align\"]",
           "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable).",
           "from": "ViewProps"
         },
         {
@@ -6738,6 +6912,12 @@
           "type": "BindableChild",
           "optional": true,
           "from": "ViewProps"
+        },
+        {
+          "name": "chrome",
+          "type": "WindowChrome",
+          "optional": true,
+          "doc": "What a `frameless` window keeps of the system frame on Windows 11: `\"system\"` (default) the\nrounded corners and the 1 px border (the root's `borderColor`), `\"none\"` square corners and no\nborder, for shapes the app draws itself (a dock, a pill, an overlay). Set when the window opens."
         },
         {
           "name": "desktopWidget",
@@ -6829,6 +7009,12 @@
           "from": "ViewProps"
         },
         {
+          "name": "opacity",
+          "type": "number",
+          "optional": true,
+          "doc": "The whole window's opacity, 0–1 (Windows and X11), applied by the system compositor. Can change while the app runs."
+        },
+        {
           "name": "padding",
           "type": "Style[\"padding\"]",
           "optional": true,
@@ -6874,6 +7060,12 @@
           "optional": true
         },
         {
+          "name": "visible",
+          "type": "boolean",
+          "optional": true,
+          "doc": "`false` opens the window hidden (nothing flashes on screen); `app.show()` or `app.activate()`\nshows it later. Default `true`."
+        },
+        {
           "name": "width",
           "type": "number",
           "optional": true
@@ -6913,6 +7105,7 @@
         "DesktopWidget",
         "Reactive",
         "WindowBackdrop",
+        "WindowChrome",
         "WindowCloseRequestEvent",
         "WindowLevel",
         "WindowPosition"
@@ -7067,9 +7260,9 @@
     },
     {
       "name": "onSize",
-      "type": "(size: { width: number; height: number }) => void",
+      "type": "(size: SizeEvent) => void",
       "optional": true,
-      "doc": "Content-box size after layout, on mount and whenever it changes (a ResizeObserver).",
+      "doc": "Size after layout, on mount and whenever it changes (a ResizeObserver): `width`/`height` the\r\ncontent box (without padding and border, as `contentRect`), `borderBox` the whole box with them\r\n(`borderBoxSize`).",
       "from": "BaseProps"
     },
     {
@@ -7100,7 +7293,7 @@
     "BreadcrumbItem": "interface BreadcrumbItem {\n  label: string;\n  disabled?: boolean;\n  onClick?: () => void;\n}",
     "BubbleSide": "type BubbleSide = \"incoming\" | \"outgoing\";",
     "BubbleVariant": "type BubbleVariant = \"default\" | \"secondary\" | \"destructive\";",
-    "ButtonProps": "interface ButtonProps extends BaseProps {\n  variant?: ButtonVariant;\n  size?: \"sm\" | \"default\" | \"lg\";\n  disabled?: boolean;\n  control?: Control;\n  onClick?: () => void;\n  onHover?: (hovered: boolean) => void;\n}",
+    "ButtonProps": "interface ButtonProps extends BaseProps {\n  variant?: ButtonVariant;\n  size?: \"sm\" | \"default\" | \"lg\";\n  disabled?: boolean;\n  control?: Control;\n  onClick?: () => void;\n  onHover?: (hovered: boolean) => void;\n  /**\n   * Liquid Glass capsule: `true`, a variant or options. `destructive` tints it red,\n   * `ghost` is clear glass without a shadow, `glass={{ tint }}` makes a prominent coloured one.\n   */\n  glass?: GlassProp;\n}",
     "ButtonVariant": "type ButtonVariant = \"default\" | \"secondary\" | \"outline\" | \"ghost\" | \"destructive\";",
     "CalendarWeekStartsOn": "type CalendarWeekStartsOn = 0 | 1 | 2 | 3 | 4 | 5 | 6;",
     "CarouselItem": "interface CarouselItem {\n  value: string;\n  content: Child;\n  label?: string;\n}",
@@ -7114,6 +7307,8 @@
     "DesktopWidget": "interface DesktopWidget { columns: number; rows: number }",
     "DropdownMenuItem": "interface DropdownMenuItem {\n  value: string;\n  label: string;\n  icon?: IconName;\n  shortcut?: string;\n  disabled?: boolean;\n  checked?: boolean;\n}",
     "GlassMaterial": "interface GlassMaterial {\n  /** Blur radius in px of what is behind the box (CSS `backdrop-filter: blur()`), 0–64. */\n  blur: number;\n  /** Colour saturation of the blurred backdrop; 1 leaves it, iOS uses about 1.6. */\n  saturate?: number;\n  /** How far in px the backdrop bends along the rounded edge (the lens), 0 for none. */\n  refraction?: number;\n  /** Brightness 0–1 of the rim, the edge reflections and the sheen. */\n  highlight?: number;\n  /** How much the flat part enlarges the backdrop, as a thick lens does: 0–0.3 (0.06 is iOS-like). */\n  magnify?: number;\n  /**\n   * Boxes painted in one frame with the same key fuse like drops of liquid: their\n   * shapes join smoothly where they come within `blend` px of each other.\n   */\n  merge?: string;\n  /** How far apart in px two merged boxes start bridging. Default 0 (touching). */\n  blend?: number;\n}",
+    "GlassOptions": "interface GlassOptions {\n  variant?: GlassVariant;\n  /**\n   * Tints the glass, the alpha being the strength: the prominent, coloured glass of a\n   * primary action. A theme token with an alpha (`var(--primary)/85`) works too.\n   */\n  tint?: string;\n  /** Light or dark glass. Default: follows the theme (its `card` colour veils, its `foreground` inks). */\n  appearance?: GlassAppearance;\n}",
+    "GlassProp": "type GlassProp = boolean | GlassVariant | GlassOptions;",
     "GlassVariant": "type GlassVariant = \"regular\" | \"clear\" | \"tinted\";",
     "HoverCardSide": "type HoverCardSide = \"top\" | \"right\" | \"bottom\" | \"left\";",
     "IconName": "type IconName =\n  | \"check\" | \"x\" | \"plus\" | \"minus\"\n  | \"chevron-down\" | \"chevron-up\" | \"chevron-right\" | \"chevron-left\"\n  | \"search\" | \"info\"\n  | \"house\" | \"settings\" | \"user\" | \"bell\" | \"heart\" | \"star\"\n  | \"download\" | \"trash-2\" | \"folder\" | \"mail\"\n  | \"play\" | \"pause\" | \"skip-back\" | \"skip-forward\";",
@@ -7125,7 +7320,7 @@
     "MenuBarItem": "type MenuBarItem =\n  | { type: \"separator\" }\n  | { type?: \"item\"; id?: string; label: string; accelerator?: string; checked?: boolean; disabled?: boolean; onSelect?: () => void; items?: MenuBarItem[] };",
     "MenubarItem": "interface MenubarItem {\n  value: string;\n  label: string;\n  disabled?: boolean;\n  checked?: boolean;\n  shortcut?: string;\n  onSelect?: () => void;\n}",
     "MenubarMenu": "interface MenubarMenu {\n  value: string;\n  label: string;\n  disabled?: boolean;\n  items: MenubarItem[];\n}",
-    "MotionProperty": "type MotionProperty = NumericMotionProperty | \"background\" | \"foreground\" | \"borderColor\" | \"boxShadow\" | \"textShadow\" | \"transform\";",
+    "MotionProperty": "type MotionProperty = NumericMotionProperty | \"background\" | \"foreground\" | \"borderColor\" | \"boxShadow\" | \"textShadow\" | \"transform\" | \"glass\";",
     "MotionTransition": "interface MotionTransition {\n  /** Duration in milliseconds. Defaults to 200 when omitted. */\n  duration?: number;\n  /** Delay in milliseconds. Defaults to 0. */\n  delay?: number;\n  easing?: MotionEasing;\n}",
     "MotionTransitions": "type MotionTransitions = Partial<Record<MotionProperty | \"all\", MotionTransition>>;",
     "MotionValues": "type MotionValues = Partial<Record<NumericMotionProperty, number>> & { transform?: Transform | string };",
@@ -7158,6 +7353,7 @@
     "TreeNode": "interface TreeNode<T = unknown> {\n  id: string;\n  label: string;\n  children?: readonly TreeNode<T>[];\n  disabled?: boolean;\n  icon?: IconName;\n  data?: T;\n}",
     "TypographyVariant": "type TypographyVariant = \"h1\" | \"h2\" | \"h3\" | \"h4\" | \"p\" | \"lead\" | \"large\" | \"small\" | \"muted\" | \"code\" | \"blockquote\";",
     "WindowBackdrop": "type WindowBackdrop = \"none\" | \"transparent\" | \"blur\" | \"mica\" | \"acrylic\";",
+    "WindowChrome": "type WindowChrome = \"system\" | \"none\";",
     "WindowCloseRequestEvent": "interface WindowCloseRequestEvent {\n  readonly defaultPrevented: boolean;\n  preventDefault(): void;\n}",
     "WindowLevel": "type WindowLevel = \"normal\" | \"alwaysOnTop\" | \"alwaysOnBottom\";",
     "WindowPosition": "type WindowPosition = WindowPositionPreset | { x: number; y: number; physical?: boolean };",

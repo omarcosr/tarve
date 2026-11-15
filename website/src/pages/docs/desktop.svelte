@@ -62,6 +62,31 @@ instance.onSecondInstance((launch) => {
 // Once, for example from a setting: myapp://… links now open this app (current user).
 registerUrlScheme("myapp", { name: "My App" });`;
 
+  const shell = `import { Row, Text, Window, createApp, systemMediaSessions } from "@tarve/core";
+
+// A dock: frameless, square (no Windows 11 corners or border), off the taskbar, docked as an AppBar.
+const app = createApp(() => (
+  <Window title="Dock" frameless chrome="none" skipTaskbar visible={false} opacity={0.95}
+    backdrop="transparent" style={{ background: "#00000000" }}>
+    <Row flex={1} gap={8} padding={8} style={{ background: "#18181bcc", radius: 16 }}>
+      <Text>…</Text>
+    </Row>
+  </Window>
+));
+await app.ready;
+app.appBar("bottom", { size: 64 }); // reserves the space; released on close or appBar(null)
+app.show();
+
+const hwnd = app.nativeHandle(); // HWND / XID as a decimal string, for your own FFI
+const { screens, cursor } = await app.screens(); // monitors (work area, scale) and the pointer
+
+// A menu in a window of its own: close it when it stops being the active window.
+const menu = app.openWindow(MenuView, { id: "menu" });
+menu.onFocusChange((focused) => { if (!focused) menu.close(); });
+menu.setBounds({ x: cursor?.x ?? 0, y: 0, width: 240, height: 320, physical: true });
+
+const playing = await systemMediaSessions(); // what other apps are playing (Windows)`;
+
   const menu = `app.menuBar([
   { label: "&File", items: [
     { id: "open", label: "&Open…", accelerator: "Ctrl+O", onSelect: openFile },
@@ -94,6 +119,16 @@ registerUrlScheme("myapp", { name: "My App" });`;
     ["appConfigDirectory(app?)", "Where per-user app data goes: %APPDATA%, ~/Library/Application Support or $XDG_CONFIG_HOME."],
     ["app.menuBar(items | null, options?)", "Puts a menu bar at the top of the window (after a TitleBar), drawn in the theme. A choice runs onSelect and reaches app.onEvent as { type: \"menu\", id }. null removes it."],
     ["<AppMenuBar items onSelect>", "The same bar as a component, to place it yourself."],
+    ["<Window visible={false}>", "Opens the window hidden; app.show() or app.activate() shows it."],
+    ["<Window frameless chrome=\"none\">", "No Windows 11 rounded corners or 1 px border on a frameless window (default \"system\" keeps them, in the root's borderColor)."],
+    ["<Window opacity> / app.setOpacity(n)", "The whole window's opacity, 0–1, by the system compositor (Windows, X11). The prop can change while the app runs."],
+    ["app.nativeHandle()", "The native window (HWND on Windows, XID on X11) as a decimal string, from ready on; undefined before."],
+    ["app.setBounds({ x, y, width, height, physical })", "Moves and resizes the window: outer top-left and client size in logical px, or screen px with physical: true. Missing fields keep their value."],
+    ["app.isFocused() / app.onFocusChange(fn)", "Whether the window is the active one, and a listener for changes (DOM window focus and blur). Open popovers and menus close when it stops being active."],
+    ["app.appBar(edge | null, { size })", "Windows: docks the window to \"top\", \"bottom\", \"left\" or \"right\" as an AppBar size logical px thick (48 by default) and reserves the space; it re-docks when the taskbar moves. null or closing releases it."],
+    ["app.screens()", "Resolves { screens, cursor }: each monitor's physical bounds, work area, scale and primary flag, and the pointer's screen position (null where unknown)."],
+    ["systemMediaSessions() / controlSystemMediaSession(appId, action)", "Windows: what other apps are playing (title, artist, artwork, position) and play, pause, toggle, next or previous for one of them. [] and false elsewhere."],
+    ["<Image src=\"C:/…/app.exe\">", "Windows: an .exe, .dll or .lnk path shows the file's shell icon."],
   ];
 
   const support = [
@@ -104,6 +139,8 @@ registerUrlScheme("myapp", { name: "My App" });`;
     ["URL links", "Per user, in the registry", "Desktop entry made the default with xdg-mime", "Not yet: registerUrlScheme throws"],
     ["Remembered windows", "Yes, across monitor scales", "Yes", "Yes"],
     ["Menu bar", "Themed, or native: true for the Win32 menu", "Themed", "Themed; the global macOS menu is not used yet"],
+    ["Shell windows", "Hidden start, bounds, opacity, chrome, AppBar, screens and pointer, native handle", "Hidden start, bounds, opacity (X11), screens; pointer on X11", "Not built or tested yet"],
+    ["Other apps' media", "Yes (system media sessions)", "No: resolves []", "No: resolves []"],
   ];
 </script>
 
@@ -210,6 +247,26 @@ registerUrlScheme("myapp", { name: "My App" });`;
       </p>
     </div>
     <CodeBlock code={menu} file="menu.ts" />
+  </section>
+
+  <section class="doc-section">
+    <h2 id="shell">Docks, bars and overlays</h2>
+    <div class="doc-prose">
+      <p>
+        A desktop shell window (a dock, a taskbar, a launcher, an overlay) needs more from the window than a document does.
+        <code>visible=&#123;false&#125;</code> opens it hidden so you can place it before it shows. <code>frameless</code>
+        with <code>chrome="none"</code> drops the Windows 11 rounded corners and border, so the shape is the one you draw.
+        <code>app.setBounds</code> moves and resizes it at any time, and <code>opacity</code> fades the whole window.
+      </p>
+      <p>
+        <code>app.appBar</code> docks it to a screen edge and reserves that space like the taskbar does: maximized windows stop
+        at it. <code>app.screens()</code> gives every monitor's work area and scale and the pointer's position, without
+        polling the system yourself. <code>app.onFocusChange</code> tells when a window stops being the active one; a menu or
+        preview in a window of its own closes on it. For anything Tarve does not cover, <code>app.nativeHandle()</code> is
+        the HWND or XID for your own FFI.
+      </p>
+    </div>
+    <CodeBlock code={shell} file="dock.tsx" />
   </section>
 
   <section class="doc-section">
