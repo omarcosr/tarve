@@ -7,6 +7,7 @@ import { MACHO_MAGICS, ZIP_MAGIC, isZip, machOKind } from "./macho";
 import { compareVersions, isValidVersion } from "./version";
 import { PACK_EXTENSION, inspectPack, isPack, packCompatible, PackHeader, importPackPublicKey } from "./pack";
 import { openPackFile, packFile, packHost, packMarker, packMismatch } from "./pack-host";
+import { syncInstallRecord } from "./install-record";
 
 export { compareVersions, isValidVersion };
 
@@ -205,6 +206,8 @@ export async function checkForUpdate(options: CheckForUpdateOptions): Promise<Up
   const currentVersion = options.currentVersion ?? metadata.version;
   if (!currentVersion) throw new Error("checkForUpdate needs currentVersion (or a version set at tarve build)");
   if (!isValidVersion(currentVersion)) throw new TypeError(`Invalid current version: ${currentVersion}`);
+  // After an update the Windows installer's Apps & features entry still shows the version it installed.
+  syncInstallRecord(packHost()?.active ?? currentVersion);
   assertUpdateUrl(options.url, options.allowInsecure);
   const response = await (options.fetch ?? fetch)(options.url, { signal: options.signal, headers: { accept: "application/json" } });
   if (!response.ok) throw new Error(`Update check failed: HTTP ${response.status}`);

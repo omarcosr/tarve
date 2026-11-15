@@ -2,6 +2,12 @@
 
 All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `@tarve/svelte` and `@tarve/mcp` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
+## Unreleased
+
+### Added
+
+- `tarve package --format setup`: a Windows installer that is itself a Tarve app, built for the same runtime as the app (txiki.js gives a ~20 MB installer), from any OS and without Inno Setup, NSIS or WiX. A wizard in the app's icon and colours (welcome and language, install folder, options, progress, done) installs per user into `%LOCALAPPDATA%\Programs`, writes Start menu and desktop shortcuts with the AppUserModelID, the Apps & features entry, deep links and file types, and installs a `Uninstall.exe` that removes it all. Configured by package.json `tarve.installer`: which options show and their defaults (desktop shortcut, start with Windows, open when done, app-defined checkboxes with install/uninstall commands), `beforeInstall`/`afterInstall`/`beforeUninstall` hooks run by the app's own executable, texts per language (English and Brazilian Portuguese built in) and traces of a previous installer to remove. `/S`, `--dir=`, `--lang=`, `--[no-]<option>` for silent installs. Also `packageSetup()` from `@tarve/core/package`, and `--entry` to read the metadata of an already built executable's app. Self-updates keep the Apps & features entry true: `checkForUpdate` moves its version (and size) to the running executable or app pack. Uninstalling also removes downloaded app packs, and the wizard refuses a folder the user cannot write to.
+
 ## 0.12.0 — 2026-11-12
 
 ### Added

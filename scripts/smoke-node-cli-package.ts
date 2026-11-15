@@ -66,7 +66,7 @@ function machO(): Uint8Array {
 function tarvePackage(cli: string, input: string, format: string): Map<string, string> {
   // Packaging compresses a whole app (deb, tar, zip): slow CI runners need more than 5 minutes.
   const output = run(node, [cli, "package", input, "--format", format], 900_000);
-  const artifacts = new Map([...output.matchAll(/^(deb|tar|zip|msix|app-zip): (.+)$/gm)].map(match => [match[1]!, match[2]!.trim()]));
+  const artifacts = new Map([...output.matchAll(/^(deb|tar|zip|msix|app-zip|setup): (.+)$/gm)].map(match => [match[1]!, match[2]!.trim()]));
   for (const wanted of format.split(",")) assert.ok(artifacts.has(wanted), `tarve package printed no ${wanted} artifact:\n${output}`);
   return artifacts;
 }
@@ -111,6 +111,29 @@ function checkZip(path: string, executable: Uint8Array, exeName: string): void {
   assert.deepEqual(entries.map(entry => entry.path), ["Smoke-Notes-1.2.3/", `Smoke-Notes-1.2.3/${exeName}`]);
   assert.equal(entries[1]!.mode & 0o777, 0o755);
   assert.equal(sha(entries[1]!.data), sha(executable));
+}
+
+/**
+ * The Windows installer (`--format setup`), a Tarve app built on Node.js: a silent install into a
+ * scratch folder (files, the Apps & features entry, the Start menu shortcut), then the installed
+ * Uninstall.exe, which relaunches from the temporary folder and removes everything.
+ */
+async function checkSetup(path: string, executable: Uint8Array, exeName: string): Promise<void> {
+  assert.match(path, /Smoke-Notes-Setup-1\.2\.3-win32-x64\.exe$/);
+  const installed = join(directory, "installed");
+  const key = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\dev.tarve.SmokeNotes";
+  const shortcut = join(process.env.APPDATA!, "Microsoft", "Windows", "Start Menu", "Programs", "Smoke Notes.lnk");
+  run(path, ["/S", `--dir=${installed}`, "--no-launch", "--no-desktop-shortcut"]);
+  assert.equal(sha(readFileSync(join(installed, exeName))), sha(executable));
+  assert.ok(existsSync(join(installed, "Uninstall.exe")) && existsSync(shortcut), "the installer wrote no uninstaller or Start menu shortcut");
+  const entry = run("reg.exe", ["query", key]);
+  assert.ok(entry.includes("Smoke Notes") && entry.includes("1.2.3") && entry.includes("--uninstall"), entry);
+  run(join(installed, "Uninstall.exe"), ["--uninstall", "--silent"]);
+  // The uninstaller hands over to a copy in the temporary folder, which removes the folder it ran from.
+  for (let waited = 0; existsSync(installed) && waited < 30_000; waited += 250) await new Promise(done => setTimeout(done, 250));
+  assert.ok(!existsSync(installed), "the uninstaller left the install folder");
+  assert.ok(!existsSync(shortcut), "the uninstaller left the Start menu shortcut");
+  assert.notEqual(spawnSync("reg.exe", ["query", key], { windowsHide: true }).status, 0, "the uninstaller left the Apps & features entry");
 }
 
 function checkAppZip(path: string, executable: Uint8Array): void {
@@ -159,7 +182,10 @@ try {
     const executablePath = join(directory, "dist", distExecutables.find(name => name.replaceAll(" ", "") === exeName) ?? distExecutables[0]!);
     const executable = readFileSync(executablePath);
     const name = executablePath.slice(executablePath.lastIndexOf(config.platform === "win32" ? "\\" : "/") + 1);
-    if (config.platform === "win32") checkZip(built.get("zip")!, executable, name);
+    if (config.platform === "win32") {
+      checkZip(built.get("zip")!, executable, name);
+      await checkSetup(tarvePackage(cli, executablePath, "setup").get("setup")!, executable, name);
+    }
     else { checkDeb(built.get("deb")!, executable, name); checkTar(built.get("tar")!, executable, name); }
     // The packaged executable is the app: it renders headless and prints its marker.
     assert.ok(run(executablePath, []).includes("tarve-node-ready"), "the built executable did not render");
@@ -187,7 +213,7 @@ try {
     });
     checkAppZip(tarvePackage(cli, app, "app-zip").get("app-zip")!, machO());
   }
-  console.log(`Tarve Node CLI package smoke PASS (node ${run(node, ["--version"]).trim()}: built ${hostFormat}, packaged deb, tar, zip, app-zip)`);
+  console.log(`Tarve Node CLI package smoke PASS (node ${run(node, ["--version"]).trim()}: built ${hostFormat}, packaged deb, tar, zip, app-zip${config.platform === "win32" ? ", setup (installed and removed)" : ""})`);
 } finally {
   rmSync(directory, { recursive: true, force: true });
 }

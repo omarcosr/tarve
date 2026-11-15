@@ -1,7 +1,8 @@
 // `tarve package`: wraps a built Tarve executable (`tarve build`) into installers and
 // portable archives without external tools: a Debian package (.deb), a Linux .tar.gz with a
 // desktop entry and a per-user install script, a Windows portable .zip, an MSIX layout
-// (packed into .msix when makeappx is available) and a zipped macOS .app (`app-zip`).
+// (packed into .msix when makeappx is available), a zipped macOS .app (`app-zip`) and, through
+// setup-build.ts, a Windows installer that is itself a Tarve app (`setup`).
 // A .dmg needs hdiutil on a Mac and is not written yet. Node.js and Bun alike: node: modules only.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -16,14 +17,16 @@ import { customFileTypes, desktopMimeTypes, fileTypeMime, mimeIconName, msixExte
 import { resolveAppAssociations, type AppAssociations } from "./associations-config";
 
 export { createAr, createTar, createTarGz, createZip, crc32, type ArchiveEntry } from "./archive-formats";
+export { packageSetup, setupManifest, type SetupPackageOptions } from "./setup-build";
+export type { InstallerConfig, SetupManifest } from "./setup/manifest";
 
-export const PACKAGE_FORMATS = ["deb", "tar", "zip", "msix", "app-zip"] as const;
+export const PACKAGE_FORMATS = ["deb", "tar", "zip", "msix", "app-zip", "setup"] as const;
 export type PackageFormat = typeof PACKAGE_FORMATS[number];
 
 export interface PackageOptions {
   /** A Tarve executable from `tarve build` (Linux ELF or Windows .exe), or a macOS `.app` bundle. */
   executable: string;
-  /** One format or several; defaults to deb + tar for a Linux executable, zip for a Windows one and app-zip for a .app. */
+  /** One format or several; defaults to deb + tar for a Linux executable, zip for a Windows one and app-zip for a .app. `setup` (a Windows installer) is `packageSetup` (async). */
   format?: PackageFormat | readonly PackageFormat[];
   /** Output directory (default: the executable's directory). */
   outDir?: string;
@@ -81,7 +84,7 @@ export function parsePackageFormats(value: string | undefined): PackageFormat[] 
   return [...new Set(formats)] as PackageFormat[];
 }
 
-/** The OS a package format installs on: deb/tar are Linux, zip/msix Windows, app-zip macOS. */
+/** The OS a package format installs on: deb/tar are Linux, zip/msix/setup Windows, app-zip macOS. */
 export function packageFormatPlatform(format: PackageFormat): "linux" | "win32" | "darwin" {
   return format === "deb" || format === "tar" ? "linux" : format === "app-zip" ? "darwin" : "win32";
 }
@@ -513,6 +516,9 @@ export function packageApp(options: PackageOptions): PackageArtifact[] {
     icon: png ? { png, size: pngSize(png) } : undefined,
     associations: resolveAppAssociations(options.entrypoint ?? executable, { protocols: options.protocols ? [...options.protocols] : undefined, fileTypes: options.fileTypes ? [...options.fileTypes] : undefined }),
   };
-  const writers: Record<PackageFormat, (context: Context) => PackageArtifact> = { deb: packageDeb, tar: packageTar, zip: packageZip, msix: packageMsix, "app-zip": packageAppZip };
+  const writers: Record<PackageFormat, (context: Context) => PackageArtifact> = {
+    deb: packageDeb, tar: packageTar, zip: packageZip, msix: packageMsix, "app-zip": packageAppZip,
+    setup: () => { throw new Error("--format setup builds an installer app: use packageSetup (@tarve/core/package) or tarve package --format setup."); },
+  };
   return formats.map(format => writers[format](context));
 }

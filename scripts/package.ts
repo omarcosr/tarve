@@ -101,6 +101,8 @@ const entries = [
   ["packages/core/alias-preload.ts", "alias-preload.js"],
   ["packages/core/node-build.ts", "node-build.js"],
   ["packages/core/package-installer.ts", "package-installer.js"],
+  // The Windows installer wizard `tarve package --format setup` builds, with the app embedded (setup-build.ts).
+  ["packages/core/setup/app.tsx", "setup-app.js"],
   ["packages/protocol/src/index.ts", "protocol.js"],
 ];
 const results = await Promise.all(entries.map(([entry, naming]) => Bun.build({

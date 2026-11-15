@@ -22,7 +22,7 @@ function usage(target?: BuildTarget): string {
     "       tarve keygen",
     "       tarve pack <app.tsx> --version 1.2.1 [--runtime bun|node|txiki] [--target ...]",
     "       tarve release --version 1.2.0 --artifact win32-x64=dist/App.exe [--pack dist/App.tarve] [...]",
-    "       tarve package <dist/App | dist/App.app | app.tsx> --format deb|tar|zip|msix|app-zip [options]",
+    "       tarve package <dist/App | dist/App.app | app.tsx> --format deb|tar|zip|msix|app-zip|setup [options]",
     "",
     "  run      run the app",
     "  dev      run with hot reload into the same window (--inspect: open the visual inspector window);",
@@ -31,7 +31,7 @@ function usage(target?: BuildTarget): string {
     `  keygen   create an update signing key pair (writes ${KEY_FILE}, prints the public key)`,
     "  pack     build a signed, encrypted app pack (.tarve): the app's code and files, without the runtime",
     "  release  copy built executables and packs to --out and write the signed latest.json",
-    "  package  wrap a built executable (or build app.tsx first) into a .deb, .tar.gz, portable .zip, MSIX or zipped .app",
+    "  package  wrap a built executable (or build app.tsx first) into a .deb, .tar.gz, portable .zip, MSIX, zipped .app or Windows installer (setup)",
     "",
     "Options:",
     "  --runtime bun|node|txiki        defaults to the runtime that launched tarve; txiki: build only",
@@ -63,8 +63,10 @@ function usage(target?: BuildTarget): string {
     "  --out dist/updates              release: output directory; keygen: where the key goes",
     "  --base-url https://host/path/   release: artifact URL prefix (default: relative to latest.json)",
     "  --notes text                    release: release notes",
-    "  --format deb,tar,zip,msix,app-zip package: comma separated (default: deb,tar for Linux, zip for Windows, app-zip for macOS); --out: output directory",
+    "  --format deb,tar,zip,msix,app-zip,setup package: comma separated (default: deb,tar for Linux, zip for Windows, app-zip for macOS); --out: output directory",
+    "                                  setup: a Windows installer that is a Tarve app (wizard, Apps & features entry, shortcuts; package.json tarve.installer)",
     "  --categories Utility;Office     package: freedesktop menu categories (deb, tar)",
+    "  --entry src/app.tsx             package (a built executable): the app whose package.json \"tarve\" fields apply",
     "  --protocol myapp                package, build (android): repeatable deep-link scheme (myapp://…), beside package.json tarve.protocols",
     "  --file-type ext=Name            package: repeatable file association, beside package.json tarve.fileTypes",
     "  --sign \"signtool sign … {file}\"  release: Authenticode command per Windows artifact, before hashing",
@@ -120,7 +122,7 @@ async function main(): Promise<number> {
       artifact: { type: "string", multiple: true }, key: { type: "string" }, "public-key": { type: "string" },
       out: { type: "string" }, "base-url": { type: "string" }, notes: { type: "string" }, sign: { type: "string" },
       notarize: { type: "boolean" }, "notary-profile": { type: "string" }, entitlements: { type: "string" },
-      categories: { type: "string" }, protocol: { type: "string", multiple: true }, "file-type": { type: "string", multiple: true },
+      categories: { type: "string" }, entry: { type: "string" }, protocol: { type: "string", multiple: true }, "file-type": { type: "string", multiple: true },
       inspect: { type: "boolean" }, packs: { type: "boolean" }, pack: { type: "string", multiple: true }, device: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
@@ -247,7 +249,7 @@ type CliValues = Readonly<Record<string, string | boolean | string[] | undefined
 
 /** `tarve package <executable | app.tsx>`: builds first when given source (one build per target OS), then packages. */
 async function packageCommand(input: string | undefined, count: number, values: CliValues): Promise<number> {
-  if (!input || count !== 2) throw new Error("Expected: tarve package <dist/App | dist/App.app | app.tsx> --format deb|tar|zip|msix|app-zip. Use --help for options.");
+  if (!input || count !== 2) throw new Error("Expected: tarve package <dist/App | dist/App.app | app.tsx> --format deb|tar|zip|msix|app-zip|setup. Use --help for options.");
   const { packageApp, packageFormatPlatform, parsePackageFormats } = await import("./package-installer");
   const { parseFileTypeFlag } = await import("./associations-config");
   const list = (key: string) => Array.isArray(values[key]) ? values[key] as string[] : [];
@@ -258,19 +260,32 @@ async function packageCommand(input: string | undefined, count: number, values: 
     copyright: string("copyright"), icon: string("icon"), appId: string("app-id"),
   };
   const source = /\.[cm]?[jt]sx?$/i.test(input);
-  const emit = (executable: string, targetFormats: typeof formats) => {
-    for (const artifact of packageApp({
-      executable, format: targetFormats, outDir: string("out"), ...metadata,
-      entrypoint: source ? input : undefined, categories: string("categories"),
-        protocols: list("protocol"), fileTypes: list("file-type").map(parseFileTypeFlag),
-    })) {
-      console.log(`${artifact.format}: ${artifact.path}`);
-      if (artifact.note) console.log(`  ${artifact.note}`);
+  // The installer (--format setup) is itself a Tarve app, built like the app: on Bun when Bun runs tarve.
+  const runtime = string("runtime") === "txiki" ? "txiki" : selectRuntime(string("runtime"));
+  if (runtime === "bun" && !process.versions.bun && (source || formats?.includes("setup"))) {
+    return forward("bun", [process.argv[1]!, ...process.argv.slice(2), "--runtime", "bun"]);
+  }
+  const print = (artifact: { format: string; path: string; note?: string }) => {
+    console.log(`${artifact.format}: ${artifact.path}`);
+    if (artifact.note) console.log(`  ${artifact.note}`);
+  };
+  const emit = async (executable: string, targetFormats: typeof formats) => {
+    const common = {
+      executable, outDir: string("out"), ...metadata,
+      entrypoint: source ? input : string("entry"), categories: string("categories"),
+      protocols: list("protocol"), fileTypes: list("file-type").map(parseFileTypeFlag),
+    };
+    const plain = targetFormats?.filter(format => format !== "setup");
+    if (plain === undefined || plain.length) for (const artifact of packageApp({ ...common, format: plain })) print(artifact);
+    if (targetFormats?.includes("setup")) {
+      const { packageSetup } = await import("./setup-build");
+      print(await packageSetup({
+        ...common, runtime, targetExecutable: string("target-executable"), nativeFeatures: string("native-features"),
+        smol: values.smol === true, trim: values.trim === true,
+      }));
     }
   };
   if (source) {
-    const runtime = string("runtime") === "txiki" ? "txiki" : selectRuntime(string("runtime"));
-    if (runtime === "bun" && !process.versions.bun) return forward("bun", [process.argv[1]!, ...process.argv.slice(2), "--runtime", "bun"]);
     const explicit = string("target");
     if (explicit !== undefined && !isBuildTarget(explicit)) throw new Error(`Unsupported target: ${explicit}. Expected ${BUILD_TARGETS.join(", ")}.`);
     const host = hostBuildTarget();
@@ -288,10 +303,10 @@ async function packageCommand(input: string | undefined, count: number, values: 
         compileJsx: values["compile-jsx"] === true, smol: values.smol === true, trim: values.trim === true, aot: values.aot === true,
         targetExecutable: string("target-executable"), nativeFeatures: string("native-features"),
       });
-      emit(executable, targetFormats);
+      await emit(executable, targetFormats);
     }
   } else {
-    emit(input, formats);
+    await emit(input, formats);
   }
   return 0;
 }
