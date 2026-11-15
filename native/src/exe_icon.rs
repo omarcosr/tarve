@@ -123,8 +123,8 @@ fn bitmap_rgba(bitmap: HBITMAP) -> Result<(u32, u32, Vec<u8>), String> {
         return Err("GetDIBits failed to read the shell icon".into());
     }
     // Icons without an alpha channel (old 24 bpp ones) come back with alpha 0 everywhere.
-    let opaque = bytes.chunks_exact(4).all(|pixel| pixel[3] == 0);
-    for pixel in bytes.chunks_exact_mut(4) {
+    let opaque = bytes.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 0);
+    for pixel in bytes.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
         if opaque {
             pixel[3] = 255;
@@ -140,7 +140,9 @@ fn bitmap_rgba(bitmap: HBITMAP) -> Result<(u32, u32, Vec<u8>), String> {
 /// Width or height (the larger) of the box holding the icon's visible pixels, from the top left.
 fn opaque_extent((width, _, bytes): &(u32, u32, Vec<u8>)) -> u32 {
     bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .enumerate()
         .filter(|(_, pixel)| pixel[3] != 0)
         .map(|(index, _)| {
@@ -181,7 +183,7 @@ mod tests {
         assert_eq!(width, height);
         assert!(width >= 32);
         assert_eq!(bytes.len(), width as usize * height as usize * 4);
-        assert!(bytes.chunks_exact(4).any(|pixel| pixel[3] != 0));
+        assert!(bytes.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 0));
     }
 
     #[test]

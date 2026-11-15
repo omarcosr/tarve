@@ -66,17 +66,16 @@ pub(crate) fn sessions() -> Result<Vec<ExternalMediaSession>, String> {
 
 /// Runs `action` on the first session of `app_id`: whether the app accepted it (false when no
 /// session has that id, and always off Windows).
+#[cfg(target_os = "windows")]
 pub(crate) fn control(app_id: &str, action: MediaAction) -> Result<bool, String> {
-    #[cfg(target_os = "windows")]
-    {
-        let app_id = app_id.to_owned();
-        return in_apartment(move || windows_impl::control(&app_id, action));
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = (app_id, action);
-        Ok(false)
-    }
+    let app_id = app_id.to_owned();
+    in_apartment(move || windows_impl::control(&app_id, action))
+}
+
+/// No media sessions to control off Windows.
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn control(_: &str, _: MediaAction) -> Result<bool, String> {
+    Ok(false)
 }
 
 /// Runs `work` on a thread of its own in the multithreaded apartment: the caller's thread (the
@@ -214,7 +213,7 @@ mod windows_impl {
     pub(super) fn control(app_id: &str, action: MediaAction) -> Result<bool> {
         let manager = manager()?;
         for session in manager.GetSessions()? {
-            if session.SourceAppUserModelId()?.to_string() != app_id {
+            if session.SourceAppUserModelId()? != app_id {
                 continue;
             }
             let operation = match action {

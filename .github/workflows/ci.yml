@@ -74,7 +74,7 @@ jobs:
           bun-version: "1.4.2"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "26.10.0"
 
@@ -161,7 +161,7 @@ jobs:
           bun-version: "1.4.2"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "26.10.0"
 
@@ -249,7 +249,7 @@ jobs:
           bun-version: "1.4.2"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "26.10.0"
 
@@ -331,7 +331,7 @@ jobs:
           bun-version: "1.4.2"
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "26.10.0"
 
