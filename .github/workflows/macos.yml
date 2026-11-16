@@ -57,7 +57,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          # macos-14 is retired ("macos-14-arm64 is not supported"): macos-15 is the arm64 image.
+          - os: macos-15
             arch: arm64
             target: darwin-arm64
           # The Intel macos-13 image is retired (its jobs stayed queued and the run never
@@ -230,7 +231,7 @@ jobs:
     name: macOS sign + notarize (secrets)
     needs: macos
     if: github.event_name != 'pull_request'
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     env:
       MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
