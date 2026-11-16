@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { openPluginLibrary, PluginFfiUnsupportedError } from "./ffi";
 import { MAX_POINTER_BUFFERS, pointerFunction } from "./pointer";
+import { nativePath } from "../bridge/runtime";
+
+// pointerFunction calls through tarve_native. Unit tests run before any native build in CI, so
+// these run in ci.yml's "Node runtime, hot-reload and pointerFunction tests" steps, after the
+// smokes built it (as node-dev.test.ts does); `bun run smoke:pointer-function` covers every runtime.
+const hasNative = (() => { try { nativePath(); return true; } catch { return false; } })();
 
 const text = (value: string) => new TextEncoder().encode(`${value}\0`);
 
@@ -29,7 +35,7 @@ function address(library: "c" | "m", name: string): bigint {
   }
 }
 
-describe("pointerFunction", () => {
+describe.skipIf(!hasNative)("pointerFunction", () => {
   test("calls integer, 64-bit and floating-point signatures by address", () => {
     const llabs = pointerFunction(address("c", "llabs"), { args: ["i64"], returns: "i64" });
     expect(llabs(-5)).toBe(5n);
