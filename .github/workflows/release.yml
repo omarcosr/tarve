@@ -112,9 +112,57 @@ jobs:
             native/android/arm64-v8a/libtarve_native.so
             native/android/x86_64/libtarve_native.so
 
+  # Built beside the Linux and Android runtimes; the release job only assembles and verifies.
+  windows-x64-native:
+    name: Windows x64 native runtime
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      # Reuse the Windows runtime cache CI's native job builds on main (tag runs can read it).
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native -> target
+            native -> target-variants
+          prefix-key: v1-rust
+          shared-key: windows-x64-native
+          save-if: false
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build Windows package runtime
+        run: bun run package:native
+
+      - name: Upload Windows runtime
+        uses: actions/upload-artifact@v7
+        with:
+          name: tarve-windows-x64-native
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            native/win32-x64/tarve_native.dll
+            native/win32-x64/runtime.json
+            native/win32-x64/variants/
+
   windows-x64-release:
     name: Windows x64 release
-    needs: [linux-x64-native, android-native]
+    needs: [linux-x64-native, android-native, windows-x64-native]
     runs-on: windows-latest
     timeout-minutes: 60
 
@@ -134,7 +182,7 @@ jobs:
         with:
           toolchain: stable
 
-      # Reuse the Windows release cache that CI's package job builds on main (tag runs can read it).
+      # The WebAssembly runtime and the example builds compile against CI's package job cache.
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
@@ -165,6 +213,12 @@ jobs:
         with:
           name: tarve-android-native
           path: native/android
+
+      - name: Download Windows runtime
+        uses: actions/download-artifact@v8
+        with:
+          name: tarve-windows-x64-native
+          path: native/win32-x64
 
       - name: Validate release ref and version policy
         shell: pwsh
@@ -205,9 +259,12 @@ jobs:
           }
 
       # Tarve is a framework: application authors sign the executables they build.
+      # TARVE_NATIVE_PREBUILT: package the runtime windows-x64-native built from this tag
+      # (checked against it) instead of building it a second time here.
       - name: Build and verify release artifacts
         env:
           TARVE_RELEASE_TAG: ${{ github.ref_name }}
+          TARVE_NATIVE_PREBUILT: "1"
         run: bun run release:build
 
       # Prebuilt example app (Bun runtime), so trying it needs no toolchain. `tarve build`

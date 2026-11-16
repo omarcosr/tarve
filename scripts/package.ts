@@ -25,8 +25,12 @@ const { values } = parseArgs({
     local: { type: "boolean" },
     // Skip the trimmed libraries `tarve build` picks for apps that use fewer native features.
     "no-variants": { type: "boolean" },
+      // Package the host runtime a previous `package:native` staged (a CI job of its own) instead of
+      // building it again. Still fail-closed: it must exist and match this checkout's compatibility.
+    prebuilt: { type: "boolean" },
   },
 });
+const prebuilt = values.prebuilt === true || process.env.TARVE_NATIVE_PREBUILT === "1";
 const platformDirectory = hostConfig.nativeDirectory;
 const nativeName = hostConfig.nativeName;
 const platformOutput = join(root, "native", platformDirectory);
@@ -37,15 +41,23 @@ if (typeof packageMetadata.version !== "string" || packageMetadata.version.lengt
 const compatibility = await createNativeCompatibilityManifest(root, packageMetadata.version);
 // Published libraries always take the fat-LTO `release` profile.
 delete process.env.TARVE_NATIVE_PROFILE;
-// Native compilation is intentionally host-native. Release automation builds each
-// runtime on its own OS, then assembles one universal Tarve package containing both.
-const library = await buildNative(true);
-await rm(platformOutput, { recursive: true, force: true });
-await mkdir(platformOutput, { recursive: true });
 const packagedLibrary = join(platformOutput, nativeName);
-await copyFile(library, packagedLibrary);
-await writeNativeRuntimeManifest(packagedLibrary, hostTarget, compatibility);
-if (!values["no-variants"]) {
+if (prebuilt) {
+  if (values["native-only"]) throw new Error("--prebuilt packages a staged runtime; it cannot be combined with --native-only.");
+  await assertNativeRuntimeCompatible(packagedLibrary, hostTarget, compatibility).catch((error: Error) => {
+    throw new Error(`--prebuilt needs the ${hostTarget} runtime staged by \`bun run package:native\` from this checkout: ${error.message}`);
+  });
+  console.log(`Tarve native ${platformDirectory}: using the staged runtime ${packagedLibrary}`);
+} else {
+  // Native compilation is intentionally host-native. Release automation builds each
+  // runtime on its own OS, then assembles one universal Tarve package containing both.
+  const library = await buildNative(true);
+  await rm(platformOutput, { recursive: true, force: true });
+  await mkdir(platformOutput, { recursive: true });
+  await copyFile(library, packagedLibrary);
+  await writeNativeRuntimeManifest(packagedLibrary, hostTarget, compatibility);
+}
+if (!prebuilt && !values["no-variants"]) {
   for (const variant of NATIVE_VARIANTS) {
     const features = variantFeatures(variant, hostConfig.platform);
     const built = await buildNative(true, features);

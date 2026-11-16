@@ -59,6 +59,53 @@ jobs:
             native/linux-x64/runtime.json
             native/linux-x64/variants/
 
+  # The Windows runtime (fat LTO, plus its trimmed variants) builds beside the Linux one, so the
+  # package job starts once both are ready instead of building it after waiting for Linux.
+  windows-x64-native:
+    name: Windows x64 native runtime
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native -> target
+            native -> target-variants
+          prefix-key: v1-rust
+          shared-key: windows-x64-native
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build Windows native runtime
+        run: bun run package:native
+
+      - name: Upload Windows runtime
+        uses: actions/upload-artifact@v7
+        with:
+          name: tarve-ci-windows-x64-native
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            native/win32-x64/tarve_native.dll
+            native/win32-x64/runtime.json
+            native/win32-x64/variants/
+
   linux-x64:
     name: Linux x64 gate
     runs-on: ubuntu-latest
@@ -232,12 +279,16 @@ jobs:
             work/*.png
           retention-days: 14
 
-  # The release gate's two longest steps, in parallel with it: the same app under every runtime
-  # (Bun, Node SEA, txiki.js) and the headless runtimes (native + WebAssembly).
+  # The release gate's two longest steps, each in a job of its own beside it: the same app under
+  # every runtime (Bun, Node SEA, txiki.js) and the headless runtimes (native + WebAssembly).
   windows-x64-runtimes:
-    name: Windows x64 runtime parity
+    name: Windows x64 ${{ matrix.smoke == 'smoke:runtime-parity' && 'runtime parity' || 'headless runtimes' }}
     runs-on: windows-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        smoke: ["smoke:runtime-parity", "smoke:headless-runtimes"]
 
     steps:
       - name: Checkout
@@ -270,6 +321,7 @@ jobs:
 
       # Must match the wasm-bindgen crate version in native/Cargo.lock.
       - name: Install wasm-bindgen
+        if: matrix.smoke == 'smoke:headless-runtimes'
         run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
 
       - name: Install JS dependencies
@@ -290,24 +342,16 @@ jobs:
           "TARVE_TXIKI=$tjs" >> $env:GITHUB_ENV
 
       # The environment scripts/verify.ts gives its steps.
-      - name: Headless runtimes smoke
+      - name: Smoke
         env:
           TARVE_BACKGROUND: "0"
           TARVE_GPU_DAMAGE_CHECK: "1"
           TARVE_REDUCED_MOTION: "0"
           TARVE_SMOKE_FORCED_WGPU: "0"
-        run: bun run smoke:headless-runtimes
-
-      - name: Runtime parity smoke
-        env:
-          TARVE_BACKGROUND: "0"
-          TARVE_GPU_DAMAGE_CHECK: "1"
-          TARVE_REDUCED_MOTION: "0"
-          TARVE_SMOKE_FORCED_WGPU: "0"
-        run: bun run smoke:runtime-parity
+        run: bun run ${{ matrix.smoke }}
 
       - name: Upload runtime parity captures
-        if: failure()
+        if: failure() && matrix.smoke == 'smoke:runtime-parity'
         uses: actions/upload-artifact@v7
         with:
           name: tarve-runtime-parity-${{ github.run_id }}
@@ -317,7 +361,7 @@ jobs:
 
   windows-x64-package:
     name: Universal package and executable
-    needs: linux-x64-native
+    needs: [linux-x64-native, windows-x64-native]
     runs-on: windows-latest
     timeout-minutes: 60
 
@@ -362,9 +406,19 @@ jobs:
           name: tarve-ci-linux-x64-native
           path: native/linux-x64
 
+      - name: Download Windows native runtime
+        uses: actions/download-artifact@v8
+        with:
+          name: tarve-ci-windows-x64-native
+          path: native/win32-x64
+
       # One step per command: a multi-line pwsh script only reports the exit code
       # of its last command, which let earlier failures pass silently.
+      # TARVE_NATIVE_PREBUILT: package the runtime windows-x64-native built (checked against
+      # this checkout) instead of building it again.
       - name: Package
+        env:
+          TARVE_NATIVE_PREBUILT: "1"
         run: bun run package
 
       # `bun run package` just built the staging: skip prepack's second package build.
