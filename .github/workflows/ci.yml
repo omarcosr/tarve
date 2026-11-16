@@ -169,11 +169,13 @@ jobs:
       - name: Rust formatting
         run: cargo fmt --manifest-path native/Cargo.toml -- --check
 
+      # `bun run test` builds the native debug library first, so the tests that open windows
+      # (Node SEA and Node dev) run here too: on the virtual display.
       - name: Typecheck, lint and unit tests
         run: |
           bun run check
           bun run lint
-          bun run test
+          xvfb-run -a -s "-screen 0 1280x800x24" bun run test
           bun run test:package-clean
           bun run test:release-policy
 
@@ -188,9 +190,6 @@ jobs:
             xvfb-run -a -s "-screen 0 1920x1080x24" bun run "$step"
             echo "::endgroup::"
           done
-
-      - name: Node runtime and hot-reload smoke
-        run: xvfb-run -a -s "-screen 0 1280x800x24" bun test packages/core/node-build.test.ts packages/core/node-dev.test.ts
 
       # A real StatusNotifierItem + dbusmenu on a private session bus, driven the way
       # a panel host drives it, with a fake notification server that clicks.
