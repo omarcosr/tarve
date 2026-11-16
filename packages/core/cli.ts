@@ -281,7 +281,8 @@ async function packageCommand(input: string | undefined, count: number, values: 
       const { packageSetup } = await import("./setup-build");
       print(await packageSetup({
         ...common, runtime, targetExecutable: string("target-executable"), nativeFeatures: string("native-features"),
-        smol: values.smol === true, trim: values.trim === true,
+        // The installer is trimmed by default; --trim also trims the app above.
+        smol: values.smol === true, trim: values.trim === true ? true : undefined,
       }));
     }
   };

@@ -9,6 +9,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { fileTypeProgId, fileTypeRegistryCommands, fileTypeUnregistryCommands, protocolRegistryCommands, protocolUnregistryCommands, quote } from "../src/associations";
 import { createShellLink } from "../src/shell-link";
+import { writeWithoutOverlay } from "../src/exe-overlay";
 import { SETUP_STATE_NAME, UNINSTALLER_NAME, UNINSTALL_ROOT, installSizeKb, readSetupState, writeSetupState, type SetupState } from "../src/install-record";
 
 export { SETUP_STATE_NAME, UNINSTALLER_NAME, readSetupState, type SetupState };
@@ -285,7 +286,11 @@ export async function install(manifest: SetupManifest, payload: string, choices:
     mkdirSync(directory, { recursive: true });
     for (const name of manifest.previous.files) rmSync(join(directory, name), { force: true });
     replaceFile(paths.executable, fresh);
-    if (resolve(system.self) !== resolve(paths.uninstaller)) replaceFile(paths.uninstaller, system.self);
+    if (resolve(system.self) !== resolve(paths.uninstaller)) {
+      // The uninstaller is this installer without the app it carries (its overlay).
+      const wizard = join(staging, UNINSTALLER_NAME);
+      replaceFile(paths.uninstaller, writeWithoutOverlay(system.self, wizard) ? wizard : system.self);
+    }
     writeSetupState(directory, { appId: manifest.appId, version: manifest.version, language: choices.language, startup: choices.startup, custom: choices.custom });
     progress("stepShortcuts", 0.6);
     const link = createShellLink({

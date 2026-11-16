@@ -11,6 +11,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdir
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
+import { extractOverlay } from "../packages/core/src/exe-overlay";
 import { readAr, readTar, readZip, type TarEntry } from "../packages/core/archive-readers";
 import { parsePlist, writeMacAppBundle } from "../packages/core/macos-bundle";
 import { hostBuildTarget, isMacTarget, targetConfig } from "../packages/core/targets";
@@ -126,6 +127,13 @@ async function checkSetup(path: string, executable: Uint8Array, exeName: string)
   run(path, ["/S", `--dir=${installed}`, "--no-launch", "--no-desktop-shortcut"]);
   assert.equal(sha(readFileSync(join(installed, exeName))), sha(executable));
   assert.ok(existsSync(join(installed, "Uninstall.exe")) && existsSync(shortcut), "the installer wrote no uninstaller or Start menu shortcut");
+  // The uninstaller is the wizard without the app it carries, not a copy of the whole installer.
+  // Exactly the setup minus the app it carries (gzipped, the overlay) and the 16-byte overlay footer.
+  const overlay = join(directory, "setup-overlay.gz");
+  assert.ok(extractOverlay(path, overlay), "the installer carries no overlay");
+  assert.equal(sha(gunzipSync(readFileSync(overlay))), sha(executable));
+  const setupSize = readFileSync(path).length, uninstallerSize = readFileSync(join(installed, "Uninstall.exe")).length;
+  assert.equal(setupSize - uninstallerSize, readFileSync(overlay).length + 16, `Uninstall.exe (${uninstallerSize} bytes) is not the installer (${setupSize} bytes) without the app`);
   const entry = run("reg.exe", ["query", key]);
   assert.ok(entry.includes("Smoke Notes") && entry.includes("1.2.3") && entry.includes("--uninstall"), entry);
   run(join(installed, "Uninstall.exe"), ["--uninstall", "--silent"]);

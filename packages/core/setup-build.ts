@@ -13,6 +13,7 @@ import { appIconImages, resolveAppMetadata, type AppMetadata } from "./package-m
 import { executableInfo, type PackageArtifact, type PackageOptions } from "./package-installer";
 import { installFolderName, parseInstallerConfig, type SetupManifest } from "./setup/manifest";
 import type { BuildOptions } from "./build";
+import { addOverlay } from "./src/exe-overlay";
 
 export interface SetupPackageOptions extends PackageOptions {
   /** Runtime of the installer executable (default: the one `tarve` runs on; txiki for the smallest installer). */
@@ -22,6 +23,10 @@ export interface SetupPackageOptions extends PackageOptions {
   /** Native subsystems of the installer's own runtime (default: core only; the wizard needs no more). */
   nativeFeatures?: string | readonly string[];
   smol?: boolean;
+  /**
+   * Bun's `--trim` for the installer (not the app it carries). Default on when the running Bun
+   * supports it: the wizard's code is Tarve's own and runs trimmed (about a third smaller).
+   */
   trim?: boolean;
   /** Where the installer's own window chrome and texts take their colour (`#RRGGBB`); default the Tarve theme. */
   accent?: string;
@@ -83,14 +88,15 @@ function setupAppModule(): string {
   throw new Error(`The installer app is missing from this Tarve package: ${bundled}`);
 }
 
-/** The installer entry module `tarve build` compiles: the wizard with the payload, icon and manifest embedded. */
-export function writeSetupEntry(directory: string, manifest: SetupManifest, payload: string, icon: string | undefined): string {
+/** The installer entry module `tarve build` compiles: the wizard with the icon and manifest embedded. */
+export function writeSetupEntry(directory: string, manifest: SetupManifest, icon: string | undefined): string {
   const lines = [
     `import { runSetup } from ${JSON.stringify(setupAppModule())};`,
-    `import payload from ${JSON.stringify(payload)} with { type: "file" };`,
     ...(icon ? [`import icon from ${JSON.stringify(icon)} with { type: "file" };`] : []),
     `const manifest = ${JSON.stringify(manifest)};`,
-    `process.exitCode = await runSetup(manifest, { payload${icon ? ", icon" : ""} });`,
+    // The app to install is the executable's overlay (src/exe-overlay.ts), not an embedded file:
+    // the uninstaller is this executable without it.
+    `process.exitCode = await runSetup(manifest, {${icon ? " icon " : ""}});`,
     "",
   ];
   const entry = join(directory, "setup-entry.ts");
@@ -126,15 +132,13 @@ export async function packageSetup(options: SetupPackageOptions): Promise<Packag
   const outfile = join(outDir, setupFileName(metadata, info.arch));
   const staging = mkdtempSync(join(tmpdir(), "tarve-setup-build-"));
   try {
-    const payload = join(staging, `${manifest.executable}.gz`);
-    writeFileSync(payload, gzipSync(readFileSync(executable), { level: 9 }));
     let icon: string | undefined;
     if (metadata.icon) {
       icon = join(staging, "icon.png");
       writeFileSync(icon, appIconImages(metadata.icon).png);
     }
-    const entry = writeSetupEntry(staging, manifest, payload, icon);
-    const { build } = await import("./build");
+    const entry = writeSetupEntry(staging, manifest, icon);
+    const { build, bunBuildSupports } = await import("./build");
     const buildOptions: BuildOptions = {
       entrypoint: entry,
       outfile,
@@ -150,9 +154,12 @@ export async function packageSetup(options: SetupPackageOptions): Promise<Packag
       targetExecutable: options.targetExecutable,
       nativeFeatures: options.nativeFeatures ?? "core",
       smol: options.smol,
-      trim: options.trim,
+      trim: options.trim ?? ((options.runtime ?? "bun") === "bun" && !!process.versions.bun && bunBuildSupports("--trim")),
     };
     const built = await build(buildOptions);
+    // The app rides as an overlay after the wizard's own runtime image; the installed
+    // Uninstall.exe is the wizard alone (writeWithoutOverlay), not a second copy of the app.
+    writeFileSync(built, addOverlay(new Uint8Array(readFileSync(built)), gzipSync(readFileSync(executable), { level: 9 })));
     return {
       format: "setup",
       path: built,

@@ -2,7 +2,10 @@
 // Installing → Done), the uninstaller's confirmation, and the silent modes. Built into one
 // executable per app by `tarve package --format setup` (setup-build.ts), which calls `runSetup`
 // with the manifest, the gzipped app executable and its icon.
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { extractOverlay } from "../src/exe-overlay";
 import { Button, Checkbox, Column, Image, Input, Progress, Row, Select, Text, TitleBar, View, Window, createApp, createTheme, darkTheme, lightTheme, theme } from "../src/index";
 import type { AppHandle } from "../src/app/types";
 import type { ThemeDefinition } from "../src/theme";
@@ -53,13 +56,25 @@ function wizardTheme(accent: string | undefined, dark: boolean): ThemeDefinition
 }
 
 export interface RunSetupOptions {
-  /** The gzipped app executable (an embedded file). */
-  payload: string;
+  /** The gzipped app executable; default the overlay of this executable (src/exe-overlay.ts). */
+  payload?: string;
   /** The app icon as a .png (an embedded file), when it has one. */
   icon?: string;
   /** The installer's arguments (default: the process's). */
   argv?: readonly string[];
   system?: SetupSystem;
+}
+
+/** The gzipped app: the option's file, else this executable's overlay copied to a temporary file. */
+function payloadFile(options: RunSetupOptions, system: SetupSystem): { path: string; dispose(): void } {
+  if (options.payload) return { path: options.payload, dispose() {} };
+  const directory = mkdtempSync(join(tmpdir(), "tarve-setup-payload-"));
+  const path = join(directory, "app.gz");
+  if (!extractOverlay(system.self, path)) {
+    rmSync(directory, { recursive: true, force: true });
+    throw new SetupError("failedText", {}, `${system.self} carries no app to install; build the installer with tarve package --format setup`);
+  }
+  return { path, dispose: () => rmSync(directory, { recursive: true, force: true }) };
 }
 
 /** Runs the installer: the wizard, or the silent install/uninstall the arguments ask for. Resolves with the exit code. */
@@ -87,7 +102,10 @@ export async function runSetup(manifestValue: unknown, options: RunSetupOptions)
   if (args.silent) {
     try {
       if (args.mode === "uninstall") await uninstall(manifest, state.uninstallDirectory!, system);
-      else await install(manifest, options.payload, state.choices, system);
+      else {
+        const payload = payloadFile(options, system);
+        try { await install(manifest, payload.path, state.choices, system); } finally { payload.dispose(); }
+      }
       return 0;
     } catch (error) {
       console.error(error instanceof Error ? error.message : String(error));
@@ -125,11 +143,16 @@ export async function runSetup(manifestValue: unknown, options: RunSetupOptions)
     state.fraction = 0;
     app.update();
     try {
-      await install(manifest, options.payload, state.choices, system, (step, fraction) => {
-        state.step = step;
-        state.fraction = fraction;
-        app.update();
-      });
+      const payload = payloadFile(options, system);
+      try {
+        await install(manifest, payload.path, state.choices, system, (step, fraction) => {
+          state.step = step;
+          state.fraction = fraction;
+          app.update();
+        });
+      } finally {
+        payload.dispose();
+      }
       state.page = "done";
     } catch (error) {
       state.error = describeError(error);
