@@ -17,8 +17,10 @@ The npm artifact is universal across those two targets: Linux CI builds `libtarv
 There are three independent version domains:
 
 1. **Product SemVer** — one version shared by the root npm package, `@tarve/core-internal`, `@tarve/protocol`, their workspace entries in `bun.lock`, `native/Cargo.toml` and the `tarve_native` entry in `Cargo.lock`.
-2. **JSON protocol version** — a monotonically increasing integer used by serialized TS/Rust messages. It is currently **v59** and is independent from package SemVer.
-3. **Native C ABI version** — a monotonically increasing integer for exported FFI function compatibility. It is currently **v5** and is independent from both product SemVer and the JSON protocol.
+2. **JSON protocol version** — a monotonically increasing integer used by serialized TS/Rust messages. It is currently **v63** and is independent from package SemVer.
+3. **Native C ABI version** — a monotonically increasing integer for exported FFI function compatibility. It is currently **v6** and is independent from both product SemVer and the JSON protocol.
+
+`bun run release:policy` prints the current protocol and ABI versions; update the two numbers above when it changes them.
 
 Use the version tool rather than editing manifests independently:
 
@@ -35,12 +37,12 @@ Tarve is a framework, not an end-user application, so the Tarve release does **n
 
 ## Release procedure
 
-1. `bun run version:set -- <semver>` and rename the `## Unreleased` section of `CHANGELOG.md` to `## <semver> — <date>` (`release:policy` rejects a version without its own section). Commit and push to `main`; wait for CI to pass.
+1. `bun run version:set -- <semver>` and rename the `## Unreleased` section of `CHANGELOG.md` to `## <semver> — <date>` (`release:policy` rejects a version without its own section). Commit and push to `main`; wait for CI to pass. Run the checks CI fails fastest on before pushing: `cargo fmt --manifest-path native/Cargo.toml -- --check`, `bun run check`, `bun run lint` and `bun run check:lines`. When a legacy file past 600 lines grew on purpose, `bun run check:lines --update` records it (commit it as `chore(lines): …`); otherwise split the file.
 2. Tag that commit with exactly `v<semver>` and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
 3. `.github/workflows/release.yml` then, without further input:
    - checks that the tag matches the product version and points to a commit on `main`;
    - requires a successful CI run for the tagged commit (CI runs the full gate on both platforms), waiting for it if it is still running;
-   - builds the Linux runtime on Linux and the Windows runtime on Windows;
+   - builds the Linux, Windows and Android runtimes in parallel jobs, each on its own OS (the Windows release job then packages the runtime its native job built, `TARVE_NATIVE_PREBUILT=1`, after checking it against the tagged sources);
    - packs the universal tarball, verifies it contains exactly the staged runtimes and the tagged version, packs the other packages and checks their versions and `@tarve/core`/`@tarve/headless` peers, and writes SHA-256 hashes of all of them to `dist/release-manifest.json`;
    - creates the GitHub release with those artifacts;
    - publishes to npm from those same tarballs (never repacked), with provenance: `@tarve/core`, `@tarve/headless`, `@tarve/react-icons`, `@tarve/svelte`, `@tarve/router`, `@tarve/test` and `create-tarve`; stable versions as `latest`, prereleases (`v0.2.0-beta.1`) as `next` and as GitHub prereleases. A re-run skips the versions already published;
