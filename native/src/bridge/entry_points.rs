@@ -333,10 +333,18 @@ pub unsafe extern "C" fn tarve_ffi_call(
     let mut raw = Vec::with_capacity(signature.args.len());
     for (index, &kind) in signature.args.iter().enumerate() {
         // SAFETY: slot `index` of the frame's n argument slots.
-        let bits = unsafe { frame.add(FFI_HEADER + 8 * index).cast::<u64>().read_unaligned() };
+        let bits = unsafe {
+            frame
+                .add(FFI_HEADER + 8 * index)
+                .cast::<u64>()
+                .read_unaligned()
+        };
         raw.push(match kind {
             Kind::Buffer if bits == u64::MAX => 0,
-            Kind::Buffer => match usize::try_from(bits).ok().and_then(|slot| buffers.get(slot)) {
+            Kind::Buffer => match usize::try_from(bits)
+                .ok()
+                .and_then(|slot| buffers.get(slot))
+            {
                 Some(buffer) => *buffer as u64,
                 None => return ffi_status::INVALID,
             },
@@ -420,18 +428,46 @@ mod ffi_tests {
         let mut unused = [0_u8; 1];
         assert_eq!(unsafe { tarve_ffi_check(frame.as_ptr()) }, ffi_status::OK);
         let status = unsafe {
-            tarve_ffi_call(frame.as_mut_ptr(), unused.as_mut_ptr(), bytes.as_mut_ptr(), null, null)
+            tarve_ffi_call(
+                frame.as_mut_ptr(),
+                unused.as_mut_ptr(),
+                bytes.as_mut_ptr(),
+                null,
+                null,
+            )
         };
         assert_eq!(status, ffi_status::OK);
         assert_eq!(bytes, [2, 4, 6]);
         assert_eq!(f64::from_bits(result(&frame)), 11.0);
 
         let mut frame = frame_for(negative as *const () as usize, I64, &[]);
-        assert_eq!(unsafe { tarve_ffi_call(frame.as_mut_ptr(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) }, 0);
+        assert_eq!(
+            unsafe {
+                tarve_ffi_call(
+                    frame.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
         assert_eq!(result(&frame) as i64, -5);
 
         let mut frame = frame_for(is_null as *const () as usize, BOOL, &[(BUFFER, u64::MAX)]);
-        assert_eq!(unsafe { tarve_ffi_call(frame.as_mut_ptr(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) }, 0);
+        assert_eq!(
+            unsafe {
+                tarve_ffi_call(
+                    frame.as_mut_ptr(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
         assert_eq!(f64::from_bits(result(&frame)), 1.0);
     }
 
@@ -442,20 +478,44 @@ mod ffi_tests {
     #[test]
     fn malformed_and_unsupported_frames_are_refused_before_any_call() {
         let null = std::ptr::null_mut();
-        assert_eq!(unsafe { tarve_ffi_check(std::ptr::null()) }, ffi_status::INVALID);
+        assert_eq!(
+            unsafe { tarve_ffi_check(std::ptr::null()) },
+            ffi_status::INVALID
+        );
         let mut unknown = frame(negative as *const () as usize, 14, &[]);
-        assert_eq!(unsafe { tarve_ffi_call(unknown.as_mut_ptr(), null, null, null, null) }, ffi_status::INVALID);
+        assert_eq!(
+            unsafe { tarve_ffi_call(unknown.as_mut_ptr(), null, null, null, null) },
+            ffi_status::INVALID
+        );
         let buffer_return = frame(negative as *const () as usize, BUFFER, &[]);
-        assert_eq!(unsafe { tarve_ffi_check(buffer_return.as_ptr()) }, ffi_status::INVALID);
+        assert_eq!(
+            unsafe { tarve_ffi_check(buffer_return.as_ptr()) },
+            ffi_status::INVALID
+        );
         let void_argument = frame(negative as *const () as usize, I64, &[(0, 0)]);
-        assert_eq!(unsafe { tarve_ffi_check(void_argument.as_ptr()) }, ffi_status::INVALID);
+        assert_eq!(
+            unsafe { tarve_ffi_check(void_argument.as_ptr()) },
+            ffi_status::INVALID
+        );
         let mut fifth_buffer = frame(is_null as *const () as usize, BOOL, &[(BUFFER, 4)]);
-        assert_eq!(unsafe { tarve_ffi_call(fifth_buffer.as_mut_ptr(), null, null, null, null) }, ffi_status::INVALID);
+        assert_eq!(
+            unsafe { tarve_ffi_call(fifth_buffer.as_mut_ptr(), null, null, null, null) },
+            ffi_status::INVALID
+        );
         let mut no_function = frame(0, I64, &[]);
-        assert_eq!(unsafe { tarve_ffi_check(no_function.as_ptr()) }, ffi_status::OK);
-        assert_eq!(unsafe { tarve_ffi_call(no_function.as_mut_ptr(), null, null, null, null) }, ffi_status::NULL_FUNCTION);
+        assert_eq!(
+            unsafe { tarve_ffi_check(no_function.as_ptr()) },
+            ffi_status::OK
+        );
+        assert_eq!(
+            unsafe { tarve_ffi_call(no_function.as_mut_ptr(), null, null, null, null) },
+            ffi_status::NULL_FUNCTION
+        );
         let too_many = frame(0, I64, &[(PTR, 0); 17]);
-        assert_eq!(unsafe { tarve_ffi_check(too_many.as_ptr()) }, ffi_status::UNSUPPORTED);
+        assert_eq!(
+            unsafe { tarve_ffi_check(too_many.as_ptr()) },
+            ffi_status::UNSUPPORTED
+        );
     }
 }
 
