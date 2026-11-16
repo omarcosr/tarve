@@ -4,7 +4,7 @@
 //! The library is opened with the app's linker namespace, so a bare `libplugin.so`
 //! resolves to the copy `tarve build` packed in the APK's lib/<abi>/.
 
-use super::foreign_call::{self, Kind, Returned, Signature};
+use crate::foreign_call::{self, Kind, Returned, Signature};
 use rquickjs::function::Rest;
 use rquickjs::{ArrayBuffer, BigInt, Ctx, Exception, Function, Object, Value};
 use std::cell::Cell;

@@ -63,7 +63,7 @@ Decisões:
 
 - `PLUGIN_API_VERSION = 1` (exportado). É um **major**: adições compatíveis (novos métodos no contexto, novos tipos FFI, novos campos opcionais no manifesto) mantêm `1`; mudança incompatível em `definePlugin`, `PluginContext` ou no manifesto incrementa. O Tarve recusa plugins com `tarvePluginApi` maior que o seu (no `createApp` e na descoberta, com "Update @tarve/core"). Plugins com número menor continuam aceitos enquanto o Tarve mantiver a camada de compatibilidade (política proposta: suportar N e N-1).
 - `version` do plugin: semver próprio. Recomendação: `peerDependencies: { "@tarve/core": ">=<versão que trouxe a API>" }`.
-- ABI C da biblioteca nativa é contrato do próprio plugin; o exemplo exporta `hello_abi_version()` e o wrapper confere. **Independente** de `ABI_VERSION` (= 6 em `native/src/bridge.rs`) e do `PROTOCOL_VERSION`, que continuam internos ao Tarve.
+- ABI C da biblioteca nativa é contrato do próprio plugin; o exemplo exporta `hello_abi_version()` e o wrapper confere. **Independente** de `ABI_VERSION` (= 7 em `native/src/bridge.rs`) e do `PROTOCOL_VERSION`, que continuam internos ao Tarve.
 
 ## Build e package
 

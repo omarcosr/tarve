@@ -653,6 +653,17 @@ export default definePlugin({
 
 `ctx.request(command, { expect })` sends a protocol request to the Tarve runtime and checks the answer type (what `app`'s own dialogs and permissions use). `ctx.loadLibrary(symbols)` or `ctx.loadLibrary({ "win32-x64": "…", "linux-x64": "…" }, symbols)` opens the library with the runtime's FFI: `bun:ffi` on Bun, `node:ffi` on Node.js 26.10+, `tjs:ffi` on txiki.js and on Android's QuickJS-ng (whose APK packs the `android-arm64`/`android-x64` library as `lib/<abi>/lib<name>.so`; up to 8 integer/pointer and 8 floating-point arguments, no variadic functions, 64-bit results and tagged heap pointers above 2^53 as `BigInt`); elsewhere it throws `PluginFfiUnsupportedError`. Symbol types are `i8`…`u64`, `f32`, `f64`, `bool`, `ptr`, `buffer` (arguments) and `void`; the returned `symbols` are typed from the declaration.
 
+`pointerFunction(address, { args, returns })` (from `@tarve/core`) binds a C function you only have the address of, such as a COM method from a vtable or a function `GetProcAddress` found by ordinal, with the same types. It works the same on Bun, Node.js, txiki.js and Android's QuickJS: every runtime calls through Tarve's native library (`tarve_ffi_call`), which picks a prototype compiled in for the platform's calling convention, so nothing is generated at run time. Returns of `i64`, `u64` and `ptr` are `BigInt`; up to 4 `buffer` arguments; Windows x64 takes up to 16 arguments, arm64 and x86-64 elsewhere up to 8 (arm64) or 6 (x86-64) integer/pointer and 8 floating-point arguments. Other signatures, variadic functions and structs by value are refused (`PluginFfiUnsupportedError` when bound).
+
+```ts
+import { pointerFunction } from "@tarve/core";
+
+// IUnknown::Release, slot 2 of a COM object's vtable.
+const vtable = readPointer(object); // your own memory read
+const release = pointerFunction(readPointer(vtable + 2n * 8n), { args: ["ptr"], returns: "u32" });
+release(object);
+```
+
 **package.json.** The `tarve` field makes a package discoverable (`discoverPlugins`, `loadPlugins`) and tells `tarve build` which library to embed per target:
 
 ```json

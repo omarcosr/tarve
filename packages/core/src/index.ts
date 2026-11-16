@@ -54,6 +54,8 @@ export { discoverPlugins, readPluginManifest } from "./plugins/discovery";
 export type { DiscoverPluginsOptions, DiscoveryProblem, PluginDiscovery, PluginManifest } from "./plugins/discovery";
 export { openPluginLibrary, PluginFfiUnsupportedError } from "./plugins/ffi";
 export type { FfiBackend, FfiFunctions, FfiSymbol, FfiSymbols, FfiType, PluginLibrary } from "./plugins/ffi";
+export { MAX_POINTER_BUFFERS, pointerFunction } from "./plugins/pointer";
+export type { PointerFunction, PointerReturnValue } from "./plugins/pointer";
 export { hostPluginTarget, pluginTargetForBuild } from "./plugins/targets";
 export type { PluginTarget } from "./plugins/targets";
 export type { DevOptions } from "./devtools/inspector";

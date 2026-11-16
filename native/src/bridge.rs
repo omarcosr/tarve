@@ -336,7 +336,7 @@ struct Host {
 }
 static HOST: OnceLock<Mutex<Option<Host>>> = OnceLock::new();
 static LAST_ERROR: Mutex<String> = Mutex::new(String::new());
-pub const ABI_VERSION: u32 = 6;
+pub const ABI_VERSION: u32 = 7;
 fn host() -> &'static Mutex<Option<Host>> {
     HOST.get_or_init(|| Mutex::new(None))
 }

@@ -24,7 +24,7 @@ import (
 // ProtocolVersion is @tarve/protocol PROTOCOL_VERSION; NativeABIVersion is NATIVE_ABI_VERSION.
 const (
 	ProtocolVersion  = 63
-	NativeABIVersion = 6
+	NativeABIVersion = 7
 )
 
 // AppIdentity names the app in media controls, notifications and the taskbar (Windows AppUserModelID).

@@ -37,7 +37,7 @@ type ReturnValue<T> =
   T extends "buffer" ? never :
   number;
 
-type ArgValues<A extends readonly FfiType[]> = { -readonly [K in keyof A]: ArgValue<A[K]> };
+export type ArgValues<A extends readonly FfiType[]> = { -readonly [K in keyof A]: ArgValue<A[K]> };
 
 /** The JavaScript functions a symbol declaration gives. */
 export type FfiFunctions<S extends FfiSymbols> = {

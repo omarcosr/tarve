@@ -27,7 +27,6 @@ mod bytecode;
 mod dev;
 mod fetch;
 mod ffi;
-mod foreign_call;
 mod subtle;
 #[allow(unused_imports)]
 pub(crate) use bytecode::*;

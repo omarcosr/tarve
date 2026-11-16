@@ -42,13 +42,7 @@ mod downmix;
 mod environment;
 #[cfg(target_os = "windows")]
 mod exe_icon;
-#[cfg(all(
-    test,
-    target_os = "linux",
-    any(target_arch = "x86_64", target_arch = "aarch64")
-))]
-#[allow(dead_code)]
-#[path = "android/qjs/foreign_call.rs"]
+#[cfg(not(target_arch = "wasm32"))]
 mod foreign_call;
 mod glass;
 #[cfg(target_os = "windows")]

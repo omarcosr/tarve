@@ -23,6 +23,17 @@ installIntl();
 // The FFI library the bridge opens (bridge/binding.ts), over the runtime's C ABI.
 const encoder = new globals.TextEncoder() as TextEncoder;
 let pendingEvent: Uint8Array | undefined;
+// pointerFunction's entry points (plugins/pointer.ts) are plain C calls: the runtime's own exports,
+// bound once through the host's FFI.
+type OwnFfi = { tarve_ffi_check(frame: Uint8Array): number; tarve_ffi_call(frame: Uint8Array, ...buffers: ArrayBufferView[]): number };
+let ownFfi: OwnFfi | undefined;
+function own(): OwnFfi {
+  ownFfi ??= host.dlopen(globals.__tarveNativePath, {
+    tarve_ffi_check: { args: ["buffer"], returns: "i32" },
+    tarve_ffi_call: { args: ["buffer", "buffer", "buffer", "buffer", "buffer"], returns: "i32" },
+  }).symbols as unknown as OwnFfi;
+  return ownFfi;
+}
 function copyOut(bytes: Uint8Array, buffer: Uint8Array, capacity: number): number {
   if (bytes.length > capacity) return -bytes.length;
   buffer.set(bytes);
@@ -53,6 +64,8 @@ const symbols = {
   tarve_join: () => 0,
   tarve_plugin_emit_address: () => BigInt(host.pluginEmitAddress()),
   tarve_allow_foreground: () => 0,
+  tarve_ffi_check: (frame: Uint8Array) => own().tarve_ffi_check(frame),
+  tarve_ffi_call: (frame: Uint8Array, ...buffers: ArrayBufferView[]) => own().tarve_ffi_call(frame, ...buffers),
 };
 // Tarve's own library is the runtime the activity loaded: its symbols are the host calls above.
 // Any other library (a plugin's ctx.loadLibrary) goes through the host's FFI.

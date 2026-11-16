@@ -2,6 +2,12 @@
 
 All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `@tarve/svelte` and `@tarve/mcp` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
+## Unreleased
+
+### Added
+
+- `pointerFunction(address, { args, returns })`: calls a C function by its address (COM and vtable methods, functions exported by ordinal, callbacks a library hands out) the same way on Bun, Node.js, txiki.js and Android's QuickJS. bun:ffi, node:ffi and tjs:ffi only bind functions by name, so every runtime calls through Tarve's library (`tarve_ffi_check`/`tarve_ffi_call`, native ABI 7): a prototype fixed at compile time per calling convention (`native/src/foreign_call.rs`, shared with Android's plugin FFI), with no libffi, no executable memory and no generated code. Same types as `loadLibrary`; 64-bit and pointer returns are `BigInt`; up to 4 buffer arguments; Windows x64 takes up to 16 arguments, arm64 and x86-64 elsewhere what fits in registers. A signature outside that throws `PluginFfiUnsupportedError` when it is bound. `bun run smoke:pointer-function` checks the three desktop runtimes against each other.
+
 ## 0.13.1 — 2026-11-17
 
 ### Changed

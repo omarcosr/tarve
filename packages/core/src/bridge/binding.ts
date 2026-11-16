@@ -28,6 +28,23 @@ export function surfacePresentSymbol(): SurfacePresent {
   return surfacePresent;
 }
 
+/** Bun on Android runs the app as a child of the activity, which holds Tarve's native library. */
+function libraryInAnotherProcess(): boolean {
+  return process.platform === "android" && Number.isInteger(Number(process.env.TARVE_ANDROID_BRIDGE_FD));
+}
+
+/**
+ * The path of Tarve's native library in this process, for entry points a feature binds on its own
+ * (`pointerFunction`): the library the app started from, or before that the one it will start from.
+ * Not Bun on Android, whose library lives in another process.
+ */
+export function ownLibraryPath(feature: string): string {
+  if (libraryInAnotherProcess()) {
+    throw new Error(`${feature} needs the QuickJS runtime on Android: with --runtime bun the native library runs in another process`);
+  }
+  return startedPath ?? nativePath();
+}
+
 let emitAddress: bigint | undefined;
 
 /**
@@ -40,7 +57,7 @@ export function pluginEmitAddress(): bigint {
   if (emitAddress !== undefined) return emitAddress;
   // A plugin's setup runs before the window starts: the library the app will start from.
   const path = startedPath ?? nativePath();
-  if (process.platform === "android" && Number.isInteger(Number(process.env.TARVE_ANDROID_BRIDGE_FD))) {
+  if (libraryInAnotherProcess()) {
     throw new Error("plugin events need the QuickJS runtime on Android: with --runtime bun the native library runs in another process");
   }
   const definitions = { tarve_plugin_emit_address: { args: [], returns: "u64" } } as const;
