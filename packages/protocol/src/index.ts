@@ -644,7 +644,8 @@ export type NativeEvent =
   /** An `image` node's source failed to load or decode. */
   | { type: "imageError"; id: string; src: string; message: string }
   | { type: "shortcut"; shortcut: string }
-  | { type: "error"; message: string }
+  /** `fatal: false`: the app stays usable (window finish such as corners or border colour); `ready` does not fail. */
+  | { type: "error"; message: string; fatal?: false }
   | { type: "inspect"; requestId: string; snapshot: Snapshot }
   | { type: "layout"; requestId: string; boxes: Record<string, LayoutBox> }
   | { type: "selection"; requestId: string; target: string | null; anchor: number; focus: number }

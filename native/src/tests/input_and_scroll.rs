@@ -296,6 +296,18 @@ pub(super) fn translucent_window_border_blends_over_the_background_for_dwm() {
     assert_eq!(opaque_border_rgb("#e4e4e7", "#ffffff00"), 0xe4e4e7);
 }
 
+#[test]
+pub(super) fn window_chrome_attributes_unknown_before_windows_11_are_unsupported_not_failures() {
+    use crate::runtime::dwm_attribute_unsupported;
+    // Windows 10 answers E_INVALIDARG for DWMWA_WINDOW_CORNER_PREFERENCE and DWMWA_BORDER_COLOR.
+    assert!(dwm_attribute_unsupported(0x8007_0057_u32 as i32));
+    assert!(!dwm_attribute_unsupported(0x8000_4005_u32 as i32));
+    assert!(!dwm_attribute_unsupported(0));
+    let event = crate::protocol::nonfatal_error("Custom window chrome: x");
+    assert_eq!(event["type"], "error");
+    assert_eq!(event["fatal"], false);
+}
+
 /// A column of auto height whose child grows from a zero basis (`flex: 1`) is
 /// as tall as its content, as in Chromium (143px here), also when its row sits
 /// in a sized parent (fixed in vendor/taffy).

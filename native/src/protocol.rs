@@ -1272,6 +1272,12 @@ pub fn error(message: impl ToString) -> Value {
     json!({"type":"error", "message": message.to_string()})
 }
 
+/// An error that leaves the app usable (window finish such as rounded corners or the
+/// border colour): reported, but it does not fail `ready`.
+pub fn nonfatal_error(message: impl ToString) -> Value {
+    json!({"type":"error", "message": message.to_string(), "fatal": false})
+}
+
 pub fn validate_patch(nodes: &[Node]) -> Result<(), String> {
     if nodes.len() > 20_000 {
         return Err("Patch exceeds node limit".into());

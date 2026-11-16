@@ -6,9 +6,11 @@ import { Image, Text, Window } from "./components";
 
 class FakeBridge implements NativeBridge {
   commands: NativeCommand[] = [];
+  beforeReady: NativeEvent[] = [];
   private listener?: (event: NativeEvent) => void;
   start(_document: SceneDocument, onEvent: (event: NativeEvent) => void): void {
     this.listener = onEvent;
+    for (const event of this.beforeReady) onEvent(event);
     onEvent({ type: "ready" });
   }
   send(command: NativeCommand): void { this.commands.push(command); }
@@ -36,6 +38,28 @@ describe("app errors from native element events", () => {
     await Bun.sleep(0);
     expect(errors.map(event => [event.source, event.event, event.targetId, event.error.message])).toEqual([["native", "imageError", "bare", "Image 'https://example.com/c.png': http status: 404"]]);
     app.close();
+  });
+});
+
+describe("native errors before ready", () => {
+  test("a non-fatal error (window finish) is reported and ready still resolves", async () => {
+    const bridge = new FakeBridge();
+    bridge.beforeReady = [{ type: "error", message: "Custom window chrome: DwmSetWindowAttribute(corner) failed: 0x80004005", fatal: false }];
+    const errors: AppErrorEvent[] = [];
+    const app = createApp(() => <Window frameless><Text>hi</Text></Window>, { bridge, onError: event => errors.push(event) });
+    await app.ready;
+    expect(errors.map(event => [event.source, event.event, event.error.message])).toEqual([["native", "error", "Custom window chrome: DwmSetWindowAttribute(corner) failed: 0x80004005"]]);
+    bridge.emit({ type: "closed" });
+    await app.closed;
+  });
+
+  test("a fatal error still fails ready", async () => {
+    const bridge = new FakeBridge();
+    bridge.beforeReady = [{ type: "error", message: "no GPU adapter" }];
+    const app = createApp(() => <Window><Text>hi</Text></Window>, { bridge, onError: () => {} });
+    await expect(app.ready).rejects.toThrow("no GPU adapter");
+    bridge.emit({ type: "closed" });
+    await app.closed;
   });
 });
 

@@ -486,33 +486,44 @@ fn configure_custom_window_chrome(
     } else {
         ((rgb & 0xff) << 16) | (rgb & 0x00ff00) | ((rgb >> 16) & 0xff)
     };
-    unsafe {
-        let corner_result = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
-            (&corner as *const _) as *const c_void,
-            size_of_val(&corner) as u32,
-        );
-        if corner_result < 0 {
-            return Err(format!(
-                "DwmSetWindowAttribute(corner) failed: 0x{:08x}",
-                corner_result as u32
-            ));
-        }
-        let border_result = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_BORDER_COLOR as u32,
-            (&border_color as *const _) as *const c_void,
-            size_of::<u32>() as u32,
-        );
-        if border_result < 0 {
-            return Err(format!(
-                "DwmSetWindowAttribute(border) failed: 0x{:08x}",
-                border_result as u32
-            ));
-        }
+    // Both attributes are Windows 11 (build 22000+): older builds answer
+    // E_INVALIDARG and keep square corners and the default border. Each is set
+    // on its own, so one failing does not skip the other.
+    let (corner_result, border_result) = unsafe {
+        (
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+                (&corner as *const _) as *const c_void,
+                size_of_val(&corner) as u32,
+            ),
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_BORDER_COLOR as u32,
+                (&border_color as *const _) as *const c_void,
+                size_of::<u32>() as u32,
+            ),
+        )
+    };
+    let failures: Vec<String> = [("corner", corner_result), ("border", border_result)]
+        .into_iter()
+        .filter(|&(_, result)| result < 0 && !dwm_attribute_unsupported(result))
+        .map(|(name, result)| format!("DwmSetWindowAttribute({name}) failed: 0x{:08x}", result as u32))
+        .collect();
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
     }
-    Ok(())
+}
+
+/// `DwmSetWindowAttribute` answers E_INVALIDARG for an attribute this Windows
+/// build does not know (`DWMWA_WINDOW_CORNER_PREFERENCE`/`DWMWA_BORDER_COLOR`
+/// before Windows 11): not supported, not a failure.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn dwm_attribute_unsupported(result: i32) -> bool {
+    const E_INVALIDARG: i32 = 0x8007_0057_u32 as i32;
+    result == E_INVALIDARG
 }
 
 /// What shows behind a blurred backdrop: `blur` the accent blur of the windows
@@ -1687,8 +1698,9 @@ impl App {
             self.window_chrome_suppressed()
                 || self.document.window.chrome == crate::protocol::WindowChrome::None,
         ) {
-            self.events
-                .push(error(format!("Custom window chrome: {chrome_error}")));
+            self.events.push(crate::protocol::nonfatal_error(format!(
+                "Custom window chrome: {chrome_error}"
+            )));
         }
     }
     /// Where a desktop widget first looks for room: the work-area point its
@@ -2437,8 +2449,9 @@ impl App {
                 app.document.window.backdrop,
                 app.document.window.decorations,
             ) {
-                app.events
-                    .push(error(format!("window backdrop: {message}")));
+                app.events.push(crate::protocol::nonfatal_error(format!(
+                    "window backdrop: {message}"
+                )));
             }
             // Lay out and shape text while the GPU device (prewarmed on another thread
             // since tarve_start) finishes; prepare() then finds a clean layout.

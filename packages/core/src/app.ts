@@ -646,7 +646,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
 
     if (event.type === "error") {
       const error = new Error(event.message);
-      if (!started && !readySettled) {
+      if (!started && !readySettled && event.fatal !== false) {
         terminalError = error;
         settleReadyFailure(error);
       }
