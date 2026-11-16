@@ -508,7 +508,12 @@ fn configure_custom_window_chrome(
     let failures: Vec<String> = [("corner", corner_result), ("border", border_result)]
         .into_iter()
         .filter(|&(_, result)| result < 0 && !dwm_attribute_unsupported(result))
-        .map(|(name, result)| format!("DwmSetWindowAttribute({name}) failed: 0x{:08x}", result as u32))
+        .map(|(name, result)| {
+            format!(
+                "DwmSetWindowAttribute({name}) failed: 0x{:08x}",
+                result as u32
+            )
+        })
         .collect();
     if failures.is_empty() {
         Ok(())
