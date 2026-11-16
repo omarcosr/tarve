@@ -36,6 +36,7 @@ globals.Buffer = Buffer;
 globals.__tarveTxikiFfi = ffi;
 globals.__tarveDirname = path.dirname(tjs.exePath);
 globals.setImmediate ??= (callback: (...args: unknown[]) => void, ...args: unknown[]) => setTimeout(callback, 0, ...args);
+let exiting = false;
 const process = {
   platform: TARVE_TXIKI_PLATFORM,
   arch: "x64",
@@ -46,8 +47,20 @@ const process = {
   execPath: tjs.exePath,
   versions: { tjs: tjs.version, quickjs: String(tjs.engine.versions.quickjs) },
   exitCode: undefined as number | undefined,
+  // Node emits "exit" before ending (pack boot confirmation and single-instance release
+  // listen to it); a listener may still change exitCode, a throwing one ends with 1.
   exit(code?: number): never {
-    return tjs.exit(code ?? this.exitCode ?? 0);
+    if (code !== undefined) this.exitCode = code;
+    if (!exiting) {
+      exiting = true;
+      try {
+        processEvents.emit("exit", this.exitCode ?? 0);
+      } catch (error) {
+        console.error(error);
+        return tjs.exit(1);
+      }
+    }
+    return tjs.exit(this.exitCode ?? 0);
   },
   cwd: () => tjs.cwd,
   chdir: (directory: string) => tjs.chdir(directory),

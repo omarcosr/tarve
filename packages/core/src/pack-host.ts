@@ -37,7 +37,7 @@ export interface PackHost extends Omit<PackHostConfig, "contentKey"> {
   active?: string;
 }
 
-/** A pack that started, then crashed within this time, is rolled back on the next launch. */
+/** A pack that started, then crashed or exited with a non-zero code within this time, is rolled back on the next launch. */
 const CONFIRM_MS = 3000;
 const HOST = Symbol.for("tarve.packHost");
 const AsyncFunction = (async () => {}).constructor as new (...args: string[]) => (host: unknown) => Promise<void>;
@@ -185,8 +185,9 @@ function restart(): never {
  * Runs the newest installed pack this executable can run and resolves true, or resolves false
  * so the executable runs the app it embeds. A pack is verified on every launch: its signature,
  * the hash of each file it reads, its version (newer than the embedded app) and its fit with
- * this executable. One that throws or crashes before it settles is marked bad, and the app
- * restarts on the pack before it or the embedded app.
+ * this executable. One that throws, crashes or exits with a non-zero code before it settles is
+ * marked bad, and the app restarts on the pack before it or the embedded app. A clean exit
+ * (code 0) settles it.
  */
 export async function bootPack(config: PackHostConfig, bindings: PackHostBindings): Promise<boolean> {
   const { contentKey: _, ...published } = config;
@@ -219,11 +220,17 @@ export async function bootPack(config: PackHostConfig, bindings: PackHostBinding
     const confirm = () => {
       if (settled) return;
       settled = true;
+      process.off("exit", exited);
       remove(boot);
       for (const older of installedPacks(directory)) {
         if (compareVersions(older, version) < 0) remove(packFile(directory, older));
       }
     };
+    // A pack that exits cleanly before CONFIRM_MS (a second instance, a quick close) started fine.
+    const exited = (code?: number) => {
+      if ((code ?? process.exitCode ?? 0) === 0) confirm();
+    };
+    process.once("exit", exited);
     const timer = setTimeout(confirm, CONFIRM_MS) as { unref?(): void };
     timer.unref?.();
     const globals = globalThis as { __tarveAssets?: Record<string, string> };

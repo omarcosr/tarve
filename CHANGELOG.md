@@ -2,6 +2,13 @@
 
 All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `@tarve/svelte` and `@tarve/mcp` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
+## Unreleased
+
+### Fixed
+
+- App packs: a pack whose process exited cleanly (exit code 0) within 3 s of starting, such as a second instance leaving after `requestSingleInstance` or a window closed right away, was marked bad on the next launch ("app pack rejected: it stopped while starting") and the app went back to the embedded version. A clean exit now confirms the pack; only a crash or a non-zero exit code within 3 s rolls it back.
+- txiki.js: `process.exit()` now emits `"exit"` before ending, as in Node, so the fix above (and `requestSingleInstance`'s lock release) also works in txiki.js executables.
+
 ## 0.13.0 — 2026-11-15
 
 ### Added

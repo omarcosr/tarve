@@ -167,7 +167,7 @@ const update = await checkForUpdate({ url: "https://example.com/app/latest.json"
 if (update && canInstallUpdate()) installUpdate(await downloadUpdate(update, { onProgress: (n, total) => {} }));
 ```
 
-`latest.json` is signed with Ed25519 and lists the size and SHA-256 of each platform's executable; the app checks the signature, only accepts newer versions, HTTPS URLs and a matching app name, and verifies the download before `installUpdate` swaps the executable and restarts. `--sign` (or `TARVE_SIGN_COMMAND`) runs your Authenticode tool on each Windows executable before it is hashed. Self-updating needs a writable install folder (per-user or portable); `canInstallUpdate()` is false under `Program Files` or a package manager. txiki.js builds are not supported yet.
+`latest.json` is signed with Ed25519 and lists the size and SHA-256 of each platform's executable; the app checks the signature, only accepts newer versions, HTTPS URLs and a matching app name, and verifies the download before `installUpdate` swaps the executable and restarts. `--sign` (or `TARVE_SIGN_COMMAND`) runs your Authenticode tool on each Windows executable before it is hashed. Self-updating needs a writable install folder (per-user or portable); `canInstallUpdate()` is false under `Program Files` or a package manager. Works the same in Bun, Node.js and txiki.js builds, including app packs.
 
 ## Runtimes
 

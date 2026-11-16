@@ -201,3 +201,29 @@ test("tarve pack bundles an app for an executable built with --packs, and the up
   expect(await checkForUpdate({ url: "https://example.test/latest.json", publicKey: keys.publicKey, currentVersion: "1.0.0", name: "Packed", fetch })).toBeNull();
   expect(createHash("sha256").update(bytes).digest("hex")).toBe(update!.sha256);
 }, 60_000);
+
+async function exitingBoot(code: number): Promise<string> {
+  const dir = directory();
+  writeFileSync(packFile(dir, "1.2.0"), await pack({ version: "1.2.0", code: `process.exit(${code});` }));
+  const script = join(dir, "boot.ts");
+  writeFileSync(script, [
+    `import { bootPack } from ${JSON.stringify(join(import.meta.dir, "src", "pack-host"))};`,
+    `await bootPack(${JSON.stringify(config())}, { runtime: {}, require: id => process.getBuiltinModule(id), dirname: ".", url: "file:///app" });`,
+  ].join("\n"));
+  const child = Bun.spawn([process.execPath, script], { env: { ...process.env, TARVE_PACK_DIRECTORY: dir }, stdout: "ignore", stderr: "ignore" });
+  expect(await child.exited).toBe(code);
+  return dir;
+}
+
+test("a pack that exits cleanly while starting is kept", async () => {
+  const dir = await exitingBoot(0);
+  expect(existsSync(packMarker(dir, "1.2.0", "boot"))).toBe(false);
+  expect(existsSync(packMarker(dir, "1.2.0", "bad"))).toBe(false);
+  expect(existsSync(packFile(dir, "1.2.0"))).toBe(true);
+});
+
+test("a pack that exits with an error while starting is rolled back on the next launch", async () => {
+  const dir = await exitingBoot(3);
+  expect(existsSync(packMarker(dir, "1.2.0", "boot"))).toBe(true);
+});
+
