@@ -110,6 +110,20 @@ struct AppBar {
     edge: AppBarEdge,
     thickness: i32,
     rect: [i32; 4],
+    shell: Shell,
+}
+/// Sends an AppBar message to the shell: `SHAppBarMessage` (tests pass a stand-in shell).
+#[cfg(target_os = "windows")]
+type Shell =
+    unsafe extern "system" fn(u32, *mut windows_sys::Win32::UI::Shell::APPBARDATA) -> usize;
+
+/// The shell answers every AppBar message it handles with nonzero; zero means no shell window
+/// (`Shell_TrayWnd`) took it, so the space was not reserved.
+#[cfg(target_os = "windows")]
+fn shell_refused(message: &str) -> String {
+    format!(
+        "SHAppBarMessage({message}) got no answer from the shell (Shell_TrayWnd): the screen space was not reserved"
+    )
 }
 /// Windows registered as AppBars, so they stay docked and are released when they close.
 #[cfg(target_os = "windows")]
@@ -129,7 +143,6 @@ fn app_bars() -> std::sync::MutexGuard<'static, Vec<AppBar>> {
 /// space; `None` releases it.
 #[cfg(target_os = "windows")]
 pub(crate) fn app_bar(window: &Window, edge: Option<AppBarEdge>, size: f64) -> Result<(), String> {
-    use windows_sys::Win32::UI::Shell::{ABM_NEW, APPBARDATA, SHAppBarMessage, SetWindowSubclass};
     let hwnd = hwnd(window).ok_or("no Win32 window handle")?;
     let Some(edge) = edge else {
         release_app_bar(hwnd as usize);
@@ -139,20 +152,39 @@ pub(crate) fn app_bar(window: &Window, edge: Option<AppBarEdge>, size: f64) -> R
         return Err("appBar size must be a positive number".into());
     }
     let thickness = (size * window.scale_factor()).round().max(1.0) as i32;
+    set_app_bar(
+        hwnd,
+        edge,
+        thickness,
+        windows_sys::Win32::UI::Shell::SHAppBarMessage,
+    )
+}
+
+/// Registers `hwnd` with `shell` (first time) and docks it on `edge`, `thickness` px thick.
+/// A new bar the shell does not dock is unregistered again, so a failed call leaves nothing behind.
+#[cfg(target_os = "windows")]
+fn set_app_bar(
+    hwnd: windows_sys::Win32::Foundation::HWND,
+    edge: AppBarEdge,
+    thickness: i32,
+    shell: Shell,
+) -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::{ABM_NEW, APPBARDATA, SetWindowSubclass};
     let registered = app_bars().iter().any(|bar| bar.hwnd == hwnd as usize);
     if !registered {
         let mut data: APPBARDATA = unsafe { std::mem::zeroed() };
         data.cbSize = size_of::<APPBARDATA>() as u32;
         data.hWnd = hwnd;
         data.uCallbackMessage = APP_BAR_MESSAGE;
-        if unsafe { SHAppBarMessage(ABM_NEW, &mut data) } == 0 {
-            return Err("SHAppBarMessage(ABM_NEW) failed".into());
+        if unsafe { shell(ABM_NEW, &mut data) } == 0 {
+            return Err(shell_refused("ABM_NEW"));
         }
         app_bars().push(AppBar {
             hwnd: hwnd as usize,
             edge,
             thickness,
             rect: [0; 4],
+            shell,
         });
         unsafe { SetWindowSubclass(hwnd, Some(app_bar_proc), APP_BAR_SUBCLASS, 0) };
     }
@@ -160,7 +192,11 @@ pub(crate) fn app_bar(window: &Window, edge: Option<AppBarEdge>, size: f64) -> R
         bar.edge = edge;
         bar.thickness = thickness;
     }
-    dock(hwnd)
+    let docked = dock(hwnd);
+    if docked.is_err() && !registered {
+        release_app_bar(hwnd as usize);
+    }
+    docked
 }
 
 /// Asks the shell for the bar's rectangle on its monitor, reserves it and moves the window there.
@@ -171,7 +207,6 @@ fn dock(hwnd: windows_sys::Win32::Foundation::HWND) -> Result<(), String> {
     };
     use windows_sys::Win32::UI::Shell::{
         ABE_BOTTOM, ABE_LEFT, ABE_RIGHT, ABE_TOP, ABM_QUERYPOS, ABM_SETPOS, APPBARDATA,
-        SHAppBarMessage,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos};
     let Some(bar) = app_bars()
@@ -198,10 +233,14 @@ fn dock(hwnd: windows_sys::Win32::Foundation::HWND) -> Result<(), String> {
     };
     data.rc = info.rcMonitor;
     fit_app_bar(&mut data.rc, bar.edge, bar.thickness);
-    unsafe { SHAppBarMessage(ABM_QUERYPOS, &mut data) };
+    if unsafe { (bar.shell)(ABM_QUERYPOS, &mut data) } == 0 {
+        return Err(shell_refused("ABM_QUERYPOS"));
+    }
     // The shell moved the proposed edge out of other AppBars and the taskbar: keep the thickness.
     fit_app_bar(&mut data.rc, bar.edge, bar.thickness);
-    unsafe { SHAppBarMessage(ABM_SETPOS, &mut data) };
+    if unsafe { (bar.shell)(ABM_SETPOS, &mut data) } == 0 {
+        return Err(shell_refused("ABM_SETPOS"));
+    }
     let rc = data.rc;
     if let Some(stored) = app_bars()
         .iter_mut()
@@ -295,23 +334,24 @@ pub(crate) fn app_bar(_: &Window, edge: Option<AppBarEdge>, _: f64) -> Result<()
 /// Gives the reserved screen space of this AppBar back (no-op for other windows).
 #[cfg(target_os = "windows")]
 fn release_app_bar(hwnd: usize) {
-    use windows_sys::Win32::UI::Shell::{
-        ABM_REMOVE, APPBARDATA, RemoveWindowSubclass, SHAppBarMessage,
-    };
-    {
+    use windows_sys::Win32::UI::Shell::{ABM_REMOVE, APPBARDATA, RemoveWindowSubclass};
+    let shell = {
         let mut bars = app_bars();
         let Some(index) = bars.iter().position(|bar| bar.hwnd == hwnd) else {
             return;
         };
-        bars.remove(index);
-    }
+        bars.remove(index).shell
+    };
     let hwnd = hwnd as windows_sys::Win32::Foundation::HWND;
     unsafe { RemoveWindowSubclass(hwnd, Some(app_bar_proc), APP_BAR_SUBCLASS) };
     let mut data: APPBARDATA = unsafe { std::mem::zeroed() };
     data.cbSize = size_of::<APPBARDATA>() as u32;
     data.hWnd = hwnd;
-    unsafe { SHAppBarMessage(ABM_REMOVE, &mut data) };
+    unsafe { shell(ABM_REMOVE, &mut data) };
 }
+
+#[cfg(all(test, target_os = "windows"))]
+mod app_bar_tests;
 
 /// Releases the window's AppBar, if it is one; call before the window goes away.
 pub(crate) fn release_window(window: &Window) {
