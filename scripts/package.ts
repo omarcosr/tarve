@@ -25,12 +25,25 @@ const { values } = parseArgs({
     local: { type: "boolean" },
     // Skip the trimmed libraries `tarve build` picks for apps that use fewer native features.
     "no-variants": { type: "boolean" },
-      // Package the host runtime a previous `package:native` staged (a CI job of its own) instead of
-      // building it again. Still fail-closed: it must exist and match this checkout's compatibility.
+    // With --native-only: build only these parts, comma separated: "full" (the full library) and
+    // variant names (core, rich…). CI builds the parts in parallel jobs and merges their outputs.
+    parts: { type: "string" },
+    // Package the host runtime a previous `package:native` staged (a CI job of its own) instead of
+    // building it again. Still fail-closed: it must exist and match this checkout's compatibility,
+    // and so must every variant of every packaged target (unless --no-variants).
     prebuilt: { type: "boolean" },
   },
 });
 const prebuilt = values.prebuilt === true || process.env.TARVE_NATIVE_PREBUILT === "1";
+const ALL_PARTS = ["full", ...NATIVE_VARIANTS.map(variant => variant.name)];
+const parts = values.parts === undefined
+  ? (values["no-variants"] ? ["full"] : ALL_PARTS)
+  : [...new Set(values.parts.split(",").map(part => part.trim()).filter(Boolean))];
+if (values.parts !== undefined) {
+  if (!values["native-only"]) throw new Error("--parts builds pieces of a runtime: use it with --native-only.");
+  const unknown = parts.filter(part => !ALL_PARTS.includes(part));
+  if (unknown.length || !parts.length) throw new Error(`Unknown --parts ${unknown.join(", ") || "(none)"}. Expected a list of ${ALL_PARTS.join(", ")}.`);
+}
 const platformDirectory = hostConfig.nativeDirectory;
 const nativeName = hostConfig.nativeName;
 const platformOutput = join(root, "native", platformDirectory);
@@ -51,14 +64,16 @@ if (prebuilt) {
 } else {
   // Native compilation is intentionally host-native. Release automation builds each
   // runtime on its own OS, then assembles one universal Tarve package containing both.
-  const library = await buildNative(true);
-  await rm(platformOutput, { recursive: true, force: true });
-  await mkdir(platformOutput, { recursive: true });
-  await copyFile(library, packagedLibrary);
-  await writeNativeRuntimeManifest(packagedLibrary, hostTarget, compatibility);
-}
-if (!prebuilt && !values["no-variants"]) {
+  if (parts.includes("full")) {
+    const library = await buildNative(true);
+    // A whole build starts from an empty folder; a partial one (--parts) adds to what is staged.
+    if (values.parts === undefined) await rm(platformOutput, { recursive: true, force: true });
+    await mkdir(platformOutput, { recursive: true });
+    await copyFile(library, packagedLibrary);
+    await writeNativeRuntimeManifest(packagedLibrary, hostTarget, compatibility);
+  }
   for (const variant of NATIVE_VARIANTS) {
+    if (!parts.includes(variant.name)) continue;
     const features = variantFeatures(variant, hostConfig.platform);
     const built = await buildNative(true, features);
     const destination = nativeVariantPath(platformOutput, variant.name, nativeName);
@@ -70,7 +85,7 @@ if (!prebuilt && !values["no-variants"]) {
 }
 
 if (values["native-only"]) {
-  console.log(`Tarve native ${platformDirectory} release runtime ready: ${packagedLibrary}`);
+  console.log(`Tarve native ${platformDirectory} release runtime ready (${parts.join(", ")}): ${platformOutput}`);
   process.exit(0);
 }
 
@@ -90,10 +105,13 @@ if (!values.local) {
   }
   for (let index = 0; index < PACKAGED_TARGETS.length; index++) {
     await assertNativeRuntimeCompatible(requiredRuntimes[index]!, PACKAGED_TARGETS[index]!, compatibility);
-    // Variants are optional: `tarve build` falls back to the full library without them.
+    // Variants are optional for `tarve build` (it falls back to the full library), but staged
+    // runtimes assembled from separate jobs (--prebuilt) must bring every one: a lost artifact
+    // would otherwise ship a package without them.
     for (const variant of NATIVE_VARIANTS) {
       const path = nativeVariantPath(dirname(requiredRuntimes[index]!), variant.name, targetConfig(PACKAGED_TARGETS[index]!).nativeName);
       if (existsSync(path)) await assertNativeRuntimeCompatible(path, PACKAGED_TARGETS[index]!, compatibility);
+      else if (prebuilt && !values["no-variants"]) throw new Error(`--prebuilt: the ${variant.name} variant of the ${PACKAGED_TARGETS[index]} runtime is missing (${path}).`);
     }
   }
 }

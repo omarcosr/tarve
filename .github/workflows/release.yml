@@ -45,10 +45,12 @@ jobs:
             echo "Waiting for CI on $GITHUB_SHA..."
             sleep 30
           done
+          # Each runtime comes in three artifacts (full, rich, media: ci.yml's native matrix).
           for name in tarve-ci-linux-x64-native tarve-ci-windows-x64-native; do
-            count=$(gh api "repos/$GH_REPO/actions/runs/$id/artifacts?name=$name" --jq '[.artifacts[] | select(.expired | not)] | length')
-            if [ "$count" = "0" ]; then
-              echo "::error::CI run $id has no $name artifact (expired after 14 days?). Re-run CI for $GITHUB_SHA, then re-run this release."
+            count=$(gh api "repos/$GH_REPO/actions/runs/$id/artifacts?per_page=100" \
+              --jq "[.artifacts[] | select((.name | startswith(\"$name-\")) and (.expired | not))] | length")
+            if [ "$count" != "3" ]; then
+              echo "::error::CI run $id has $count of the 3 $name-* artifacts (expired after 14 days?). Re-run CI for $GITHUB_SHA, then re-run this release."
               exit 1
             fi
           done
@@ -148,7 +150,8 @@ jobs:
       - name: Download Linux runtime
         uses: actions/download-artifact@v8
         with:
-          name: tarve-ci-linux-x64-native
+          pattern: tarve-ci-linux-x64-native-*
+          merge-multiple: true
           path: native/linux-x64
           run-id: ${{ needs.ci-runtimes.outputs.run-id }}
           github-token: ${{ github.token }}
@@ -162,7 +165,8 @@ jobs:
       - name: Download Windows runtime
         uses: actions/download-artifact@v8
         with:
-          name: tarve-ci-windows-x64-native
+          pattern: tarve-ci-windows-x64-native-*
+          merge-multiple: true
           path: native/win32-x64
           run-id: ${{ needs.ci-runtimes.outputs.run-id }}
           github-token: ${{ github.token }}

@@ -12,9 +12,18 @@ concurrency:
 
 jobs:
   linux-x64-native:
-    name: Linux x64 native runtime
+    name: Linux x64 native runtime (${{ matrix.part }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The full library and its four trimmed variants are five fat-LTO builds of ~3 min each:
+    # three jobs build them side by side and the package jobs merge their outputs.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { part: full, parts: "full" }
+          - { part: rich, parts: "core,rich" }
+          - { part: media, parts: "media,rich-media" }
 
     steps:
       - name: Checkout
@@ -37,7 +46,7 @@ jobs:
             native -> target
             native -> target-variants
           prefix-key: v1-rust
-          shared-key: linux-x64-native
+          shared-key: linux-x64-native-${{ matrix.part }}
 
       - name: Install Linux native dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev libasound2-dev
@@ -46,26 +55,33 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build Linux native runtime
-        run: bun run package:native
+        run: bun scripts/package.ts --native-only --parts "${{ matrix.parts }}"
 
+      # Only this job's parts are in native/linux-x64; the package jobs merge the three artifacts.
       - name: Upload Linux runtime
         uses: actions/upload-artifact@v7
         with:
-          name: tarve-ci-linux-x64-native
+          name: tarve-ci-linux-x64-native-${{ matrix.part }}
           if-no-files-found: error
           # The release workflow packages these for the tagged commit (release.yml, ci-runtimes).
           retention-days: 14
-          path: |
-            native/linux-x64/libtarve_native.so
-            native/linux-x64/runtime.json
-            native/linux-x64/variants/
+          path: native/linux-x64/
 
   # The Windows runtime (fat LTO, plus its trimmed variants) builds beside the Linux one, so the
   # package job starts once both are ready instead of building it after waiting for Linux.
   windows-x64-native:
-    name: Windows x64 native runtime
+    name: Windows x64 native runtime (${{ matrix.part }})
     runs-on: windows-latest
     timeout-minutes: 30
+    # The full library and its four trimmed variants are five fat-LTO builds of ~3 min each:
+    # three jobs build them side by side and the package jobs merge their outputs.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { part: full, parts: "full" }
+          - { part: rich, parts: "core,rich" }
+          - { part: media, parts: "media,rich-media" }
 
     steps:
       - name: Checkout
@@ -88,25 +104,23 @@ jobs:
             native -> target
             native -> target-variants
           prefix-key: v1-rust
-          shared-key: windows-x64-native
+          shared-key: windows-x64-native-${{ matrix.part }}
 
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
 
       - name: Build Windows native runtime
-        run: bun run package:native
+        run: bun scripts/package.ts --native-only --parts "${{ matrix.parts }}"
 
+      # Only this job's parts are in native/win32-x64; the package jobs merge the three artifacts.
       - name: Upload Windows runtime
         uses: actions/upload-artifact@v7
         with:
-          name: tarve-ci-windows-x64-native
+          name: tarve-ci-windows-x64-native-${{ matrix.part }}
           if-no-files-found: error
           # The release workflow packages these for the tagged commit (release.yml, ci-runtimes).
           retention-days: 14
-          path: |
-            native/win32-x64/tarve_native.dll
-            native/win32-x64/runtime.json
-            native/win32-x64/variants/
+          path: native/win32-x64/
 
   linux-x64:
     name: Linux x64 gate
@@ -411,13 +425,15 @@ jobs:
       - name: Download Linux native runtime
         uses: actions/download-artifact@v8
         with:
-          name: tarve-ci-linux-x64-native
+          pattern: tarve-ci-linux-x64-native-*
+          merge-multiple: true
           path: native/linux-x64
 
       - name: Download Windows native runtime
         uses: actions/download-artifact@v8
         with:
-          name: tarve-ci-windows-x64-native
+          pattern: tarve-ci-windows-x64-native-*
+          merge-multiple: true
           path: native/win32-x64
 
       # One step per command: a multi-line pwsh script only reports the exit code
