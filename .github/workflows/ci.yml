@@ -53,7 +53,8 @@ jobs:
         with:
           name: tarve-ci-linux-x64-native
           if-no-files-found: error
-          retention-days: 1
+          # The release workflow packages these for the tagged commit (release.yml, ci-runtimes).
+          retention-days: 14
           path: |
             native/linux-x64/libtarve_native.so
             native/linux-x64/runtime.json
@@ -100,7 +101,8 @@ jobs:
         with:
           name: tarve-ci-windows-x64-native
           if-no-files-found: error
-          retention-days: 1
+          # The release workflow packages these for the tagged commit (release.yml, ci-runtimes).
+          retention-days: 14
           path: |
             native/win32-x64/tarve_native.dll
             native/win32-x64/runtime.json
@@ -359,11 +361,17 @@ jobs:
           path: work/runtime-parity/*.png
           retention-days: 14
 
+  # Packaging takes seconds once both runtimes exist (--prebuilt), so each group of package
+  # smokes packages on its own and they run side by side.
   windows-x64-package:
-    name: Universal package and executable
+    name: Package (${{ matrix.group }})
     needs: [linux-x64-native, windows-x64-native]
     runs-on: windows-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [install, executable, node-cli]
 
     steps:
       - name: Checkout
@@ -428,15 +436,19 @@ jobs:
         run: bun run pack
 
       - name: Package install smoke
+        if: matrix.group == 'install'
         run: bun run smoke:package
 
-      - name: Standalone executable smoke
-        run: bun run smoke:exe
-
       - name: Node-only package and executable smoke
+        if: matrix.group == 'install'
         run: bun scripts/smoke-node-package.ts
 
-      - name: Node-only tarve package smoke (deb, tar, zip, app-zip)
+      - name: Standalone executable smoke
+        if: matrix.group == 'executable'
+        run: bun run smoke:exe
+
+      - name: Node-only tarve package smoke (deb, tar, zip, app-zip, setup)
+        if: matrix.group == 'node-cli'
         run: bun run smoke:node-cli-package
 
   # @tarve/headless renders with the WebAssembly build: no window, GPU or native library. Running

@@ -42,7 +42,7 @@ Tarve is a framework, not an end-user application, so the Tarve release does **n
 3. `.github/workflows/release.yml` then, without further input:
    - checks that the tag matches the product version and points to a commit on `main`;
    - requires a successful CI run for the tagged commit (CI runs the full gate on both platforms), waiting for it if it is still running;
-   - builds the Linux, Windows and Android runtimes in parallel jobs, each on its own OS (the Windows release job then packages the runtime its native job built, `TARVE_NATIVE_PREBUILT=1`, after checking it against the tagged sources);
+   - takes the Windows and Linux runtimes that CI run built and tested (its native jobs keep them for 14 days; re-run CI on an older commit before tagging it) and checks them against the tagged sources before packaging (`TARVE_NATIVE_PREBUILT=1`); builds the Android runtimes from the tag;
    - packs the universal tarball, verifies it contains exactly the staged runtimes and the tagged version, packs the other packages and checks their versions and `@tarve/core`/`@tarve/headless` peers, and writes SHA-256 hashes of all of them to `dist/release-manifest.json`;
    - creates the GitHub release with those artifacts;
    - publishes to npm from those same tarballs (never repacked), with provenance: `@tarve/core`, `@tarve/headless`, `@tarve/react-icons`, `@tarve/svelte`, `@tarve/router`, `@tarve/test` and `create-tarve`; stable versions as `latest`, prereleases (`v0.2.0-beta.1`) as `next` and as GitHub prereleases. A re-run skips the versions already published;

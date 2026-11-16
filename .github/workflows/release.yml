@@ -14,55 +14,46 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  linux-x64-native:
-    name: Linux x64 native runtime
+  # The desktop runtimes are the ones CI built and tested for the tagged commit (its native jobs
+  # upload them for 14 days): the release waits for that green CI run instead of building them
+  # again. The release job still checks them against the tagged sources before packaging.
+  ci-runtimes:
+    name: CI runtimes of the tagged commit
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
+    outputs:
+      run-id: ${{ steps.ci.outputs.run-id }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.2"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            native -> target
-            native -> target-variants
-          prefix-key: v1-rust
-          shared-key: linux-x64-native
-          save-if: false
-
-      - name: Install Linux native dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev libasound2-dev
-
-      - name: Install JS dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build Linux package runtime
-        run: bun run package:native
-
-      - name: Upload Linux runtime
-        uses: actions/upload-artifact@v7
-        with:
-          name: tarve-linux-x64-native
-          if-no-files-found: error
-          retention-days: 1
-          # variants/: the trimmed libraries `tarve build` picks (scripts/package.ts).
-          path: |
-            native/linux-x64/libtarve_native.so
-            native/linux-x64/runtime.json
-            native/linux-x64/variants/
+      - name: Wait for green CI and find its run
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          deadline=$(( $(date +%s) + 40 * 60 ))
+          while true; do
+            id=$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --limit 20 --json databaseId,status,conclusion \
+              --jq '[.[] | select(.status == "completed" and .conclusion == "success")][0].databaseId // empty')
+            if [ -n "$id" ]; then break; fi
+            pending=$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --limit 20 --json status --jq '[.[] | select(.status != "completed")] | length')
+            if [ "$pending" = "0" ]; then
+              echo "::error::No successful CI run for $GITHUB_SHA. Push the commit to main and let CI pass before tagging."
+              exit 1
+            fi
+            if [ "$(date +%s)" -gt "$deadline" ]; then echo "::error::Timed out waiting for CI on $GITHUB_SHA."; exit 1; fi
+            echo "Waiting for CI on $GITHUB_SHA..."
+            sleep 30
+          done
+          for name in tarve-ci-linux-x64-native tarve-ci-windows-x64-native; do
+            count=$(gh api "repos/$GH_REPO/actions/runs/$id/artifacts?name=$name" --jq '[.artifacts[] | select(.expired | not)] | length')
+            if [ "$count" = "0" ]; then
+              echo "::error::CI run $id has no $name artifact (expired after 14 days?). Re-run CI for $GITHUB_SHA, then re-run this release."
+              exit 1
+            fi
+          done
+          echo "CI run $id"
+          echo "run-id=$id" >> "$GITHUB_OUTPUT"
 
   # `tarve build --target android` looks for native/android/<abi>/libtarve_native.so in the
   # package (package.json "files" lists native/android); build both ABIs from the tag.
@@ -112,57 +103,9 @@ jobs:
             native/android/arm64-v8a/libtarve_native.so
             native/android/x86_64/libtarve_native.so
 
-  # Built beside the Linux and Android runtimes; the release job only assembles and verifies.
-  windows-x64-native:
-    name: Windows x64 native runtime
-    runs-on: windows-latest
-    timeout-minutes: 60
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.2"
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      # Reuse the Windows runtime cache CI's native job builds on main (tag runs can read it).
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            native -> target
-            native -> target-variants
-          prefix-key: v1-rust
-          shared-key: windows-x64-native
-          save-if: false
-
-      - name: Install JS dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build Windows package runtime
-        run: bun run package:native
-
-      - name: Upload Windows runtime
-        uses: actions/upload-artifact@v7
-        with:
-          name: tarve-windows-x64-native
-          if-no-files-found: error
-          retention-days: 1
-          path: |
-            native/win32-x64/tarve_native.dll
-            native/win32-x64/runtime.json
-            native/win32-x64/variants/
-
   windows-x64-release:
     name: Windows x64 release
-    needs: [linux-x64-native, android-native, windows-x64-native]
+    needs: [ci-runtimes, android-native]
     runs-on: windows-latest
     timeout-minutes: 60
 
@@ -205,8 +148,10 @@ jobs:
       - name: Download Linux runtime
         uses: actions/download-artifact@v8
         with:
-          name: tarve-linux-x64-native
+          name: tarve-ci-linux-x64-native
           path: native/linux-x64
+          run-id: ${{ needs.ci-runtimes.outputs.run-id }}
+          github-token: ${{ github.token }}
 
       - name: Download Android runtimes
         uses: actions/download-artifact@v8
@@ -217,8 +162,10 @@ jobs:
       - name: Download Windows runtime
         uses: actions/download-artifact@v8
         with:
-          name: tarve-windows-x64-native
+          name: tarve-ci-windows-x64-native
           path: native/win32-x64
+          run-id: ${{ needs.ci-runtimes.outputs.run-id }}
+          github-token: ${{ github.token }}
 
       - name: Validate release ref and version policy
         shell: pwsh
@@ -237,30 +184,9 @@ jobs:
             throw "Release tag must point to a commit reachable from the default branch."
           }
 
-      # The tagged commit already went through the full gate in CI (typecheck,
-      # clippy, tests, real-window smokes, package and executable smokes on both
-      # platforms). Require that green run instead of repeating ~20 minutes of it.
-      - name: Require green CI for the tagged commit
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $deadline = (Get-Date).AddMinutes(40)
-          while ($true) {
-            $runs = gh run list --workflow ci.yml --commit "$env:GITHUB_SHA" --json status,conclusion | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0) { throw "Could not query CI runs." }
-            if ($runs | Where-Object { $_.status -eq "completed" -and $_.conclusion -eq "success" }) { break }
-            if (-not ($runs | Where-Object { $_.status -ne "completed" })) {
-              throw "No successful CI run for $env:GITHUB_SHA. Push the commit to main and let CI pass before tagging."
-            }
-            if ((Get-Date) -gt $deadline) { throw "Timed out waiting for CI on $env:GITHUB_SHA." }
-            Write-Host "Waiting for CI on $env:GITHUB_SHA..."
-            Start-Sleep -Seconds 30
-          }
-
       # Tarve is a framework: application authors sign the executables they build.
-      # TARVE_NATIVE_PREBUILT: package the runtime windows-x64-native built from this tag
-      # (checked against it) instead of building it a second time here.
+      # TARVE_NATIVE_PREBUILT: package the Windows runtime CI built for this commit (checked
+      # against the tagged sources) instead of building it again here.
       - name: Build and verify release artifacts
         env:
           TARVE_RELEASE_TAG: ${{ github.ref_name }}
