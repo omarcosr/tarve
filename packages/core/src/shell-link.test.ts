@@ -44,5 +44,6 @@ describe("shell links", () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  // PowerShell and its COM objects start slowly on CI runners (over 5 s on windows-latest).
+  }, 60_000);
 });
