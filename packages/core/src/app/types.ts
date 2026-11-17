@@ -13,6 +13,7 @@ import { type TarvePlugin } from "../plugins";
 import { type OpenFilesListener, type OpenUrlListener } from "./open-requests";
 import { type KeepAlive, type KeepAliveOptions, type SecureStore, type AuthenticateOptions, type AuthenticateResult, type PositionOptions, type PositionResult, type ShareOptions, type ShareResult, type SpeechOptions, type SpeechSession } from "./device";
 import type { FileTypeAssociation } from "../associations";
+import type { AppPerformance } from "./performance";
 
 export type AppErrorSource =
   | "render"
@@ -183,7 +184,6 @@ export interface AppJsStats {
   heapUsedMb: number;
 }
 export interface AppStats { js: AppJsStats; native: NativeStats }
-/** Options of a window opened with `app.openWindow`: an app of its own on the same native app. */
 /** Where the focus went when a window lost it; empty when it went to another app or is unknown. */
 export interface WindowFocusChange {
   /** The app's window that took it: `"main"` for the first window, else its `openWindow` id. */
@@ -191,6 +191,7 @@ export interface WindowFocusChange {
   /** The node of that window under the pointer that a press reaches (the click that took the focus). */
   pointerTarget?: string;
 }
+/** Options of a window opened with `app.openWindow`: an app of its own on the same native app. */
 export interface OpenWindowOptions extends Pick<AppOptions, "rememberWindow" | "debug" | "renderer" | "componentAdapters" | "onError" | "dev" | "maxFps" | "msaa" | "textRendering" | "lowPower" | "keyboardEvents" | "pointerEvents" | "closeBehavior"> {
   /** Names the window in native events; unique among the app's open windows. Default `window-<n>`. */
   id?: string;
@@ -291,7 +292,6 @@ export interface AppHandle {
   appBar(edge: AppBarEdge | null, options?: { size?: number; overlap?: number }): void;
   /** Every monitor (physical px, work area, scale, primary) and the pointer's screen position (`null` where unknown, e.g. Wayland). */
   screens(): Promise<{ screens: ScreenInfo[]; cursor: { x: number; y: number } | null }>;
-  /** Shows a system tray icon (Windows, Linux); `onAvailability` / `availability()` say whether it can be seen. A second call replaces the first tray. */
   /** The monitor the window is on (most of it), as `screens()` lists it; `undefined` where unknown (Wayland, no window yet). */
   screen(): Promise<ScreenInfo | undefined>;
   /**
@@ -300,6 +300,7 @@ export interface AppHandle {
    * burst of system notifications that leaves the screens different. Returns the unsubscribe.
    */
   onScreensChange(listener: (screens: ScreenInfo[]) => void): () => void;
+  /** Shows a system tray icon (Windows, Linux); `onAvailability` / `availability()` say whether it can be seen. A second call replaces the first tray. */
   tray(options: TrayOptions): TrayHandle;
   /**
    * The window's menu bar, replaced as a whole on each call; `null` removes it. Drawn in
@@ -388,6 +389,18 @@ export interface AppHandle {
    * startup stage. `reset` clears the samples after reading them.
    */
   stats(options?: { reset?: boolean }): Promise<AppStats>;
+  /**
+   * This window's performance: JS update and native frame phase percentiles (ms, recent
+   * samples), native events received (counted from the first reading on) and synchronous
+   * native requests (`layout`, `textSelection`) with the time they blocked. Read-only: the
+   * samples `stats({ reset })` clears are left alone. Costs nothing until first called.
+   */
+  performance(): Promise<AppPerformance>;
+  /**
+   * Calls `listener` with `performance()` every `intervalMs` (default 1000, at least 100)
+   * until the returned function is called or the window closes. Readings never overlap.
+   */
+  onPerformance(listener: (reading: AppPerformance) => void, intervalMs?: number): () => void;
   capture(path: string): Promise<void>;
   /** Advance the native deterministic motion clock. Requires debug mode. */
   advanceMotion(milliseconds: number): Promise<void>;

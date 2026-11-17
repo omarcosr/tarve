@@ -50,8 +50,10 @@ let automationClaimed = false;
 
 export type { TrayAvailability, TrayMenuItem, TrayOptions, TrayHandle } from "./app/tray";
 export type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, NotifyOptions, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle, NotifyResult, NotificationPlace } from "./app/types";
+export type { AppPerformance, SyncRequestStats } from "./app/performance";
 export type { WindowFocusChange } from "./app/types";
 import type { WindowFocusChange } from "./app/types";
+import { createPerformanceMonitor, type AppPerformance } from "./app/performance";
 import type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle } from "./app/types";
 const DEV_OVERLAY_SOURCES = new Set<AppErrorSource>(["render", "event-handler", "listener", "hotkey", "process"]);
 const DEV_APP_KEY = Symbol.for("tarve.devApp");
@@ -214,6 +216,23 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   let committed: CompiledTree | undefined;
   let observed: CompiledTree | undefined;
   const jsStats = { render: new PhaseSamples(), diff: new PhaseSamples(), shadow: new PhaseSamples(), send: new PhaseSamples(), update: new PhaseSamples() };
+  const jsSummary = (): AppJsStats => ({
+    render: jsStats.render.summary(), diff: jsStats.diff.summary(), shadow: jsStats.shadow.summary(),
+    send: jsStats.send.summary(), update: jsStats.update.summary(),
+    heapUsedMb: Math.round(process.memoryUsage().heapUsed / 104857.6) / 10,
+  });
+  async function nativeStats(reset: boolean): Promise<NativeStats> {
+    const event = await requests.request({ type: "stats", requestId: crypto.randomUUID(), reset });
+    if (event.type !== "stats") {
+      throw reportError(new Error("Unexpected native stats response"), { source: "request", event: "stats" });
+    }
+    return event.stats;
+  }
+  /** `app.performance()`: counts native events only once read, so it costs nothing before. */
+  const perf = createPerformanceMonitor({
+    jsStats: jsSummary, nativeStats: () => nativeStats(false),
+    report: error => reportError(error, { source: "listener", event: "performance" }),
+  });
   /** The window's content size, from the root's size reports; breakpoint styles read it. */
   let viewport: { width: number; height: number } | undefined;
   let queued = false;
@@ -234,7 +253,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   void closed.then(() => opens.dispose({ appClosed: !childWindowBridges.has(bridge) }));
   // Share, location and biometrics: created with the bridge's requests (below).
   let device!: DeviceRequests;
-  void closed.then(() => { device?.dispose(); notifications.dispose(); });
+  void closed.then(() => { device?.dispose(); notifications.dispose(); perf.dispose(); });
   // toast(): every app re-renders its Toaster when the queue changes.
   if (!openedWindow) void closed.then(onToastsChange(() => { if (started && !ended) update(); }));
   // store(): a change renders again the windows whose renders read the changed data (update()
@@ -636,6 +655,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   const focusListeners = new Set<(focused: boolean, change: WindowFocusChange) => void>();
   /** The native window handle the `ready` event carried. */
   let windowHandle: string | undefined;
+  const screensListeners = new Set<(screens: ScreenInfo[]) => void>();
 
   function dispatchNativeEvent(event: NativeEvent): void {
     (globalThis as Record<symbol, unknown>)[ACTIVE_APP_KEY] = app;
@@ -645,6 +665,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
     if (event.type === "windowFocus" && event.focused !== windowFocused) {
       windowFocused = event.focused;
+      const change: WindowFocusChange = {};
+      if (event.to !== undefined) change.to = event.to;
+      if (event.pointerTarget !== undefined) change.pointerTarget = event.pointerTarget;
       for (const listener of [...focusListeners]) {
         try { listener(windowFocused, change); } catch (error) { reportError(error, { source: "listener", event: "windowFocus" }); }
       }
@@ -657,9 +680,13 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         settleReadyFailure(error);
       }
       reportError(error, { source: "native", event: "error" });
-  const screensListeners = new Set<(screens: ScreenInfo[]) => void>();
     }
 
+    if (event.type === "screensChange") {
+      for (const listener of [...screensListeners]) {
+        try { listener(event.screens); } catch (error) { reportError(error, { source: "listener", event: "screensChange" }); }
+      }
+    }
     if (event.type === "fullscreen" && event.fullscreen !== fullscreen) {
       fullscreen = event.fullscreen;
       for (const listener of [...fullscreenListeners]) listener(fullscreen);
@@ -667,9 +694,6 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     if (event.type === "windowState" && rememberKey) {
       windowStateStore().set(rememberKey, { x: event.x, y: event.y, width: event.width, height: event.height, maximized: event.maximized, ...(event.physical ? { physical: true } : {}) });
     }
-      const change: WindowFocusChange = {};
-      if (event.to !== undefined) change.to = event.to;
-      if (event.pointerTarget !== undefined) change.pointerTarget = event.pointerTarget;
     if (event.type === "pluginEvent") {
       pluginHost?.event(event.channel, Buffer.from(event.data, "base64"));
       return;
@@ -684,11 +708,6 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       const handler = item?.[1].onEscape;
       if (handler) {
         if (invokeHandler("escape", item?.[0], handler)) update();
-    if (event.type === "screensChange") {
-      for (const listener of [...screensListeners]) {
-        try { listener(event.screens); } catch (error) { reportError(error, { source: "listener", event: "screensChange" }); }
-      }
-    }
       } else runBackHandlers(true);
     }
 
@@ -856,6 +875,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       windows.get(target)?.(own as NativeEvent);
       return;
     }
+    perf.count(event.type);
     try {
       dispatchNativeEvent(event);
     } catch (error) {
@@ -883,7 +903,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (queued) renderQueued();
       try {
         // Startup can wait for the window and graphics device to come up.
-        const event = bridge.requestSync({ type: "layout", ids, requestId: crypto.randomUUID() }, started ? 1000 : 5000);
+        const event = perf.sync(() => bridge.requestSync!({ type: "layout", ids, requestId: crypto.randomUUID() }, started ? 1000 : 5000));
         return event?.type === "layout" ? event.boxes : undefined;
       } catch (error) {
         reportError(error, { source: "bridge", event: "layout" });
@@ -904,7 +924,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     textSelection(): { id: string; anchor: number; focus: number } | undefined {
       if (ended || closing || !bridge.requestSync) return undefined;
       try {
-        const event = bridge.requestSync({ type: "selection", requestId: crypto.randomUUID() }, 1000);
+        const event = perf.sync(() => bridge.requestSync!({ type: "selection", requestId: crypto.randomUUID() }, 1000));
         return event?.type === "selection" && event.target !== null ? { id: event.target, anchor: event.anchor, focus: event.focus } : undefined;
       } catch (error) {
         reportError(error, { source: "bridge", event: "selection" });
@@ -1022,6 +1042,15 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (event.type !== "screens") throw reportError(new Error("Unexpected native response"), { source: "request", event: "screens" });
       return { screens: event.screens, cursor: event.cursor };
     },
+    async screen(): Promise<ScreenInfo | undefined> {
+      const event = await requests.request({ type: "screens", requestId: crypto.randomUUID() });
+      if (event.type !== "screens") throw reportError(new Error("Unexpected native response"), { source: "request", event: "screens" });
+      return typeof event.windowScreen === "number" ? event.screens[event.windowScreen] : undefined;
+    },
+    onScreensChange(listener: (screens: ScreenInfo[]) => void): () => void {
+      screensListeners.add(listener);
+      return () => { screensListeners.delete(listener); };
+    },
     tray(initial: TrayOptions): TrayHandle {
       return trays.tray(initial);
     },
@@ -1044,15 +1073,6 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     requestPermissions: names => requests.permissions("request", names),
     media(id: string): MediaController {
       return mediaController(id, command => { if (!ended) sendPublic(command); });
-    async screen(): Promise<ScreenInfo | undefined> {
-      const event = await requests.request({ type: "screens", requestId: crypto.randomUUID() });
-      if (event.type !== "screens") throw reportError(new Error("Unexpected native response"), { source: "request", event: "screens" });
-      return typeof event.windowScreen === "number" ? event.screens[event.windowScreen] : undefined;
-    },
-    onScreensChange(listener: (screens: ScreenInfo[]) => void): () => void {
-      screensListeners.add(listener);
-      return () => { screensListeners.delete(listener); };
-    },
     },
     surface(id: string): SurfaceController {
       return surfaceController(id, command => { if (!ended) sendPublic(command); }, surfaceId => surfaceHandles.get(surfaceId));
@@ -1125,17 +1145,17 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     async stats(statsOptions: { reset?: boolean } = {}): Promise<AppStats> {
       if (queued) await flushQueuedUpdate();
       const reset = statsOptions.reset === true;
-      const event = await requests.request({ type: "stats", requestId: crypto.randomUUID(), reset });
-      if (event.type !== "stats") {
-        throw reportError(new Error("Unexpected native stats response"), { source: "request", event: "stats" });
-      }
-      const js: AppJsStats = {
-        render: jsStats.render.summary(), diff: jsStats.diff.summary(), shadow: jsStats.shadow.summary(),
-        send: jsStats.send.summary(), update: jsStats.update.summary(),
-        heapUsedMb: Math.round(process.memoryUsage().heapUsed / 104857.6) / 10,
-      };
+      const native = await nativeStats(reset);
+      const js = jsSummary();
       if (reset) for (const samples of Object.values(jsStats)) samples.reset();
-      return { js, native: event.stats };
+      return { js, native };
+    },
+    async performance(): Promise<AppPerformance> {
+      if (queued) await flushQueuedUpdate();
+      return perf.read();
+    },
+    onPerformance(listener: (reading: AppPerformance) => void, intervalMs?: number): () => void {
+      return perf.listen(listener, intervalMs);
     },
     async capture(path: string): Promise<void> {
       if (!options.debug) throw new Error("Enable debug to capture the rendered scene");

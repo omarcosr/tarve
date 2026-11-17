@@ -43,7 +43,7 @@ export type { AppMenuBarProps } from "./menu-bar";
 export type { InstanceLaunch, SingleInstance, SingleInstanceOptions, UrlSchemeOptions } from "./instance";
 export { checkForUpdate, downloadUpdate, installUpdate, canInstallUpdate, cleanupUpdate, compareVersions, verifyUpdateManifest, validateUpdateManifest, isValidVersion, assertUpdateUrl, updatePlatform } from "./updates";
 export type { Update, UpdateArtifact, UpdatePack, UpdateManifest, SignedUpdateManifest, CheckForUpdateOptions, DownloadUpdateOptions, InstallUpdateOptions } from "./updates";
-export type { AppErrorEvent, AppErrorSource, AppHandle, AppJsStats, AppOptions, AppStats, MenuBarItem, MenuBarOptions, NotifyOptions, NotifyResult, NotificationPlace, OpenEvent, OpenFilesListener, OpenUrlListener, OpenWindowOptions, SystemMediaSession, TrayAvailability, TrayHandle, TrayMenuItem, TrayOptions } from "./app";
+export type { AppErrorEvent, AppErrorSource, AppHandle, AppJsStats, AppOptions, AppPerformance, AppStats, SyncRequestStats, WindowFocusChange, MenuBarItem, MenuBarOptions, NotifyOptions, NotifyResult, NotificationPlace, OpenEvent, OpenFilesListener, OpenUrlListener, OpenWindowOptions, SystemMediaSession, TrayAvailability, TrayHandle, TrayMenuItem, TrayOptions } from "./app";
 export type { WebSignInOptions } from "./app/requests";
 export { share, getCurrentPosition, watchPosition, authenticate, recognizeSpeech, keepAlive, moveToBackground, secureStore, clipboard } from "./device";
 export type { AppClipboard } from "./app/types";
