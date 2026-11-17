@@ -238,7 +238,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   // store(): a change renders again the windows whose renders read the changed data (update()
   // batches the renders). Reads add up across renders: a memoized subtree that is reused
   // without running keeps depending on what it read when it last ran.
-  void closed.then(onStoreChange(() => { if (started && !ended) update(); }, storeReads));
+  void closed.then(onStoreChange(() => { if (started && !ended) update(); }, storeReads, devMode));
   // With onError, uncaught errors are the app's (Node and Bun would otherwise exit, closing the
   // window); a window opened with openWindow leaves them to its opener.
   if (options.onError && !openedWindow) {

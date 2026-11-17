@@ -3,7 +3,7 @@ import type { NativeCommand, NativeEvent, SceneDocument } from "./protocol";
 import { createApp } from "./app";
 import type { NativeBridge } from "./bridge";
 import { Text, Window } from "./components";
-import { store, toRaw } from "./store";
+import { onStoreChange, store, toRaw } from "./store";
 
 class FakeBridge implements NativeBridge {
   commands: NativeCommand[] = [];
@@ -98,6 +98,130 @@ describe("store()", () => {
     expect(ui.tabs.indexOf(ui.tabs[1]!)).toBe(1);
     expect(ui.tabs.includes({ name: "one" })).toBe(false);
     expect(ui.tabs.find(item => toRaw(item) === tab)).toBe(ui.tabs[0]);
+  });
+
+  test("writing the value already there notifies nobody", async () => {
+    const tab = { name: "one" };
+    const state = store({ count: 1, label: "a", missing: undefined as number | undefined, nan: NaN, tab, map: new Map([["k", 1]]) });
+    let changes = 0;
+    const stop = onStoreChange(() => { changes++; });
+    state.count = 1;
+    state.label = "a";
+    state.missing = undefined;
+    state.nan = NaN;
+    state.tab = tab;
+    state.tab = state.tab;
+    state.map.set("k", 1);
+    await tick();
+    expect(changes).toBe(0);
+    state.count = 2;
+    await tick();
+    expect(changes).toBe(1);
+    stop();
+  });
+
+  test("shallow-equal arrays and plain objects notify nobody; any difference does", async () => {
+    const item = { id: 1 };
+    const state = store({ list: [1, 2] as number[], items: [item], options: { a: 1, b: "x" } as Record<string, unknown>, nested: { inner: { deep: 1 } } });
+    let changes = 0;
+    const stop = onStoreChange(() => { changes++; });
+    state.list = [1, 2];
+    state.items = [...state.items];
+    state.options = { b: "x", a: 1 };
+    await tick();
+    expect(changes).toBe(0);
+    // Deep equality is not checked: a new inner object is a change.
+    state.nested = { inner: { deep: 1 } };
+    await tick();
+    expect(changes).toBe(1);
+    for (const write of [
+      () => { state.list = [1, 2, 3]; },
+      () => { state.list = [2, 1, 3]; },
+      () => { state.options = { a: 1 }; },
+      () => { state.options = { a: 1, b: "x", c: undefined }; },
+      () => { state.options = { a: 1, c: "x" }; },
+      () => { state.items = [{ id: 1 }]; },
+    ]) {
+      const before = changes;
+      write();
+      await tick();
+      expect(changes).toBe(before + 1);
+    }
+    stop();
+  });
+
+  test("a render that read a replaced shallow-equal array still hears its later changes", async () => {
+    const state = store({ list: [1, 2] });
+    let renders = 0;
+    const app = createApp(() => { renders++; return <Window><Text>{state.list.join(",")}</Text></Window>; }, { bridge: new FakeBridge() });
+    await app.ready;
+    const base = renders;
+    state.list = [1, 2];
+    await tick();
+    expect(renders).toBe(base);
+    state.list.push(3);
+    await tick();
+    expect(renders).toBe(base + 1);
+    app.close();
+  });
+
+  test("dev mode warns once about a store written on every render and keeps the event loop running", async () => {
+    const state = store({ count: 0 });
+    let looping = true;
+    let renders = 0;
+    const warnings: string[] = [];
+    const warn = console.warn;
+    console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")); };
+    try {
+      const app = createApp(() => {
+        renders++;
+        const count = state.count;
+        if (looping) queueMicrotask(() => { state.count = count + 1; });
+        return <Window><Text>{String(count)}</Text></Window>;
+      }, { bridge: new FakeBridge(), dev: true });
+      await app.ready;
+      state.count = 1;
+      // A pure microtask chain would never let these timers fire.
+      for (let index = 0; index < 5; index++) await tick();
+      expect(renders).toBeGreaterThan(1000);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(".count on { count }");
+      expect(warnings[0]).toContain("store.test.tsx");
+      looping = false;
+      await tick();
+      await tick();
+      const settled = renders;
+      await tick();
+      expect(renders).toBe(settled);
+      app.close();
+    } finally {
+      console.warn = warn;
+    }
+  });
+
+  test("without dev mode the guard stays off", async () => {
+    const state = store({ count: 0 });
+    let renders = 0;
+    const warnings: unknown[] = [];
+    const warn = console.warn;
+    console.warn = (...args: unknown[]) => { warnings.push(args); };
+    try {
+      const app = createApp(() => {
+        renders++;
+        const count = state.count;
+        if (count > 0 && count < 1200) queueMicrotask(() => { state.count = count + 1; });
+        return <Window><Text>{String(count)}</Text></Window>;
+      }, { bridge: new FakeBridge(), dev: false });
+      await app.ready;
+      state.count = 1;
+      await tick();
+      expect(state.count).toBe(1200);
+      expect(renders).toBeGreaterThan(1000);
+      expect(warnings).toHaveLength(0);
+      app.close();
+    } finally {
+      console.warn = warn;
+    }
   });
 });
 
