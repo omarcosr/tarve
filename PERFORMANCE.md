@@ -2,6 +2,8 @@
 
 Run `bun run build` followed by `bun run bench`. The benchmark uses the host Rust release library, opens a real GPU-backed window, and writes `work/benchmark.json`.
 
+**Project rule:** no change may make performance worse (runtime, startup, first launch, CPU, GPU or memory). Binary size never justifies a regression: a size optimization ships only with zero measured cost, benchmarked before and after. See `AGENTS.md`.
+
 ## Current measurement
 
 Windows x64, Bun 1.4.1, AMD Ryzen 7 9800X3D. The workload contains 2,000 rows / 6,005 native nodes; 67 nodes are visible. Each row contains text and an interactive button. The benchmark discards five warm-up samples and collects 60 samples for each operation.
