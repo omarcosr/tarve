@@ -149,56 +149,6 @@ function wrap<T>(value: T): T {
 /** Array searches by identity: on the plain elements, with plain arguments, so the object pushed and the one found match. */
 const IDENTITY_SEARCHES = new Set<PropertyKey>(["indexOf", "lastIndexOf", "includes"]);
 
-/**
- * Whether writing `next` over `previous` changes nothing a render shows: the same value
- * (Object.is), or an array or plain object with the same keys holding the same values (one
- * level, by identity of the plain data). A shallow-equal replacement is still stored: renders
- * that read the old one now depend on the new one too, so its later changes reach them.
- */
-function same(previous: unknown, next: unknown): boolean {
-  if (Object.is(previous, next)) return true;
-  if (previous === null || next === null || typeof previous !== "object" || typeof next !== "object") return false;
-  if (!shallowEqual(previous, next)) return false;
-  follow(previous, next);
-  return true;
-}
-
-const hasOwn = Object.prototype.hasOwnProperty;
-
-/** Same keys (own enumerable strings) and Object.is values; arrays by length and index. No allocation. */
-function shallowEqual(a: object, b: object): boolean {
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false;
-    for (let index = 0; index < a.length; index++) if (!Object.is(toRaw(a[index]), toRaw(b[index]))) return false;
-    return true;
-  }
-  if (Array.isArray(b)) return false;
-  const prototype = Object.getPrototypeOf(a);
-  if (prototype !== Object.getPrototypeOf(b) || (prototype !== Object.prototype && prototype !== null)) return false;
-  let count = 0;
-  for (const key in a) {
-    if (!hasOwn.call(a, key)) continue;
-    count++;
-    if (!hasOwn.call(b, key) || !Object.is(toRaw((a as Record<string, unknown>)[key]), toRaw((b as Record<string, unknown>)[key]))) return false;
-  }
-  for (const key in b) if (hasOwn.call(b, key)) count--;
-  return count === 0;
-}
-
-/** What renders read of `from` they now read of `to` as well (it replaced `from` unnoticed). */
-function follow(from: object, to: object): void {
-  if (reading) copyReads(reading, from, to);
-  for (const listener of listeners) if (listener.reads) copyReads(listener.reads, from, to);
-}
-
-function copyReads(reads: StoreReads, from: object, to: object): void {
-  const keys = reads.get(from);
-  if (!keys) return;
-  const existing = reads.get(to);
-  if (!existing) reads.set(to, new Set(keys));
-  else for (const key of keys) existing.add(key);
-}
-
 const objectHandler: ProxyHandler<object> = {
           get(target, key, receiver) {
             if (key === RAW) return target;
@@ -225,7 +175,7 @@ const objectHandler: ProxyHandler<object> = {
             // the set goes through the defineProperty trap, and QuickJS (Android) then rejects an array's
             // `push` with "inconsistent defineProperty".
             const done = receiver === proxies.get(target) ? Reflect.set(target, key, next) : Reflect.set(target, key, next, receiver);
-            if (done && (!had || !same(previous, next))) changed(target, key, !had);
+            if (done && (!had || !Object.is(previous, next))) changed(target, key, !had);
             return done;
           },
           deleteProperty(target, key) {
@@ -258,7 +208,7 @@ function collection(target: Map<unknown, unknown> | Set<unknown>): object {
           const map = target as Map<unknown, unknown>;
           const next = toRaw(value);
           const rawKey = toRaw(item);
-          const unchanged = map.has(rawKey) && same(map.get(rawKey), next);
+          const unchanged = map.has(rawKey) && Object.is(map.get(rawKey), next);
           map.set(rawKey, next);
           if (!unchanged) changed(target, ANY);
           return proxies.get(target);

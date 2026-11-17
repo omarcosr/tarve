@@ -120,49 +120,17 @@ describe("store()", () => {
     stop();
   });
 
-  test("shallow-equal arrays and plain objects notify nobody; any difference does", async () => {
-    const item = { id: 1 };
-    const state = store({ list: [1, 2] as number[], items: [item], options: { a: 1, b: "x" } as Record<string, unknown>, nested: { inner: { deep: 1 } } });
+  test("a new array or object notifies even with the same contents (a copy forces a render)", async () => {
+    const state = store({ list: [1, 2] as number[], options: { a: 1 } as Record<string, unknown> });
     let changes = 0;
     const stop = onStoreChange(() => { changes++; });
-    state.list = [1, 2];
-    state.items = [...state.items];
-    state.options = { b: "x", a: 1 };
-    await tick();
-    expect(changes).toBe(0);
-    // Deep equality is not checked: a new inner object is a change.
-    state.nested = { inner: { deep: 1 } };
+    state.list = [...state.list];
     await tick();
     expect(changes).toBe(1);
-    for (const write of [
-      () => { state.list = [1, 2, 3]; },
-      () => { state.list = [2, 1, 3]; },
-      () => { state.options = { a: 1 }; },
-      () => { state.options = { a: 1, b: "x", c: undefined }; },
-      () => { state.options = { a: 1, c: "x" }; },
-      () => { state.items = [{ id: 1 }]; },
-    ]) {
-      const before = changes;
-      write();
-      await tick();
-      expect(changes).toBe(before + 1);
-    }
+    state.options = { a: 1 };
+    await tick();
+    expect(changes).toBe(2);
     stop();
-  });
-
-  test("a render that read a replaced shallow-equal array still hears its later changes", async () => {
-    const state = store({ list: [1, 2] });
-    let renders = 0;
-    const app = createApp(() => { renders++; return <Window><Text>{state.list.join(",")}</Text></Window>; }, { bridge: new FakeBridge() });
-    await app.ready;
-    const base = renders;
-    state.list = [1, 2];
-    await tick();
-    expect(renders).toBe(base);
-    state.list.push(3);
-    await tick();
-    expect(renders).toBe(base + 1);
-    app.close();
   });
 
   test("dev mode warns once about a store written on every render and keeps the event loop running", async () => {
