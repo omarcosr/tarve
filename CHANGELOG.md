@@ -9,10 +9,23 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 - `threadsafeCallback(run, { args, returns, copy })`: a C function pointer native code may call from any thread (thread pools, RPC/COM threads, audio threads), on Bun, Node.js and txiki.js alike. Each call queues its arguments in Tarve's library (`native/src/threadsafe.rs`, native ABI 8), returns `returns` at once and wakes the JavaScript thread through a pipe, where `run` runs in call order, as bun:ffi's `JSCallback({ threadsafe: true })` does. Up to 6 integer or pointer arguments (no floating point), 128 open at once; `copy` takes the bytes a pointer argument names during the call. An open callback keeps the process alive; a closed one stays safe to call. `threadsafeComObject({ iids, methods })` builds a COM event sink around them: QueryInterface, AddRef and Release answer natively (IUnknown, IAgileObject and `iids`). `bun run smoke:threadsafe` checks the three desktop runtimes against each other.
 - `app.layoutAsync(ids)`: `app.layout` without blocking the JavaScript thread.
 - `onSystemMediaSessionsChange(listener)`: other apps' media sessions as Windows events instead of polling (sessions coming and going, the current one, track, play state, timeline). One native thread keeps the session manager and its subscriptions, rebuilds the list once per burst of events and reads media properties and artwork again only for the session that changed them; the listener runs through a threadsafe callback. While anyone listens, `systemMediaSessions()` answers from that list without calling into Windows.
+- `messageWindow()` (Windows): a hidden window on its own native thread with its own message loop that delivers chosen window messages (by number or registered name), WinEvents (`SetWinEventHook`), shell hook notifications and registry/folder change notifications to JavaScript in order, on Bun, Node.js and txiki.js, without polling or Workers. Sent messages get their LRESULT from a reply table set ahead of time (`replies`/`setReply`) or from `onMessage` within a bounded `replyTimeout` (`waitReplies`). `WM_COPYDATA`, `WM_SETTINGCHANGE`, `PBT_POWERSETTINGCHANGE` and `WM_DEVICECHANGE` data are copied. `dispose()` stops the thread. Other platforms throw `MessageWindowUnsupportedError`. `bun run smoke:message-window` checks the three desktop runtimes.
+- `app.appBar(edge, { overlap })`: the window reaches `overlap` logical px past the reserved strip into the screen without reserving it.
+- `app.onScreensChange(listener)`: every monitor, once per change (added or removed, resolution, scale, work area moved by the taskbar or an AppBar), event-driven on Windows. `app.screen()`: the monitor the window is on; the `screens` event carries its index as `windowScreen`.
+- `Window activation="never" | "whileEditing"` (Windows): windows that do not take the foreground (docks, menus, overlays). `whileEditing` activates the window through the click that focuses an editable Input or TextArea and hands the foreground back on blur.
+- `onFocusChange(focused, change)`: on blur, `change.to` (the app window that took the focus) and `change.pointerTarget` (the node pressed there), on Windows. A menu window that closes on blur can ignore the click on its own anchor without an artificial delay.
+- `app.performance()` and `app.onPerformance(listener, intervalMs)`: per-window percentiles of the JS and native phases, native event counts and synchronous request counts. Free until first read; no new per-frame work.
+- `Flyout`: an unstyled anchored popup with `placement`, light dismiss and anchor toggle (pressing the anchor while it is open closes it without reopening).
+- `Overflow`: shows the items that fit and hands the rest to `renderOverflow(hidden)`, one render per layout change; `overflowVisibleCount` is the pure helper.
+- txiki.js: `process.pid`.
+- `bun run bench:ffi`: per-call FFI cost on Bun, Node.js and txiki.js, through Tarve and through each runtime's own FFI.
 
 ### Fixed
 
 - `systemMediaSessions()` and `controlSystemMediaSession()` keep Tarve's library open instead of loading and unloading it on every call.
+- Node.js: `loadLibrary` takes numbers for `i64`/`u64`/`ptr` arguments, as Bun and txiki.js do; `node:ffi` threw a `TypeError`.
+- `app.appBar` reaches Explorer's taskbar even when the app (or another program) hosts a `Shell_TrayWnd` of its own, so a taskbar replacement can dock AppBars.
+- `app.setBounds` on a docked AppBar docks it again through the shell (new thickness, stretch of the edge, monitor) instead of leaving its reserved space.
 
 ### Changed
 
@@ -21,6 +34,11 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 - A repeated `key` among siblings warns once and keeps both children (`#1`, `#2`… ids) instead of failing every render; a repeated explicit `id` is still an error.
 - A local `<Image src>` that failed to load is not read nor reported again until its source changes or it mounts again.
 - `requestSingleInstance` waits up to about 10 s for a previous instance that is still quitting.
+- `store()`: assigning the value a property already holds (by `Object.is`, or a shallow-equal array or plain object) no longer notifies nor renders again. Code that reassigned a copy only to force a render (`state.list = [...state.list]`) should call `app.update()`.
+- Dev mode: a render that writes to a `store()` in an unbroken chain (through `queueMicrotask`, say) warns once with the key and the stack of the write, and its renders then wait for the next task instead of pinning a core at 100% with no error. `onStoreChange(listener, reads, dev)` takes the new `dev` flag.
+- `Modal` is bounded by the window height: title and footer stay in place and the body scrolls (`scrollBody={false}` keeps the old layout).
+- `<Image>` of an `.exe`/`.dll`/`.lnk` draws an icon frame sized for its displayed physical size, loaded off the UI thread and cached per (path, size), instead of the 256 px frame scaled down on the GPU with aliased edges.
+- txiki.js: FFI calls with `i64`/`u64`/`ptr` arguments no longer allocate per call (`PeekMessageW` 1.9 to 0.73 µs); a missing such argument is a `TypeError`.
 
 ## 0.13.2 — 2026-11-17
 

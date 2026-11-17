@@ -1299,7 +1299,7 @@
     {
       "name": "Combobox",
       "source": "packages/core/src/popups.ts",
-      "line": 501,
+      "line": 600,
       "generic": false,
       "propsType": "ComboboxProps",
       "props": [
@@ -1396,7 +1396,7 @@
     {
       "name": "Command",
       "source": "packages/core/src/popups.ts",
-      "line": 649,
+      "line": 748,
       "generic": false,
       "propsType": "CommandProps",
       "props": [
@@ -1476,7 +1476,7 @@
     {
       "name": "CommandPalette",
       "source": "packages/core/src/popups.ts",
-      "line": 772,
+      "line": 871,
       "generic": false,
       "propsType": "CommandPaletteProps",
       "props": [
@@ -1590,7 +1590,7 @@
     {
       "name": "ContextMenu",
       "source": "packages/core/src/popups.ts",
-      "line": 421,
+      "line": 520,
       "generic": false,
       "propsType": "ContextMenuProps",
       "props": [
@@ -1961,7 +1961,7 @@
     {
       "name": "Dialog",
       "source": "packages/core/src/components/modal.ts",
-      "line": 112,
+      "line": 128,
       "generic": false,
       "props": [
         {
@@ -1998,6 +1998,13 @@
           "name": "onOpenChange",
           "type": "(open: boolean) => void",
           "optional": true,
+          "from": "ModalProps"
+        },
+        {
+          "name": "scrollBody",
+          "type": "boolean",
+          "optional": true,
+          "doc": "The panel never grows past the window (24 px margins): title and footer stay put and the\nbody scrolls (a `Scroll`). Default `true`; `false` lays the body out unbounded, as before.",
           "from": "ModalProps"
         },
         {
@@ -2246,7 +2253,7 @@
     {
       "name": "DropdownMenu",
       "source": "packages/core/src/popups.ts",
-      "line": 351,
+      "line": 450,
       "generic": false,
       "propsType": "DropdownMenuProps",
       "props": [
@@ -2461,6 +2468,100 @@
         "style"
       ],
       "types": []
+    },
+    {
+      "name": "Flyout",
+      "summary": "Anchored, unstyled popup (a native portal): `Popover` without the card. Pressing the anchor\r\ntoggles it; while open that press is the light-dismiss press outside the flyout, which native\r\nswallows, so it closes it instead of reopening it (no timing involved). Escape on the anchor\r\ncloses it too.",
+      "source": "packages/core/src/popups.ts",
+      "line": 331,
+      "generic": false,
+      "propsType": "FlyoutProps",
+      "props": [
+        {
+          "name": "anchor",
+          "type": "Child",
+          "optional": false,
+          "doc": "What the flyout hangs from. Buttons and Pressables keep their node; other content is wrapped in a Pressable."
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false
+        },
+        {
+          "name": "open",
+          "type": "boolean",
+          "optional": false
+        },
+        {
+          "name": "anchorStyle",
+          "type": "Style",
+          "optional": true
+        },
+        {
+          "name": "contentStyle",
+          "type": "Style",
+          "optional": true,
+          "doc": "Style of the content box; the flyout draws no surface of its own."
+        },
+        {
+          "name": "disabled",
+          "type": "boolean",
+          "optional": true,
+          "default": "false"
+        },
+        {
+          "name": "label",
+          "type": "string",
+          "optional": true,
+          "doc": "Accessible name of a wrapped anchor; defaults to its text."
+        },
+        {
+          "name": "lightDismiss",
+          "type": "boolean",
+          "optional": true,
+          "doc": "A press outside the flyout closes it without reaching what is under it. Default `true`.",
+          "default": "true"
+        },
+        {
+          "name": "offset",
+          "type": "number",
+          "optional": true,
+          "doc": "Distance from the anchor in px. Default 6.",
+          "default": "6"
+        },
+        {
+          "name": "onOpenChange",
+          "type": "(open: boolean) => void",
+          "optional": true
+        },
+        {
+          "name": "placement",
+          "type": "FlyoutPlacement",
+          "optional": true,
+          "doc": "Default `\"bottom-start\"`; flips back into the window when it would leave it.",
+          "default": "\"bottom-start\""
+        }
+      ],
+      "common": [
+        "children",
+        "class",
+        "className",
+        "highlight",
+        "key",
+        "motionFrom",
+        "onHighlight",
+        "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
+        "onTransitionEnd",
+        "rovingGroup",
+        "style"
+      ],
+      "types": [
+        "FlyoutPlacement"
+      ]
     },
     {
       "name": "Glass",
@@ -3792,7 +3893,7 @@
     {
       "name": "Modal",
       "source": "packages/core/src/components/modal.ts",
-      "line": 20,
+      "line": 26,
       "generic": false,
       "propsType": "ModalProps",
       "props": [
@@ -3827,6 +3928,13 @@
           "name": "onOpenChange",
           "type": "(open: boolean) => void",
           "optional": true
+        },
+        {
+          "name": "scrollBody",
+          "type": "boolean",
+          "optional": true,
+          "doc": "The panel never grows past the window (24 px margins): title and footer stay put and the\nbody scrolls (a `Scroll`). Default `true`; `false` lays the body out unbounded, as before.",
+          "default": "true"
         },
         {
           "name": "showClose",
@@ -3984,6 +4092,159 @@
       ],
       "types": [
         "NavigationMenuItem"
+      ]
+    },
+    {
+      "name": "Overflow",
+      "summary": "A row (or column) that shows the leading items that fit and hands the rest to\n`renderOverflow(hidden)`, like a toolbar or tab strip's \"more\" menu.\n\nNative layout has no \"hide what does not fit and tell me\" rule, so the decision is made in JS\nfrom sizes native reports (`onSize`), with no extra pass: sizes from one layout arrive in one\nbatch, which re-renders once with the new split, computed during that render (no microtask\nre-render). Items keep their last measured size while hidden (`display: none`), so growing back\nneeds no trial render; an item never measured is shown once to be measured. The box clips\n(`overflow: hidden`) so nothing spills meanwhile. Give it a bounded main size (`flex: 1`, a\nwidth): it never grows to fit its items.",
+      "source": "packages/core/src/components/overflow.ts",
+      "line": 62,
+      "generic": true,
+      "propsType": "OverflowProps<T>",
+      "props": [
+        {
+          "name": "id",
+          "type": "string",
+          "optional": false,
+          "doc": "Remembers the measured sizes across renders."
+        },
+        {
+          "name": "items",
+          "type": "readonly T[]",
+          "optional": false
+        },
+        {
+          "name": "renderItem",
+          "type": "(item: T, index: number) => Child",
+          "optional": false
+        },
+        {
+          "name": "align",
+          "type": "Style[\"align\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "autoFocus",
+          "type": "boolean",
+          "optional": true,
+          "doc": "Focus this control when it first appears (HTML `autofocus`); interactive views only (Pressable).",
+          "from": "ViewProps"
+        },
+        {
+          "name": "direction",
+          "type": "\"row\" | \"column\"",
+          "optional": true,
+          "doc": "Main axis. Default `\"row\"`.",
+          "default": "\"row\""
+        },
+        {
+          "name": "dismissOnOutside",
+          "type": "boolean",
+          "optional": true,
+          "doc": "A press outside the box fires `onOutsideClick` instead of reaching what is under it\r\n(light dismiss). Works on portals and in-flow boxes; an open portal wins.",
+          "from": "ViewProps"
+        },
+        {
+          "name": "dragRegion",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "flex",
+          "type": "number | string",
+          "optional": true,
+          "doc": "CSS `flex`: `1` is `1 1 0`; strings take any CSS value, e.g. `\"1 1 176px\"`.",
+          "from": "ViewProps"
+        },
+        {
+          "name": "focusable",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "gap",
+          "type": "number",
+          "optional": true,
+          "default": "0"
+        },
+        {
+          "name": "itemKey",
+          "type": "(item: T, index: number) => string | number",
+          "optional": true,
+          "doc": "Stable key of an item. Default: its index."
+        },
+        {
+          "name": "justify",
+          "type": "Style[\"justify\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "onOutsideClick",
+          "type": "() => void",
+          "optional": true,
+          "doc": "With `dismissOnOutside`: a press (or right click) outside the box.",
+          "from": "ViewProps"
+        },
+        {
+          "name": "padding",
+          "type": "Style[\"padding\"]",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "portal",
+          "type": "boolean",
+          "optional": true,
+          "from": "ViewProps"
+        },
+        {
+          "name": "renderOverflow",
+          "type": "(hidden: T[]) => Child",
+          "optional": true,
+          "doc": "The control for the items that do not fit (a \"more\" button); not shown while everything fits."
+        },
+        {
+          "name": "style",
+          "type": "Reactive<Style>",
+          "optional": true,
+          "doc": "Values may be signals: setting one restyles this box without a render.",
+          "from": "ViewProps"
+        },
+        {
+          "name": "windowAction",
+          "type": "\"minimize\" | \"toggleMaximize\" | \"toggleFullscreen\" | \"close\"",
+          "optional": true,
+          "from": "ViewProps"
+        }
+      ],
+      "common": [
+        "class",
+        "className",
+        "dropTarget",
+        "fileDropTarget",
+        "highlight",
+        "key",
+        "motionFrom",
+        "onDragEnter",
+        "onDragLeave",
+        "onDrop",
+        "onFileDragEnter",
+        "onFileDragLeave",
+        "onFileDrop",
+        "onHighlight",
+        "onPaste",
+        "onPointerLeave",
+        "onPointerMove",
+        "onSize",
+        "onTransitionEnd",
+        "rovingGroup"
+      ],
+      "types": [
+        "Reactive"
       ]
     },
     {
@@ -7306,6 +7567,7 @@
     "DataGridSortDirection": "type DataGridSortDirection = \"asc\" | \"desc\";",
     "DesktopWidget": "interface DesktopWidget { columns: number; rows: number }",
     "DropdownMenuItem": "interface DropdownMenuItem {\n  value: string;\n  label: string;\n  icon?: IconName;\n  shortcut?: string;\n  disabled?: boolean;\n  checked?: boolean;\n}",
+    "FlyoutPlacement": "type FlyoutPlacement = PopupSide | `${PopupSide}-start` | `${PopupSide}-end`;",
     "GlassMaterial": "interface GlassMaterial {\n  /** Blur radius in px of what is behind the box (CSS `backdrop-filter: blur()`), 0–64. */\n  blur: number;\n  /** Colour saturation of the blurred backdrop; 1 leaves it, iOS uses about 1.6. */\n  saturate?: number;\n  /** How far in px the backdrop bends along the rounded edge (the lens), 0 for none. */\n  refraction?: number;\n  /** Brightness 0–1 of the rim, the edge reflections and the sheen. */\n  highlight?: number;\n  /** How much the flat part enlarges the backdrop, as a thick lens does: 0–0.3 (0.06 is iOS-like). */\n  magnify?: number;\n  /**\n   * Boxes painted in one frame with the same key fuse like drops of liquid: their\n   * shapes join smoothly where they come within `blend` px of each other.\n   */\n  merge?: string;\n  /** How far apart in px two merged boxes start bridging. Default 0 (touching). */\n  blend?: number;\n}",
     "GlassOptions": "interface GlassOptions {\n  variant?: GlassVariant;\n  /**\n   * Tints the glass, the alpha being the strength: the prominent, coloured glass of a\n   * primary action. A theme token with an alpha (`var(--primary)/85`) works too.\n   */\n  tint?: string;\n  /** Light or dark glass. Default: follows the theme (its `card` colour veils, its `foreground` inks). */\n  appearance?: GlassAppearance;\n}",
     "GlassProp": "type GlassProp = boolean | GlassVariant | GlassOptions;",
