@@ -1,4 +1,4 @@
-import type { AppBarEdge, ScreenInfo, SceneDocument, LayoutBox, NativeEvent, NativeCommand, NativeNode, Snapshot } from "./protocol";
+import type { AppBarEdge, ScreenInfo, SceneDocument, LayoutBox, NativeEvent, NativeCommand, NativeNode, NativeStats, Snapshot } from "./protocol";
 import { readFileSync } from "node:fs";
 import { environmentKey, initialViewport, setEnvironment, trackViewport } from "./viewport";
 import { applyMediaEvent, quietMediaEvent, type MediaController } from "./media-element";
@@ -50,6 +50,8 @@ let automationClaimed = false;
 
 export type { TrayAvailability, TrayMenuItem, TrayOptions, TrayHandle } from "./app/tray";
 export type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, NotifyOptions, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle, NotifyResult, NotificationPlace } from "./app/types";
+export type { WindowFocusChange } from "./app/types";
+import type { WindowFocusChange } from "./app/types";
 import type { AppErrorSource, AppErrorEvent, AppOptions, SystemMediaSession, DiagnosticInput, AppJsStats, AppStats, OpenWindowOptions, AppHandle } from "./app/types";
 const DEV_OVERLAY_SOURCES = new Set<AppErrorSource>(["render", "event-handler", "listener", "hotkey", "process"]);
 const DEV_APP_KEY = Symbol.for("tarve.devApp");
@@ -631,7 +633,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   const fullscreenListeners = new Set<(fullscreen: boolean) => void>();
   /** Whether the window is the active one, as its `windowFocus` events report it. */
   let windowFocused = false;
-  const focusListeners = new Set<(focused: boolean) => void>();
+  const focusListeners = new Set<(focused: boolean, change: WindowFocusChange) => void>();
   /** The native window handle the `ready` event carried. */
   let windowHandle: string | undefined;
 
@@ -644,7 +646,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     if (event.type === "windowFocus" && event.focused !== windowFocused) {
       windowFocused = event.focused;
       for (const listener of [...focusListeners]) {
-        try { listener(windowFocused); } catch (error) { reportError(error, { source: "listener", event: "windowFocus" }); }
+        try { listener(windowFocused, change); } catch (error) { reportError(error, { source: "listener", event: "windowFocus" }); }
       }
     }
 
@@ -655,6 +657,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
         settleReadyFailure(error);
       }
       reportError(error, { source: "native", event: "error" });
+  const screensListeners = new Set<(screens: ScreenInfo[]) => void>();
     }
 
     if (event.type === "fullscreen" && event.fullscreen !== fullscreen) {
@@ -664,6 +667,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     if (event.type === "windowState" && rememberKey) {
       windowStateStore().set(rememberKey, { x: event.x, y: event.y, width: event.width, height: event.height, maximized: event.maximized, ...(event.physical ? { physical: true } : {}) });
     }
+      const change: WindowFocusChange = {};
+      if (event.to !== undefined) change.to = event.to;
+      if (event.pointerTarget !== undefined) change.pointerTarget = event.pointerTarget;
     if (event.type === "pluginEvent") {
       pluginHost?.event(event.channel, Buffer.from(event.data, "base64"));
       return;
@@ -678,6 +684,11 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       const handler = item?.[1].onEscape;
       if (handler) {
         if (invokeHandler("escape", item?.[0], handler)) update();
+    if (event.type === "screensChange") {
+      for (const listener of [...screensListeners]) {
+        try { listener(event.screens); } catch (error) { reportError(error, { source: "listener", event: "screensChange" }); }
+      }
+    }
       } else runBackHandlers(true);
     }
 
@@ -976,7 +987,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     isFocused(): boolean {
       return windowFocused;
     },
-    onFocusChange(listener: (focused: boolean) => void): () => void {
+    onFocusChange(listener: (focused: boolean, change: WindowFocusChange) => void): () => void {
       focusListeners.add(listener);
       return () => { focusListeners.delete(listener); };
     },
@@ -999,11 +1010,12 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       if (typeof opacity !== "number" || !Number.isFinite(opacity)) throw new RangeError("setOpacity takes a number from 0 to 1");
       if (!ended) sendPublic({ type: "windowOpacity", opacity: Math.min(1, Math.max(0, opacity)) });
     },
-    appBar(edge: AppBarEdge | null, appBarOptions: { size?: number } = {}): void {
-      if (edge !== null && !["top", "bottom", "left", "right"].includes(edge)) throw new RangeError(`appBar edge must be "top", "bottom", "left", "right" or null`);
-      const size = appBarOptions.size;
+    appBar(edge: AppBarEdge | null, appBarOptions: { size?: number; overlap?: number } = {}): void {
+      if (edge !== null && !(["top", "bottom", "left", "right"] as unknown[]).includes(edge)) throw new RangeError(`appBar edge must be "top", "bottom", "left", "right" or null`);
+      const { size, overlap } = appBarOptions;
       if (size !== undefined && !(typeof size === "number" && Number.isFinite(size) && size > 0)) throw new RangeError("appBar size must be a positive number");
-      if (!ended) sendPublic({ type: "appBar", edge, ...(size !== undefined ? { size } : {}) });
+      if (overlap !== undefined && !(typeof overlap === "number" && Number.isFinite(overlap) && overlap >= 0)) throw new RangeError("appBar overlap must be a number of 0 or more");
+      if (!ended) sendPublic({ type: "appBar", edge, ...(size !== undefined ? { size } : {}), ...(overlap !== undefined ? { overlap } : {}) });
     },
     async screens(): Promise<{ screens: ScreenInfo[]; cursor: { x: number; y: number } | null }> {
       const event = await requests.request({ type: "screens", requestId: crypto.randomUUID() });
@@ -1032,6 +1044,15 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     requestPermissions: names => requests.permissions("request", names),
     media(id: string): MediaController {
       return mediaController(id, command => { if (!ended) sendPublic(command); });
+    async screen(): Promise<ScreenInfo | undefined> {
+      const event = await requests.request({ type: "screens", requestId: crypto.randomUUID() });
+      if (event.type !== "screens") throw reportError(new Error("Unexpected native response"), { source: "request", event: "screens" });
+      return typeof event.windowScreen === "number" ? event.screens[event.windowScreen] : undefined;
+    },
+    onScreensChange(listener: (screens: ScreenInfo[]) => void): () => void {
+      screensListeners.add(listener);
+      return () => { screensListeners.delete(listener); };
+    },
     },
     surface(id: string): SurfaceController {
       return surfaceController(id, command => { if (!ended) sendPublic(command); }, surfaceId => surfaceHandles.get(surfaceId));

@@ -90,14 +90,16 @@ fn window_commands_and_options_parse() {
         Command::WindowOpacity { opacity } if opacity == 0.5
     ));
     assert!(matches!(
-        Command::from_json(br#"{"type":"appBar","edge":"bottom","size":56}"#).unwrap(),
-        Command::AppBar { edge: Some(AppBarEdge::Bottom), size: Some(size) } if size == 56.0
+        Command::from_json(br#"{"type":"appBar","edge":"bottom","size":56,"overlap":12}"#).unwrap(),
+        Command::AppBar { edge: Some(AppBarEdge::Bottom), size: Some(size), overlap: Some(overlap) }
+            if size == 56.0 && overlap == 12.0
     ));
     assert!(matches!(
         Command::from_json(br#"{"type":"appBar","edge":null}"#).unwrap(),
         Command::AppBar {
             edge: None,
-            size: None
+            size: None,
+            overlap: None
         }
     ));
     assert!(matches!(

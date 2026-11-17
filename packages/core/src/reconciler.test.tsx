@@ -660,7 +660,12 @@ describe("native TSX protocol", () => {
     const small = compileTree(<Window width={280} height={190}><Text>Small</Text></Window>).document.window;
     expect([small.minWidth, small.minHeight]).toEqual([280, 190]);
     const plain = compileTree(<Window><Text>App</Text></Window>).document.window;
-    expect("level" in plain || "skipTaskbar" in plain || "desktopWidget" in plain || "backdrop" in plain).toBe(false);
+    expect("level" in plain || "skipTaskbar" in plain || "desktopWidget" in plain || "backdrop" in plain || "activation" in plain).toBe(false);
+  });
+  test("Window activation reaches the native window only when it is not normal", () => {
+    expect(compileTree(<Window activation="whileEditing"><Text>x</Text></Window>).document.window.activation).toBe("whileEditing");
+    expect(compileTree(<Window activation="never"><Text>x</Text></Window>).document.window.activation).toBe("never");
+    expect("activation" in compileTree(<Window activation="normal"><Text>x</Text></Window>).document.window).toBe(false);
   });
   test("Window backdrop reaches the native window with a transparent default background", () => {
     const mica = compileTree(<Window backdrop="mica"><Text>x</Text></Window>).document;

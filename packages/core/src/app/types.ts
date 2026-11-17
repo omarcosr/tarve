@@ -184,6 +184,13 @@ export interface AppJsStats {
 }
 export interface AppStats { js: AppJsStats; native: NativeStats }
 /** Options of a window opened with `app.openWindow`: an app of its own on the same native app. */
+/** Where the focus went when a window lost it; empty when it went to another app or is unknown. */
+export interface WindowFocusChange {
+  /** The app's window that took it: `"main"` for the first window, else its `openWindow` id. */
+  to?: string;
+  /** The node of that window under the pointer that a press reaches (the click that took the focus). */
+  pointerTarget?: string;
+}
 export interface OpenWindowOptions extends Pick<AppOptions, "rememberWindow" | "debug" | "renderer" | "componentAdapters" | "onError" | "dev" | "maxFps" | "msaa" | "textRendering" | "lowPower" | "keyboardEvents" | "pointerEvents" | "closeBehavior"> {
   /** Names the window in native events; unique among the app's open windows. Default `window-<n>`. */
   id?: string;
@@ -252,8 +259,13 @@ export interface AppHandle {
   onFullscreenChange(listener: (fullscreen: boolean) => void): () => void;
   /** Whether the window is the active one (has the keyboard focus), as its `windowFocus` events report it. */
   isFocused(): boolean;
-  /** Called when the window becomes or stops being the active window (DOM `window` focus/blur). Returns the unsubscribe. */
-  onFocusChange(listener: (focused: boolean) => void): () => void;
+  /**
+   * Called when the window becomes or stops being the active window (DOM `window` focus/blur).
+   * On blur, `change` says where the focus went (Windows): `to` another window of this app and the
+   * `pointerTarget` node the click there reaches, so a menu window that closes on blur can tell a
+   * click on its own anchor (which would reopen it) without timing. Returns the unsubscribe.
+   */
+  onFocusChange(listener: (focused: boolean, change: WindowFocusChange) => void): () => void;
   /**
    * The native window: HWND on Windows, XID on X11 (`wl_surface*` on Wayland, `NSView*` on macOS),
    * as a decimal string for FFI. `undefined` until `ready`.
@@ -269,12 +281,25 @@ export interface AppHandle {
   /**
    * Windows: docks the window to a screen edge as an AppBar, `size` logical px thick (default 48),
    * reserving that space (maximized windows and the desktop stop at it); `null` releases it.
-   * Released on close too. Pair with `frameless` and `skipTaskbar`.
+   * Released on close too. Pair with `frameless` and `skipTaskbar`. `overlap` (logical px, default 0)
+   * lets the window reach that far past the reserved strip into the screen (a shadow, a hover
+   * lift) without reserving it. `setBounds` on a docked bar re-docks it through the shell: the
+   * size across the edge (less `overlap`) is the new thickness, `x`/`width` (`y`/`height` on a
+   * side edge) the stretch of the edge the window covers, and the position picks the monitor.
+   * Reaches Explorer's taskbar even when the app hosts a `Shell_TrayWnd` of its own.
    */
-  appBar(edge: AppBarEdge | null, options?: { size?: number }): void;
+  appBar(edge: AppBarEdge | null, options?: { size?: number; overlap?: number }): void;
   /** Every monitor (physical px, work area, scale, primary) and the pointer's screen position (`null` where unknown, e.g. Wayland). */
   screens(): Promise<{ screens: ScreenInfo[]; cursor: { x: number; y: number } | null }>;
   /** Shows a system tray icon (Windows, Linux); `onAvailability` / `availability()` say whether it can be seen. A second call replaces the first tray. */
+  /** The monitor the window is on (most of it), as `screens()` lists it; `undefined` where unknown (Wayland, no window yet). */
+  screen(): Promise<ScreenInfo | undefined>;
+  /**
+   * Called with every monitor when they change (Windows): one added or removed, a resolution or
+   * scale change, or a work area moved by the taskbar or an AppBar. Event-driven, once for each
+   * burst of system notifications that leaves the screens different. Returns the unsubscribe.
+   */
+  onScreensChange(listener: (screens: ScreenInfo[]) => void): () => void;
   tray(options: TrayOptions): TrayHandle;
   /**
    * The window's menu bar, replaced as a whole on each call; `null` removes it. Drawn in

@@ -85,13 +85,17 @@ describe("controlled native reconciliation", () => {
     expect(() => app.setBounds({ x: Number.NaN })).toThrow(RangeError);
     app.setOpacity(1.5);
     app.appBar("bottom", { size: 56 });
+    app.appBar("top", { size: 40, overlap: 12 });
     app.appBar(null);
     expect(() => app.appBar("middle" as never)).toThrow(RangeError);
+    expect(() => app.appBar("top", { overlap: -1 })).toThrow(RangeError);
+    expect(() => app.appBar("top", { overlap: Number.NaN })).toThrow(RangeError);
     expect(bridge.commands).toEqual([
       { type: "windowBounds", x: -10, width: 300 },
       { type: "windowBounds", y: 20, height: 40, physical: true },
       { type: "windowOpacity", opacity: 1 },
       { type: "appBar", edge: "bottom", size: 56 },
+      { type: "appBar", edge: "top", size: 40, overlap: 12 },
       { type: "appBar", edge: null },
     ]);
     opacity = 0.5;
@@ -104,6 +108,22 @@ describe("controlled native reconciliation", () => {
     const screen = { x: 0, y: 0, width: 1920, height: 1080, workArea: { x: 0, y: 0, width: 1920, height: 1040 }, scale: 1.5, primary: true };
     bridge.emit({ type: "screens", requestId: request.requestId, screens: [screen], cursor: { x: 5, y: 6 } });
     expect(await asked).toEqual({ screens: [screen], cursor: { x: 5, y: 6 } });
+    const second = { ...screen, x: 1920, primary: false };
+    const current = app.screen();
+    const currentRequest = bridge.commands.at(-1) as Extract<NativeCommand, { type: "screens" }>;
+    bridge.emit({ type: "screens", requestId: currentRequest.requestId, screens: [screen, second], cursor: null, windowScreen: 1 });
+    expect(await current).toEqual(second);
+    const unknown = app.screen();
+    const unknownRequest = bridge.commands.at(-1) as Extract<NativeCommand, { type: "screens" }>;
+    bridge.emit({ type: "screens", requestId: unknownRequest.requestId, screens: [screen], cursor: null, windowScreen: null });
+    expect(await unknown).toBeUndefined();
+    const changes: unknown[] = [];
+    const stopScreens = app.onScreensChange(screens => changes.push(screens));
+    const shrunk = { ...screen, workArea: { x: 0, y: 48, width: 1920, height: 992 } };
+    bridge.emit({ type: "screensChange", screens: [shrunk] });
+    stopScreens();
+    bridge.emit({ type: "screensChange", screens: [screen] });
+    expect(changes).toEqual([[shrunk]]);
     app.close();
   });
 

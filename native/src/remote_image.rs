@@ -244,6 +244,11 @@ fn worker(queue: &Shared, proxy: &crate::runtime::CommandProxy) {
         };
         // A panic in a decoder must not take the worker, and the URL with it, down.
         let result = std::panic::catch_unwind(|| {
+            // A shell icon frame sized for the screen (see `exe_icon::frame_size`).
+            #[cfg(target_os = "windows")]
+            if let Some((size, path)) = crate::exe_icon::parse_frame_request(&url) {
+                return crate::tree::decode_icon_frame(path, size);
+            }
             fetch(&url).and_then(|bytes| crate::tree::decode_remote_image(&bytes))
         })
         .unwrap_or_else(|_| Err("the image decoder panicked".into()));

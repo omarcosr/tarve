@@ -574,6 +574,9 @@ pub struct WindowOptions {
     /// Windows: no taskbar button and no Alt+Tab entry (a tool window).
     #[serde(default)]
     pub skip_taskbar: bool,
+    /// How showing and clicking the window activate it (see `runtime::activation`).
+    #[serde(default)]
+    pub activation: WindowActivation,
     /// Windows: live on the desktop icon grid (see `desktop_widget`).
     pub desktop_widget: Option<DesktopWidget>,
     /// What shows through where the window's frame is translucent.
@@ -601,6 +604,20 @@ pub enum WindowChrome {
     #[default]
     System,
     None,
+}
+
+/// How a window takes the foreground.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum WindowActivation {
+    /// Activated when shown and when clicked.
+    #[default]
+    Normal,
+    /// Never activated (Windows `WS_EX_NOACTIVATE`): the app in use keeps the keyboard.
+    Never,
+    /// Like `Never`, but activatable (and activated by the click that did it) while an
+    /// editable Input or TextArea has focus.
+    WhileEditing,
 }
 
 /// The screen edge an AppBar docks to.
@@ -942,6 +959,8 @@ pub enum Command {
     AppBar {
         edge: Option<AppBarEdge>,
         size: Option<f64>,
+        /// Logical px the window reaches past the reserved strip, into the screen.
+        overlap: Option<f64>,
     },
     /// The monitors and the pointer position, answered by a `screens` event.
     Screens {

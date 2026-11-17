@@ -5,6 +5,10 @@
 //! its own icon shows the generic one. The 256 px jumbo icon is used when the file carries one;
 //! the Shell draws a smaller icon unscaled inside the 256 px canvas, so such files get their
 //! 48 px (else 32 px) icon instead.
+//!
+//! That natural frame sizes the layout. Drawn smaller, the GPU would sample it down without
+//! mipmaps and alias the edges, so paint asks for a frame at least as large as the displayed
+//! physical size ([`frame_size`]), loaded off the UI thread and cached per (path, size).
 
 use std::{ffi::c_void, mem::size_of, path::Path};
 use windows::{
@@ -35,17 +39,59 @@ pub(crate) fn is_icon_path(path: &str) -> bool {
         })
 }
 
-/// The file's largest shell icon as premultiplied RGBA: `(width, height, bytes)`.
-pub(crate) fn load(path: &str) -> Result<(u32, u32, Vec<u8>), String> {
+/// Frame sizes paint asks for below the natural one: steps of at most 25 %, so the GPU never
+/// samples a frame down by more than that, and a resize re-requests only on crossing a step.
+const FRAME_SIZES: [u32; 12] = [16, 20, 24, 32, 40, 48, 64, 80, 96, 128, 160, 192];
+
+/// Prefix of a sized-frame request on the image workers: `tarve-icon-frame:<size>:<path>`.
+const FRAME_SCHEME: &str = "tarve-icon-frame:";
+
+/// The frame to draw an icon whose natural frame is `natural` px at `drawn` physical px:
+/// the smallest step at least as large, or `None` when the natural frame is not larger.
+pub(crate) fn frame_size(drawn: f64, natural: u32) -> Option<u32> {
+    if !drawn.is_finite() || drawn <= 0.0 {
+        return None;
+    }
+    // A hundredth of a pixel of layout rounding does not ask for the next step.
+    let needed = (drawn - 0.01).ceil().max(1.0);
+    FRAME_SIZES
+        .iter()
+        .copied()
+        .find(|size| f64::from(*size) >= needed)
+        .filter(|size| *size < natural)
+}
+
+pub(crate) fn frame_request(path: &str, size: u32) -> String {
+    format!("{FRAME_SCHEME}{size}:{path}")
+}
+
+/// `(size, path)` of a [`frame_request`].
+pub(crate) fn parse_frame_request(request: &str) -> Option<(u32, &str)> {
+    let (size, path) = request.strip_prefix(FRAME_SCHEME)?.split_once(':')?;
+    Some((size.parse().ok()?, path))
+}
+
+/// The shell icon rendered at `size` px (the Shell scales its nearest frame down with
+/// filtering) as premultiplied RGBA.
+pub(crate) fn load_sized(path: &str, size: u32) -> Result<(u32, u32, Vec<u8>), String> {
+    let _com = ComScope::enter();
+    render(&shell_item(path)?, size.clamp(1, 256) as i32)
+}
+
+fn shell_item(path: &str) -> Result<IShellItemImageFactory, String> {
     let absolute =
         std::path::absolute(path.replace('/', "\\")).map_err(|error| error.to_string())?;
     if !absolute.exists() {
         return Err(format!("file not found: {}", absolute.display()));
     }
+    unsafe { SHCreateItemFromParsingName(&HSTRING::from(absolute.as_os_str()), None) }
+        .map_err(|error| format!("shell item for {}: {error}", absolute.display()))
+}
+
+/// The file's largest shell icon as premultiplied RGBA: `(width, height, bytes)`.
+pub(crate) fn load(path: &str) -> Result<(u32, u32, Vec<u8>), String> {
     let _com = ComScope::enter();
-    let factory: IShellItemImageFactory =
-        unsafe { SHCreateItemFromParsingName(&HSTRING::from(absolute.as_os_str()), None) }
-            .map_err(|error| format!("shell item for {}: {error}", absolute.display()))?;
+    let factory = shell_item(path)?;
     let jumbo = render(&factory, 256)?;
     let extent = opaque_extent(&jumbo);
     if extent > 48 {
@@ -56,13 +102,25 @@ pub(crate) fn load(path: &str) -> Result<(u32, u32, Vec<u8>), String> {
 }
 
 fn render(factory: &IShellItemImageFactory, size: i32) -> Result<(u32, u32, Vec<u8>), String> {
-    let bitmap = unsafe {
+    let get = || unsafe {
         factory.GetImage(
             SIZE { cx: size, cy: size },
             SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK,
         )
+    };
+    let mut result = get();
+    // Another thread extracting icons at the same time (the image workers) can leave the
+    // Shell's icon cache mid-update: it answers E_PENDING, and a moment later the icon.
+    for attempt in 1..=4 {
+        match &result {
+            Err(error) if error.code() == windows::core::HRESULT(0x8000_000A_u32 as i32) => {
+                std::thread::sleep(std::time::Duration::from_millis(2 * attempt));
+                result = get();
+            }
+            _ => break,
+        }
     }
-    .map_err(|error| format!("shell icon: {error}"))?;
+    let bitmap = result.map_err(|error| format!("shell icon: {error}"))?;
     let pixels = bitmap_rgba(bitmap);
     unsafe {
         let _ = DeleteObject(bitmap.into());
@@ -187,8 +245,42 @@ mod tests {
     }
 
     #[test]
+    fn exe_icon_frames_fit_the_displayed_size() {
+        assert_eq!(frame_size(32.0, 256), Some(32));
+        assert_eq!(frame_size(32.004, 256), Some(32));
+        assert_eq!(frame_size(33.0, 256), Some(40));
+        assert_eq!(frame_size(48.0 * 1.5, 256), Some(80));
+        assert_eq!(
+            frame_size(200.0, 256),
+            None,
+            "the natural frame is the next step"
+        );
+        assert_eq!(frame_size(48.0, 48), None);
+        assert_eq!(frame_size(24.0, 48), Some(24));
+        assert_eq!(frame_size(0.0, 256), None);
+        assert_eq!(frame_size(f64::NAN, 256), None);
+        let request = frame_request(r"C:\Apps\app.lnk", 40);
+        assert_eq!(
+            parse_frame_request(&request),
+            Some((40, r"C:\Apps\app.lnk"))
+        );
+        assert_eq!(parse_frame_request("https://example.com/a.png"), None);
+    }
+
+    #[test]
+    fn exe_icon_sized_frame_matches_the_request() {
+        let notepad = r"C:\Windows\System32\notepad.exe";
+        for size in [24, 40, 96] {
+            let (width, height, bytes) = load_sized(notepad, size).expect("sized notepad icon");
+            assert_eq!((width, height), (size, size));
+            assert!(bytes.as_chunks::<4>().0.iter().any(|pixel| pixel[3] != 0));
+        }
+    }
+
+    #[test]
     fn exe_icon_rejects_missing_file() {
         assert!(load(r"C:\definitely\missing\app.exe").is_err());
+        assert!(load_sized(r"C:\definitely\missing\app.exe", 32).is_err());
         assert!(!is_icon_path("photo.png"));
     }
 }

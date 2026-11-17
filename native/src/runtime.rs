@@ -131,6 +131,7 @@ fn shortcut_key_name(key: &Key) -> Option<String> {
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
 mod accessibility_actions;
+mod activation;
 mod clipboard;
 mod cursor;
 /// Word-wise caret motion: Ctrl on Windows/Linux, Option (Alt) on macOS.
@@ -687,7 +688,14 @@ fn install_dpi_scaled_size(window: &Window, main: bool) {
             }
             WM_EXITSIZEMOVE => with_logical_size(hwnd as u64, |state| state.moving.set(false)),
             WM_SETTINGCHANGE => {
-                SETTINGS_GENERATION.with(|generation| generation.set(generation.get() + 1))
+                SETTINGS_GENERATION.with(|generation| generation.set(generation.get() + 1));
+                if wparam as u32 == windows_sys::Win32::UI::WindowsAndMessaging::SPI_SETWORKAREA {
+                    crate::window_ext::screens_maybe_changed();
+                }
+            }
+            windows_sys::Win32::UI::WindowsAndMessaging::WM_DISPLAYCHANGE
+            | windows_sys::Win32::UI::WindowsAndMessaging::WM_DPICHANGED => {
+                crate::window_ext::screens_maybe_changed()
             }
             // A menu bar selection: HIWORD 0 and no control handle.
             WM_COMMAND if (wparam >> 16) & 0xffff == 0 && lparam == 0 => {
@@ -1098,6 +1106,31 @@ impl Host {
         app.resumed(event_loop);
         self.others.push((id, app));
     }
+    /// Which other window of the app took the focus `lost` gave up (`"main"` or its
+    /// `openWindow` id), and the node a press under the pointer reaches there.
+    fn focus_handoff(&self, lost: WindowId) -> Option<activation::FocusHandoff> {
+        let foreground = activation::foreground_window()?;
+        std::iter::once(("main", &self.main))
+            .chain(self.others.iter().map(|(id, app)| (id.as_str(), app)))
+            .filter(|(_, app)| !app.owns(lost))
+            .find_map(|(id, app)| {
+                let window = app.window.as_deref()?;
+                (activation::window_key(window)? == foreground).then(|| {
+                    let scale = window.scale_factor();
+                    let size = window.inner_size().to_logical::<f64>(scale);
+                    let pointer_target = os_cursor_in_client(window)
+                        .map(|(x, y)| (x / scale, y / scale))
+                        .filter(|(x, y)| {
+                            *x >= 0.0 && *y >= 0.0 && *x < size.width && *y < size.height
+                        })
+                        .and_then(|point| app.tree.pointer_target_at(point));
+                    activation::FocusHandoff {
+                        to: id.to_string(),
+                        pointer_target,
+                    }
+                })
+            })
+    }
     /// After every callback: quit or drop closed windows, then wait for the
     /// earliest wake-up any window needs.
     fn settle(&mut self, event_loop: &ActiveEventLoop) {
@@ -1154,6 +1187,12 @@ impl ApplicationHandler<Command> for Host {
         self.settle(event_loop);
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(change) = crate::window_ext::screens_change(event_loop) {
+            for (_, app) in &mut self.others {
+                app.events.push(change.clone());
+            }
+            self.main.events.push(change);
+        }
         self.main.about_to_wait(event_loop);
         for (_, app) in &mut self.others {
             app.about_to_wait(event_loop);
@@ -1161,6 +1200,14 @@ impl ApplicationHandler<Command> for Host {
         self.settle(event_loop);
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        if matches!(event, WindowEvent::Focused(false)) {
+            let handoff = self.focus_handoff(id);
+            if self.main.owns(id) {
+                self.main.focus_handoff = handoff;
+            } else if let Some((_, app)) = self.others.iter_mut().find(|(_, app)| app.owns(id)) {
+                app.focus_handoff = handoff;
+            }
+        }
         if self.main.owns(id) {
             self.main.window_event(event_loop, id, event);
         } else if let Some((_, app)) = self.others.iter_mut().find(|(_, app)| app.owns(id)) {
@@ -1288,6 +1335,7 @@ impl App {
             graphics_stable_since: None,
             ime_target: None,
             ime_enabled: false,
+            focus_handoff: None,
             last_titlebar_click: None,
             close_request_pending: false,
             event_proxy,
@@ -1479,6 +1527,8 @@ struct App {
     graphics_stable_since: Option<Instant>,
     ime_target: Option<String>,
     ime_enabled: bool,
+    /// Set by the host just before `Focused(false)`: the app's window that took the focus.
+    focus_handoff: Option<activation::FocusHandoff>,
     last_titlebar_click: Option<(Instant, (f64, f64))>,
     close_request_pending: bool,
     event_proxy: EventLoopProxy<Command>,
@@ -3028,6 +3078,11 @@ impl App {
                 .filter(|id| ime_allowed_for_node(Some(&self.tree.entries[*id].node)))
                 .cloned();
             if target != self.ime_target {
+                activation::editing_changed(
+                    &window,
+                    self.document.window.activation,
+                    target.is_some(),
+                );
                 self.tree.ime_cancel();
                 set_ime_allowed(&window, false);
                 self.ime_enabled = false;
@@ -3236,7 +3291,9 @@ impl ApplicationHandler<Command> for App {
             .with_decorations(options.decorations)
             .with_window_level(winit_window_level(level))
             .with_visible(false)
-            .with_active(!background_windows());
+            .with_active(
+                !background_windows() && activation::activates_on_show(options.activation),
+            );
         if options.backdrop.transparent() {
             // macOS and Wayland/X11 (KDE) blur through winit; Windows in apply_window_backdrop.
             attributes = attributes
@@ -3296,6 +3353,7 @@ impl ApplicationHandler<Command> for App {
                         self.memory_stages.record("graphics");
                         self.graphics = GraphicsState::Ready(Box::new(graphics));
                         install_dpi_scaled_size(&window, self.is_main);
+                        activation::install(&window, self.document.window.activation);
                         self.window = Some(window.clone());
                         self.motion_epoch = Instant::now();
                         self.apply_initial_window_position(event_loop, &window, false);
@@ -3483,7 +3541,15 @@ impl ApplicationHandler<Command> for App {
                 height,
                 physical,
             } => {
-                if let Some(window) = &self.window {
+                if let Some(window) = &self.window
+                    && let Some(docked) =
+                        crate::window_ext::app_bar_bounds(window, [x, y, width, height], physical)
+                {
+                    // An AppBar moves through the shell, so its reserved space follows.
+                    if let Err(message) = docked {
+                        self.events.push(error(format!("setBounds: {message}")));
+                    }
+                } else if let Some(window) = &self.window {
                     let finite = |value: Option<f64>| value.filter(|value| value.is_finite());
                     let (x, y) = (finite(x), finite(y));
                     if x.is_some() || y.is_some() {
@@ -3537,16 +3603,24 @@ impl ApplicationHandler<Command> for App {
                         .push(error(format!("window opacity: {message}")));
                 }
             }
-            Command::AppBar { edge, size } => {
+            Command::AppBar {
+                edge,
+                size,
+                overlap,
+            } => {
                 if let Some(window) = &self.window
-                    && let Err(message) =
-                        crate::window_ext::app_bar(window, edge, size.unwrap_or(48.0))
+                    && let Err(message) = crate::window_ext::app_bar(
+                        window,
+                        edge,
+                        size.unwrap_or(48.0),
+                        overlap.unwrap_or(0.0),
+                    )
                 {
                     self.events.push(error(format!("appBar: {message}")));
                 }
             }
             Command::Screens { request_id } => {
-                let mut answer = crate::window_ext::screens(event_loop);
+                let mut answer = crate::window_ext::screens(event_loop, self.window.as_deref());
                 answer["type"] = json!("screens");
                 answer["requestId"] = json!(request_id);
                 self.events.push(answer);
@@ -4546,9 +4620,15 @@ impl ApplicationHandler<Command> for App {
                 events.push(json!({"type":"windowFocus", "focused":true}));
             }
             WindowEvent::Focused(false) => {
-                events.push(json!({"type":"windowFocus", "focused":false}));
+                events.push(activation::blur_event(self.focus_handoff.take()));
                 events.extend(self.tree.outside_dismissal_on_deactivate());
                 self.ime_enabled = false;
+                // The field blurs below: a `whileEditing` window is non-activating again.
+                if self.ime_target.is_some()
+                    && let Some(window) = self.window.as_ref()
+                {
+                    activation::editing_changed(window, self.document.window.activation, false);
+                }
                 self.ime_target = None;
                 events.extend(self.tree.cancel_pointer_drag());
                 if let Some(blurred) = self.tree.blur() {

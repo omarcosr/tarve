@@ -1,4 +1,4 @@
-import type { DesktopWidget, WindowBackdrop, WindowChrome, WindowLevel, WindowPosition } from "../protocol";
+import type { DesktopWidget, WindowActivation, WindowBackdrop, WindowChrome, WindowLevel, WindowPosition } from "../protocol";
 import type { VNode } from "../jsx-runtime";
 import { theme, type ThemeDefinition } from "../theme";
 import { container, type ViewProps } from "./layout";
@@ -20,6 +20,15 @@ export interface WindowProps extends ViewProps {
   level?: WindowLevel;
   /** Keep the window off the taskbar and out of Alt+Tab (Windows) or the task switcher and pager (Linux, X11). */
   skipTaskbar?: boolean;
+  /**
+   * How the window takes the foreground (Windows): `"normal"` (default) when shown or clicked;
+   * `"never"`, for a dock, menu or overlay that must not take the keyboard from the app in use;
+   * `"whileEditing"`, like `"never"` until a click focuses an editable `Input`/`TextArea`: the
+   * window then activates to receive typing, and when that field blurs it stops being activatable
+   * and hands the foreground back to the window that had it. Elsewhere the window only opens
+   * without activating. Set when the window opens.
+   */
+  activation?: WindowActivation;
   /** No native frame or title bar, without needing a `TitleBar`. Pair with a `dragRegion` to move it. */
   frameless?: boolean;
   /**

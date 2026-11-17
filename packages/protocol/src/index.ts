@@ -366,6 +366,8 @@ export interface WindowOptions {
   opacity?: number;
   /** No taskbar button or task switcher entry (Windows; Linux on X11). */
   skipTaskbar?: boolean;
+  /** Whether showing or clicking the window activates it; omitted for `normal`. */
+  activation?: WindowActivation;
   /** A desktop widget `columns` × `rows` cells (the icon grid on Windows; 80 × 100 cells on Linux). */
   desktopWidget?: DesktopWidget;
   /** What shows through where the window is translucent; omitted for an opaque window. */
@@ -392,6 +394,13 @@ export type WindowLevel = "normal" | "alwaysOnTop" | "alwaysOnBottom";
  * corners and 1 px border (in the root's `borderColor`), `none` square corners and no border.
  */
 export type WindowChrome = "system" | "none";
+/**
+ * How a window takes the foreground: `normal` on show and click; `never` never (a dock, a menu,
+ * an overlay: the app the user works in keeps the keyboard); `whileEditing` like `never`, but a
+ * click that focuses an editable Input or TextArea activates the window so it receives typing,
+ * and blurring it hands the foreground back. Windows; elsewhere only showing skips activation.
+ */
+export type WindowActivation = "normal" | "never" | "whileEditing";
 export type AppBarEdge = "top" | "bottom" | "left" | "right";
 /** A monitor, in physical screen px; `workArea` leaves out the taskbar and docked AppBars. */
 export interface ScreenInfo {
@@ -474,7 +483,7 @@ export type NativeCommand =
    * Windows: makes the window an application desktop toolbar (AppBar) docked to `edge`, `size` logical px
    * thick, with the screen space reserved so maximized windows stop at it; `edge: null` releases it.
    */
-  | { type: "appBar"; edge: AppBarEdge | null; size?: number }
+  | { type: "appBar"; edge: AppBarEdge | null; size?: number; overlap?: number }
   /** The monitors and the pointer's screen position; answered by `screens`. */
   | { type: "screens"; requestId: string }
   | { type: "tray"; tray: NativeTrayOptions | null }
@@ -576,8 +585,20 @@ export type NativeEvent =
   | { type: "ready"; handle?: string }
   | { type: "closed" }
   /** The window gained or lost the keyboard focus (became or stopped being the active window). */
-  | { type: "windowFocus"; focused: boolean }
-  | { type: "screens"; requestId: string; screens: ScreenInfo[]; cursor: { x: number; y: number } | null }
+  | {
+    type: "windowFocus"; focused: boolean;
+    /**
+     * On blur (Windows): the app's window that took the focus, `"main"` for the first window or
+     * its `openWindow` id; absent when another app took it.
+     */
+    to?: string;
+    /** On blur, with `to`: the node of that window a press under the pointer reaches (the click that took the focus). */
+    pointerTarget?: string;
+  }
+  /** `windowScreen`: index in `screens` of the monitor the window is on (`null` where unknown). */
+  | { type: "screens"; requestId: string; screens: ScreenInfo[]; cursor: { x: number; y: number } | null; windowScreen?: number | null }
+  /** The monitors changed (Windows: one added or removed, resolution, scale, work area). */
+  | { type: "screensChange"; screens: ScreenInfo[] }
   | { type: "closeRequest" }
   | { type: "tray"; action: "click" | "doubleClick" }
   | { type: "systemMedia"; action: "play" | "pause" | "next" | "previous" | "seek"; time?: number }

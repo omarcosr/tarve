@@ -661,6 +661,9 @@ func (c *compiler) windowOptions(p Props, style S) {
 	if truthy(p["skipTaskbar"]) {
 		c.window["skipTaskbar"] = true
 	}
+	if a := str(p, "activation"); a == "never" || a == "whileEditing" {
+		c.window["activation"] = a
+	}
 	if b := str(p, "backdrop"); b != "" && b != "none" {
 		c.window["backdrop"] = b
 	}

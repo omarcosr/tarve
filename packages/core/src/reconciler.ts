@@ -578,6 +578,7 @@ export function compileTree(
       if (p.level && p.level !== "normal") windowOptions.level = p.level;
       if (p.maximized) windowOptions.maximized = true;
       if (p.skipTaskbar) windowOptions.skipTaskbar = true;
+      if (p.activation === "never" || p.activation === "whileEditing") windowOptions.activation = p.activation;
       if (p.backdrop && p.backdrop !== "none") windowOptions.backdrop = p.backdrop;
       if (p.desktopWidget) {
         const { columns, rows } = p.desktopWidget;
