@@ -18,7 +18,7 @@ There are three independent version domains:
 
 1. **Product SemVer** — one version shared by the root npm package, `@tarve/core-internal`, `@tarve/protocol`, their workspace entries in `bun.lock`, `native/Cargo.toml` and the `tarve_native` entry in `Cargo.lock`.
 2. **JSON protocol version** — a monotonically increasing integer used by serialized TS/Rust messages. It is currently **v63** and is independent from package SemVer.
-3. **Native C ABI version** — a monotonically increasing integer for exported FFI function compatibility. It is currently **v7** and is independent from both product SemVer and the JSON protocol.
+3. **Native C ABI version** — a monotonically increasing integer for exported FFI function compatibility. It is currently **v8** and is independent from both product SemVer and the JSON protocol.
 
 `bun run release:policy` prints the current protocol and ABI versions; update the two numbers above when it changes them.
 
