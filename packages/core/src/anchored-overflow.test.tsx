@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Button, Image, Input, Modal, Overflow, overflowVisibleCount, Pressable, Scroll, Text, View, Window } from "./components";
 import type { SizeEvent } from "./jsx-runtime";
-import { Flyout } from "./popups";
+import { Flyout } from "./flyout";
 import { compileTree } from "./reconciler";
 
 const size = (width: number, height = 20): SizeEvent => ({ width, height, borderBox: { width, height } });

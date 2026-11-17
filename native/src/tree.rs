@@ -31,11 +31,18 @@ mod css_layout;
 #[cfg(test)]
 pub(crate) use css_layout::css_track_list;
 mod gestures;
+#[cfg(target_os = "windows")]
+mod icon_frame;
+#[cfg(target_os = "windows")]
+use icon_frame::IconFrame;
+#[cfg(target_os = "windows")]
+pub(crate) use icon_frame::decode_icon_frame;
 mod inherit;
 mod keyframes;
 mod long_press;
 mod overscroll;
 mod paint_values;
+mod pointer_target;
 mod popup;
 mod slider;
 mod touch_target;
@@ -744,49 +751,6 @@ fn load_untrusted_svg_data(bytes: &[u8]) -> Result<ImageData, String> {
         ..resvg::usvg::Options::default()
     };
     render_svg_tree(bytes, &options)
-}
-
-/// A shell icon frame at `size` px: requested on the image workers (`image` is `None` until it
-/// arrives, and stays so when it failed: the natural frame is drawn instead).
-#[cfg(target_os = "windows")]
-struct IconFrame {
-    size: u32,
-    /// The worker request, also the renderer's texture key.
-    key: String,
-    image: Option<ImageData>,
-}
-
-/// Renders a shell icon frame on an image worker (see `remote_image`).
-#[cfg(target_os = "windows")]
-pub(crate) fn decode_icon_frame(path: &str, size: u32) -> Result<DecodedImage, String> {
-    let (width, height, rgba) = crate::exe_icon::load_sized(path, size)?;
-    rgba_image_data(width, height, rgba, true).map(DecodedImage)
-}
-
-/// The loaded `size` frame of the icon at `src`; queues its request the first time.
-#[cfg(target_os = "windows")]
-fn icon_frame<'a>(
-    frames: &'a mut HashMap<String, Vec<IconFrame>>,
-    requests: &mut Vec<String>,
-    src: &str,
-    size: u32,
-) -> Option<&'a IconFrame> {
-    if !frames.contains_key(src) {
-        frames.insert(src.to_string(), Vec::new());
-    }
-    let list = frames.get_mut(src)?;
-    let Some(index) = list.iter().position(|frame| frame.size == size) else {
-        let key = crate::exe_icon::frame_request(src, size);
-        requests.push(key.clone());
-        list.push(IconFrame {
-            size,
-            key,
-            image: None,
-        });
-        return None;
-    };
-    let frame = &list[index];
-    frame.image.is_some().then_some(frame)
 }
 
 pub(crate) fn is_remote_url(src: &str) -> bool {
@@ -3359,19 +3323,8 @@ impl Tree {
         result: Result<DecodedImage, String>,
     ) {
         #[cfg(target_os = "windows")]
-        if let Some((size, src)) = crate::exe_icon::parse_frame_request(&url) {
-            // A failed frame stays empty and is not asked for again: the natural one is drawn.
-            if let Ok(DecodedImage(image)) = result
-                && let Some(frame) = self
-                    .icon_frames
-                    .get_mut(src)
-                    .and_then(|frames| frames.iter_mut().find(|frame| frame.size == size))
-            {
-                frame.image = Some(image);
-                self.dirty.paint = true;
-                self.dirty.full_paint = true;
-            }
-            return;
+        if crate::exe_icon::parse_frame_request(&url).is_some() {
+            return self.finish_icon_frame(&url, result);
         }
         let image = match result {
             Ok(DecodedImage(image)) => image,
@@ -6221,33 +6174,14 @@ impl Tree {
                 };
                 let tx = rect.x0 + (rect.width() - image.width as f64 * fx) / 2.0;
                 let ty = rect.y0 + (rect.height() - image.height as f64 * fy) / 2.0;
-                #[allow(unused_mut)]
-                let mut drawn = (key, image, fx, fy);
-                // A shell icon drawn below its natural frame takes a frame sized for the
-                // screen; the layout keeps the natural size.
+                // A shell icon drawn below its natural frame takes a frame sized for the screen.
                 #[cfg(target_os = "windows")]
-                if node.image.is_none()
-                    && crate::exe_icon::is_icon_path(&node.src)
-                    && let Some(size) = crate::exe_icon::frame_size(
-                        scale * (image.width as f64 * fx).max(image.height as f64 * fy),
-                        image.width.max(image.height),
-                    )
-                    && let Some(frame) = icon_frame(
-                        &mut self.icon_frames,
-                        &mut self.remote_requests,
-                        &node.src,
-                        size,
-                    )
-                    && let Some(pixels) = frame.image.as_ref()
-                {
-                    drawn = (
-                        frame.key.as_str(),
-                        pixels,
-                        fx * image.width as f64 / pixels.width as f64,
-                        fy * image.height as f64 / pixels.height as f64,
-                    );
-                }
-                let (key, image, fx, fy) = drawn;
+                let (key, image, fx, fy) = icon_frame::sized_icon(
+                    &mut self.icon_frames,
+                    &mut self.remote_requests,
+                    (node.image.is_none(), &node.src, scale),
+                    (key, image, fx, fy),
+                );
                 target.draw_image(
                     key,
                     image,
@@ -6639,25 +6573,6 @@ impl Tree {
             self.mouse.into(),
             false,
         )
-    }
-
-    /// The node a press at `point` (logical px) would reach, found as for the pointer.
-    pub(crate) fn pointer_target_at(&self, point: (f64, f64)) -> Option<String> {
-        let root_rect = self.entries.get(&self.root)?.rect;
-        let mouse = vello::kurbo::Point::new(point.0, point.1);
-        for portal in self.portal_order.iter().rev() {
-            if let Some(id) = self.hit(
-                portal,
-                self.ancestor_scroll_offset(portal),
-                root_rect,
-                false,
-                mouse,
-                self.pointer_muted_above(portal),
-            ) {
-                return Some(id);
-            }
-        }
-        self.hit(&self.root, Vec2::ZERO, root_rect, false, mouse, false)
     }
 
     fn selectable_text_hit_root(&self) -> Option<String> {
