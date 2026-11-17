@@ -22,6 +22,7 @@ interface TjsGlobal {
   readonly version: string;
   readonly engine: { versions: Record<string, string | number> };
   readonly cwd: string;
+  readonly pid: number;
   chdir(directory: string): void;
   exit(code?: number): never;
   open(path: string, mode: string): Promise<TjsFileHandle>;

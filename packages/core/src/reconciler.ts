@@ -20,6 +20,9 @@ import { environmentKey, initialViewport, setViewportHook } from "./viewport";
 import { BREAKPOINTS, foldVariants, luminance, type Position, type VariantContext } from "./reconciler/variants";
 
 const isPrimitive = (child: Child): child is string | number => typeof child === "string" || typeof child === "number";
+/** Children paths whose repeated `key` was already reported (warned once, not every render). */
+const warnedDuplicateKeys = new Set<string>();
+
 
 
 
@@ -442,6 +445,7 @@ export function compileTree(
         if (typeof item === "object" && item !== null && !Array.isArray(item) && !isSignal(item)) elements++;
       }
       let seen = 0;
+      let keysSeen: Map<string, number> | undefined;
       const out: NativeNode[] = [];
       for (let index = 0; index < child.length; index++) {
         const item = child[index];
@@ -477,7 +481,21 @@ export function compileTree(
           piece = text;
         }
         const at = element ? { index: seen++, count: elements } : undefined;
-        const itemPath = path + "/" + (key != null ? "k:" + key : index);
+        let itemPath = path + "/" + (key != null ? "k:" + key : index);
+        if (key != null) {
+          // React: a repeated key is a warning, not a crash. Later copies get their own id and
+          // the warning is shown once per path, so a render loop does not fail every frame.
+          const seenKeys = keysSeen ??= new Map();
+          const copies = seenKeys.get(itemPath) ?? 0;
+          seenKeys.set(itemPath, copies + 1);
+          if (copies > 0) {
+            if (!warnedDuplicateKeys.has(itemPath)) {
+              warnedDuplicateKeys.add(itemPath);
+              console.warn(`[tarve] Duplicate key "${String(key)}" among the children at ${path}: keys should be unique; the copies are told apart by position.`);
+            }
+            itemPath += "#" + copies;
+          }
+        }
         const nodes = element && autoMemo && componentTrace === undefined && !((item as VNode).type as unknown as Record<symbol, unknown>)[MEMO]
           ? autoMemoItem(item as VNode, itemPath, group, at)
           : visit(piece, itemPath, group, false, at);

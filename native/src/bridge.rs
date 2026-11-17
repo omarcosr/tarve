@@ -279,7 +279,7 @@ mod wake_pipe {
     }
 }
 
-use wake_pipe::WakePipe;
+pub(crate) use wake_pipe::WakePipe;
 
 pub struct Events {
     /// Each event with when it was queued: the wait until JS takes it is a stat (`eventWait`).
@@ -336,7 +336,7 @@ struct Host {
 }
 static HOST: OnceLock<Mutex<Option<Host>>> = OnceLock::new();
 static LAST_ERROR: Mutex<String> = Mutex::new(String::new());
-pub const ABI_VERSION: u32 = 7;
+pub const ABI_VERSION: u32 = 8;
 fn host() -> &'static Mutex<Option<Host>> {
     HOST.get_or_init(|| Mutex::new(None))
 }

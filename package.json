@@ -182,6 +182,7 @@
     "smoke:exe:txiki": "bun scripts/smoke-exe.ts --runtime txiki",
     "smoke:txiki-shims": "bun scripts/smoke-txiki-shims.ts",
     "smoke:pointer-function": "bun scripts/smoke-pointer-function.ts",
+    "smoke:threadsafe": "bun scripts/smoke-threadsafe.ts",
     "smoke:headless-runtimes": "bun run build:native && bun run build:wasm && bun scripts/smoke-headless-runtimes.ts",
     "smoke:txiki-apps": "bun run build:native && bun run setup:examples && bun scripts/smoke-txiki-apps.ts",
     "smoke:runtime-parity": "bun run build:native && bun run setup:examples && bun scripts/smoke-runtime-parity.ts",

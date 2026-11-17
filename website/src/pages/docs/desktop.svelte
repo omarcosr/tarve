@@ -128,6 +128,8 @@ const playing = await systemMediaSessions(); // what other apps are playing (Win
     ["app.appBar(edge | null, { size })", "Windows: docks the window to \"top\", \"bottom\", \"left\" or \"right\" as an AppBar size logical px thick (48 by default) and reserves the space; it re-docks when the taskbar moves. null or closing releases it."],
     ["app.screens()", "Resolves { screens, cursor }: each monitor's physical bounds, work area, scale and primary flag, and the pointer's screen position (null where unknown)."],
     ["systemMediaSessions() / controlSystemMediaSession(appId, action)", "Windows: what other apps are playing (title, artist, artwork, position) and play, pause, toggle, next or previous for one of them. [] and false elsewhere."],
+    ["onSystemMediaSessionsChange(listener)", "Windows: the same list now and on every change (Windows events, no polling); returns the unsubscribe function. While anyone listens, systemMediaSessions() reads the kept list."],
+    ["threadsafeCallback(run, { args, returns, copy }) / threadsafeComObject({ iids, methods })", "A C function pointer (or a COM event sink) native code may call from any thread: each call returns at once and run runs on the JavaScript thread, in order. Bun, Node.js and txiki.js."],
     ["<Image src=\"C:/…/app.exe\">", "Windows: an .exe, .dll or .lnk path shows the file's shell icon."],
   ];
 

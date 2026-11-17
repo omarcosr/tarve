@@ -1705,6 +1705,9 @@ pub struct Tree {
     surface_frames: HashMap<String, (ImageData, bool)>,
     /// Keys whose decoded pixels were dropped because a GPU texture holds them.
     released_images: HashSet<String>,
+    /// Local image keys that failed to load: an unchanged node showing one is not read
+    /// (nor reported) again every render; a new node or a changed source tries again.
+    failed_images: HashSet<String>,
     /// Smooth `scrollToItem` requests in flight, by list id.
     scroll_animations: HashMap<String, ScrollAnimation>,
     /// `scrollTo` requests, applied after the next layout: (id, x, y, smooth).
@@ -2040,6 +2043,7 @@ impl Tree {
             video_painted: HashSet::default(),
             surface_frames: HashMap::default(),
             released_images: HashSet::default(),
+            failed_images: HashSet::default(),
             scroll_animations: HashMap::default(),
             scroll_requests: Vec::new(),
             wheel_latch: None,
@@ -2678,9 +2682,15 @@ impl Tree {
                     || entry.node.image != node.image
             });
             // Remote sources load off the UI thread once painted (see paint_node_content).
-            if (source_changed || !self.images.contains_key(&key)) && !is_remote_image(&node) {
+            let known_failure =
+                previous.is_some() && !source_changed && self.failed_images.contains(&key);
+            if (source_changed || !self.images.contains_key(&key))
+                && !is_remote_image(&node)
+                && !known_failure
+            {
                 match load_image_data(&node) {
                     Ok(image) => {
+                        self.failed_images.remove(&key);
                         let current_bytes: usize = self
                             .images
                             .iter()
@@ -2701,6 +2711,7 @@ impl Tree {
                     }
                     Err(e) => {
                         self.images.remove(&key);
+                        self.failed_images.insert(key.clone());
                         // The node hears it (`onError`); the host reports it to the app only
                         // when no handler takes it.
                         if previous.is_none() || source_changed {
@@ -3489,6 +3500,7 @@ impl Tree {
         // A failed remote image is tried again once it is shown again.
         self.remote_images
             .retain(|url, state| *state == RemoteImageState::Pending || used.contains(url));
+        self.failed_images.retain(|key| used.contains(key));
         let images = &self.images;
         self.released_images.retain(|key| images.contains_key(key));
         self.image_last_used

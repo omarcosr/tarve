@@ -9,6 +9,8 @@ import { createServer, connect } from "node:net";
 import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { deflateSync, gunzipSync, gzipSync, inflateSync } from "node:zlib";
+import { openPluginLibrary } from "../packages/core/src/plugins/ffi";
+import { threadsafeCallback } from "../packages/core/src/threadsafe";
 
 const results: Record<string, unknown> = {};
 const check = (name: string, ok: boolean, detail?: unknown) => { results[name] = ok ? true : { failed: detail }; };
@@ -106,6 +108,38 @@ try {
   const [shellCommand, shellArgs] = shell(windows ? "echo out& echo err 1>&2& exit /b 3" : "echo out; echo err >&2; exit 3");
   const sync = spawnSync(shellCommand, [...shellArgs], { encoding: "utf8", windowsHide: true });
   check("child_process.spawnSync", sync.status === 3 && sync.signal === null && sync.stdout.trim() === "out" && sync.stderr.trim() === "err" && !sync.error && sync.pid > 0, { status: sync.status, stdout: sync.stdout, stderr: sync.stderr, error: sync.error?.message });
+  if (windows) {
+    // spawn with windowsHide (CreateProcessW + CREATE_NO_WINDOW, named pipes): stdin, stdout,
+    // stderr, the exit code, kill and a missing command, as with tjs.spawn.
+    const hidden = spawn("cmd.exe", ["/d", "/s", "/c", "set /p LINE=& call echo got %LINE%& echo err 1>&2& exit /b 4"], { windowsHide: true });
+    let hiddenOut = "", hiddenErr = "";
+    hidden.stdout!.on("data", chunk => { hiddenOut += chunk.toString(); });
+    hidden.stderr!.on("data", chunk => { hiddenErr += chunk.toString(); });
+    hidden.stdin!.end("hello\r\n");
+    const [hiddenCode] = await once(hidden, "exit");
+    await new Promise(resolve => setTimeout(resolve, 50));
+    check("child_process.spawn windowsHide", hiddenCode === 4 && hiddenOut.trim() === "got hello" && hiddenErr.trim() === "err" && hidden.pid! > 0, { hiddenCode, hiddenOut, hiddenErr });
+    const sleeper = spawn("ping", ["-n", "30", "127.0.0.1"], { stdio: "ignore", windowsHide: true });
+    const sleeperStarted = Date.now();
+    setTimeout(() => sleeper.kill(), 100);
+    const [killedCode, killedSignal] = await once(sleeper, "exit");
+    check("child_process.spawn windowsHide kill", killedCode === null && killedSignal === "SIGTERM" && Date.now() - sleeperStarted < 3000, { killedCode, killedSignal });
+    const missing = spawn("tarve-no-such-command", [], { windowsHide: true });
+    const [missingError] = await once(missing, "error");
+    check("child_process.spawn windowsHide ENOENT", (missingError as { code?: string }).code === "ENOENT", (missingError as Error).message);
+    // threadsafeCallback: a system thread (CreateThread) calls it; the callback runs here.
+    const received: unknown[] = [];
+    const callback = threadsafeCallback((value: unknown) => { received.push(value); }, { args: ["u64"] });
+    const kernel32 = openPluginLibrary("kernel32.dll", {
+      CreateThread: { args: ["ptr", "u64", "ptr", "ptr", "u32", "ptr"], returns: "ptr" },
+      CloseHandle: { args: ["ptr"], returns: "i32" },
+    });
+    const thread = kernel32.symbols.CreateThread(0, 0, callback.pointer, 4242n, 0, 0);
+    kernel32.symbols.CloseHandle(thread);
+    for (let tries = 0; tries < 200 && !received.length; tries++) await sleep(10);
+    callback.close();
+    check("threadsafeCallback from another thread", received.length === 1 && received[0] === 4242n, received.map(String));
+  }
   const [envCommand, envArgs] = shell(windows ? "echo %TARVE_SHIM%& cd" : "echo $TARVE_SHIM; pwd");
   const placed = spawnSync(envCommand, [...envArgs], { encoding: "utf8", cwd: root, env: { ...process.env, TARVE_SHIM: "shim-env" }, windowsHide: true });
   const placedLines = placed.stdout.trim().split(/\r?\n/);

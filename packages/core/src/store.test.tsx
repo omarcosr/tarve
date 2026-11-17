@@ -28,19 +28,49 @@ describe("store()", () => {
     state.sessions.set("s1", { lines: [] });
     await tick();
     expect(renders).toBe(base + 2);
+    // Data the view never read (a session's lines, the tags) renders nothing.
     state.sessions.get("s1")!.lines.push("ls");
     await tick();
-    expect(renders).toBe(base + 3);
+    expect(renders).toBe(base + 2);
     expect([...state.sessions.values()][0]!.lines).toEqual(["ls"]);
     state.tags.add("x");
     state.tags.add("x");
     await tick();
-    expect(renders).toBe(base + 4);
+    expect(renders).toBe(base + 2);
     state.title = "b";
     state.tags.delete("missing");
     state.sessions.clear();
     await tick();
-    expect(renders).toBe(base + 5);
+    expect(renders).toBe(base + 3);
+    app.close();
+  });
+
+  test("only the windows whose renders read the changed data render again", async () => {
+    const state = store({ main: 1, popup: 1, keys: {} as Record<string, number> });
+    let mainRenders = 0, popupRenders = 0;
+    let emit!: (event: NativeEvent & { window?: string }) => void;
+    const bridge = new FakeBridge();
+    bridge.start = (_document, onEvent) => { emit = onEvent; onEvent({ type: "ready" }); };
+    const app = createApp(() => { mainRenders++; return <Window><Text>{`${state.main} ${Object.keys(state.keys).length}`}</Text></Window>; }, { bridge });
+    await app.ready;
+    const popup = app.openWindow(() => { popupRenders++; return <Window><Text>{String(state.popup)}</Text></Window>; }, { id: "popup" });
+    emit({ type: "ready", window: "popup" });
+    await popup.ready;
+    await tick();
+    const [main0, popup0] = [mainRenders, popupRenders];
+    state.main = 2;
+    await tick();
+    expect([mainRenders - main0, popupRenders - popup0]).toEqual([1, 0]);
+    state.popup = 2;
+    await tick();
+    expect([mainRenders - main0, popupRenders - popup0]).toEqual([1, 1]);
+    // A key added changes Object.keys, which the main window read.
+    state.keys.a = 1;
+    await tick();
+    expect([mainRenders - main0, popupRenders - popup0]).toEqual([2, 1]);
+    state.keys.a = 2;
+    await tick();
+    expect([mainRenders - main0, popupRenders - popup0]).toEqual([2, 1]);
     app.close();
   });
 

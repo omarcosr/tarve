@@ -88,6 +88,8 @@ mod syntax;
 mod tests;
 mod text;
 #[cfg(not(target_arch = "wasm32"))]
+mod threadsafe;
+#[cfg(not(target_arch = "wasm32"))]
 #[cfg_attr(target_os = "android", allow(unused_imports))]
 mod tray;
 mod tree;

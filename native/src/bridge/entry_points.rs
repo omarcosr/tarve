@@ -124,6 +124,226 @@ pub unsafe extern "C" fn tarve_zlib_gunzip(
     })
 }
 
+/// Waits for a process where the runtime cannot (txiki.js's `spawn` shim on Windows, which starts
+/// hidden children with CreateProcessW): writes into `out` the name of a named pipe that, once a
+/// client connected and `process` (a handle the caller keeps owning) ended, carries its exit code
+/// (u32, little endian) and closes. Returns as tarve_zlib_deflate does; -1 elsewhere than Windows.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tarve_watch_process(process: u64, out: *mut u8, capacity: u32) -> i32 {
+    guard(|| {
+        #[cfg(target_os = "windows")]
+        {
+            process_watch::watch(process, out, capacity)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (process, out, capacity);
+            Err("tarve_watch_process is only available on Windows".to_string())
+        }
+    })
+}
+
+/// The name of a fresh wake pipe for threadsafe callbacks (native/src/threadsafe.rs) into `out`;
+/// the previous one closes. A byte arrives on it when calls were queued. Returns as
+/// tarve_zlib_deflate does.
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tarve_threadsafe_pipe_name(out: *mut u8, capacity: u32) -> i32 {
+    guard(|| {
+        let name = crate::threadsafe::pipe_name()?;
+        unsafe { output(name.as_bytes(), out, capacity) }
+    })
+}
+
+/// Opens a threadsafe callback for JavaScript callback `id`: the address of a C function any
+/// thread may call with up to 6 integer or pointer arguments; each call is queued and returns
+/// `returns` at once. With `copy_arg` below 6, each call also copies `copy_len` bytes from the
+/// address that argument holds. 0 when it cannot open one (tarve_last_error says why).
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn tarve_threadsafe_callback(id: u32, returns: u64, copy_arg: u32, copy_len: u32) -> u64 {
+    match crate::threadsafe::create(id, returns, copy_arg, copy_len) {
+        Ok(address) => address,
+        Err(message) => {
+            *LAST_ERROR.lock().unwrap_or_else(|p| p.into_inner()) = message;
+            0
+        }
+    }
+}
+
+/// Closes the threadsafe callback at `address`: 1, or 0 when none is open there.
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn tarve_threadsafe_close(address: u64) -> i32 {
+    i32::from(crate::threadsafe::close(address))
+}
+
+/// Takes the queued calls into `out`: whole records (id u32, copied length u32, 6 arguments u64,
+/// the copied bytes), in call order. Their length (0 when none), or, when not even the first
+/// fits, minus the capacity it needs.
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tarve_threadsafe_poll(out: *mut u8, capacity: u32) -> i32 {
+    guard(|| {
+        if out.is_null() || capacity == 0 {
+            return Err("Invalid output buffer".into());
+        }
+        // SAFETY: the caller owns a writable buffer of `capacity` bytes for this call.
+        let buffer = unsafe { std::slice::from_raw_parts_mut(out, capacity as usize) };
+        match crate::threadsafe::poll(buffer) {
+            Ok(written) => Ok(written as i32),
+            Err(needed) => Ok(-(needed as i32).max(2)),
+        }
+    })
+}
+
+/// Calls dropped since the last ask because JavaScript left too many queued.
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn tarve_threadsafe_dropped() -> u64 {
+    crate::threadsafe::take_dropped()
+}
+
+/// A COM object whose IUnknown runs natively: `iids` (`count` GUIDs of 16 bytes) are the
+/// interfaces it answers to besides IUnknown and IAgileObject, `methods` (`methods_count` u64
+/// addresses) its vtable after IUnknown. Its address, holding one reference
+/// (tarve_com_release); 0 on error.
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tarve_com_object(
+    iids: *const u8,
+    count: u32,
+    methods: *const u8,
+    methods_count: u32,
+) -> u64 {
+    let built = (|| {
+        let iid_bytes = unsafe { input(iids, count.checked_mul(16).ok_or("Too many IIDs")?)? };
+        let method_bytes = unsafe { input(methods, methods_count.checked_mul(8).ok_or("Too many methods")?)? };
+        let iids = iid_bytes.as_chunks::<16>().0.to_vec();
+        let methods: Vec<u64> = method_bytes
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|chunk| u64::from_le_bytes(*chunk))
+            .collect();
+        crate::threadsafe::com_object(iids, &methods)
+    })();
+    match built {
+        Ok(object) => object,
+        Err(message) => {
+            *LAST_ERROR.lock().unwrap_or_else(|p| p.into_inner()) = message;
+            0
+        }
+    }
+}
+
+/// Releases one reference to an object tarve_com_object made: the references left, or -1.
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn tarve_com_release(object: u64) -> i32 {
+    guard(|| crate::threadsafe::com_release(object).map(|left| left as i32))
+}
+
+#[cfg(target_os = "windows")]
+mod process_watch {
+    use std::{
+        ptr,
+        sync::atomic::{AtomicU64, Ordering},
+    };
+    use windows_sys::Win32::{
+        Foundation::{
+            CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle, ERROR_PIPE_CONNECTED,
+            GetLastError, HANDLE, INVALID_HANDLE_VALUE,
+        },
+        Storage::FileSystem::{FlushFileBuffers, PIPE_ACCESS_OUTBOUND, WriteFile},
+        System::{
+            Pipes::{
+                ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_REJECT_REMOTE_CLIENTS,
+                PIPE_TYPE_BYTE, PIPE_WAIT,
+            },
+            Threading::{GetCurrentProcess, GetExitCodeProcess, INFINITE, WaitForSingleObject},
+        },
+    };
+
+    static NEXT_WATCH: AtomicU64 = AtomicU64::new(1);
+
+    pub(super) fn watch(process: u64, out: *mut u8, capacity: u32) -> Result<i32, String> {
+        let id = NEXT_WATCH.fetch_add(1, Ordering::Relaxed);
+        let name = format!(r"\\.\pipe\tarve-exit-{}-{id}", std::process::id());
+        if name.len() > capacity as usize {
+            // Asks for room before creating anything (see `output`).
+            return unsafe { super::output(name.as_bytes(), out, capacity) };
+        }
+        let mut own: HANDLE = ptr::null_mut();
+        // SAFETY: duplicates the caller's handle within this process; checked below.
+        let duplicated = unsafe {
+            DuplicateHandle(
+                GetCurrentProcess(),
+                process as usize as HANDLE,
+                GetCurrentProcess(),
+                &mut own,
+                0,
+                0,
+                DUPLICATE_SAME_ACCESS,
+            )
+        };
+        if duplicated == 0 {
+            return Err(format!("Invalid process handle (Windows error {})", unsafe { GetLastError() }));
+        }
+        let wide: Vec<u16> = name.encode_utf16().chain([0]).collect();
+        // SAFETY: a NUL-terminated name; the handle is checked below.
+        let pipe = unsafe {
+            CreateNamedPipeW(
+                wide.as_ptr(),
+                PIPE_ACCESS_OUTBOUND,
+                PIPE_TYPE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+                1,
+                8,
+                8,
+                0,
+                ptr::null(),
+            )
+        };
+        if pipe == INVALID_HANDLE_VALUE {
+            let error = unsafe { GetLastError() };
+            unsafe { CloseHandle(own) };
+            return Err(format!("Could not create the exit pipe (Windows error {error})"));
+        }
+        let (own, pipe) = (own as usize, pipe as usize);
+        let spawned = std::thread::Builder::new()
+            .name("tarve-process-watch".into())
+            .stack_size(64 * 1024)
+            .spawn(move || {
+                let (own, pipe) = (own as HANDLE, pipe as HANDLE);
+                // SAFETY: both handles belong to this thread, which closes them.
+                unsafe {
+                    let connected = ConnectNamedPipe(pipe, ptr::null_mut()) != 0
+                        || GetLastError() == ERROR_PIPE_CONNECTED;
+                    if connected {
+                        WaitForSingleObject(own, INFINITE);
+                        let mut code = 1u32;
+                        GetExitCodeProcess(own, &mut code);
+                        let bytes = code.to_le_bytes();
+                        let mut written = 0u32;
+                        WriteFile(pipe, bytes.as_ptr(), 4, &mut written, ptr::null_mut());
+                        FlushFileBuffers(pipe);
+                        DisconnectNamedPipe(pipe);
+                    }
+                    CloseHandle(pipe);
+                    CloseHandle(own);
+                }
+            });
+        if let Err(error) = spawned {
+            unsafe {
+                CloseHandle(pipe as HANDLE);
+                CloseHandle(own as HANDLE);
+            }
+            return Err(format!("Could not start the process watch: {error}"));
+        }
+        unsafe { super::output(name.as_bytes(), out, capacity) }
+    }
+}
+
 /// A plugin's native library reports to its JavaScript (`ctx.events(channel)`) from any thread:
 /// `channel` is NUL-terminated UTF-8 (1-128 bytes), the `len` bytes at `data` are copied and
 /// arrive as a Uint8Array. Events sent before the app started (from a plugin's setup) are held and
@@ -187,6 +407,29 @@ pub(super) fn take_pending_plugin_events() -> Vec<serde_json::Value> {
     )
 }
 
+/// Follows other apps' media sessions (Windows): `tarve_media_sessions` then answers from a list
+/// kept up to date, and `callback` (a C function taking a u64, a threadsafe callback) is called
+/// with the list's version whenever it changes. Watching already: only the callback changes.
+/// 0, or -1 (tarve_last_error) when Windows has no session manager or off Windows.
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn tarve_media_sessions_watch(callback: u64) -> i32 {
+    guard(|| {
+        if callback == 0 {
+            return Err("tarve_media_sessions_watch needs a callback".into());
+        }
+        crate::media_sessions::watch(callback).map(|()| 0)
+    })
+}
+
+/// Stops tarve_media_sessions_watch: its subscriptions, its thread and the kept list. 0.
+#[cfg(not(target_arch = "wasm32"))]
+#[unsafe(no_mangle)]
+pub extern "C" fn tarve_media_sessions_unwatch() -> i32 {
+    crate::media_sessions::unwatch();
+    0
+}
+
 /// The sessions `tarve_media_sessions` read that did not fit the caller's buffer, handed to the
 /// next call (made with the capacity asked for) instead of listing them again.
 static PENDING_MEDIA_SESSIONS: std::sync::Mutex<Option<Vec<u8>>> = std::sync::Mutex::new(None);
@@ -203,8 +446,7 @@ pub unsafe extern "C" fn tarve_media_sessions(out: *mut u8, capacity: u32) -> i3
             .unwrap_or_else(|p| p.into_inner());
         let json = match pending.take() {
             Some(json) => json,
-            None => serde_json::to_vec(&crate::media_sessions::sessions()?)
-                .map_err(|error| error.to_string())?,
+            None => crate::media_sessions::sessions_json()?,
         };
         let written = unsafe { output(&json, out, capacity)? };
         if written < -1 {

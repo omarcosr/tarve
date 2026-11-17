@@ -1,6 +1,7 @@
 /** node:child_process spawn over tjs.spawn: exit/error events and stream-like stdio. spawnSync: child-process-sync.ts. */
 import { Buffer } from "./buffer";
 import { spawnDetachedWindows, spawnSync } from "./child-process-sync";
+import { spawnHiddenWindows } from "./child-process-windows";
 import { EventEmitter } from "./events";
 
 export { spawnSync };
@@ -125,7 +126,8 @@ export class ChildProcess extends EventEmitter {
       : options.stdio;
     try {
       const spawn = (tjs as unknown as { spawn(args: string[], options: object): TjsProcess }).spawn;
-      this.process = spawn([command, ...args], {
+      // tjs.spawn cannot hide a console child's window: CreateProcessW with CREATE_NO_WINDOW does.
+      this.process = options.windowsHide && TARVE_TXIKI_PLATFORM === "win32" ? spawnHiddenWindows(command, args, stdio, options) : spawn([command, ...args], {
         ...(options.cwd ? { cwd: options.cwd } : {}),
         ...(options.env ? { env: Object.fromEntries(Object.entries(options.env).filter(([, value]) => value !== undefined)) } : {}),
         stdin: stdio[0] ?? "pipe", stdout: stdio[1] ?? "pipe", stderr: stdio[2] ?? "pipe",

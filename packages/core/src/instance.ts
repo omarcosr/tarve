@@ -213,10 +213,11 @@ export async function requestSingleInstance(options: SingleInstanceOptions = {})
       try { listener({ ...next, urls }); } catch (error) { console.error("[tarve] onSecondInstance", error); }
     }
   };
-  // A first instance that was just killed can leave its pipe or socket behind for a moment: nobody
-  // answers, yet listening fails too. Retry with a growing pause (about 2.5 s in all) instead of
-  // giving up on the first round.
-  for (let attempt = 0; attempt < 8; attempt++) {
+  // A first instance that was just killed or is still quitting (`App.exe --quit` then a new
+  // launch) can leave its pipe or socket behind for a while: nobody answers, yet listening fails
+  // too. Retry with a growing pause until it is gone (up to about 10 s) instead of giving up early.
+  const deadline = Date.now() + 10_000;
+  for (let attempt = 0; attempt < 2 || Date.now() < deadline; attempt++) {
     if (attempt > 1) await new Promise(resolve => setTimeout(resolve, Math.min(50 * 2 ** (attempt - 2), 800)));
     const answer = await forward(address, launch);
     if (answer) {

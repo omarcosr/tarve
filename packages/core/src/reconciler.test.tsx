@@ -541,6 +541,22 @@ describe("native TSX protocol", () => {
     expect(() => compileTree(<Window><Text id="same">a</Text><Text id="same">b</Text></Window>)).toThrow("Duplicate");
     expect(() => compileTree(<Column/>)).toThrow("Window root");
   });
+  test("a repeated key warns once and keeps both children apart", () => {
+    const warnings: unknown[] = [];
+    const warn = console.warn;
+    console.warn = (...args: unknown[]) => { warnings.push(args[0]); };
+    try {
+      const view = () => compileTree(<Window>{["a", "b"].map(text => <Text key="same">{text}</Text>)}</Window>);
+      const ids = (tree: ReturnType<typeof view>) => tree.document.root.children!.map(node => node.id);
+      const first = ids(view());
+      expect(first).toHaveLength(2);
+      expect(new Set(first).size).toBe(2);
+      expect(ids(view())).toEqual(first);
+      expect(warnings.filter(message => String(message).includes('Duplicate key "same"'))).toHaveLength(1);
+    } finally {
+      console.warn = warn;
+    }
+  });
   test("sends property patches and encodes structural changes as retained mutations", () => {
     const view = (value: string) => compileTree(<Window><Column><Text id="label">{value}</Text><Button id="button">Save</Button></Column></Window>);
     const a = view("Before");

@@ -76,6 +76,7 @@ export { CanvasRenderingContext2D, CanvasGradient, parseCanvasFont } from "./can
 export type { MediaAudioTrack, MediaTextTrack, MediaController, MediaElementProps, MediaErrorInfo, MediaEventInfo, SubtitleTrack } from "./media-element";
 export { Surface, type SurfaceController, type SurfaceEvent, type SurfaceGl, type SurfacePixelFormat, type SurfaceProps } from "./surface";
 export { parseSubtitles } from "./subtitles";
-export { systemMediaSessions, controlSystemMediaSession, type ExternalMediaSession, type SystemMediaSessionAction } from "./media-sessions";
+export { systemMediaSessions, controlSystemMediaSession, onSystemMediaSessionsChange, type ExternalMediaSession, type SystemMediaSessionAction } from "./media-sessions";
+export { threadsafeCallback, threadsafeComObject, guidBytes, THREADSAFE_MAX_ARGS, THREADSAFE_MAX_CALLBACKS, type ThreadsafeArgType, type ThreadsafeCallback, type ThreadsafeCallbackOptions, type ThreadsafeComObject, type ThreadsafeComObjectOptions } from "./threadsafe";
 export { extendTailwind, tw } from "./tailwind";
 

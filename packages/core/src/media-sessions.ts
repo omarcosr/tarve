@@ -1,5 +1,6 @@
-import { nativePath } from "#tarve/runtime";
-import { openLibrary } from "./bridge/binding";
+import { openLibrary, ownLibraryPath } from "./bridge/binding";
+import { openPluginLibrary, type PluginLibrary } from "./plugins/ffi";
+import { threadsafeCallback, type ThreadsafeCallback } from "./threadsafe";
 
 /** Another app's media session (Windows Global System Media Transport Controls). */
 export interface ExternalMediaSession {
@@ -26,10 +27,60 @@ const ACTIONS: Record<SystemMediaSessionAction, number> = { play: 0, pause: 1, t
 
 type Library = ReturnType<typeof openLibrary>;
 
+let opened: Library | undefined;
+/** Tarve's library, opened once and kept: every read goes through it, on Bun, Node.js and txiki.js alike. */
 function withLibrary<T>(use: (library: Library) => T): T {
-  // Through the native library, so Bun, Node.js and txiki.js behave the same.
-  const library = openLibrary(nativePath());
-  try { return use(library); } finally { library.close(); }
+  opened ??= openLibrary(ownLibraryPath("systemMediaSessions"));
+  return use(opened);
+}
+
+const WATCH_SYMBOLS = {
+  tarve_media_sessions_watch: { args: ["u64"], returns: "i32" },
+  tarve_media_sessions_unwatch: { args: [], returns: "i32" },
+} as const;
+let watchLibrary: PluginLibrary<typeof WATCH_SYMBOLS> | undefined;
+
+type SessionsListener = (sessions: ExternalMediaSession[]) => void;
+const listeners = new Set<SessionsListener>();
+/** The native watch, while anyone listens: its change callback and the last version delivered. */
+let watching: { callback: ThreadsafeCallback; version: bigint } | undefined;
+
+function deliver(to: Iterable<SessionsListener>): void {
+  let sessions: ExternalMediaSession[];
+  try {
+    sessions = withLibrary(readMediaSessions);
+  } catch (error) {
+    console.error("[tarve] onSystemMediaSessionsChange", error);
+    return;
+  }
+  for (const listener of [...to]) {
+    if (!listeners.has(listener)) continue;
+    try { listener(sessions); } catch (error) { console.error("[tarve] onSystemMediaSessionsChange", error); }
+  }
+}
+
+function startWatching(): void {
+  const callback = threadsafeCallback((version: bigint) => {
+    // Several changes queued while JavaScript was busy: the list read now already has the last one.
+    if (!watching || version <= watching.version) return;
+    watching.version = version;
+    deliver(listeners);
+  }, { args: ["u64"] });
+  watchLibrary ??= openPluginLibrary(ownLibraryPath("onSystemMediaSessionsChange"), WATCH_SYMBOLS, "onSystemMediaSessionsChange");
+  watching = { callback, version: 0n };
+  if (watchLibrary.symbols.tarve_media_sessions_watch(callback.pointer) < 0) {
+    watching = undefined;
+    callback.close();
+    throw withLibrary(library => failure(library, "onSystemMediaSessionsChange"));
+  }
+}
+
+function stopWatching(): void {
+  if (!watching) return;
+  const { callback } = watching;
+  watching = undefined;
+  watchLibrary?.symbols.tarve_media_sessions_unwatch();
+  callback.close();
 }
 
 function failure(library: Library, call: string): Error {
@@ -76,6 +127,7 @@ function checkAction(appId: string, action: SystemMediaSessionAction): void {
  * the one media keys reach marked `current`. Windows only; resolves `[]` elsewhere.
  */
 export async function systemMediaSessions(): Promise<ExternalMediaSession[]> {
+  // While onSystemMediaSessionsChange listens, this reads the list it keeps: no call into Windows.
   if (process.platform !== "win32") return [];
   return withLibrary(readMediaSessions);
 }
@@ -90,3 +142,40 @@ export async function controlSystemMediaSession(appId: string, action: SystemMed
   if (process.platform !== "win32") return false;
   return withLibrary(library => sendMediaSessionAction(library, appId, action));
 }
+
+/**
+ * Calls `listener` with every app's media sessions now and whenever they change: an app starts or
+ * stops playing, the current session, the track, the play state or the timeline (a seek, a new
+ * position the app published). Windows events, not polling: one native thread follows them, and
+ * a burst of events gives one call. While anyone listens, `systemMediaSessions()` answers from the
+ * same list without asking Windows. Returns the unsubscribe function; the watch stops with the
+ * last listener. Windows only; elsewhere the listener gets `[]` once.
+ *
+ * `position` is where the track was when the app last published its timeline (apps do so on
+ * seeks and every few seconds, not continuously): advance it while `playing`.
+ */
+export function onSystemMediaSessionsChange(listener: (sessions: ExternalMediaSession[]) => void): () => void {
+  if (typeof listener !== "function") throw new TypeError("onSystemMediaSessionsChange: listener must be a function");
+  if (process.platform !== "win32") {
+    let active = true;
+    queueMicrotask(() => { if (active) listener([]); });
+    return () => { active = false; };
+  }
+  const subscriber: SessionsListener = sessions => listener(sessions);
+  listeners.add(subscriber);
+  if (!watching) {
+    try {
+      startWatching();
+    } catch (error) {
+      listeners.delete(subscriber);
+      throw error;
+    }
+  }
+  // Its first list, from the kept one (the watch already published it).
+  queueMicrotask(() => deliver([subscriber]));
+  return () => {
+    if (!listeners.delete(subscriber)) return;
+    if (!listeners.size) stopWatching();
+  };
+}
+

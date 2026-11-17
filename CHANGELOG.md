@@ -2,6 +2,26 @@
 
 All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `@tarve/svelte` and `@tarve/mcp` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
+## Unreleased
+
+### Added
+
+- `threadsafeCallback(run, { args, returns, copy })`: a C function pointer native code may call from any thread (thread pools, RPC/COM threads, audio threads), on Bun, Node.js and txiki.js alike. Each call queues its arguments in Tarve's library (`native/src/threadsafe.rs`, native ABI 8), returns `returns` at once and wakes the JavaScript thread through a pipe, where `run` runs in call order, as bun:ffi's `JSCallback({ threadsafe: true })` does. Up to 6 integer or pointer arguments (no floating point), 128 open at once; `copy` takes the bytes a pointer argument names during the call. An open callback keeps the process alive; a closed one stays safe to call. `threadsafeComObject({ iids, methods })` builds a COM event sink around them: QueryInterface, AddRef and Release answer natively (IUnknown, IAgileObject and `iids`). `bun run smoke:threadsafe` checks the three desktop runtimes against each other.
+- `app.layoutAsync(ids)`: `app.layout` without blocking the JavaScript thread.
+- `onSystemMediaSessionsChange(listener)`: other apps' media sessions as Windows events instead of polling (sessions coming and going, the current one, track, play state, timeline). One native thread keeps the session manager and its subscriptions, rebuilds the list once per burst of events and reads media properties and artwork again only for the session that changed them; the listener runs through a threadsafe callback. While anyone listens, `systemMediaSessions()` answers from that list without calling into Windows.
+
+### Fixed
+
+- `systemMediaSessions()` and `controlSystemMediaSession()` keep Tarve's library open instead of loading and unloading it on every call.
+
+### Changed
+
+- `store()`: a change renders again only the windows whose renders read the changed data (reads add up across renders), instead of every open window.
+- txiki.js on Windows: `spawn(..., { windowsHide: true })` starts the child with `CREATE_NO_WINDOW` (no console window flashes), with asynchronous named-pipe stdio and its exit from `tarve_watch_process`.
+- A repeated `key` among siblings warns once and keeps both children (`#1`, `#2`… ids) instead of failing every render; a repeated explicit `id` is still an error.
+- A local `<Image src>` that failed to load is not read nor reported again until its source changes or it mounts again.
+- `requestSingleInstance` waits up to about 10 s for a previous instance that is still quitting.
+
 ## 0.13.2 — 2026-11-17
 
 ### Added

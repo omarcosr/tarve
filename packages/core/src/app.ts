@@ -18,7 +18,7 @@ import { editShadowNode, nativeShadow, reconciliationCommand } from "./app/shado
 import { createTrayController, type TrayHandle, type TrayOptions } from "./app/tray";
 import { createMenuBarController, withMenuBar, type MenuBarItem, type MenuBarOptions } from "./app/menu-bar";
 import { onToastsChange, withToasts } from "./toast";
-import { onStoreChange } from "./store";
+import { onStoreChange, trackStoreReads, type StoreReads } from "./store";
 import { AppMenuBar, menuBarState } from "./menu-bar";
 import { withRenderScope } from "./render-scope";
 export type { MenuBarItem, MenuBarOptions } from "./app/menu-bar";
@@ -102,6 +102,8 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   /** A window opened with openWindow: its opener shows the toasts and takes uncaught errors. */
   const openedWindow = !!(options.bridge && childWindowBridges.has(options.bridge));
   let renderScope: object = {};
+  /** The store() data this window's renders read: only changes to it render the window again. */
+  const storeReads: StoreReads = new WeakMap();
   let currentView = view;
   const devMode = options.dev === undefined ? envFlag("TARVE_DEV") : options.dev !== false;
   const wantsInspector = !(options.bridge && childWindowBridges.has(options.bridge)) && options.dev !== false
@@ -160,7 +162,7 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     const compile = () => compileTree(
       (openedWindow ? (view: VNode) => view : withToasts)(drawnMenu ? withMenuBar(currentView(), jsx(AppMenuBar, { id: APP_MENU_BAR_ID, items: drawnMenu, onSelect: (id: string) => onNativeEvent({ type: "menu", id }) })) : currentView()), options.debug, renderer, options.componentAdapters, scope, !options.headless, viewport,
     );
-    const tracked = trackViewport(size, () => withRenderScope(scope, () => inspector ? inspector.compile(compile) : compile()));
+    const tracked = trackViewport(size, () => trackStoreReads(storeReads, () => withRenderScope(scope, () => inspector ? inspector.compile(compile) : compile())));
     const tree = tracked.value;
     inspector?.decorate(tree);
     // `viewport()` read the size: the root reports it, and any change re-renders.
@@ -233,8 +235,10 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
   void closed.then(() => { device?.dispose(); notifications.dispose(); });
   // toast(): every app re-renders its Toaster when the queue changes.
   if (!openedWindow) void closed.then(onToastsChange(() => { if (started && !ended) update(); }));
-  // store(): a change anywhere renders every open window again (update() batches the renders).
-  void closed.then(onStoreChange(() => { if (started && !ended) update(); }));
+  // store(): a change renders again the windows whose renders read the changed data (update()
+  // batches the renders). Reads add up across renders: a memoized subtree that is reused
+  // without running keeps depending on what it read when it last ran.
+  void closed.then(onStoreChange(() => { if (started && !ended) update(); }, storeReads));
   // With onError, uncaught errors are the app's (Node and Bun would otherwise exit, closing the
   // window); a window opened with openWindow leaves them to its opener.
   if (options.onError && !openedWindow) {
@@ -873,6 +877,17 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       } catch (error) {
         reportError(error, { source: "bridge", event: "layout" });
         return undefined;
+      }
+    },
+    async layoutAsync(ids: string[]): Promise<Record<string, LayoutBox> | undefined> {
+      if (ended || closing) return undefined;
+      if (queued) renderQueued();
+      try {
+        const event = await requests.request({ type: "layout", ids, requestId: crypto.randomUUID() });
+        return event.type === "layout" ? event.boxes : undefined;
+      } catch (error) {
+        if (ended || closing) return undefined;
+        throw error;
       }
     },
     textSelection(): { id: string; anchor: number; focus: number } | undefined {

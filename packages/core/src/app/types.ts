@@ -203,6 +203,12 @@ export interface AppHandle {
    */
   layout(ids: string[]): Record<string, LayoutBox> | undefined;
   /**
+   * `layout` without blocking: renders a queued update, then resolves with these nodes'
+   * boxes once native answers, while the JS thread keeps running (another window opening
+   * does not freeze it). `undefined` when the app has closed.
+   */
+  layoutAsync(ids: string[]): Promise<Record<string, LayoutBox> | undefined>;
+  /**
    * The focused text field and its selection (UTF-8 offsets into its value), read
    * synchronously. `undefined` when nothing editable has focus or the bridge cannot answer.
    */

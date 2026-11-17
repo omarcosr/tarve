@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { controlSystemMediaSession, readMediaSessions, sendMediaSessionAction, systemMediaSessions, type ExternalMediaSession } from "./media-sessions";
+import { nativePath } from "./bridge/runtime";
+import { controlSystemMediaSession, onSystemMediaSessionsChange, readMediaSessions, sendMediaSessionAction, systemMediaSessions, type ExternalMediaSession } from "./media-sessions";
+
+const hasNative = (() => { try { nativePath(); return true; } catch { return false; } })();
 
 // The native calls themselves are covered by native/src/media_sessions.rs; here a stand-in
 // library checks the buffer protocol and the argument handling around them.
@@ -53,6 +56,29 @@ describe("system media sessions", () => {
   test("an unknown action or empty app id is rejected", async () => {
     await expect(controlSystemMediaSession("x", "stop" as never)).rejects.toThrow(TypeError);
     await expect(controlSystemMediaSession("", "play")).rejects.toThrow(TypeError);
+  });
+
+  test.skipIf(process.platform !== "win32" || !hasNative)("onSystemMediaSessionsChange delivers the kept list, which systemMediaSessions then reads, until the last listener leaves", async () => {
+    const first: ExternalMediaSession[][] = [];
+    const second: ExternalMediaSession[][] = [];
+    const stopFirst = onSystemMediaSessionsChange(sessions => first.push(sessions));
+    const stopSecond = onSystemMediaSessionsChange(sessions => second.push(sessions));
+    try {
+      for (let tries = 0; tries < 100 && (!first.length || !second.length); tries++) await new Promise(resolve => setTimeout(resolve, 10));
+      expect(Array.isArray(first[0])).toBe(true);
+      expect(second[0]).toEqual(first.at(-1)!);
+      expect(await systemMediaSessions()).toEqual(first.at(-1)!);
+    } finally {
+      stopFirst();
+      stopFirst();
+      stopSecond();
+    }
+    // Listening again starts a new watch.
+    const again: ExternalMediaSession[][] = [];
+    const stopAgain = onSystemMediaSessionsChange(sessions => again.push(sessions));
+    for (let tries = 0; tries < 100 && !again.length; tries++) await new Promise(resolve => setTimeout(resolve, 10));
+    stopAgain();
+    expect(again.length).toBeGreaterThan(0);
   });
 
   test.skipIf(process.platform === "win32")("other platforms have no sessions to read or control", async () => {
