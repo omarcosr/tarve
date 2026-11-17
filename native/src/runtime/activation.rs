@@ -16,6 +16,7 @@ pub(super) fn activates_on_show(mode: WindowActivation) -> bool {
 
 /// The non-activating state a window moves to when an editable field gains (`editing`) or
 /// loses focus, or `None` when it stays as it is.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(super) fn next_no_activate(
     mode: WindowActivation,
     no_activate: bool,

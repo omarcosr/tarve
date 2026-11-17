@@ -135,6 +135,7 @@ pub(crate) fn slot_of(address: u64) -> Option<usize> {
 /// native/src/message_window.rs) with `bytes` as its copied data, of any length up to
 /// [`MAX_COPY`] (longer is cut): the same record, queue, order and wake-up as a call through its
 /// entry. False when the slot is not open.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub(crate) fn post(index: usize, args: [u64; ARGS], bytes: &[u8]) -> bool {
     let Some(slot) = TABLE.get(index) else {
         return false;

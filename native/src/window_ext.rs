@@ -177,6 +177,7 @@ pub(crate) fn app_bar(
     set_app_bar(hwnd, edge, thickness, overlap, system_shell)
 }
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn horizontal(edge: AppBarEdge) -> bool {
     matches!(edge, AppBarEdge::Top | AppBarEdge::Bottom)
 }
@@ -508,4 +509,6 @@ pub(crate) fn release_window(window: &Window) {
 }
 
 mod screens;
-pub(crate) use screens::{screens, screens_change, screens_maybe_changed};
+pub(crate) use screens::{screens, screens_change};
+#[cfg(target_os = "windows")]
+pub(crate) use screens::screens_maybe_changed;
