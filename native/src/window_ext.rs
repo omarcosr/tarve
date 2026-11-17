@@ -509,6 +509,6 @@ pub(crate) fn release_window(window: &Window) {
 }
 
 mod screens;
-pub(crate) use screens::{screens, screens_change};
 #[cfg(target_os = "windows")]
 pub(crate) use screens::screens_maybe_changed;
+pub(crate) use screens::{screens, screens_change};
