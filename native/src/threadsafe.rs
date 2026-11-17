@@ -126,7 +126,9 @@ fn record(id: u32, args: [u64; ARGS], copied: &[u8]) -> Vec<u8> {
 
 /// The slot of the callback whose entry is at `address`, for [`post`].
 pub(crate) fn slot_of(address: u64) -> Option<usize> {
-    ENTRIES.iter().position(|entry| *entry as usize as u64 == address)
+    ENTRIES
+        .iter()
+        .position(|entry| *entry as usize as u64 == address)
 }
 
 /// Queues a call of callback slot `index` from Rust (a native producer such as
@@ -141,7 +143,11 @@ pub(crate) fn post(index: usize, args: [u64; ARGS], bytes: &[u8]) -> bool {
     if slot.state.load(Ordering::Acquire) != ACTIVE {
         return false;
     }
-    push(record(id, args, &bytes[..bytes.len().min(MAX_COPY as usize)]));
+    push(record(
+        id,
+        args,
+        &bytes[..bytes.len().min(MAX_COPY as usize)],
+    ));
     true
 }
 
@@ -157,7 +163,13 @@ fn push(record: Vec<u8>) {
         queue.push_back(record);
         was_empty
     };
-    if was_empty && let Some(wake) = calls.wake.lock().unwrap_or_else(|p| p.into_inner()).as_mut() {
+    if was_empty
+        && let Some(wake) = calls
+            .wake
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_mut()
+    {
         wake.signal();
     }
 }
@@ -175,10 +187,14 @@ pub(crate) fn pipe_name() -> Result<String, String> {
 /// pointed-to `copy_len` bytes each call copies (`u32::MAX` for none).
 pub(crate) fn create(id: u32, returns: u64, copy_arg: u32, copy_len: u32) -> Result<u64, String> {
     if copy_arg != NO_COPY && copy_arg as usize >= ARGS {
-        return Err(format!("A threadsafe callback copies from one of its first {ARGS} arguments"));
+        return Err(format!(
+            "A threadsafe callback copies from one of its first {ARGS} arguments"
+        ));
     }
     if copy_len > MAX_COPY {
-        return Err(format!("A threadsafe callback copies at most {MAX_COPY} bytes per call"));
+        return Err(format!(
+            "A threadsafe callback copies at most {MAX_COPY} bytes per call"
+        ));
     }
     for (index, slot) in TABLE.iter().enumerate() {
         if slot
@@ -189,7 +205,10 @@ pub(crate) fn create(id: u32, returns: u64, copy_arg: u32, copy_len: u32) -> Res
             slot.id.store(id, Ordering::Release);
             slot.returns.store(returns, Ordering::Release);
             slot.copy_arg.store(copy_arg, Ordering::Release);
-            slot.copy_len.store(if copy_arg == NO_COPY { 0 } else { copy_len }, Ordering::Release);
+            slot.copy_len.store(
+                if copy_arg == NO_COPY { 0 } else { copy_len },
+                Ordering::Release,
+            );
             slot.state.store(ACTIVE, Ordering::Release);
             return Ok(ENTRIES[index] as usize as u64);
         }
@@ -256,7 +275,11 @@ const S_OK: i32 = 0;
 const E_NOINTERFACE: i32 = 0x8000_4002_u32 as i32;
 const E_POINTER: i32 = 0x8000_4003_u32 as i32;
 
-extern "system" fn query_interface(this: *mut ComObject, iid: *const [u8; 16], out: *mut *mut c_void) -> i32 {
+extern "system" fn query_interface(
+    this: *mut ComObject,
+    iid: *const [u8; 16],
+    out: *mut *mut c_void,
+) -> i32 {
     if out.is_null() {
         return E_POINTER;
     }
@@ -297,7 +320,8 @@ pub(crate) fn com_object(iids: Vec<[u8; 16]>, methods: &[u64]) -> Result<u64, St
     if methods.contains(&0) {
         return Err("A COM object method is a null pointer".into());
     }
-    type QueryInterface = extern "system" fn(*mut ComObject, *const [u8; 16], *mut *mut c_void) -> i32;
+    type QueryInterface =
+        extern "system" fn(*mut ComObject, *const [u8; 16], *mut *mut c_void) -> i32;
     type Count = extern "system" fn(*mut ComObject) -> u32;
     let mut table = vec![
         query_interface as QueryInterface as usize,
@@ -361,20 +385,34 @@ mod tests {
         let _turn = serial();
         let address = create(7001, 0x8000_4005, 1, 4).unwrap();
         // SAFETY: the address is one of ENTRIES.
-        let function: extern "C" fn(u64, u64) -> u64 = unsafe { std::mem::transmute(address as usize) };
+        let function: extern "C" fn(u64, u64) -> u64 =
+            unsafe { std::mem::transmute(address as usize) };
         let data = [1u8, 2, 3, 4];
         let pointer = data.as_ptr() as usize as u64;
-        let result = std::thread::spawn(move || function(42, pointer)).join().unwrap();
+        let result = std::thread::spawn(move || function(42, pointer))
+            .join()
+            .unwrap();
         assert_eq!(result, 0x8000_4005);
         assert_eq!(function(43, 0), 0x8000_4005);
         assert!(close(address));
-        assert_eq!(function(44, 0), 0x8000_4005, "a closed callback still returns");
+        assert_eq!(
+            function(44, 0),
+            0x8000_4005,
+            "a closed callback still returns"
+        );
         let mut out = vec![0u8; 4096];
         let written = poll(&mut out).unwrap();
-        let mine: Vec<_> = records(&out[..written]).into_iter().filter(|record| record.0 == 7001).collect();
+        let mine: Vec<_> = records(&out[..written])
+            .into_iter()
+            .filter(|record| record.0 == 7001)
+            .collect();
         assert_eq!(mine.len(), 2);
         assert_eq!((mine[0].1[0], mine[0].2.clone()), (42, vec![1, 2, 3, 4]));
-        assert_eq!((mine[1].1[0], mine[1].2.len()), (43, 0), "a null pointer copies nothing");
+        assert_eq!(
+            (mine[1].1[0], mine[1].2.len()),
+            (43, 0),
+            "a null pointer copies nothing"
+        );
         assert!(!close(address), "closing twice is a no-op");
     }
 
@@ -388,7 +426,11 @@ mod tests {
         assert_eq!(poll(&mut small), Err(RECORD_HEADER));
         let mut out = vec![0u8; 4096];
         let written = poll(&mut out).unwrap();
-        assert!(records(&out[..written]).iter().any(|record| record.0 == 7002));
+        assert!(
+            records(&out[..written])
+                .iter()
+                .any(|record| record.0 == 7002)
+        );
         close(address);
     }
 
@@ -422,14 +464,27 @@ mod tests {
         assert!(post(index, [1, 2, 3, 4, 5, 6], b"abc"));
         assert!(post(index, [7, 0, 0, 0, 0, 0], &long));
         assert!(close(address));
-        assert!(!post(index, [8, 0, 0, 0, 0, 0], &[]), "a closed slot takes no posts");
+        assert!(
+            !post(index, [8, 0, 0, 0, 0, 0], &[]),
+            "a closed slot takes no posts"
+        );
         assert!(!post(SLOTS, [0; ARGS], &[]));
         let mut out = vec![0u8; 2 * (RECORD_HEADER + MAX_COPY as usize) + 4096];
         let written = poll(&mut out).unwrap();
-        let mine: Vec<_> = records(&out[..written]).into_iter().filter(|record| record.0 == 7005).collect();
+        let mine: Vec<_> = records(&out[..written])
+            .into_iter()
+            .filter(|record| record.0 == 7005)
+            .collect();
         assert_eq!(mine.len(), 2);
-        assert_eq!((mine[0].1, mine[0].2.clone()), ([1, 2, 3, 4, 5, 6], b"abc".to_vec()));
-        assert_eq!((mine[1].1[0], mine[1].2.len()), (7, MAX_COPY as usize), "cut to MAX_COPY");
+        assert_eq!(
+            (mine[0].1, mine[0].2.clone()),
+            ([1, 2, 3, 4, 5, 6], b"abc".to_vec())
+        );
+        assert_eq!(
+            (mine[1].1[0], mine[1].2.len()),
+            (7, MAX_COPY as usize),
+            "cut to MAX_COPY"
+        );
     }
 
     #[test]

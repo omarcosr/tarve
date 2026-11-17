@@ -161,7 +161,12 @@ pub unsafe extern "C" fn tarve_threadsafe_pipe_name(out: *mut u8, capacity: u32)
 /// address that argument holds. 0 when it cannot open one (tarve_last_error says why).
 #[cfg(not(target_arch = "wasm32"))]
 #[unsafe(no_mangle)]
-pub extern "C" fn tarve_threadsafe_callback(id: u32, returns: u64, copy_arg: u32, copy_len: u32) -> u64 {
+pub extern "C" fn tarve_threadsafe_callback(
+    id: u32,
+    returns: u64,
+    copy_arg: u32,
+    copy_len: u32,
+) -> u64 {
     match crate::threadsafe::create(id, returns, copy_arg, copy_len) {
         Ok(address) => address,
         Err(message) => {
@@ -218,7 +223,12 @@ pub unsafe extern "C" fn tarve_com_object(
 ) -> u64 {
     let built = (|| {
         let iid_bytes = unsafe { input(iids, count.checked_mul(16).ok_or("Too many IIDs")?)? };
-        let method_bytes = unsafe { input(methods, methods_count.checked_mul(8).ok_or("Too many methods")?)? };
+        let method_bytes = unsafe {
+            input(
+                methods,
+                methods_count.checked_mul(8).ok_or("Too many methods")?,
+            )?
+        };
         let iids = iid_bytes.as_chunks::<16>().0.to_vec();
         let methods: Vec<u64> = method_bytes
             .as_chunks::<8>()
@@ -304,9 +314,18 @@ pub extern "C" fn tarve_message_window_reply(id: u64, sequence: u64, value: i64)
 
 /// Sets (`set` 1) or clears (`set` 0) the fixed LRESULT of `message`: 1, or 0 for no such window.
 #[unsafe(no_mangle)]
-pub extern "C" fn tarve_message_window_set_reply(id: u64, message: u32, set: u32, value: i64) -> i32 {
+pub extern "C" fn tarve_message_window_set_reply(
+    id: u64,
+    message: u32,
+    set: u32,
+    value: i64,
+) -> i32 {
     #[cfg(target_os = "windows")]
-    return i32::from(crate::message_window::set_reply(id, message, (set != 0).then_some(value)));
+    return i32::from(crate::message_window::set_reply(
+        id,
+        message,
+        (set != 0).then_some(value),
+    ));
     #[cfg(not(target_os = "windows"))]
     {
         let _ = (id, message, set, value);
@@ -341,8 +360,8 @@ mod process_watch {
         Storage::FileSystem::{FlushFileBuffers, PIPE_ACCESS_OUTBOUND, WriteFile},
         System::{
             Pipes::{
-                ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_REJECT_REMOTE_CLIENTS,
-                PIPE_TYPE_BYTE, PIPE_WAIT,
+                ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe,
+                PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT,
             },
             Threading::{GetCurrentProcess, GetExitCodeProcess, INFINITE, WaitForSingleObject},
         },
@@ -371,7 +390,10 @@ mod process_watch {
             )
         };
         if duplicated == 0 {
-            return Err(format!("Invalid process handle (Windows error {})", unsafe { GetLastError() }));
+            return Err(format!(
+                "Invalid process handle (Windows error {})",
+                unsafe { GetLastError() }
+            ));
         }
         let wide: Vec<u16> = name.encode_utf16().chain([0]).collect();
         // SAFETY: a NUL-terminated name; the handle is checked below.
@@ -390,7 +412,9 @@ mod process_watch {
         if pipe == INVALID_HANDLE_VALUE {
             let error = unsafe { GetLastError() };
             unsafe { CloseHandle(own) };
-            return Err(format!("Could not create the exit pipe (Windows error {error})"));
+            return Err(format!(
+                "Could not create the exit pipe (Windows error {error})"
+            ));
         }
         let (own, pipe) = (own as usize, pipe as usize);
         let spawned = std::thread::Builder::new()

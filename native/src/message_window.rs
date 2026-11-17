@@ -27,8 +27,8 @@ use std::{
 };
 use windows_sys::Win32::{
     Foundation::{
-        CloseHandle, GetLastError, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, LRESULT, WAIT_OBJECT_0,
-        WPARAM,
+        CloseHandle, GetLastError, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, LRESULT,
+        WAIT_OBJECT_0, WPARAM,
     },
     Storage::FileSystem::{
         FindCloseChangeNotification, FindFirstChangeNotificationW, FindNextChangeNotification,
@@ -41,14 +41,12 @@ use windows_sys::Win32::{
         },
         Threading::{CreateEventW, INFINITE, SetEvent},
     },
-    UI::{
-        WindowsAndMessaging::{
-            CreateWindowExW, DefWindowProcW, DeregisterShellHookWindow, DestroyWindow, RegisterShellHookWindow, DispatchMessageW, HWND_MESSAGE,
-            ISMEX_NOTIFY, ISMEX_REPLIED, InSendMessageEx, MSG, MWMO_INPUTAVAILABLE,
-            MsgWaitForMultipleObjectsEx, PM_REMOVE, PeekMessageW, QS_ALLINPUT, RegisterClassExW,
-            RegisterWindowMessageW, UnregisterClassW, WM_CLOSE, WNDCLASSEXW, WS_EX_NOACTIVATE,
-            WS_EX_TOOLWINDOW, WS_POPUP,
-        },
+    UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DeregisterShellHookWindow, DestroyWindow,
+        DispatchMessageW, HWND_MESSAGE, ISMEX_NOTIFY, ISMEX_REPLIED, InSendMessageEx, MSG,
+        MWMO_INPUTAVAILABLE, MsgWaitForMultipleObjectsEx, PM_REMOVE, PeekMessageW, QS_ALLINPUT,
+        RegisterClassExW, RegisterShellHookWindow, RegisterWindowMessageW, UnregisterClassW,
+        WM_CLOSE, WNDCLASSEXW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
     },
 };
 
@@ -210,7 +208,10 @@ fn register_name(name: &str) -> Result<u32, String> {
     // SAFETY: a NUL-terminated name.
     let id = unsafe { RegisterWindowMessageW(wide(name).as_ptr()) };
     if id == 0 {
-        return Err(format!("RegisterWindowMessageW(\"{name}\") failed (Windows error {})", unsafe { GetLastError() }));
+        return Err(format!(
+            "RegisterWindowMessageW(\"{name}\") failed (Windows error {})",
+            unsafe { GetLastError() }
+        ));
     }
     Ok(id)
 }
@@ -244,14 +245,25 @@ fn hive(key: &str) -> Result<(HKEY, &str), String> {
         "HKCR" | "HKEY_CLASSES_ROOT" => HKEY_CLASSES_ROOT,
         "HKU" | "HKEY_USERS" => HKEY_USERS,
         "HKCC" | "HKEY_CURRENT_CONFIG" => HKEY_CURRENT_CONFIG,
-        _ => return Err(format!("Registry key \"{key}\" must start with HKCU, HKLM, HKCR, HKU or HKCC")),
+        _ => {
+            return Err(format!(
+                "Registry key \"{key}\" must start with HKCU, HKLM, HKCR, HKU or HKCC"
+            ));
+        }
     };
     Ok((hive, rest))
 }
 
 enum Watch {
-    Registry { key: HKEY, event: HANDLE, subtree: bool, filter: u32 },
-    Folder { handle: HANDLE },
+    Registry {
+        key: HKEY,
+        event: HANDLE,
+        subtree: bool,
+        filter: u32,
+    },
+    Folder {
+        handle: HANDLE,
+    },
 }
 
 impl Watch {
@@ -267,9 +279,12 @@ impl Watch {
         // SAFETY: handles this watch owns.
         unsafe {
             match self {
-                Watch::Registry { key, event, subtree, filter } => {
-                    RegNotifyChangeKeyValue(*key, i32::from(*subtree), *filter, *event, 1) == 0
-                }
+                Watch::Registry {
+                    key,
+                    event,
+                    subtree,
+                    filter,
+                } => RegNotifyChangeKeyValue(*key, i32::from(*subtree), *filter, *event, 1) == 0,
                 Watch::Folder { handle } => FindNextChangeNotification(*handle) != 0,
             }
         }
@@ -344,9 +359,20 @@ impl Local {
         }
         // WM_CLOSE (taskkill, an Alt+F4 sent from outside) never destroys the window: dispose() does.
         let fallback = |hwnd, message, wparam, lparam| {
-            if message == WM_CLOSE { 0 } else { unsafe { DefWindowProcW(hwnd, message, wparam, lparam) } }
+            if message == WM_CLOSE {
+                0
+            } else {
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            }
         };
-        let fixed = |message| self.shared.replies.lock().unwrap_or_else(|p| p.into_inner()).get(&message).copied();
+        let fixed = |message| {
+            self.shared
+                .replies
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .get(&message)
+                .copied()
+        };
         if self.messages.binary_search(&message).is_err() || !self.live.get() {
             return fixed(message).unwrap_or_else(|| fallback(hwnd, message, wparam, lparam));
         }
@@ -360,13 +386,25 @@ impl Local {
         let sequence = if waits {
             let sequence = self.next.get() + 1;
             self.next.set(sequence);
-            *self.shared.answer.lock().unwrap_or_else(|p| p.into_inner()) =
-                Answer { waiting: sequence, value: None };
+            *self.shared.answer.lock().unwrap_or_else(|p| p.into_inner()) = Answer {
+                waiting: sequence,
+                value: None,
+            };
             sequence
         } else {
             0
         };
-        self.post([KIND_MESSAGE, u64::from(message), wparam as u64, lparam as u64, sequence, 0], &bytes);
+        self.post(
+            [
+                KIND_MESSAGE,
+                u64::from(message),
+                wparam as u64,
+                lparam as u64,
+                sequence,
+                0,
+            ],
+            &bytes,
+        );
         let mut answer = None;
         if waits {
             let deadline = Instant::now() + self.timeout;
@@ -389,7 +427,9 @@ impl Local {
             answer = state.value.take();
             state.waiting = 0;
         }
-        answer.or_else(|| fixed(message)).unwrap_or_else(|| fallback(hwnd, message, wparam, lparam))
+        answer
+            .or_else(|| fixed(message))
+            .unwrap_or_else(|| fallback(hwnd, message, wparam, lparam))
     }
 }
 
@@ -443,8 +483,17 @@ unsafe fn copied(message: u32, wparam: WPARAM, lparam: LPARAM) -> Vec<u8> {
     }
 }
 
-unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    let handled = LOCAL.with(|local| local.get().map(|local| local.message(hwnd, message, wparam, lparam)));
+unsafe extern "system" fn window_proc(
+    hwnd: HWND,
+    message: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    let handled = LOCAL.with(|local| {
+        local
+            .get()
+            .map(|local| local.message(hwnd, message, wparam, lparam))
+    });
     // SAFETY: Windows' own arguments.
     handled.unwrap_or_else(|| unsafe { DefWindowProcW(hwnd, message, wparam, lparam) })
 }
@@ -461,7 +510,17 @@ unsafe extern "system" fn win_event(
     LOCAL.with(|local| {
         if let Some(local) = local.get() {
             let ids = u64::from(object as u32) | (u64::from(child as u32) << 32);
-            local.post([KIND_WIN_EVENT, u64::from(event), hwnd as u64, ids, u64::from(thread), u64::from(time)], &[]);
+            local.post(
+                [
+                    KIND_WIN_EVENT,
+                    u64::from(event),
+                    hwnd as u64,
+                    ids,
+                    u64::from(thread),
+                    u64::from(time),
+                ],
+                &[],
+            );
         }
     });
 }
@@ -478,7 +537,12 @@ fn class_name(options: &Options, id: u64) -> Result<String, String> {
 
 /// Builds the window and everything it listens to on this (its own) thread: the info JavaScript
 /// gets back, and what to release when the thread ends.
-fn setup(options: Options, slot: usize, shared: Arc<Shared>, id: u64) -> Result<(String, Resources), String> {
+fn setup(
+    options: Options,
+    slot: usize,
+    shared: Arc<Shared>,
+    id: u64,
+) -> Result<(String, Resources), String> {
     let mut named = HashMap::new();
     let wait = resolve(&options.wait_replies, &mut named)?;
     // A message JavaScript answers is one it gets.
@@ -494,7 +558,11 @@ fn setup(options: Options, slot: usize, shared: Arc<Shared>, id: u64) -> Result<
             table.insert(id, value as isize);
         }
     }
-    let shell = if options.shell_hook { register_name("SHELLHOOK")? } else { 0 };
+    let shell = if options.shell_hook {
+        register_name("SHELLHOOK")?
+    } else {
+        0
+    };
     let class = wide(&class_name(&options, id)?);
     // SAFETY: the module this code is in loaded the process image; null names the exe.
     let instance = unsafe { GetModuleHandleW(ptr::null()) };
@@ -513,7 +581,10 @@ fn setup(options: Options, slot: usize, shared: Arc<Shared>, id: u64) -> Result<
             messages,
             wait,
             timeout: Duration::from_millis(u64::from(
-                options.reply_timeout.unwrap_or(DEFAULT_REPLY_TIMEOUT_MS).min(MAX_REPLY_TIMEOUT_MS),
+                options
+                    .reply_timeout
+                    .unwrap_or(DEFAULT_REPLY_TIMEOUT_MS)
+                    .min(MAX_REPLY_TIMEOUT_MS),
             )),
             shell,
             next: Cell::new(0),
@@ -540,7 +611,9 @@ fn setup(options: Options, slot: usize, shared: Arc<Shared>, id: u64) -> Result<
         resources.registered_class = true;
         let title = wide(options.window_name.as_deref().unwrap_or(""));
         resources.hwnd = CreateWindowExW(
-            options.ex_style.unwrap_or(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE),
+            options
+                .ex_style
+                .unwrap_or(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE),
             resources.class.as_ptr(),
             title.as_ptr(),
             options.style.unwrap_or(WS_POPUP),
@@ -548,17 +621,27 @@ fn setup(options: Options, slot: usize, shared: Arc<Shared>, id: u64) -> Result<
             0,
             0,
             0,
-            if options.message_only { HWND_MESSAGE } else { ptr::null_mut() },
+            if options.message_only {
+                HWND_MESSAGE
+            } else {
+                ptr::null_mut()
+            },
             ptr::null_mut(),
             instance,
             ptr::null(),
         );
         if resources.hwnd.is_null() {
-            return Err(format!("CreateWindowExW failed (Windows error {})", GetLastError()));
+            return Err(format!(
+                "CreateWindowExW failed (Windows error {})",
+                GetLastError()
+            ));
         }
         if options.shell_hook {
             if RegisterShellHookWindow(resources.hwnd) == 0 {
-                return Err(format!("RegisterShellHookWindow failed (Windows error {})", GetLastError()));
+                return Err(format!(
+                    "RegisterShellHookWindow failed (Windows error {})",
+                    GetLastError()
+                ));
             }
             resources.shell_hook = true;
         }
@@ -573,7 +656,11 @@ fn setup(options: Options, slot: usize, shared: Arc<Shared>, id: u64) -> Result<
                 WINEVENT_OUTOFCONTEXT | (hook.flags & 0x3),
             );
             if handle.is_null() {
-                return Err(format!("SetWinEventHook({:#x}..{:#x}) failed", hook.min, hook.max.unwrap_or(hook.min)));
+                return Err(format!(
+                    "SetWinEventHook({:#x}..{:#x}) failed",
+                    hook.min,
+                    hook.max.unwrap_or(hook.min)
+                ));
             }
             resources.hooks.push(handle);
         }
@@ -582,14 +669,25 @@ fn setup(options: Options, slot: usize, shared: Arc<Shared>, id: u64) -> Result<
             let mut key: HKEY = ptr::null_mut();
             let opened = RegOpenKeyExW(root, wide(path).as_ptr(), 0, KEY_NOTIFY, &mut key);
             if opened != 0 {
-                return Err(format!("Could not open registry key \"{}\" (Windows error {opened})", watch.key));
+                return Err(format!(
+                    "Could not open registry key \"{}\" (Windows error {opened})",
+                    watch.key
+                ));
             }
             let event = CreateEventW(ptr::null(), 0, 0, ptr::null());
             if event.is_null() {
                 RegCloseKey(key);
-                return Err(format!("CreateEventW failed (Windows error {})", GetLastError()));
+                return Err(format!(
+                    "CreateEventW failed (Windows error {})",
+                    GetLastError()
+                ));
             }
-            resources.watches.push(Watch::Registry { key, event, subtree: watch.subtree, filter: watch.filter.unwrap_or(0x1 | 0x4) });
+            resources.watches.push(Watch::Registry {
+                key,
+                event,
+                subtree: watch.subtree,
+                filter: watch.filter.unwrap_or(0x1 | 0x4),
+            });
         }
         for watch in &options.folders {
             let handle = FindFirstChangeNotificationW(
@@ -598,7 +696,11 @@ fn setup(options: Options, slot: usize, shared: Arc<Shared>, id: u64) -> Result<
                 watch.filter.unwrap_or(0x1 | 0x2 | 0x10),
             );
             if handle == INVALID_HANDLE_VALUE || handle.is_null() {
-                return Err(format!("Could not watch folder \"{}\" (Windows error {})", watch.path, GetLastError()));
+                return Err(format!(
+                    "Could not watch folder \"{}\" (Windows error {})",
+                    watch.path,
+                    GetLastError()
+                ));
             }
             resources.watches.push(Watch::Folder { handle });
         }
@@ -634,7 +736,13 @@ fn pump(stop: HANDLE, resources: &Resources) {
         let count = handles.len() as u32;
         // SAFETY: open handles this thread owns.
         let woke = unsafe {
-            MsgWaitForMultipleObjectsEx(count, handles.as_ptr(), INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE)
+            MsgWaitForMultipleObjectsEx(
+                count,
+                handles.as_ptr(),
+                INFINITE,
+                QS_ALLINPUT,
+                MWMO_INPUTAVAILABLE,
+            )
         };
         if woke == WAIT_OBJECT_0 {
             return;
@@ -650,7 +758,10 @@ fn pump(stop: HANDLE, resources: &Resources) {
             }
             LOCAL.with(|local| {
                 if let Some(local) = local.get() {
-                    local.post([watch.kind(), index as u64, u64::from(!still), 0, 0, 0], &[]);
+                    local.post(
+                        [watch.kind(), index as u64, u64::from(!still), 0, 0, 0],
+                        &[],
+                    );
                 }
             });
         } else if woke == WAIT_OBJECT_0 + count {
@@ -672,15 +783,22 @@ fn pump(stop: HANDLE, resources: &Resources) {
 
 /// Opens a message window whose calls go to the threadsafe callback at `callback`: its id.
 pub(crate) fn open(options: Options, callback: u64) -> Result<u64, String> {
-    let slot = threadsafe::slot_of(callback).ok_or("messageWindow: the callback is not an open threadsafe callback")?;
+    let slot = threadsafe::slot_of(callback)
+        .ok_or("messageWindow: the callback is not an open threadsafe callback")?;
     if options.messages.len() + options.wait_replies.len() + options.replies.len() > MAX_MESSAGES {
-        return Err(format!("messageWindow takes at most {MAX_MESSAGES} messages"));
+        return Err(format!(
+            "messageWindow takes at most {MAX_MESSAGES} messages"
+        ));
     }
     if options.win_events.len() > MAX_WIN_EVENTS {
-        return Err(format!("messageWindow takes at most {MAX_WIN_EVENTS} winEvents"));
+        return Err(format!(
+            "messageWindow takes at most {MAX_WIN_EVENTS} winEvents"
+        ));
     }
     if options.registry.len() + options.folders.len() > MAX_WATCHES {
-        return Err(format!("messageWindow watches at most {MAX_WATCHES} registry keys and folders together"));
+        return Err(format!(
+            "messageWindow watches at most {MAX_WATCHES} registry keys and folders together"
+        ));
     }
     let id = NEXT_WINDOW.fetch_add(1, Ordering::Relaxed);
     let shared = Arc::new(Shared {
@@ -692,7 +810,9 @@ pub(crate) fn open(options: Options, callback: u64) -> Result<u64, String> {
     // SAFETY: a manual-reset event, closed by close() (or below on failure).
     let stop = unsafe { CreateEventW(ptr::null(), 1, 0, ptr::null()) };
     if stop.is_null() {
-        return Err(format!("CreateEventW failed (Windows error {})", unsafe { GetLastError() }));
+        return Err(format!("CreateEventW failed (Windows error {})", unsafe {
+            GetLastError()
+        }));
     }
     let stop_address = stop as usize;
     let (sender, receiver) = mpsc::sync_channel::<Result<String, String>>(1);
@@ -714,7 +834,9 @@ pub(crate) fn open(options: Options, callback: u64) -> Result<u64, String> {
         Ok(thread) => thread,
         Err(error) => {
             unsafe { CloseHandle(stop) };
-            return Err(format!("Could not start the message window thread: {error}"));
+            return Err(format!(
+                "Could not start the message window thread: {error}"
+            ));
         }
     };
     let info = match receiver.recv() {
@@ -730,7 +852,12 @@ pub(crate) fn open(options: Options, callback: u64) -> Result<u64, String> {
     };
     windows().lock().unwrap_or_else(|p| p.into_inner()).insert(
         id,
-        Window { shared, stop: stop_address, thread: Some(thread), info },
+        Window {
+            shared,
+            stop: stop_address,
+            thread: Some(thread),
+            info,
+        },
     );
     Ok(id)
 }
@@ -747,7 +874,12 @@ pub(crate) fn info(id: u64) -> Result<String, String> {
 
 /// JavaScript's answer to the waiting message `sequence`; false when it is no longer waited for.
 pub(crate) fn reply(id: u64, sequence: u64, value: i64) -> bool {
-    let Some(shared) = windows().lock().unwrap_or_else(|p| p.into_inner()).get(&id).map(|w| Arc::clone(&w.shared)) else {
+    let Some(shared) = windows()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&id)
+        .map(|w| Arc::clone(&w.shared))
+    else {
         return false;
     };
     let mut answer = shared.answer.lock().unwrap_or_else(|p| p.into_inner());
@@ -761,7 +893,12 @@ pub(crate) fn reply(id: u64, sequence: u64, value: i64) -> bool {
 
 /// Sets (`Some`) or clears the fixed answer to `message`.
 pub(crate) fn set_reply(id: u64, message: u32, value: Option<i64>) -> bool {
-    let Some(shared) = windows().lock().unwrap_or_else(|p| p.into_inner()).get(&id).map(|w| Arc::clone(&w.shared)) else {
+    let Some(shared) = windows()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(&id)
+        .map(|w| Arc::clone(&w.shared))
+    else {
         return false;
     };
     let mut table = shared.replies.lock().unwrap_or_else(|p| p.into_inner());
@@ -774,12 +911,20 @@ pub(crate) fn set_reply(id: u64, message: u32, value: Option<i64>) -> bool {
 
 /// Stops the window's thread and waits for it: hooks, window and class are gone when it returns.
 pub(crate) fn close(id: u64) -> bool {
-    let Some(mut window) = windows().lock().unwrap_or_else(|p| p.into_inner()).remove(&id) else {
+    let Some(mut window) = windows()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(&id)
+    else {
         return false;
     };
     window.shared.closing.store(true, Ordering::Release);
     {
-        let _answer = window.shared.answer.lock().unwrap_or_else(|p| p.into_inner());
+        let _answer = window
+            .shared
+            .answer
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         window.shared.answered.notify_all();
     }
     // SAFETY: the stop event this window owns.
@@ -810,7 +955,8 @@ mod tests {
                 let start = at + 8 + index * 8;
                 *arg = u64::from_le_bytes(out[start..start + 8].try_into().unwrap());
             }
-            let data = out[at + threadsafe::RECORD_HEADER..at + threadsafe::RECORD_HEADER + len].to_vec();
+            let data =
+                out[at + threadsafe::RECORD_HEADER..at + threadsafe::RECORD_HEADER + len].to_vec();
             into.push((id, args, data));
             at += threadsafe::RECORD_HEADER + len;
         }
@@ -864,7 +1010,11 @@ mod tests {
         let mut calls = Vec::new();
         // Windows handles sent messages before posted ones: let the posted ones through first.
         until(&mut calls, 8101, |mine| mine.len() >= 2);
-        assert_eq!(send(WM_APP + 3, 0, 0), 77, "not delivered, answered from the table");
+        assert_eq!(
+            send(WM_APP + 3, 0, 0),
+            77,
+            "not delivered, answered from the table"
+        );
         assert_eq!(send(WM_APP + 5, 0, 0), 0, "neither: DefWindowProc");
         let settings = wide("ImmersiveColorSet");
         send(WM_SETTINGCHANGE, 0, settings.as_ptr() as isize);
@@ -875,13 +1025,21 @@ mod tests {
             length: u32,
             bytes: *const u8,
         }
-        let copy = CopyData { data: 1, length: 4, bytes: payload.as_ptr() };
+        let copy = CopyData {
+            data: 1,
+            length: 4,
+            bytes: payload.as_ptr(),
+        };
         send(WM_COPYDATA, 0, &copy as *const CopyData as isize);
         until(&mut calls, 8101, |mine| mine.len() >= 4);
         let mine: Vec<&Call> = calls.iter().filter(|call| call.0 == 8101).collect();
         assert_eq!(mine[0].1[..4], [KIND_MESSAGE, u64::from(WM_APP + 1), 5, 6]);
         assert_eq!(mine[1].1[..4], [KIND_MESSAGE, u64::from(registered), 7, 8]);
-        let text: Vec<u16> = mine[2].2.chunks(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect();
+        let text: Vec<u16> = mine[2]
+            .2
+            .chunks(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
         assert_eq!(String::from_utf16(&text).unwrap(), "ImmersiveColorSet");
         assert_eq!(mine[3].2, [1, 0, 0, 0, 0, 0, 0, 0, b't', b'r', b'a', b'y']);
         // A sent message JavaScript answers (here: this thread, standing in for it).
@@ -894,9 +1052,19 @@ mod tests {
         assert_eq!(sender.join().unwrap(), 42);
         assert!(!reply(id, sequence, 43), "answered once");
         // Unanswered: the table after the timeout; a later set_reply changes it.
-        assert_eq!(std::thread::spawn(move || send(WM_APP + 4, 0, 0)).join().unwrap(), 9);
+        assert_eq!(
+            std::thread::spawn(move || send(WM_APP + 4, 0, 0))
+                .join()
+                .unwrap(),
+            9
+        );
         assert!(set_reply(id, WM_APP + 4, Some(-1)));
-        assert_eq!(std::thread::spawn(move || send(WM_APP + 4, 0, 0)).join().unwrap(), -1);
+        assert_eq!(
+            std::thread::spawn(move || send(WM_APP + 4, 0, 0))
+                .join()
+                .unwrap(),
+            -1
+        );
         assert!(close(id));
         assert!(!close(id));
         assert!(!reply(id, 1, 0));
@@ -908,7 +1076,8 @@ mod tests {
     fn watches_folders_and_reports_setup_errors() {
         let _turn = threadsafe::test_turn();
         let callback = threadsafe::create(8102, 0, u32::MAX, 0).unwrap();
-        let folder = std::env::temp_dir().join(format!("tarve-message-window-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("tarve-message-window-{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
         let id = open(
             options(serde_json::json!({
@@ -921,21 +1090,61 @@ mod tests {
         .unwrap();
         std::fs::write(folder.join("changed.txt"), b"x").unwrap();
         let mut calls = Vec::new();
-        until(&mut calls, 8102, |mine| mine.iter().any(|call| call.1[0] == KIND_FOLDER));
-        let folder_call = calls.iter().find(|call| call.0 == 8102 && call.1[0] == KIND_FOLDER).unwrap();
-        assert_eq!(folder_call.1[1], 1, "the watch's index among registry keys then folders");
+        until(&mut calls, 8102, |mine| {
+            mine.iter().any(|call| call.1[0] == KIND_FOLDER)
+        });
+        let folder_call = calls
+            .iter()
+            .find(|call| call.0 == 8102 && call.1[0] == KIND_FOLDER)
+            .unwrap();
+        assert_eq!(
+            folder_call.1[1], 1,
+            "the watch's index among registry keys then folders"
+        );
         assert!(close(id));
         let _ = std::fs::remove_dir_all(&folder);
 
-        let taken = open(options(serde_json::json!({ "className": "TarveMessageWindowTwice", "messageOnly": true })), callback).unwrap();
-        let error = open(options(serde_json::json!({ "className": "TarveMessageWindowTwice", "messageOnly": true })), callback).err().unwrap();
+        let taken = open(
+            options(
+                serde_json::json!({ "className": "TarveMessageWindowTwice", "messageOnly": true }),
+            ),
+            callback,
+        )
+        .unwrap();
+        let error = open(
+            options(
+                serde_json::json!({ "className": "TarveMessageWindowTwice", "messageOnly": true }),
+            ),
+            callback,
+        )
+        .err()
+        .unwrap();
         assert!(error.contains("already registered"), "{error}");
         assert!(close(taken));
-        let again = open(options(serde_json::json!({ "className": "TarveMessageWindowTwice", "messageOnly": true })), callback).unwrap();
-        assert!(close(again), "the class is unregistered when the window closes");
-        let error = open(options(serde_json::json!({ "registry": [{ "key": "HKXX\\Nope" }] })), callback).err().unwrap();
+        let again = open(
+            options(
+                serde_json::json!({ "className": "TarveMessageWindowTwice", "messageOnly": true }),
+            ),
+            callback,
+        )
+        .unwrap();
+        assert!(
+            close(again),
+            "the class is unregistered when the window closes"
+        );
+        let error = open(
+            options(serde_json::json!({ "registry": [{ "key": "HKXX\\Nope" }] })),
+            callback,
+        )
+        .err()
+        .unwrap();
         assert!(error.contains("HKCU"), "{error}");
-        assert!(open(Options::default(), 12345).err().unwrap().contains("threadsafe callback"));
+        assert!(
+            open(Options::default(), 12345)
+                .err()
+                .unwrap()
+                .contains("threadsafe callback")
+        );
         assert!(serde_json::from_value::<Options>(serde_json::json!({ "bogus": 1 })).is_err());
         threadsafe::close(callback);
         take(&mut calls);

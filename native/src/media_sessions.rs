@@ -180,12 +180,19 @@ mod windows_impl {
     }
 
     pub(super) fn properties(session: &Session) -> Properties {
-        let Some(properties) = session.TryGetMediaPropertiesAsync().and_then(|operation| operation.join()).ok() else {
+        let Some(properties) = session
+            .TryGetMediaPropertiesAsync()
+            .and_then(|operation| operation.join())
+            .ok()
+        else {
             return Properties::default();
         };
         let text = |value: Option<String>| value.filter(|value| !value.is_empty());
         Properties {
-            title: properties.Title().map(|t| t.to_string()).unwrap_or_default(),
+            title: properties
+                .Title()
+                .map(|t| t.to_string())
+                .unwrap_or_default(),
             artist: text(properties.Artist().ok().map(|t| t.to_string())),
             album: text(properties.AlbumTitle().ok().map(|t| t.to_string())),
             artwork: properties
@@ -197,9 +204,18 @@ mod windows_impl {
         }
     }
 
-    pub(super) fn describe(session: &Session, current: Option<&str>, properties: &Properties) -> Result<ExternalMediaSession> {
+    pub(super) fn describe(
+        session: &Session,
+        current: Option<&str>,
+        properties: &Properties,
+    ) -> Result<ExternalMediaSession> {
         let app_id = session.SourceAppUserModelId()?.to_string();
-        let Properties { title, artist, album, artwork } = properties.clone();
+        let Properties {
+            title,
+            artist,
+            album,
+            artwork,
+        } = properties.clone();
         let playing = session
             .GetPlaybackInfo()
             .and_then(|info| info.PlaybackStatus())
@@ -370,7 +386,11 @@ mod watcher {
         events: Sender<Event>,
     }
 
-    fn run(events: Sender<Event>, receiver: Receiver<Event>, ready: mpsc::SyncSender<Result<(), String>>) {
+    fn run(
+        events: Sender<Event>,
+        receiver: Receiver<Event>,
+        ready: mpsc::SyncSender<Result<(), String>>,
+    ) {
         use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
         let initialized = unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.is_ok();
         match State::new(events) {
@@ -393,15 +413,17 @@ mod watcher {
         fn new(events: Sender<Event>) -> windows::core::Result<Self> {
             let manager = windows_impl::manager()?;
             let sender = events.clone();
-            let sessions_token = manager.SessionsChanged(&TypedEventHandler::new(move |_, _| {
-                let _ = sender.send(Event::Sessions);
-                Ok(())
-            }))?;
+            let sessions_token =
+                manager.SessionsChanged(&TypedEventHandler::new(move |_, _| {
+                    let _ = sender.send(Event::Sessions);
+                    Ok(())
+                }))?;
             let sender = events.clone();
-            let current_token = manager.CurrentSessionChanged(&TypedEventHandler::new(move |_, _| {
-                let _ = sender.send(Event::Changed);
-                Ok(())
-            }))?;
+            let current_token =
+                manager.CurrentSessionChanged(&TypedEventHandler::new(move |_, _| {
+                    let _ = sender.send(Event::Changed);
+                    Ok(())
+                }))?;
             let mut state = Self {
                 manager,
                 manager_tokens: [sessions_token, current_token],
@@ -459,29 +481,40 @@ mod watcher {
                 };
                 let sender = self.events.clone();
                 let id = app_id.clone();
-                let properties = session.MediaPropertiesChanged(&TypedEventHandler::new(move |_, _| {
-                    let _ = sender.send(Event::Properties(id.clone()));
-                    Ok(())
-                }));
+                let properties =
+                    session.MediaPropertiesChanged(&TypedEventHandler::new(move |_, _| {
+                        let _ = sender.send(Event::Properties(id.clone()));
+                        Ok(())
+                    }));
                 let sender = self.events.clone();
                 let playback = session.PlaybackInfoChanged(&TypedEventHandler::new(move |_, _| {
                     let _ = sender.send(Event::Changed);
                     Ok(())
                 }));
                 let sender = self.events.clone();
-                let timeline = session.TimelinePropertiesChanged(&TypedEventHandler::new(move |_, _| {
-                    let _ = sender.send(Event::Changed);
-                    Ok(())
-                }));
+                let timeline =
+                    session.TimelinePropertiesChanged(&TypedEventHandler::new(move |_, _| {
+                        let _ = sender.send(Event::Changed);
+                        Ok(())
+                    }));
                 let tokens = [
                     properties.unwrap_or(0),
                     playback.unwrap_or(0),
                     timeline.unwrap_or(0),
                 ];
-                self.sessions.push(Watched { session, app_id, tokens });
+                self.sessions.push(Watched {
+                    session,
+                    app_id,
+                    tokens,
+                });
             }
-            let present: Vec<&str> = self.sessions.iter().map(|watched| watched.app_id.as_str()).collect();
-            self.properties.retain(|app_id, _| present.contains(&app_id.as_str()));
+            let present: Vec<&str> = self
+                .sessions
+                .iter()
+                .map(|watched| watched.app_id.as_str())
+                .collect();
+            self.properties
+                .retain(|app_id, _| present.contains(&app_id.as_str()));
         }
 
         fn unsubscribe_sessions(&mut self) {
@@ -502,7 +535,9 @@ mod watcher {
         fn unsubscribe(&mut self) {
             self.unsubscribe_sessions();
             let _ = self.manager.RemoveSessionsChanged(self.manager_tokens[0]);
-            let _ = self.manager.RemoveCurrentSessionChanged(self.manager_tokens[1]);
+            let _ = self
+                .manager
+                .RemoveCurrentSessionChanged(self.manager_tokens[1]);
         }
 
         /// Rebuilds the list; when it differs from the kept one, keeps it and calls the callback.
@@ -514,7 +549,9 @@ mod watcher {
                     .properties
                     .entry(watched.app_id.clone())
                     .or_insert_with(|| windows_impl::properties(&watched.session));
-                if let Ok(session) = windows_impl::describe(&watched.session, current.as_deref(), properties) {
+                if let Ok(session) =
+                    windows_impl::describe(&watched.session, current.as_deref(), properties)
+                {
                     list.push(session);
                 }
             }
@@ -533,7 +570,8 @@ mod watcher {
             if callback != 0 {
                 // SAFETY: the caller of `watch` handed a C function taking a u64 (a threadsafe
                 // callback, which stays safe to call after it was closed).
-                let call: extern "C" fn(u64) -> u64 = unsafe { std::mem::transmute(callback as usize) };
+                let call: extern "C" fn(u64) -> u64 =
+                    unsafe { std::mem::transmute(callback as usize) };
                 call(version);
             }
         }
@@ -552,11 +590,16 @@ mod tests {
             CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             0
         }
-        watch(changed as extern "C" fn(u64) -> u64 as usize as u64).expect("watching media sessions");
+        watch(changed as extern "C" fn(u64) -> u64 as usize as u64)
+            .expect("watching media sessions");
         // The first list is published before `watch` returns.
         assert!(CALLS.load(std::sync::atomic::Ordering::Relaxed) >= 1);
         let kept = sessions_json().unwrap();
-        assert!(serde_json::from_slice::<serde_json::Value>(&kept).unwrap().is_array());
+        assert!(
+            serde_json::from_slice::<serde_json::Value>(&kept)
+                .unwrap()
+                .is_array()
+        );
         // Watching again only swaps the callback.
         watch(changed as extern "C" fn(u64) -> u64 as usize as u64).unwrap();
         unwatch();
