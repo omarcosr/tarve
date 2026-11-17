@@ -95,20 +95,51 @@ function txikiDefinitions(symbols: FfiSymbols) {
   return Object.fromEntries(Object.entries(symbols).map(([name, symbol]) => [name, { args: symbol.args.map(raw), returns: raw(symbol.returns ?? "void") }]));
 }
 
-/** tjs:ffi functions taking BigInt and null where the declaration allows them: 64-bit values pass as numbers. */
-function txikiFunctions(functions: Record<string, unknown>, symbols: FfiSymbols): Record<string, unknown> {
+/** tjs:ffi takes 64-bit integers and addresses only as numbers: BigInt within 53 bits and null pass as numbers. */
+function txikiWide(value: unknown, name: string, index: number): unknown {
+    if (value === null) return 0;
+    if (typeof value !== "bigint") {
+      if (value === undefined) throw new TypeError(`${name}: argument ${index} is missing`);
+      return value;
+    }
+    const number = Number(value);
+    if (!Number.isSafeInteger(number)) throw new RangeError(`${name}: argument ${index} (${value}) does not fit txiki.js FFI's 53-bit integers`);
+    return number;
+}
+
+/** node:ffi takes 64-bit integers and addresses only as BigInt (addresses also as null): numbers pass as BigInt. */
+function nodeWide(value: unknown): unknown {
+  return typeof value === "number" ? BigInt(value) : value;
+}
+
+type Call = (...args: unknown[]) => unknown;
+
+/**
+ * Each function of `symbols`, its i64/u64/ptr arguments passed through `convert` unless they are
+ * already of type `ready`. A call runs no per-call allocation: up to six arguments the wrapper has
+ * fixed parameters and tests flags fixed at bind time; functions without such arguments are unwrapped.
+ */
+function widenFunctions(functions: Record<string, unknown>, symbols: FfiSymbols, ready: "number" | "bigint", convert: (value: unknown, name: string, index: number) => unknown): Record<string, unknown> {
   return Object.fromEntries(Object.entries(symbols).map(([name, symbol]) => {
-    const call = functions[name] as (...args: unknown[]) => unknown;
+    const call = functions[name] as Call;
     const wide = symbol.args.map(type => type === "i64" || type === "u64" || type === "ptr");
     if (!wide.includes(true)) return [name, call];
-    return [name, (...args: unknown[]) => call(...args.map((value, index) => {
-      if (!wide[index]) return value;
-      if (value === null || value === undefined) return 0;
-      if (typeof value !== "bigint") return value;
-      const number = Number(value);
-      if (!Number.isSafeInteger(number)) throw new RangeError(`${name}: argument ${index} (${value}) does not fit txiki.js FFI's 53-bit integers`);
-      return number;
-    }))];
+    const [w0, w1, w2, w3, w4, w5] = wide;
+    const c = convert;
+    let wrapper: Call;
+    switch (wide.length) {
+      case 1: wrapper = a => call(typeof a !== ready ? c(a, name, 0) : a); break;
+      case 2: wrapper = (a, b) => call(w0 && typeof a !== ready ? c(a, name, 0) : a, w1 && typeof b !== ready ? c(b, name, 1) : b); break;
+      case 3: wrapper = (a, b, d) => call(w0 && typeof a !== ready ? c(a, name, 0) : a, w1 && typeof b !== ready ? c(b, name, 1) : b, w2 && typeof d !== ready ? c(d, name, 2) : d); break;
+      case 4: wrapper = (a, b, d, e) => call(w0 && typeof a !== ready ? c(a, name, 0) : a, w1 && typeof b !== ready ? c(b, name, 1) : b, w2 && typeof d !== ready ? c(d, name, 2) : d, w3 && typeof e !== ready ? c(e, name, 3) : e); break;
+      case 5: wrapper = (a, b, d, e, f) => call(w0 && typeof a !== ready ? c(a, name, 0) : a, w1 && typeof b !== ready ? c(b, name, 1) : b, w2 && typeof d !== ready ? c(d, name, 2) : d, w3 && typeof e !== ready ? c(e, name, 3) : e, w4 && typeof f !== ready ? c(f, name, 4) : f); break;
+      case 6: wrapper = (a, b, d, e, f, g) => call(w0 && typeof a !== ready ? c(a, name, 0) : a, w1 && typeof b !== ready ? c(b, name, 1) : b, w2 && typeof d !== ready ? c(d, name, 2) : d, w3 && typeof e !== ready ? c(e, name, 3) : e, w4 && typeof f !== ready ? c(f, name, 4) : f, w5 && typeof g !== ready ? c(g, name, 5) : g); break;
+      default: wrapper = (...args) => {
+        for (let index = 0; index < wide.length; index++) if (wide[index] && typeof args[index] !== ready) args[index] = c(args[index], name, index);
+        return call(...args);
+      };
+    }
+    return [name, wrapper];
   }));
 }
 
@@ -144,7 +175,7 @@ export function openPluginLibrary<const S extends FfiSymbols>(path: string, symb
       // as a TypedArray: raw addresses go as u64 numbers there.
       const txiki = detected.backend === "txiki" && typeof (globalThis as { tjs?: { version?: unknown } }).tjs?.version === "string";
       const library = ffi.dlopen(path, txiki ? txikiDefinitions(symbols) : bunDefinitions(symbols));
-      functions = txiki ? txikiFunctions(library.symbols, symbols) : library.symbols;
+      functions = txiki ? widenFunctions(library.symbols, symbols, "number", txikiWide) : library.symbols;
       close = () => library.close();
     } else {
       let nodeFfi: { dlopen(path: string, definitions: unknown): { functions: Record<string, unknown>; lib: { close(): void } } };
@@ -158,7 +189,7 @@ export function openPluginLibrary<const S extends FfiSymbols>(path: string, symb
         return: NODE_TYPES[symbol.returns ?? "void"],
       }]));
       const library = nodeFfi.dlopen(path, definitions);
-      functions = library.functions;
+      functions = widenFunctions(library.functions, symbols, "bigint", nodeWide);
       close = () => library.lib.close();
     }
   } catch (error) {

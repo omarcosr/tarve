@@ -40,6 +40,7 @@ let exiting = false;
 const process = {
   platform: TARVE_TXIKI_PLATFORM,
   arch: "x64",
+  pid: tjs.pid,
   env: tjs.env,
   // A compiled app: [exe, ...args]. `tjs run app.js ...args` (debugging a bundle): [tjs, "run", app.js, ...args].
   argv: tjs.args[1] === "run" ? [tjs.exePath, ...tjs.args.slice(2)] : [tjs.exePath, tjs.exePath, ...tjs.args.slice(1)],

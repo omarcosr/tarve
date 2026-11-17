@@ -169,6 +169,13 @@ try {
   let unref = "";
   try { server.unref(); } catch (error) { unref = (error as Error).message; }
   check("net server", reply === "echo:hi" && unref.includes("close() the server"), { reply, unref });
+  // process.pid: the id the OS gives this process.
+  const self = process.platform === "win32"
+    ? openPluginLibrary("kernel32.dll", { GetCurrentProcessId: { args: [], returns: "u32" } })
+    : openPluginLibrary("libc.so.6", { getpid: { args: [], returns: "i32" } });
+  const osPid = "GetCurrentProcessId" in self.symbols ? self.symbols.GetCurrentProcessId() : self.symbols.getpid();
+  self.close();
+  check("process.pid", typeof process.pid === "number" && process.pid === osPid, { pid: process.pid, osPid });
   // fetch (txiki/fetch.ts): exactly the app's headers, bodies, redirects, compression, streaming, abort.
   const base = process.argv[3]!;
   const echo = await (await fetch(base + "/echo", { method: "POST", headers: { origin: "https://example.com", "content-type": "application/json" }, body: JSON.stringify({ a: "ação" }) })).json() as { method: string; headers: Record<string, string[]>; body: string };

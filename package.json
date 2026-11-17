@@ -144,6 +144,7 @@
     "smoke:steady-frames": "bun run build:native && bun scripts/smoke-steady-frames.tsx",
     "smoke:idle": "bun run build:native && bun scripts/smoke-idle.tsx",
     "bench:compare": "bun scripts/bench-compare.ts",
+    "bench:ffi": "bun scripts/bench-ffi.ts",
     "test:renderer-parity": "bun run build:native && bun scripts/renderer-parity.tsx",
     "check:lines": "bun scripts/check-lines.ts",
     "smoke:devtools": "bun run build:native && bun scripts/smoke-devtools.ts",
