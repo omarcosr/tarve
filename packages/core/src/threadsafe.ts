@@ -54,6 +54,13 @@ const SYMBOLS = {
   tarve_com_object: { args: ["buffer", "u32", "buffer", "u32"], returns: "u64" },
   tarve_com_release: { args: ["u64"], returns: "i32" },
   tarve_last_error: { args: ["buffer", "u32"], returns: "i32" },
+  // messageWindow (./message-window.ts) queues into this library's callbacks: it must bind the same
+  // instance (a Node.js single executable app loads each dlopen of its embedded library anew).
+  tarve_message_window_open: { args: ["buffer", "u32", "u64"], returns: "u64" },
+  tarve_message_window_info: { args: ["u64", "buffer", "u32"], returns: "i32" },
+  tarve_message_window_reply: { args: ["u64", "u64", "i64"], returns: "i32" },
+  tarve_message_window_set_reply: { args: ["u64", "u32", "u32", "i64"], returns: "i32" },
+  tarve_message_window_close: { args: ["u64"], returns: "i32" },
 } as const;
 
 interface Open {
@@ -70,6 +77,11 @@ let pollBuffer = new Uint8Array(64 * 1024);
 function native(): PluginLibrary<typeof SYMBOLS>["symbols"] {
   library ??= openPluginLibrary(ownLibraryPath("threadsafeCallback"), SYMBOLS, "threadsafeCallback");
   return library.symbols;
+}
+
+/** The library instance threadsafe callbacks live in, for Tarve's own native producers. */
+export function threadsafeNative(): PluginLibrary<typeof SYMBOLS>["symbols"] {
+  return native();
 }
 
 function lastError(): string {
@@ -214,12 +226,29 @@ export function threadsafeCallback<const A extends readonly ThreadsafeArgType[] 
   // txiki.js's FFI takes 64-bit values as numbers, which cannot hold a sign-extended one.
   const wanted = BigInt(options.returns ?? 0);
   const returns = unsignedBits(wanted, wanted < 0n && wanted >= -(1n << 31n) ? 32n : 64n);
+  return openCallback(run as Open["run"], decoder(types, copy?.arg), returns, copy ? copy.arg : NO_COPY, copy ? copy.bytes : 0);
+}
+
+/**
+ * A threadsafe callback for Tarve's own native producers (native/src/message_window.rs), which
+ * queue records with copied data of any length: `run` gets the 6 raw arguments and those bytes.
+ */
+export function threadsafeRecordCallback(run: (args: bigint[], copied: Uint8Array | null) => void): ThreadsafeCallback {
+  const raw: Open["decode"] = (view, at, copied) => {
+    const args: bigint[] = [];
+    for (let index = 0; index < THREADSAFE_MAX_ARGS; index++) args.push(view.getBigUint64(at + index * 8, true));
+    return [args, copied];
+  };
+  return openCallback(run as Open["run"], raw, 0n, NO_COPY, 0);
+}
+
+function openCallback(run: Open["run"], decode: Open["decode"], returns: bigint, copyArg: number, copyBytes: number): ThreadsafeCallback {
   const id = nextId++;
   if (nextId > 0xffffffff) nextId = 1;
   const symbols = native();
-  const pointer = BigInt(symbols.tarve_threadsafe_callback(id, returns, copy ? copy.arg : NO_COPY, copy ? copy.bytes : 0));
+  const pointer = BigInt(symbols.tarve_threadsafe_callback(id, returns, copyArg, copyBytes));
   if (pointer === 0n) throw new Error(`threadsafeCallback: ${lastError()}`);
-  open.set(id, { run: run as Open["run"], decode: decoder(types, copy?.arg) });
+  open.set(id, { run, decode });
   try {
     listen();
   } catch (error) {

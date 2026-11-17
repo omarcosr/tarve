@@ -244,6 +244,89 @@ pub extern "C" fn tarve_com_release(object: u64) -> i32 {
     guard(|| crate::threadsafe::com_release(object).map(|left| left as i32))
 }
 
+#[cfg(not(target_os = "windows"))]
+const MESSAGE_WINDOW_UNSUPPORTED: &str = "messageWindow is only available on Windows";
+
+fn set_last_error(message: String) {
+    *LAST_ERROR.lock().unwrap_or_else(|p| p.into_inner()) = message;
+}
+
+/// Opens a message window (native/src/message_window.rs): a hidden window on its own thread,
+/// described by the JSON options at `ptr`, whose messages, WinEvents, shell hook notifications and
+/// registry/folder changes go to the threadsafe callback at `callback`. Its id, or 0
+/// (tarve_last_error) on error and off Windows.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tarve_message_window_open(ptr: *const u8, len: u32, callback: u64) -> u64 {
+    #[cfg(target_os = "windows")]
+    let opened = unsafe { read_json::<crate::message_window::Options>(ptr, len) }
+        .and_then(|options| crate::message_window::open(options, callback));
+    #[cfg(not(target_os = "windows"))]
+    let opened: Result<u64, String> = {
+        let _ = (ptr, len, callback);
+        Err(MESSAGE_WINDOW_UNSUPPORTED.into())
+    };
+    opened.unwrap_or_else(|message| {
+        set_last_error(message);
+        0
+    })
+}
+
+/// The message window's description as JSON (hwnd, threadId, registered message ids, shellHook)
+/// into `out`. Returns as tarve_zlib_deflate does.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tarve_message_window_info(id: u64, out: *mut u8, capacity: u32) -> i32 {
+    guard(|| {
+        #[cfg(target_os = "windows")]
+        {
+            let info = crate::message_window::info(id)?;
+            unsafe { output(info.as_bytes(), out, capacity) }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (id, out, capacity);
+            Err(MESSAGE_WINDOW_UNSUPPORTED.into())
+        }
+    })
+}
+
+/// JavaScript's LRESULT for the sent message `sequence` the window waits on: 1, or 0 when that
+/// message no longer waits (answered, timed out, closed).
+#[unsafe(no_mangle)]
+pub extern "C" fn tarve_message_window_reply(id: u64, sequence: u64, value: i64) -> i32 {
+    #[cfg(target_os = "windows")]
+    return i32::from(crate::message_window::reply(id, sequence, value));
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (id, sequence, value);
+        0
+    }
+}
+
+/// Sets (`set` 1) or clears (`set` 0) the fixed LRESULT of `message`: 1, or 0 for no such window.
+#[unsafe(no_mangle)]
+pub extern "C" fn tarve_message_window_set_reply(id: u64, message: u32, set: u32, value: i64) -> i32 {
+    #[cfg(target_os = "windows")]
+    return i32::from(crate::message_window::set_reply(id, message, (set != 0).then_some(value)));
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (id, message, set, value);
+        0
+    }
+}
+
+/// Stops the message window's thread and waits for it (hooks, window and class released): 1, or
+/// 0 for no such window.
+#[unsafe(no_mangle)]
+pub extern "C" fn tarve_message_window_close(id: u64) -> i32 {
+    #[cfg(target_os = "windows")]
+    return i32::from(crate::message_window::close(id));
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = id;
+        0
+    }
+}
+
 #[cfg(target_os = "windows")]
 mod process_watch {
     use std::{

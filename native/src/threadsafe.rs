@@ -109,6 +109,11 @@ fn dispatch(index: usize, args: [u64; ARGS]) -> u64 {
         }
         _ => &[],
     };
+    push(record(id, args, copied));
+    returns
+}
+
+fn record(id: u32, args: [u64; ARGS], copied: &[u8]) -> Vec<u8> {
     let mut record = Vec::with_capacity(RECORD_HEADER + copied.len());
     record.extend_from_slice(&id.to_le_bytes());
     record.extend_from_slice(&(copied.len() as u32).to_le_bytes());
@@ -116,8 +121,28 @@ fn dispatch(index: usize, args: [u64; ARGS]) -> u64 {
         record.extend_from_slice(&value.to_le_bytes());
     }
     record.extend_from_slice(copied);
-    push(record);
-    returns
+    record
+}
+
+/// The slot of the callback whose entry is at `address`, for [`post`].
+pub(crate) fn slot_of(address: u64) -> Option<usize> {
+    ENTRIES.iter().position(|entry| *entry as usize as u64 == address)
+}
+
+/// Queues a call of callback slot `index` from Rust (a native producer such as
+/// native/src/message_window.rs) with `bytes` as its copied data, of any length up to
+/// [`MAX_COPY`] (longer is cut): the same record, queue, order and wake-up as a call through its
+/// entry. False when the slot is not open.
+pub(crate) fn post(index: usize, args: [u64; ARGS], bytes: &[u8]) -> bool {
+    let Some(slot) = TABLE.get(index) else {
+        return false;
+    };
+    let id = slot.id.load(Ordering::Acquire);
+    if slot.state.load(Ordering::Acquire) != ACTIVE {
+        return false;
+    }
+    push(record(id, args, &bytes[..bytes.len().min(MAX_COPY as usize)]));
+    true
 }
 
 fn push(record: Vec<u8>) {
@@ -177,7 +202,7 @@ pub(crate) fn create(id: u32, returns: u64, copy_arg: u32, copy_len: u32) -> Res
 /// Closes the slot whose entry is at `address`. Later calls to it return its fixed value and
 /// record nothing, so a native caller that still holds the address stays safe.
 pub(crate) fn close(address: u64) -> bool {
-    let Some(index) = ENTRIES.iter().position(|entry| *entry as usize as u64 == address) else {
+    let Some(index) = slot_of(address) else {
         return false;
     };
     TABLE[index]
@@ -298,14 +323,19 @@ pub(crate) fn com_release(object: u64) -> Result<u32, String> {
     Ok(release(object as usize as *mut ComObject))
 }
 
+/// The queue and the slots are process-wide: tests that poll it take turns.
+#[cfg(test)]
+pub(crate) fn test_turn() -> std::sync::MutexGuard<'static, ()> {
+    static SERIAL: Mutex<()> = Mutex::new(());
+    SERIAL.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The queue and the slots are process-wide: these tests take turns.
-    static SERIAL: Mutex<()> = Mutex::new(());
     fn serial() -> std::sync::MutexGuard<'static, ()> {
-        SERIAL.lock().unwrap_or_else(|p| p.into_inner())
+        test_turn()
     }
 
     fn records(bytes: &[u8]) -> Vec<(u32, [u64; ARGS], Vec<u8>)> {
@@ -381,6 +411,25 @@ mod tests {
             assert_eq!(com_release(object as usize as u64).unwrap(), left);
         }
         close(method);
+    }
+
+    #[test]
+    fn native_posts_carry_any_copy_length_and_stop_once_closed() {
+        let _turn = serial();
+        let address = create(7005, 0, NO_COPY, 0).unwrap();
+        let index = slot_of(address).unwrap();
+        let long = vec![5u8; MAX_COPY as usize + 10];
+        assert!(post(index, [1, 2, 3, 4, 5, 6], b"abc"));
+        assert!(post(index, [7, 0, 0, 0, 0, 0], &long));
+        assert!(close(address));
+        assert!(!post(index, [8, 0, 0, 0, 0, 0], &[]), "a closed slot takes no posts");
+        assert!(!post(SLOTS, [0; ARGS], &[]));
+        let mut out = vec![0u8; 2 * (RECORD_HEADER + MAX_COPY as usize) + 4096];
+        let written = poll(&mut out).unwrap();
+        let mine: Vec<_> = records(&out[..written]).into_iter().filter(|record| record.0 == 7005).collect();
+        assert_eq!(mine.len(), 2);
+        assert_eq!((mine[0].1, mine[0].2.clone()), ([1, 2, 3, 4, 5, 6], b"abc".to_vec()));
+        assert_eq!((mine[1].1[0], mine[1].2.len()), (7, MAX_COPY as usize), "cut to MAX_COPY");
     }
 
     #[test]

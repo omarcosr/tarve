@@ -78,5 +78,6 @@ export { Surface, type SurfaceController, type SurfaceEvent, type SurfaceGl, typ
 export { parseSubtitles } from "./subtitles";
 export { systemMediaSessions, controlSystemMediaSession, onSystemMediaSessionsChange, type ExternalMediaSession, type SystemMediaSessionAction } from "./media-sessions";
 export { threadsafeCallback, threadsafeComObject, guidBytes, THREADSAFE_MAX_ARGS, THREADSAFE_MAX_CALLBACKS, type ThreadsafeArgType, type ThreadsafeCallback, type ThreadsafeCallbackOptions, type ThreadsafeComObject, type ThreadsafeComObjectOptions } from "./threadsafe";
+export { messageWindow, MessageWindowUnsupportedError, type MessageWindow, type MessageWindowEvent, type MessageWindowFolderWatch, type MessageWindowMessage, type MessageWindowOptions, type MessageWindowRegistryWatch, type MessageWindowReply, type MessageWindowWinEvent } from "./message-window";
 export { extendTailwind, tw } from "./tailwind";
 

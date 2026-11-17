@@ -56,6 +56,8 @@ mod media;
 mod media_sessions;
 #[cfg(not(target_arch = "wasm32"))]
 mod menu_bar;
+#[cfg(target_os = "windows")]
+mod message_window;
 #[cfg(not(target_arch = "wasm32"))]
 mod notification;
 mod paint;
