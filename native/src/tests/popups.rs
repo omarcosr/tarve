@@ -353,3 +353,107 @@ fn deactivating_the_window_dismisses_the_open_popup_like_a_system_menu() {
     closed.compute(220.0, 140.0).unwrap();
     assert!(closed.outside_dismissal_on_deactivate().is_empty());
 }
+
+#[test]
+fn pressing_the_anchor_of_an_open_popup_closes_it_without_reopening() {
+    // Flyout, Popover, DropdownMenu: the anchor is a sibling of the popup portal; Select nests
+    // the portal inside its trigger. Either way the press is outside the popup: it dismisses
+    // and is swallowed, so the anchor's own click (which would toggle it open again) never fires.
+    for nested in [false, true] {
+        let item = node("item", "button", json!({"width":80,"height":30}), vec![]);
+        let mut popup = node(
+            "popup",
+            "column",
+            json!({"position":"absolute","top":"100%","left":0,"width":80,"height":30,"zIndex":1001}),
+            vec![item],
+        );
+        popup.portal = true;
+        popup.dismiss_on_outside = true;
+        let anchor_style = json!({"position":"relative","width":60,"height":24});
+        let children = if nested {
+            vec![node("anchor", "pressable", anchor_style, vec![popup])]
+        } else {
+            vec![node("anchor", "pressable", anchor_style, vec![]), popup]
+        };
+        let wrapper = node("wrapper", "view", json!({"position":"relative"}), children);
+        let mut tree = Tree::new(root(vec![wrapper]));
+        tree.compute(220.0, 140.0).unwrap();
+        let rect = tree.entries["anchor"].rect;
+        tree.pointer_move(rect.x0 + 10.0, rect.y0 + 10.0);
+        let down = tree.pointer_down();
+        assert_eq!(
+            down,
+            vec![json!({"type":"outside", "id":"popup"})],
+            "nested: {nested}"
+        );
+        let up = tree.pointer_up();
+        assert!(
+            up.iter().all(|event| event["type"] != "click"),
+            "the anchor must not click (reopen): {up:?}"
+        );
+    }
+}
+
+#[test]
+fn a_modal_panel_bounded_by_the_window_scrolls_its_body_and_keeps_header_and_footer() {
+    let tall = node("tall", "view", json!({"height":900,"shrink":0}), vec![]);
+    let header = node("header", "view", json!({"height":30,"shrink":0}), vec![]);
+    let body = node(
+        "body",
+        "scroll",
+        json!({"direction":"column","gap":20,"minHeight":0,"shrink":1}),
+        vec![tall],
+    );
+    let footer = node("footer", "row", json!({"height":36,"shrink":0}), vec![]);
+    let panel = node(
+        "panel",
+        "column",
+        json!({"width":300,"maxHeight":"100%","padding":24,"gap":20}),
+        vec![header, body, footer],
+    );
+    let overlay = node(
+        "overlay",
+        "pressable",
+        json!({"position":"absolute","top":0,"right":0,"bottom":0,"left":0,"padding":24,"align":"center","justify":"center"}),
+        vec![panel],
+    );
+    let mut tree = Tree::new(root(vec![overlay]));
+    tree.compute(400.0, 400.0).unwrap();
+    let panel = tree.entries["panel"].rect;
+    assert!((panel.y1 - panel.y0 - 352.0).abs() < 0.5, "panel {panel:?}");
+    let footer = tree.entries["footer"].rect;
+    assert!(
+        footer.y1 <= panel.y1 - 23.5,
+        "footer stays inside: {footer:?}"
+    );
+    assert!((footer.y1 - footer.y0 - 36.0).abs() < 0.5);
+    let body = tree.entries["body"].rect;
+    assert!(
+        (body.y1 - body.y0 - (352.0 - 48.0 - 30.0 - 36.0 - 40.0)).abs() < 0.5,
+        "body {body:?}"
+    );
+    // Short content lays out at its own height, as an unbounded panel would.
+    let short = node("short", "view", json!({"height":50,"shrink":0}), vec![]);
+    let body = node(
+        "body",
+        "scroll",
+        json!({"direction":"column","gap":20,"minHeight":0,"shrink":1}),
+        vec![short],
+    );
+    let panel = node(
+        "panel",
+        "column",
+        json!({"width":300,"maxHeight":"100%","padding":24,"gap":20}),
+        vec![body],
+    );
+    let overlay = node(
+        "overlay",
+        "pressable",
+        json!({"position":"absolute","top":0,"right":0,"bottom":0,"left":0,"padding":24,"align":"center","justify":"center"}),
+        vec![panel],
+    );
+    let mut tree = Tree::new(root(vec![overlay]));
+    tree.compute(400.0, 400.0).unwrap();
+    let body = tree.entries["body"].rect;
+    assert!((body.y1 - body.y0 - 50.0).abs() < 0.5, "body {body:?}");
+}

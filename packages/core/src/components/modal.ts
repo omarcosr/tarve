@@ -4,6 +4,7 @@ import { Icon } from "./icon";
 import { Column, Row } from "./layout";
 import { Pressable } from "./pressable";
 import { Text } from "./text";
+import { Scroll } from "./scroll";
 
 export interface ModalProps extends BaseProps {
   open: boolean;
@@ -15,6 +16,11 @@ export interface ModalProps extends BaseProps {
   closeOnOverlay?: boolean;
   closeOnEscape?: boolean;
   showClose?: boolean;
+  /**
+   * The panel never grows past the window (24 px margins): title and footer stay put and the
+   * body scrolls (a `Scroll`). Default `true`; `false` lays the body out unbounded, as before.
+   */
+  scrollBody?: boolean;
 }
 
 export function Modal({
@@ -27,6 +33,7 @@ export function Modal({
   closeOnOverlay = true,
   closeOnEscape = true,
   showClose = true,
+  scrollBody = true,
   children,
   style,
   ...props
@@ -36,8 +43,8 @@ export function Modal({
   const modalId = props.id;
   const header = title || description
     ? jsx(Column, {
-        gap: 6,
-        style: { padding: { right: showClose ? 28 : 0 } },
+          gap: 6,
+          style: { shrink: 0, padding: { right: showClose ? 28 : 0 } },
         children: [
           title ? jsx(Text, { size: 18, weight: 600, children: title }) : null,
           description ? jsx(Text, { size: 14, color: theme.colors.mutedForeground, children: description }) : null,
@@ -65,7 +72,15 @@ export function Modal({
         children: jsx(Icon, { name: "x", size: 16, color: theme.colors.mutedForeground }),
       })
     : null;
-  const footerNode = footer ? jsx(Row, { gap: 8, justify: "end", children: footer }) : null;
+  const footerNode = footer ? jsx(Row, { gap: 8, justify: "end", style: { shrink: 0 }, children: footer }) : null;
+  // The body takes what header and footer leave; content that fits lays out as a plain column.
+  const body = scrollBody && children != null && children !== false
+    ? jsx(Scroll, {
+        ...(modalId ? { id: `${modalId}-body` } : {}),
+        style: { direction: "column", gap: 20 },
+        children,
+      })
+    : children;
   const panel = jsx(Column, {
     ...(modalId ? { id: `${modalId}-content` } : {}),
     ...((title || description) ? {
@@ -76,6 +91,7 @@ export function Modal({
       position: "relative",
       width,
       maxWidth: "90%",
+      maxHeight: "100%",
       background: theme.colors.card,
       borderWidth: 1,
       borderColor: theme.colors.border,
@@ -85,7 +101,7 @@ export function Modal({
       pointerEvents: "block",
       ...style,
     },
-    children: [header, closeButton, children, footerNode],
+    children: [header, closeButton, body, footerNode],
   });
   return jsx(Pressable, {
     ...props,

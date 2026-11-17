@@ -37,3 +37,5 @@ export { TitleBar } from "./components/titlebar";
 export type { TitleBarProps } from "./components/titlebar";
 export { Modal, Dialog } from "./components/modal";
 export type { ModalProps, DialogProps } from "./components/modal";
+export { Overflow, overflowVisibleCount } from "./components/overflow";
+export type { OverflowProps } from "./components/overflow";

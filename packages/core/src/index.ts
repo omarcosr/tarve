@@ -1,5 +1,5 @@
-export { Window, View, Row, Column, Portal, Glass, glassChrome, glassControl, glassInk, glassLens, glassPopup, hoverLens, glassSurface, glassWash, resolveGlass, Pressable, Link, Icon, Svg, Path, Circle, Ellipse, Line, Polyline, Polygon, SvgRect, Text, Markdown, Code, Diff, Button, Image, clearImageSourceCache, loadImageSource, Scroll, ScrollArea, Input, TextArea, TitleBar, Modal, Dialog, over } from "./components";
-export type { WindowProps, WindowCloseRequestEvent, ViewProps, GlassAppearance, GlassOptions, GlassProp, GlassProps, GlassVariant, ResolvedGlass, PortalProps, PressableProps, LinkProps, IconName, IconProps, SvgProps, SvgNode, SvgAttributes, PathProps, CircleProps, EllipseProps, LineProps, PolylineProps, PolygonProps, RectProps, TextProps, MarkdownProps, CodeProps, DiffProps, ButtonProps, ImageBytesSource, ImageErrorEvent, ImageHttpCacheMode, ImageProps, ImageRgbaSource, ImageSource, LoadImageSourceOptions, ScrollProps, ScrollAreaProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps } from "./components";
+export { Window, View, Row, Column, Portal, Glass, glassChrome, glassControl, glassInk, glassLens, glassPopup, hoverLens, glassSurface, glassWash, resolveGlass, Pressable, Link, Icon, Svg, Path, Circle, Ellipse, Line, Polyline, Polygon, SvgRect, Text, Markdown, Code, Diff, Button, Image, clearImageSourceCache, loadImageSource, Scroll, ScrollArea, Input, TextArea, TitleBar, Modal, Dialog, Overflow, overflowVisibleCount, over } from "./components";
+export type { WindowProps, WindowCloseRequestEvent, ViewProps, GlassAppearance, GlassOptions, GlassProp, GlassProps, GlassVariant, ResolvedGlass, PortalProps, PressableProps, LinkProps, IconName, IconProps, SvgProps, SvgNode, SvgAttributes, PathProps, CircleProps, EllipseProps, LineProps, PolylineProps, PolygonProps, RectProps, TextProps, MarkdownProps, CodeProps, DiffProps, ButtonProps, ImageBytesSource, ImageErrorEvent, ImageHttpCacheMode, ImageProps, ImageRgbaSource, ImageSource, LoadImageSourceOptions, ScrollProps, ScrollAreaProps, InputType, InputProps, TextAreaProps, TitleBarProps, ModalProps, DialogProps, OverflowProps } from "./components";
 export { Checkbox, Switch, RadioGroup, Slider, Card, Badge, Separator, Progress, Tabs, Accordion } from "./controls";
 export type { CheckboxProps, SwitchProps, RadioOption, RadioGroupProps, SliderProps, CardProps, BadgeProps, SeparatorProps, ProgressProps, TabItem, TabsProps, AccordionItem, AccordionProps } from "./controls";
 export { VirtualList } from "./virtual-list";
@@ -15,8 +15,8 @@ export { List } from "./list";
 export type { ListProps } from "./list";
 export { Select } from "./select";
 export type { SelectProps, SelectOption } from "./select";
-export { Tooltip, Popover, DropdownMenu, ContextMenu, Combobox, Command, CommandPalette } from "./popups";
-export type { PopupSide, TooltipProps, PopoverProps, DropdownMenuItem, DropdownMenuProps, ContextMenuProps, ComboboxOption, ComboboxProps, CommandItem, CommandProps, CommandPaletteProps } from "./popups";
+export { Tooltip, Popover, Flyout, DropdownMenu, ContextMenu, Combobox, Command, CommandPalette } from "./popups";
+export type { PopupSide, TooltipProps, PopoverProps, FlyoutProps, FlyoutPlacement, DropdownMenuItem, DropdownMenuProps, ContextMenuProps, ComboboxOption, ComboboxProps, CommandItem, CommandProps, CommandPaletteProps } from "./popups";
 export { Skeleton, Spinner, Avatar, Breadcrumb, Pagination, Calendar, DatePicker, Collapsible, Table, DataTable, AlertDialog, Sheet, Toast, Toaster, Menubar, HoverCard } from "./extra-controls";
 export { store, toRaw } from "./store";
 export { toast, dismissToast, setToastPosition, activeToasts, type ToastOptions, type ToastHandle, type ToastTone } from "./toast";
