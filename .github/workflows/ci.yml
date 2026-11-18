@@ -16,14 +16,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # The full library and its four trimmed variants are five fat-LTO builds of ~3 min each:
-    # three jobs build them side by side and the package jobs merge their outputs.
+    # four jobs build them side by side and the package jobs merge their outputs.
     strategy:
       fail-fast: false
       matrix:
         include:
           - { part: full, parts: "full" }
           - { part: rich, parts: "core,rich" }
-          - { part: media, parts: "media,rich-media" }
+          - { part: media, parts: "media" }
+          - { part: rich-media, parts: "rich-media" }
 
     steps:
       - name: Checkout
@@ -33,6 +34,13 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
+
+      - name: Cache Bun packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'examples/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -48,8 +56,12 @@ jobs:
           prefix-key: v1-rust
           shared-key: linux-x64-native-${{ matrix.part }}
 
+      # Cached .deb contents (no apt-get update on a hit): the mirror alone took up to 3 min.
       - name: Install Linux native dependencies
-        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev libasound2-dev
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.3
+        with:
+          packages: build-essential pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libegl1-mesa-dev libfontconfig1-dev libasound2-dev
+          version: linux-x64-native-1
 
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
@@ -74,14 +86,15 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     # The full library and its four trimmed variants are five fat-LTO builds of ~3 min each:
-    # three jobs build them side by side and the package jobs merge their outputs.
+    # four jobs build them side by side and the package jobs merge their outputs.
     strategy:
       fail-fast: false
       matrix:
         include:
           - { part: full, parts: "full" }
           - { part: rich, parts: "core,rich" }
-          - { part: media, parts: "media,rich-media" }
+          - { part: media, parts: "media" }
+          - { part: rich-media, parts: "rich-media" }
 
     steps:
       - name: Checkout
@@ -91,6 +104,13 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
+
+      - name: Cache Bun packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'examples/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -135,6 +155,13 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
+
+      - name: Cache Bun packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'examples/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -223,6 +250,13 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
+
+      - name: Cache Bun packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'examples/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -317,6 +351,13 @@ jobs:
         with:
           bun-version: "1.4.2"
 
+      - name: Cache Bun packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'examples/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
@@ -397,6 +438,13 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
+
+      - name: Cache Bun packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'examples/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
 
       - name: Setup Node
         uses: actions/setup-node@v7
@@ -490,6 +538,13 @@ jobs:
         with:
           bun-version: "1.4.2"
 
+      - name: Cache Bun packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'examples/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -544,6 +599,13 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
+
+      - name: Cache Bun packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock', 'examples/bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
