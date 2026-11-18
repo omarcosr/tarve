@@ -2,6 +2,14 @@ import { createRequire } from "node:module";
 import { nativePath } from "#tarve/runtime";
 import { remoteLibrary } from "./remote";
 
+/**
+ * Library handles opened for one entry point, held for the life of the process: txiki.js closes a
+ * dropped handle when it is collected, which unloads the library under the symbols and addresses
+ * taken from it (a silent crash on the next call).
+ */
+const keepOpen: unknown[] = [];
+
+
 type NativeSymbols = Record<"tarve_start" | "tarve_send" | "tarve_event_pipe_name" | "tarve_poll_event" | "tarve_open_external" | "tarve_last_error", (buffer: Uint8Array, length: number) => number> & { tarve_abi_version(): number; tarve_join(): number; tarve_allow_foreground(pid: number): number; tarve_prewarm?(renderer: number): number; tarve_media_sessions?(out: Uint8Array, capacity: number): number; tarve_media_session_control?(action: number, appId: Uint8Array, length: number): number };
 
 type NativeLibrary = { symbols: NativeSymbols; close(): void };
@@ -24,6 +32,7 @@ export function surfacePresentSymbol(): SurfacePresent {
   if (txikiFfi) opened = txikiFfi.dlopen(startedPath, definitions);
   else if (process.versions.bun) opened = (createRequire(import.meta.url)("bun:ffi") as typeof import("bun:ffi")).dlopen(startedPath, definitions) as unknown as Opened;
   else throw new Error("surface present needs Bun or txiki.js FFI; native producers call tarve_surface_present directly");
+  keepOpen.push(opened);
   surfacePresent = opened.symbols.tarve_surface_present;
   return surfacePresent;
 }
@@ -65,11 +74,15 @@ export function pluginEmitAddress(): bigint {
   const require = createRequire(import.meta.url);
   const txikiFfi = (globalThis as { __tarveTxikiFfi?: { dlopen(path: string, symbols: typeof definitions): Opened } }).__tarveTxikiFfi;
   let address: bigint | number;
-  if (txikiFfi) address = txikiFfi.dlopen(path, definitions).symbols.tarve_plugin_emit_address();
-  else if (process.versions.bun) address = ((require("bun:ffi") as typeof import("bun:ffi")).dlopen(path, definitions) as unknown as Opened).symbols.tarve_plugin_emit_address();
-  else {
+  if (txikiFfi || process.versions.bun) {
+    const opened = txikiFfi ? txikiFfi.dlopen(path, definitions) : (require("bun:ffi") as typeof import("bun:ffi")).dlopen(path, definitions) as unknown as Opened;
+    keepOpen.push(opened);
+    address = opened.symbols.tarve_plugin_emit_address();
+  } else {
     const { dlopen } = require("node:ffi") as { dlopen(path: string, definitions: Record<string, { arguments: string[]; return: string }>): { functions: { tarve_plugin_emit_address(): bigint | number } } };
-    address = dlopen(path, { tarve_plugin_emit_address: { arguments: [], return: "uint64" } }).functions.tarve_plugin_emit_address();
+    const opened = dlopen(path, { tarve_plugin_emit_address: { arguments: [], return: "uint64" } });
+    keepOpen.push(opened);
+    address = opened.functions.tarve_plugin_emit_address();
   }
   emitAddress = BigInt(address);
   return emitAddress;
@@ -95,9 +108,12 @@ export function surfaceGlSymbols(): SurfaceGlSymbols {
   } as const;
   type Opened = { symbols: SurfaceGlSymbols };
   const txikiFfi = (globalThis as { __tarveTxikiFfi?: { dlopen(path: string, symbols: typeof definitions): Opened } }).__tarveTxikiFfi;
-  if (txikiFfi) surfaceGl = txikiFfi.dlopen(startedPath, definitions).symbols;
-  else if (process.versions.bun) surfaceGl = ((createRequire(import.meta.url)("bun:ffi") as typeof import("bun:ffi")).dlopen(startedPath, definitions) as unknown as Opened).symbols;
+  let opened: Opened;
+  if (txikiFfi) opened = txikiFfi.dlopen(startedPath, definitions);
+  else if (process.versions.bun) opened = (createRequire(import.meta.url)("bun:ffi") as typeof import("bun:ffi")).dlopen(startedPath, definitions) as unknown as Opened;
   else throw new Error("surface GL needs Bun or txiki.js FFI; native producers call tarve_surface_gl_* directly");
+  keepOpen.push(opened);
+  surfaceGl = opened.symbols;
   return surfaceGl;
 }
 
