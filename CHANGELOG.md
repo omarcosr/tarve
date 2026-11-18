@@ -12,7 +12,8 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 
 ### Fixed
 
-- `show()` of a `Window activation="never" | "whileEditing"` no longer takes the focus: only `activation="normal"` windows are focused when shown (an explicit `focus()` or `activate` still focuses).
+- `show()` of a `Window activation="never" | "whileEditing"` no longer takes the focus: only `activation="normal"` windows are focused when shown (an explicit `focus()` or `activate` still focuses). On Windows a window shown again after `hide()` is shown with `SW_SHOWNA` first: winit's own show activates it after the first time.
+- Windows: when another window activates while the cursor stays over a window, the window keeps its hover instead of leaving, and a release hit-tests where the pointer is, so a click with the mouse held still is no longer lost.
 - `app.appBar` docks again by itself when Explorer restarts (`TaskbarCreated`): the bar registers with the new shell and keeps its edge, thickness, overlap and span.
 
 ## 0.13.3 — 2026-11-18
@@ -46,7 +47,7 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 - txiki.js on Windows: `spawn(..., { windowsHide: true })` starts the child with `CREATE_NO_WINDOW` (no console window flashes), with asynchronous named-pipe stdio and its exit from `tarve_watch_process`.
 - A repeated `key` among siblings warns once and keeps both children (`#1`, `#2`… ids) instead of failing every render; a repeated explicit `id` is still an error.
 - A local `<Image src>` that failed to load is not read nor reported again until its source changes or it mounts again.
-- `requestSingleInstance` waits up to about 10 s for a previous instance that is still quitting.
+- `requestSingleInstance` waits up to about 10 s for a previous instance that is still quitting.
 - Dev mode: a render that writes to a `store()` in an unbroken chain (through `queueMicrotask`, say) warns once with the key and the stack of the write, and its renders then wait for the next task instead of pinning a core at 100% with no error. `onStoreChange(listener, reads, dev)` takes the new `dev` flag.
 - `Modal` is bounded by the window height: title and footer stay in place and the body scrolls (`scrollBody={false}` keeps the old layout).
 - `<Image>` of an `.exe`/`.dll`/`.lnk` draws an icon frame sized for its displayed physical size, loaded off the UI thread and cached per (path, size), instead of the 256 px frame scaled down on the GPU with aliased edges.

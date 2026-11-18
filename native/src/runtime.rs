@@ -179,6 +179,32 @@ fn show_without_activation(window: &Window) {
 #[cfg(not(target_os = "windows"))]
 fn show_without_activation(_: &Window) {}
 
+/// `ShowWindow(SW_SHOWNA)`: shows the window where it is in the z-order, never activating it.
+#[cfg(target_os = "windows")]
+fn show_inactive(window: &Window) {
+    if let Some(hwnd) = activation_hwnd(window) {
+        // SAFETY: the window handle is live for the window's lifetime.
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(
+                hwnd,
+                windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNA,
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn show_inactive(_: &Window) {}
+
+#[cfg(target_os = "windows")]
+fn activation_hwnd(window: &Window) -> Option<windows_sys::Win32::Foundation::HWND> {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match window.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Win32(handle) => Some(handle.hwnd.get() as _),
+        _ => None,
+    }
+}
+
 pub(crate) fn background_windows() -> bool {
     static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *FLAG.get_or_init(|| {
@@ -827,6 +853,37 @@ fn os_cursor_in_client(window: &Window) -> Option<(f64, f64)> {
         }
     }
     Some((point.x as f64, point.y as f64))
+}
+
+/// Whether the OS still has the cursor over this window (nothing of another window above it).
+/// Windows posts a pointer leave when an app's other window activates, or capture changes, with
+/// the cursor still over this one: such a leave is not one.
+#[cfg(target_os = "windows")]
+fn os_cursor_over_window(window: &Window) -> bool {
+    use windows_sys::Win32::{
+        Foundation::POINT,
+        UI::WindowsAndMessaging::{GA_ROOT, GetAncestor, GetCursorPos, WindowFromPoint},
+    };
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let Ok(handle) = window.window_handle() else {
+        return false;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return false;
+    };
+    let mut point = POINT { x: 0, y: 0 };
+    unsafe {
+        if GetCursorPos(&mut point) == 0 {
+            return false;
+        }
+        let under = WindowFromPoint(point);
+        !under.is_null() && GetAncestor(under, GA_ROOT) == handle.hwnd.get() as _
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn os_cursor_over_window(_: &Window) -> bool {
+    false
 }
 
 #[cfg(target_os = "linux")]
@@ -2148,9 +2205,14 @@ impl App {
                 self.handle_render_error(event_loop, error);
             }
         }
+        let activates = activation::activates_on_show(self.document.window.activation);
+        if !activates {
+            // `activation` never/whileEditing: shown without taking the foreground.
+            show_inactive(&window);
+        }
         window.set_visible(true);
         window.set_minimized(false);
-        if !background_windows() && activation::activates_on_show(self.document.window.activation) {
+        if !background_windows() && activates {
             window.focus_window();
         }
         self.keep_window_opacity();
@@ -4408,7 +4470,20 @@ impl ApplicationHandler<Command> for App {
                         matches!(event["type"].as_str(), Some("valueChange" | "scroll"))
                     });
             }
-            WindowEvent::CursorLeft { .. } => events = self.tree.pointer_leave(),
+            WindowEvent::CursorLeft { .. } => {
+                // A leave with the cursor still over the window (another window of the app or
+                // another app activated, capture moved) keeps the hover, as the DOM does.
+                let still_over = self.window.as_deref().is_some_and(|window| {
+                    let size = window.inner_size();
+                    os_cursor_over_window(window)
+                        && os_cursor_in_client(window).is_some_and(|(x, y)| {
+                            x >= 0.0 && y >= 0.0 && x < f64::from(size.width) && y < f64::from(size.height)
+                        })
+                });
+                if !still_over {
+                    events = self.tree.pointer_leave();
+                }
+            }
             WindowEvent::PinchGesture { delta, phase, .. } => events = self.pinch(phase, delta),
             WindowEvent::MouseInput {
                 state,
@@ -4423,7 +4498,10 @@ impl ApplicationHandler<Command> for App {
                     self.reopen_ime_on_focused_press();
                     self.titlebar_pressed();
                 } else {
-                    events = self.tree_pointer_up();
+                    // The release hit-tests where the pointer is too: a leave or a missed move
+                    // since the press must not lose the click.
+                    events = self.sync_pointer_from_os();
+                    events.extend(self.tree_pointer_up());
                     self.handle_window_actions(event_loop, &events);
                 }
                 accessibility_changed = true;

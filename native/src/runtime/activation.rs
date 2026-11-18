@@ -311,6 +311,62 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
+    fn showing_a_never_window_does_not_activate_it() {
+        use windows_sys::Win32::Foundation::HWND;
+        #[link(name = "user32")]
+        unsafe extern "system" {
+            fn GetActiveWindow() -> HWND;
+            fn SetActiveWindow(hwnd: HWND) -> HWND;
+        }
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, SW_HIDE, SW_SHOW, SW_SHOWNA, ShowWindow,
+            WS_OVERLAPPEDWINDOW,
+        };
+        let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+        let create = || unsafe {
+            CreateWindowExW(
+                0,
+                class.as_ptr(),
+                std::ptr::null(),
+                WS_OVERLAPPEDWINDOW,
+                0,
+                0,
+                50,
+                50,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            )
+        };
+        let (other, plain, never) = (create(), create(), create());
+        platform::install_hwnd(never, WindowActivation::Never);
+        unsafe {
+            ShowWindow(other, SW_SHOW);
+            SetActiveWindow(other);
+            // Control: an ordinary window takes the activation when shown.
+            ShowWindow(plain, SW_SHOW);
+            let plain_activated = GetActiveWindow() == plain;
+            SetActiveWindow(other);
+            // As `unpark` does: SW_SHOWNA, then winit's set_visible (SW_SHOW once shown before).
+            ShowWindow(never, SW_SHOWNA);
+            ShowWindow(never, SW_SHOW);
+            let active = GetActiveWindow();
+            ShowWindow(never, SW_HIDE);
+            ShowWindow(never, SW_SHOWNA);
+            ShowWindow(never, SW_SHOW);
+            let active_again = GetActiveWindow();
+            for hwnd in [other, plain, never] {
+                DestroyWindow(hwnd);
+            }
+            assert!(plain_activated, "an ordinary window activates when shown");
+            assert_ne!(active, never);
+            assert_ne!(active_again, never);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
     fn no_activate_style_survives_rewrites_and_follows_editing() {
         use windows_sys::Win32::UI::WindowsAndMessaging::{
             CreateWindowExW, DestroyWindow, GWL_EXSTYLE, GetWindowLongPtrW, SetWindowLongPtrW,
