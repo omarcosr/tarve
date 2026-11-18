@@ -1,10 +1,6 @@
 {
   "examples/components/components-view.tsx": 707,
   "examples/pulse/pulse-view.tsx": 1213,
-  "examples/youtube-music/youtube-music-view.tsx": 773,
-  "go/examples/youtube-music/ytm/actions.go": 811,
-  "go/examples/youtube-music/ytm/source.go": 809,
-  "go/examples/youtube-music/ytm/view.go": 1223,
   "go/tarve/app.go": 993,
   "go/tarve/compile.go": 761,
   "go/tarve/components.go": 638,

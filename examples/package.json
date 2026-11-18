@@ -16,7 +16,6 @@
     "text": "tarve run text/text.tsx",
     "html": "tarve run html/html.tsx",
     "performance": "tarve run performance/performance.tsx",
-    "youtube-music": "tarve run youtube-music/youtube-music.tsx",
     "pulse": "tarve run pulse/pulse.tsx",
     "widget": "tarve run widget/widget.tsx",
     "glass": "tarve run glass/glass.tsx",
@@ -53,7 +52,6 @@
     "build:performance": "tarve build performance/performance.tsx --outfile dist/Performance.exe",
     "build:player": "tarve build player/player.tsx --outfile dist/Player.exe",
     "build:fps": "tarve build fps/fps.tsx --outfile dist/Fps.exe",
-    "build:youtube-music": "tarve build youtube-music/youtube-music.tsx --outfile dist/YouTubeMusic.exe",
     "build:pulse": "tarve build pulse/pulse.tsx --outfile dist/Pulse.exe",
     "build:widget": "tarve build widget/widget.tsx --outfile dist/Widget.exe",
     "build:glass": "tarve build glass/glass.tsx --outfile dist/LiquidGlass.exe",
@@ -128,12 +126,6 @@
         "description": "Animation demo built with Tarve",
         "icon": "motion/icon.png",
         "appId": "Tarve.Examples.Motion"
-      },
-      "youtube-music/youtube-music.tsx": {
-        "name": "YouTube Music (Tarve)",
-        "description": "YouTube Music client built with Tarve",
-        "icon": "youtube-music/icon.png",
-        "appId": "Tarve.Examples.YouTubeMusic"
       }
     }
   }

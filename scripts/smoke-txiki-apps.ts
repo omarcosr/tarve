@@ -1,14 +1,13 @@
 /**
  * Runs the full example apps (their real entry files, with live timers, processes and
  * network) under Bun and as txiki.js executables, and compares what each shows after
- * a few seconds. Live data (frame rates, CPU load, YouTube's recommendations) differs
+ * a few seconds. Live data (frame rates, CPU load) differs
  * between any two runs, so texts and counts are compared, not matched: this fails on a
  * crash, a build error, any error event in either runtime, error-looking text that Bun
- * does not show, or a node count off by more than 15% (YouTube's shelves alone vary by
- * ~6% between requests). Errors are strict on both: what the machine lacks (a tray host
+ * does not show, or a node count off by more than 15%. Errors are strict on both: what the machine lacks (a tray host
  * under WSLg) is a feature state the app shows (`app.tray` onAvailability), not an error.
  *
- *   bun run smoke:txiki-apps [example ...]      (needs network for youtube-music)
+ *   bun run smoke:txiki-apps [example ...]
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -19,7 +18,7 @@ const dir = join(examples, "_entry-parity");
 const out = join(import.meta.dir, "../work/txiki-apps");
 rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true }); mkdirSync(out, { recursive: true });
 const failures: string[] = [];
-const names = process.argv.slice(2).length ? process.argv.slice(2) : ["counter", "diff", "fps", "html", "liquid", "performance", "player", "pulse", "tailwind", "text", "tray", "widget", "youtube-music"];
+const names = process.argv.slice(2).length ? process.argv.slice(2) : ["counter", "diff", "fps", "html", "liquid", "performance", "player", "pulse", "tailwind", "text", "tray", "widget"];
 const wait = Number(process.env.WAIT ?? 9000);
 const probe = `await (async () => {
   const __errors: string[] = [];

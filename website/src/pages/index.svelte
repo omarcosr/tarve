@@ -8,8 +8,8 @@
   import { catalog } from "../lib/docs/catalog";
 
   let { version = "0.4.0" }: { version?: string } = $props();
-  // Every release attaches a prebuilt examples/youtube-music for Windows and Linux.
-  const demo = "https://github.com/omarcosr/tarve/releases/latest";
+  // YouTube Music, an app built with Tarve in its own repository, with a Windows installer.
+  const demo = "https://github.com/omarcosr/youtube-music/releases/latest";
 </script>
 
 <main class="home">
@@ -36,7 +36,7 @@
       <div class="cta">
         <CopyCommand command="bun add @tarve/core" />
         <a class="btn btn-primary" href="/docs">Documentation</a>
-        <a class="btn btn-ghost" href={demo} title="A YouTube Music client built with Tarve, prebuilt for Windows and Linux">Try a demo app</a>
+        <a class="btn btn-ghost" href={demo} title="A YouTube Music client built with Tarve, with a Windows installer">Try a demo app</a>
       </div>
     </div>
   </section>

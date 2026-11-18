@@ -468,7 +468,7 @@ mod tests {
             assert!(shared_host_executable(std::path::Path::new(host)));
         }
         assert!(!shared_host_executable(std::path::Path::new(
-            "A:\\tarve\\examples\\dist\\YouTubeMusic.exe"
+            "C:\\Users\\a\\AppData\\Local\\Programs\\Player\\Player.exe"
         )));
     }
 }

@@ -7,10 +7,12 @@ Windows, Linux and macOS (`GOOS=…`); run so far on Windows.
 ```
 cd go
 go run ./examples/counter
-go run ./examples/youtube-music
 ```
 
 The library is found through `TARVE_NATIVE` or `native/bin/current.json` (`bun run build:native`).
+
+[YouTube Music](https://github.com/omarcosr/youtube-music) has a Go version in its `go/` folder: the
+same app as its TypeScript one, node for node, built against this module.
 
 ## Same app, node for node
 
@@ -34,9 +36,9 @@ Row(Props{"gap": 10},
 Handlers, renders and `Post`ed functions run on the goroutine in `app.Run()`; network work runs in
 goroutines that `app.Post` their results back.
 
-`go test ./...` renders the counter, YouTube Music and `go/parity/fixtures.tsx` views in Go and in
-TypeScript (`go/parity/dump.tsx`, through bun) over 56 states and handler sequences and requires
-identical native documents.
+`go test ./...` renders the counter and `go/parity/fixtures.tsx` views in Go and in TypeScript
+(`go/parity/dump.tsx`, through bun) over their states and handler sequences and requires identical
+native documents.
 
 ## Where Go is faster
 

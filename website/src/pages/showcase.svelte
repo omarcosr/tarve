@@ -1,6 +1,5 @@
 <script lang="ts">
   const repo = "https://github.com/omarcosr/tarve";
-  const tree = `${repo}/tree/main/examples`;
 
   type Shot = { src: string; alt: string };
   type App = {
@@ -32,14 +31,13 @@
       kind: "Music player",
       body:
         "Home feed, search, albums, playlists, a play queue, synced lyrics and Google sign-in. Streams audio with <audio>, answers the media keys and keeps playing from the tray. Also written in Go against the same runtime.",
-      tags: ["<audio>", "Media keys", "Tray", "Go port"],
+      tags: ["<audio>", "Media keys", "Tray", "Installer", "Go port"],
       shots: [{ src: "/showcase/youtube-music.webp", alt: "YouTube Music client showing Quick picks and an Autumn shelf of album covers" }],
       links: [
-        { label: "Download", href: `${repo}/releases/latest` },
-        { label: "TSX source", href: `${tree}/youtube-music` },
-        { label: "Go source", href: `${repo}/tree/main/go/examples/youtube-music` },
+        { label: "Download", href: "https://github.com/omarcosr/youtube-music/releases/latest" },
+        { label: "TSX source", href: "https://github.com/omarcosr/youtube-music" },
+        { label: "Go source", href: "https://github.com/omarcosr/youtube-music/tree/main/go" },
       ],
-      run: "bun run youtube-music",
     },
   ];
 </script>
