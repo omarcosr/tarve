@@ -62,7 +62,15 @@ func TitleBar(p Props, kids ...Child) *VNode {
 		if appearance == "dark" {
 			surface["foreground"] = "#ffffff"
 		}
-		buttonStyle = merge(S{"width": 36, "height": 36, "radius": 18}, buttonStyle)
+	}
+	// On glass the controls answer the pointer with a drop of glass (close with a red one), as the
+	// rest of the glass controls do, instead of a flat wash.
+	controlStyle, closeStyle := buttonStyle, buttonStyle
+	if glass != "" {
+		lens := glassLens(appearance, false)
+		pressed := merge(lens, S{"transform": S{"scale": 0.94}})
+		controlStyle = merge(S{"width": 36, "height": 36, "radius": 18, "hover": lens, "active": pressed}, buttonStyle)
+		closeStyle = merge(controlStyle, S{"hover": merge(lens, S{"background": T.WindowCloseHover}), "active": merge(pressed, S{"background": T.WindowCloseActive})}, buttonStyle)
 	}
 	ink := T.Foreground
 	if f, ok := style["foreground"].(string); ok {
@@ -75,13 +83,13 @@ func TitleBar(p Props, kids ...Child) *VNode {
 	}
 	button := func(action string, child Child) Child {
 		label := map[string]string{"minimize": "Minimize window", "toggleMaximize": "Maximize or restore window", "close": "Close window"}[action]
-		hover, active := translucent(ink, 0x1f), translucent(ink, 0x33)
+		hover, active, override := translucent(ink, 0x1f), translucent(ink, 0x33), controlStyle
 		if action == "close" {
-			hover, active = T.WindowCloseHover, T.WindowCloseActive
+			hover, active, override = T.WindowCloseHover, T.WindowCloseActive, closeStyle
 		}
 		return Pressable(Props{"windowAction": action, "control": S{"role": "button", "label": label}, "focusable": false,
 			"style": merge(S{"width": 46, "height": "100%", "radius": 0, "align": "center", "justify": "center", "background": "#00000000",
-				"group": action == "close", "hover": S{"background": hover}, "active": S{"background": active}}, buttonStyle), "children": child})
+				"group": action == "close", "hover": S{"background": hover}, "active": S{"background": active}}, override), "children": child})
 	}
 	// Android has no window to minimize, maximize or close: TitleBar is the app's top bar there.
 	mobile := runtime.GOOS == "android"
@@ -128,7 +136,7 @@ func TitleBar(p Props, kids ...Child) *VNode {
 	if mobile {
 		height, padding = 56, 16
 	}
-	base := S{"direction": "row", "height": numOr(p, "height", height), "shrink": 0, "padding": S{"left": padding}, "background": T.Card,
+	base := S{"direction": "row", "height": numOr(p, "height", height), "shrink": 0, "padding": S{"left": padding, "right": 0}, "background": T.Card,
 		"borderWidth": S{"bottom": 1}, "borderColor": T.Border, "justify": "between", "align": "center", "pointerEvents": "block"}
 	if glass != "" {
 		base["gap"], base["padding"] = 4, S{"left": 14, "right": 4}

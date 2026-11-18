@@ -8,13 +8,22 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 
 - `threadsafeCallback` marshals pointer arguments during the call, per argument (native ABI 9: `tarve_threadsafe_callback_args`, `tarve_unknown_release`): `{ type: "ptr", keep: "com" }` AddRefs an interface pointer the callback then hands to the new `releaseCom(ptr)`; `{ type: "ptr", copy: bytes }` copies like `copy`; on Windows `copy: "bstr"` gives the BSTR's text and `copy: "variant"` a VARIANT by pointer or by value (passed as a pointer on x64/arm64) as a string, number, boolean, null, an AddRef'd pointer (VT_UNKNOWN/VT_DISPATCH) or its 24 raw bytes. A UI Automation `HandlePropertyChangedEvent` can now read its `sender` and `newValue`. Calls dropped on a full queue or left for a closed callback release what they kept; `close()` waits for calls in flight. `copy` keeps working unchanged.
 - `Overflow max`: the space available on the main axis (logical px); the box grows with its items up to `max` and decides what fits against it, for containers that grow with their content (docks, taskbars).
+- Go: `tarve.RequestSingleInstance(SingleInstanceOptions{ID, Schemes})` (`go/tarve/instance.go`), the port of `requestSingleInstance`: the first launch is `Primary` and hears later ones through `OnSecondInstance` (arguments, working directory, links of its schemes); a later launch hands its arguments over and lets the first take the foreground. Same named pipe (Windows) or private Unix socket and the same wire format as the TypeScript one, so a Go and a TypeScript build with the same id share one instance. `Release()` stops answering; a socket a crashed instance left behind is cleared by the next launch.
 - `messageWindow({ parent, children, keyedReplies })` (Windows): the window can be a WS_CHILD of `parent` and hosts a tree of child windows made on its thread (`children: [{ className, windowName?, style?, exStyle?, replies?, keyedReplies?, children? }]`, found by `FindWindowEx`, e.g. a replacement `Shell_TrayWnd` with `TrayNotifyWnd`, `SysPager`, `ToolbarWindow32`). Message events name the window that got them (`window: { hwnd, className }`); each window has its own reply table (`setReply(message, value, hwnd | { hwnd, wParam, dwData })`, `MessageWindow.children`). `keyedReplies` answer natively by (message, wParam) or by `WM_COPYDATA` dwData, so the tray's `NIM_*` (dwData 1) gets 1 at once while its copied payload still reaches `onMessage`.
 
 ### Fixed
 
+- Windows installer (`--format setup`): the app is opened as the very last step, once the install is done, and the wizard then closes itself; without the launch option the Done page stays. A silent install opens it after installing too. `launchInstalled` does it; `install()` no longer launches.
+- Windows installer: the installed `Uninstall.exe` opened by hand (without `--uninstall`) uninstalls instead of failing, since it carries no app to install.
+- txiki.js: the library handles opened for `tarve_surface_present`, the surface GL symbols and the plugin emit address stay open for the life of the process; a collected handle unloaded the library under them (a silent crash on the next call).
+- Go: `TitleBar` keeps `padding.right: 0`, its glass controls take a drop of glass on hover and press (`glassLens`), and a checked `Switch` thumb takes `PrimaryForeground`, as in TypeScript (the Go parity tests pass again).
 - `show()` of a `Window activation="never" | "whileEditing"` no longer takes the focus: only `activation="normal"` windows are focused when shown (an explicit `focus()` or `activate` still focuses). On Windows a window shown again after `hide()` is shown with `SW_SHOWNA` first: winit's own show activates it after the first time.
 - Windows: when another window activates while the cursor stays over a window, the window keeps its hover instead of leaving, and a release hit-tests where the pointer is, so a click with the mouse held still is no longer lost.
 - `app.appBar` docks again by itself when Explorer restarts (`TaskbarCreated`): the bar registers with the new shell and keeps its edge, thickness, overlap and span.
+
+### Removed
+
+- The YouTube Music example (`examples/youtube-music`) and its Go port (`go/examples/youtube-music`) moved to their own repository, with a Windows installer: [omarcosr/youtube-music](https://github.com/omarcosr/youtube-music) (TypeScript in `src/`, Go in `go/`, with the parity test between them). Tarve's own Go parity tests keep the counter and `go/parity/fixtures.tsx`.
 
 ## 0.13.3 — 2026-11-18
 

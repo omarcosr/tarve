@@ -84,6 +84,24 @@ type GlassOptions struct {
 	Blend    *float64
 }
 
+// glassLens is a drop of glass inside a glass control (glass.ts glassLens): a faint lens for
+// hover, a brighter one for the selected item.
+func glassLens(appearance string, selected bool) S {
+	veil := map[bool]string{true: "#ffffff1f", false: "#ffffff0f"}[selected]
+	switch appearance {
+	case "dark":
+	case "light":
+		veil = map[bool]string{true: "#ffffff4d", false: "#ffffff26"}[selected]
+	default:
+		veil = T.Card + map[bool]string{true: "/30", false: "/15"}[selected]
+	}
+	refraction, magnify := 16.0, 0.1
+	if selected {
+		refraction, magnify = 24, 0.16
+	}
+	return S{"background": veil, "glass": S{"blur": 10, "saturate": 1.6, "refraction": refraction, "highlight": 1, "magnify": magnify}}
+}
+
 func glassSurface(variant, appearance string, o GlassOptions) S {
 	bg := glassVeil[appearance][variant]
 	if o.Tint != "" {

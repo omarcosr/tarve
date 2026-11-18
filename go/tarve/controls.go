@@ -58,9 +58,14 @@ func Switch(p Props) *VNode {
 	} else if checked {
 		track = T.Primary
 	}
-	left := 2
+	left, thumb := 2, T.SliderThumb
 	if checked {
 		left = 18
+	}
+	// On the checked track (Primary) the thumb takes PrimaryForeground: the dark theme's primary is
+	// near-white, the same as its thumb.
+	if checked && !truthy(disabled) {
+		thumb = T.PrimaryForeground
 	}
 	color := foregroundOr(style, T.Foreground)
 	if truthy(disabled) {
@@ -76,7 +81,7 @@ func Switch(p Props) *VNode {
 	q["style"] = merge(S{"direction": "row", "align": "center", "gap": 9, "minHeight": 28}, style)
 	q["children"] = []Child{
 		View(Props{"style": S{"position": "relative", "width": 36, "height": 20, "shrink": 0, "radius": 10, "background": track},
-			"children": View(Props{"style": S{"position": "absolute", "top": 2, "left": left, "width": 16, "height": 16, "radius": 8, "background": T.SliderThumb}})}),
+			"children": View(Props{"style": S{"position": "absolute", "top": 2, "left": left, "width": 16, "height": 16, "radius": 8, "background": thumb}})}),
 		Text(Props{"color": color, "children": label}),
 	}
 	return Pressable(q)
