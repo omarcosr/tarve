@@ -65,4 +65,55 @@ describe("messageWindow", () => {
     expect(() => window.setReply(1, 1)).toThrow("disposed");
     window.dispose();
   });
+
+  test.skipIf(!windows || !hasNative)("hosts a tree of child windows with keyed native replies", async () => {
+    const user32 = openPluginLibrary("user32.dll", {
+      PostMessageW: { args: ["ptr", "u32", "u64", "i64"], returns: "i32" },
+      SendMessageW: { args: ["ptr", "u32", "u64", "i64"], returns: "i64" },
+      FindWindowExW: { args: ["ptr", "ptr", "buffer", "ptr"], returns: "ptr" },
+    });
+    const sendCopy = openPluginLibrary("user32.dll", { SendMessageW: { args: ["ptr", "u32", "u64", "buffer"], returns: "i64" } }).symbols.SendMessageW;
+    const wide = (text: string) => new Uint8Array(new Uint16Array([...text].map(char => char.charCodeAt(0)).concat(0)).buffer);
+    const find = (parent: bigint, className: string) => BigInt(user32.symbols.FindWindowExW(parent, 0, wide(className), 0) as number | bigint);
+    const WM_APP = 0x8000, WM_COPYDATA = 0x4a;
+    expect(() => messageWindow({ children: [{} as never], onMessage() {} })).toThrow("className");
+    expect(() => messageWindow({ keyedReplies: [{ message: 1, wParam: 1, dwData: 1, value: 0 }], onMessage() {} })).toThrow("not both");
+    const events: MessageWindowEvent[] = [];
+    const window = messageWindow({
+      className: "TarveJsTreeTray",
+      messageOnly: true,
+      messages: [WM_COPYDATA, WM_APP + 1],
+      keyedReplies: [{ message: WM_COPYDATA, dwData: 1, value: true }, { message: WM_APP + 2, wParam: 4, value: 3 }],
+      children: [{ className: "TarveJsTreeNotify", children: [{ className: "TarveJsTreeToolbar", replies: { [WM_APP + 3]: 9 } }] }],
+      onMessage(event) { events.push(event); },
+    });
+    try {
+      expect(window.className).toBe("TarveJsTreeTray");
+      const [notify, toolbar] = window.children;
+      expect(window.children.map(child => [child.className, child.parent])).toEqual([["TarveJsTreeNotify", window.hwnd], ["TarveJsTreeToolbar", notify!.hwnd]]);
+      expect(find(window.hwnd, "TarveJsTreeNotify")).toBe(notify!.hwnd);
+      expect(find(notify!.hwnd, "TarveJsTreeToolbar")).toBe(toolbar!.hwnd);
+      expect(Number(user32.symbols.SendMessageW(toolbar!.hwnd, WM_APP + 3, 0, 0))).toBe(9);
+      expect(Number(user32.symbols.SendMessageW(window.hwnd, WM_APP + 2, 4, 0))).toBe(3);
+      expect(Number(user32.symbols.SendMessageW(window.hwnd, WM_APP + 2, 5, 0))).toBe(0);
+      window.setReply(WM_APP + 4, 6, { hwnd: toolbar!.hwnd, wParam: 2n });
+      expect(Number(user32.symbols.SendMessageW(toolbar!.hwnd, WM_APP + 4, 2, 0))).toBe(6);
+      window.setReply(WM_APP + 4, null, { hwnd: toolbar!.hwnd, wParam: 2 });
+      expect(Number(user32.symbols.SendMessageW(toolbar!.hwnd, WM_APP + 4, 2, 0))).toBe(0);
+      expect(() => window.setReply(1, 1, 12345n)).toThrow("not a window");
+      // COPYDATASTRUCT { dwData = 1, cbData = 0, lpData = null } answered 1 natively, still delivered.
+      const copy = new Uint8Array(24);
+      copy[0] = 1;
+      expect(Number(sendCopy(window.hwnd, WM_COPYDATA, 0, copy))).toBe(1);
+      copy[0] = 3;
+      expect(Number(sendCopy(window.hwnd, WM_COPYDATA, 0, copy))).toBe(0);
+      user32.symbols.PostMessageW(toolbar!.hwnd, WM_APP + 1, 1, 2);
+      await until(() => events.length >= 3);
+      expect(events[0]).toMatchObject({ type: "message", window: { hwnd: window.hwnd, className: "TarveJsTreeTray" }, copyData: { dwData: 1n } });
+      expect(events[1]).toMatchObject({ copyData: { dwData: 3n } });
+      expect(events[2]).toMatchObject({ type: "message", message: WM_APP + 1, window: { hwnd: toolbar!.hwnd, className: "TarveJsTreeToolbar" } });
+    } finally {
+      window.dispose();
+    }
+  });
 });

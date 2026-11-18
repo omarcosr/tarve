@@ -11,6 +11,46 @@ export type MessageWindowMessage = number | string;
 /** An LRESULT: booleans are 1 and 0. */
 export type MessageWindowReply = number | bigint | boolean;
 
+/** A fixed answer only to `message` with this wParam, or (WM_COPYDATA) this COPYDATASTRUCT dwData, e.g. `{ message: 0x4a, dwData: 1, value: 1 }` answers the tray's NIM_* at once. A keyed entry wins over the message's `replies` entry. */
+export interface MessageWindowKeyedReply {
+  readonly message: MessageWindowMessage;
+  readonly wParam?: number | bigint;
+  readonly dwData?: number | bigint;
+  readonly value: MessageWindowReply;
+}
+
+/** A child window made on the window's thread (WS_CHILD is always added to `style`): found by FindWindowEx, its messages delivered like the top window's (`messages`, `waitReplies` apply to every window of the tree). */
+export interface MessageWindowChild {
+  /** Registered for this window (unless the tree already did), unregistered by dispose(). */
+  readonly className: string;
+  readonly windowName?: string;
+  /** CreateWindowExW dwStyle / dwExStyle. Default 0 / 0. */
+  readonly style?: number;
+  readonly exStyle?: number;
+  /** This child's own fixed answers (see MessageWindowOptions.replies). */
+  readonly replies?: Readonly<Record<string, MessageWindowReply>>;
+  readonly keyedReplies?: readonly MessageWindowKeyedReply[];
+  readonly children?: readonly MessageWindowChild[];
+}
+
+/** A window of the tree: the top one or a child. */
+export interface MessageWindowTarget {
+  readonly hwnd: bigint;
+  readonly className: string;
+}
+
+export interface MessageWindowChildInfo extends MessageWindowTarget {
+  readonly windowName: string;
+  readonly parent: bigint;
+}
+
+/** Where `setReply` puts its answer: a window of the tree (default: the top one), keyed by wParam or by WM_COPYDATA dwData. */
+export interface MessageWindowReplyTarget {
+  readonly hwnd?: bigint | number;
+  readonly wParam?: number | bigint;
+  readonly dwData?: number | bigint;
+}
+
 export interface MessageWindowWinEvent {
   /** EVENT_* range (SetWinEventHook eventMin/eventMax); `max` defaults to `min`. */
   readonly min: number;
@@ -42,6 +82,8 @@ export interface MessageWindowFolderWatch {
 export type MessageWindowEvent =
   | {
     readonly type: "message";
+    /** The window of the tree that got it. */
+    readonly window: MessageWindowTarget;
     readonly message: number;
     readonly wParam: bigint;
     readonly lParam: bigint;
@@ -83,7 +125,11 @@ export interface MessageWindowOptions {
    * top-level tool window, which gets them.
    */
   readonly messageOnly?: boolean;
-  /** CreateWindowExW dwStyle / dwExStyle. Default WS_POPUP / WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE (never shown). */
+  /** An HWND to make the window a WS_CHILD of (not with `messageOnly`). */
+  readonly parent?: bigint | number;
+  /** Child windows made on the window's thread under it (a replacement Shell_TrayWnd's TrayNotifyWnd, SysPager, ToolbarWindow32, …). Up to 256, 16 deep. */
+  readonly children?: readonly MessageWindowChild[];
+  /** CreateWindowExW dwStyle / dwExStyle. Default WS_POPUP (WS_CHILD with `parent`) / WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE (never shown). */
   readonly style?: number;
   readonly exStyle?: number;
   /** Window messages delivered to `onMessage`. Every other message gets DefWindowProcW (WM_CLOSE gets 0: only dispose() closes the window). */
@@ -100,6 +146,8 @@ export interface MessageWindowOptions {
   readonly replyTimeout?: number;
   /** Fixed answers, given at once on the window's thread to any message, delivered or not (keys: message numbers or registered names). Change with `setReply`. */
   readonly replies?: Readonly<Record<string, MessageWindowReply>>;
+  /** Fixed answers by (message, wParam) or by WM_COPYDATA dwData, given natively like `replies`; the message is still delivered when listed in `messages`. */
+  readonly keyedReplies?: readonly MessageWindowKeyedReply[];
   /** SetWinEventHook ranges (out of context, delivered on the window's thread). */
   readonly winEvents?: readonly MessageWindowWinEvent[];
   /** RegisterShellHookWindow: HSHELL_* notifications as `shell` events. */
@@ -114,6 +162,9 @@ export interface MessageWindowOptions {
 
 export interface MessageWindow {
   readonly hwnd: bigint;
+  readonly className: string;
+  /** The child windows, depth first. */
+  readonly children: readonly MessageWindowChildInfo[];
   /** The native thread pumping the window (for AttachThreadInput, PostThreadMessage). */
   readonly threadId: number;
   /** Ids of the registered messages named in the options. */
@@ -121,8 +172,8 @@ export interface MessageWindow {
   /** The shell hook's message id (0 without `shellHook`). */
   readonly shellHookMessage: number;
   readonly disposed: boolean;
-  /** Sets the fixed answer to `message`; null clears it. */
-  setReply(message: MessageWindowMessage, value: MessageWindowReply | null): void;
+  /** Sets the fixed answer to `message` (to the top window, or `target`: a window of the tree's hwnd, or its hwnd and a wParam or dwData key); null clears it. */
+  setReply(message: MessageWindowMessage, value: MessageWindowReply | null, target?: bigint | number | MessageWindowReplyTarget): void;
   /** Unhooks everything, destroys the window and stops its thread (waits for it). Calls not yet delivered are dropped. While a window is open, the process stays alive. */
   dispose(): void;
 }
@@ -165,6 +216,45 @@ function utf16(bytes: Uint8Array): string {
     text += String.fromCharCode(...units);
   }
   return text;
+}
+
+const U64 = (1n << 64n) - 1n;
+
+/** A u64 argument: a number while it is exact. */
+function u64(value: bigint): number | bigint {
+  return value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value;
+}
+
+/** A reply's key: [kind (0 none, 1 wParam, 2 dwData), key]. */
+function replyKey(match: { readonly wParam?: number | bigint; readonly dwData?: number | bigint }): [number, bigint] {
+  if (match.wParam !== undefined && match.dwData !== undefined) throw new TypeError("messageWindow: a reply is keyed by wParam or by dwData, not both");
+  const key = match.wParam ?? match.dwData;
+  if (key === undefined) return [0, 0n];
+  if (typeof key === "number" ? !Number.isInteger(key) : typeof key !== "bigint") throw new TypeError(`messageWindow: invalid reply key ${String(key)}`);
+  return [match.wParam !== undefined ? 1 : 2, BigInt(key) & U64];
+}
+
+function replyEntries(replies?: Readonly<Record<string, MessageWindowReply>>, keyed?: readonly MessageWindowKeyedReply[]): unknown[] {
+  const entries: unknown[] = Object.entries(replies ?? {}).map(([key, value]) => [checkMessage(messageName(key)), Number(i64(value))]);
+  for (const entry of keyed ?? []) {
+    const [kind, key] = replyKey(entry);
+    entries.push(kind ? [checkMessage(entry.message), Number(i64(entry.value)), kind, String(key)] : [checkMessage(entry.message), Number(i64(entry.value))]);
+  }
+  return entries;
+}
+
+function childJson(child: MessageWindowChild): unknown {
+  if (typeof child?.className !== "string" || !child.className) throw new TypeError("messageWindow: every child needs a className");
+  return {
+    className: child.className, windowName: child.windowName, style: child.style, exStyle: child.exStyle,
+    replies: replyEntries(child.replies, child.keyedReplies), children: (child.children ?? []).map(childJson),
+  };
+}
+
+function handle(value: bigint | number): number {
+  const wide = BigInt(value);
+  if (wide <= 0n || wide > BigInt(Number.MAX_SAFE_INTEGER)) throw new RangeError(`messageWindow: invalid window handle ${String(value)}`);
+  return Number(wide);
 }
 
 function messageName(key: string): MessageWindowMessage {
@@ -212,12 +302,14 @@ export function messageWindow(options: MessageWindowOptions): MessageWindow {
     className: options.className,
     windowName: options.windowName,
     messageOnly: options.messageOnly ?? false,
+    parent: options.parent === undefined ? undefined : handle(options.parent),
+    children: (options.children ?? []).map(childJson),
     style: options.style,
     exStyle: options.exStyle,
     messages: (options.messages ?? []).map(checkMessage),
     waitReplies: (options.waitReplies ?? []).map(checkMessage),
     replyTimeout: timeout,
-    replies: Object.entries(options.replies ?? {}).map(([key, value]) => [checkMessage(messageName(key)), Number(i64(value))]),
+    replies: replyEntries(options.replies, options.keyedReplies),
     winEvents: (options.winEvents ?? []).map(hook => ({
       min: hook.min, max: hook.max, process: hook.process ?? 0, thread: hook.thread ?? 0,
       flags: (hook.skipOwnThread ? 1 : 0) | (hook.skipOwnProcess ? 2 : 0),
@@ -231,6 +323,9 @@ export function messageWindow(options: MessageWindowOptions): MessageWindow {
   let id = 0;
   let disposed = false;
   const onMessage = options.onMessage;
+  // hwnd -> its window of the tree, filled once the window exists (records arrive after that).
+  const targets = new Map<bigint, MessageWindowTarget>();
+  let top: MessageWindowTarget = { hwnd: 0n, className: "" };
   const callback = threadsafeRecordCallback((args, copied) => {
     if (disposed) return;
     const [kind, a1, a2, a3, a4, a5] = args as [bigint, bigint, bigint, bigint, bigint, bigint];
@@ -250,7 +345,7 @@ export function messageWindow(options: MessageWindowOptions): MessageWindow {
         } else if (message === WM_SETTINGCHANGE) {
           extra = { text: "" };
         }
-        const result = onMessage({ type: "message", message, wParam: a2, lParam: signed(a3, 64n), ...extra, waiting: sequence !== 0n });
+        const result = onMessage({ type: "message", window: targets.get(a5) ?? top, message, wParam: a2, lParam: signed(a3, 64n), ...extra, waiting: sequence !== 0n });
         if (sequence !== 0n && result !== undefined && !disposed) symbols.tarve_message_window_reply(id, sequence, i64(result));
         return;
       }
@@ -272,7 +367,10 @@ export function messageWindow(options: MessageWindowOptions): MessageWindow {
       }
     }
   });
-  let info: { hwnd: string; threadId: number; messages: Record<string, number>; shellHook: number };
+  let info: {
+    hwnd: string; className: string; threadId: number; messages: Record<string, number>; shellHook: number;
+    children: { hwnd: string; parent: string; className: string; windowName: string }[];
+  };
   try {
     const bytes = new TextEncoder().encode(JSON.stringify(json));
     id = Number(symbols.tarve_message_window_open(bytes, bytes.length, callback.pointer));
@@ -294,18 +392,31 @@ export function messageWindow(options: MessageWindowOptions): MessageWindow {
     throw error;
   }
   const messageIds = Object.freeze({ ...info.messages });
+  top = Object.freeze({ hwnd: BigInt(info.hwnd), className: info.className });
+  targets.set(top.hwnd, top);
+  const children = Object.freeze(info.children.map(child => {
+    const described = Object.freeze({ hwnd: BigInt(child.hwnd), className: child.className, windowName: child.windowName, parent: BigInt(child.parent) });
+    targets.set(described.hwnd, Object.freeze({ hwnd: described.hwnd, className: described.className }));
+    return described;
+  }));
   return {
-    hwnd: BigInt(info.hwnd),
+    hwnd: top.hwnd,
+    className: top.className,
+    children,
     threadId: info.threadId,
     messageIds,
     shellHookMessage: info.shellHook,
     get disposed() { return disposed; },
-    setReply(message, value) {
+    setReply(message, value, target) {
       if (disposed) throw new Error("messageWindow: disposed");
       checkMessage(message);
+      const where: MessageWindowReplyTarget = typeof target === "object" && target !== null ? target : { hwnd: target };
+      const hwnd = where.hwnd === undefined ? top.hwnd : BigInt(where.hwnd);
+      if (!targets.has(hwnd)) throw new RangeError(`messageWindow: ${hwnd} is not a window of this message window`);
+      const [kind, key] = replyKey(where);
       const number = typeof message === "number" ? message : messageIds[message];
       if (number === undefined) throw new RangeError(`messageWindow: "${message}" is not one of this window's registered messages`);
-      symbols.tarve_message_window_set_reply(id, number, value === null ? 0 : 1, value === null ? 0 : i64(value));
+      symbols.tarve_message_window_set_reply(id, u64(hwnd), number, kind, u64(key), value === null ? 0 : 1, value === null ? 0 : i64(value));
     },
     dispose() {
       if (disposed) return;

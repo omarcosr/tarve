@@ -257,7 +257,7 @@ pub extern "C" fn tarve_com_release(object: u64) -> i32 {
 #[cfg(not(target_os = "windows"))]
 const MESSAGE_WINDOW_UNSUPPORTED: &str = "messageWindow is only available on Windows";
 
-fn set_last_error(message: String) {
+pub(crate) fn set_last_error(message: String) {
     *LAST_ERROR.lock().unwrap_or_else(|p| p.into_inner()) = message;
 }
 
@@ -312,23 +312,22 @@ pub extern "C" fn tarve_message_window_reply(id: u64, sequence: u64, value: i64)
     }
 }
 
-/// Sets (`set` 1) or clears (`set` 0) the fixed LRESULT of `message`: 1, or 0 for no such window.
+/// Sets (`set` 1) or clears the LRESULT of `message` to `hwnd`, keyed by `kind`/`key`: 1 or 0.
 #[unsafe(no_mangle)]
 pub extern "C" fn tarve_message_window_set_reply(
     id: u64,
+    hwnd: u64,
     message: u32,
+    kind: u32,
+    key: u64,
     set: u32,
     value: i64,
 ) -> i32 {
     #[cfg(target_os = "windows")]
-    return i32::from(crate::message_window::set_reply(
-        id,
-        message,
-        (set != 0).then_some(value),
-    ));
+    return crate::message_window::set_reply(id, hwnd, message, kind, key, set, value).into();
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = (id, message, set, value);
+        let _ = (id, hwnd, message, kind, key, set, value);
         0
     }
 }

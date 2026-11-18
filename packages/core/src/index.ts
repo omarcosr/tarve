@@ -78,7 +78,7 @@ export type { MediaAudioTrack, MediaTextTrack, MediaController, MediaElementProp
 export { Surface, type SurfaceController, type SurfaceEvent, type SurfaceGl, type SurfacePixelFormat, type SurfaceProps } from "./surface";
 export { parseSubtitles } from "./subtitles";
 export { systemMediaSessions, controlSystemMediaSession, onSystemMediaSessionsChange, type ExternalMediaSession, type SystemMediaSessionAction } from "./media-sessions";
-export { threadsafeCallback, threadsafeComObject, guidBytes, THREADSAFE_MAX_ARGS, THREADSAFE_MAX_CALLBACKS, type ThreadsafeArgType, type ThreadsafeCallback, type ThreadsafeCallbackOptions, type ThreadsafeComObject, type ThreadsafeComObjectOptions } from "./threadsafe";
-export { messageWindow, MessageWindowUnsupportedError, type MessageWindow, type MessageWindowEvent, type MessageWindowFolderWatch, type MessageWindowMessage, type MessageWindowOptions, type MessageWindowRegistryWatch, type MessageWindowReply, type MessageWindowWinEvent } from "./message-window";
+export { threadsafeCallback, threadsafeComObject, releaseCom, guidBytes, THREADSAFE_MAX_ARGS, THREADSAFE_MAX_CALLBACKS, type ThreadsafeArgType, type ThreadsafeArg, type ThreadsafeArgSpec, type ThreadsafeVariant, type ThreadsafeCallback, type ThreadsafeCallbackOptions, type ThreadsafeComObject, type ThreadsafeComObjectOptions } from "./threadsafe";
+export { messageWindow, MessageWindowUnsupportedError, type MessageWindow, type MessageWindowChild, type MessageWindowChildInfo, type MessageWindowEvent, type MessageWindowFolderWatch, type MessageWindowKeyedReply, type MessageWindowReplyTarget, type MessageWindowTarget, type MessageWindowMessage, type MessageWindowOptions, type MessageWindowRegistryWatch, type MessageWindowReply, type MessageWindowWinEvent } from "./message-window";
 export { extendTailwind, tw } from "./tailwind";
 

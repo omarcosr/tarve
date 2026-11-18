@@ -23,6 +23,7 @@ if (process.platform !== "win32") {
   const user32 = openPluginLibrary("user32.dll", {
     PostMessageW: { args: ["ptr", "u32", "u64", "i64"], returns: "i32" },
     SendMessageW: { args: ["ptr", "u32", "u64", "i64"], returns: "i64" },
+    FindWindowExW: { args: ["ptr", "ptr", "buffer", "ptr"], returns: "ptr" },
   });
   // SendMessageW again, its lParam a buffer's address.
   const sendText = openPluginLibrary("user32.dll", {
@@ -49,6 +50,7 @@ if (process.platform !== "win32") {
   // In arrival order; the registered id and the string's address differ per run.
   results["events"] = events.filter(event => event.type === "message").slice(0, 3).map(show).map(event => ({
     ...event,
+    window: event.window.className.startsWith("TarveMessageWindow-") ? "top" : event.window.className,
     ...(event.message === WM_APP + 1 || event.message === WM_SETTINGCHANGE ? {} : { message: "registered" }),
     ...(event.message === WM_SETTINGCHANGE ? { lParam: "address" } : {}),
   }));
@@ -56,6 +58,41 @@ if (process.platform !== "win32") {
   window.dispose();
   rmSync(folder, { recursive: true, force: true });
   results["disposed"] = window.disposed;
+  // A tray-like tree: children found by FindWindowEx, answered natively per window and by
+  // (message, wParam) or WM_COPYDATA dwData, their messages delivered naming the window.
+  const WM_COPYDATA = 0x4a;
+  const wide = (value: string) => new Uint8Array(new Uint16Array([...value].map(char => char.charCodeAt(0)).concat(0)).buffer);
+  const find = (parent: bigint, className: string) => BigInt(user32.symbols.FindWindowExW(parent, 0, wide(className), 0) as number | bigint);
+  const treeEvents: MessageWindowEvent[] = [];
+  const tray = messageWindow({
+    className: "TarveSmokeTray",
+    messageOnly: true,
+    messages: [WM_COPYDATA, WM_APP + 1],
+    keyedReplies: [{ message: WM_COPYDATA, dwData: 1, value: 1 }, { message: WM_APP + 2, wParam: 4, value: 3 }],
+    children: [{ className: "TarveSmokeNotify", children: [{ className: "TarveSmokeToolbar", windowName: "Smoke", replies: { [WM_APP + 3]: 9 } }] }],
+    onMessage(event) { treeEvents.push(event); },
+  });
+  const [notify, toolbar] = tray.children;
+  tray.setReply(WM_APP + 4, 6, { hwnd: toolbar!.hwnd, wParam: 2 });
+  const copy = new Uint8Array(24);
+  copy[0] = 1;
+  const nim = Number(sendText(tray.hwnd, WM_COPYDATA, 0, copy));
+  user32.symbols.PostMessageW(toolbar!.hwnd, WM_APP + 1, 5, 6);
+  await until(() => treeEvents.length >= 2);
+  results["tree"] = {
+    children: tray.children.map(child => [child.className, child.windowName, child.parent === tray.hwnd ? "top" : child.parent === notify!.hwnd ? "notify" : "other"]),
+    found: find(tray.hwnd, "TarveSmokeNotify") === notify!.hwnd && find(notify!.hwnd, "TarveSmokeToolbar") === toolbar!.hwnd,
+    replies: [
+      Number(user32.symbols.SendMessageW(toolbar!.hwnd, WM_APP + 3, 0, 0)),
+      Number(user32.symbols.SendMessageW(tray.hwnd, WM_APP + 3, 0, 0)),
+      Number(user32.symbols.SendMessageW(tray.hwnd, WM_APP + 2, 4, 0)),
+      Number(user32.symbols.SendMessageW(tray.hwnd, WM_APP + 2, 5, 0)),
+      Number(user32.symbols.SendMessageW(toolbar!.hwnd, WM_APP + 4, 2, 0)),
+      nim,
+    ],
+    events: treeEvents.map(event => event.type === "message" && [event.window.className, event.message, String(event.wParam), event.copyData ? "address" : String(event.lParam), event.copyData ? String(event.copyData.dwData) : null]),
+  };
+  tray.dispose();
 }
 
 writeFileSync(process.argv.at(-1)!, JSON.stringify(results));

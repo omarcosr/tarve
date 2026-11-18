@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { nativePath } from "./bridge/runtime";
 import { openPluginLibrary } from "./plugins/ffi";
 import { pointerFunction } from "./plugins/pointer";
-import { guidBytes, threadsafeCallback, threadsafeComObject } from "./threadsafe";
+import { guidBytes, releaseCom, threadsafeCallback, threadsafeComObject } from "./threadsafe";
 
 // Calls through Tarve's native library (native/src/threadsafe.rs): skipped before a native build,
 // as pointer.test.ts is.
@@ -116,7 +116,85 @@ describe.skipIf(!hasNative)("threadsafeCallback", () => {
       method.close();
     }
   });
+
+  test("keeps COM arguments and copies byte arguments per argument", async () => {
+    const calls: unknown[][] = [];
+    const callback = threadsafeCallback((...args) => { calls.push(args); }, {
+      args: ["u32", { type: "ptr", keep: "com" }, { type: "ptr", copy: 2 }, { type: "ptr", keep: "com" }],
+      returns: 7,
+    });
+    const sender = threadsafeComObject({ iids: [], methods: [1n] });
+    try {
+      const call = pointerFunction(callback.pointer, { args: ["u32", "ptr", "buffer", "ptr"], returns: "i32" });
+      expect(call(4, sender.pointer, new Uint8Array([5, 6, 7]), 0n)).toBe(7);
+      expect(refCount(sender.pointer)).toBe(2);
+      await until(() => calls.length > 0);
+      expect(calls).toEqual([[4, sender.pointer, new Uint8Array([5, 6]), null]]);
+      expect(releaseCom(calls[0]![1] as bigint)).toBe(1);
+      expect(releaseCom(null)).toBe(0);
+    } finally {
+      sender.release();
+      callback.close();
+    }
+  });
+
+  test.skipIf(process.platform !== "win32")("copies a BSTR and VARIANTs before the caller frees them", async () => {
+    const oleaut32 = openPluginLibrary("oleaut32.dll", {
+      SysAllocString: { args: ["buffer"], returns: "ptr" },
+      SysFreeString: { args: ["ptr"], returns: "void" },
+    });
+    const text = "Olá, barra 😀";
+    const utf16 = new Uint8Array((text.length + 1) * 2);
+    for (let index = 0; index < text.length; index++) new DataView(utf16.buffer).setUint16(index * 2, text.charCodeAt(index), true);
+    const bstr = BigInt(oleaut32.symbols.SysAllocString(utf16));
+    const variant = (vt: number, value: bigint) => {
+      const bytes = new Uint8Array(24);
+      new DataView(bytes.buffer).setUint16(0, vt, true);
+      new DataView(bytes.buffer).setBigUint64(8, value, true);
+      return bytes;
+    };
+    const calls: unknown[][] = [];
+    const callback = threadsafeCallback((...args) => { calls.push(args); }, {
+      args: [{ type: "ptr", copy: "bstr" }, { type: "ptr", copy: "variant" }, { type: "ptr", copy: "variant" }, { type: "ptr", copy: "variant" }, { type: "ptr", copy: "variant" }],
+    });
+    const unknown = threadsafeComObject({ iids: [], methods: [1n] });
+    try {
+      const call = pointerFunction(callback.pointer, { args: ["ptr", "buffer", "buffer", "buffer", "buffer"], returns: "i32" });
+      call(bstr, variant(8, bstr), variant(3, 0xfffffffbn), variant(11, 0xffffn), variant(13, unknown.pointer));
+      oleaut32.symbols.SysFreeString(bstr);
+      const date = variant(7, 0x4004000000000000n);
+      call(0n, date, variant(0, 0n), variant(5, 0x4004000000000000n), variant(9, 0n));
+      await until(() => calls.length > 1);
+      expect(calls).toEqual([[text, text, -5, true, unknown.pointer], [null, date, null, 2.5, null]]);
+      expect(releaseCom(calls[0]![4] as bigint)).toBe(1);
+    } finally {
+      unknown.release();
+      callback.close();
+      oleaut32.close();
+    }
+  });
+
+  test("refuses bad argument specs", () => {
+    expect(() => threadsafeCallback(() => {}, { args: [{ type: "ptr", keep: "nope" } as never] })).toThrow(TypeError);
+    expect(() => threadsafeCallback(() => {}, { args: [{ type: "ptr", copy: 0 }] })).toThrow(RangeError);
+    expect(() => threadsafeCallback(() => {}, { args: [{ type: "u32", keep: "com" } as never] })).toThrow(TypeError);
+    expect(() => threadsafeCallback(() => {}, { args: [{ type: "ptr", keep: "com" }], copy: { arg: 0, bytes: 4 } })).toThrow(RangeError);
+    if (process.platform !== "win32") {
+      expect(() => threadsafeCallback(() => {}, { args: [{ type: "ptr", copy: "bstr" }] })).toThrow("only available on Windows");
+    }
+  });
 });
+
+/** An object's reference count: AddRef then Release through its vtable. */
+function refCount(object: bigint): number {
+  const memcpy = pointerFunction(memcpyAddress(), { args: ["buffer", "ptr", "u64"], returns: "ptr" });
+  const vtable = new BigUint64Array(1);
+  memcpy(vtable, object, 8);
+  const entries = new BigUint64Array(3);
+  memcpy(entries, vtable[0]!, 24);
+  pointerFunction(entries[1]!, { args: ["ptr"], returns: "u32" })(object);
+  return pointerFunction(entries[2]!, { args: ["ptr"], returns: "u32" })(object) as number;
+}
 
 function memcpyAddress(): bigint {
   const text = (value: string) => new TextEncoder().encode(`${value}\0`);

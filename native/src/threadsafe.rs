@@ -9,7 +9,8 @@
 //! Each callback is one of a fixed set of entry points (no code is generated at run time). An
 //! entry takes up to [`ARGS`] integer or pointer arguments; floating-point arguments are not
 //! captured. [`com_object`] builds a COM object whose IUnknown runs natively (QueryInterface must
-//! answer synchronously) and whose other methods are such callbacks.
+//! answer synchronously) and whose other methods are such callbacks. [`marshal`] keeps or copies
+//! what an argument names (an interface pointer, a BSTR, a VARIANT) per argument.
 use crate::bridge::WakePipe;
 use std::{
     collections::VecDeque,
@@ -19,6 +20,8 @@ use std::{
         atomic::{AtomicU32, AtomicU64, Ordering},
     },
 };
+
+mod marshal;
 
 /// Callbacks that can be open at once.
 pub(crate) const SLOTS: usize = 128;
@@ -42,6 +45,11 @@ struct Slot {
     returns: AtomicU64,
     copy_arg: AtomicU32,
     copy_len: AtomicU32,
+    /// [`marshal`] kinds, 4 bits per argument; 0 for none (the plain path).
+    kinds: AtomicU32,
+    lens: [AtomicU32; ARGS],
+    /// Marshalled calls in flight: [`close`] waits for them, so none queues after it.
+    busy: AtomicU32,
 }
 
 #[allow(clippy::declare_interior_mutable_const)]
@@ -51,6 +59,9 @@ const EMPTY: Slot = Slot {
     returns: AtomicU64::new(0),
     copy_arg: AtomicU32::new(NO_COPY),
     copy_len: AtomicU32::new(0),
+    kinds: AtomicU32::new(0),
+    lens: [const { AtomicU32::new(0) }; ARGS],
+    busy: AtomicU32::new(0),
 };
 static TABLE: [Slot; SLOTS] = [EMPTY; SLOTS];
 
@@ -91,6 +102,13 @@ static ENTRIES: [Entry; SLOTS] = entries!(
 
 fn dispatch(index: usize, args: [u64; ARGS]) -> u64 {
     let slot = &TABLE[index];
+    if slot.kinds.load(Ordering::Acquire) != 0 {
+        return marshal::dispatch(slot, args);
+    }
+    dispatch_plain(slot, args)
+}
+
+fn dispatch_plain(slot: &Slot, args: [u64; ARGS]) -> u64 {
     let returns = slot.returns.load(Ordering::Acquire);
     let id = slot.id.load(Ordering::Acquire);
     // A slot closed (or closed and opened again) during the call records nothing for its old id.
@@ -109,14 +127,15 @@ fn dispatch(index: usize, args: [u64; ARGS]) -> u64 {
         }
         _ => &[],
     };
-    push(record(id, args, copied));
+    push(record(id, args, copied, 0));
     returns
 }
 
-fn record(id: u32, args: [u64; ARGS], copied: &[u8]) -> Vec<u8> {
+/// `flag` is ORed into the copied length ([`marshal::TAGGED`] for a marshalled call's segments).
+fn record(id: u32, args: [u64; ARGS], copied: &[u8], flag: u32) -> Vec<u8> {
     let mut record = Vec::with_capacity(RECORD_HEADER + copied.len());
     record.extend_from_slice(&id.to_le_bytes());
-    record.extend_from_slice(&(copied.len() as u32).to_le_bytes());
+    record.extend_from_slice(&(copied.len() as u32 | flag).to_le_bytes());
     for value in args {
         record.extend_from_slice(&value.to_le_bytes());
     }
@@ -148,17 +167,19 @@ pub(crate) fn post(index: usize, args: [u64; ARGS], bytes: &[u8]) -> bool {
         id,
         args,
         &bytes[..bytes.len().min(MAX_COPY as usize)],
+        0,
     ));
     true
 }
 
-fn push(record: Vec<u8>) {
+/// Queues a record: false when the queue was full and it was dropped (and counted).
+fn push(record: Vec<u8>) -> bool {
     let calls = calls();
     let was_empty = {
         let mut queue = calls.queue.lock().unwrap_or_else(|p| p.into_inner());
         if queue.len() >= MAX_QUEUED {
             calls.dropped.fetch_add(1, Ordering::Relaxed);
-            return;
+            return false;
         }
         let was_empty = queue.is_empty();
         queue.push_back(record);
@@ -173,6 +194,7 @@ fn push(record: Vec<u8>) {
     {
         wake.signal();
     }
+    true
 }
 
 /// A new wake pipe (the previous one closes): JavaScript connects to its name and drains the
@@ -197,6 +219,17 @@ pub(crate) fn create(id: u32, returns: u64, copy_arg: u32, copy_len: u32) -> Res
             "A threadsafe callback copies at most {MAX_COPY} bytes per call"
         ));
     }
+    open_slot(id, returns, copy_arg, copy_len, 0, [0; ARGS])
+}
+
+fn open_slot(
+    id: u32,
+    returns: u64,
+    copy_arg: u32,
+    copy_len: u32,
+    kinds: u32,
+    lens: [u32; ARGS],
+) -> Result<u64, String> {
     for (index, slot) in TABLE.iter().enumerate() {
         if slot
             .state
@@ -210,6 +243,10 @@ pub(crate) fn create(id: u32, returns: u64, copy_arg: u32, copy_len: u32) -> Res
                 if copy_arg == NO_COPY { 0 } else { copy_len },
                 Ordering::Release,
             );
+            for (len, value) in slot.lens.iter().zip(lens) {
+                len.store(value, Ordering::Release);
+            }
+            slot.kinds.store(kinds, Ordering::Release);
             slot.state.store(ACTIVE, Ordering::Release);
             return Ok(ENTRIES[index] as usize as u64);
         }
@@ -220,15 +257,25 @@ pub(crate) fn create(id: u32, returns: u64, copy_arg: u32, copy_len: u32) -> Res
 }
 
 /// Closes the slot whose entry is at `address`. Later calls to it return its fixed value and
-/// record nothing, so a native caller that still holds the address stays safe.
+/// record nothing, so a native caller that still holds the address stays safe. A marshalled call
+/// already past its check finishes first, so every record of the slot is queued once this returns.
 pub(crate) fn close(address: u64) -> bool {
     let Some(index) = slot_of(address) else {
         return false;
     };
-    TABLE[index]
+    let slot = &TABLE[index];
+    if slot
         .state
-        .compare_exchange(ACTIVE, FREE, Ordering::AcqRel, Ordering::Relaxed)
-        .is_ok()
+        .compare_exchange(ACTIVE, RESERVED, Ordering::SeqCst, Ordering::Relaxed)
+        .is_err()
+    {
+        return false;
+    }
+    while slot.busy.load(Ordering::SeqCst) != 0 {
+        std::thread::yield_now();
+    }
+    slot.state.store(FREE, Ordering::Release);
+    true
 }
 
 /// Moves queued calls into `out` (whole records, in order) while they fit. Ok(bytes written,

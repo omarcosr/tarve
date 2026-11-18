@@ -9,8 +9,12 @@
 //! with the value the reply table holds for it (`replies`, changed from JavaScript at any time;
 //! it also answers messages JavaScript does not get); else as `DefWindowProcW` does. While it
 //! waits for JavaScript this thread pumps nothing: a sender on the JavaScript thread itself gets
-//! the table value after the timeout, never a deadlock.
+//! the table value after the timeout, never a deadlock. The window may have a parent and a tree
+//! of child windows made on its thread (message_window/tree.rs), each answering from the table.
+mod payload;
+mod tree;
 use crate::threadsafe;
+use payload::copied;
 use serde::Deserialize;
 use std::{
     cell::{Cell, OnceCell},
@@ -25,6 +29,7 @@ use std::{
     thread::JoinHandle,
     time::{Duration, Instant},
 };
+use tree::{Classes, Replies, ReplyEntry};
 use windows_sys::Win32::{
     Foundation::{
         CloseHandle, GetLastError, HANDLE, HWND, INVALID_HANDLE_VALUE, LPARAM, LRESULT,
@@ -43,10 +48,10 @@ use windows_sys::Win32::{
     },
     UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DeregisterShellHookWindow, DestroyWindow,
-        DispatchMessageW, HWND_MESSAGE, ISMEX_NOTIFY, ISMEX_REPLIED, InSendMessageEx, MSG,
-        MWMO_INPUTAVAILABLE, MsgWaitForMultipleObjectsEx, PM_REMOVE, PeekMessageW, QS_ALLINPUT,
-        RegisterClassExW, RegisterShellHookWindow, RegisterWindowMessageW, UnregisterClassW,
-        WM_CLOSE, WNDCLASSEXW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
+        DispatchMessageW, ISMEX_NOTIFY, ISMEX_REPLIED, InSendMessageEx, MSG, MWMO_INPUTAVAILABLE,
+        MsgWaitForMultipleObjectsEx, PM_REMOVE, PeekMessageW, QS_ALLINPUT, RegisterClassExW,
+        RegisterShellHookWindow, RegisterWindowMessageW, UnregisterClassW, WM_CLOSE, WNDCLASSEXW,
+        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     },
 };
 
@@ -67,11 +72,6 @@ const DEFAULT_REPLY_TIMEOUT_MS: u32 = 50;
 /// Messages dispatched before the stop event and the watches are looked at again.
 const PUMP_BATCH: usize = 256;
 
-const WM_SETTINGCHANGE: u32 = 0x001A;
-const WM_COPYDATA: u32 = 0x004A;
-const WM_POWERBROADCAST: u32 = 0x0218;
-const WM_DEVICECHANGE: u32 = 0x0219;
-const PBT_POWERSETTINGCHANGE: usize = 0x8013;
 const WINEVENT_OUTOFCONTEXT: u32 = 0;
 const ERROR_CLASS_ALREADY_EXISTS: u32 = 1410;
 
@@ -134,6 +134,10 @@ pub(crate) struct Options {
     pub window_name: Option<String>,
     #[serde(default)]
     pub message_only: bool,
+    /// A window to make this one a WS_CHILD of.
+    pub parent: Option<u64>,
+    #[serde(default)]
+    pub children: Vec<tree::Child>,
     pub style: Option<u32>,
     pub ex_style: Option<u32>,
     #[serde(default)]
@@ -142,7 +146,7 @@ pub(crate) struct Options {
     pub wait_replies: Vec<MessageName>,
     pub reply_timeout: Option<u32>,
     #[serde(default)]
-    pub replies: Vec<(MessageName, i64)>,
+    pub replies: Vec<ReplyEntry>,
     #[serde(default)]
     pub win_events: Vec<WinEventHook>,
     #[serde(default)]
@@ -155,7 +159,7 @@ pub(crate) struct Options {
 
 /// What the window's thread and JavaScript's calls share.
 struct Shared {
-    replies: Mutex<HashMap<u32, isize>>,
+    replies: Mutex<Replies>,
     answer: Mutex<Answer>,
     answered: Condvar,
     closing: AtomicBool,
@@ -302,6 +306,8 @@ impl Watch {
 struct Resources {
     instance: *mut c_void,
     class: Vec<u16>,
+    /// Dropped after Drop::drop destroyed the windows.
+    classes: Classes,
     registered_class: bool,
     hwnd: HWND,
     shell_hook: bool,
@@ -365,16 +371,17 @@ impl Local {
                 unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
             }
         };
-        let fixed = |message| {
-            self.shared
+        // SAFETY: lParam is this message's own, valid during this call.
+        let fixed = || unsafe {
+            let table = self
+                .shared
                 .replies
                 .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .get(&message)
-                .copied()
+                .unwrap_or_else(|p| p.into_inner());
+            table.get(hwnd as usize, message, wparam, lparam)
         };
         if self.messages.binary_search(&message).is_err() || !self.live.get() {
-            return fixed(message).unwrap_or_else(|| fallback(hwnd, message, wparam, lparam));
+            return fixed().unwrap_or_else(|| fallback(hwnd, message, wparam, lparam));
         }
         // SAFETY: lParam is what Windows documents for these messages, valid during this call.
         let bytes = unsafe { copied(message, wparam, lparam) };
@@ -401,7 +408,7 @@ impl Local {
                 wparam as u64,
                 lparam as u64,
                 sequence,
-                0,
+                hwnd as u64,
             ],
             &bytes,
         );
@@ -428,58 +435,8 @@ impl Local {
             state.waiting = 0;
         }
         answer
-            .or_else(|| fixed(message))
+            .or_else(fixed)
             .unwrap_or_else(|| fallback(hwnd, message, wparam, lparam))
-    }
-}
-
-/// The bytes a message's lParam points to, for the messages whose lParam is data JavaScript
-/// cannot read once the call returned.
-unsafe fn copied(message: u32, wparam: WPARAM, lparam: LPARAM) -> Vec<u8> {
-    let max = threadsafe::MAX_COPY as usize;
-    let address = lparam as usize;
-    if address == 0 {
-        return Vec::new();
-    }
-    // SAFETY (all arms): the layouts Windows documents for each message's lParam.
-    unsafe {
-        match message {
-            WM_COPYDATA => {
-                #[repr(C)]
-                struct CopyData {
-                    data: usize,
-                    length: u32,
-                    bytes: *const u8,
-                }
-                let copy = &*(address as *const CopyData);
-                let length = (copy.length as usize).min(max - 8);
-                let mut out = Vec::with_capacity(8 + length);
-                out.extend_from_slice(&(copy.data as u64).to_le_bytes());
-                if !copy.bytes.is_null() && length > 0 {
-                    out.extend_from_slice(std::slice::from_raw_parts(copy.bytes, length));
-                }
-                out
-            }
-            WM_SETTINGCHANGE => {
-                let text = address as *const u16;
-                let mut length = 0;
-                while length < max / 2 && *text.add(length) != 0 {
-                    length += 1;
-                }
-                std::slice::from_raw_parts(text as *const u8, length * 2).to_vec()
-            }
-            WM_POWERBROADCAST if wparam == PBT_POWERSETTINGCHANGE => {
-                // POWERBROADCAST_SETTING: GUID, DataLength, Data.
-                let length = *((address + 16) as *const u32) as usize;
-                std::slice::from_raw_parts(address as *const u8, (20 + length).min(max)).to_vec()
-            }
-            WM_DEVICECHANGE if wparam & 0x8000 != 0 => {
-                // DEV_BROADCAST_HDR: its first u32 is the whole structure's size.
-                let length = *(address as *const u32) as usize;
-                std::slice::from_raw_parts(address as *const u8, length.clamp(4, max)).to_vec()
-            }
-            _ => Vec::new(),
-        }
     }
 }
 
@@ -550,25 +507,22 @@ fn setup(
     messages.extend_from_slice(&wait);
     messages.sort_unstable();
     messages.dedup();
-    let replies: Vec<(MessageName, i64)> = options.replies.clone();
-    {
-        let mut table = shared.replies.lock().unwrap_or_else(|p| p.into_inner());
-        for (name, value) in replies {
-            let id = resolve(std::slice::from_ref(&name), &mut named)?[0];
-            table.insert(id, value as isize);
-        }
-    }
     let shell = if options.shell_hook {
         register_name("SHELLHOOK")?
     } else {
         0
     };
-    let class = wide(&class_name(&options, id)?);
+    let name = class_name(&options, id)?;
+    let class = wide(&name);
+    let table = Arc::clone(&shared);
+    let (parent, style) = tree::top(options.message_only, options.parent, options.style)?;
     // SAFETY: the module this code is in loaded the process image; null names the exe.
     let instance = unsafe { GetModuleHandleW(ptr::null()) };
+    let mut children = Vec::new();
     let mut resources = Resources {
         instance,
         class,
+        classes: Classes::new(instance),
         registered_class: false,
         hwnd: ptr::null_mut(),
         shell_hook: false,
@@ -616,16 +570,12 @@ fn setup(
                 .unwrap_or(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE),
             resources.class.as_ptr(),
             title.as_ptr(),
-            options.style.unwrap_or(WS_POPUP),
+            style,
             0,
             0,
             0,
             0,
-            if options.message_only {
-                HWND_MESSAGE
-            } else {
-                ptr::null_mut()
-            },
+            parent,
             ptr::null_mut(),
             instance,
             ptr::null(),
@@ -636,6 +586,17 @@ fn setup(
                 GetLastError()
             ));
         }
+        let mut replies = table.replies.lock().unwrap_or_else(|p| p.into_inner());
+        replies.fill(resources.hwnd as usize, &options.replies, &mut named)?;
+        drop(replies);
+        let mut build = tree::Build {
+            proc: Some(window_proc),
+            top_class: &resources.class,
+            classes: &mut resources.classes,
+            replies: &table.replies,
+            named: &mut named,
+        };
+        build.create(&options.children, resources.hwnd, &mut children)?;
         if options.shell_hook {
             if RegisterShellHookWindow(resources.hwnd) == 0 {
                 return Err(format!(
@@ -712,6 +673,8 @@ fn setup(
     }
     let info = serde_json::json!({
         "hwnd": (resources.hwnd as u64).to_string(),
+        "className": name,
+        "children": children,
         "threadId": unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() },
         "messages": named,
         "shellHook": shell,
@@ -790,6 +753,7 @@ pub(crate) fn open(options: Options, callback: u64) -> Result<u64, String> {
             "messageWindow takes at most {MAX_MESSAGES} messages"
         ));
     }
+    tree::check(&options.children)?;
     if options.win_events.len() > MAX_WIN_EVENTS {
         return Err(format!(
             "messageWindow takes at most {MAX_WIN_EVENTS} winEvents"
@@ -802,7 +766,7 @@ pub(crate) fn open(options: Options, callback: u64) -> Result<u64, String> {
     }
     let id = NEXT_WINDOW.fetch_add(1, Ordering::Relaxed);
     let shared = Arc::new(Shared {
-        replies: Mutex::new(HashMap::new()),
+        replies: Mutex::new(Replies::default()),
         answer: Mutex::new(Answer::default()),
         answered: Condvar::new(),
         closing: AtomicBool::new(false),
@@ -891,8 +855,21 @@ pub(crate) fn reply(id: u64, sequence: u64, value: i64) -> bool {
     true
 }
 
-/// Sets (`Some`) or clears the fixed answer to `message`.
-pub(crate) fn set_reply(id: u64, message: u32, value: Option<i64>) -> bool {
+/// Sets (`Some`) or clears the fixed answer to `message` sent to `hwnd` of the window's tree, for
+/// any wParam (`kind` 0), wParam `key` (1) or WM_COPYDATA dwData `key` (2).
+pub(crate) fn set_reply(
+    id: u64,
+    hwnd: u64,
+    message: u32,
+    kind: u32,
+    key: u64,
+    set: u32,
+    value: i64,
+) -> bool {
+    let Ok(key) = tree::Key::of(kind, key) else {
+        return false;
+    };
+    let value = (set != 0).then_some(value);
     let Some(shared) = windows()
         .lock()
         .unwrap_or_else(|p| p.into_inner())
@@ -902,10 +879,12 @@ pub(crate) fn set_reply(id: u64, message: u32, value: Option<i64>) -> bool {
         return false;
     };
     let mut table = shared.replies.lock().unwrap_or_else(|p| p.into_inner());
-    match value {
-        Some(value) => table.insert(message, value as isize),
-        None => table.remove(&message),
-    };
+    table.set(
+        hwnd as usize,
+        message,
+        key,
+        value.map(|value| value as isize),
+    );
     true
 }
 
@@ -938,12 +917,13 @@ pub(crate) fn close(id: u64) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::payload::{WM_COPYDATA, WM_SETTINGCHANGE};
     use super::*;
     use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, SendMessageW, WM_APP};
 
     type Call = (u32, [u64; threadsafe::ARGS], Vec<u8>);
 
-    fn take(into: &mut Vec<Call>) {
+    pub(super) fn take(into: &mut Vec<Call>) {
         let mut out = vec![0u8; 256 * 1024];
         let written = threadsafe::poll(&mut out).unwrap();
         let mut at = 0;
@@ -962,7 +942,7 @@ mod tests {
         }
     }
 
-    fn until(calls: &mut Vec<Call>, id: u32, done: impl Fn(&[&Call]) -> bool) {
+    pub(super) fn until(calls: &mut Vec<Call>, id: u32, done: impl Fn(&[&Call]) -> bool) {
         for _ in 0..500 {
             take(calls);
             let mine: Vec<&Call> = calls.iter().filter(|call| call.0 == id).collect();
@@ -975,7 +955,7 @@ mod tests {
         panic!("timed out waiting for message window calls: {mine:?}");
     }
 
-    fn options(json: serde_json::Value) -> Options {
+    pub(super) fn options(json: serde_json::Value) -> Options {
         serde_json::from_value(json).unwrap()
     }
 
@@ -1019,18 +999,12 @@ mod tests {
         let settings = wide("ImmersiveColorSet");
         send(WM_SETTINGCHANGE, 0, settings.as_ptr() as isize);
         let payload = *b"tray";
-        #[repr(C)]
-        struct CopyData {
-            data: usize,
-            length: u32,
-            bytes: *const u8,
-        }
-        let copy = CopyData {
+        let copy = payload::CopyData {
             data: 1,
             length: 4,
             bytes: payload.as_ptr(),
         };
-        send(WM_COPYDATA, 0, &copy as *const CopyData as isize);
+        send(WM_COPYDATA, 0, &copy as *const payload::CopyData as isize);
         until(&mut calls, 8101, |mine| mine.len() >= 4);
         let mine: Vec<&Call> = calls.iter().filter(|call| call.0 == 8101).collect();
         assert_eq!(mine[0].1[..4], [KIND_MESSAGE, u64::from(WM_APP + 1), 5, 6]);
@@ -1058,7 +1032,7 @@ mod tests {
                 .unwrap(),
             9
         );
-        assert!(set_reply(id, WM_APP + 4, Some(-1)));
+        assert!(set_reply(id, hwnd as u64, WM_APP + 4, 0, 0, 1, -1));
         assert_eq!(
             std::thread::spawn(move || send(WM_APP + 4, 0, 0))
                 .join()

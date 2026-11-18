@@ -4,7 +4,7 @@ import { writeFileSync } from "node:fs";
 import { openPluginLibrary } from "../packages/core/src/plugins/ffi";
 import { pointerFunction } from "../packages/core/src/plugins/pointer";
 import { onSystemMediaSessionsChange, systemMediaSessions } from "../packages/core/src/media-sessions";
-import { guidBytes, threadsafeCallback, threadsafeComObject } from "../packages/core/src/threadsafe";
+import { guidBytes, releaseCom, threadsafeCallback, threadsafeComObject } from "../packages/core/src/threadsafe";
 
 /** Starts a system thread at `start` with `parameter` (CreateThread / pthread_create). */
 function startThread(start: bigint, parameter: bigint): void {
@@ -79,6 +79,42 @@ await until(() => direct.length > 0);
 results["COM method from a thread"] = direct.length === 1 && direct[0]![0] === sink.pointer;
 sink.release();
 method.close();
+
+// Per-argument marshalling: a COM argument kept from a system thread, released here.
+const sender = threadsafeComObject({ iids: [], methods: [1n] });
+const kept: unknown[][] = [];
+const keeping = threadsafeCallback((...args) => { kept.push(args); }, { args: [{ type: "ptr", keep: "com" }] });
+startThread(keeping.pointer, sender.pointer);
+await until(() => kept.length > 0);
+keeping.close();
+results["COM argument kept"] = [kept.length === 1 && kept[0]![0] === sender.pointer, releaseCom(kept[0]?.[0] as bigint)];
+sender.release();
+
+// BSTR and VARIANT copies (Windows): read after the caller freed the BSTR.
+if (process.platform === "win32") {
+  const oleaut32 = openPluginLibrary("oleaut32.dll", { SysAllocString: { args: ["buffer"], returns: "ptr" }, SysFreeString: { args: ["ptr"], returns: "void" } });
+  const text = "Olá, barra 😀";
+  const utf16 = new Uint8Array((text.length + 1) * 2);
+  for (let index = 0; index < text.length; index++) new DataView(utf16.buffer).setUint16(index * 2, text.charCodeAt(index), true);
+  const bstr = BigInt(oleaut32.symbols.SysAllocString(utf16));
+  const variant = (vt: number, value: bigint) => {
+    const bytes = new Uint8Array(24);
+    new DataView(bytes.buffer).setUint16(0, vt, true);
+    new DataView(bytes.buffer).setBigUint64(8, value, true);
+    return bytes;
+  };
+  const copied: unknown[][] = [];
+  const copying = threadsafeCallback((...args) => { copied.push(args); }, {
+    args: [{ type: "ptr", copy: "bstr" }, { type: "ptr", copy: "variant" }, { type: "ptr", copy: "variant" }, { type: "ptr", copy: "variant" }, { type: "ptr", copy: "variant" }],
+  });
+  const call = pointerFunction(copying.pointer, { args: ["ptr", "buffer", "buffer", "buffer", "buffer"], returns: "i32" });
+  call(bstr, variant(8, bstr), variant(3, 0xfffffffbn), variant(11, 0xffffn), variant(7, 0x4004000000000000n));
+  oleaut32.symbols.SysFreeString(bstr);
+  call(0n, variant(5, 0x4004000000000000n), variant(0, 0n), variant(18, 0xffffn), variant(8, 0n));
+  await until(() => copied.length > 1);
+  copying.close();
+  results["BSTR and VARIANT copies"] = copied.map(args => show(args));
+}
 
 // Media session events (Windows): the first list arrives, systemMediaSessions reads the same one,
 // and the last unsubscribe lets the process exit.

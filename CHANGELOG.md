@@ -4,6 +4,12 @@ All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `
 
 ## Unreleased
 
+### Added
+
+- `threadsafeCallback` marshals pointer arguments during the call, per argument (native ABI 9: `tarve_threadsafe_callback_args`, `tarve_unknown_release`): `{ type: "ptr", keep: "com" }` AddRefs an interface pointer the callback then hands to the new `releaseCom(ptr)`; `{ type: "ptr", copy: bytes }` copies like `copy`; on Windows `copy: "bstr"` gives the BSTR's text and `copy: "variant"` a VARIANT by pointer or by value (passed as a pointer on x64/arm64) as a string, number, boolean, null, an AddRef'd pointer (VT_UNKNOWN/VT_DISPATCH) or its 24 raw bytes. A UI Automation `HandlePropertyChangedEvent` can now read its `sender` and `newValue`. Calls dropped on a full queue or left for a closed callback release what they kept; `close()` waits for calls in flight. `copy` keeps working unchanged.
+- `Overflow max`: the space available on the main axis (logical px); the box grows with its items up to `max` and decides what fits against it, for containers that grow with their content (docks, taskbars).
+- `messageWindow({ parent, children, keyedReplies })` (Windows): the window can be a WS_CHILD of `parent` and hosts a tree of child windows made on its thread (`children: [{ className, windowName?, style?, exStyle?, replies?, keyedReplies?, children? }]`, found by `FindWindowEx`, e.g. a replacement `Shell_TrayWnd` with `TrayNotifyWnd`, `SysPager`, `ToolbarWindow32`). Message events name the window that got them (`window: { hwnd, className }`); each window has its own reply table (`setReply(message, value, hwnd | { hwnd, wParam, dwData })`, `MessageWindow.children`). `keyedReplies` answer natively by (message, wParam) or by `WM_COPYDATA` dwData, so the tray's `NIM_*` (dwData 1) gets 1 at once while its copied payload still reaches `onMessage`.
+
 ### Fixed
 
 - `show()` of a `Window activation="never" | "whileEditing"` no longer takes the focus: only `activation="normal"` windows are focused when shown (an explicit `focus()` or `activate` still focuses).
