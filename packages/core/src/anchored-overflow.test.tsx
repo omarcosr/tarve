@@ -140,6 +140,38 @@ describe("Overflow", () => {
     expect(tree.nodes.get("bar")?.style).toMatchObject({ direction: "row", overflow: "hidden", gap: 10 });
   });
 
+  test("max sizes to content and decides against max, not the measured box", () => {
+    const items = ["a", "b", "c"];
+    let max = 110;
+    const view = () => compileTree(
+      <Window>
+        <Overflow id="dock" max={max} items={items} gap={10} itemKey={item => item} style={{ padding: 5 }}
+          renderItem={item => <Text>{item}</Text>} renderOverflow={hidden => <Text>{`+${hidden.length}`}</Text>} />
+      </Window>,
+    );
+    const shown = (tree: ReturnType<typeof compileTree>) => tree.nodes.get("dock")!.children!
+      .filter(child => child.style.display !== "none").map(child => child.id.split("k:")[1]);
+    let tree = view();
+    expect(tree.nodes.get("dock")?.style).toMatchObject({ maxWidth: 110, overflow: "hidden" });
+    expect(shown(tree)).toEqual(["a", "b", "c"]);
+    // Content-sized box: measured size is whatever the items took, padding 5 on each side.
+    tree.handlers.get("dock")?.onSize?.({ width: 100, height: 20, borderBox: { width: 110, height: 30 } });
+    for (const key of items) tree.handlers.get(`dock/children/k:${key}`)?.onSize?.(size(40));
+    tree = view();
+    expect(shown(tree)).toEqual(["a", "b", "\u0000overflow"]);
+    tree.handlers.get("dock/children/k:\u0000overflow")?.onSize?.(size(30));
+    tree.handlers.get("dock")?.onSize?.({ width: 80, height: 20, borderBox: { width: 90, height: 30 } });
+    tree = view();
+    expect(shown(tree)).toEqual(["a", "\u0000overflow"]);
+    max = 150;
+    tree = view();
+    expect(shown(tree)).toEqual(["a", "b", "c"]);
+    expect(tree.nodes.get("dock")?.style.maxWidth).toBe(150);
+    expect(compileTree(<Window><Overflow id="v" direction="column" max={50} items={[]} renderItem={() => null} /></Window>)
+      .nodes.get("v")?.style).toMatchObject({ maxHeight: 50 });
+    expect(() => compileTree(<Window><Overflow id="neg" max={-1} items={[]} renderItem={() => null} /></Window>)).toThrow(RangeError);
+  });
+
   test("column direction measures heights", () => {
     const tree = compileTree(<Window><Overflow id="col" direction="column" items={[1, 2]} renderItem={item => <Text>{String(item)}</Text>} /></Window>);
     expect(tree.nodes.get("col")?.style.direction).toBe("column");

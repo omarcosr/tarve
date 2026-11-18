@@ -15,11 +15,19 @@ export interface OverflowProps<T> extends Omit<ViewProps, "children" | "gap"> {
   gap?: number;
   /** Main axis. Default `"row"`. */
   direction?: "row" | "column";
+  /**
+   * Space available on the main axis, in logical px (border box). When set, the box sizes to its
+   * items up to `max` (`maxWidth`/`maxHeight`) and decides what fits against `max` instead of
+   * its measured size, so it works in a container that grows with its content (a dock, a taskbar).
+   */
+  max?: number;
 }
 
 interface OverflowSizes {
   /** Content-box main size of the container. */
   container?: number;
+  /** Padding plus border of the container on the main axis. */
+  inset?: number;
   /** Border-box main size of the overflow control. */
   more?: number;
   items: Map<string | number, number>;
@@ -57,7 +65,7 @@ export function overflowVisibleCount(sizes: readonly (number | undefined)[], ava
  * re-render). Items keep their last measured size while hidden (`display: none`), so growing back
  * needs no trial render; an item never measured is shown once to be measured. The box clips
  * (`overflow: hidden`) so nothing spills meanwhile. Give it a bounded main size (`flex: 1`, a
- * width): it never grows to fit its items.
+ * width), or `max` to let it grow with its items up to a limit.
  */
 export function Overflow<T>({
   id,
@@ -67,11 +75,13 @@ export function Overflow<T>({
   itemKey,
   gap = 0,
   direction = "row",
+  max,
   onSize,
   style,
   ...props
 }: OverflowProps<T>): VNode {
   if (direction !== "row" && direction !== "column") throw new TypeError(`Unsupported Overflow direction: ${direction}`);
+  if (max !== undefined && !(max >= 0)) throw new RangeError(`Overflow max must be a non-negative number: ${max}`);
   const all = scopedState(OVERFLOW_SIZES, () => new Map<string, OverflowSizes>());
   let sizes = all.get(id);
   if (!sizes) all.set(id, sizes = { items: new Map() });
@@ -86,7 +96,8 @@ export function Overflow<T>({
     const live = new Set(keys);
     for (const key of store.items.keys()) if (!live.has(key)) store.items.delete(key);
   }
-  const visible = overflowVisibleCount(keys.map(key => store.items.get(key)), store.container, gap,
+  const available = max === undefined ? store.container : Math.max(0, max - (store.inset ?? 0));
+  const visible = overflowVisibleCount(keys.map(key => store.items.get(key)), available, gap,
     renderOverflow ? store.more ?? 0 : 0);
   const hidden = items.slice(visible);
   const children: Child[] = items.map((item, index) => {
@@ -106,12 +117,14 @@ export function Overflow<T>({
     }, "\u0000overflow"));
   }
   const base: Style = { direction, align: row ? "center" : "stretch", overflow: "hidden", minWidth: 0, minHeight: 0, shrink: 1 };
+  if (max !== undefined) base[row ? "maxWidth" : "maxHeight"] = max;
   return container(row ? "row" : "column", {
     ...props,
     id,
     gap,
     onSize: (size: SizeEvent) => {
       store.container = main(size, false);
+      store.inset = main(size, true) - store.container;
       onSize?.(size);
     },
     style: style ? { ...base, ...style } : base,
