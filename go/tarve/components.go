@@ -522,7 +522,7 @@ func Input(p Props) *VNode {
 	return nativeJsx("input", rest)
 }
 
-// Modal props: open, onOpenChange(bool), title, description, footer, width (480), closeOnOverlay, closeOnEscape, showClose, style, id.
+// Modal props: open, onOpenChange(bool), title, description, footer, width (480), closeOnOverlay, closeOnEscape, showClose, scrollBody (true), style, id.
 func Modal(p Props, kids ...Child) *VNode {
 	p = props(p, kids)
 	if !truthy(p["open"]) {
@@ -556,7 +556,7 @@ func Modal(p Props, kids ...Child) *VNode {
 		if showClose {
 			right = 28
 		}
-		header = Column(Props{"gap": 6, "style": S{"padding": S{"right": right}}, "children": []Child{t, d}})
+		header = Column(Props{"gap": 6, "style": S{"shrink": 0, "padding": S{"right": right}}, "children": []Child{t, d}})
 	}
 	var closeButton Child
 	if showClose {
@@ -571,11 +571,21 @@ func Modal(p Props, kids ...Child) *VNode {
 	}
 	var footer Child
 	if truthy(p["footer"]) {
-		footer = Row(Props{"gap": 8, "justify": "end", "children": p["footer"]})
+		footer = Row(Props{"gap": 8, "justify": "end", "style": S{"shrink": 0}, "children": p["footer"]})
 	}
-	panel := Props{"modal": true, "style": merge(S{"position": "relative", "width": numOr(p, "width", 480), "maxWidth": "90%", "background": T.Card,
+	// scrollBody (default true): the panel never grows past the window; title and footer stay put
+	// and the body scrolls. Content that fits lays out as a plain column.
+	body := p["children"]
+	if scrollBody, ok := p["scrollBody"].(bool); (!ok || scrollBody) && body != nil && body != false {
+		bp := Props{"style": S{"direction": "column", "gap": 20}, "children": body}
+		if modalID != "" {
+			bp["id"] = modalID + "-body"
+		}
+		body = Scroll(bp)
+	}
+	panel := Props{"modal": true, "style": merge(S{"position": "relative", "width": numOr(p, "width", 480), "maxWidth": "90%", "maxHeight": "100%", "background": T.Card,
 		"borderWidth": 1, "borderColor": T.Border, "radius": RadiusLg, "padding": 24, "gap": 20, "pointerEvents": "block"}, styleOf(p)),
-		"children": []Child{header, closeButton, p["children"], footer}}
+		"children": []Child{header, closeButton, body, footer}}
 	if modalID != "" {
 		panel["id"] = modalID + "-content"
 	}
@@ -585,7 +595,7 @@ func Modal(p Props, kids ...Child) *VNode {
 	outer := Props{}
 	for k, v := range p {
 		switch k {
-		case "open", "onOpenChange", "title", "description", "footer", "width", "closeOnOverlay", "closeOnEscape", "showClose", "children", "style":
+		case "open", "onOpenChange", "title", "description", "footer", "width", "closeOnOverlay", "closeOnEscape", "showClose", "scrollBody", "children", "style":
 		default:
 			outer[k] = v
 		}
