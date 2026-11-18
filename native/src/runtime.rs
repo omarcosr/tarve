@@ -2150,7 +2150,7 @@ impl App {
         }
         window.set_visible(true);
         window.set_minimized(false);
-        if !background_windows() {
+        if !background_windows() && activation::activates_on_show(self.document.window.activation) {
             window.focus_window();
         }
         self.keep_window_opacity();

@@ -465,7 +465,9 @@ fn set_bounds_on_an_app_bar_re_docks_through_the_shell() {
             46
         )
     );
-    SENT.lock().unwrap().clear();
+    SENT.lock()
+        .unwrap()
+        .retain(|(hwnd, _)| *hwnd != window.0 as usize);
     let left = info.rcMonitor.left + 20;
     move_app_bar(window.0, [Some(left), Some(0), Some(300), Some(70)]).unwrap();
     assert_eq!(window.messages(), [ABM_QUERYPOS, ABM_SETPOS]);
@@ -561,4 +563,31 @@ fn bar_window_reaches_past_the_strip_and_keeps_its_span_inside_it() {
         window(bar_window(top, &bar(AppBarEdge::Top, 0, Some((-50, 2000))))),
         (0, 0, 1000, 40)
     );
+}
+
+/// Explorer restarting broadcasts `TaskbarCreated`: a docked bar registers with the new shell and
+/// docks again where it was.
+#[test]
+fn a_restarted_shell_gets_the_bar_registered_and_docked_again() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
+    let window = TestWindow::new();
+    // A handle value can come back from a window another test destroyed: start from its own.
+    SENT.lock()
+        .unwrap()
+        .retain(|(hwnd, _)| *hwnd != window.0 as usize);
+    set_app_bar(window.0, AppBarEdge::Top, 30, 0, takes_all).unwrap();
+    assert_eq!(window.messages(), [ABM_NEW, ABM_QUERYPOS, ABM_SETPOS]);
+    unsafe { SendMessageW(window.0, taskbar_created(), 0, 0) };
+    assert_eq!(
+        window.messages(),
+        [
+            ABM_NEW,
+            ABM_QUERYPOS,
+            ABM_SETPOS,
+            ABM_NEW,
+            ABM_QUERYPOS,
+            ABM_SETPOS
+        ]
+    );
+    assert!(window.registered());
 }

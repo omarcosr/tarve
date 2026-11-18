@@ -2,6 +2,13 @@
 
 All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `@tarve/svelte` and `@tarve/mcp` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
+## Unreleased
+
+### Fixed
+
+- `show()` of a `Window activation="never" | "whileEditing"` no longer takes the focus: only `activation="normal"` windows are focused when shown (an explicit `focus()` or `activate` still focuses).
+- `app.appBar` docks again by itself when Explorer restarts (`TaskbarCreated`): the bar registers with the new shell and keeps its edge, thickness, overlap and span.
+
 ## 0.13.3 — 2026-11-18
 
 ### Added

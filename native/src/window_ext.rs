@@ -453,9 +453,42 @@ unsafe extern "system" fn app_bar_proc(
                 }
             }
         }
+        // Explorer restarted: the new shell knows no AppBars, so register and dock again.
+        message if message == taskbar_created() => reregister_app_bar(hwnd),
         _ => {}
     }
     unsafe { DefSubclassProc(hwnd, message, wparam, lparam) }
+}
+
+/// The message Explorer broadcasts to top-level windows when its taskbar is (re)created.
+#[cfg(target_os = "windows")]
+fn taskbar_created() -> u32 {
+    use windows_sys::Win32::UI::WindowsAndMessaging::RegisterWindowMessageW;
+    static MESSAGE: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *MESSAGE.get_or_init(|| {
+        let name: Vec<u16> = "TaskbarCreated\0".encode_utf16().collect();
+        unsafe { RegisterWindowMessageW(name.as_ptr()) }
+    })
+}
+
+/// Registers a docked bar with a new shell (`ABM_NEW`) and docks it again where it was.
+#[cfg(target_os = "windows")]
+fn reregister_app_bar(hwnd: windows_sys::Win32::Foundation::HWND) {
+    use windows_sys::Win32::UI::Shell::{ABM_NEW, APPBARDATA};
+    let Some(shell) = app_bars()
+        .iter()
+        .find(|bar| bar.hwnd == hwnd as usize)
+        .map(|bar| bar.shell)
+    else {
+        return;
+    };
+    let mut data: APPBARDATA = unsafe { std::mem::zeroed() };
+    data.cbSize = size_of::<APPBARDATA>() as u32;
+    data.hWnd = hwnd;
+    data.uCallbackMessage = APP_BAR_MESSAGE;
+    if unsafe { shell(ABM_NEW, &mut data) } != 0 {
+        let _ = dock(hwnd);
+    }
 }
 
 #[cfg(target_os = "windows")]
