@@ -6,11 +6,17 @@
 // in youtube-music-lyrics.ts); Tarve renders the UI and streams the URL with <audio>.
 // Personal-use demo: YouTube's Terms of Service forbid third-party clients.
 
-import { createApp } from "@tarve/core";
+import { createApp, requestSingleInstance } from "@tarve/core";
 import { connect } from "./youtube-music-actions";
 import { phone } from "./youtube-music-mobile";
 import { restoreSession, saveSession } from "./youtube-music-session";
 import { YouTubeMusicView, state } from "./youtube-music-view";
+
+// One app per user: closed to the tray, a later launch (Start, the taskbar, a media flyout
+// opening the app by its AppUserModelID) brings this one back instead of starting another
+// player with a second media session.
+const instance = await requestSingleInstance({ id: "Tarve.Examples.YouTubeMusic" });
+if (!instance.primary) process.exit(0);
 
 // The queue, song, position, volume and modes of the last run come back, paused.
 restoreSession();
@@ -18,6 +24,7 @@ restoreSession();
 // Name, icon and app id (media controls, taskbar) come from examples/package.json "tarve".
 const app = createApp(() => <YouTubeMusicView />, { closeBehavior: "hide", textRendering: "cleartype" });
 connect(app);
+instance.onSecondInstance(() => app.activate());
 await app.ready;
 // Android has no system tray; Back sends the app to the background, still playing.
 if (!phone) {
