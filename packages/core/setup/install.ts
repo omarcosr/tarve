@@ -342,7 +342,6 @@ export async function install(manifest: SetupManifest, payload: string, choices:
       await runHook(system, paths.executable, choices.custom[option.id] ? option.command : undefined, "hookFailed");
     }
     progress("stepHooks", 1);
-    if (manifest.options.launch.enabled && choices.launch) system.launch(paths.executable, manifest.options.launch.args, { cwd: directory });
     return { directory, executable: paths.executable };
   } finally {
     rmSync(staging, { recursive: true, force: true });
@@ -406,6 +405,12 @@ export function relaunchUninstallerFromTemp(manifest: SetupManifest, args: reado
   return true;
 }
 
+
+/** The command line, with `--uninstall` added when the installed Uninstall.exe is opened by hand: it carries no app, so it can only uninstall. */
+export function effectiveSetupArgv(manifest: SetupManifest, argv: readonly string[], system: SetupSystem): string[] {
+  return !argv.includes("--uninstall") && installedDirectory(manifest, system) ? [...argv, "--uninstall"] : [...argv];
+}
+
 const UNINSTALL_TEMP_PREFIX = "tarve-uninstall-";
 
 /** Removes the temporary uninstaller copies of earlier runs (a running one refuses and stays). */
@@ -416,5 +421,14 @@ export function sweepUninstallerCopies(temporary = tmpdir()): void {
     if (!name.startsWith(UNINSTALL_TEMP_PREFIX)) continue;
     try { rmSync(join(temporary, name), { recursive: true, force: true }); } catch { /* in use */ }
   }
+}
+/**
+ * Opens the installed app when the launch option is on and checked: the installer's last step,
+ * once it is done (the wizard closes itself right after).
+ */
+export function launchInstalled(manifest: SetupManifest, choices: SetupChoices, result: InstallResult, system: SetupSystem): boolean {
+  if (!manifest.options.launch.enabled || !choices.launch) return false;
+  system.launch(result.executable, manifest.options.launch.args, { cwd: result.directory });
+  return true;
 }
 

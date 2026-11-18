@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { readShellLink } from "../src/shell-link";
 import { syncInstallRecord } from "../src/install-record";
-import { applyArgs, defaultChoices, defaultDirectory, directoryProblem, directoryWritable, install, installedDirectory, parseSetupArgs, readSetupState, relaunchUninstallerFromTemp, setupPaths, uninstall, type SetupSystem } from "./install";
+import { applyArgs, defaultChoices, defaultDirectory, directoryProblem, directoryWritable, effectiveSetupArgv, install, installedDirectory, launchInstalled, parseSetupArgs, readSetupState, relaunchUninstallerFromTemp, setupPaths, uninstall, type SetupSystem } from "./install";
 import { parseInstallerConfig, type SetupManifest } from "./manifest";
 
 const windows = process.platform === "win32";
@@ -172,10 +172,13 @@ describe.skipIf(!windows)("install and uninstall", () => {
     expect(system.registry.get("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run")!.get("Acme.Notes")).toBe('"' + paths.executable + '" "--background"');
     expect(system.registry.get("HKCU\\Software\\Classes\\acmenotes\\shell\\open\\command")!.get("")).toBe('"' + paths.executable + '" "%1"');
     expect(system.registry.get("HKCU\\Software\\Classes\\.acmenote\\OpenWithProgids")!.has("Acme.Notes.acmenote")).toBe(true);
-    // Hooks: the fresh executable before, the installed one after, then the checked option's command, then the launch.
+    // Hooks: the fresh executable before, the installed one after, then the checked option's command.
     expect(system.runs.map(run => run.args.join(" "))).toEqual(["--stop --wait", "--migrate", "--add-menu"]);
     expect(system.runs[0]!.executable).not.toBe(paths.executable);
     expect(system.runs[1]!.executable).toBe(paths.executable);
+    // Opening the app is left to the end: install() does not, launchInstalled() does.
+    expect(system.launches).toEqual([]);
+    expect(launchInstalled(m, choices, result, system)).toBe(true);
     expect(system.launches).toEqual([{ executable: paths.executable, args: [] }]);
 
     // Incremental updates downloaded since (pack-host.ts keeps them per user, by app id).
@@ -277,5 +280,18 @@ describe.skipIf(!windows)("install and uninstall", () => {
     rmSync(installed.launches[0]!.executable, { force: true });
     expect(relaunchUninstallerFromTemp(m, ["--uninstall", "--dir=" + directory], installed)).toBe(false);
     expect(relaunchUninstallerFromTemp(m, ["--uninstall"], system)).toBe(false);
+  });
+
+  test("the installed uninstaller opened without --uninstall uninstalls", () => {
+    const system = fakeSystem("uninstaller-by-hand");
+    const m = manifest();
+    const directory = join(system.env.LOCALAPPDATA!, "Programs", "Acme Notes");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, "AcmeNotes.exe"), "app");
+    writeFileSync(join(directory, "Uninstall.exe"), "SETUP");
+    const installed: FakeSystem = { ...system, self: join(directory, "Uninstall.exe") };
+    expect(effectiveSetupArgv(m, [], installed)).toEqual(["--uninstall"]);
+    expect(effectiveSetupArgv(m, ["--uninstall", "--silent"], installed)).toEqual(["--uninstall", "--silent"]);
+    expect(effectiveSetupArgv(m, ["--silent"], system)).toEqual(["--silent"]);
   });
 });

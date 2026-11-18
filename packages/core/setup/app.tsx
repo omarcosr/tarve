@@ -10,7 +10,7 @@ import { Button, Checkbox, Column, Image, Input, Progress, Row, Select, Text, Ti
 import type { AppHandle } from "../src/app/types";
 import type { ThemeDefinition } from "../src/theme";
 import type { Child, VNode } from "../src/jsx-runtime";
-import { applyArgs, defaultChoices, defaultSystem, directoryProblem, directoryWritable, install, installedDirectory, parseSetupArgs, relaunchUninstallerFromTemp, sweepUninstallerCopies, uninstall, SetupError, type SetupSystem } from "./install";
+import { applyArgs, defaultChoices, defaultSystem, directoryProblem, directoryWritable, effectiveSetupArgv, install, installedDirectory, launchInstalled, parseSetupArgs, relaunchUninstallerFromTemp, sweepUninstallerCopies, uninstall, SetupError, type InstallResult, type SetupSystem } from "./install";
 import { localizedText, parseSetupManifest } from "./manifest";
 import { LANGUAGE_NAMES, formatSize, pickLanguage, setupText, type SetupStringKey } from "./strings";
 
@@ -81,7 +81,7 @@ function payloadFile(options: RunSetupOptions, system: SetupSystem): { path: str
 export async function runSetup(manifestValue: unknown, options: RunSetupOptions): Promise<number> {
   const manifest = parseSetupManifest(manifestValue);
   const system = options.system ?? defaultSystem();
-  const argv = options.argv ?? process.argv.slice(2);
+  const argv = effectiveSetupArgv(manifest, options.argv ?? process.argv.slice(2), system);
   const args = parseSetupArgs(argv);
   if (args.mode === "uninstall" && relaunchUninstallerFromTemp(manifest, argv, system)) return 0;
   if (args.mode === "install") sweepUninstallerCopies();
@@ -104,7 +104,7 @@ export async function runSetup(manifestValue: unknown, options: RunSetupOptions)
       if (args.mode === "uninstall") await uninstall(manifest, state.uninstallDirectory!, system);
       else {
         const payload = payloadFile(options, system);
-        try { await install(manifest, payload.path, state.choices, system); } finally { payload.dispose(); }
+        try { launchInstalled(manifest, state.choices, await install(manifest, payload.path, state.choices, system), system); } finally { payload.dispose(); }
       }
       return 0;
     } catch (error) {
@@ -144,8 +144,9 @@ export async function runSetup(manifestValue: unknown, options: RunSetupOptions)
     app.update();
     try {
       const payload = payloadFile(options, system);
+      let result: InstallResult;
       try {
-        await install(manifest, payload.path, state.choices, system, (step, fraction) => {
+        result = await install(manifest, payload.path, state.choices, system, (step, fraction) => {
           state.step = step;
           state.fraction = fraction;
           app.update();
@@ -154,6 +155,11 @@ export async function runSetup(manifestValue: unknown, options: RunSetupOptions)
         payload.dispose();
       }
       state.page = "done";
+      // Opening the app is the last step: the installer closes itself and gets out of its way.
+      if (launchInstalled(manifest, state.choices, result, system)) {
+        app.close();
+        return;
+      }
     } catch (error) {
       state.error = describeError(error);
       state.page = "failed";
