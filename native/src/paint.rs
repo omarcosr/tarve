@@ -39,6 +39,41 @@ pub(crate) enum GradientGeometry {
     },
 }
 
+/// An image drawn 1:1 (one texel per device pixel, not rotated) moved to the
+/// nearest whole device pixel. Layout rounds in logical pixels, so at 125 % or
+/// 150 % such an image lands a fraction of a pixel off the grid and the sampler
+/// blends neighbouring texels: a 30 px icon came out 31 px wide and soft.
+/// Browsers snap 1:1 images the same way. Scaled images are left alone.
+pub(crate) fn snap_unit_image(transform: Affine) -> Affine {
+    let [a, b, c, d, e, f] = transform.as_coeffs();
+    const EPS: f64 = 1e-3;
+    if (a - 1.0).abs() < EPS && (d - 1.0).abs() < EPS && b.abs() < EPS && c.abs() < EPS {
+        Affine::new([a, b, c, d, e.round(), f.round()])
+    } else {
+        transform
+    }
+}
+
+#[cfg(test)]
+mod snap_tests {
+    use super::snap_unit_image;
+    use vello::kurbo::Affine;
+
+    #[test]
+    fn unit_images_land_on_whole_pixels() {
+        let t = snap_unit_image(Affine::new([1.0, 0.0, 0.0, 1.0, 1098.25, 15.5]));
+        assert_eq!(t.as_coeffs(), [1.0, 0.0, 0.0, 1.0, 1098.0, 16.0]);
+    }
+
+    #[test]
+    fn scaled_and_rotated_images_keep_their_place() {
+        let scaled = Affine::new([1.25, 0.0, 0.0, 1.25, 10.3, 4.6]);
+        assert_eq!(snap_unit_image(scaled), scaled);
+        let rotated = Affine::rotate(0.3).then_translate((10.3, 4.6).into());
+        assert_eq!(snap_unit_image(rotated), rotated);
+    }
+}
+
 /// Fraction of a turn (0..1) of `point` around `center`, clockwise from
 /// `from` (radians, 0 pointing up) in y-down coordinates, as CSS conics.
 pub(crate) fn conic_turn(center: Point, from: f64, point: Point) -> f64 {

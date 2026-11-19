@@ -676,6 +676,7 @@ impl PaintTarget for CpuRecorder<'_> {
 
     fn draw_image(&mut self, key: &str, image: &ImageData, transform: Affine) {
         let (transform, hashed) = self.mapped(transform);
+        let transform = crate::paint::snap_unit_image(transform);
         self.cache_taint();
         let Some(pixmap) = cached_cpu_pixmap(self.images, &mut self.used_images, key, image) else {
             return;

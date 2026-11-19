@@ -4680,6 +4680,7 @@ impl PaintTarget for D3d11PaintTarget<'_> {
         if self.suppressed_clips > 0 {
             return;
         }
+        let transform = crate::paint::snap_unit_image(transform);
         let Some(view) = self.graphics.image_view(key, image) else {
             return;
         };
