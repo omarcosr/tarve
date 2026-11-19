@@ -1,8 +1,10 @@
+use super::payload::{CopyData, WM_COPYDATA};
 use super::tests::{options, take, until};
 use super::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetMessageW, IDI_APPLICATION, LoadIconW, PostThreadMessageW, SendMessageW, WM_APP, WM_QUIT,
-    WS_CHILD, WS_POPUP,
+    FindWindowExW, GetMessageW, HWND_TOPMOST, IDI_APPLICATION, LoadIconW, PostThreadMessageW,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SendMessageW, SetWindowPos, WM_APP, WM_QUIT, WS_CHILD,
+    WS_POPUP,
 };
 
 fn send(hwnd: usize, message: u32, wparam: usize, lparam: isize) -> isize {

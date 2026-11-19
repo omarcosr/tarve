@@ -6,8 +6,8 @@ use unicode_segmentation::UnicodeSegmentation;
 pub(crate) mod notifications;
 pub(crate) mod requests;
 pub use requests::FileDialogOptions;
-mod style_validation;
 mod errors;
+mod style_validation;
 pub use errors::{error, fatal_error, nonfatal_error};
 #[allow(unused_imports)]
 pub(crate) use style_validation::*;

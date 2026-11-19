@@ -1,6 +1,30 @@
 //! CSS `flex` shorthands and grid lines/templates as Taffy styles.
 use super::*;
 
+/// CSS's automatic minimum sizes that Taffy cannot take from the content.
+pub(super) fn apply_automatic_minimums(node: &Node, style: &mut Style) {
+    // Replaced elements (img, svg): CSS's automatic minimum size is their
+    // specified size, so a sized image never shrinks below it.
+    if matches!(node.kind.as_str(), "image" | "svg" | "video") {
+        if node.style["minWidth"].is_null() && node.style["width"].is_number() {
+            style.min_size.width = length(node.number("width", 0.0));
+        }
+        if node.style["minHeight"].is_null() && node.style["height"].is_number() {
+            style.min_size.height = length(node.number("height", 0.0));
+        }
+    }
+    // An input's text scrolls inside it, so its value never sets its minimum width (a browser's
+    // <input> does not grow with its value): the specified width, as CSS's specified size
+    // suggestion, else 0 so a `flex` field shrinks with its row.
+    if node.kind == "input" && node.style["minWidth"].is_null() {
+        style.min_size.width = length(if node.style["width"].is_number() {
+            node.number("width", 0.0)
+        } else {
+            0.0
+        });
+    }
+}
+
 pub(super) fn apply_css_flex(node: &Node, style: &mut Style) {
     let shorthand = match &node.style["flex"] {
         serde_json::Value::Number(number) => number

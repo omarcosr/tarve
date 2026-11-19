@@ -47,7 +47,7 @@ mod popup;
 mod slider;
 mod touch_target;
 mod wheel;
-use css_layout::{apply_css_flex, grid_line, grid_template};
+use css_layout::{apply_automatic_minimums, apply_css_flex, grid_line, grid_template};
 #[allow(unused_imports)]
 pub(crate) use keyframes::*;
 #[allow(unused_imports)]
@@ -11073,26 +11073,7 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
         style.overflow.x = taffy::style::Overflow::Hidden;
         style.overflow.y = taffy::style::Overflow::Hidden;
     }
-    // Replaced elements (img, svg): CSS's automatic minimum size is their
-    // specified size, so a sized image never shrinks below it.
-    if matches!(node.kind.as_str(), "image" | "svg" | "video") {
-        if node.style["minWidth"].is_null() && node.style["width"].is_number() {
-            style.min_size.width = length(node.number("width", 0.0));
-        }
-        if node.style["minHeight"].is_null() && node.style["height"].is_number() {
-            style.min_size.height = length(node.number("height", 0.0));
-        }
-    }
-    // An input's text scrolls inside it, so its value never sets its minimum width (a browser's
-    // <input> does not grow with its value): the specified width, as CSS's specified size
-    // suggestion, else 0 so a `flex` field shrinks with its row.
-    if node.kind == "input" && node.style["minWidth"].is_null() {
-        style.min_size.width = length(if node.style["width"].is_number() {
-            node.number("width", 0.0)
-        } else {
-            0.0
-        });
-    }
+    apply_automatic_minimums(node, &mut style);
     if node.kind == "scroll" {
         if matches!(node.scroll_orientation.as_str(), "horizontal" | "both") {
             style.overflow.x = taffy::style::Overflow::Scroll;

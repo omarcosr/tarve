@@ -3991,7 +3991,7 @@ dependencies = [
 
 [[package]]
 name = "tarve_native"
-version = "0.13.4"
+version = "0.13.5"
 dependencies = [
  "accesskit",
  "accesskit_android",

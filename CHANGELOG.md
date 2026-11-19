@@ -2,13 +2,13 @@
 
 All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `@tarve/svelte` and `@tarve/mcp` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
-## Unreleased
+## 0.13.5 — 2026-11-19
 
 ### Added
 
 - A `tarve build` executable whose `render()` fails (the window could not open, or a native failure ended it) writes `<config>/logs/crash-<time>.log` (app, version, runtime, platform, the error with its stack and causes) and shows the error and the log's path in a native dialog before `render()` throws: such an executable has no console, so the app no longer vanishes without a word. Windows: `MessageBoxW`; Linux: the desktop's dialog through rfd; macOS: the log only. `fatalDialog: false` keeps only the log; `tarve run`/`tarve dev` are unchanged. Native ABI 10: `tarve_fatal_dialog(title, length, message, length)`, which needs no running app.
 - `messageWindow({ forward, icons, messageRanges, keepFirst })` (Windows), everything a replacement tray needs, done on the window's thread without waking JavaScript. `forward: { messages?, ranges?, timeout? }` sends those messages on to the window's twin (the first other top-level window of its class, then the same class path under it, e.g. Explorer's `Shell_TrayWnd > ReBarWindow32 > MSTaskSwWClass`), and the twin's answer becomes the window's. Fixed replies and `onMessage` answers still take precedence. A forward made inside another one waits with `SMTO_BLOCK`. `icons: [{ message, dwData?, offset?, when? }]` reads the icon in lParam, or the 32-bit handle at `offset` of the `WM_COPYDATA` data, before the sender gets its answer. Its pixels reach `onMessage` as `icon: { width, height, rgba }` (up to 128×128). `messageRanges` delivers inclusive ranges (e.g. every `WM_USER` message). `keepFirst: ms` keeps the top window the first of its class (what `FindWindow` returns) using a native timer.
-- `windowThumbnail(destination, source, { rect, source?, opacity?, visible?, clientAreaOnly? })`, `peekWindow(target | null, { keepVisible? })` and `setWindowPeek(window, { excluded?, disallowed?, transitions? })` (Windows): DWM live thumbnails as in taskbar previews, Aero Peek (dwmapi's `DwmpActivateLivePreview`, native `tarve_dwm_peek`), and the `DWMWA_EXCLUDED_FROM_PEEK`, `DWMWA_DISALLOW_PEEK` and `DWMWA_TRANSITIONS_FORCEDISABLED` attributes.
+- `windowThumbnail(destination, source, { rect, source?, opacity?, visible?, clientAreaOnly? })`, `peekWindow(target | null, { keepVisible? })` and `setWindowPeek(window, { excluded?, disallowed?, transitions? })` (Windows): DWM live thumbnails as in taskbar previews, Aero Peek (dwmapi's `DwmpActivateLivePreview`, native `tarve_dwm_peek`), and the `DWMWA_EXCLUDED_FROM_PEEK`, `DWMWA_DISALLOW_PEEK` and `DWMWA_TRANSITIONS_FORCEDISABLED` attributes. Native ABI 10 also adds `tarve_dwm_peek(target, keep)`.
 - txiki.js and Android: `Buffer` supports `utf16le`/`ucs2` (`from`, `toString`, `write`, `byteLength`), and `TextDecoder` decodes `utf-16le` and windows-1252 (`latin1`, `ascii`, …) as Bun and Node.js do, including streaming and BOM handling.
 
 ### Fixed
