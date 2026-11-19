@@ -39,6 +39,8 @@ mod desktop_widget;
 mod device;
 #[cfg(all(not(target_arch = "wasm32"), feature = "media"))]
 mod downmix;
+#[cfg(target_os = "windows")]
+mod dwm;
 mod environment;
 #[cfg(target_os = "windows")]
 mod exe_icon;

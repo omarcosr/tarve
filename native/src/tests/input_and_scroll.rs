@@ -1180,19 +1180,38 @@ fn an_input_keeps_its_width_or_shrinks_with_its_row_whatever_its_value() {
         input.value = Some(long.into());
         input
     };
-    let row = |id: &str, child: Node| node(id, "row", json!({"width": 200, "height": 40}), vec![child]);
+    let row =
+        |id: &str, child: Node| node(id, "row", json!({"width": 200, "height": 40}), vec![child]);
     let mut tree = Tree::new(node(
         "root",
         "window",
         json!({}),
         vec![
-            row("fixed-row", field("fixed", json!({"width": 80, "height": 38}))),
+            row(
+                "fixed-row",
+                field("fixed", json!({"width": 80, "height": 38})),
+            ),
             row("flex-row", field("flex", json!({"flex": 1, "height": 38}))),
-            row("min-row", field("min", json!({"flex": 1, "minWidth": 260, "height": 38}))),
+            row(
+                "min-row",
+                field("min", json!({"flex": 1, "minWidth": 260, "height": 38})),
+            ),
         ],
     ));
     tree.compute(400.0, 200.0).unwrap();
-    assert_eq!(tree.entries["fixed"].rect.width().round(), 80.0, "a given width wins over the value");
-    assert_eq!(tree.entries["flex"].rect.width().round(), 200.0, "a flex field fits its row");
-    assert_eq!(tree.entries["min"].rect.width().round(), 260.0, "an explicit minWidth still holds");
+    assert_eq!(
+        tree.entries["fixed"].rect.width().round(),
+        80.0,
+        "a given width wins over the value"
+    );
+    assert_eq!(
+        tree.entries["flex"].rect.width().round(),
+        200.0,
+        "a flex field fits its row"
+    );
+    assert_eq!(
+        tree.entries["min"].rect.width().round(),
+        260.0,
+        "an explicit minWidth still holds"
+    );
 }

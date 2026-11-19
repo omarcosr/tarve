@@ -11,6 +11,7 @@ import { createFetch } from "./fetch";
 import { installIntl } from "./intl";
 import { Buffer } from "./shims/buffer";
 import { EventEmitter } from "./shims/events";
+import { withWindowsEncodings } from "./text-decoder";
 
 declare const TARVE_TXIKI_PLATFORM: "win32" | "linux";
 declare const TARVE_TXIKI_NATIVE_NAME: string;
@@ -33,7 +34,24 @@ const globals = globalThis as Record<string, unknown>;
 installIntl();
 globals.fetch = createFetch(globalThis.fetch.bind(globalThis));
 globals.Buffer = Buffer;
-globals.__tarveTxikiFfi = ffi;
+globals.TextDecoder = withWindowsEncodings(globalThis.TextDecoder);
+// tjs:ffi frees a library (FreeLibrary/dlclose) once its object is collected, even while its
+// symbols are still held: a call then jumps into unmapped code (0xC0000005). Bun and Node.js
+// keep a library loaded until close(), so this does too.
+const openLibraries = new Set<object>();
+globals.__tarveTxikiFfi = {
+  ...ffi,
+  dlopen(...args: Parameters<typeof ffi.dlopen>) {
+    const library = ffi.dlopen(...args);
+    openLibraries.add(library);
+    return {
+      symbols: library.symbols,
+      close() {
+        if (openLibraries.delete(library)) library.close();
+      },
+    };
+  },
+};
 globals.__tarveDirname = path.dirname(tjs.exePath);
 globals.setImmediate ??= (callback: (...args: unknown[]) => void, ...args: unknown[]) => setTimeout(callback, 0, ...args);
 let exiting = false;

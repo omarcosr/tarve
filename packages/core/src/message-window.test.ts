@@ -116,4 +116,54 @@ describe("messageWindow", () => {
       window.dispose();
     }
   });
+
+  test.skipIf(!windows || !hasNative)("delivers message ranges with the pixels of the icons they carry", async () => {
+    const user32 = openPluginLibrary("user32.dll", {
+      SendMessageW: { args: ["ptr", "u32", "u64", "i64"], returns: "i64" },
+      LoadIconW: { args: ["ptr", "u64"], returns: "ptr" },
+    });
+    const sendCopy = openPluginLibrary("user32.dll", { SendMessageW: { args: ["ptr", "u32", "u64", "buffer"], returns: "i64" } }).symbols.SendMessageW;
+    const WM_APP = 0x8000, WM_COPYDATA = 0x4a;
+    expect(() => messageWindow({ messageRanges: [[5, 4]], onMessage() {} })).toThrow("invalid messageRanges range");
+    expect(() => messageWindow({ keepFirst: 10, onMessage() {} })).toThrow(RangeError);
+    expect(() => messageWindow({ forward: { timeout: 0 }, onMessage() {} })).toThrow(RangeError);
+    expect(() => messageWindow({ icons: [{ message: 1, when: { offset: 0, mask: 0 } }], onMessage() {} })).toThrow("mask");
+    expect(() => messageWindow({ messageOnly: true, keepFirst: 100, onMessage() {} })).toThrow("keepFirst");
+    // IDI_APPLICATION: a shared system icon.
+    const icon = BigInt(user32.symbols.LoadIconW(0, 32512) as number | bigint);
+    const events: MessageWindowEvent[] = [];
+    const window = messageWindow({
+      messageOnly: true,
+      messages: [WM_COPYDATA],
+      messageRanges: [[WM_APP, WM_APP + 9]],
+      icons: [{ message: WM_APP + 1 }, { message: WM_COPYDATA, dwData: 1, offset: 4, when: { offset: 0, mask: 2 } }],
+      onMessage(event) { events.push(event); },
+    });
+    try {
+      user32.symbols.SendMessageW(window.hwnd, WM_APP + 1, 0, icon);
+      user32.symbols.SendMessageW(window.hwnd, WM_APP + 2, 0, icon);
+      // SHELLTRAYDATA-like data: uFlags with the flag at 0, the 32-bit handle at 4.
+      const data = new Uint8Array(8);
+      new DataView(data.buffer).setUint32(0, 2, true);
+      new DataView(data.buffer).setUint32(4, Number(icon & 0xffffffffn), true);
+      const { ptr } = await import("bun:ffi");
+      const copy = new Uint8Array(24);
+      const view = new DataView(copy.buffer);
+      view.setBigUint64(0, 1n, true);
+      view.setUint32(8, data.length, true);
+      view.setBigUint64(16, BigInt(ptr(data)), true);
+      sendCopy(window.hwnd, WM_COPYDATA, 0, copy);
+      await until(() => events.length >= 3);
+      const icons = events.map(event => event.type === "message" && event.icon);
+      expect(icons[1]).toBeUndefined();
+      for (const read of [icons[0], icons[2]]) {
+        expect(read).toBeTruthy();
+        if (!read) continue;
+        expect(read.rgba.length).toBe(read.width * read.height * 4);
+        expect(read.rgba.some((value, index) => index % 4 === 3 && value !== 0)).toBe(true);
+      }
+    } finally {
+      window.dispose();
+    }
+  });
 });

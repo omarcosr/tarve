@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { messageWindow, type MessageWindowEvent } from "../packages/core/src/message-window";
 import { openPluginLibrary } from "../packages/core/src/plugins/ffi";
+import { peekWindow, setWindowPeek, windowThumbnail } from "../packages/core/src/window-dwm";
 
 const results: Record<string, unknown> = {};
 const until = async (done: () => boolean) => {
@@ -93,6 +94,33 @@ if (process.platform !== "win32") {
     events: treeEvents.map(event => event.type === "message" && [event.window.className, event.message, String(event.wParam), event.copyData ? "address" : String(event.lParam), event.copyData ? String(event.copyData.dwData) : null]),
   };
   tray.dispose();
+  // Message ranges with the pixels of the icon they carry (IDI_APPLICATION, a shared system icon),
+  // a window kept first of its class, and DWM thumbnails and peek attributes between two of them.
+  const icons = openPluginLibrary("user32.dll", { LoadIconW: { args: ["ptr", "u64"], returns: "ptr" } }).symbols;
+  const iconEvents: MessageWindowEvent[] = [];
+  const host = messageWindow({
+    className: "TarveSmokeKeptFirst",
+    messageRanges: [[WM_APP + 10, WM_APP + 19]],
+    icons: [{ message: WM_APP + 11 }],
+    keepFirst: 100,
+    onMessage(event) { iconEvents.push(event); },
+  });
+  const other = messageWindow({ onMessage() {} });
+  user32.symbols.SendMessageW(host.hwnd, WM_APP + 11, 0, icons.LoadIconW(0, 32512));
+  user32.symbols.SendMessageW(host.hwnd, WM_APP + 12, 0, 0);
+  await until(() => iconEvents.length >= 2);
+  const thumbnail = windowThumbnail(host.hwnd, other.hwnd, { rect: { x: 0, y: 0, width: 160, height: 90 } });
+  thumbnail.update({ opacity: 0.5, clientAreaOnly: true });
+  setWindowPeek(host.hwnd, { excluded: true, transitions: false });
+  peekWindow(null);
+  results["icons"] = {
+    events: iconEvents.map(event => event.type === "message" && [event.message - WM_APP, event.icon ? event.icon.rgba.length === event.icon.width * event.icon.height * 4 : null]),
+    first: find(0n, "TarveSmokeKeptFirst") === host.hwnd,
+    thumbnail: typeof thumbnail.sourceSize.width,
+  };
+  thumbnail.dispose();
+  other.dispose();
+  host.dispose();
 }
 
 writeFileSync(process.argv.at(-1)!, JSON.stringify(results));

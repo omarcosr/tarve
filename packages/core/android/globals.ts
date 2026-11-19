@@ -5,6 +5,7 @@
  */
 import { host } from "./host";
 import { EventEmitter } from "../txiki/shims/events";
+import { withWindowsEncodings } from "../txiki/text-decoder";
 
 export {};
 
@@ -195,7 +196,7 @@ class TextDecoder {
   }
 }
 globals.TextEncoder ??= TextEncoder;
-globals.TextDecoder ??= TextDecoder;
+globals.TextDecoder = withWindowsEncodings((globals.TextDecoder as typeof TextDecoder | undefined) ?? TextDecoder);
 
 const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 globals.btoa ??= (input: string) => {

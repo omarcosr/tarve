@@ -86,6 +86,11 @@ try {
     && damaged === "zlib.gunzipSync: incorrect header check",
     { gzip: Buffer.from(gzipSync(Buffer.from("hello"))).toString("hex"), damaged });
   check("Buffer", Buffer.from("hi").toString("base64") === "aGk=");
+  // Windows strings: UTF-16LE in Buffer and TextDecoder, windows-1252 for "latin1", as on Bun and Node.js.
+  const utf16 = Buffer.from("hé€😀", "utf16le");
+  check("Buffer utf16le", utf16.toString("hex") === "6800e900ac203dd800de" && utf16.toString("ucs2") === "hé€😀", utf16.toString("hex"));
+  const decoded = [new TextDecoder("utf-16le").decode(utf16), new TextDecoder("latin1").decode(new Uint8Array([0x68, 0x80, 0xe9]))];
+  check("TextDecoder utf-16le latin1", decoded[0] === "hé€😀" && decoded[1] === "h€é", decoded);
   check("Intl", new Intl.NumberFormat("en-US").format(1234567.891) === "1,234,567.891" && new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(2026, 9, 15)) === "Oct 15",
     [new Intl.NumberFormat("en-US").format(1234567.891), new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(new Date(2026, 9, 15))]);
 

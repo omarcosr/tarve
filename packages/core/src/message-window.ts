@@ -79,6 +79,45 @@ export interface MessageWindowFolderWatch {
   readonly filter?: number;
 }
 
+/** Inclusive message range [min, max], e.g. [0x400, 0xbfff] for every private (WM_USER) message. */
+export type MessageWindowRange = readonly [number, number];
+
+/**
+ * Messages sent on to the window's twin, natively, before the sender gets its answer: the twin's
+ * answer becomes the window's (0 when there is no twin or it does not answer in time), unless a
+ * fixed reply or `onMessage` gives one. The twin of the top window is the first other top-level
+ * window of its class (in z-order); a child's twin is found under it along the same class path,
+ * e.g. Explorer's Shell_TrayWnd > ReBarWindow32 > MSTaskSwWClass for a replacement tray. Both are
+ * looked up at each message, so a restarted shell is found again.
+ */
+export interface MessageWindowForward {
+  readonly messages?: readonly MessageWindowMessage[];
+  readonly ranges?: readonly MessageWindowRange[];
+  /** SendMessageTimeout bound in ms, 1-10000. Default 2000. */
+  readonly timeout?: number;
+}
+
+/**
+ * An icon a delivered message carries, read before its sender gets the answer (apps destroy theirs
+ * once Shell_NotifyIcon or SetOverlayIcon returns): its pixels reach `onMessage` as `icon`.
+ */
+export interface MessageWindowIconSource {
+  readonly message: MessageWindowMessage;
+  /** WM_COPYDATA: only this dwData. */
+  readonly dwData?: number | bigint;
+  /** The HICON is lParam (default), or the 32-bit handle at this byte offset of WM_COPYDATA's data (NOTIFYICONDATA's hIcon: 28 in SHELLTRAYDATA). */
+  readonly offset?: number;
+  /** Only when the u32 at `offset` of WM_COPYDATA's data has any bit of `mask` (NOTIFYICONDATA's uFlags & NIF_ICON: { offset: 20, mask: 2 }). */
+  readonly when?: { readonly offset: number; readonly mask: number };
+}
+
+/** An icon's pixels: straight-alpha RGBA, top row first, up to 128×128. */
+export interface MessageWindowIcon {
+  readonly width: number;
+  readonly height: number;
+  readonly rgba: Uint8Array;
+}
+
 export type MessageWindowEvent =
   | {
     readonly type: "message";
@@ -99,6 +138,8 @@ export type MessageWindowEvent =
     readonly copyData?: { readonly dwData: bigint; readonly data: Uint8Array };
     /** Its sender waits for what `onMessage` returns (the message is in `waitReplies`). */
     readonly waiting: boolean;
+    /** The pixels of the icon it carried (see `icons`); absent when the handle was no icon or larger than 128×128. */
+    readonly icon?: MessageWindowIcon;
   }
   | {
     readonly type: "winEvent";
@@ -156,6 +197,18 @@ export interface MessageWindowOptions {
   readonly registry?: readonly MessageWindowRegistryWatch[];
   /** Folders whose changes arrive as `folder` events (FindFirstChangeNotificationW). Up to 62 registry keys and folders together. */
   readonly folders?: readonly MessageWindowFolderWatch[];
+  /** Message ranges delivered like `messages` (up to 64). */
+  readonly messageRanges?: readonly MessageWindowRange[];
+  /** Messages answered by the window's twin (another process's window of the same classes), natively. */
+  readonly forward?: MessageWindowForward;
+  /** Icons whose pixels delivered messages carry to `onMessage` (up to 64). */
+  readonly icons?: readonly MessageWindowIconSource[];
+  /**
+   * Keeps the top window the first of its class (what FindWindow returns, e.g. the Shell_TrayWnd
+   * Shell_NotifyIcon finds), checked every this many ms (50-60000) by a timer on the window's
+   * thread: Windows tells no one when a hidden window loses that place. Top-level windows only.
+   */
+  readonly keepFirst?: number;
   /** Runs on the JavaScript thread, in order. Its result answers a `waiting` message. */
   readonly onMessage: (event: MessageWindowEvent) => MessageWindowReply | void;
 }
@@ -189,7 +242,7 @@ function lastError(): string {
   return new TextDecoder().decode(message.subarray(0, Math.max(0, written)));
 }
 
-const KIND = { message: 1n, winEvent: 2n, shell: 3n, registry: 4n, folder: 5n } as const;
+const KIND = { message: 1n, winEvent: 2n, shell: 3n, registry: 4n, folder: 5n, icon: 6n } as const;
 const WM_SETTINGCHANGE = 0x1a;
 const WM_COPYDATA = 0x4a;
 
@@ -257,6 +310,31 @@ function handle(value: bigint | number): number {
   return Number(wide);
 }
 
+function ranges(list: readonly MessageWindowRange[] | undefined, what: string): [number, number][] {
+  return (list ?? []).map(range => {
+    const [min, max] = Array.isArray(range) ? range : [];
+    const valid = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 0xffffffff;
+    if (!valid(min) || !valid(max) || min! > max!) throw new TypeError(`messageWindow: invalid ${what} range ${String(range)}`);
+    return [min!, max!];
+  });
+}
+
+function iconJson(source: MessageWindowIconSource): unknown {
+  const offset = (value: unknown, what: string) => {
+    if (value !== undefined && (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 0xffff)) throw new TypeError(`messageWindow: invalid icon ${what} ${String(value)}`);
+    return value as number | undefined;
+  };
+  const [, dwData] = replyKey({ dwData: source.dwData });
+  const mask = source.when?.mask;
+  if (source.when && (typeof mask !== "number" || !Number.isInteger(mask) || mask <= 0 || mask > 0xffffffff)) throw new TypeError(`messageWindow: invalid icon mask ${String(mask)}`);
+  return {
+    message: checkMessage(source.message),
+    dwData: source.dwData === undefined ? undefined : String(dwData),
+    offset: offset(source.offset, "offset"),
+    when: source.when ? [offset(source.when.offset, "when.offset"), mask] : undefined,
+  };
+}
+
 function messageName(key: string): MessageWindowMessage {
   return /^(0|[1-9][0-9]*)$/.test(key) ? Number(key) : key;
 }
@@ -296,6 +374,14 @@ export function messageWindow(options: MessageWindowOptions): MessageWindow {
   if (timeout !== undefined && (!Number.isInteger(timeout) || timeout < 0 || timeout > 5000)) {
     throw new RangeError("messageWindow: replyTimeout must be an integer from 0 to 5000");
   }
+  const keepFirst = options.keepFirst;
+  if (keepFirst !== undefined && (!Number.isInteger(keepFirst) || keepFirst < 50 || keepFirst > 60000)) {
+    throw new RangeError("messageWindow: keepFirst must be an integer from 50 to 60000 (ms)");
+  }
+  const forwardTimeout = options.forward?.timeout;
+  if (forwardTimeout !== undefined && (!Number.isInteger(forwardTimeout) || forwardTimeout < 1 || forwardTimeout > 10000)) {
+    throw new RangeError("messageWindow: forward.timeout must be an integer from 1 to 10000");
+  }
   const registry = options.registry ?? [];
   const folders = options.folders ?? [];
   const json = {
@@ -317,6 +403,14 @@ export function messageWindow(options: MessageWindowOptions): MessageWindow {
     shellHook: options.shellHook ?? false,
     registry,
     folders,
+    messageRanges: ranges(options.messageRanges, "messageRanges"),
+    forward: options.forward ? {
+      messages: (options.forward.messages ?? []).map(checkMessage),
+      ranges: ranges(options.forward.ranges, "forward"),
+      timeout: forwardTimeout,
+    } : undefined,
+    icons: (options.icons ?? []).map(iconJson),
+    keepFirst,
   };
   const symbols = threadsafeNative();
   const decoder = new TextDecoder();
@@ -326,6 +420,8 @@ export function messageWindow(options: MessageWindowOptions): MessageWindow {
   // hwnd -> its window of the tree, filled once the window exists (records arrive after that).
   const targets = new Map<bigint, MessageWindowTarget>();
   let top: MessageWindowTarget = { hwnd: 0n, className: "" };
+  // An icon's pixels arrive just before the message that carried it (same thread, same queue).
+  let icon: MessageWindowIcon | undefined;
   const callback = threadsafeRecordCallback((args, copied) => {
     if (disposed) return;
     const [kind, a1, a2, a3, a4, a5] = args as [bigint, bigint, bigint, bigint, bigint, bigint];
@@ -345,10 +441,17 @@ export function messageWindow(options: MessageWindowOptions): MessageWindow {
         } else if (message === WM_SETTINGCHANGE) {
           extra = { text: "" };
         }
+        if (icon) {
+          extra = { ...extra, icon };
+          icon = undefined;
+        }
         const result = onMessage({ type: "message", window: targets.get(a5) ?? top, message, wParam: a2, lParam: signed(a3, 64n), ...extra, waiting: sequence !== 0n });
         if (sequence !== 0n && result !== undefined && !disposed) symbols.tarve_message_window_reply(id, sequence, i64(result));
         return;
       }
+      case KIND.icon:
+        if (copied) icon = Object.freeze({ width: Number(a1), height: Number(a2), rgba: copied });
+        return;
       case KIND.winEvent:
         onMessage({ type: "winEvent", event: Number(a1), hwnd: a2, idObject: Number(signed(a3, 32n)), idChild: Number(signed(a3 >> 32n, 32n)), thread: Number(a4), time: Number(a5) });
         return;

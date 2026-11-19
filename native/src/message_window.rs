@@ -11,13 +11,14 @@
 //! waits for JavaScript this thread pumps nothing: a sender on the JavaScript thread itself gets
 //! the table value after the timeout, never a deadlock. The window may have a parent and a tree
 //! of child windows made on its thread (message_window/tree.rs), each answering from the table.
+mod icon;
 mod payload;
 mod tree;
 use crate::threadsafe;
-use payload::copied;
+use payload::{CopyData, WM_COPYDATA, copied};
 use serde::Deserialize;
 use std::{
-    cell::{Cell, OnceCell},
+    cell::{Cell, OnceCell, RefCell},
     collections::HashMap,
     ffi::c_void,
     ptr,
@@ -48,10 +49,12 @@ use windows_sys::Win32::{
     },
     UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DeregisterShellHookWindow, DestroyWindow,
-        DispatchMessageW, ISMEX_NOTIFY, ISMEX_REPLIED, InSendMessageEx, MSG, MWMO_INPUTAVAILABLE,
-        MsgWaitForMultipleObjectsEx, PM_REMOVE, PeekMessageW, QS_ALLINPUT, RegisterClassExW,
-        RegisterShellHookWindow, RegisterWindowMessageW, UnregisterClassW, WM_CLOSE, WNDCLASSEXW,
-        WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+        DispatchMessageW, FindWindowExW, HICON, HWND_TOPMOST, ISMEX_NOTIFY, ISMEX_REPLIED,
+        InSendMessageEx, MSG, MWMO_INPUTAVAILABLE, MsgWaitForMultipleObjectsEx, PM_REMOVE,
+        PeekMessageW, QS_ALLINPUT, RegisterClassExW, RegisterShellHookWindow,
+        RegisterWindowMessageW, SMTO_ABORTIFHUNG, SMTO_BLOCK, SWP_NOACTIVATE, SWP_NOMOVE,
+        SWP_NOSIZE, SendMessageTimeoutW, SetTimer, SetWindowPos, UnregisterClassW, WM_CLOSE,
+        WM_TIMER, WNDCLASSEXW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     },
 };
 
@@ -61,6 +64,8 @@ pub(crate) const KIND_WIN_EVENT: u64 = 2;
 pub(crate) const KIND_SHELL: u64 = 3;
 pub(crate) const KIND_REGISTRY: u64 = 4;
 pub(crate) const KIND_FOLDER: u64 = 5;
+/// An icon's pixels ([width, height]), posted just before the message that carried the icon.
+pub(crate) const KIND_ICON: u64 = 6;
 
 /// Registry keys and folders one window watches (MsgWaitForMultipleObjects takes 63 handles,
 /// one is the stop event).
@@ -71,6 +76,12 @@ const MAX_REPLY_TIMEOUT_MS: u32 = 5_000;
 const DEFAULT_REPLY_TIMEOUT_MS: u32 = 50;
 /// Messages dispatched before the stop event and the watches are looked at again.
 const PUMP_BATCH: usize = 256;
+const MAX_RANGES: usize = 64;
+const MAX_ICON_SOURCES: usize = 64;
+const DEFAULT_FORWARD_TIMEOUT_MS: u32 = 2_000;
+const MAX_FORWARD_TIMEOUT_MS: u32 = 10_000;
+/// The keepFirst timer's id (WM_TIMER wParam) on the top window.
+const KEEP_FIRST_TIMER: usize = 0x7461_7276;
 
 const WINEVENT_OUTOFCONTEXT: u32 = 0;
 const ERROR_CLASS_ALREADY_EXISTS: u32 = 1410;
@@ -127,6 +138,56 @@ pub(crate) struct FolderWatch {
     pub filter: Option<u32>,
 }
 
+/// Messages sent on, natively, to the twin of the window that got them (see [`Local::twin`]),
+/// whose answer becomes theirs.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct Forward {
+    #[serde(default)]
+    pub messages: Vec<MessageName>,
+    #[serde(default)]
+    pub ranges: Vec<[u32; 2]>,
+    pub timeout: Option<u32>,
+}
+
+/// Where a message carries an icon whose pixels reach JavaScript (read before the answer).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct IconSource {
+    pub message: MessageName,
+    /// WM_COPYDATA: only this dwData (a decimal u64).
+    pub dw_data: Option<String>,
+    /// The handle: lParam (None), or a 32-bit handle at this byte offset of WM_COPYDATA's data.
+    pub offset: Option<u32>,
+    /// Only when the u32 at this offset of WM_COPYDATA's data has any of these bits: [offset, mask].
+    pub when: Option<[u32; 2]>,
+}
+
+struct Icon {
+    message: u32,
+    dw_data: Option<u64>,
+    offset: Option<u32>,
+    when: Option<[u32; 2]>,
+}
+
+fn within(ranges: &[[u32; 2]], message: u32) -> bool {
+    ranges
+        .iter()
+        .any(|[min, max]| (*min..=*max).contains(&message))
+}
+
+fn check_ranges(ranges: &[[u32; 2]], what: &str) -> Result<(), String> {
+    if ranges.len() > MAX_RANGES {
+        return Err(format!("messageWindow takes at most {MAX_RANGES} {what}"));
+    }
+    if ranges.iter().any(|[min, max]| min > max) {
+        return Err(format!(
+            "messageWindow: every range of {what} needs min <= max"
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Options {
@@ -155,6 +216,14 @@ pub(crate) struct Options {
     pub registry: Vec<RegistryWatch>,
     #[serde(default)]
     pub folders: Vec<FolderWatch>,
+    /// Inclusive [min, max] message ranges delivered like `messages`.
+    #[serde(default)]
+    pub message_ranges: Vec<[u32; 2]>,
+    pub forward: Option<Forward>,
+    #[serde(default)]
+    pub icons: Vec<IconSource>,
+    /// Milliseconds between checks that the top window is still the first of its class.
+    pub keep_first: Option<u32>,
 }
 
 /// What the window's thread and JavaScript's calls share.
@@ -176,6 +245,16 @@ struct Answer {
 struct Local {
     slot: usize,
     messages: Vec<u32>,
+    ranges: Vec<[u32; 2]>,
+    forward: Vec<u32>,
+    forward_ranges: Vec<[u32; 2]>,
+    forward_timeout: u32,
+    icons: Vec<Icon>,
+    /// Each window of the tree's class path from the top window (to find its twin).
+    paths: RefCell<HashMap<usize, Vec<Vec<u16>>>>,
+    top: Cell<usize>,
+    /// Window procedures of this thread running one inside another (see [`Local::forward`]).
+    depth: Cell<u32>,
     wait: Vec<u32>,
     timeout: Duration,
     shell: u32,
@@ -358,7 +437,137 @@ impl Local {
         }
     }
 
+    /// Sends `message` on to the twin of `hwnd`: its answer, 0 when there is none or it does not
+    /// answer within the timeout.
+    fn forward(&self, hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        let target = self.twin(hwnd);
+        if target.is_null() {
+            return 0;
+        }
+        // While it waits, SendMessageTimeoutW runs the messages sent to this thread, so a burst
+        // (every app re-adding its tray icon at once) would nest forwards ever deeper. A forward
+        // made inside another one waits without running them (SMTO_BLOCK): their senders queue.
+        let flags = if self.depth.get() > 1 {
+            SMTO_ABORTIFHUNG | SMTO_BLOCK
+        } else {
+            SMTO_ABORTIFHUNG
+        };
+        let mut result = 0usize;
+        // SAFETY: Windows marshals the message's own arguments (WM_COPYDATA across processes too).
+        let sent = unsafe {
+            SendMessageTimeoutW(
+                target,
+                message,
+                wparam,
+                lparam,
+                flags,
+                self.forward_timeout,
+                &mut result,
+            )
+        };
+        if sent == 0 { 0 } else { result as LRESULT }
+    }
+
+    /// The window another process made in the place of `hwnd`: the first top-level window of the
+    /// top window's class that is not this tree's (in z-order), then down the same class path as
+    /// `hwnd` under it. Looked up at each message, so a restarted shell is found again.
+    fn twin(&self, hwnd: HWND) -> HWND {
+        let paths = self.paths.borrow();
+        let Some(path) = paths.get(&(hwnd as usize)) else {
+            return ptr::null_mut();
+        };
+        let mut top: HWND = ptr::null_mut();
+        // SAFETY: NUL-terminated class names; FindWindowExW checks the handles.
+        unsafe {
+            loop {
+                top = FindWindowExW(ptr::null_mut(), top, path[0].as_ptr(), ptr::null());
+                if top.is_null() || !paths.contains_key(&(top as usize)) {
+                    break;
+                }
+            }
+            let mut at = top;
+            for class in &path[1..] {
+                if at.is_null() {
+                    break;
+                }
+                at = FindWindowExW(at, ptr::null_mut(), class.as_ptr(), ptr::null());
+            }
+            at
+        }
+    }
+
+    /// The pixels of the icon `message` carries, per `icons`.
+    fn icon(&self, message: u32, lparam: LPARAM) -> Option<(u32, u32, Vec<u8>)> {
+        for source in self.icons.iter().filter(|source| source.message == message) {
+            // SAFETY: WM_COPYDATA's lParam is a COPYDATASTRUCT valid during this call.
+            let copy = (message == WM_COPYDATA && lparam != 0)
+                .then(|| unsafe { &*(lparam as *const CopyData) });
+            if source.dw_data.is_some()
+                && copy.is_none_or(|copy| Some(copy.data as u64) != source.dw_data)
+            {
+                continue;
+            }
+            let field = |at: u32| -> Option<u32> {
+                let copy = copy?;
+                (!copy.bytes.is_null() && at as usize + 4 <= copy.length as usize).then(|| {
+                    // SAFETY: inside the cbData bytes lpData points to.
+                    unsafe { ptr::read_unaligned(copy.bytes.add(at as usize).cast::<u32>()) }
+                })
+            };
+            if let Some([at, mask]) = source.when
+                && field(at).is_none_or(|value| value & mask == 0)
+            {
+                continue;
+            }
+            // Handles are 32-bit values, sign-extended (as Windows does across 32/64-bit processes).
+            let handle = match source.offset {
+                None => lparam,
+                Some(at) => match field(at) {
+                    Some(value) => value as i32 as isize,
+                    None => continue,
+                },
+            };
+            if handle != 0 {
+                return icon::rgba(handle as HICON);
+            }
+        }
+        None
+    }
+
+    /// Makes the top window the first of its class again (FindWindow returns that one), when
+    /// another took its place.
+    fn keep_first(&self, hwnd: HWND) {
+        let paths = self.paths.borrow();
+        let Some(path) = paths.get(&(hwnd as usize)) else {
+            return;
+        };
+        // SAFETY: a NUL-terminated class name; this thread's own window.
+        unsafe {
+            if FindWindowExW(
+                ptr::null_mut(),
+                ptr::null_mut(),
+                path[0].as_ptr(),
+                ptr::null(),
+            ) != hwnd
+            {
+                SetWindowPos(
+                    hwnd,
+                    HWND_TOPMOST,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE,
+                );
+            }
+        }
+    }
+
     fn message(&self, hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        if message == WM_TIMER && wparam == KEEP_FIRST_TIMER && hwnd as usize == self.top.get() {
+            self.keep_first(hwnd);
+            return 0;
+        }
         if self.shell != 0 && message == self.shell {
             self.post([KIND_SHELL, wparam as u64, lparam as u64, 0, 0, 0], &[]);
             return 0;
@@ -380,11 +589,24 @@ impl Local {
                 .unwrap_or_else(|p| p.into_inner());
             table.get(hwnd as usize, message, wparam, lparam)
         };
-        if self.messages.binary_search(&message).is_err() || !self.live.get() {
-            return fixed().unwrap_or_else(|| fallback(hwnd, message, wparam, lparam));
+        let forwarded = (self.forward.binary_search(&message).is_ok()
+            || within(&self.forward_ranges, message))
+        .then(|| self.forward(hwnd, message, wparam, lparam));
+        let delivered =
+            self.messages.binary_search(&message).is_ok() || within(&self.ranges, message);
+        if !delivered || !self.live.get() {
+            return fixed()
+                .or(forwarded)
+                .unwrap_or_else(|| fallback(hwnd, message, wparam, lparam));
         }
         // SAFETY: lParam is what Windows documents for these messages, valid during this call.
         let bytes = unsafe { copied(message, wparam, lparam) };
+        if let Some((width, height, pixels)) = self.icon(message, lparam) {
+            self.post(
+                [KIND_ICON, u64::from(width), u64::from(height), 0, 0, 0],
+                &pixels,
+            );
+        }
         // SAFETY: no arguments to check.
         let sent = unsafe { InSendMessageEx(ptr::null_mut()) };
         let waits = self.wait.binary_search(&message).is_ok()
@@ -436,6 +658,7 @@ impl Local {
         }
         answer
             .or_else(fixed)
+            .or(forwarded)
             .unwrap_or_else(|| fallback(hwnd, message, wparam, lparam))
     }
 }
@@ -447,9 +670,12 @@ unsafe extern "system" fn window_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     let handled = LOCAL.with(|local| {
-        local
-            .get()
-            .map(|local| local.message(hwnd, message, wparam, lparam))
+        local.get().map(|local| {
+            local.depth.set(local.depth.get() + 1);
+            let result = local.message(hwnd, message, wparam, lparam);
+            local.depth.set(local.depth.get() - 1);
+            result
+        })
     });
     // SAFETY: Windows' own arguments.
     handled.unwrap_or_else(|| unsafe { DefWindowProcW(hwnd, message, wparam, lparam) })
@@ -495,7 +721,7 @@ fn class_name(options: &Options, id: u64) -> Result<String, String> {
 /// Builds the window and everything it listens to on this (its own) thread: the info JavaScript
 /// gets back, and what to release when the thread ends.
 fn setup(
-    options: Options,
+    mut options: Options,
     slot: usize,
     shared: Arc<Shared>,
     id: u64,
@@ -512,6 +738,28 @@ fn setup(
     } else {
         0
     };
+    let forward = options.forward.take().unwrap_or_default();
+    let forwarded = resolve(&forward.messages, &mut named)?;
+    let mut icons = Vec::with_capacity(options.icons.len());
+    for source in &options.icons {
+        icons.push(Icon {
+            message: resolve(std::slice::from_ref(&source.message), &mut named)?[0],
+            dw_data: match &source.dw_data {
+                Some(key) => Some(
+                    key.parse::<u64>()
+                        .map_err(|_| format!("Icon dwData \"{key}\" is not a u64"))?,
+                ),
+                None => None,
+            },
+            offset: source.offset,
+            when: source.when,
+        });
+    }
+    if options.keep_first.is_some() && (options.message_only || options.parent.is_some()) {
+        return Err(
+            "messageWindow: keepFirst needs a top-level window (no messageOnly, no parent)".into(),
+        );
+    }
     let name = class_name(&options, id)?;
     let class = wide(&name);
     let table = Arc::clone(&shared);
@@ -533,6 +781,17 @@ fn setup(
         let _ = local.set(Local {
             slot,
             messages,
+            ranges: std::mem::take(&mut options.message_ranges),
+            forward: forwarded,
+            forward_ranges: forward.ranges,
+            forward_timeout: forward
+                .timeout
+                .unwrap_or(DEFAULT_FORWARD_TIMEOUT_MS)
+                .clamp(1, MAX_FORWARD_TIMEOUT_MS),
+            icons,
+            paths: RefCell::new(HashMap::new()),
+            top: Cell::new(0),
+            depth: Cell::new(0),
             wait,
             timeout: Duration::from_millis(u64::from(
                 options
@@ -597,6 +856,46 @@ fn setup(
             named: &mut named,
         };
         build.create(&options.children, resources.hwnd, &mut children)?;
+        LOCAL.with(|local| {
+            if let Some(local) = local.get() {
+                let mut paths = local.paths.borrow_mut();
+                paths.insert(resources.hwnd as usize, vec![resources.class.clone()]);
+                // Depth first: a parent's path is there before its children's.
+                for child in &children {
+                    let number = |key: &str| {
+                        child[key]
+                            .as_str()
+                            .and_then(|text| text.parse::<usize>().ok())
+                            .unwrap_or(0)
+                    };
+                    let mut path = paths.get(&number("parent")).cloned().unwrap_or_default();
+                    path.push(wide(child["className"].as_str().unwrap_or("")));
+                    paths.insert(number("hwnd"), path);
+                }
+                local.top.set(resources.hwnd as usize);
+            }
+        });
+        if let Some(interval) = options.keep_first {
+            // Windows tells nobody when a hidden window loses its z-order place (no message, no
+            // WinEvent), so a native timer on this thread checks it; JavaScript is never woken.
+            LOCAL.with(|local| {
+                if let Some(local) = local.get() {
+                    local.keep_first(resources.hwnd);
+                }
+            });
+            if SetTimer(
+                resources.hwnd,
+                KEEP_FIRST_TIMER,
+                interval.clamp(50, 60_000),
+                None,
+            ) == 0
+            {
+                return Err(format!(
+                    "SetTimer failed (Windows error {})",
+                    GetLastError()
+                ));
+            }
+        }
         if options.shell_hook {
             if RegisterShellHookWindow(resources.hwnd) == 0 {
                 return Err(format!(
@@ -754,6 +1053,20 @@ pub(crate) fn open(options: Options, callback: u64) -> Result<u64, String> {
         ));
     }
     tree::check(&options.children)?;
+    check_ranges(&options.message_ranges, "messageRanges")?;
+    if let Some(forward) = &options.forward {
+        check_ranges(&forward.ranges, "forward ranges")?;
+        if forward.messages.len() > MAX_MESSAGES {
+            return Err(format!(
+                "messageWindow forwards at most {MAX_MESSAGES} messages"
+            ));
+        }
+    }
+    if options.icons.len() > MAX_ICON_SOURCES {
+        return Err(format!(
+            "messageWindow takes at most {MAX_ICON_SOURCES} icons"
+        ));
+    }
     if options.win_events.len() > MAX_WIN_EVENTS {
         return Err(format!(
             "messageWindow takes at most {MAX_WIN_EVENTS} winEvents"
@@ -915,6 +1228,8 @@ pub(crate) fn close(id: u64) -> bool {
     true
 }
 
+#[cfg(test)]
+mod forward_tests;
 #[cfg(test)]
 mod tests {
     use super::payload::{WM_COPYDATA, WM_SETTINGCHANGE};

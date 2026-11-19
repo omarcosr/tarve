@@ -345,6 +345,24 @@ pub extern "C" fn tarve_message_window_close(id: u64) -> i32 {
     }
 }
 
+/// Aero Peek at window `target` (native/src/dwm.rs): it shows in place while every other window
+/// fades to outlines, `keep` (0: none) staying visible above; `target` 0 ends the peek. 1, or -1
+/// (tarve_last_error) where Windows has no such call and off Windows.
+#[unsafe(no_mangle)]
+pub extern "C" fn tarve_dwm_peek(target: u64, keep: u64) -> i32 {
+    guard(|| {
+        #[cfg(target_os = "windows")]
+        {
+            crate::dwm::peek(target, keep).map(|()| 1)
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (target, keep);
+            Err("peekWindow is only available on Windows".into())
+        }
+    })
+}
+
 #[cfg(target_os = "windows")]
 mod process_watch {
     use std::{

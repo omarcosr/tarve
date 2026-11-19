@@ -1,5 +1,7 @@
 /** The part of Node's Buffer the Tarve core uses, over Uint8Array. */
-type Encoding = "utf8" | "utf-8" | "base64" | "hex" | "latin1" | "binary" | "ascii";
+import { decodeUtf16le as utf16le } from "../text-decoder";
+
+type Encoding = "utf8" | "utf-8" | "base64" | "hex" | "latin1" | "binary" | "ascii" | "utf16le" | "utf-16le" | "ucs2" | "ucs-2";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -9,6 +11,16 @@ function encode(value: string, encoding: Encoding = "utf8"): Uint8Array {
     case "base64": return Uint8Array.fromBase64(value.replace(/[\s=]+$/g, "").replace(/\s/g, ""), { lastChunkHandling: "loose" });
     case "hex": return Uint8Array.fromHex(value);
     case "latin1": case "binary": case "ascii": return Uint8Array.from(value, character => character.charCodeAt(0) & 0xff);
+    case "utf16le": case "utf-16le": case "ucs2": case "ucs-2": {
+      // Code units, little endian whatever the host's byte order.
+      const bytes = new Uint8Array(value.length * 2);
+      for (let index = 0; index < value.length; index++) {
+        const unit = value.charCodeAt(index);
+        bytes[index * 2] = unit & 0xff;
+        bytes[index * 2 + 1] = unit >> 8;
+      }
+      return bytes;
+    }
     default: return encoder.encode(value);
   }
 }
@@ -70,12 +82,16 @@ class BufferBytes extends Uint8Array {
         for (let index = 0; index < bytes.length; index += 0x8000) out += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
         return out;
       }
+      case "utf16le": case "utf-16le": case "ucs2": case "ucs-2": return utf16le(bytes);
       default: return decoder.decode(bytes);
     }
   }
 
   write(value: string, offset = 0, encoding: Encoding = "utf8"): number {
-    const bytes = encode(value, encoding).subarray(0, this.length - offset);
+    let room = this.length - offset;
+    // Whole UTF-16 code units only, as Node.js writes them.
+    if (encoding === "utf16le" || encoding === "utf-16le" || encoding === "ucs2" || encoding === "ucs-2") room &= ~1;
+    const bytes = encode(value, encoding).subarray(0, room);
     this.set(bytes, offset);
     return bytes.length;
   }

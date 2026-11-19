@@ -68,7 +68,9 @@ const WATCH_SYMBOLS = {
   tarve_watch_process: { args: ["u64", "buffer", "u32"], returns: "i32" },
   tarve_last_error: { args: ["buffer", "u32"], returns: "i32" },
 } as const;
-let watcher: ReturnType<typeof dlopen<typeof WATCH_SYMBOLS>>["symbols"] | undefined;
+// The library object is kept, not only its symbols: tjs:ffi unloads a collected library, and the
+// next tarve_watch_process call would jump into unmapped code (0xC0000005).
+let watcher: ReturnType<typeof dlopen<typeof WATCH_SYMBOLS>> | undefined;
 
 /** NUL-terminated UTF-16 (what the W functions take). */
 function wide(value: string): Uint8Array {
@@ -102,14 +104,14 @@ let nextPipe = 0;
 
 /** The pipe the exit code of `process` arrives on (native/src/bridge/entry_points.rs). */
 function watchName(process: number): string {
-  watcher ??= dlopen(nativePath(), WATCH_SYMBOLS).symbols;
+  const native = (watcher ??= dlopen(nativePath(), WATCH_SYMBOLS)).symbols;
   for (let size = 128; ;) {
     const out = new Uint8Array(size);
-    const length = watcher.tarve_watch_process(process, out, size) as number;
+    const length = native.tarve_watch_process(process, out, size) as number;
     if (length >= 0) return new TextDecoder().decode(out.subarray(0, length));
     if (length === -1) {
       const message = new Uint8Array(1024);
-      const written = watcher.tarve_last_error(message, message.length) as number;
+      const written = native.tarve_last_error(message, message.length) as number;
       throw new Error(`spawn: ${new TextDecoder().decode(message.subarray(0, Math.max(0, written)))}`);
     }
     size = -length;
