@@ -24,6 +24,10 @@ int32_t tarve_poll_event(uint8_t *buffer, uint32_t capacity);
 int32_t tarve_last_error(uint8_t *buffer, uint32_t capacity);
 /* Call after receiving closed. Joins the native window thread. */
 int32_t tarve_join(void);
+/* Blocking error dialog with one OK button, for an app that ended with an error and has no
+   console (UTF-8 title and message, explicit lengths). Needs no running app.
+   0 = dismissed; 1 = no dialog on this platform or none could be shown; -1 = error. */
+int32_t tarve_fatal_dialog(const uint8_t *title, uint32_t title_length, const uint8_t *message, uint32_t message_length);
 #ifdef __cplusplus
 }
 #endif

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { NativeCommand, NativeEvent, SceneDocument } from "./protocol";
-import { createApp, type AppErrorEvent } from "./app";
+import { createApp, render, type AppErrorEvent } from "./app";
 import type { NativeBridge } from "./bridge";
 import { Image, Text, Window } from "./components";
 
@@ -60,6 +60,31 @@ describe("native errors before ready", () => {
     await expect(app.ready).rejects.toThrow("no GPU adapter");
     bridge.emit({ type: "closed" });
     await app.closed;
+  });
+});
+
+describe("native errors after ready", () => {
+  test("a fatal error ends the app with that error; render() throws it", async () => {
+    const bridge = new FakeBridge();
+    const errors: AppErrorEvent[] = [];
+    const rendering = render(() => <Window><Text>hi</Text></Window>, { bridge, onError: event => errors.push(event) });
+    await Bun.sleep(0);
+    bridge.emit({ type: "error", message: "GPU device lost", fatal: true });
+    bridge.emit({ type: "closed" });
+    await expect(rendering).rejects.toThrow("GPU device lost");
+    expect(errors.map(event => [event.source, event.event, event.error.message])).toEqual([["native", "error", "GPU device lost"]]);
+  });
+
+  test("a plain error is reported and a normal close leaves no error", async () => {
+    const bridge = new FakeBridge();
+    const errors: AppErrorEvent[] = [];
+    const app = createApp(() => <Window><Text>hi</Text></Window>, { bridge, onError: event => errors.push(event) });
+    await app.ready;
+    bridge.emit({ type: "error", message: "window icon: bad png" });
+    bridge.emit({ type: "closed" });
+    await app.closed;
+    expect(app.error).toBeUndefined();
+    expect(errors.map(event => event.error.message)).toEqual(["window icon: bad png"]);
   });
 });
 

@@ -13,6 +13,8 @@ export interface RuntimeAppMetadata {
   version?: string;
   /** Path (run/dev) or data URL (built executables) of the app icon. */
   icon?: string;
+  /** Baked into a `tarve build` executable: no terminal shows its errors, so a fatal one opens a dialog. */
+  packaged?: boolean;
 }
 
 let cached: RuntimeAppMetadata | undefined;

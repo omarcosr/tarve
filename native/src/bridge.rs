@@ -336,11 +336,11 @@ struct Host {
 }
 static HOST: OnceLock<Mutex<Option<Host>>> = OnceLock::new();
 static LAST_ERROR: Mutex<String> = Mutex::new(String::new());
-pub const ABI_VERSION: u32 = 9;
+pub const ABI_VERSION: u32 = 10;
 fn host() -> &'static Mutex<Option<Host>> {
     HOST.get_or_init(|| Mutex::new(None))
 }
-fn guard(f: impl FnOnce() -> Result<i32, String>) -> i32 {
+pub(crate) fn guard(f: impl FnOnce() -> Result<i32, String>) -> i32 {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(Ok(code)) => code,
         result => {
@@ -361,7 +361,7 @@ unsafe fn read_json<T: serde::de::DeserializeOwned>(ptr: *const u8, len: u32) ->
 }
 
 /// The caller's buffer, checked for size; valid for this call only.
-unsafe fn input_bytes<'a>(ptr: *const u8, len: u32) -> Result<&'a [u8], String> {
+pub(crate) unsafe fn input_bytes<'a>(ptr: *const u8, len: u32) -> Result<&'a [u8], String> {
     if ptr.is_null() || len == 0 || len > MAX_JSON_INPUT_BYTES {
         return Err("Invalid input buffer".into());
     }
@@ -561,8 +561,8 @@ pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
         let window = move || {
             let result = catch_unwind(AssertUnwindSafe(|| runtime::run(document, out.clone(), tx)));
             match result {
-                Ok(Err(e)) => out.push(protocol::error(e)),
-                Err(_) => out.push(protocol::error("Native window thread panicked")),
+                Ok(Err(e)) => out.push(protocol::fatal_error(e)),
+                Err(_) => out.push(protocol::fatal_error("Native window thread panicked")),
                 _ => {}
             }
             out.push(serde_json::json!({"type":"closed"}));

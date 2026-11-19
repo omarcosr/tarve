@@ -181,6 +181,7 @@
     "smoke:update": "bun scripts/smoke-update.ts",
     "smoke:pack": "bun scripts/smoke-pack.ts",
     "smoke:exe:txiki": "bun scripts/smoke-exe.ts --runtime txiki",
+    "smoke:fatal-dialog": "bun scripts/smoke-fatal-dialog.ts",
     "smoke:txiki-shims": "bun scripts/smoke-txiki-shims.ts",
     "smoke:pointer-function": "bun scripts/smoke-pointer-function.ts",
     "smoke:threadsafe": "bun scripts/smoke-threadsafe.ts",

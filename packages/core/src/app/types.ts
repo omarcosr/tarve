@@ -56,6 +56,13 @@ export interface AppOptions {
    */
   onError?: (event: AppErrorEvent) => void;
   /**
+   * A `tarve build` executable whose `render()` fails (the window could not open, or a native
+   * failure ended it) writes `<config>/logs/crash-<time>.log` and shows the error in a native
+   * dialog (Windows, Linux) before `render()` throws: such an executable has no console.
+   * `false` keeps only the log. Ignored by `tarve run`/`tarve dev`, whose terminal shows the error.
+   */
+  fatalDialog?: boolean;
+  /**
    * Development mode: runtime errors render an in-window overlay and render() remounts in the same window. Defaults to TARVE_DEV=1.
    * `{ inspector: true }` also opens the visual inspector window (component tree, props, layout, picker, render counts,
    * events); `TARVE_INSPECTOR=1` (`tarve dev --inspect`) opens it too. (TARVE_INSPECT is the automation's node-tree path.)
@@ -200,6 +207,12 @@ export interface OpenWindowOptions extends Pick<AppOptions, "rememberWindow" | "
 export interface AppHandle {
   ready: Promise<void>;
   closed: Promise<void>;
+  /**
+   * The error that ended the app (the native window failed, its thread panicked or the
+   * event transport broke); undefined while it runs and after a normal close. `render()`
+   * throws it once the window is gone, so the process does not exit with code 0.
+   */
+  readonly error: Error | undefined;
   update(): void;
   /** Renders a queued `update()` now instead of at the end of the task. */
   flush(): void;

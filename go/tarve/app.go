@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -24,7 +23,7 @@ import (
 // ProtocolVersion is @tarve/protocol PROTOCOL_VERSION; NativeABIVersion is NATIVE_ABI_VERSION.
 const (
 	ProtocolVersion  = 63
-	NativeABIVersion = 9
+	NativeABIVersion = 10
 )
 
 // AppIdentity names the app in media controls, notifications and the taskbar (Windows AppUserModelID).
@@ -91,6 +90,8 @@ type App struct {
 	events  chan map[string]any
 	ended   bool
 	closing bool
+	// fatal is the error that ended the app (a native failure); Run returns it.
+	fatal error
 
 	reqMu   sync.Mutex
 	pending map[string]chan map[string]any
@@ -305,14 +306,6 @@ func (a *App) encodeDocument(t *CompiledTree) []byte {
 	return a.buf
 }
 
-func (a *App) reportError(source string, err error) {
-	if a.options.OnError != nil {
-		a.options.OnError(source, err)
-		return
-	}
-	log.Printf("[tarve] %s: %v", source, err)
-}
-
 func (a *App) pump() {
 	buf := make([]byte, 64<<10)
 	for {
@@ -320,7 +313,7 @@ func (a *App) pump() {
 		var err error
 		buf, data, err = a.bridge.wait(buf)
 		if err != nil {
-			a.events <- map[string]any{"type": "error", "message": err.Error()}
+			a.events <- map[string]any{"type": "error", "message": err.Error(), "fatal": true}
 			a.events <- map[string]any{"type": "closed"}
 			close(a.events)
 			return
@@ -367,6 +360,7 @@ func (a *App) Update() {
 }
 
 // Run delivers events, posted functions and renders until the window closes, then joins the native thread.
+// It returns the error that ended the app (a native failure), nil after a normal close.
 func (a *App) Run() error {
 	for !a.ended {
 		select {
@@ -384,7 +378,7 @@ func (a *App) Run() error {
 			a.renderQueued()
 		}
 	}
-	return a.bridge.join()
+	return errors.Join(a.fatal, a.bridge.join())
 }
 
 func (a *App) Ready() <-chan struct{}  { return a.ready }
@@ -647,8 +641,7 @@ func (a *App) dispatchNativeEvent(ev map[string]any) {
 	case "ready":
 		a.readyOnce.Do(func() { close(a.ready) })
 	case "error":
-		msg, _ := ev["message"].(string)
-		a.reportError("native", errors.New(msg))
+		a.nativeError(ev)
 	case "closed":
 		a.finishClosed()
 	case "escape":

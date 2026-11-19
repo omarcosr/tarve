@@ -141,16 +141,17 @@ export function buildMetadata(entrypoint: string, overrides: AppMetadataOverride
   const metadata = resolveAppMetadata(entrypoint, overrides);
   const images = metadata.icon ? appIconImages(metadata.icon) : undefined;
   const icon = images ? `data:image/png;base64,${Buffer.from(images.png).toString("base64")}` : undefined;
-  return { metadata, images, define: { "process.env.TARVE_APP_METADATA": JSON.stringify(runtimeMetadata(metadata, icon)) } };
+  return { metadata, images, define: { "process.env.TARVE_APP_METADATA": JSON.stringify(runtimeMetadata(metadata, icon, true)) } };
 }
 
 /** The metadata an app reads at run time (see src/app-metadata.ts), as a JSON string. */
-export function runtimeMetadata(metadata: AppMetadata, icon: string | undefined): string {
+export function runtimeMetadata(metadata: AppMetadata, icon: string | undefined, packaged = false): string {
   return JSON.stringify({
     name: metadata.name,
     ...(metadata.version ? { version: metadata.version } : {}),
     ...(metadata.appId ? { appId: metadata.appId } : {}),
     ...(icon ? { icon } : {}),
+    ...(packaged ? { packaged: true } : {}),
   });
 }
 

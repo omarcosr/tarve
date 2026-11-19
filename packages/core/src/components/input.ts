@@ -25,6 +25,11 @@ export interface InputProps extends BaseProps {
 const inputTypes = new Set<InputType>(["text", "password", "email", "number", "search", "tel", "url"]);
 const numberEditPattern = /^[+-]?(?:\.?|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d*)?)$/;
 
+/** The caller sized the field along a row: a width or a flex factor/basis. */
+function sized(style: BaseProps["style"]): boolean {
+  return style !== undefined && (style.width !== undefined || style.flex !== undefined || style.grow !== undefined || style.basis !== undefined);
+}
+
 export function Input({ type = "text", value, glass, style, ...props }: InputProps): VNode {
   const resolved = resolveGlass(glass);
   const surface = resolved ? { ...resolved, tint: undefined } : undefined;
@@ -38,7 +43,9 @@ export function Input({ type = "text", value, glass, style, ...props }: InputPro
     inputType: type,
     style: {
       height: 38,
-      minWidth: 120,
+      // The intrinsic minimum of an unsized field; a given width or flex replaces it (the native
+      // input then keeps its specified width, or shrinks to 0 with its row).
+      ...(sized(style) ? {} : { minWidth: 120 }),
       padding: { left: 12, right: 12 },
       radius: theme.radius.sm,
       borderWidth: 1,

@@ -2,6 +2,16 @@
 
 All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `@tarve/svelte` and `@tarve/mcp` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
+## Unreleased
+
+### Added
+
+- A `tarve build` executable whose `render()` fails (the window could not open, or a native failure ended it) writes `<config>/logs/crash-<time>.log` (app, version, runtime, platform, the error with its stack and causes) and shows the error and the log's path in a native dialog before `render()` throws: such an executable has no console, so the app no longer vanishes without a word. Windows: `MessageBoxW`; Linux: the desktop's dialog through rfd; macOS: the log only. `fatalDialog: false` keeps only the log; `tarve run`/`tarve dev` are unchanged. Native ABI 10: `tarve_fatal_dialog(title, length, message, length)`, which needs no running app.
+
+### Fixed
+
+- A native failure after the window opened (GPU device lost past recovery, a renderer error, a panic of the window thread, a broken event transport) no longer ends the process with code 0 as if the window had been closed: the error event carries `fatal: true`, `app.error` holds it, `render()` throws it once the window is gone (exit code 1, the error on stderr) and under `--hot` the process exits with 1. Go: `App.Run()` returns it.
+
 ## 0.13.4 — 2026-11-18
 
 ### Added

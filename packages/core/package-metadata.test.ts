@@ -89,6 +89,7 @@ test("build metadata bakes the name, id and a PNG data URL into the define", () 
   const runtime = JSON.parse(JSON.parse(define["process.env.TARVE_APP_METADATA"]!));
   expect(runtime.name).toBe("Baked");
   expect(runtime.appId).toBe("Acme.Baked");
+  expect(runtime.packaged).toBe(true);
   expect(runtime.icon).toBe(`data:image/png;base64,${Buffer.from(images!.png).toString("base64")}`);
 });
 

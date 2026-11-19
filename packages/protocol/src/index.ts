@@ -1,5 +1,5 @@
 /** Renderer-independent, versioned messages crossing the C ABI as UTF-8 JSON. */
-export const NATIVE_ABI_VERSION = 9;
+export const NATIVE_ABI_VERSION = 10;
 export const PROTOCOL_VERSION = 63;
 export * from "./values";
 import type { Length, NodeKind, Insets, Margins, CornerRadius, OutlineStyle, BorderStyle, TextShadow, Transform, BoxShadow, Gradient, UserSelect, TextDecoration, SyntaxTheme, TextHighlight } from "./values";
@@ -665,8 +665,8 @@ export type NativeEvent =
   /** An `image` node's source failed to load or decode. */
   | { type: "imageError"; id: string; src: string; message: string }
   | { type: "shortcut"; shortcut: string }
-  /** `fatal: false`: the app stays usable (window finish such as corners or border colour); `ready` does not fail. */
-  | { type: "error"; message: string; fatal?: false }
+  /** `fatal: false`: the app stays usable (window finish such as corners); `ready` does not fail. `fatal: true`: it ended the window (`closed` follows). */
+  | { type: "error"; message: string; fatal?: boolean }
   | { type: "inspect"; requestId: string; snapshot: Snapshot }
   | { type: "layout"; requestId: string; boxes: Record<string, LayoutBox> }
   | { type: "selection"; requestId: string; target: string | null; anchor: number; focus: number }

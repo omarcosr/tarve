@@ -1073,7 +1073,7 @@ impl Host {
                 return true;
             }
             if let Some(message) = app.fatal.take() {
-                app.events.push(error(message));
+                app.events.push(crate::protocol::fatal_error(message));
             }
             app.events.push(json!({"type": "closed"}));
             if let Some(window) = &app.window {

@@ -11083,6 +11083,16 @@ fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
             style.min_size.height = length(node.number("height", 0.0));
         }
     }
+    // An input's text scrolls inside it, so its value never sets its minimum width (a browser's
+    // <input> does not grow with its value): the specified width, as CSS's specified size
+    // suggestion, else 0 so a `flex` field shrinks with its row.
+    if node.kind == "input" && node.style["minWidth"].is_null() {
+        style.min_size.width = length(if node.style["width"].is_number() {
+            node.number("width", 0.0)
+        } else {
+            0.0
+        });
+    }
     if node.kind == "scroll" {
         if matches!(node.scroll_orientation.as_str(), "horizontal" | "both") {
             style.overflow.x = taffy::style::Overflow::Scroll;

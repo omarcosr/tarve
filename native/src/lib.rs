@@ -43,6 +43,8 @@ mod environment;
 #[cfg(target_os = "windows")]
 mod exe_icon;
 #[cfg(not(target_arch = "wasm32"))]
+mod fatal_dialog;
+#[cfg(not(target_arch = "wasm32"))]
 mod foreign_call;
 mod glass;
 #[cfg(target_os = "windows")]

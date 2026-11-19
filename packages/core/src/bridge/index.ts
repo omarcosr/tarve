@@ -226,7 +226,7 @@ export class BunFfiBridge implements NativeBridge {
     this.closed = true;
     this.closeEventSocket();
     const cleanupErrors = this.stopAfterEventFailure();
-    onEvent({ type: "error", message: `Native event wake pipe failed: ${error instanceof Error ? error.message : String(error)}` });
+    onEvent({ type: "error", message: `Native event wake pipe failed: ${error instanceof Error ? error.message : String(error)}`, fatal: true });
     for (const cleanupError of cleanupErrors) {
       onEvent({ type: "error", message: `Bridge cleanup failed: ${cleanupError.message}` });
     }
@@ -259,7 +259,7 @@ export class BunFfiBridge implements NativeBridge {
       if (this.closed) return;
       this.closed = true;
       const cleanupErrors = this.stopAfterEventFailure();
-      onEvent({ type: "error", message: error instanceof Error ? error.message : String(error) });
+      onEvent({ type: "error", message: error instanceof Error ? error.message : String(error), fatal: true });
       for (const cleanupError of cleanupErrors) {
         onEvent({ type: "error", message: `Bridge cleanup failed: ${cleanupError.message}` });
       }

@@ -107,6 +107,16 @@ test.skipIf(!supported)("Node dev remounts the same window and process on TSX ed
       child.kill();
       await new Promise<void>(resolve => child!.once("exit", () => resolve()));
     }
-    rmSync(directory, { recursive: true, force: true });
+    // Windows: killing the CLI leaves the app process unloading the copied native library for a
+    // moment, so the directory is briefly locked (EBUSY).
+    for (let attempt = 0; ; attempt++) {
+      try {
+        rmSync(directory, { recursive: true, force: true });
+        break;
+      } catch (error) {
+        if (attempt >= 40 || (error as NodeJS.ErrnoException).code !== "EBUSY") throw error;
+        await Bun.sleep(50);
+      }
+    }
   }
 }, 60000);
