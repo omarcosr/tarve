@@ -468,6 +468,8 @@ export type NativeCommand =
   | { type: "mutate"; mutations: TreeMutation[] }
   | { type: "update"; root: NativeNode }
   | { type: "close" }
+  /** Answers `background` once the JS heap is collected: native gives the freed pages back. */
+  | { type: "releaseMemory" }
   | { type: "cancelCloseRequest" }
   | { type: "window"; action: WindowAction }
   | { type: "windowLevel"; level: WindowLevel }
@@ -600,6 +602,8 @@ export type NativeEvent =
   /** The monitors changed (Windows: one added or removed, resolution, scale, work area). */
   | { type: "screensChange"; screens: ScreenInfo[] }
   | { type: "closeRequest" }
+  /** The window was hidden (or minimized under `lowPower`) and gave its renderer back: the app collects its JS garbage, then sends `releaseMemory`. */
+  | { type: "background" }
   | { type: "tray"; action: "click" | "doubleClick" }
   | { type: "systemMedia"; action: "play" | "pause" | "next" | "previous" | "seek"; time?: number }
   | { type: "trayMenu"; id: string }

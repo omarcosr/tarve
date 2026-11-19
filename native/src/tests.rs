@@ -209,6 +209,12 @@ fn graphics_recovery_circuit_breaker_spans_generations_and_decays_after_stabilit
 }
 
 #[test]
+fn release_memory_command_parses() {
+    let command = protocol::Command::from_json(br#"{"type":"releaseMemory"}"#).unwrap();
+    assert!(matches!(command, protocol::Command::ReleaseMemory));
+}
+
+#[test]
 fn close_request_protocol_and_coalescing_are_explicit() {
     let plain = root(vec![]);
     assert!(!plain.close_intercept);

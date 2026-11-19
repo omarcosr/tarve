@@ -6,7 +6,7 @@ import { BunFfiBridge, type NativeBridge } from "./bridge";
 import { boundControlValue, boundText, compileTree, resolveBoundStyle, type CompiledTree, type NodeBinding, invalidateMemos } from "./reconciler";
 import type { Signal } from "./signal";
 import { NodeSetsCommand } from "./app/node-sets";
-import { noteFlushedValues } from "./app/gc-pacer";
+import { collectInBackground, noteFlushedValues } from "./app/gc-pacer";
 import { resolveStyleString } from "./theme";
 import { normalizeHotkey, type HotkeyHandler } from "./hotkeys";
 import { jsx, type VNode } from "./jsx-runtime";
@@ -694,6 +694,9 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
     if (event.type === "windowState" && rememberKey) {
       windowStateStore().set(rememberKey, { x: event.x, y: event.y, width: event.width, height: event.height, maximized: event.maximized, ...(event.physical ? { physical: true } : {}) });
+    }
+    if (!ended && event.type === "background") {
+      collectInBackground(() => { sendInternal({ type: "releaseMemory" }, { source: "bridge", event: "releaseMemory" }); });
     }
     if (event.type === "pluginEvent") {
       pluginHost?.event(event.channel, Buffer.from(event.data, "base64"));

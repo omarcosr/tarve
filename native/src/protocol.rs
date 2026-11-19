@@ -936,6 +936,9 @@ pub enum Command {
     },
     Close,
     CancelCloseRequest,
+    /// The app collected its JS garbage after a `background` event: free
+    /// allocator pages go back to the OS now that the engine let go of them.
+    ReleaseMemory,
     Window {
         action: String,
     },

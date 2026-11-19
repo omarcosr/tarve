@@ -1958,13 +1958,23 @@ impl App {
         self.parked = true;
         self.release_graphics();
         self.trim_at.set(None);
+        self.release_memory();
+        self.request_background_collection();
+        self.sync_control_flow(event_loop);
+    }
+    /// Gives free allocator pages back (and, when the app opted in, the working set).
+    fn release_memory(&self) {
         crate::release_free_memory();
         if self.trim_delay().is_some() {
             crate::trim_working_set();
         }
         self.memory_dirty.set(false);
         self.last_memory_release.set(Instant::now());
-        self.sync_control_flow(event_loop);
+    }
+    /// Nothing can be seen: the JS engine's heap still holds its last peak, so the app
+    /// is asked to collect it and answer with `releaseMemory`, which frees what it let go.
+    fn request_background_collection(&mut self) {
+        self.events.push(json!({"type": "background"}));
     }
     /// Gives the GPU device, swap chain, textures and scene back.
     fn release_graphics(&mut self) {
@@ -1998,12 +2008,8 @@ impl App {
         self.iconic = true;
         self.release_graphics();
         self.trim_at.set(None);
-        crate::release_free_memory();
-        if self.trim_delay().is_some() {
-            crate::trim_working_set();
-        }
-        self.memory_dirty.set(false);
-        self.last_memory_release.set(Instant::now());
+        self.release_memory();
+        self.request_background_collection();
         self.sync_control_flow(event_loop);
     }
     fn deiconify(&mut self) {
@@ -3458,6 +3464,7 @@ impl ApplicationHandler<Command> for App {
                 self.exit_requested = true;
             }
             Command::CancelCloseRequest => self.close_request_pending = false,
+            Command::ReleaseMemory => self.release_memory(),
             Command::MenuBar { menu } => {
                 if let Err(message) = self.apply_menu_bar(menu) {
                     self.events.push(error(format!("menu bar: {message}")));
