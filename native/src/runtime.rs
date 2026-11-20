@@ -4339,9 +4339,9 @@ impl ApplicationHandler<Command> for App {
             WindowEvent::CursorMoved { position, .. } => {
                 let scale = self.window.as_ref().unwrap().scale_factor();
                 events = self.tree_pointer_move(position.x / scale, position.y / scale);
-                let dragged = events.iter().any(|event| {
-                    matches!(event["type"].as_str(), Some("valueChange" | "scroll"))
-                });
+                let dragged = events
+                    .iter()
+                    .any(|event| matches!(event["type"].as_str(), Some("valueChange" | "scroll")));
                 // A dragged scrollbar thumb or slider moves on every pointer event, hundreds a
                 // second: updating the accessibility tree (a layout pass and the whole tree for
                 // assistive technology) on each one made the drag stutter. Like app updates, it
