@@ -273,10 +273,6 @@ impl Encoding {
     }
 
     /// Encodes a brush with an optional alpha modifier.
-    #[allow(
-        single_use_lifetimes,
-        reason = "False positive: https://github.com/rust-lang/rust/issues/129255"
-    )]
     pub fn encode_brush<'b>(&mut self, brush: impl Into<BrushRef<'b>>, alpha: f32) {
         use super::math::point_to_f32;
         match brush.into() {
@@ -460,7 +456,11 @@ impl Encoding {
             })));
     }
 
-    // Encodes a blurred rounded rectangle brush.
+    /// Encodes a blurred rounded rectangle brush.
+    ///
+    /// Negative values of `std_dev` are treated as zero.
+    ///
+    /// When `invert` is `true`, the inverse (`1 - alpha`) of the blur coverage is painted.
     pub fn encode_blurred_rounded_rect(
         &mut self,
         color: impl Into<DrawColor>,
@@ -468,7 +468,17 @@ impl Encoding {
         height: f32,
         radius: f32,
         std_dev: f32,
+        invert: bool,
     ) {
+        // A standard deviation is a magnitude, so negative (and NaN) values are clamped to
+        // zero. That leaves the sign bit of the encoded `std_dev` free to carry the `invert`
+        // flag (see `DrawBlurRoundedRect::std_dev`). This also works for a standard deviation
+        // of zero, as `-0.0` has its sign bit set.
+        let std_dev = if invert {
+            -std_dev.max(0.0)
+        } else {
+            std_dev.max(0.0)
+        };
         self.draw_tags.push(DrawTag::BLUR_RECT);
         self.draw_data
             .extend_from_slice(bytemuck::cast_slice(bytemuck::bytes_of(

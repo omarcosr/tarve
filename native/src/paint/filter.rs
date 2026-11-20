@@ -215,7 +215,8 @@ pub(crate) fn rasterize_filtered(
             None,
             None,
             Some(Filter::from_primitive(FilterPrimitive::GaussianBlur {
-                std_deviation: filter.blur,
+                std_deviation_x: filter.blur,
+                std_deviation_y: filter.blur,
                 edge_mode: EdgeMode::None,
             })),
         );

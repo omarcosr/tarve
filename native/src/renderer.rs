@@ -325,6 +325,7 @@ impl GpuGraphics {
             desired_maximum_frame_latency: 2,
             alpha_mode,
             view_formats: vec![],
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
         let (target_texture, target_view) = create_targets(config.width, config.height, &device);
         let blitter = if premultiply {
@@ -479,7 +480,7 @@ impl GpuGraphics {
         self.blitter
             .copy(&self.device, &mut encoder, &self.target_view, &view);
         self.queue.submit([encoder.finish()]);
-        frame.present();
+        self.queue.present(frame);
         self.surface_failure_streak = 0;
         gpu_report::log(&self.device);
         if suboptimal {
@@ -573,7 +574,10 @@ impl GpuGraphics {
         rx.recv()
             .map_err(|error| CaptureError::Request(error.to_string()))?
             .map_err(|error| CaptureError::RecoverDevice(error.to_string()))?;
-        let mapped = buffer.slice(..).get_mapped_range();
+        let mapped = buffer
+            .slice(..)
+            .get_mapped_range()
+            .map_err(|error| CaptureError::Request(error.to_string()))?;
         let mut pixels = Vec::with_capacity((width * height * 4) as usize);
         for row in mapped.chunks(pitch as usize) {
             pixels.extend_from_slice(&row[..width as usize * 4]);

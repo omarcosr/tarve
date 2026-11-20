@@ -323,7 +323,9 @@ impl DisplayList {
                     context.push_clip_layer(&clip);
                     context.set_fill_rule(Fill::NonZero);
                     context.set_paint(*color);
-                    context.fill_blurred_rounded_rect(
+                    crate::paint::fill_box_shadow(
+                        context,
+                        area,
                         rect,
                         *radius as f32,
                         *std_dev as f32,
@@ -354,7 +356,8 @@ impl DisplayList {
                 } => {
                     context.set_transform(origin * *transform);
                     context.set_paint(*color);
-                    context
+                    // A glyph that fails to render is skipped; the rest of the run still draws.
+                    let _ = context
                         .glyph_run(resources, font)
                         .font_size(*size)
                         .normalized_coords(coords)

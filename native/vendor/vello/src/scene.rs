@@ -97,10 +97,6 @@ impl Scene {
     ///
     /// **However, the transforms are *not* saved or modified by the layer stack.**
     /// That is, the `transform` argument to this function only applies a transform to the `clip` shape.
-    #[allow(
-        single_use_lifetimes,
-        reason = "False positive: https://github.com/rust-lang/rust/issues/129255"
-    )]
     #[track_caller]
     pub fn push_layer<'a>(
         &mut self,
@@ -147,10 +143,6 @@ impl Scene {
     /// This issue only occurs if there are no intermediate opaque layers, so can be worked around
     /// by drawing something opaque (or having an opaque `base_color`), then putting a layer around your entire scene
     /// with a [`Compose::SrcOver`].
-    #[allow(
-        single_use_lifetimes,
-        reason = "False positive: https://github.com/rust-lang/rust/issues/129255"
-    )]
     pub fn push_luminance_mask_layer<'a>(
         &mut self,
         clip_style: impl Into<StyleRef<'a>>,
@@ -185,10 +177,6 @@ impl Scene {
     ///
     /// **However, the transforms are *not* saved or modified by the layer stack.**
     /// That is, the `transform` argument to this function only applies a transform to the `clip` shape.
-    #[allow(
-        single_use_lifetimes,
-        reason = "False positive: https://github.com/rust-lang/rust/issues/129255"
-    )]
     pub fn push_clip_layer<'a>(
         &mut self,
         clip_style: impl Into<StyleRef<'a>>,
@@ -266,19 +254,34 @@ impl Scene {
         let kernel_size = 2.5 * std_dev;
 
         let shape: Rect = rect.inflate(kernel_size, kernel_size);
-        self.draw_blurred_rounded_rect_in(&shape, transform, rect, brush, radius, std_dev);
+        self.draw_blurred_rounded_rect_in(&shape, transform, rect, brush, radius, std_dev, false);
     }
 
     /// Draw a rounded rectangle blurred with a gaussian filter in `shape`.
-    ///
-    /// For performance reasons, `shape` should not extend more than approximately 2.5 times
-    /// `std_dev` away from the edges of `rect` (as any such points will not be perceptably painted to,
-    /// but calculations will still be performed for them).
     ///
     /// This method effectively draws the blurred rounded rectangle clipped to the given shape.
     /// If just the blurred rounded rectangle is desired without clipping,
     /// use the simpler [`Self::draw_blurred_rounded_rect`].
     /// For many users, that method will be easier to use.
+    ///
+    /// The blurred rounded rectangle is `rect` with its corners rounded by `radius`, blurred by
+    /// a gaussian filter with a standard deviation of `std_dev`. Negative values of `std_dev`
+    /// are treated as zero.
+    ///
+    /// When `invert` is `false`, `brush` is painted with the coverage (`alpha`) of the blurred
+    /// rounded rectangle. Points which are more than approximately 2.5 times `std_dev` outside
+    /// of the edges of `rect` will not be perceptibly painted to, but calculations will still
+    /// be performed for them. So for performance reasons, `shape` should not extend further
+    /// than that.
+    ///
+    /// When `invert` is `true`, the inverse (`1 - alpha`) of that coverage is painted instead.
+    /// The coverage then falls off towards the inside of `rect`, and is effectively full at
+    /// all points of `shape` which are more than approximately 2.5 times `std_dev` outside of
+    /// the edges of `rect`. This means that the extent of the painted area is determined only
+    /// by `shape`, which can extend as far beyond `rect` as is needed.
+    /// This can be used to implement inset box shadows, by using the box as `shape`, the box
+    /// shrunk by the spread of the shadow and translated by its offset as `rect`, and the
+    /// corner radius of the box reduced by the spread as `radius`.
     pub fn draw_blurred_rounded_rect_in(
         &mut self,
         shape: &impl Shape,
@@ -287,6 +290,7 @@ impl Scene {
         brush: Color,
         radius: f64,
         std_dev: f64,
+        invert: bool,
     ) {
         let t = Transform::from_kurbo(&transform);
         self.encoding.encode_transform(t);
@@ -304,15 +308,12 @@ impl Scene {
                 rect.height() as _,
                 radius as _,
                 std_dev as _,
+                invert,
             );
         }
     }
 
     /// Fills a shape using the specified style and brush.
-    #[allow(
-        single_use_lifetimes,
-        reason = "False positive: https://github.com/rust-lang/rust/issues/129255"
-    )]
     pub fn fill<'b>(
         &mut self,
         style: Fill,
@@ -340,10 +341,6 @@ impl Scene {
     }
 
     /// Strokes a shape using the specified style and brush.
-    #[allow(
-        single_use_lifetimes,
-        reason = "False positive: https://github.com/rust-lang/rust/issues/129255"
-    )]
     pub fn stroke<'b>(
         &mut self,
         style: &Stroke,
@@ -678,6 +675,10 @@ impl<'a> DrawGlyphs<'a> {
 
         let color_collection = font.color_glyphs();
         let bitmaps = font.bitmap_strikes();
+        let is_apple_color_emoji = bitmaps.format() == Some(BitmapFormat::Sbix)
+            && font
+                .localized_strings(skrifa::string::StringId::POSTSCRIPT_NAME)
+                .any(|name| name.chars().eq("AppleColorEmoji".chars()));
         let mut final_glyph = None;
         let mut outline_count = 0;
         // We copy out of the variable font coords here because we need to call an exclusive self method
@@ -726,11 +727,10 @@ impl<'a> DrawGlyphs<'a> {
                                 continue;
                             }
                             let data: Box<[u8]> = data
-                                .chunks_exact(4)
-                                .flat_map(|bytes| {
-                                    let [b, g, r, a] = bytes.try_into().unwrap();
-                                    [r, g, b, a]
-                                })
+                                .as_chunks::<4>()
+                                .0
+                                .iter()
+                                .flat_map(|&[b, g, r, a]| [r, g, b, a])
                                 .collect();
                             ImageData {
                                 // TODO: The design of the Blob type forces the double boxing
@@ -818,28 +818,24 @@ impl<'a> DrawGlyphs<'a> {
                     let image_scale_factor = self.run.font_size / bitmap.ppem_y;
                     let font_units_to_size = self.run.font_size / upem;
 
-                    // CoreText appears to special case Apple Color Emoji, adding
-                    // a 100 font unit vertical offset. We do the same but only
-                    // when both vertical offsets are 0 to avoid incorrect
-                    // rendering if Apple ever does encode the offset directly in
-                    // the font.
-                    let bearing_y = if bitmap.bearing_y == 0.0
-                        && bitmaps.format() == Some(BitmapFormat::Sbix)
-                    {
-                        100.0
+                    // Apple applies a hardcoded shift to Apple Color Emoji, see
+                    // https://wh0.github.io/2024/12/31/emoji-metrics.html
+                    // and https://github.com/harfbuzz/harfbuzz/issues/2679#issuecomment-1345595425.
+                    let outer_offset = if is_apple_color_emoji {
+                        Vec2::new(0.0, f64::from(self.run.font_size) / 8.0)
                     } else {
-                        bitmap.bearing_y
+                        Vec2::new(
+                            f64::from(bitmap.bearing_x * font_units_to_size),
+                            -f64::from(bitmap.bearing_y * font_units_to_size),
+                        )
                     };
 
                     let transform = transform
-                        .pre_translate(Vec2 {
-                            x: (-bitmap.bearing_x * font_units_to_size).into(),
-                            y: (bearing_y * font_units_to_size).into(),
-                        })
+                        .pre_translate(outer_offset)
                         // Unclear why this isn't non-uniform
                         .pre_scale(image_scale_factor.into())
                         .pre_translate(Vec2 {
-                            x: (-bitmap.inner_bearing_x).into(),
+                            x: bitmap.inner_bearing_x.into(),
                             y: (-bitmap.inner_bearing_y).into(),
                         });
                     let mut transform = match bitmap.placement_origin {

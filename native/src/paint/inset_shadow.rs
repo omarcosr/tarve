@@ -27,7 +27,15 @@ pub(super) fn draw(
         transform,
         &band,
     );
-    scene.draw_blurred_rounded_rect_in(&area, transform, rect, Color::BLACK, radius, std_dev);
+    scene.draw_blurred_rounded_rect_in(
+        &area,
+        transform,
+        rect,
+        Color::BLACK,
+        radius,
+        std_dev,
+        false,
+    );
     scene.pop_layer();
     scene.pop_layer();
 }

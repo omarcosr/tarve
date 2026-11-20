@@ -11,9 +11,9 @@
 
 [package]
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 name = "vello"
-version = "0.10.0"
+version = "0.12.0"
 build = false
 autolib = false
 autobins = false
@@ -81,7 +81,7 @@ default-features = true
 version = "0.18.1"
 
 [dependencies.skrifa]
-version = "0.44.0"
+version = "0.49.0"
 features = [
     "autohint_shaping",
     "std",
@@ -96,14 +96,14 @@ version = "2.0.18"
 default-features = false
 
 [dependencies.vello_encoding]
-version = "0.10.0"
+version = "0.12.0"
 
 [dependencies.vello_shaders]
-version = "0.10.0"
+version = "0.12.0"
 optional = true
 
 [dependencies.wgpu]
-version = "29.0.3"
+version = "30.0.0"
 features = [
     "std",
     "wgsl",
@@ -112,7 +112,7 @@ optional = true
 default-features = false
 
 [dependencies.wgpu-profiler]
-version = "0.27.0"
+version = "0.28.0"
 optional = true
 
 [lints.clippy]
@@ -131,7 +131,7 @@ mismatching_type_param_order = "warn"
 missing_assert_message = "warn"
 missing_fields_in_debug = "warn"
 negative_feature_names = "warn"
-redundant_feature_names = "warn"
+redundant_feature_names = "allow"
 same_functions_in_if_condition = "warn"
 semicolon_if_nothing_returned = "warn"
 should_panic_without_expect = "warn"
@@ -156,3 +156,12 @@ unused_import_braces = "warn"
 unused_lifetimes = "warn"
 unused_macro_rules = "warn"
 unused_qualifications = "warn"
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+priority = 0
+check-cfg = [
+    "cfg(disable_dispatch_sse4_2)",
+    "cfg(disable_dispatch_avx2)",
+    "cfg(disable_dispatch_avx512)",
+]

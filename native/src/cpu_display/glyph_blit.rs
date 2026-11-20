@@ -107,7 +107,8 @@ impl GlyphMasks {
         let mut context = RenderContext::new_with(width, height, settings);
         context.set_transform(Affine::translate(origin) * Affine::scale(scale));
         context.set_paint(Color::WHITE);
-        context
+        // A glyph that fails to render is skipped; the rest of the run still draws.
+        let _ = context
             .glyph_run(&mut self.resources, font)
             .font_size(size)
             .normalized_coords(coords)

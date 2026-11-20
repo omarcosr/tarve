@@ -28,11 +28,11 @@ fxhash = ["dep:rustc-hash"]
 qjs-prototype = ["dep:rquickjs"]
 
 [dependencies]
-vello = { version = "=0.10.0", default-features = false }
-vello_cpu = { version = "=0.2.0", default-features = false, features = ["std", "text", "u8_pipeline"] }
+vello = { version = "=0.12.0", default-features = false }
+vello_cpu = { version = "=0.4.0", default-features = false, features = ["std", "text", "u8_pipeline"] }
 # vello_cpu's filter layers (CSS `filter: blur()` / `drop-shadow()`) take its `Filter`.
-vello_common = { version = "=0.2.0", default-features = false, features = ["std"] }
-parley = "=0.11.1"
+vello_common = { version = "=0.4.0", default-features = false, features = ["std"] }
+parley = "=0.13.0"
 comrak = { version = "=0.55.0", default-features = false, optional = true }
 diffy = "=0.5.2"
 taffy = { version = "=0.14.0", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout", "content_size", "parse"] }
@@ -69,7 +69,7 @@ ureq = { version = "3", default-features = false, features = ["rustls"], optiona
 [target.'cfg(not(any(target_arch = "wasm32", target_os = "android")))'.dependencies]
 arboard = { version = "3.6", default-features = false, features = ["image-data"] }
 # The CPU renderer rasterizes a frame's strips on helper threads (`cpu_render_settings`).
-vello_cpu = { version = "=0.2.0", default-features = false, features = ["multithreading"] }
+vello_cpu = { version = "=0.4.0", default-features = false, features = ["multithreading"] }
 # CPU glass shades its surfaces on rayon's kept threads (already in the tree through vello_cpu).
 rayon = "=1.12.0"
 
@@ -94,7 +94,7 @@ accesskit_winit = { version = "=0.34.0", default-features = false, features = ["
 accesskit_android = { version = "=0.8.0", features = ["embedded-dex"] }
 # The CPU renderer rasterizes on every core: a phone's single core cannot fill a 1080 px wide
 # frame per vsync, and phones draw on the CPU when an app asks for `lowPower` or `renderer: "cpu"`.
-vello_cpu = { version = "=0.2.0", default-features = false, features = ["multithreading"] }
+vello_cpu = { version = "=0.4.0", default-features = false, features = ["multithreading"] }
 rayon = "=1.12.0"
 
 # Browser build (bun run build:web): no windowing, clipboard or C regex engine.
@@ -154,7 +154,7 @@ android-activity = { path = "vendor/android-activity" }
 # the process (src/inject.rs), and an event raised after accessibility turned off is dropped
 # (src/event.rs) instead of throwing.
 accesskit_android = { path = "vendor/accesskit_android" }
-# vello and vello_encoding 0.10 with the bump-allocated buffers sized from use instead of
+# vello and vello_encoding 0.12 with the bump-allocated buffers sized from use instead of
 # upstream's fixed ~165 MB: each frame reads back what its coarse stages needed and grows them
 # (running those stages again) before fine rasterization (vendor/vello/src/bump.rs).
 vello = { path = "vendor/vello" }

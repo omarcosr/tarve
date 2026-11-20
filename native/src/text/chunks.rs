@@ -54,9 +54,7 @@ impl TextChunk {
         if self.broken == Some(key) {
             return;
         }
-        self.layout.break_all_lines(key.map(f32::from_bits));
-        self.layout
-            .align(align, parley::AlignmentOptions::default());
+        super::break_aligned(&mut self.layout, key.map(f32::from_bits), align);
         self.broken = Some(key);
     }
     fn size(&mut self, key: WidthKey, align: parley::Alignment) -> (f32, f32) {

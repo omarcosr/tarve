@@ -211,12 +211,29 @@ impl PaintGradient {
 
 use vello_cpu::{
     Image as CpuImage, ImageSource as CpuImageSource, Pixmap, RenderContext, Resources,
-    color::PremulRgba8,
 };
 
 /// A CPU render context that rasterizes on the calling thread. Filter layers need one (the
 /// threaded dispatcher of vello_cpu does not implement them), and a small offscreen pass gains
 /// nothing from a pool of its own threads; only the window's frame rasterizes on several.
+/// Fills the blurred rounded `rect` over `area`, the region its clip already bounds. An inset
+/// shadow (`invert`) covers `area` minus the blur, so it fills `area` itself; an outer one only
+/// reaches about 3σ past `rect`, which vello_cpu inflates the fill to.
+pub(crate) fn fill_box_shadow(
+    context: &mut RenderContext,
+    area: &vello::kurbo::Rect,
+    rect: &vello::kurbo::Rect,
+    radius: f32,
+    std_dev: f32,
+    invert: bool,
+) {
+    if invert {
+        context.fill_blurred_rounded_rect_in(&area.to_path(0.1), rect, radius, std_dev, true);
+    } else {
+        context.fill_blurred_rounded_rect(rect, radius, std_dev);
+    }
+}
+
 pub(crate) fn single_threaded_context(width: u16, height: u16) -> RenderContext {
     let settings = vello_cpu::RenderSettings {
         num_threads: 0,
@@ -668,7 +685,9 @@ impl PaintTarget for Scene {
         invert: bool,
     ) {
         if !invert {
-            self.draw_blurred_rounded_rect_in(&area, transform, rect, color, radius, std_dev);
+            self.draw_blurred_rounded_rect_in(
+                &area, transform, rect, color, radius, std_dev, false,
+            );
             return;
         }
         inset_shadow::draw(self, transform, area, rect, color, radius, std_dev);
@@ -802,7 +821,8 @@ impl<'a> CpuPaintTarget<'a> {
         if source.len() != usize::from(width) * usize::from(height) * 4 {
             return None;
         }
-        let mut pixels = Vec::with_capacity(usize::from(width) * usize::from(height));
+        let mut pixels = Vec::with_capacity(source.len());
+        let mut opaque = true;
         for pixel in source.as_chunks::<4>().0 {
             let (r, g, b, a) = match image.format {
                 ImageFormat::Rgba8 => (pixel[0], pixel[1], pixel[2], pixel[3]),
@@ -817,9 +837,14 @@ impl<'a> CpuPaintTarget<'a> {
                 }
                 vello::peniko::ImageAlphaType::AlphaPremultiplied => (r, g, b),
             };
-            pixels.push(PremulRgba8::from_u8_array([r, g, b, a]));
+            opaque &= a == u8::MAX;
+            pixels.extend_from_slice(&[r, g, b, a]);
         }
-        Some(Pixmap::from_parts(pixels, width, height))
+        let metadata = vello_common::pixmap::PixelMetadata::new(
+            vello::peniko::ImageAlphaType::AlphaPremultiplied,
+            !opaque,
+        );
+        Some(Pixmap::from_parts(pixels, width, height, metadata))
     }
 
     pub(crate) fn finish(self) {
@@ -888,8 +913,14 @@ impl PaintTarget for CpuPaintTarget<'_> {
         self.context.set_transform(transform);
         self.context.push_clip_layer(&area.to_path(0.1));
         self.context.set_paint(color);
-        self.context
-            .fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, invert);
+        fill_box_shadow(
+            self.context,
+            &area,
+            &rect,
+            radius as f32,
+            std_dev as f32,
+            invert,
+        );
         self.context.pop_layer();
     }
 
@@ -972,7 +1003,9 @@ impl PaintTarget for CpuPaintTarget<'_> {
     ) {
         self.context.set_transform(transform);
         self.context.set_paint(color);
-        self.context
+        // A glyph that fails to render is skipped; the rest of the run still draws.
+        let _ = self
+            .context
             .glyph_run(self.resources, font)
             .font_size(font_size)
             .normalized_coords(normalized_coords)

@@ -195,7 +195,7 @@ pub(crate) fn shifted_line_extents(layout: &Layout<TextBrush>) -> Option<Vec<(f3
                     continue;
                 }
                 any = true;
-                let run = glyph_run.run().metrics();
+                let run = glyph_run.run().font_metrics();
                 let half = (line_box - (run.ascent + run.descent)) / 2.0;
                 top = top.max(run.ascent + half + shift - above);
                 bottom = bottom.max(run.descent + half - shift - below);
@@ -1078,6 +1078,26 @@ fn alignment_for_node(node: &Node) -> parley::Alignment {
     }
 }
 
+/// Breaks `layout` at `width` with `align`: parley aligns lines while it breaks them.
+pub(super) fn break_aligned<B: parley::Brush>(
+    layout: &mut parley::Layout<B>,
+    width: Option<f32>,
+    align: parley::Alignment,
+) {
+    layout.set_alignment(align, parley::AlignmentOptions::default());
+    layout.break_all_lines(width);
+}
+
+/// Applies `align` to an already broken `layout`, breaking it again at the width it was last
+/// broken at only when its lines carry another alignment.
+fn realign<B: parley::Brush>(layout: &mut parley::Layout<B>, align: parley::Alignment) {
+    if layout.alignment() == Some(align) {
+        return;
+    }
+    let width = layout.alignment().map(|_| layout.layout_max_advance());
+    break_aligned(layout, width, align);
+}
+
 fn default_syntax_color(kind: HighlightKind) -> &'static str {
     match kind {
         HighlightKind::Comment => "#6e7781",
@@ -1247,10 +1267,15 @@ fn draw_layout_with<P: PaintTarget>(
                         .map(crate::tree::color)
                         .unwrap_or(fallback)
                 };
+                let coords: Vec<i16> = run
+                    .normalized_coords()
+                    .iter()
+                    .map(|coord| coord.to_bits())
+                    .collect();
                 target.draw_glyphs(
                     run.font(),
                     run.font_size(),
-                    run.normalized_coords(),
+                    &coords,
                     Affine::scale(scale) * Affine::translate(origin),
                     color,
                     &glyphs,
@@ -1556,13 +1581,13 @@ impl TextEngine {
         // only measures — the a11y pass, the hit test, a snapshot — must see the
         // same line structure, or the gutter numbers a different set of lines
         // than the text does.
-        if !preshaped_broken && !ready {
-            Arc::make_mut(&mut layout).break_all_lines(None);
-        }
         // Aligned now, at its own width: `draw` keeps it as it is when it fits (`prealigned`).
         let align = alignment_for_node(node);
+        if !preshaped_broken && !ready {
+            break_aligned(Arc::make_mut(&mut layout), None, align);
+        }
         if !ready {
-            Arc::make_mut(&mut layout).align(align, parley::AlignmentOptions::default());
+            realign(Arc::make_mut(&mut layout), align);
         }
         if shareable && content.len() <= RECENT_SHAPE_BYTES && !self.recent.contains(&share_key) {
             self.recent.put(share_key, layout.clone());
@@ -2373,9 +2398,9 @@ impl TextEngine {
                 && node.kind != "input"
                 && wrap.is_none_or(|width| width >= layout.width());
             if !fits {
-                layout.break_all_lines(wrap);
+                break_aligned(layout, wrap, align);
             }
-            layout.align(align, parley::AlignmentOptions::default());
+            realign(layout, align);
             if !truncated {
                 if !fits && wrap.is_some() {
                     self.unwrapped.remove(&node.id);
@@ -2653,11 +2678,7 @@ impl TextEngine {
         let RichContent::Text { blocks, .. } = rich.as_ref() else {
             return;
         };
-        layout.break_all_lines(Some(width.max(0.0)));
-        layout.align(
-            alignment_for_node(node),
-            parley::AlignmentOptions::default(),
-        );
+        break_aligned(layout, Some(width.max(0.0)), alignment_for_node(node));
         draw_markdown_blocks(target, layout, blocks, node, origin, width, scale);
     }
 
@@ -3063,8 +3084,7 @@ impl TextEngine {
         self.unwrapped.remove(id);
         self.prealigned.remove(id);
         let layout = self.layouts.get_mut(id).map(Arc::make_mut)?;
-        layout.break_all_lines(width.map(|width| width.max(0.0)));
-        layout.align(align, parley::AlignmentOptions::default());
+        break_aligned(layout, width.map(|width| width.max(0.0)), align);
         let mut rect =
             Cursor::from_byte_index(layout, index, Affinity::Downstream).geometry(layout, 1.0);
         let dy = shifted_y(layout, rect.y0) - rect.y0;
@@ -3143,8 +3163,7 @@ impl TextEngine {
         let Some(layout) = self.layouts.get_mut(id).map(Arc::make_mut) else {
             return vec![];
         };
-        layout.break_all_lines(width.map(|width| width.max(0.0)));
-        layout.align(align, parley::AlignmentOptions::default());
+        break_aligned(layout, width.map(|width| width.max(0.0)), align);
         let anchor = Cursor::from_byte_index(layout, start, Affinity::Downstream);
         let focus = Cursor::from_byte_index(layout, end, Affinity::Upstream);
         Selection::new(anchor, focus)
@@ -3186,8 +3205,7 @@ impl TextEngine {
         self.unwrapped.remove(id);
         self.prealigned.remove(id);
         let layout = self.layouts.get_mut(id).map(Arc::make_mut)?;
-        layout.break_all_lines(width.map(|width| width.max(0.0)));
-        layout.align(align, parley::AlignmentOptions::default());
+        break_aligned(layout, width.map(|width| width.max(0.0)), align);
         Some(Cursor::from_point(layout, x, y).index())
     }
 
@@ -3242,8 +3260,7 @@ impl TextEngine {
         let Some(layout) = self.layouts.get_mut(id).map(Arc::make_mut) else {
             return vec![];
         };
-        layout.break_all_lines(width.map(|width| width.max(0.0)));
-        layout.align(align, parley::AlignmentOptions::default());
+        break_aligned(layout, width.map(|width| width.max(0.0)), align);
         layout_accessibility_lines(layout, value)
     }
 

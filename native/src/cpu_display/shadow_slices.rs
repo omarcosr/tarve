@@ -161,7 +161,9 @@ impl ShadowCache {
             self.context.set_transform(Affine::IDENTITY);
             self.context.push_clip_layer(&proto_area.to_path(0.1));
             self.context.set_paint(color);
-            self.context.fill_blurred_rounded_rect(
+            crate::paint::fill_box_shadow(
+                &mut self.context,
+                &proto_area,
                 &proto_rect,
                 radius as f32,
                 std_dev as f32,
@@ -242,7 +244,14 @@ mod tests {
         context.set_transform(transform);
         context.push_clip_layer(&area.to_path(0.1));
         context.set_paint(color);
-        context.fill_blurred_rounded_rect(&rect, radius as f32, std_dev as f32, invert);
+        crate::paint::fill_box_shadow(
+            &mut context,
+            &area,
+            &rect,
+            radius as f32,
+            std_dev as f32,
+            invert,
+        );
         context.pop_layer();
         context.flush();
         let mut pixmap = Pixmap::new(size.0, size.1);

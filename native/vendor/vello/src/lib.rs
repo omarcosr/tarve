@@ -1,8 +1,10 @@
 // Copyright 2022 the Vello Authors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! Vello is a 2d graphics rendering engine written in Rust, using [`wgpu`].
-//! It efficiently draws large 2d scenes with interactive or near-interactive performance.
+//! Vello is a compute-centric 2D graphics rendering engine written in Rust,
+//! using [`wgpu`].
+//! It efficiently draws large 2D scenes with interactive or near-interactive
+//! performance.
 //!
 //! ![image](https://github.com/linebender/vello/assets/8573618/cc2b742e-2135-4b70-8051-c49aeddb5d19)
 //!
@@ -76,7 +78,7 @@
 //! // wgpu::util::TextureBlitter.
 //! ```
 //!
-//! See the [`examples/`](https://github.com/linebender/vello/tree/main/examples) folder to see how that code integrates with frameworks like winit.
+//! See the [`research/examples/`](https://github.com/linebender/vello/tree/main/research/examples) folder to see how that code integrates with frameworks like winit.
 
 // LINEBENDER LINT SET - lib.rs - v2
 // See https://linebender.org/wiki/canonical-lints/
@@ -131,8 +133,8 @@ pub mod low_level {
     };
     pub use crate::render::Render;
     pub use crate::shaders::FullShaders;
-    /// Temporary export, used in `with_winit` for stats
-    pub use vello_encoding::BumpAllocators;
+
+    pub use vello_encoding;
 }
 /// Styling and composition primitives.
 pub use peniko;
@@ -149,13 +151,13 @@ pub use vello_encoding::{FontEmbolden, Glyph, NormalizedCoord};
 
 use low_level::ShaderId;
 #[cfg(feature = "wgpu")]
-use low_level::{BumpAllocators, FullShaders, Recording, Render};
+use low_level::{FullShaders, Recording, Render};
 use thiserror::Error;
 
 #[cfg(feature = "wgpu")]
 use debug::DebugLayers;
 #[cfg(feature = "wgpu")]
-use vello_encoding::Resolver;
+use vello_encoding::{BumpAllocators, Resolver};
 #[cfg(feature = "wgpu")]
 use wgpu_engine::{ExternalResource, WgpuEngine};
 
@@ -634,12 +636,17 @@ impl Renderer {
             if state == 0 {
                 break;
             }
-            let bump = (state == 1).then(|| {
-                let bump: BumpAllocators =
-                    bytemuck::pod_read_unaligned(&buffer.slice(..).get_mapped_range());
-                buffer.unmap();
-                bump
-            });
+            let bump = (state == 1)
+                .then(|| {
+                    let bump: Option<BumpAllocators> = buffer
+                        .slice(..)
+                        .get_mapped_range()
+                        .ok()
+                        .map(|view| bytemuck::pod_read_unaligned(&view));
+                    buffer.unmap();
+                    bump
+                })
+                .flatten();
             self.bump_pending.pop_front();
             match bump.map(|bump| self.bump.check(&bump)) {
                 Some(bump::Verdict::Grown) => {
@@ -673,9 +680,12 @@ impl Renderer {
             return Ok(None);
         };
         mapped?;
-        let bump = bytemuck::pod_read_unaligned(&slice.get_mapped_range());
+        let bump = slice
+            .get_mapped_range()
+            .ok()
+            .map(|view| bytemuck::pod_read_unaligned(&view));
         buffer.unmap();
-        Ok(Some(bump))
+        Ok(bump)
     }
 
     /// Overwrite `image` with `texture`.
@@ -920,7 +930,7 @@ impl Renderer {
             let (sender, receiver) = futures_intrusive::channel::shared::oneshot_channel();
             buf_slice.map_async(wgpu::MapMode::Read, move |v| sender.send(v).unwrap());
             receiver.receive().await.expect("channel was closed")?;
-            let mapped = buf_slice.get_mapped_range();
+            let mapped = buf_slice.get_mapped_range().unwrap();
             bump = Some(bytemuck::pod_read_unaligned(&mapped));
         }
         // TODO: apply logic to determine whether we need to rerun coarse, and also
