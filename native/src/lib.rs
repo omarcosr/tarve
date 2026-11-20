@@ -136,6 +136,29 @@ pub(crate) mod counting_alloc {
 #[global_allocator]
 static GLOBAL: alloc_trace::Traced = alloc_trace::Traced;
 
+/// Windows commits memory up front (no overcommit): by default mimalloc commits each page of
+/// an arena as it hands it out, so a small app held ~19 MB committed it never touched
+/// (scripts/bench-blitz.ts, counter scene: 45.6 → 26.5 MB private with this). On-demand
+/// commit leaves the working set and the frame times as they were. Runs as the library
+/// loads, before its first allocation; MIMALLOC_PAGE_COMMIT_ON_DEMAND still overrides it.
+#[cfg(all(feature = "mimalloc", target_os = "windows"))]
+mod allocator_options {
+    unsafe extern "C" {
+        fn mi_option_set(option: i32, value: std::ffi::c_long);
+    }
+    /// `mi_option_page_commit_on_demand` in mimalloc v3's `mi_option_e`.
+    const PAGE_COMMIT_ON_DEMAND: i32 = 40;
+
+    extern "C" fn configure() {
+        if std::env::var_os("MIMALLOC_PAGE_COMMIT_ON_DEMAND").is_none() {
+            unsafe { mi_option_set(PAGE_COMMIT_ON_DEMAND, 1) };
+        }
+    }
+    #[used]
+    #[unsafe(link_section = ".CRT$XCU")]
+    static CONFIGURE: extern "C" fn() = configure;
+}
+
 /// TARVE_ALLOC_TRACE=<KB>: every allocation of at least that size goes to stderr with the
 /// stack that made it (debug info and _NT_SYMBOL_PATH pointing at the PDBs), and the live
 /// bytes of the native heap with it. Off, it costs one relaxed load per allocation.
