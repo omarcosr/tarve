@@ -16,7 +16,7 @@
   "native/src/renderer.rs": 2147,
   "native/src/rich.rs": 1437,
   "native/src/runtime.rs": 4630,
-  "native/src/surface_gl.rs": 1162,
+  "native/src/surface_gl.rs": 1164,
   "native/src/surface.rs": 1187,
   "native/src/svg.rs": 633,
   "native/src/syntax.rs": 668,
