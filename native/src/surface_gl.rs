@@ -463,6 +463,8 @@ impl Interop {
                         usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
                         view_formats: &[],
                     },
+                    // Created with `ImageLayout::UNDEFINED` above; GL fills it before wgpu reads it.
+                    wgpu::TextureUses::UNINITIALIZED,
                 );
             Ok((
                 SharedImage {
