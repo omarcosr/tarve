@@ -2,6 +2,19 @@
 
 All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `@tarve/svelte` and `@tarve/mcp` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
+## 0.13.6 — 2026-11-20
+
+### Changed
+
+- Rendering moves to vello 0.12, vello_cpu/vello_common 0.4 and parley 0.13; the vendored vello and vello_encoding keep their buffers sized from use.
+- Windows: mimalloc commits its pages on demand, so a small app holds about 19 MB less committed memory (`MIMALLOC_PAGE_COMMIT_ON_DEMAND` still overrides it).
+- A window hidden (or minimized under `lowPower`) collects the app's JS garbage and then gives the freed native memory back to the OS: protocol event `background` and command `releaseMemory`.
+
+### Fixed
+
+- Unscaled, axis-aligned images snap to whole device pixels on the CPU and D3D11 renderers, so icons are no longer soft or off by a pixel at fractional display scales.
+- Dragging a scrollbar thumb or slider no longer stutters: accessibility tree updates during the drag are throttled to the usual interval.
+
 ## 0.13.5 — 2026-11-19
 
 ### Added
