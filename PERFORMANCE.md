@@ -4,6 +4,29 @@ Run `bun run build` followed by `bun run bench`. The benchmark uses the host Rus
 
 **Project rule:** no change may make performance worse (runtime, startup, first launch, CPU, GPU or memory). Binary size never justifies a regression: a size optimization ships only with zero measured cost, benchmarked before and after. See `AGENTS.md`.
 
+## Cross-framework benchmark (`bench/frameworks`)
+
+The same app in Tarve, Electron, Tauri, Flutter, Dioxus Native and egui, measured from outside the process (`bench/frameworks/README.md`: method, the eight metrics, every run). The goal is Tarve 1st on all eight. Progress log, newest first; each row is one change, measured before and after on the same machine (Core Ultra 7 255HX, RTX 5070 Laptop, Windows 11, 125%, 240 Hz).
+
+### 2026-11-21: update of 2,000 rows (metric 8), 5th → 1st
+
+The benchmark's "Update" click changes the label of every row of a 2,000-row list (6,000 nodes). Click-to-pixel median, Tarve · Bun: **66.1 → 25.5 ms** (Electron 26.9, Tauri 28.4, egui 34.3); Tarve · txiki: 270.9 → ~114 ms.
+
+| Change | Where | Measured effect |
+| --- | --- | --- |
+| Items whose texts alone changed are patched, not compiled again (`memo.ts` `sameVNodeExceptText`, `reconciler.ts` `patchTexts`, `markTextSlot` on `Text`) | JS | Headless (`bench/render`, every row's label changes): compile on txiki 227 → 74 ms, on Bun 9.4 → 2.4 ms. In the app: render 13.5 → 7.8 ms (Bun), 208 → 84 ms (txiki). |
+| Automatic memo skips items whose own type is not pure (`pureRoot`): they never hit and only paid for the cache | JS | Part of the row above. |
+| Texts patched in place go to native as packed `setNodes` text sets instead of a patch of whole nodes (`shadow.ts` `splitTextSets`) | JS → native | Native apply 5.3 → 1.3 ms. |
+| A fixed-height box stretched across a column whose width nothing inside sets is a layout boundary (`tree.rs` `stretched_across_fixed_width`) | native | `layout_bench`: layout 25.0 → 15.0 ms (no full-tree flexbox over 2,000 rows). |
+| Text changes inside offscreen layout boundaries lay out after the frame is presented (`tree.rs` `defer_offscreen_texts`, `finish_deferred_layout`; `runtime.rs` `redraw_frame`) | native | `layout_bench`: layout before the frame 15.0 → 2.5 ms; the other ~14.7 ms run right after present, before any event is read. Total CPU is unchanged; the visible rows reach the screen first. |
+| A mouse press or release tells assistive technology after the next frame instead of before handling the release (`runtime.rs` `accessibility_after_frame`) | native | With an accessibility client active (as on this machine), the whole-tree accessibility update on press (~12 ms) no longer delays the click; click-to-pixel 38–40 → 25–29 ms. Without a client it costs nothing either way. |
+
+Tests: `auto-memo.test.tsx` (patched renders equal fresh compiles, render after render), `app/shadow.test.tsx` (`splitTextSets`), `native/src/tests/deferred_layout.rs` (a deferred layout ends exactly where a whole layout does; a later `compute` finishes it first). Verified live: the bench window after clicks and a 60-step scroll shows the new labels in rows that were offscreen when they changed.
+
+Tools added for the next steps: `bench/render` (JS cost of one update on Bun, Node and txiki without a window; `DUMP=<dir>` writes the document and patch) and `native/src/tests/layout_bench.rs` (native patch/layout/paint of that patch; `TARVE_LAYOUT_PROFILE=1` samples it with `crate::profiler`).
+
+Still behind: disk size (metric 1, lowest priority: egui 3.5 MB, Tauri 4.1 MB, Tarve · txiki 11.5 MB) and idle RAM with 2,000 rows (metric 5: egui 70.9 MB, Tarve · txiki `lowPower` 89.3 MB).
+
 ## Current measurement
 
 Windows x64, Bun 1.4.1, AMD Ryzen 7 9800X3D. The workload contains 2,000 rows / 6,005 native nodes; 67 nodes are visible. Each row contains text and an interactive button. The benchmark discards five warm-up samples and collects 60 samples for each operation.
