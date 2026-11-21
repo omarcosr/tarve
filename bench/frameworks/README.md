@@ -84,6 +84,154 @@ On the empty screen the update takes 4–12 ms in every framework: that is the v
 | native `layout` (taffy + text) | 20.5 ms | 20.1 ms |
 | native `paint` | 1.7 ms | 1.7 ms |
 
+## Ranking por métrica (mediana de 5 execuções, menor é melhor)
+
+Uma tabela por métrica, com todos os apps ordenados do melhor para o pior. Δ é a diferença em relação ao primeiro colocado.
+
+### 1. Disco (o que é distribuído)
+
+O Tauri não inclui o WebView2 do sistema.
+
+| # | App | MB | Δ vs 1º | Zip MB |
+| ---: | --- | ---: | ---: | ---: |
+| 1 | egui | 3.5 | — | 1.8 |
+| 2 | tauri | 4.1 | 1.2× | 1.6 |
+| 3 | **tarve-txiki** | 11.5 | 3.3× | 8.6 |
+| 4 | **tarve-txiki-lowpower** | 11.5 | 3.3× | 8.6 |
+| 5 | dioxus-native | 14.9 | 4.3× | 6.4 |
+| 6 | flutter | 24.8 | 7.1× | 10.4 |
+| 7 | **tarve-node** | 114.8 | 32.8× | 43.4 |
+| 8 | **tarve-node-lowpower** | 114.8 | 32.8× | 43.4 |
+| 9 | **tarve-bun** | 150.7 | 43.1× | 75.9 |
+| 10 | **tarve-bun-lowpower** | 150.7 | 43.1× | 75.9 |
+| 11 | electron | 357.1 | 102.0× | 150.9 |
+
+### 2. 1º frame, tela vazia
+
+Do CreateProcess até o marcador aparecer na tela.
+
+| # | App | ms | Δ vs 1º | 1ª janela ms |
+| ---: | --- | ---: | ---: | ---: |
+| 1 | **tarve-txiki-lowpower** | 124 | — | 47 |
+| 2 | **tarve-txiki** | 126 | 1.0× | 52 |
+| 3 | **tarve-bun-lowpower** | 131 | 1.1× | 54 |
+| 4 | **tarve-bun** | 139 | 1.1× | 57 |
+| 5 | egui | 277 | 2.2× | 166 |
+| 6 | electron | 378 | 3.0× | 120 |
+| 7 | **tarve-node-lowpower** | 427 | 3.4× | 356 |
+| 8 | tauri | 440 | 3.5× | 37 |
+| 9 | **tarve-node** | 441 | 3.6× | 356 |
+| 10 | flutter | 547 | 4.4× | 471 |
+| 11 | dioxus-native | 966 | 7.8× | 238 |
+
+### 3. 1º frame, 2.000 linhas
+
+Do CreateProcess até o marcador aparecer na tela.
+
+| # | App | ms | Δ vs 1º | 1ª janela ms |
+| ---: | --- | ---: | ---: | ---: |
+| 1 | **tarve-bun-lowpower** | 212 | — | 132 |
+| 2 | **tarve-bun** | 239 | 1.1× | 160 |
+| 3 | egui | 298 | 1.4× | 175 |
+| 4 | electron | 367 | 1.7× | 113 |
+| 5 | tauri | 460 | 2.2× | 36 |
+| 6 | **tarve-txiki-lowpower** | 486 | 2.3× | 406 |
+| 7 | **tarve-node-lowpower** | 509 | 2.4× | 435 |
+| 8 | **tarve-txiki** | 524 | 2.5× | 448 |
+| 9 | **tarve-node** | 583 | 2.8× | 502 |
+| 10 | flutter | 743 | 3.5× | 668 |
+| 11 | dioxus-native | 957 | 4.5× | 232 |
+
+### 4. RAM ociosa, tela vazia (private working set)
+
+Soma de toda a árvore de processos.
+
+| # | App | MB | Δ vs 1º | Commit MB |
+| ---: | --- | ---: | ---: | ---: |
+| 1 | **tarve-txiki-lowpower** | 18.5 | — | 68.8 |
+| 2 | **tarve-txiki** | 24.4 | 1.3× | 129 |
+| 3 | **tarve-bun-lowpower** | 25.2 | 1.4× | 128.8 |
+| 4 | **tarve-bun** | 32.5 | 1.8× | 319.5 |
+| 5 | egui | 33.6 | 1.8× | 68.4 |
+| 6 | flutter | 50.8 | 2.7× | 163.9 |
+| 7 | **tarve-node-lowpower** | 59.7 | 3.2× | 73.4 |
+| 8 | **tarve-node** | 65.9 | 3.6× | 133.9 |
+| 9 | electron | 72.7 | 3.9× | 147.2 |
+| 10 | tauri | 75.6 | 4.1× | 154.3 |
+| 11 | dioxus-native | 135.7 | 7.3× | 464.7 |
+
+### 5. RAM ociosa, 2.000 linhas (private working set)
+
+Soma de toda a árvore de processos.
+
+| # | App | MB | Δ vs 1º | Commit MB |
+| ---: | --- | ---: | ---: | ---: |
+| 1 | egui | 65.9 | — | 100.7 |
+| 2 | **tarve-txiki-lowpower** | 87.9 | 1.3× | 146 |
+| 3 | **tarve-bun-lowpower** | 88.6 | 1.3× | 211.9 |
+| 4 | **tarve-txiki** | 96.4 | 1.5× | 215.2 |
+| 5 | **tarve-bun** | 97.3 | 1.5× | 405.3 |
+| 6 | **tarve-node-lowpower** | 102.8 | 1.6× | 119.7 |
+| 7 | electron | 105.3 | 1.6× | 186.7 |
+| 8 | **tarve-node** | 110.5 | 1.7× | 181.9 |
+| 9 | tauri | 115.7 | 1.8× | 200.4 |
+| 10 | dioxus-native | 172.1 | 2.6× | 507.8 |
+| 11 | flutter | 246.7 | 3.7× | 359.5 |
+
+### 6. CPU durante o scroll
+
+240 eventos reais de roda a ~60 Hz.
+
+| # | App | % de 1 core | Δ vs 1º | GPU 3D % |
+| ---: | --- | ---: | ---: | ---: |
+| 1 | **tarve-txiki** | 24.3 | — | 2.6 |
+| 2 | **tarve-node** | 26.2 | 1.1× | 2.7 |
+| 3 | **tarve-bun** | 30.5 | 1.3× | 2.8 |
+| 4 | tauri | 36.9 | 1.5× | 3.1 |
+| 5 | electron | 41.2 | 1.7× | 3.1 |
+| 6 | dioxus-native | 100.1 | 4.1× | 1.3 |
+| 7 | egui | 102.8 | 4.2× | 0.8 |
+| 8 | flutter | 103.8 | 4.3× | 0.6 |
+| 9 | **tarve-bun-lowpower** | 120.4 | 5.0× | 0 |
+| 10 | **tarve-node-lowpower** | 121.3 | 5.0× | 0 |
+| 11 | **tarve-txiki-lowpower** | 122 | 5.0× | 0 |
+
+### 7. Update das 2.000 labels (clique até o pixel na tela)
+
+30 cliques reais. Nenhum app teve falhas.
+
+| # | App | ms p50 | Δ vs 1º | p95 ms |
+| ---: | --- | ---: | ---: | ---: |
+| 1 | tauri | 28.5 | — | 32.8 |
+| 2 | electron | 28.6 | 1.0× | 33.7 |
+| 3 | egui | 37.1 | 1.3× | 40.8 |
+| 4 | dioxus-native | 53.6 | 1.9× | 58.9 |
+| 5 | **tarve-bun** | 66.1 | 2.3× | 74.7 |
+| 6 | **tarve-bun-lowpower** | 66.2 | 2.3× | 83.3 |
+| 7 | **tarve-node** | 66.2 | 2.3× | 79 |
+| 8 | **tarve-node-lowpower** | 66.5 | 2.3× | 95.4 |
+| 9 | flutter | 158.3 | 5.6× | 186.8 |
+| 10 | **tarve-txiki** | 270.9 | 9.5× | 316.3 |
+| 11 | **tarve-txiki-lowpower** | 274.5 | 9.6× | 321.7 |
+
+### 8. Memória de GPU dedicada (tela vazia)
+
+Contador GPU Process Memory do Windows.
+
+| # | App | MB | Δ vs 1º | Com 2.000 linhas MB |
+| ---: | --- | ---: | ---: | ---: |
+| 1 | **tarve-bun-lowpower** | 0 | — | 0 |
+| 2 | **tarve-node-lowpower** | 0 | — | 0 |
+| 3 | **tarve-txiki-lowpower** | 0 | — | 0 |
+| 4 | egui | 22.8 | +22.8 | 22.8 |
+| 5 | tauri | 25.5 | +25.5 | 29.3 |
+| 6 | electron | 26.6 | +26.6 | 30.6 |
+| 7 | **tarve-bun** | 33.4 | +33.4 | 33.4 |
+| 8 | **tarve-node** | 33.4 | +33.4 | 33.4 |
+| 9 | **tarve-txiki** | 33.4 | +33.4 | 33.4 |
+| 10 | flutter | 68.8 | +68.8 | 68.8 |
+| 11 | dioxus-native | 269.2 | +269.2 | 269.2 |
+
 ## Todas as métricas (mediana de 5 execuções, todos os apps)
 
 Tabela completa gerada de `results/results.json`. Cada execução individual está em `results/results.jsonl`, e as capturas da primeira execução de cada app estão em `results/shots/`. Em todas as métricas, menor é melhor. "Falhas" conta cliques cuja mudança não apareceu na tela em até 3 s.
