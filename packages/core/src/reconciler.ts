@@ -152,8 +152,10 @@ interface MemoEntry {
   font: Record<string, unknown>;
   form: FormContext | undefined;
   result: NativeNode[];
-  ids: string[];
-  nodes: [string, NativeNode][];
+  /** The ids it claimed, when they are not just its nodes' ids in order (`entryIds`). */
+  ids: string[] | undefined;
+  /** Its nodes; each is registered under its own id. */
+  nodes: NativeNode[];
   handlers: [string, Handlers][];
   media: [string, MediaRequest][];
   bindings: [string, NodeBinding[]][];
@@ -247,11 +249,16 @@ export function setComponentTrace(trace: ComponentTrace | undefined): ComponentT
  * component reads (VirtualList's measured height, a row's own module state),
  * which its props alone do not show.
  */
+/** The ids a memo entry claimed: its own list, or its nodes' ids (most entries). */
+function entryIds(entry: MemoEntry): string[] {
+  return entry.ids ?? entry.nodes.map(node => node.id);
+}
+
 export function invalidateMemos(renderScope: object, id: string): void {
   const store = memoStores.get(renderScope);
   if (!store) return;
   for (const [path, entry] of store) {
-    entry.idSet ??= new Set(entry.ids);
+    entry.idSet ??= new Set(entryIds(entry));
     if (entry.idSet.has(id)) store.delete(path);
   }
 }
@@ -328,7 +335,13 @@ export function compileTree(
       for (const id of own) { const value = map.get(id); if (value !== undefined) (out ??= []).push([id, value]); }
       return out ?? EMPTY_ENTRIES as [string, T][];
     };
-    return { ids: own, nodes: pick(nodes), handlers: pick(handlers), media: pick(media), bindings: pick(bindings) };
+    let ownNodes: NativeNode[] | undefined;
+    for (let index = 0; index < own.length; index++) { const node = nodes.get(own[index]!); if (node !== undefined) (ownNodes ??= []).push(node); }
+    const list = ownNodes ?? EMPTY_ENTRIES as unknown as NativeNode[];
+    // Most subtrees claim exactly their nodes' ids: those are not kept twice.
+    let same = list.length === own.length;
+    for (let index = 0; same && index < own.length; index++) same = list[index]!.id === own[index];
+    return { ids: same ? undefined : own, nodes: list, handlers: pick(handlers), media: pick(media), bindings: pick(bindings) };
   }
 
   function restore<T>(map: Map<string, T>, entries: [string, T][]): void {
@@ -382,13 +395,14 @@ export function compileTree(
       // It still depends on the width: the root must keep reporting resizes.
       if (previous.breakpoint !== undefined) usesViewport = true;
       // Indexed loops without destructuring: this is the whole cost of a reused subtree.
-      const previousIds = previous.ids;
-      for (let index = 0; index < previousIds.length; index++) {
-        const id = previousIds[index]!;
+      const previousIds = previous.ids, previousNodes = previous.nodes;
+      const claimed = previousIds ?? previousNodes;
+      for (let index = 0; index < claimed.length; index++) {
+        const id = previousIds ? previousIds[index]! : previousNodes[index]!.id;
         if (ids.has(id)) throw new Error(`Duplicate node id: ${id}`);
         ids.add(id); idLog.push(id);
       }
-      restore(nodes, previous.nodes);
+      for (let index = 0; index < previousNodes.length; index++) { const node = previousNodes[index]!; nodes.set(node.id, node); }
       restore(handlers, previous.handlers);
       restore(media, previous.media);
       restore(bindings, previous.bindings);
@@ -488,10 +502,9 @@ export function compileTree(
     for (let index = 0; index < previous.result.length; index++) result.push(patchNode(previous.result[index]!, replaced));
     const entries = previous.nodes;
     for (let index = 0; index < entries.length; index++) {
-      // The entry's own pairs (claimedSince made them): updated in place.
-      const entry = entries[index]!;
-      const node = replacedNode(replaced, entry[0]);
-      if (node) entry[1] = node;
+      // The entry's own list (claimedSince made it): updated in place.
+      const node = replacedNode(replaced, entries[index]!.id);
+      if (node) entries[index] = node;
     }
     slots.owners = patch.owners as VNode[];
     slots.nodes = nextNodes;

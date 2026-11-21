@@ -19,6 +19,8 @@ async function privateMb(pid: number): Promise<number> {
   probeBuffer = probeBuffer.slice(index + 1);
   return Math.round(Number(line) / 104857.6) / 10;
 }
+// PowerShell answers its first request only once it has started: ask before timing anything.
+await privateMb(process.pid);
 for (const runtime of (process.env.RUNTIMES ?? "bun,node,txiki").split(",")) {
   const exe = join(out, `memory-${runtime}.exe`);
   const build = Bun.spawnSync(["bun", "run", "tarve", "build", "../bench/render/memory.tsx", "--runtime", runtime, "--outfile", exe], { cwd: join(root, "examples"), stdout: "pipe", stderr: "pipe" });
