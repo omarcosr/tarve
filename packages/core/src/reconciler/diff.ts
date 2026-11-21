@@ -62,6 +62,23 @@ function nodePropertiesChanged(old: NativeNode, node: NativeNode): boolean {
     || (old.style !== node.style && !sameStyle(old.style, node.style));
 }
 
+/**
+ * Two text nodes that differ in their text alone (the reconciler's patched texts share every
+ * other field with the node before): native can set the text in place.
+ */
+export function textOnly(old: NativeNode, node: NativeNode): boolean {
+  if (old.kind !== "text" || node.kind !== "text" || node.runs !== undefined || typeof node.text !== "string"
+    || node.children.length !== 0 || old.children.length !== 0) return false;
+  const a = old as unknown as Record<string, unknown>, b = node as unknown as Record<string, unknown>;
+  let keys = 0;
+  for (const key in b) {
+    keys++;
+    if (key !== "text" && key !== "children" && b[key] !== a[key]) return false;
+  }
+  for (const key in a) keys--;
+  return keys === 0;
+}
+
 function flatNode(node: NativeNode): NativeNode {
   return { ...node, children: [] };
 }
@@ -82,7 +99,11 @@ export function diffTrees(previous: CompiledTree, next: CompiledTree): NativeNod
  * Computes one atomic retained-tree mutation batch. A null result is reserved for
  * identity-incompatible replacements (root ID or an existing keyed node kind changed).
  */
-export function diffTreeMutations(previous: CompiledTree, next: CompiledTree, unchanged?: (old: NativeNode, node: NativeNode) => boolean): TreeMutation[] | null {
+export function diffTreeMutations(
+  previous: CompiledTree, next: CompiledTree, unchanged?: (old: NativeNode, node: NativeNode) => boolean,
+  /** Collects nodes whose text alone changed (`textOnly`) instead of patching them. */
+  texts?: { ids: string[]; texts: string[] },
+): TreeMutation[] | null {
   if (previous.document.root.id !== next.document.root.id) return null;
 
   const creates: TreeMutation[] = [];
@@ -102,6 +123,11 @@ export function diffTreeMutations(previous: CompiledTree, next: CompiledTree, un
     // The same compiled node (a memoized subtree, or a shadow sharing it): nothing changed.
     if (old === node || unchanged?.(old, node)) continue;
     if (old.kind !== node.kind) return null;
+    if (texts !== undefined && old.text !== node.text && textOnly(old, node)) {
+      texts.ids.push(id);
+      texts.texts.push(node.text as string);
+      continue;
+    }
     if (nodePropertiesChanged(old, node)) patches.push({ type: "patch", node: flatNode(node) });
     if (!sameChildren(old, node)) {
       children.push({ type: "children", id, children: node.children.map(child => child.id) });

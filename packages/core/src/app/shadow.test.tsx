@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Column, Input, Row, Text, View, Window } from "../components";
 import { compileTree } from "../reconciler";
-import { editShadowNode, nativeShadow, reconciliationCommand, splitTextSets } from "./shadow";
+import { editShadowNode, nativeShadow, reconciliationCommand, reconciliationCommands } from "./shadow";
 
 describe("nativeShadow", () => {
   test("shares the compiled nodes until native edits one", () => {
@@ -69,7 +69,7 @@ describe("nativeShadow", () => {
   });
 });
 
-describe("splitTextSets", () => {
+describe("reconciliationCommands", () => {
   const view = (tick: number, color: string) => <Window title="w"><Column>
     <View id="marker" style={{ width: 10, height: 10, background: color }} />
     {Array.from({ length: 6 }, (_, i) => <Row key={i} style={{ height: 20 }}><Text style={{ flex: 1 }}>Row {i}: {tick}</Text></Row>)}
@@ -80,13 +80,14 @@ describe("splitTextSets", () => {
     compileTree(view(0, "#f00"), false, "auto", [], scope);
     const first = compileTree(view(1, "#f00"), false, "auto", [], scope);
     const next = compileTree(view(2, "#0f0"), false, "auto", [], scope);
-    const command = reconciliationCommand(nativeShadow(first), next)!;
-    const split = splitTextSets(nativeShadow(first), command)!;
-    expect(split).toBeDefined();
-    const sets = (split.sets as unknown as { nodes: { id: string; text?: string; style?: unknown }[] }).nodes;
+    const split = reconciliationCommands(nativeShadow(first), next);
+    expect(split.texts).toBeDefined();
+    const sets = (split.texts as unknown as { nodes: { id: string; text?: string; style?: unknown }[] }).nodes;
     expect(sets.map(set => set.text)).toEqual(Array.from({ length: 6 }, (_, i) => `Row ${i}: 2`));
     expect(sets.every(set => set.style === undefined)).toBe(true);
-    expect(split.rest).toEqual({ type: "patch", nodes: [expect.objectContaining({ id: "marker" })] });
+    expect(split.command).toEqual({ type: "patch", nodes: [expect.objectContaining({ id: "marker" })] });
+    // Without the split, the same texts go as a patch of whole nodes.
+    expect((reconciliationCommand(nativeShadow(first), next) as { nodes: unknown[] }).nodes).toHaveLength(7);
   });
 
   test("a text whose style changed too stays in the patch", () => {
@@ -95,6 +96,8 @@ describe("splitTextSets", () => {
     compileTree(styled(0, 1), false, "auto", [], scope);
     const first = compileTree(styled(1, 1), false, "auto", [], scope);
     const next = compileTree(styled(2, 2), false, "auto", [], scope);
-    expect(splitTextSets(nativeShadow(first), reconciliationCommand(nativeShadow(first), next)!)).toBeUndefined();
+    const split = reconciliationCommands(nativeShadow(first), next);
+    expect(split.texts).toBeUndefined();
+    expect((split.command as { nodes: unknown[] }).nodes).toHaveLength(2);
   });
 });

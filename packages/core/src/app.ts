@@ -14,7 +14,7 @@ import { createElementDispatcher } from "./app/element-events";
 import { createMediaSync, mediaController } from "./app/media";
 import { surfaceController, trackSurfaceHandles, type SurfaceController } from "./surface";
 import { createNativeRequests } from "./app/requests";
-import { editShadowNode, nativeShadow, reconciliationCommand, splitTextSets } from "./app/shadow";
+import { editShadowNode, nativeShadow, reconciliationCommand, reconciliationCommands } from "./app/shadow";
 import { createTrayController, type TrayHandle, type TrayOptions } from "./app/tray";
 import { createMenuBarController, withMenuBar, type MenuBarItem, type MenuBarOptions } from "./app/menu-bar";
 import { onToastsChange, withToasts } from "./toast";
@@ -545,14 +545,14 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
     }
 
     let command: NativeCommand | undefined;
-    // Texts alone changed in many nodes: set in place, as signals set them (splitTextSets).
-    let textSets: ReturnType<typeof splitTextSets>;
+    // Nodes whose text alone changed: set in place, as signals set them (reconciliationCommands).
+    let textSets: ReturnType<typeof reconciliationCommands>["texts"];
     try {
       const current = observed;
       command = jsStats.diff.time(() => {
-        const diffed = reconciliationCommand(current, next);
-        textSets = diffed && splitTextSets(current, diffed);
-        return textSets ? textSets.rest : diffed;
+        const diffed = reconciliationCommands(current, next);
+        textSets = diffed.texts;
+        return diffed.command;
       });
     } catch (error) {
       reportError(error, { source: "render", event: "diff" });
@@ -570,16 +570,18 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       return;
     }
 
-    if (command) {
-      const patch = command;
-      if (!jsStats.send.time(() => sendInternal(patch, { source: "bridge", event: patch.type }))) {
+    // Texts first: their nodes exist before and after the command, and a frame native draws
+    // between the two never shows the command's half (a moved or recoloured node) without them.
+    if (textSets) {
+      const sets = textSets as unknown as NativeCommand;
+      if (!jsStats.send.time(() => sendInternal(sets, { source: "bridge", event: "setNodes" }))) {
         restoreCommitted();
         return;
       }
     }
-    if (textSets) {
-      const sets = textSets.sets as unknown as NativeCommand;
-      if (!jsStats.send.time(() => sendInternal(sets, { source: "bridge", event: "setNodes" }))) {
+    if (command) {
+      const patch = command;
+      if (!jsStats.send.time(() => sendInternal(patch, { source: "bridge", event: patch.type }))) {
         restoreCommitted();
         return;
       }

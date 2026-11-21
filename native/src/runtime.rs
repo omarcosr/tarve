@@ -2946,6 +2946,7 @@ impl App {
         }
         // What the layout left offscreen (Tree::finish_deferred_layout) lays out now, before
         // any event reads it; a frame after this one paints it where it shows.
+        self.tree.release_retired_text();
         match self.tree.finish_deferred_layout() {
             Ok(true) => {
                 if let Some(window) = &self.window {

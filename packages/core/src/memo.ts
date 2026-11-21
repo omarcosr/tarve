@@ -51,7 +51,8 @@ function isPure(node: VNode): boolean {
 }
 
 function isVNodeLike(value: object): value is VNode {
-  return "type" in value && "props" in value && "key" in value;
+  // `props` first: a style or data object lacks it, so one lookup settles most calls.
+  return (value as { props?: unknown }).props !== undefined ? "type" in value && "key" in value : "props" in value && "type" in value && "key" in value;
 }
 
 function everyVNode(child: unknown): boolean {

@@ -175,11 +175,17 @@ interface TextSlots {
   /** Its compiled text node, by slot. */
   nodes: NativeNode[];
 }
-/** What autoMemoItem found when only some slots' texts changed: the new owners and children by slot. */
-interface TextPatch { owners: (VNode | undefined)[]; children: unknown[] }
+/** patchTexts' replaced nodes by id: a list row has a text or two, so two short arrays beat a Map. */
+interface Replaced { ids: string[]; nodes: NativeNode[]; map: Map<string, NativeNode> | undefined }
+const scratch: Replaced = { ids: [], nodes: [], map: undefined };
+function replacedNode(replaced: Replaced, id: string): NativeNode | undefined {
+  if (replaced.map) return replaced.map.get(id);
+  const index = replaced.ids.indexOf(id);
+  return index < 0 ? undefined : replaced.nodes[index];
+}
 /** A node with the replaced descendants swapped in; copied (and itself replaced) only above a change. */
-function patchNode(node: NativeNode, replaced: Map<string, NativeNode>): NativeNode {
-  const own = replaced.get(node.id);
+function patchNode(node: NativeNode, replaced: Replaced): NativeNode {
+  const own = replacedNode(replaced, node.id);
   if (own) return own;
   const children = node.children;
   if (!children || children.length === 0) return node;
@@ -191,9 +197,12 @@ function patchNode(node: NativeNode, replaced: Map<string, NativeNode>): NativeN
   }
   if (!next) return node;
   const copy: NativeNode = { ...node, children: next };
-  replaced.set(node.id, copy);
+  if (replaced.map) replaced.map.set(node.id, copy);
+  else { replaced.ids.push(node.id); replaced.nodes.push(copy); }
   return copy;
 }
+/** What autoMemoItem found when only some slots' texts changed: the new owners and children by slot. */
+interface TextPatch { owners: (VNode | undefined)[]; children: unknown[] }
 
 const memoStores = new WeakMap<object, Map<string, MemoEntry>>();
 const EMPTY_ENTRIES: readonly [string, unknown][] = Object.freeze([]) as readonly [string, unknown][];
@@ -357,14 +366,13 @@ export function compileTree(
     return visitMemo(memoStore!, AUTO_MEMO as MemoInfo<object>, { vnode: item, same, owners, patch }, path, group, at);
   }
   function visitMemo(store: Map<string, MemoEntry>, info: MemoInfo<object>, props: object, path: string, group?: string, position?: Position): NativeNode[] {
-    const at = position ? position.index + "/" + position.count : "";
     seeMemo(path);
     const previous = store.get(path);
     const sameContext = previous !== undefined && previous.render === info.render && previous.group === group && previous.theme === selectedTheme
       && previous.form === currentForm && sameValue(previous.font, inheritedFont)
       // A subtree with breakpoint styles is reused only at the breakpoint it was styled for.
       && (previous.breakpoint === undefined || previous.breakpoint === currentBreakpoint(previous.breakpoint.includes("x")))
-      && (previous.position === undefined || previous.position === at);
+      && (previous.position === undefined || (position !== undefined && previous.position === position.index + "/" + position.count));
     // An automatic memo whose item changed only some texts: the same nodes, those texts patched.
     const autoProps = info === (AUTO_MEMO as MemoInfo<object>) ? props as { vnode: VNode; owners?: (VNode | undefined)[]; patch?: TextPatch } : undefined;
     const patched = sameContext && autoProps?.patch && previous!.texts ? patchTexts(previous!, autoProps.patch) : undefined;
@@ -387,7 +395,9 @@ export function compileTree(
       // Memoized components nested in a reused subtree stay cached too.
       for (let index = 0; index < previous.nested.length; index++) seeMemo(previous.nested[index]!);
       // An automatic memo keeps only the item: the next render compares against it.
-      previous.props = autoProps ? { vnode: autoProps.vnode, same: false } : props;
+      // An automatic memo's props are its own object: the item is swapped in place.
+      if (autoProps) (previous.props as { vnode: VNode }).vnode = autoProps.vnode;
+      else previous.props = props;
       // An enclosing automatic memo's item contains these texts too.
       if (collecting > 0 && previous.texts) {
         for (let slot = 0; slot < previous.texts.owners.length; slot++) {
@@ -440,7 +450,7 @@ export function compileTree(
         // Only reached on a cache miss: what this subtree's compile saw first.
         nested: memoOrder.length > seenBefore ? memoOrder.slice(seenBefore) : EMPTY_ENTRIES as unknown as string[],
         ...readViewport ? { breakpoint: currentBreakpoint(readExact) } : {},
-        ...readPosition && at ? { position: at } : {},
+        ...readPosition && position ? { position: position.index + "/" + position.count } : {},
         ...autoProps && slotOwners.length > slotStart ? { texts: { owners: slotOwners.slice(slotStart), nodes: slotNodes.slice(slotStart) } } : {},
         ...autoProps ? { props: { vnode: autoProps.vnode, same: false } } : {},
       });
@@ -455,7 +465,10 @@ export function compileTree(
    */
   function patchTexts(previous: MemoEntry, patch: TextPatch): NativeNode[] | undefined {
     const slots = previous.texts!;
-    const replaced = new Map<string, NativeNode>();
+    // Scratch lists, reused item after item (patchTexts does not nest).
+    const replacedIds = scratch.ids, replacedNodes = scratch.nodes;
+    replacedIds.length = 0;
+    replacedNodes.length = 0;
     const nextNodes = slots.nodes.slice();
     for (let slot = 0; slot < patch.children.length; slot++) {
       const children = patch.children[slot];
@@ -465,15 +478,20 @@ export function compileTree(
       const inline = compileInline(children as Child, String(style.whiteSpace ?? "normal"), style, () => inlineContext(old.id, style));
       if (inline.runs.length) return undefined;
       const node: NativeNode = { ...old, text: inline.text };
-      replaced.set(old.id, node);
+      replacedIds.push(old.id);
+      replacedNodes.push(node);
       nextNodes[slot] = node;
     }
+    scratch.map = replacedIds.length > 8 ? new Map(replacedIds.map((id, index) => [id, replacedNodes[index]!])) : undefined;
+    const replaced = scratch;
     const result: NativeNode[] = [];
     for (let index = 0; index < previous.result.length; index++) result.push(patchNode(previous.result[index]!, replaced));
     const entries = previous.nodes;
     for (let index = 0; index < entries.length; index++) {
-      const node = replaced.get(entries[index]![0]);
-      if (node) entries[index] = [entries[index]![0], node];
+      // The entry's own pairs (claimedSince made them): updated in place.
+      const entry = entries[index]!;
+      const node = replacedNode(replaced, entry[0]);
+      if (node) entry[1] = node;
     }
     slots.owners = patch.owners as VNode[];
     slots.nodes = nextNodes;

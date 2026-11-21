@@ -867,6 +867,10 @@ pub struct TextEngine {
     /// Shaped layouts by node, shared (`Arc`): an equal text elsewhere, the recent cache and
     /// the node hold one copy; mutating one (`Arc::make_mut`) copies it only while shared.
     pub layouts: HashMap<String, Arc<Layout<TextBrush>>>,
+    /// Layouts of texts set in place (`Tree::set_node_in_place`), freed after the next frame
+    /// is presented (`Tree::release_retired_text`): freeing a list's worth of them held up the
+    /// update that replaced them.
+    pub(crate) retired: Vec<Arc<Layout<TextBrush>>>,
     markdown_lines: HashMap<String, Vec<MarkdownLine>>,
     /// The style hash each markdown's lines were shaped with.
     markdown_styles: HashMap<String, u64>,
@@ -1436,6 +1440,7 @@ impl TextEngine {
             fonts: web_fonts::context(),
             context: LayoutContext::new(),
             layouts: HashMap::default(),
+            retired: Vec::new(),
             markdown_lines: HashMap::default(),
             markdown_styles: HashMap::default(),
             markdown_scroll: HashMap::default(),

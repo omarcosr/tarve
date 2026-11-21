@@ -37,11 +37,24 @@ fn layout_bench() {
                 node.text = format!("{} {round}", node.text);
             }
         }
+        // As the app sends a list's new labels: text sets, applied in place (Tree::set_nodes).
+        let sets: Vec<crate::protocol::NodeSet> = nodes
+            .iter()
+            .filter(|node| node.kind == "text")
+            .map(|node| serde_json::from_value(json!({"id": node.id, "text": node.text})).unwrap())
+            .collect();
+        let rest: Vec<Node> = nodes.into_iter().filter(|node| node.kind != "text").collect();
+        let profile_apply = std::env::var("TARVE_LAYOUT_PROFILE").is_ok_and(|v| v == "apply");
         let start = Instant::now();
-        tree.patch(nodes).unwrap();
+        crate::profiler::ACTIVE.store(profile_apply, std::sync::atomic::Ordering::Relaxed);
+        tree.set_nodes(sets).unwrap();
+        if !rest.is_empty() {
+            tree.patch(rest).unwrap();
+        }
+        crate::profiler::ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
         let patched = start.elapsed().as_secs_f64() * 1000.0;
         let start = Instant::now();
-        crate::profiler::ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
+        crate::profiler::ACTIVE.store(!profile_apply, std::sync::atomic::Ordering::Relaxed);
         // As the window's frame loop: offscreen rows wait until the frame is presented.
         tree.defer_offscreen = true;
         tree.compute(1024.0, 760.0).unwrap();
@@ -52,6 +65,7 @@ fn layout_bench() {
         tree.scene(1.25);
         let painted = start.elapsed().as_secs_f64() * 1000.0;
         let start = Instant::now();
+        tree.release_retired_text();
         tree.finish_deferred_layout().unwrap();
         let shaped = start.elapsed().as_secs_f64() * 1000.0;
         times.push((patched, shaped, laid, painted));
@@ -73,3 +87,48 @@ fn layout_bench() {
     );
 }
 
+
+/// Live native heap of the benchmark's list, stage by stage (no mimalloc: the counting allocator):
+///   set TARVE_LAYOUT_BENCH=<dir> && cargo test --release --lib --no-default-features --features fxhash layout_memory -- --ignored --nocapture
+#[cfg(not(feature = "mimalloc"))]
+#[test]
+#[ignore = "memory probe: needs TARVE_LAYOUT_BENCH"]
+fn layout_memory() {
+    use crate::counting_alloc::LIVE;
+    use std::sync::atomic::Ordering;
+    let Ok(dir) = std::env::var("TARVE_LAYOUT_BENCH") else {
+        return;
+    };
+    let mb = |bytes: isize| bytes as f64 / 1048576.0;
+    let live = || LIVE.load(Ordering::Relaxed);
+    let bytes = std::fs::read(format!("{dir}/root.json")).unwrap();
+    let base = live();
+    let root: Node = serde_json::from_slice(&bytes).unwrap();
+    let parsed = live();
+    let mut tree = Tree::new(root);
+    let built = live();
+    tree.compute(1024.0, 760.0).unwrap();
+    let laid = live();
+    let mut images = std::collections::HashMap::new();
+    let list = {
+        let mut recorder = crate::cpu_display::CpuRecorder::new(&mut images);
+        tree.paint(1.25, &mut recorder);
+        recorder.finish()
+    };
+    let painted = live();
+    println!(
+        "MEMORY document={:.2} tree={:.2} layout+text={:.2} displaylist={:.2} MB ({} ops)",
+        mb(parsed - base),
+        mb(built - parsed),
+        mb(laid - built),
+        mb(painted - laid),
+        list.len()
+    );
+    drop(list);
+    for (name, bytes) in tree.text_memory_report() {
+        println!("MEMORY text {name}: {:.2} MB", mb(bytes));
+    }
+    let before = live();
+    drop(tree);
+    println!("MEMORY rest (entries, taffy): {:.2} MB", mb(before - live()));
+}

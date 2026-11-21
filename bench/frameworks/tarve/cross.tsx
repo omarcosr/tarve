@@ -45,7 +45,8 @@ if (process.env.STATS === "1") {
   // Phase breakdown of the full-list update the harness measures from the outside.
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
   await sleep(1500);
-  for (let i = 0; i < 20; i++) { tick++; app.update(); await sleep(400); }
+  const updates = Number(process.env.STATS_N ?? 20), gap = Number(process.env.STATS_GAP ?? 400);
+  for (let i = 0; i < updates; i++) { tick++; app.update(); await sleep(gap); }
   const { js, native } = await app.stats();
   const ms = (s?: { p50: number; p95: number }) => s && `${s.p50.toFixed(1)}/${s.p95.toFixed(1)}`;
   console.log(JSON.stringify({

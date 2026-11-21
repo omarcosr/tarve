@@ -1706,6 +1706,8 @@ pub struct Tree {
     /// Those boundaries, and the texts inside them still to shape and lay out.
     pub(crate) deferred_boundaries: Vec<String>,
     pub(crate) deferred_texts: HashSet<String>,
+    /// `width_independent` by id while one layout pass asks it for every row of a list.
+    width_independent_memo: std::cell::RefCell<Option<HashMap<String, bool>>>,
     images: HashMap<String, ImageData>,
     /// The current picture of each `<video>`, by node id (set by the runtime).
     video_frames: HashMap<String, crate::video::VideoFrame>,
@@ -2056,6 +2058,7 @@ impl Tree {
             defer_offscreen: false,
             deferred_boundaries: Vec::new(),
             deferred_texts: HashSet::default(),
+            width_independent_memo: std::cell::RefCell::new(None),
             images: HashMap::default(),
             video_frames: HashMap::default(),
             video_display: HashMap::default(),
@@ -3007,7 +3010,13 @@ impl Tree {
         if text_changed {
             entry.node.text = set.text.clone().unwrap_or_default();
             entry.measure_dirty = true;
-            self.text.layouts.remove(&set.id);
+            if let Some(layout) = self.text.layouts.remove(&set.id) {
+                // Bounded, should no frame come to free them (a hidden window).
+                if self.text.retired.len() >= 20_000 {
+                    self.text.retired.clear();
+                }
+                self.text.retired.push(layout);
+            }
             self.text.diff_layouts.remove(&set.id);
             self.dirty.text = true;
             self.dirty.layout = true;
@@ -4140,6 +4149,22 @@ impl Tree {
     /// The width of `id` follows from the window and fixed widths alone, never from content:
     /// a fixed width, the window itself, or a box stretched across such a column.
     fn width_independent(&self, id: &str) -> bool {
+        if let Some(known) = self
+            .width_independent_memo
+            .borrow()
+            .as_ref()
+            .and_then(|memo| memo.get(id).copied())
+        {
+            return known;
+        }
+        let independent = self.width_independent_uncached(id);
+        if let Some(memo) = self.width_independent_memo.borrow_mut().as_mut() {
+            memo.insert(id.to_string(), independent);
+        }
+        independent
+    }
+
+    fn width_independent_uncached(&self, id: &str) -> bool {
         let Some(entry) = self.entries.get(id) else {
             return false;
         };
@@ -4164,6 +4189,14 @@ impl Tree {
     /// Lays out again only inside the layout boundaries that hold every change (see
     /// `layout_boundary`), when there are such. False when the tree needs a full layout.
     fn compute_within_boundaries(&mut self) -> Result<bool, String> {
+        // Rows of one list ask `width_independent` about the same column: once per pass.
+        *self.width_independent_memo.borrow_mut() = Some(HashMap::default());
+        let result = self.compute_within_boundaries_memoized();
+        *self.width_independent_memo.borrow_mut() = None;
+        result
+    }
+
+    fn compute_within_boundaries_memoized(&mut self) -> Result<bool, String> {
         let mut boundaries: Vec<String> = Vec::new();
         let mut seen: HashSet<String> = HashSet::default();
         for (id, entry) in &self.entries {
@@ -4285,6 +4318,12 @@ impl Tree {
     /// and none of it shows. `finish_deferred_layout` shapes and lays them out once the frame
     /// with what shows is presented: a list whose every row changed paints its visible rows first.
     fn defer_offscreen_texts(&mut self, width: f32, height: f32) {
+        *self.width_independent_memo.borrow_mut() = Some(HashMap::default());
+        self.defer_offscreen_texts_memoized(width, height);
+        *self.width_independent_memo.borrow_mut() = None;
+    }
+
+    fn defer_offscreen_texts_memoized(&mut self, width: f32, height: f32) {
         self.deferred_boundaries.clear();
         self.deferred_texts.clear();
         let (x0, y0) = (f64::from(self.viewport.0), f64::from(self.viewport.1));
@@ -4326,9 +4365,11 @@ impl Tree {
             verdicts.entry(boundary.to_string()).or_insert(true);
             texts.push((id.clone(), boundary.to_string()));
         }
+        // A list's rows share their parent's scroll offset: found once.
+        let mut offsets: HashMap<String, Vec2> = HashMap::default();
         for (boundary, verdict) in verdicts.iter_mut() {
             if *verdict {
-                *verdict = self.offscreen_and_plain(boundary, window);
+                *verdict = self.offscreen_and_plain(boundary, window, &mut offsets);
             }
         }
         for (text, boundary) in texts {
@@ -4344,10 +4385,32 @@ impl Tree {
 
     /// Nothing of the boundary shows in the window, and it holds nothing placed outside the
     /// tree's own painting (a video, a native surface, a text field's caret and IME box).
-    fn offscreen_and_plain(&self, boundary: &str, window: BoxRect) -> bool {
-        let Some(rect) = self.visible_rect(boundary) else {
+    fn offscreen_and_plain(
+        &self,
+        boundary: &str,
+        window: BoxRect,
+        offsets: &mut HashMap<String, Vec2>,
+    ) -> bool {
+        let Some(entry) = self.entries.get(boundary) else {
             return false;
         };
+        // Neither it nor its parent scrolls or is a portal: it shows where its parent's
+        // offset puts it (`ancestor_scroll_offset`), which its siblings share.
+        let offset = match entry.parent.as_deref() {
+            Some(parent)
+                if !entry.node.portal
+                    && entry.scroll == 0.0
+                    && entry.scroll_x == 0.0
+                    && self.entries[parent].scroll == 0.0
+                    && self.entries[parent].scroll_x == 0.0 =>
+            {
+                *offsets
+                    .entry(parent.to_string())
+                    .or_insert_with(|| self.ancestor_scroll_offset(parent))
+            }
+            _ => self.ancestor_scroll_offset(boundary),
+        };
+        let rect = entry.rect - offset;
         if rect.x1 > window.x0 && rect.x0 < window.x1 && rect.y1 > window.y0 && rect.y0 < window.y1
         {
             return false;
@@ -4386,6 +4449,11 @@ impl Tree {
                 .map(|entry| &*entry.node),
         );
         std::mem::take(&mut self.deferred_boundaries)
+    }
+
+    /// Frees the layouts of texts set in place since the last frame (`TextEngine::retired`).
+    pub(crate) fn release_retired_text(&mut self) {
+        self.text.retired = Vec::new();
     }
 
     /// Lays out what the last layout left offscreen (`defer_offscreen_texts`), for the frame

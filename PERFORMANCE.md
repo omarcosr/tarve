@@ -27,6 +27,27 @@ Tools added for the next steps: `bench/render` (JS cost of one update on Bun, No
 
 Still behind: disk size (metric 1, lowest priority: egui 3.5 MB, Tauri 4.1 MB, Tarve · txiki 11.5 MB) and idle RAM with 2,000 rows (metric 5: egui 70.9 MB, Tarve · txiki `lowPower` 89.3 MB).
 
+### 2026-11-21, later: widening the update margin
+
+The full run after the commit above put Tarve · Node at 25.4 ms against Electron at 25.6 ms: a tie, not a lead. A timeline with epoch timestamps (native mouse-up, JS click, commands arriving, frame presented) split one click as mouse-up → JS click handler 0.5 ms → compile done ~9 ms → commands at native ~4 ms later (diff and send) → apply ~2.3 ms → frame ~4.5 ms → vblank and DWM. Changes since:
+
+| Change | Measured effect |
+| --- | --- |
+| The diff collects text-only nodes itself (`diff.ts` `textOnly`, `shadow.ts` `reconciliationCommands`) instead of flattening them into a patch first | no flat copy per text |
+| Text sets are sent before the patch of the other nodes, so a frame native draws between the two can never show the patch half (the benchmark's marker) without the texts | correctness of the measurement; before this, a frame between the two commands could have shown the marker early |
+| Layouts of texts set in place are freed after the frame (`TextEngine::retired`, `Tree::release_retired_text`) | `layout_bench` apply 2.06 → 0.66 ms (freeing 2,000 parley layouts was 40% of it) |
+| `width_independent` is asked once per column per pass, and rows share their parent's scroll offset (`offscreen_and_plain`) | `layout_bench` layout before the frame 2.47 → 1.64 ms |
+| JS: fewer allocations per patched row (scratch lists, in-place pairs and props, lazy position strings), cheaper `isVNodeLike` | within noise headless (Bun compile ~3.8–4.2 ms) |
+
+Three interleaved runs after these: Tarve · Node 24.7–24.8 ms, Tarve · Bun 24.8–25.5 ms, Electron 25.4–27.5 ms, Tauri 28.7 ms. Still too close to call a lead.
+
+Next steps found on the way:
+- In the app, compile takes ~7 ms between clicks 180 ms apart but ~5 ms when updates run back to back (`STATS_N=200 STATS_GAP=1` in `bench/frameworks/tarve/cross.tsx`): a cold CPU or caches after idle, not code.
+- The JS left per row is spread thin (`bun --cpu-prof` on `bench/render`): `visitMemo`, `sameData`, `restore`, `seeMemo`, object spreads. Bigger wins need fewer per-row steps: e.g. reuse whole runs of unchanged sibling items, or keep `ids`/`nodes` maps across renders instead of rebuilding 6,000 entries.
+- Native left: `compute_within_boundaries` and `defer_offscreen_texts` still scan all 6,000 entries for dirty ones; a list of dirty ids would make the pass proportional to the change.
+- Metric 5 (RAM with 2,000 rows): `native/src/tests/layout_bench.rs` has a `layout_memory` probe (counting allocator: `--no-default-features --features fxhash`) that splits document, tree, layout+text and display list; not run yet.
+- Txiki update (~114 ms) is QuickJS running the same compile; it is not the best variant for metric 8 but is far from the others.
+
 ## Current measurement
 
 Windows x64, Bun 1.4.1, AMD Ryzen 7 9800X3D. The workload contains 2,000 rows / 6,005 native nodes; 67 nodes are visible. Each row contains text and an interactive button. The benchmark discards five warm-up samples and collects 60 samples for each operation.
