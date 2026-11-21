@@ -1491,6 +1491,11 @@ fn measure_leaf(
                 } else {
                     None
                 };
+                // A text dropped far offscreen (`TextEngine::evict`) answers from its sizes;
+                // a width it was never measured at shapes it again.
+                if text.evicted.contains_key(id) && text.cached_size(id, max_width).is_none() {
+                    text.prepare(node);
+                }
                 let (w, h) = text.measure(id, max_width);
                 measured = Size {
                     width: w + text.code_gutter_inset(node),
@@ -1706,6 +1711,8 @@ pub struct Tree {
     /// Those boundaries, and the texts inside them still to shape and lay out.
     pub(crate) deferred_boundaries: Vec<String>,
     pub(crate) deferred_texts: HashSet<String>,
+    /// `TextEngine::shapes` when offscreen layouts were last dropped (`evict_offscreen_texts`).
+    shapes_at_eviction: u64,
     /// `width_independent` by id while one layout pass asks it for every row of a list.
     width_independent_memo: std::cell::RefCell<Option<HashMap<String, bool>>>,
     images: HashMap<String, ImageData>,
@@ -2058,6 +2065,7 @@ impl Tree {
             defer_offscreen: false,
             deferred_boundaries: Vec::new(),
             deferred_texts: HashSet::default(),
+            shapes_at_eviction: 0,
             width_independent_memo: std::cell::RefCell::new(None),
             images: HashMap::default(),
             video_frames: HashMap::default(),
@@ -4451,6 +4459,66 @@ impl Tree {
         std::mem::take(&mut self.deferred_boundaries)
     }
 
+    /// Shapes a text again if its layout was dropped offscreen (`TextEngine::evict`).
+    pub(crate) fn ensure_text(&mut self, id: &str) {
+        if self.text.evicted.contains_key(id)
+            && let Some(entry) = self.entries.get(id)
+        {
+            let node = entry.node.clone();
+            self.text.prepare(&node);
+        }
+    }
+
+    /// Drops the layouts of plain texts far outside the window (more than a window's height
+    /// away), keeping their sizes: a long list keeps a few rows' worth of shaped text instead
+    /// of all of it (~4.7 KB per label). They are shaped again before they paint, or when a
+    /// layout asks for a width they were never measured at. Runs only when texts were shaped
+    /// since the last time.
+    pub(crate) fn evict_offscreen_texts(&mut self) -> bool {
+        if self.text.shapes == self.shapes_at_eviction || self.static_selection.is_some() {
+            return false;
+        }
+        self.shapes_at_eviction = self.text.shapes;
+        let Some((width, height)) = self.laid_out_size else {
+            return false;
+        };
+        let (x0, y0) = (f64::from(self.viewport.0), f64::from(self.viewport.1));
+        let (w, h) = (f64::from(width), f64::from(height));
+        let near = BoxRect::new(x0 - w, y0 - h, x0 + 2.0 * w, y0 + 2.0 * h);
+        let mut offsets: HashMap<String, Vec2> = HashMap::default();
+        let mut far: Vec<String> = Vec::new();
+        for (id, entry) in &self.entries {
+            let node = &entry.node;
+            if !matches!(node.kind.as_str(), "text" | "button")
+                || node.rich.is_some()
+                || !node.runs.is_null()
+                || node.highlight.is_some()
+                || entry.measure_dirty
+                || self.focused.as_deref() == Some(id.as_str())
+                || !self.text.layouts.contains_key(id)
+                || self.text.truncated.contains_key(id)
+                || self.text.clamps.contains_key(id)
+            {
+                continue;
+            }
+            let offset = match entry.parent.as_deref() {
+                Some(parent) => *offsets
+                    .entry(parent.to_string())
+                    .or_insert_with(|| self.ancestor_scroll_offset(parent)),
+                None => Vec2::ZERO,
+            };
+            let rect = entry.rect - offset;
+            if rect.x1 < near.x0 || rect.x0 > near.x1 || rect.y1 < near.y0 || rect.y0 > near.y1 {
+                far.push(id.clone());
+            }
+        }
+        let mut evicted = false;
+        for id in far {
+            evicted |= self.text.evict(&id);
+        }
+        evicted
+    }
+
     /// Frees the layouts of texts set in place since the last frame (`TextEngine::retired`).
     pub(crate) fn release_retired_text(&mut self) {
         self.text.retired = Vec::new();
@@ -5354,6 +5422,7 @@ impl Tree {
         clip: BoxRect,
         target: &mut P,
     ) -> bool {
+        self.ensure_text(id);
         let entry = &self.entries[id];
         // Parsed into the kept node (a clone's cache would be lost with it).
         let simple = entry.node.simple_style();
@@ -5783,6 +5852,9 @@ impl Tree {
         {
             return;
         }
+        // On screen: a text dropped while offscreen (`TextEngine::evict`) is shaped again.
+        self.ensure_text(id);
+        let entry = &self.entries[id];
         if self.simple_paint_enabled
             && entry.node.simple_paint()
             && entry.motions.is_empty()
@@ -8207,7 +8279,7 @@ impl Tree {
         }
         Ok(vec![event])
     }
-    fn scroll_to_2d(&mut self, id: &str, offset_x: f64, offset_y: f64) -> Vec<Value> {
+    pub(crate) fn scroll_to_2d(&mut self, id: &str, offset_x: f64, offset_y: f64) -> Vec<Value> {
         if !offset_x.is_finite() || !offset_y.is_finite() {
             return vec![];
         }

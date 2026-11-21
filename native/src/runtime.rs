@@ -2956,6 +2956,10 @@ impl App {
             Ok(false) => {}
             Err(message) => self.events.push(error(message)),
         }
+        // Texts far offscreen give their shaped layouts back; the idle release returns the pages.
+        if self.tree.evict_offscreen_texts() {
+            self.memory_dirty.set(true);
+        }
         if self.accessibility_after_frame {
             self.accessibility_after_frame = false;
             self.sync_accessibility();

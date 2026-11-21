@@ -41,6 +41,14 @@ function Bench() {
 
 const app = createApp(Bench, { renderer, lowPower: process.env.LOWPOWER === "1" });
 await app.ready;
+if (process.env.MEMORY === "1") {
+  // Where the idle list's memory is: the JS heap and the native allocator's stages.
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  const { js, native } = await app.stats();
+  console.log(JSON.stringify({ heapUsedMb: js.heapUsedMb, native: native.memory }));
+  app.close();
+  process.exit(0);
+}
 if (process.env.STATS === "1") {
   // Phase breakdown of the full-list update the harness measures from the outside.
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));

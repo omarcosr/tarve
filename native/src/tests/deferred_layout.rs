@@ -107,3 +107,41 @@ fn a_compute_lays_out_what_was_deferred_before_anything_new() {
     fresh.compute(400.0, 300.0).unwrap();
     assert_eq!(rects(&tree), rects(&fresh));
 }
+
+#[test]
+fn texts_far_offscreen_drop_their_layouts_and_paint_the_same_when_back() {
+    let label = |i: usize| format!("Record {i}");
+    let mut tree = Tree::new(list(&label));
+    tree.compute(400.0, 300.0).unwrap();
+    tree.scene(1.0);
+    let rects_before = rects(&tree);
+    assert!(tree.evict_offscreen_texts());
+    // Rows on screen (and a window's height around) keep theirs; the far ones are dropped.
+    assert!(tree.text.layouts.contains_key("t0"));
+    assert!(!tree.text.layouts.contains_key("t55"));
+    assert!(tree.text.evicted.contains_key("t55"));
+    // Nothing new shaped: a second call does nothing.
+    assert!(!tree.evict_offscreen_texts());
+    // A whole layout answers from the kept sizes and leaves every box where it was.
+    tree.dirty.full = true;
+    tree.dirty.layout = true;
+    tree.compute(400.0, 300.0).unwrap();
+    assert_eq!(rects(&tree), rects_before);
+    assert!(!tree.text.layouts.contains_key("t55"), "sizes came from the cache");
+    // Scrolled to the end, the dropped rows shape again and paint like a tree that never dropped them.
+    let mut fresh = Tree::new(list(&label));
+    fresh.compute(400.0, 300.0).unwrap();
+    for tree in [&mut tree, &mut fresh] {
+        tree.scroll_to_2d("s", 0.0, 10_000.0);
+        tree.compute(400.0, 300.0).unwrap();
+        tree.scene(1.0);
+    }
+    assert!(tree.text.layouts.contains_key("t55"));
+    assert_eq!(rects(&tree), rects(&fresh));
+    // A new text in a dropped row measures right.
+    tree.patch(texts(&|i| if i == 2 { "a much longer label that wraps inside its row ".repeat(3) } else { label(i) })).unwrap();
+    fresh.patch(texts(&|i| if i == 2 { "a much longer label that wraps inside its row ".repeat(3) } else { label(i) })).unwrap();
+    tree.compute(400.0, 300.0).unwrap();
+    fresh.compute(400.0, 300.0).unwrap();
+    assert_eq!(rects(&tree), rects(&fresh));
+}

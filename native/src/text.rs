@@ -871,6 +871,10 @@ pub struct TextEngine {
     /// is presented (`Tree::release_retired_text`): freeing a list's worth of them held up the
     /// update that replaced them.
     pub(crate) retired: Vec<Arc<Layout<TextBrush>>>,
+    /// Texts whose layout was dropped while far offscreen (`evict`), with their first
+    /// baseline: their sizes stay in `measure_cache`, and `prepare` shapes them again when
+    /// they are needed (`Tree::ensure_text`).
+    pub(crate) evicted: HashMap<String, Option<f32>>,
     markdown_lines: HashMap<String, Vec<MarkdownLine>>,
     /// The style hash each markdown's lines were shaped with.
     markdown_styles: HashMap<String, u64>,
@@ -912,7 +916,7 @@ pub struct TextEngine {
     /// Text nodes laid out on their source lines (`white-space: nowrap | pre`).
     nowrap: HashSet<String>,
     /// `lineClamp` per text node.
-    clamps: HashMap<String, usize>,
+    pub(crate) clamps: HashMap<String, usize>,
     /// How `draw` last broke and aligned each layout (wrap width bits, alignment). Anything
     /// else that breaks or replaces a layout forgets it here.
     drawn: HashMap<String, (u32, parley::Alignment)>,
@@ -923,7 +927,7 @@ pub struct TextEngine {
     /// `style_hash`: each text's style and its hash.
     style_hashes: HashMap<String, (crate::protocol::NodeStyle, u64)>,
     /// Ellipsized layout per text node and paint width; `None` when it fits.
-    truncated: HashMap<String, (u32, Option<Layout<TextBrush>>)>,
+    pub(crate) truncated: HashMap<String, (u32, Option<Layout<TextBrush>>)>,
     /// Long text areas shaped in chunks of whole lines (`chunks.rs`); their `layouts` entry is empty.
     chunked: HashMap<String, ChunkedText>,
     /// The length from which a text area is chunked (tests compare with one layout).
@@ -1441,6 +1445,7 @@ impl TextEngine {
             context: LayoutContext::new(),
             layouts: HashMap::default(),
             retired: Vec::new(),
+            evicted: HashMap::default(),
             markdown_lines: HashMap::default(),
             markdown_styles: HashMap::default(),
             markdown_scroll: HashMap::default(),
@@ -1476,6 +1481,7 @@ impl TextEngine {
         }
     }
     pub fn prepare(&mut self, node: &Node) {
+        self.evicted.remove(&node.id);
         if let Some(cache) = self.measure_cache.get_mut(&node.id) {
             cache.sizes.clear();
             cache.natural = None;
@@ -2081,6 +2087,50 @@ impl TextEngine {
         self.unwrapped_code.retain(|id| keep(id));
         self.diff_column_widths.retain(|id, _| keep(id));
         self.chunked.retain(|id, _| keep(id));
+        self.evicted.retain(|id, _| keep(id));
+    }
+
+    /// Drops a plain text's layout, keeping its measured sizes and first baseline (`evicted`).
+    /// The layout is shaped again when it is needed. False when there is none to drop.
+    pub(crate) fn evict(&mut self, id: &str) -> bool {
+        let baseline = self.first_baseline(id);
+        let Some(layout) = self.layouts.remove(id) else {
+            return false;
+        };
+        // The recent-shapes cache would keep it alive: dropped there too unless shared.
+        if let Some(&(content, style)) = self.signatures.get(id) {
+            for button in [false, true] {
+                let key = (content, style, button);
+                if self.recent.peek(&key).is_some_and(|recent| Arc::ptr_eq(recent, &layout) && Arc::strong_count(&layout) == 2) {
+                    self.recent.pop(&key);
+                }
+            }
+        }
+        drop(layout);
+        self.drawn.remove(id);
+        self.unwrapped.remove(id);
+        self.prealigned.remove(id);
+        self.evicted.insert(id.to_string(), baseline);
+        true
+    }
+
+    /// A size `measure` would give without a layout: the cached one, if any.
+    pub(crate) fn cached_size(&self, id: &str, width: Option<f32>) -> Option<(f32, f32)> {
+        let wrap = if self.nowrap.contains(id) {
+            None
+        } else {
+            width.map(|w| w.max(0.0))
+        };
+        let cache = self.measure_cache.get(id)?;
+        let key = wrap.map(f32::to_bits);
+        if let Some((_, size)) = cache.sizes.iter().find(|(width, _)| *width == key) {
+            return Some(*size);
+        }
+        match (wrap, cache.natural) {
+            (Some(w), Some((natural, size))) if w >= natural => Some(size),
+            (None, Some((_, size))) => Some(size),
+            _ => None,
+        }
     }
     pub fn measure(&mut self, id: &str, width: Option<f32>) -> (f32, f32) {
         if let Some((measured_width, height)) =
@@ -2095,7 +2145,8 @@ impl TextEngine {
             return size;
         }
         let Some(layout) = self.layouts.get(id) else {
-            return (0.0, 0.0);
+            // Dropped offscreen (`evict`): its sizes are kept.
+            return self.cached_size(id, width).unwrap_or((0.0, 0.0));
         };
         // A `Code` block never wraps: its width is its content and the block
         // scrolls sideways instead. Measuring it at a viewport width would
@@ -3291,6 +3342,9 @@ impl TextEngine {
     /// The first line's baseline from the top of the text's content box, as last broken by
     /// `measure`: what `align: baseline` lines up. `None` before the text has lines.
     pub fn first_baseline(&self, id: &str) -> Option<f32> {
+        if let Some(baseline) = self.evicted.get(id) {
+            return *baseline;
+        }
         if let Some(lines) = self.markdown_lines.get(id) {
             let line = lines.first()?;
             return Some(line.y + line.layout.lines().next()?.metrics().baseline);
