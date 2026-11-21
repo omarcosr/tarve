@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Input, Text, Window } from "../components";
+import { Column, Input, Row, Text, View, Window } from "../components";
 import { compileTree } from "../reconciler";
-import { editShadowNode, nativeShadow, reconciliationCommand } from "./shadow";
+import { editShadowNode, nativeShadow, reconciliationCommand, splitTextSets } from "./shadow";
 
 describe("nativeShadow", () => {
   test("shares the compiled nodes until native edits one", () => {
@@ -66,5 +66,35 @@ describe("nativeShadow", () => {
     const restored = nativeShadow(committed, observed);
     // A controlled field goes back to the app's value; nothing of the edit survives.
     expect(restored.nodes.get("q")?.value).toBe("v");
+  });
+});
+
+describe("splitTextSets", () => {
+  const view = (tick: number, color: string) => <Window title="w"><Column>
+    <View id="marker" style={{ width: 10, height: 10, background: color }} />
+    {Array.from({ length: 6 }, (_, i) => <Row key={i} style={{ height: 20 }}><Text style={{ flex: 1 }}>Row {i}: {tick}</Text></Row>)}
+  </Column></Window>;
+
+  test("texts patched in place go as text sets, the rest as a patch", () => {
+    const scope = {};
+    compileTree(view(0, "#f00"), false, "auto", [], scope);
+    const first = compileTree(view(1, "#f00"), false, "auto", [], scope);
+    const next = compileTree(view(2, "#0f0"), false, "auto", [], scope);
+    const command = reconciliationCommand(nativeShadow(first), next)!;
+    const split = splitTextSets(nativeShadow(first), command)!;
+    expect(split).toBeDefined();
+    const sets = (split.sets as unknown as { nodes: { id: string; text?: string; style?: unknown }[] }).nodes;
+    expect(sets.map(set => set.text)).toEqual(Array.from({ length: 6 }, (_, i) => `Row ${i}: 2`));
+    expect(sets.every(set => set.style === undefined)).toBe(true);
+    expect(split.rest).toEqual({ type: "patch", nodes: [expect.objectContaining({ id: "marker" })] });
+  });
+
+  test("a text whose style changed too stays in the patch", () => {
+    const scope = {};
+    const styled = (tick: number, flex: number) => <Window title="w"><Column>{[0, 1].map(i => <Row key={i}><Text style={{ flex }}>{tick}</Text></Row>)}</Column></Window>;
+    compileTree(styled(0, 1), false, "auto", [], scope);
+    const first = compileTree(styled(1, 1), false, "auto", [], scope);
+    const next = compileTree(styled(2, 2), false, "auto", [], scope);
+    expect(splitTextSets(nativeShadow(first), reconciliationCommand(nativeShadow(first), next)!)).toBeUndefined();
   });
 });

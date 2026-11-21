@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Button, Text, View, Window } from "./index";
+import { Button, Column, Row, Scroll, Text, View, Window } from "./index";
 import { compileTree } from "./reconciler";
+import type { VNode } from "./jsx-runtime";
 
 describe("automatic memo of list items", () => {
   const grid = (changed: number, label: string, extra?: (i: number) => unknown) => <Window title="grid">
@@ -55,5 +56,62 @@ describe("automatic memo of list items", () => {
     expect(next.nodes.get(id(1))).toBe(first.nodes.get(id(1)));
     expect(next.nodes.get(id(0))).not.toBe(first.nodes.get(id(0)));
     expect([...next.nodes.values()].some(node => node.kind === "button" && node.text === "b")).toBe(true);
+  });
+});
+
+describe("automatic memo: items whose texts alone changed are patched", () => {
+  const row = (i: number, label: unknown, tick: number) => <Row key={i} style={{ height: 36 }} gap={12}>
+    <Text style={{ flex: 1 }}>Record {i}: {label as never} {tick}</Text>
+    <Button size="sm">Open</Button>
+  </Row>;
+  const list = (tick: number, label: (i: number) => unknown = () => "text", count = 20) =>
+    <Window title="list"><Column><Scroll id="s"><Column>{Array.from({ length: count }, (_, i) => row(i, label(i), tick))}</Column></Scroll></Column></Window>;
+
+  /** The scoped (memoized, patched) compile must equal a compile from scratch, render after render. */
+  function expectSameAsFresh(views: (() => VNode)[]): void {
+    const scope = {};
+    for (const view of views) {
+      const memoized = compileTree(view(), false, "auto", [], scope);
+      const fresh = compileTree(view(), false, "auto", []);
+      expect(memoized.document).toEqual(fresh.document);
+      expect([...memoized.nodes.keys()].sort()).toEqual([...fresh.nodes.keys()].sort());
+      for (const [id, node] of memoized.nodes) expect(node).toEqual(fresh.nodes.get(id)!);
+    }
+  }
+
+  test("a changed text is patched and the rest of the item is reused", () => {
+    const scope = {};
+    compileTree(list(0), false, "auto", [], scope);
+    const first = compileTree(list(1), false, "auto", [], scope);
+    const next = compileTree(list(2), false, "auto", [], scope);
+    const rowId = "s/children/children/k:3";
+    const text = (tree: typeof next) => [...tree.nodes.values()].find(node => node.kind === "text" && node.id.startsWith(rowId + "/"))!;
+    expect(text(next).text).toBe("Record 3: text 2");
+    expect(text(next)).not.toBe(text(first));
+    const button = (tree: typeof next) => [...tree.nodes.values()].find(node => node.kind === "button" && node.id.startsWith(rowId + "/"))!;
+    expect(button(next)).toBe(button(first));
+    expect(next.nodes.get(rowId)!.children).toContain(text(next));
+  });
+
+  test("patched renders compile exactly what a fresh compile does", () => {
+    expectSameAsFresh([
+      () => list(0), () => list(1), () => list(2), () => list(2),
+      // Whitespace collapses, numbers, empty strings.
+      () => list(3, i => i % 2 ? "two  spaces" : 7), () => list(3, i => i % 3 ? "" : "x"),
+      // A text that becomes an element (not plain) and back.
+      () => list(4, i => i === 2 ? <strong>bold</strong> : "t"), () => list(5), () => list(6),
+      // Structure and style changes, fewer items, more items.
+      () => list(7, () => "t", 10), () => list(8, () => "t", 25), () => list(9, () => "u", 25),
+    ]);
+  });
+
+  test("a style change next to a text change compiles the item again", () => {
+    const scope = {};
+    const view = (tick: number, flex: number) => <Window title="w"><Column>{[0, 1].map(i => <Row key={i}><Text style={{ flex }}>{tick}</Text></Row>)}</Column></Window>;
+    compileTree(view(0, 1), false, "auto", [], scope);
+    compileTree(view(1, 1), false, "auto", [], scope);
+    const next = compileTree(view(2, 2), false, "auto", [], scope);
+    const texts = [...next.nodes.values()].filter(node => node.kind === "text");
+    expect(texts.map(node => [node.text, node.style.flex])).toEqual([["2", 2], ["2", 2]]);
   });
 });

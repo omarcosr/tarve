@@ -1700,6 +1700,12 @@ pub struct Tree {
     #[cfg(test)]
     pub highlight_searches: u64,
     highlight_dirty: bool,
+    /// Set by the window's frame loop: a layout may then leave text changes inside offscreen
+    /// layout boundaries to `finish_deferred_layout`, run once the frame is presented.
+    pub(crate) defer_offscreen: bool,
+    /// Those boundaries, and the texts inside them still to shape and lay out.
+    pub(crate) deferred_boundaries: Vec<String>,
+    pub(crate) deferred_texts: HashSet<String>,
     images: HashMap<String, ImageData>,
     /// The current picture of each `<video>`, by node id (set by the runtime).
     video_frames: HashMap<String, crate::video::VideoFrame>,
@@ -2047,6 +2053,9 @@ impl Tree {
             #[cfg(test)]
             highlight_searches: 0,
             highlight_dirty: true,
+            defer_offscreen: false,
+            deferred_boundaries: Vec::new(),
+            deferred_texts: HashSet::default(),
             images: HashMap::default(),
             video_frames: HashMap::default(),
             video_display: HashMap::default(),
@@ -3868,6 +3877,8 @@ impl Tree {
         std::mem::take(&mut self.pending_interaction_events)
     }
     pub fn compute(&mut self, width: f32, height: f32) -> Result<(), String> {
+        // What the last frame left offscreen goes first: this layout starts from a whole tree.
+        self.finish_deferred_layout()?;
         self.compute_layout(width, height)?;
         if !self.scroll_requests.is_empty() {
             self.apply_scroll_requests();
@@ -3935,11 +3946,16 @@ impl Tree {
             }
             return Ok(());
         }
-        self.text.prepare_dirty(
-            self.entries
-                .values()
-                .filter(|entry| entry.measure_dirty)
-                .map(|entry| &*entry.node),
+        if self.defer_offscreen && !self.dirty.full && self.laid_out_size == Some((width, height))
+        {
+            self.defer_offscreen_texts(width, height);
+        }
+        let (text, entries, deferred) = (&mut self.text, &self.entries, &self.deferred_texts);
+        text.prepare_dirty(
+            entries
+                .iter()
+                .filter(|(id, entry)| entry.measure_dirty && !deferred.contains(id.as_str()))
+                .map(|(_, entry)| &*entry.node),
         );
         if !self.dirty.full && self.laid_out_size == Some((width, height)) {
             self.settle_same_size_texts();
@@ -3954,6 +3970,8 @@ impl Tree {
             self.dirty.paint = true;
             return Ok(());
         }
+        // The whole tree lays out: the texts left for after the frame are part of it.
+        self.prepare_deferred_texts();
         self.laid_out_size = None;
         let root = self.build_layout(&self.root.clone(), Some((width, height)))?;
         let text = &mut self.text;
@@ -4000,10 +4018,16 @@ impl Tree {
     /// laid out at their natural size qualify, whose min- and max-content are that size, so
     /// no line of the flex algorithm can come out differently.
     fn settle_same_size_texts(&mut self) {
-        let (entries, text, layout) = (&mut self.entries, &mut self.text, &self.layout);
+        let (entries, text, layout, deferred) = (
+            &mut self.entries,
+            &mut self.text,
+            &self.layout,
+            &self.deferred_texts,
+        );
         for (id, entry) in entries.iter_mut() {
             let candidate =
-                entry.measure_dirty
+                !deferred.contains(id.as_str())
+                    && entry.measure_dirty
                     && !entry.layout_dirty
                     && !entry.structure_dirty
                     && entry.node.kind == "text"
@@ -4048,15 +4072,20 @@ impl Tree {
         ) else {
             return false;
         };
-        let (Some(width), Some(height)) = (
-            style.size.width.into_option(),
-            style.size.height.into_option(),
-        ) else {
+        let Some(height) = style.size.height.into_option() else {
             return false;
         };
+        // No width of its own: a column stretching it across a width its content cannot change
+        // (a list row of fixed height) places and sizes it the same too.
+        let width = style.size.width.into_option();
+        if width.is_none() && !self.stretched_across_fixed_width(style, parent) {
+            return false;
+        }
         // Block parents collapse a first child's margin through it; baseline alignment and
-        // min/max sizes read its content.
-        if parent_style.display != Display::Flex
+        // min/max sizes read its content. A flex basis of its own would size it instead of
+        // its height, down to its content.
+        if !style.flex_basis.is_auto()
+            || parent_style.display != Display::Flex
             || style.display == Display::None
             || style.box_sizing != BoxSizing::BorderBox
             || style.aspect_ratio.is_some()
@@ -4075,15 +4104,69 @@ impl Tree {
         }
         // It came out at its specified size: neither grown nor shrunk by its line.
         let size = self.layout.unrounded_layout(layout_id).size;
-        size.width == width && size.height == height
+        width.is_none_or(|width| size.width == width) && size.height == height
+    }
+
+    /// A box with an automatic width that a single-line flex column `parent` stretches across
+    /// itself, where the column's own width depends on nothing it holds (see `width_independent`).
+    fn stretched_across_fixed_width(&self, style: &taffy::Style, parent: &str) -> bool {
+        let Some(parent_style) = self
+            .entries
+            .get(parent)
+            .and_then(|entry| entry.layout_id)
+            .and_then(|layout_id| self.layout.style(layout_id).ok())
+        else {
+            return false;
+        };
+        let stretched = style
+            .align_self
+            .or(parent_style.align_items)
+            .is_none_or(|align| align.keyword == taffy::AlignItemsKeyword::Stretch);
+        parent_style.display == Display::Flex
+            && matches!(
+                parent_style.flex_direction,
+                taffy::FlexDirection::Column | taffy::FlexDirection::ColumnReverse
+            )
+            && parent_style.flex_wrap == taffy::FlexWrap::NoWrap
+            && stretched
+            && style.size.width.is_auto()
+            && style.min_size.width.is_auto()
+            && style.max_size.width.is_auto()
+            && !style.margin.left.is_auto()
+            && !style.margin.right.is_auto()
+            && self.width_independent(parent)
+    }
+
+    /// The width of `id` follows from the window and fixed widths alone, never from content:
+    /// a fixed width, the window itself, or a box stretched across such a column.
+    fn width_independent(&self, id: &str) -> bool {
+        let Some(entry) = self.entries.get(id) else {
+            return false;
+        };
+        let Some(style) = entry
+            .layout_id
+            .and_then(|layout_id| self.layout.style(layout_id).ok())
+        else {
+            return false;
+        };
+        if style.size.width.into_option().is_some()
+            && style.min_size.width.is_auto()
+            && style.max_size.width.is_auto()
+        {
+            return true;
+        }
+        match entry.parent.as_deref() {
+            None => true,
+            Some(parent) => self.stretched_across_fixed_width(style, parent),
+        }
     }
 
     /// Lays out again only inside the layout boundaries that hold every change (see
     /// `layout_boundary`), when there are such. False when the tree needs a full layout.
     fn compute_within_boundaries(&mut self) -> Result<bool, String> {
         let mut boundaries: Vec<String> = Vec::new();
-        let mut seen: HashSet<&str> = HashSet::default();
-        for entry in self.entries.values() {
+        let mut seen: HashSet<String> = HashSet::default();
+        for (id, entry) in &self.entries {
             if entry.node.virtual_list.is_some() || entry.node.report_size {
                 return Ok(false);
             }
@@ -4091,6 +4174,8 @@ impl Tree {
                 || entry.structure_dirty
                 || entry.measure_dirty
                 || entry.layout_id.is_none())
+                // Left for after the frame (`defer_offscreen_texts`).
+                || self.deferred_texts.contains(id.as_str())
             {
                 continue;
             }
@@ -4104,8 +4189,27 @@ impl Tree {
                 }
                 ancestor = self.entries[candidate].parent.as_deref();
             };
-            if seen.insert(found) {
+            if seen.insert(found.to_string()) {
                 boundaries.push(found.to_string());
+            }
+        }
+        // A deferred boundary inside one that lays out now would lay out with stale texts:
+        // nothing is deferred then.
+        let deferred_inside = self.deferred_boundaries.iter().any(|id| {
+            let mut ancestor = Some(id.as_str());
+            while let Some(candidate) = ancestor {
+                if seen.contains(candidate) {
+                    return true;
+                }
+                ancestor = self.entries[candidate].parent.as_deref();
+            }
+            false
+        });
+        if deferred_inside {
+            for id in self.prepare_deferred_texts() {
+                if seen.insert(id.clone()) {
+                    boundaries.push(id);
+                }
             }
         }
         // Nothing an entry records needs layout (texts that kept their size, say): done.
@@ -4129,7 +4233,19 @@ impl Tree {
                 true
             })
             .collect();
-        for id in &boundaries {
+        if !self.lay_out_boundaries(&boundaries)? {
+            return Ok(false);
+        }
+        self.ensure_focused_textarea_caret_visible();
+        self.resolve_highlights();
+        self.highlight_dirty = false;
+        Ok(true)
+    }
+
+    /// Lays out each boundary's subtree at the size it has and places it; false (nothing
+    /// placed) when one came out at another size, and the whole tree has to lay out.
+    fn lay_out_boundaries(&mut self, boundaries: &[String]) -> Result<bool, String> {
+        for id in boundaries {
             let layout_id = self.build_layout(id, None)?;
             let text = &mut self.text;
             let nodes = &self.entries;
@@ -4147,7 +4263,7 @@ impl Tree {
                 return Ok(false);
             }
         }
-        for id in &boundaries {
+        for id in boundaries {
             self.mark_paint_changed(id);
             let parent_origin = self.absolute_origin(self.entries[id].parent.as_deref())?;
             let bounds = self.positions(id, parent_origin)?;
@@ -4161,9 +4277,131 @@ impl Tree {
                 ancestor = entry.parent.clone();
             }
         }
-        self.ensure_focused_textarea_caret_visible();
-        self.resolve_highlights();
-        self.highlight_dirty = false;
+        Ok(true)
+    }
+
+    /// Defers the texts that changed inside offscreen layout boundaries (see `layout_boundary`),
+    /// where nothing else changed: such a boundary keeps its size, so nothing outside it moves,
+    /// and none of it shows. `finish_deferred_layout` shapes and lays them out once the frame
+    /// with what shows is presented: a list whose every row changed paints its visible rows first.
+    fn defer_offscreen_texts(&mut self, width: f32, height: f32) {
+        self.deferred_boundaries.clear();
+        self.deferred_texts.clear();
+        let (x0, y0) = (f64::from(self.viewport.0), f64::from(self.viewport.1));
+        let window = BoxRect::new(x0, y0, x0 + f64::from(width), y0 + f64::from(height));
+        // Boundary → whether it qualifies; the texts each one would defer.
+        let mut verdicts: HashMap<String, bool> = HashMap::default();
+        let mut texts: Vec<(String, String)> = Vec::new();
+        for (id, entry) in &self.entries {
+            if entry.node.virtual_list.is_some() || entry.node.report_size {
+                return;
+            }
+            if !(entry.layout_dirty
+                || entry.structure_dirty
+                || entry.measure_dirty
+                || entry.layout_id.is_none())
+            {
+                continue;
+            }
+            let mut ancestor = entry.parent.as_deref();
+            let boundary = loop {
+                let Some(candidate) = ancestor else {
+                    // The whole tree lays out: nothing to defer.
+                    return;
+                };
+                if self.layout_boundary(candidate) {
+                    break candidate;
+                }
+                ancestor = self.entries[candidate].parent.as_deref();
+            };
+            let plain_text = entry.measure_dirty
+                && !entry.layout_dirty
+                && !entry.structure_dirty
+                && entry.layout_id.is_some()
+                && matches!(entry.node.kind.as_str(), "text" | "button");
+            if !plain_text {
+                verdicts.insert(boundary.to_string(), false);
+                continue;
+            }
+            verdicts.entry(boundary.to_string()).or_insert(true);
+            texts.push((id.clone(), boundary.to_string()));
+        }
+        for (boundary, verdict) in verdicts.iter_mut() {
+            if *verdict {
+                *verdict = self.offscreen_and_plain(boundary, window);
+            }
+        }
+        for (text, boundary) in texts {
+            if verdicts[&boundary] {
+                self.deferred_texts.insert(text);
+            }
+        }
+        self.deferred_boundaries = verdicts
+            .into_iter()
+            .filter_map(|(boundary, verdict)| verdict.then_some(boundary))
+            .collect();
+    }
+
+    /// Nothing of the boundary shows in the window, and it holds nothing placed outside the
+    /// tree's own painting (a video, a native surface, a text field's caret and IME box).
+    fn offscreen_and_plain(&self, boundary: &str, window: BoxRect) -> bool {
+        let Some(rect) = self.visible_rect(boundary) else {
+            return false;
+        };
+        if rect.x1 > window.x0 && rect.x0 < window.x1 && rect.y1 > window.y0 && rect.y0 < window.y1
+        {
+            return false;
+        }
+        // A list row is a handful of nodes; a large subtree is not worth walking.
+        let mut stack = vec![boundary];
+        let mut walked = 0;
+        while let Some(id) = stack.pop() {
+            walked += 1;
+            let Some(entry) = self.entries.get(id) else {
+                return false;
+            };
+            if walked > 64
+                || matches!(
+                    entry.node.kind.as_str(),
+                    "video" | "surface" | "input" | "textarea"
+                )
+                || self.focused.as_deref() == Some(id)
+            {
+                return false;
+            }
+            stack.extend(entry.children.iter().map(String::as_str));
+        }
+        true
+    }
+
+    /// Shapes the deferred texts now and gives back their boundaries, deferring nothing.
+    fn prepare_deferred_texts(&mut self) -> Vec<String> {
+        let texts = std::mem::take(&mut self.deferred_texts);
+        let (text, entries) = (&mut self.text, &self.entries);
+        text.prepare_dirty(
+            texts
+                .iter()
+                .filter_map(|id| entries.get(id))
+                .filter(|entry| entry.measure_dirty)
+                .map(|entry| &*entry.node),
+        );
+        std::mem::take(&mut self.deferred_boundaries)
+    }
+
+    /// Lays out what the last layout left offscreen (`defer_offscreen_texts`), for the frame
+    /// after the one that left it: the window loop calls it once that frame is presented, and
+    /// every `compute` before laying out anything else.
+    pub(crate) fn finish_deferred_layout(&mut self) -> Result<bool, String> {
+        if self.deferred_boundaries.is_empty() {
+            return Ok(false);
+        }
+        let boundaries = self.prepare_deferred_texts();
+        if !self.lay_out_boundaries(&boundaries)? {
+            // A text that measured unlike its box after all: the next layout is a whole one.
+            self.dirty.full = true;
+            self.dirty.layout = true;
+        }
+        self.dirty.paint = true;
         Ok(true)
     }
 

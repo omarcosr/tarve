@@ -1274,6 +1274,7 @@ impl App {
             transparency_effects: None,
             frame_stats: Default::default(),
             accessibility_pending: false,
+            accessibility_after_frame: false,
             updated_since_frame: false,
             last_accessibility_sync: Instant::now(),
             accessibility_interval: ACCESSIBILITY_INTERVAL,
@@ -1475,6 +1476,9 @@ struct App {
     frame_stats: crate::stats::FrameStats,
     /// An app update changed the tree since the accessibility tree was last updated.
     accessibility_pending: bool,
+    /// A mouse button changed what assistive technology sees (focus, say): it is told after
+    /// the next frame is presented, so the click reaches the app and the screen first.
+    accessibility_after_frame: bool,
     /// An app update arrived since the last `frame` event.
     updated_since_frame: bool,
     last_accessibility_sync: Instant,
@@ -2870,7 +2874,11 @@ impl App {
             self.events.push(json!({"type":"frame", "frames":frames}));
         }
         self.advance_live_motion();
-        let content_changed = match self.prepare() {
+        // Offscreen text changes may wait until this frame is presented (see below).
+        self.tree.defer_offscreen = true;
+        let prepared = self.prepare();
+        self.tree.defer_offscreen = false;
+        let content_changed = match prepared {
             Ok(content_changed) => content_changed,
             Err(error) => {
                 self.handle_render_error(event_loop, error);
@@ -2935,6 +2943,21 @@ impl App {
                 self.sync_control_flow(event_loop);
             }
             Err(error) => self.handle_render_error(event_loop, error),
+        }
+        // What the layout left offscreen (Tree::finish_deferred_layout) lays out now, before
+        // any event reads it; a frame after this one paints it where it shows.
+        match self.tree.finish_deferred_layout() {
+            Ok(true) => {
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            Ok(false) => {}
+            Err(message) => self.events.push(error(message)),
+        }
+        if self.accessibility_after_frame {
+            self.accessibility_after_frame = false;
+            self.sync_accessibility();
         }
     }
     fn sync_cursor(&mut self) {
@@ -4168,6 +4191,19 @@ impl ApplicationHandler<Command> for App {
             self.advance_live_motion();
         }
         let gpu_redraw = self.poll_gpu_check();
+        // No frame is coming to tell assistive technology after (redraw_frame): tell it now.
+        if self.accessibility_after_frame
+            && (self.parked
+                || self.minimized()
+                || !matches!(self.graphics, GraphicsState::Ready(_))
+                || !(self.tree.dirty.paint
+                    || self.tree.dirty.layout
+                    || self.tree.dirty.text
+                    || self.input_hold.is_some()))
+        {
+            self.accessibility_after_frame = false;
+            self.sync_accessibility();
+        }
         if self.accessibility_pending
             && self.last_accessibility_sync.elapsed() >= self.accessibility_interval
         {
@@ -4200,6 +4236,7 @@ impl ApplicationHandler<Command> for App {
         ) {
             self.sync_input_clock();
         }
+        let pointer_button = matches!(event, WindowEvent::MouseInput { .. });
         // A release or key a JS handler may answer: hold its frame for that patch.
         let holds_for_js = matches!(
             event,
@@ -4613,7 +4650,13 @@ impl ApplicationHandler<Command> for App {
         }
         self.emit(events);
         if accessibility_changed {
-            self.sync_accessibility();
+            // A whole-tree accessibility update on a large tree takes milliseconds: done on a
+            // press, it held the release (and the app's answer to the click) back.
+            if pointer_button {
+                self.accessibility_after_frame = true;
+            } else {
+                self.sync_accessibility();
+            }
             self.layout_hidden_window();
         }
         self.sync_cursor();

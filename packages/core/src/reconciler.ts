@@ -8,7 +8,7 @@ import { Text } from "./components/text";
 import { serializeImageSource } from "./components/image";
 import { parseTransform } from "./css-shadow";
 import { withRenderScope } from "./render-scope";
-import { MEMO, sameVNode, type MemoInfo } from "./memo";
+import { MEMO, pureRoot, sameVNode, sameVNodeExceptText, TEXT_SLOT, type MemoInfo } from "./memo";
 import { isSignal, type Signal } from "./signal";
 import { openExternal } from "./bridge";
 import { compileInline, type InlineContext } from "./inline-text";
@@ -164,7 +164,37 @@ interface MemoEntry {
   breakpoint?: string;
   /** "index/count" of the list position a template's element was styled for (first/last/odd/even). */
   position?: string;
+  /** Plain texts in the subtree (automatic memos only): what an item whose texts alone changed patches. */
+  texts?: TextSlots;
 }
+
+/** The plain text nodes of a compiled item and the VNodes whose children they show. */
+interface TextSlots {
+  /** The text component VNode in the item, by slot. */
+  owners: VNode[];
+  /** Its compiled text node, by slot. */
+  nodes: NativeNode[];
+}
+/** What autoMemoItem found when only some slots' texts changed: the new owners and children by slot. */
+interface TextPatch { owners: (VNode | undefined)[]; children: unknown[] }
+/** A node with the replaced descendants swapped in; copied (and itself replaced) only above a change. */
+function patchNode(node: NativeNode, replaced: Map<string, NativeNode>): NativeNode {
+  const own = replaced.get(node.id);
+  if (own) return own;
+  const children = node.children;
+  if (!children || children.length === 0) return node;
+  let next: NativeNode[] | undefined;
+  for (let index = 0; index < children.length; index++) {
+    const child = children[index]!;
+    const patched = patchNode(child, replaced);
+    if (patched !== child) (next ??= children.slice())[index] = patched;
+  }
+  if (!next) return node;
+  const copy: NativeNode = { ...node, children: next };
+  replaced.set(node.id, copy);
+  return copy;
+}
+
 const memoStores = new WeakMap<object, Map<string, MemoEntry>>();
 const EMPTY_ENTRIES: readonly [string, unknown][] = Object.freeze([]) as readonly [string, unknown][];
 
@@ -174,7 +204,7 @@ const EMPTY_ENTRIES: readonly [string, unknown][] = Object.freeze([]) as readonl
  * render's (`sameVNode`) reuses its compiled nodes, as `memo` would. A grid where one cell
  * of thousands changes compiles and diffs one cell.
  */
-const AUTO_MEMO: MemoInfo<{ vnode: VNode; same: boolean }> = {
+const AUTO_MEMO: MemoInfo<{ vnode: VNode; same: boolean; owners?: (VNode | undefined)[]; patch?: TextPatch }> = {
   render: props => props.vnode,
   // Compared once, before visitMemo (which counts on it).
   equal: (_previous, next) => next.same,
@@ -256,9 +286,20 @@ export function compileTree(
   /** memoSeen in insertion order: a memo entry's nested paths are a slice, not a walk of the whole set. */
   const memoOrder: string[] = [];
   function seeMemo(path: string): void {
-    if (memoSeen.has(path)) return;
-    memoSeen.add(path); memoOrder.push(path);
+    // One hash lookup: add, and tell a new path by the grown size.
+    const size = memoSeen.size;
+    memoSeen.add(path);
+    if (memoSeen.size !== size) memoOrder.push(path);
   }
+  /**
+   * The plain texts compiled while an automatic memo's item compiles (TextSlots), in order: an
+   * item's own are the ones added since it started. `collecting` counts the items compiling.
+   */
+  const slotOwners: VNode[] = [];
+  const slotNodes: NativeNode[] = [];
+  let collecting = 0;
+  /** The text component being expanded while items collect: the owner of the text it compiles. */
+  let textOwner: VNode | undefined;
   let autoMemo: AutoMemoState | undefined;
   if (renderScope && memoStore && (typeof process === "undefined" || process.env?.TARVE_AUTO_MEMO !== "0")) {
     autoMemo = autoMemoStates.get(renderScope);
@@ -288,27 +329,48 @@ export function compileTree(
     }
   }
   function autoMemoItem(item: VNode, path: string, group: string | undefined, at: Position | undefined): NativeNode[] {
+    // An item whose own type may read state is never the same: caching it only costs.
+    if (!pureRoot(item, pureElement)) return visit(item, path, group, false, at);
     const state = autoMemo!;
     const previous = memoStore!.get(path);
     state.tries++;
     // visitMemo reuses it when equal; count the misses to know when this does not pay.
     const known = previous !== undefined && previous.render === AUTO_MEMO.render;
-    const same = known && sameVNode((previous.props as { vnode: VNode }).vnode, item, pureElement);
+    let same = false;
+    let owners: (VNode | undefined)[] | undefined;
+    let patch: TextPatch | undefined;
+    if (known && previous.texts) {
+      // One walk tells equal, texts-only changes (patched in place) and anything else apart.
+      const slots = previous.texts;
+      const found: (VNode | undefined)[] = new Array(slots.owners.length);
+      const children: unknown[] = new Array(slots.owners.length);
+      if (sameVNodeExceptText((previous.props as { vnode: VNode }).vnode, item, pureElement, slots.owners, found, children)) {
+        let changed = false;
+        for (let slot = 0; slot < children.length; slot++) if (children[slot] !== undefined) { changed = true; break; }
+        if (changed) patch = { owners: found, children };
+        else { same = true; owners = found; }
+      }
+    } else if (known) same = sameVNode((previous.props as { vnode: VNode }).vnode, item, pureElement);
     // An item seen for the first time is no evidence either way.
     if (!known) state.tries--;
-    else if (!same) state.misses++;
-    return visitMemo(memoStore!, AUTO_MEMO as MemoInfo<object>, { vnode: item, same }, path, group, at);
+    else if (!same && !patch) state.misses++;
+    return visitMemo(memoStore!, AUTO_MEMO as MemoInfo<object>, { vnode: item, same, owners, patch }, path, group, at);
   }
   function visitMemo(store: Map<string, MemoEntry>, info: MemoInfo<object>, props: object, path: string, group?: string, position?: Position): NativeNode[] {
     const at = position ? position.index + "/" + position.count : "";
     seeMemo(path);
     const previous = store.get(path);
-    if (previous && previous.render === info.render && previous.group === group && previous.theme === selectedTheme
+    const sameContext = previous !== undefined && previous.render === info.render && previous.group === group && previous.theme === selectedTheme
       && previous.form === currentForm && sameValue(previous.font, inheritedFont)
       // A subtree with breakpoint styles is reused only at the breakpoint it was styled for.
       && (previous.breakpoint === undefined || previous.breakpoint === currentBreakpoint(previous.breakpoint.includes("x")))
-      && (previous.position === undefined || previous.position === at)
-      && info.equal(previous.props, props)) {
+      && (previous.position === undefined || previous.position === at);
+    // An automatic memo whose item changed only some texts: the same nodes, those texts patched.
+    const autoProps = info === (AUTO_MEMO as MemoInfo<object>) ? props as { vnode: VNode; owners?: (VNode | undefined)[]; patch?: TextPatch } : undefined;
+    const patched = sameContext && autoProps?.patch && previous!.texts ? patchTexts(previous!, autoProps.patch) : undefined;
+    if (previous && (patched || (sameContext && info.equal(previous.props, props)))) {
+      if (patched) previous.result = patched;
+      else if (autoProps?.owners && previous.texts) previous.texts.owners = autoProps.owners as VNode[];
       // It still depends on the width: the root must keep reporting resizes.
       if (previous.breakpoint !== undefined) usesViewport = true;
       // Indexed loops without destructuring: this is the whole cost of a reused subtree.
@@ -324,7 +386,15 @@ export function compileTree(
       restore(bindings, previous.bindings);
       // Memoized components nested in a reused subtree stay cached too.
       for (let index = 0; index < previous.nested.length; index++) seeMemo(previous.nested[index]!);
-      previous.props = props;
+      // An automatic memo keeps only the item: the next render compares against it.
+      previous.props = autoProps ? { vnode: autoProps.vnode, same: false } : props;
+      // An enclosing automatic memo's item contains these texts too.
+      if (collecting > 0 && previous.texts) {
+        for (let slot = 0; slot < previous.texts.owners.length; slot++) {
+          slotOwners.push(previous.texts.owners[slot]!);
+          slotNodes.push(previous.texts.nodes[slot]!);
+        }
+      }
       return previous.result;
     }
     const seenBefore = memoOrder.length;
@@ -338,6 +408,10 @@ export function compileTree(
     exactViewport = false;
     let result: NativeNode[];
     let readViewport: boolean;
+    const outerCollecting = collecting;
+    const slotStart = slotOwners.length;
+    // Plain memos hide their texts: they are compared by their own props, not as part of an item.
+    collecting = autoProps ? collecting + 1 : 0;
     let readExact = false;
     let readPosition = false;
     try {
@@ -351,6 +425,7 @@ export function compileTree(
         positionRead = outerPosition || positionRead;
       }
     } finally {
+      collecting = outerCollecting;
       readViewport = usesViewport;
       usesViewport = outerViewport || readViewport;
       readExact = exactViewport;
@@ -366,8 +441,42 @@ export function compileTree(
         nested: memoOrder.length > seenBefore ? memoOrder.slice(seenBefore) : EMPTY_ENTRIES as unknown as string[],
         ...readViewport ? { breakpoint: currentBreakpoint(readExact) } : {},
         ...readPosition && at ? { position: at } : {},
+        ...autoProps && slotOwners.length > slotStart ? { texts: { owners: slotOwners.slice(slotStart), nodes: slotNodes.slice(slotStart) } } : {},
+        ...autoProps ? { props: { vnode: autoProps.vnode, same: false } } : {},
       });
     } else store.delete(path);
+    // A plain memo's texts are its own: an enclosing item does not see them.
+    if (!autoProps) { slotOwners.length = slotStart; slotNodes.length = slotStart; }
+    return result;
+  }
+  /**
+   * The previous result of an automatic memo with the patch's texts replaced and their ancestors
+   * copied, the entry updated; undefined when a new text is not plain (runs): the item compiles.
+   */
+  function patchTexts(previous: MemoEntry, patch: TextPatch): NativeNode[] | undefined {
+    const slots = previous.texts!;
+    const replaced = new Map<string, NativeNode>();
+    const nextNodes = slots.nodes.slice();
+    for (let slot = 0; slot < patch.children.length; slot++) {
+      const children = patch.children[slot];
+      if (children === undefined) continue;
+      const old = slots.nodes[slot]!;
+      const style = old.style as Record<string, unknown>;
+      const inline = compileInline(children as Child, String(style.whiteSpace ?? "normal"), style, () => inlineContext(old.id, style));
+      if (inline.runs.length) return undefined;
+      const node: NativeNode = { ...old, text: inline.text };
+      replaced.set(old.id, node);
+      nextNodes[slot] = node;
+    }
+    const result: NativeNode[] = [];
+    for (let index = 0; index < previous.result.length; index++) result.push(patchNode(previous.result[index]!, replaced));
+    const entries = previous.nodes;
+    for (let index = 0; index < entries.length; index++) {
+      const node = replaced.get(entries[index]![0]);
+      if (node) entries[index] = [entries[index]![0], node];
+    }
+    slots.owners = patch.owners as VNode[];
+    slots.nodes = nextNodes;
     return result;
   }
   function inlineContext(textId: string, base: Record<string, unknown>): InlineContext {
@@ -433,7 +542,16 @@ export function compileTree(
     const type = child.type as Component;
     const info = (type as unknown as Record<symbol, MemoInfo<object> | undefined>)[MEMO];
     if (info && memoStore) return visitMemo(memoStore, info, child.props as object, path, group, position);
-    return visit(type(child.props), path, group, false, info?.template ? position : undefined);
+    if (collecting === 0 || (type as unknown as Record<symbol, unknown>)[TEXT_SLOT] !== true) {
+      return visit(type(child.props), path, group, false, info?.template ? position : undefined);
+    }
+    const outerOwner = textOwner;
+    textOwner = child;
+    try {
+      return visit(type(child.props), path, group, false, info?.template ? position : undefined);
+    } finally {
+      textOwner = outerOwner;
+    }
   }
   function visit(child: Child, path: string, group?: string, adapterNative = false, position?: Position): NativeNode[] {
     if (child == null || typeof child === "boolean") return [];
@@ -708,6 +826,11 @@ export function compileTree(
       const inline = compileInline(textChildren, String(style.whiteSpace ?? "normal"), style as Record<string, unknown>, () => inlineContext(id, style as Record<string, unknown>));
       node.text = inline.text;
       if (inline.runs.length) node.runs = inline.runs;
+      else if (collecting > 0 && !parts && textOwner !== undefined && textOwner.props.children === p.children) {
+        // A plain text from a text component's own children: a slot its item can patch.
+        slotOwners.push(textOwner); slotNodes.push(node);
+        textOwner = undefined;
+      }
     } else if (isText) node.text = textContent(textChildren);
     if (nativeType === "textarea" && p.richText !== undefined) {
       // A rich text area: its value styled by phrasing children, as runs over the value's text.

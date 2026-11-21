@@ -13,8 +13,10 @@ use crate::{
 };
 use base64::Engine as _;
 mod baseline;
+mod deferred_layout;
 mod gestures;
 mod input_and_scroll;
+mod layout_bench;
 mod long_press;
 mod pointer_and_icons;
 mod popups;

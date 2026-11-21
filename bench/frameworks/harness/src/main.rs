@@ -281,7 +281,9 @@ fn main() {
     let list = scene == "list";
     let t0 = Instant::now();
     let child = Command::new(&args[1]).args(&args[2..]).env("SCENE", &scene)
-        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+        .stdin(Stdio::null()).stdout(Stdio::null())
+        // STDERR=path keeps the app's stderr (TARVE_TRACE=1 timelines, say).
+        .stderr(std::env::var("STDERR").ok().and_then(|path| std::fs::File::create(path).ok()).map_or(Stdio::null(), Stdio::from))
         .creation_flags(0x0800_0000).spawn().expect("spawn");
     let root = child.id();
     let fail = |why: &str| -> ! { kill(root); println!("{}", json!({ "error": why })); std::process::exit(1) };
@@ -360,6 +362,9 @@ fn main() {
     let mut cursor = POINT { x: 0, y: 0 };
     unsafe { GetCursorPos(&mut cursor); }
     let mut lat = vec![];
+    if debug {
+        eprintln!("clicks start at {:?}", t0.elapsed());
+    }
     let mut misses = 0;
     for _ in 0..30 {
         let was = marker(hwnd);
@@ -368,7 +373,13 @@ fn main() {
         let t = Instant::now();
         click(hwnd, 124.0, 24.0);
         loop {
-            if marker(hwnd) == want { lat.push(t.elapsed().as_secs_f64() * 1000.0); break; }
+            if marker(hwnd) == want {
+                lat.push(t.elapsed().as_secs_f64() * 1000.0);
+                if debug {
+                    eprintln!("click at {:.2} ms → pixel {:.2} ms later", t.duration_since(t0).as_secs_f64() * 1000.0, lat.last().unwrap());
+                }
+                break;
+            }
             if t.elapsed() > Duration::from_secs(3) { misses += 1; break; }
         }
         sleep(Duration::from_millis(150));

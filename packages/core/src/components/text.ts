@@ -1,6 +1,6 @@
 import { jsx, type BaseProps, type BindableChild, type IntrinsicStyle, type Reactive, type VNode } from "../jsx-runtime";
 import { canonicalizeIntrinsicStyle } from "../intrinsic-style";
-import { markPure } from "../memo";
+import { markPure, markTextSlot } from "../memo";
 
 export interface TextProps extends Omit<BaseProps, "style" | "children"> {
   size?: number;
@@ -26,3 +26,5 @@ export function Text({ size, weight, color, style, ...props }: TextProps): VNode
 }
 // Its output is its props (see markPure).
 markPure(Text);
+// Its children become the native text's children and nothing else (see markTextSlot).
+markTextSlot(Text);
