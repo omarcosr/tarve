@@ -27,6 +27,28 @@ Tools added for the next steps: `bench/render` (JS cost of one update on Bun, No
 
 Still behind: disk size (metric 1, lowest priority: egui 3.5 MB, Tauri 4.1 MB, Tarve · txiki 11.5 MB) and idle RAM with 2,000 rows (metric 5: egui 70.9 MB, Tarve · txiki `lowPower` 89.3 MB).
 
+### 2026-11-22: idle RAM with 2,000 rows (metric 5) and more update margin
+
+Full run (5 per cell, windows now opened in the work area's top-left corner): Tarve is 1st in 7 of 8 metrics; only disk size is behind (lowest priority). Update: Tarve · Bun 20.6 ms, Node 20.8, Tauri 28.5, Electron 28.6. Idle RAM with the list: Tarve · txiki `lowPower` 62.1 MB. egui and Flutter stopped rendering on this machine during the session (blank windows: their OpenGL/ANGLE path), so their rows in `bench/frameworks/README.md` are from the run before; in the last session where egui still ran, the two were within noise of each other (Tarve 66, egui 65–70), so metric 5 is a lead to confirm, not a settled one.
+
+Where the 2,000-row list's memory went, and what each change took off (txiki `lowPower`, private working set, harness; commit where measured differently):
+
+| Change | Effect |
+| --- | --- |
+| Texts far offscreen give their shaped layouts back after the frame (`TextEngine::evict`, `Tree::evict_offscreen_texts`); they shape again before they paint or at a new width | commit −9 MB, private WS −2.5 MB |
+| Memo entries keep their nodes, not `[id, node]` pairs; ids only when they differ | JS commit −2 MB |
+| Equal compiled styles under the same inherited font are one object; leaves share one frozen empty `children`; automatic memos keep the item as props | JS commit −5 MB (6,004 style objects → 7); compile faster |
+| Preshape workers' `LayoutContext`s are fresh after each batch (allocated on scoped threads, kept, never reused) | −4.5 MB |
+| Taffy keeps each node's style in an `Arc`; nodes with the same interned style, kind and scroll orientation share it | native tree 8.9 → 5.8 MB, −3 MB |
+| No nested memo entries for a few (≤ 4) children of a stable memoized item (kept when it recompiles or cannot be stored) | JS commit −11 MB with the above; compile Bun 4.0 → 2.9 ms, txiki 79 → 73 ms |
+| First document writes each node style once (`styles` table before the root, protocol 64) | 1.9 → 0.6 MB of JSON; txiki JSON 25.5 → 12.7 ms; first frame with the list txiki ~470 → ~390 ms |
+
+Measured and dropped: building the first document's JSON piece by piece (`encodeJson`, to avoid one 2 MB string on QuickJS) left the start-up working set unchanged and the commit 6 MB higher; a cheaper `sameSlot` was within noise.
+
+Tools: `bench/render/memory.ts` (JS memory per stage, any runtime, sampled from outside), `MEMORY=1` in `bench/frameworks/tarve/cross.tsx` (memory stages, plus `nativeLiveMb` under `TARVE_ALLOC_TRACE`), `layout_memory` in `native/src/tests/layout_bench.rs` (native heap by part, after eviction).
+
+What is left in the list's memory (txiki `lowPower`): JS ~22 MB of working set at start (QuickJS keeps ~13 MB committed after the first `JSON.stringify` until its allocator sees activity again), the native tree ~18 MB for 6,000 nodes (`Node` is 720 bytes, taffy's per-node cache 384, ids stored several times), and the CPU renderer's frame buffers (~13 MB, the same with an empty screen).
+
 ### 2026-11-21, later: widening the update margin
 
 The full run after the commit above put Tarve · Node at 25.4 ms against Electron at 25.6 ms: a tie, not a lead. A timeline with epoch timestamps (native mouse-up, JS click, commands arriving, frame presented) split one click as mouse-up → JS click handler 0.5 ms → compile done ~9 ms → commands at native ~4 ms later (diff and send) → apply ~2.3 ms → frame ~4.5 ms → vblank and DWM. Changes since:

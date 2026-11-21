@@ -98,6 +98,8 @@ for (const [scene, title] of [["empty", "Empty screen"], ["list", "2,000 rows"]]
   for (const app of apps) full += `| ${names[app]} | ${columns.map(([key]) => row(app, scene)[key] ?? "—").join(" | ")} |\n`;
 }
 
+const earlier = [...new Set(summary.filter(row => row.fromEarlierRun).map(row => `${names[row.app]} (${String(row.fromEarlierRun).slice(0, 10)})`))];
+const earlierNote = earlier.length ? `- ${earlier.join(", ")}: from an earlier run on the same machine; in this one their windows stayed blank (their OpenGL/ANGLE rendering stopped working on this machine during the session), so their rows were kept from the run before.` : "";
 const readme = `# Cross-framework GUI benchmark
 
 The same screen built in Tarve and in 5 other GUI frameworks (Electron, Tauri, Flutter, Dioxus Native, egui), all measured from outside the process in exactly the same way.
@@ -142,6 +144,7 @@ bun bench/frameworks/report.ts         # → this README and results/
 - Update times include vsync and Windows composition (DWM), about 4 ms at 240 Hz. On the empty screen every app takes 4–12 ms.
 - An accessibility client was active on this machine (Windows asked every app for its accessibility tree), as on many desktops.
 - Dioxus Native 0.7.10 still describes itself as experimental.
+${earlierNote}
 
 ## Full data
 

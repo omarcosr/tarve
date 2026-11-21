@@ -2,9 +2,9 @@
 
 The same screen built in Tarve and in 5 other GUI frameworks (Electron, Tauri, Flutter, Dioxus Native, egui), all measured from outside the process in exactly the same way.
 
-- **Date:** 2026-11-21 · median of 5 runs per app and scene · **lower is better for every metric**
+- **Date:** 2026-11-22 · median of 5 runs per app and scene · **lower is better for every metric**
 - **Machine:** Intel Core Ultra 7 255HX, RTX 5070 Laptop, 31 GB, Windows 11 Insider 26340, 125% scaling, 240 Hz
-- **Versions:** Tarve 0.13.6 at `a1601e6` (Bun 1.4.4, Node 26.10, txiki), Electron 45.4.1 + React 19.3, Tauri 2.12 (WebView2 157) + React 19.3, Flutter 3.50.1, Dioxus Native 0.7.10, egui/eframe 0.33
+- **Versions:** Tarve 0.13.6 at `f1d055f` (Bun 1.4.4, Node 26.10, txiki), Electron 45.4.1 + React 19.3, Tauri 2.12 (WebView2 157) + React 19.3, Flutter 3.50.1, Dioxus Native 0.7.10, egui/eframe 0.33
 - **Tarve variants:** Bun, Node or txiki as the JavaScript runtime; GPU rendering by default (`auto`, D3D11) or the `lowPower` option (CPU rendering).
 
 ## Summary
@@ -12,15 +12,15 @@ The same screen built in Tarve and in 5 other GUI frameworks (Electron, Tauri, F
 | # | Metric | 1st place | Best Tarve | Tarve rank |
 | ---: | --- | --- | --- | :---: |
 | 1 | [Disk size](#1-disk-size) | egui · 3.5 MB | Tarve · txiki · 11.5 MB | 3rd of 11 |
-| 2 | [First frame, empty screen](#2-first-frame-empty-screen) | Tarve · txiki `lowPower` · 123 ms | Tarve · txiki `lowPower` · 123 ms | 1st of 11 |
-| 3 | [First frame, 2,000 rows](#3-first-frame-2000-rows) | Tarve · Bun `lowPower` · 219 ms | Tarve · Bun `lowPower` · 219 ms | 1st of 11 |
+| 2 | [First frame, empty screen](#2-first-frame-empty-screen) | Tarve · txiki `lowPower` · 120 ms | Tarve · txiki `lowPower` · 120 ms | 1st of 11 |
+| 3 | [First frame, 2,000 rows](#3-first-frame-2000-rows) | Tarve · Bun `lowPower` · 200 ms | Tarve · Bun `lowPower` · 200 ms | 1st of 11 |
 | 4 | [Idle RAM, empty screen](#4-idle-ram-empty-screen) | Tarve · txiki `lowPower` · 18.1 MB | Tarve · txiki `lowPower` · 18.1 MB | 1st of 11 |
-| 5 | [Idle RAM, 2,000 rows](#5-idle-ram-2000-rows) | egui · 65.9 MB | Tarve · txiki `lowPower` · 87.3 MB | 2nd of 11 |
+| 5 | [Idle RAM, 2,000 rows](#5-idle-ram-2000-rows) | Tarve · txiki `lowPower` · 62.1 MB | Tarve · txiki `lowPower` · 62.1 MB | 1st of 11 |
 | 6 | [GPU memory](#6-gpu-memory) | Tarve · Bun `lowPower` · 0 MB | Tarve · Bun `lowPower` · 0 MB | 1st of 11 |
-| 7 | [CPU while scrolling](#7-cpu-while-scrolling) | Tarve · Node · 23.5 % of one core | Tarve · Node · 23.5 % of one core | 1st of 11 |
-| 8 | [Update time](#8-update-time) | Tarve · Node · 25.4 ms (median) | Tarve · Node · 25.4 ms (median) | 1st of 11 |
+| 7 | [CPU while scrolling](#7-cpu-while-scrolling) | Tarve · Node · 24.3 % of one core | Tarve · Node · 24.3 % of one core | 1st of 11 |
+| 8 | [Update time](#8-update-time) | Tarve · Bun · 20.6 ms (median) | Tarve · Bun · 20.6 ms (median) | 1st of 11 |
 
-**At a glance:** Tarve is 1st in metrics 2, 3, 4, 6, 7, 8 and behind in 1, 5 (each with its best variant; see [PERFORMANCE.md](../../PERFORMANCE.md) for what changed between runs).
+**At a glance:** Tarve is 1st in metrics 2, 3, 4, 5, 6, 7, 8 and behind in 1 (each with its best variant; see [PERFORMANCE.md](../../PERFORMANCE.md) for what changed between runs).
 
 ## Size and startup
 
@@ -38,8 +38,8 @@ What has to ship (the executable and the files next to it). "Zipped" is the down
 | 6 | Flutter | 24.8 | 7.1× | 10.4 |
 | 7 | **Tarve · Node** | 114.9 | 32.8× | 43.4 |
 | 8 | **Tarve · Node `lowPower`** | 114.9 | 32.8× | 43.4 |
-| 9 | **Tarve · Bun** | 150.7 | 43.1× | 75.9 |
-| 10 | **Tarve · Bun `lowPower`** | 150.7 | 43.1× | 75.9 |
+| 9 | **Tarve · Bun** | 150.8 | 43.1× | 75.9 |
+| 10 | **Tarve · Bun `lowPower`** | 150.8 | 43.1× | 75.9 |
 | 11 | Electron | 357.1 | 102.0× | 150.9 |
 
 ### 2. First frame, empty screen
@@ -48,17 +48,17 @@ From `CreateProcess` until the content shows on screen.
 
 | # | App | ms | vs 1st | Window created (ms) |
 | ---: | --- | ---: | ---: | ---: |
-| 1 | **Tarve · txiki `lowPower`** | 123 | — | 45 |
-| 2 | **Tarve · Bun** | 129 | 1.0× | 51 |
-| 3 | **Tarve · Bun `lowPower`** | 133 | 1.1× | 55 |
-| 4 | **Tarve · txiki** | 134 | 1.1× | 58 |
+| 1 | **Tarve · txiki `lowPower`** | 120 | — | 47 |
+| 2 | **Tarve · Bun `lowPower`** | 122 | 1.0× | 48 |
+| 3 | **Tarve · txiki** | 126 | 1.1× | 50 |
+| 4 | **Tarve · Bun** | 131 | 1.1× | 50 |
 | 5 | egui | 267 | 2.2× | 165 |
-| 6 | Electron | 363 | 3.0× | 114 |
-| 7 | **Tarve · Node `lowPower`** | 436 | 3.5× | 368 |
-| 8 | **Tarve · Node** | 448 | 3.6× | 360 |
-| 9 | Tauri | 465 | 3.8× | 37 |
-| 10 | Flutter | 590 | 4.8× | 510 |
-| 11 | Dioxus Native | 950 | 7.7× | 237 |
+| 6 | Electron | 369 | 3.1× | 118 |
+| 7 | Tauri | 420 | 3.5× | 30 |
+| 8 | **Tarve · Node `lowPower`** | 458 | 3.8× | 385 |
+| 9 | **Tarve · Node** | 460 | 3.8× | 384 |
+| 10 | Flutter | 590 | 4.9× | 510 |
+| 11 | Dioxus Native | 907 | 7.6× | 245 |
 
 ### 3. First frame, 2,000 rows
 
@@ -66,17 +66,17 @@ The same, with the whole list built.
 
 | # | App | ms | vs 1st | Window created (ms) |
 | ---: | --- | ---: | ---: | ---: |
-| 1 | **Tarve · Bun `lowPower`** | 219 | — | 136 |
-| 2 | **Tarve · Bun** | 241 | 1.1× | 153 |
-| 3 | egui | 301 | 1.4× | 186 |
-| 4 | Electron | 361 | 1.6× | 116 |
-| 5 | Tauri | 476 | 2.2× | 36 |
-| 6 | **Tarve · txiki `lowPower`** | 496 | 2.3× | 419 |
-| 7 | **Tarve · Node `lowPower`** | 531 | 2.4× | 455 |
-| 8 | **Tarve · txiki** | 541 | 2.5× | 463 |
-| 9 | **Tarve · Node** | 563 | 2.6× | 482 |
-| 10 | Flutter | 760 | 3.5× | 673 |
-| 11 | Dioxus Native | 998 | 4.6× | 237 |
+| 1 | **Tarve · Bun `lowPower`** | 200 | — | 121 |
+| 2 | **Tarve · Bun** | 221 | 1.1× | 139 |
+| 3 | egui | 301 | 1.5× | 186 |
+| 4 | Electron | 362 | 1.8× | 112 |
+| 5 | **Tarve · txiki `lowPower`** | 383 | 1.9× | 294 |
+| 6 | **Tarve · txiki** | 415 | 2.1× | 334 |
+| 7 | Tauri | 431 | 2.2× | 30 |
+| 8 | **Tarve · Node `lowPower`** | 494 | 2.5× | 411 |
+| 9 | **Tarve · Node** | 512 | 2.6× | 434 |
+| 10 | Flutter | 760 | 3.8× | 673 |
+| 11 | Dioxus Native | 934 | 4.7× | 240 |
 
 ## Memory
 
@@ -86,17 +86,17 @@ Private working set: physical RAM used only by the app, summed over all its proc
 
 | # | App | MB | vs 1st | Committed (MB) |
 | ---: | --- | ---: | ---: | ---: |
-| 1 | **Tarve · txiki `lowPower`** | 18.1 | — | 68.5 |
-| 2 | **Tarve · txiki** | 24.1 | 1.3× | 128.3 |
-| 3 | **Tarve · Bun `lowPower`** | 24.8 | 1.4× | 128.4 |
-| 4 | **Tarve · Bun** | 32.1 | 1.8× | 318.1 |
+| 1 | **Tarve · txiki `lowPower`** | 18.1 | — | 68.3 |
+| 2 | **Tarve · txiki** | 23.6 | 1.3× | 127.9 |
+| 3 | **Tarve · Bun `lowPower`** | 24.8 | 1.4× | 124.7 |
+| 4 | **Tarve · Bun** | 32.1 | 1.8× | 314.7 |
 | 5 | egui | 33.6 | 1.9× | 69.8 |
 | 6 | Flutter | 50.9 | 2.8× | 164 |
-| 7 | **Tarve · Node `lowPower`** | 59.4 | 3.3× | 73 |
-| 8 | **Tarve · Node** | 65.4 | 3.6× | 133.6 |
-| 9 | Electron | 71.2 | 3.9× | 145.5 |
-| 10 | Tauri | 75.4 | 4.2× | 153.8 |
-| 11 | Dioxus Native | 134.5 | 7.4× | 467.9 |
+| 7 | **Tarve · Node `lowPower`** | 59.7 | 3.3× | 73.2 |
+| 8 | **Tarve · Node** | 65.4 | 3.6× | 132.5 |
+| 9 | Electron | 70.4 | 3.9× | 145.5 |
+| 10 | Tauri | 74.9 | 4.1× | 154.2 |
+| 11 | Dioxus Native | 134.8 | 7.4× | 464.5 |
 
 ### 5. Idle RAM, 2,000 rows
 
@@ -104,17 +104,17 @@ The same, with the list built.
 
 | # | App | MB | vs 1st | Committed (MB) |
 | ---: | --- | ---: | ---: | ---: |
-| 1 | egui | 65.9 | — | 100.7 |
-| 2 | **Tarve · txiki `lowPower`** | 87.3 | 1.3× | 150.7 |
-| 3 | **Tarve · Bun `lowPower`** | 90.1 | 1.4× | 209.7 |
-| 4 | **Tarve · txiki** | 95.1 | 1.4× | 213.7 |
-| 5 | **Tarve · Bun** | 97.6 | 1.5× | 404.9 |
-| 6 | **Tarve · Node `lowPower`** | 102.5 | 1.6× | 119.2 |
-| 7 | Electron | 108 | 1.6× | 188.7 |
-| 8 | **Tarve · Node** | 110.6 | 1.7× | 181.4 |
-| 9 | Tauri | 115.2 | 1.7× | 201.9 |
-| 10 | Dioxus Native | 171.6 | 2.6× | 504.6 |
-| 11 | Flutter | 246.6 | 3.7× | 360 |
+| 1 | **Tarve · txiki `lowPower`** | 62.1 | — | 122.2 |
+| 2 | egui | 65.9 | 1.1× | 100.7 |
+| 3 | **Tarve · Bun `lowPower`** | 69.5 | 1.1× | 189.5 |
+| 4 | **Tarve · txiki** | 69.9 | 1.1× | 185.1 |
+| 5 | **Tarve · Node `lowPower`** | 75.9 | 1.2× | 90.1 |
+| 6 | **Tarve · Bun** | 80.6 | 1.3× | 390.1 |
+| 7 | **Tarve · Node** | 85.9 | 1.4× | 153.9 |
+| 8 | Electron | 107.2 | 1.7× | 187.8 |
+| 9 | Tauri | 114.4 | 1.8× | 198.2 |
+| 10 | Dioxus Native | 166.5 | 2.7× | 504.7 |
+| 11 | Flutter | 246.6 | 4.0× | 360 |
 
 ### 6. GPU memory
 
@@ -125,12 +125,12 @@ Dedicated video memory from the Windows `GPU Process Memory` counter. The `lowPo
 | 1 | **Tarve · Bun `lowPower`** | 0 | — | 0 |
 | 2 | **Tarve · Node `lowPower`** | 0 | — | 0 |
 | 3 | **Tarve · txiki `lowPower`** | 0 | — | 0 |
-| 4 | egui | 22.8 | +22.8 | 22.8 |
-| 5 | Tauri | 25.5 | +25.5 | 29.3 |
+| 4 | Tauri | 20.5 | +20.5 | 29.3 |
+| 5 | egui | 22.8 | +22.8 | 22.8 |
 | 6 | Electron | 26.6 | +26.6 | 30.6 |
-| 7 | **Tarve · Bun** | 33.4 | +33.4 | 33.4 |
-| 8 | **Tarve · Node** | 33.4 | +33.4 | 33.4 |
-| 9 | **Tarve · txiki** | 33.4 | +33.4 | 33.4 |
+| 7 | **Tarve · Bun** | 28.4 | +28.4 | 28.4 |
+| 8 | **Tarve · Node** | 28.4 | +28.4 | 28.4 |
+| 9 | **Tarve · txiki** | 28.4 | +28.4 | 33.4 |
 | 10 | Flutter | 68.8 | +68.8 | 68.8 |
 | 11 | Dioxus Native | 269.2 | +269.2 | 269.2 |
 
@@ -142,17 +142,17 @@ Dedicated video memory from the Windows `GPU Process Memory` counter. The `lowPo
 
 | # | App | % of one core | vs 1st | GPU 3D use % |
 | ---: | --- | ---: | ---: | ---: |
-| 1 | **Tarve · Node** | 23.5 | — | 5.3 |
-| 2 | **Tarve · txiki** | 24.3 | 1.0× | 5.1 |
-| 3 | **Tarve · Bun** | 25.8 | 1.1× | 6.3 |
-| 4 | Tauri | 34.6 | 1.5× | 2.6 |
-| 5 | Electron | 47.2 | 2.0× | 2.5 |
-| 6 | Dioxus Native | 98.2 | 4.2× | 2.3 |
-| 7 | Flutter | 99.1 | 4.2× | 3.3 |
-| 8 | egui | 102.9 | 4.4× | 5.2 |
-| 9 | **Tarve · Bun `lowPower`** | 115.9 | 4.9× | 0 |
-| 10 | **Tarve · txiki `lowPower`** | 118.8 | 5.1× | 0 |
-| 11 | **Tarve · Node `lowPower`** | 119.7 | 5.1× | 0 |
+| 1 | **Tarve · Node** | 24.3 | — | 9.6 |
+| 2 | **Tarve · Bun** | 25.1 | 1.0× | 10.1 |
+| 3 | **Tarve · txiki** | 25.5 | 1.0× | 8.8 |
+| 4 | Tauri | 31.8 | 1.3× | 12.3 |
+| 5 | Electron | 41.6 | 1.7× | 11.5 |
+| 6 | Dioxus Native | 97.1 | 4.0× | 4.3 |
+| 7 | Flutter | 99.1 | 4.1× | 3.3 |
+| 8 | egui | 102.9 | 4.2× | 5.2 |
+| 9 | **Tarve · txiki `lowPower`** | 115.8 | 4.8× | 0 |
+| 10 | **Tarve · Node `lowPower`** | 116.2 | 4.8× | 0 |
+| 11 | **Tarve · Bun `lowPower`** | 120.1 | 4.9× | 0 |
 
 ### 8. Update time
 
@@ -160,17 +160,17 @@ Real clicks on the "Update" button, each one changing the text of all 2,000 rows
 
 | # | App | ms (median) | vs 1st | 95th percentile (ms) |
 | ---: | --- | ---: | ---: | ---: |
-| 1 | **Tarve · Node** | 25.4 | — | 37.4 |
-| 2 | Electron | 25.6 | 1.0× | 33.1 |
-| 3 | **Tarve · Bun** | 25.7 | 1.0× | 34 |
-| 4 | Tauri | 28.8 | 1.1× | 33.8 |
-| 5 | egui | 36.6 | 1.4× | 42.5 |
-| 6 | **Tarve · Node `lowPower`** | 41.1 | 1.6× | 46.3 |
-| 7 | **Tarve · Bun `lowPower`** | 41.2 | 1.6× | 46.1 |
-| 8 | Dioxus Native | 50.1 | 2.0× | 54.3 |
-| 9 | **Tarve · txiki `lowPower`** | 112.8 | 4.4× | 140.6 |
-| 10 | **Tarve · txiki** | 115.5 | 4.5× | 140.9 |
-| 11 | Flutter | 158.5 | 6.2× | 175.5 |
+| 1 | **Tarve · Bun** | 20.6 | — | 24.9 |
+| 2 | **Tarve · Node** | 20.8 | 1.0× | 28.9 |
+| 3 | Tauri | 28.5 | 1.4× | 36.6 |
+| 4 | Electron | 28.6 | 1.4× | 36.2 |
+| 5 | egui | 36.6 | 1.8× | 42.5 |
+| 6 | **Tarve · Bun `lowPower`** | 37.1 | 1.8× | 46.3 |
+| 7 | **Tarve · Node `lowPower`** | 37.2 | 1.8× | 45.6 |
+| 8 | Dioxus Native | 51.5 | 2.5× | 58 |
+| 9 | **Tarve · txiki** | 124.4 | 6.0× | 133.1 |
+| 10 | **Tarve · txiki `lowPower`** | 141.4 | 6.9× | 166.3 |
+| 11 | Flutter | 158.5 | 7.7× | 175.5 |
 
 ## Where Tarve spends the 2,000-row update
 
@@ -178,13 +178,13 @@ Measured inside the app with `app.stats()` (`STATS=1`), median / 95th percentile
 
 | Phase | Bun | txiki |
 | --- | ---: | ---: |
-| JS update (render + diff + send) | 9.7 / 11.3 ms | 126.6 / 171.7 ms |
-| ↳ JS render | 7.7 / 9.3 ms | 85.6 / 115.5 ms |
-| ↳ JS diff | 1.6 / 2.3 ms | 17.5 / 22.2 ms |
-| Native apply | 1.4 / 2.4 ms | 1.6 / 2.6 ms |
-| Native layout (taffy + text) | 0.0 / 2.9 ms | 0.0 / 3.5 ms |
-| Native paint | 1.3 / 2.1 ms | 1.3 / 2.5 ms |
-| Native frame (CPU) | 1.5 / 5.5 ms | 1.4 / 5.7 ms |
+| JS update (render + diff + send) | 7.2 / 14.2 ms | 114.2 / 134.0 ms |
+| ↳ JS render | 5.9 / 11.2 ms | 76.3 / 92.9 ms |
+| ↳ JS diff | 0.9 / 2.4 ms | 13.7 / 19.4 ms |
+| Native apply | 0.7 / 1.4 ms | 0.7 / 1.3 ms |
+| Native layout (taffy + text) | 0.0 / 3.5 ms | 0.0 / 2.7 ms |
+| Native paint | 1.5 / 3.6 ms | 1.4 / 2.9 ms |
+| Native frame (CPU) | 3.3 / 8.4 ms | 2.3 / 4.4 ms |
 
 ## Method
 
@@ -220,30 +220,30 @@ Every collected metric, median of 5 runs. Individual runs are in `results/result
 
 | App | Disk MB | Zipped MB | Window ms | First frame ms | Committed MB | Private WS MB | Working set MB | Threads | Handles | Processes | Idle CPU % | Dedicated GPU MB | Shared GPU MB | Scroll CPU % | Scroll GPU 3D % | Update median ms | Update p95 ms | Update max ms | Missed clicks | Peak committed MB | Peak working set MB | Final committed MB | Final private WS MB | Machine busy % | Runs |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Tarve · Bun | 150.7 | 75.9 | 51 | 129 | 318.1 | 32.1 | 82.6 | 90 | 645 | 1 | 0 | 33.4 | 2.3 | — | — | 8.7 | 15.8 | 29.9 | 0 | 337.9 | 89.6 | 337.9 | 36.4 | 4.8 | 5 |
-| Tarve · Bun `lowPower` | 150.7 | 75.9 | 55 | 133 | 128.4 | 24.8 | 55.3 | 24 | 284 | 1 | 0 | 0 | 0 | — | — | 4.4 | 13.5 | 23.9 | 0 | 146.2 | 61.4 | 146.2 | 28.2 | 7.6 | 5 |
-| Tarve · Node | 114.9 | 43.4 | 360 | 448 | 133.6 | 65.4 | 138 | 84 | 639 | 1 | 0 | 33.4 | 2.3 | — | — | 8.4 | 16.5 | 28.8 | 0 | 140.4 | 144.5 | 107.7 | 40.1 | 8.1 | 5 |
-| Tarve · Node `lowPower` | 114.9 | 43.4 | 368 | 436 | 73 | 59.4 | 112 | 18 | 296 | 1 | 0 | 0 | 0 | — | — | 4.2 | 13.2 | 25 | 0 | 75.2 | 115.2 | 46.6 | 33.4 | 4.9 | 5 |
-| Tarve · txiki | 11.5 | 8.6 | 58 | 134 | 128.3 | 24.1 | 65.4 | 84 | 640 | 1 | 0 | 33.4 | 2.3 | — | — | 8.6 | 16.6 | 29.1 | 0 | 135.1 | 72 | 129.4 | 26 | 4.6 | 5 |
-| Tarve · txiki `lowPower` | 11.5 | 8.6 | 45 | 123 | 68.5 | 18.1 | 39.5 | 18 | 295 | 1 | 0 | 0 | 0 | — | — | 4.9 | 13 | 22.9 | 0 | 69.1 | 41.4 | 69.1 | 19 | 4.3 | 5 |
-| Electron | 357.1 | 150.9 | 114 | 363 | 145.5 | 71.2 | 298.4 | 167 | 2363 | 4 | 0 | 26.6 | 1.9 | — | — | 9 | 15.5 | 17.5 | 0 | 149.2 | 302.4 | 149 | 73.1 | 7.8 | 5 |
-| Tauri | 4.1 | 1.6 | 37 | 465 | 153.8 | 75.4 | 357 | 238 | 3550 | 7 | 0.3 | 25.5 | 1.8 | — | — | 9.1 | 16.1 | 17 | 0 | 159.4 | 364.1 | 156.8 | 77.1 | 11 | 5 |
+| Tarve · Bun | 150.8 | 75.9 | 50 | 131 | 314.7 | 32.1 | 81.6 | 88 | 628 | 1 | 0 | 28.4 | 2.3 | — | — | 7.9 | 13.5 | 19.4 | 0 | 334.2 | 88.3 | 334.2 | 36.3 | 13.6 | 5 |
+| Tarve · Bun `lowPower` | 150.8 | 75.9 | 48 | 122 | 124.7 | 24.8 | 54.4 | 22 | 267 | 1 | 0 | 0 | 0 | — | — | 7.8 | 12.9 | 16.8 | 0 | 140.9 | 60.2 | 140.9 | 28.1 | 8.6 | 5 |
+| Tarve · Node | 114.9 | 43.4 | 384 | 460 | 132.5 | 65.4 | 137 | 82 | 622 | 1 | 0 | 28.4 | 2.3 | — | — | 7.9 | 13.4 | 19.6 | 0 | 139.3 | 143.8 | 106.7 | 40.1 | 9.4 | 5 |
+| Tarve · Node `lowPower` | 114.9 | 43.4 | 385 | 458 | 73.2 | 59.7 | 111.5 | 16 | 279 | 1 | 0 | 0 | 0 | — | — | 7.8 | 12.8 | 20.1 | 0 | 75.3 | 114.6 | 46.5 | 33.2 | 10.3 | 5 |
+| Tarve · txiki | 11.5 | 8.6 | 50 | 126 | 127.9 | 23.6 | 64 | 82 | 623 | 1 | 0 | 28.4 | 2.3 | — | — | 7.8 | 16.1 | 19.5 | 0 | 134.7 | 70.6 | 129.1 | 25.6 | 8.6 | 5 |
+| Tarve · txiki `lowPower` | 11.5 | 8.6 | 47 | 120 | 68.3 | 18.1 | 38.5 | 16 | 278 | 1 | 0 | 0 | 0 | — | — | 7.8 | 12.9 | 19.4 | 0 | 68.9 | 40.4 | 68.9 | 18.9 | 8.5 | 5 |
+| Electron | 357.1 | 150.9 | 118 | 369 | 145.5 | 70.4 | 294.9 | 163 | 2300 | 4 | 0.6 | 26.6 | 1.9 | — | — | 7.9 | 12.3 | 15.9 | 0 | 149.6 | 299 | 148.8 | 72.5 | 8.7 | 5 |
+| Tauri | 4.1 | 1.6 | 30 | 420 | 154.2 | 74.9 | 332.9 | 231 | 3453 | 7 | 0.6 | 20.5 | 1.8 | — | — | 7.8 | 12.6 | 16 | 0 | 160.3 | 340.1 | 157.4 | 76.8 | 9 | 5 |
 | Flutter | 24.8 | 10.4 | 510 | 590 | 164 | 50.9 | 99 | 105 | 723 | 1 | 0 | 68.8 | 8 | — | — | 4.4 | 9 | 14.7 | 0 | 173.8 | 107.3 | 171.9 | 58.7 | 5.7 | 5 |
-| Dioxus Native | 14.9 | 6.4 | 237 | 950 | 467.9 | 134.5 | 200.7 | 56 | 707 | 1 | 0 | 269.2 | 52.6 | — | — | 5.6 | 13.1 | 16.1 | 0 | 478.2 | 204.4 | 468.8 | 138.1 | 4.8 | 5 |
+| Dioxus Native | 14.9 | 6.4 | 245 | 907 | 464.5 | 134.8 | 199.6 | 54 | 684 | 1 | 0 | 269.2 | 52.6 | — | — | 8 | 12.6 | 14.4 | 0 | 474 | 203.5 | 465.4 | 138.4 | 12.5 | 5 |
 | egui | 3.5 | 1.8 | 165 | 267 | 69.8 | 33.6 | 65.2 | 16 | 390 | 1 | 0 | 22.8 | 5.7 | — | — | 5.3 | 9.8 | 10.7 | 0 | 74.8 | 70.8 | 74.8 | 39.1 | 7.6 | 5 |
 
 ### 2,000 rows
 
 | App | Disk MB | Zipped MB | Window ms | First frame ms | Committed MB | Private WS MB | Working set MB | Threads | Handles | Processes | Idle CPU % | Dedicated GPU MB | Shared GPU MB | Scroll CPU % | Scroll GPU 3D % | Update median ms | Update p95 ms | Update max ms | Missed clicks | Peak committed MB | Peak working set MB | Final committed MB | Final private WS MB | Machine busy % | Runs |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Tarve · Bun | 150.7 | 75.9 | 153 | 241 | 404.9 | 97.6 | 154.1 | 90 | 646 | 1 | 0 | 33.4 | 3 | 25.8 | 6.3 | 25.7 | 34 | 49.4 | 0 | 530.4 | 240.7 | 505.2 | 180.1 | 7.4 | 5 |
-| Tarve · Bun `lowPower` | 150.7 | 75.9 | 136 | 219 | 209.7 | 90.1 | 126.6 | 24 | 291 | 1 | 0 | 0 | 0 | 115.9 | 0 | 41.2 | 46.1 | 58.3 | 0 | 345.9 | 219.4 | 315.6 | 173.9 | 4.3 | 5 |
-| Tarve · Node | 114.9 | 43.4 | 482 | 563 | 181.4 | 110.6 | 188 | 84 | 654 | 1 | 0 | 33.4 | 3 | 23.5 | 5.3 | 25.4 | 37.4 | 41.2 | 0 | 295.5 | 299.3 | 292.7 | 217 | 7.8 | 5 |
-| Tarve · Node `lowPower` | 114.9 | 43.4 | 455 | 531 | 119.2 | 102.5 | 159.9 | 18 | 303 | 1 | 0 | 0 | 0 | 119.7 | 0 | 41.1 | 46.3 | 50 | 0 | 227.2 | 265.7 | 226.5 | 205.1 | 4.3 | 5 |
-| Tarve · txiki | 11.5 | 8.6 | 463 | 541 | 213.7 | 95.1 | 136.6 | 83 | 663 | 1 | 0 | 33.4 | 3.3 | 24.3 | 5.1 | 115.5 | 140.9 | 141.4 | 0 | 240.3 | 170.9 | 234.7 | 125.1 | 4.5 | 5 |
-| Tarve · txiki `lowPower` | 11.5 | 8.6 | 419 | 496 | 150.7 | 87.3 | 109.5 | 18 | 302 | 1 | 0 | 0 | 0 | 118.8 | 0 | 112.8 | 140.6 | 148.8 | 0 | 179.8 | 146.4 | 174.5 | 118.3 | 7.7 | 5 |
-| Electron | 357.1 | 150.9 | 116 | 361 | 188.7 | 108 | 338.8 | 169 | 2380 | 4 | 0.3 | 30.6 | 2.2 | 47.2 | 2.5 | 25.6 | 33.1 | 38 | 0 | 263.2 | 408.7 | 261.1 | 171.8 | 3.8 | 5 |
-| Tauri | 4.1 | 1.6 | 36 | 476 | 201.9 | 115.2 | 402.1 | 240 | 3562 | 7 | 0 | 29.3 | 2.4 | 34.6 | 2.6 | 28.8 | 33.8 | 37 | 0 | 270.7 | 471 | 265.5 | 176.1 | 8.3 | 5 |
+| Tarve · Bun | 150.8 | 75.9 | 139 | 221 | 390.1 | 80.6 | 136.2 | 88 | 625 | 1 | 0 | 28.4 | 3 | 25.1 | 10.1 | 20.6 | 24.9 | 33.9 | 0 | 485.1 | 200.9 | 445.9 | 123.1 | 9.3 | 5 |
+| Tarve · Bun `lowPower` | 150.8 | 75.9 | 121 | 200 | 189.5 | 69.5 | 105.1 | 22 | 274 | 1 | 0 | 0 | 0 | 120.1 | 0 | 37.1 | 46.3 | 53.8 | 0 | 294.4 | 170.9 | 269 | 130.2 | 8.9 | 5 |
+| Tarve · Node | 114.9 | 43.4 | 434 | 512 | 153.9 | 85.9 | 162.3 | 82 | 633 | 1 | 0 | 28.4 | 3 | 24.3 | 9.6 | 20.8 | 28.9 | 37.5 | 0 | 254.4 | 258.3 | 231.1 | 161.3 | 11.6 | 5 |
+| Tarve · Node `lowPower` | 114.9 | 43.4 | 411 | 494 | 90.1 | 75.9 | 132.4 | 16 | 286 | 1 | 0 | 0 | 0 | 116.2 | 0 | 37.2 | 45.6 | 53.9 | 0 | 187.3 | 226.5 | 179.1 | 159.2 | 8.8 | 5 |
+| Tarve · txiki | 11.5 | 8.6 | 334 | 415 | 185.1 | 69.9 | 110.3 | 81 | 642 | 1 | 0 | 33.4 | 3.4 | 25.5 | 8.8 | 124.4 | 133.1 | 141 | 0 | 210.1 | 138.4 | 203.3 | 91.8 | 8.4 | 5 |
+| Tarve · txiki `lowPower` | 11.5 | 8.6 | 294 | 383 | 122.2 | 62.1 | 83.4 | 16 | 285 | 1 | 0 | 0 | 0 | 115.8 | 0 | 141.4 | 166.3 | 183.1 | 0 | 149.4 | 114.4 | 135.9 | 81.5 | 9.9 | 5 |
+| Electron | 357.1 | 150.9 | 112 | 362 | 187.8 | 107.2 | 332 | 164 | 2301 | 4 | 0.3 | 30.6 | 2.2 | 41.6 | 11.5 | 28.6 | 36.2 | 40.8 | 0 | 256.6 | 401.6 | 255.7 | 170.7 | 9.6 | 5 |
+| Tauri | 4.1 | 1.6 | 30 | 431 | 198.2 | 114.4 | 378.3 | 232 | 3458 | 7 | 0.6 | 29.3 | 2.3 | 31.8 | 12.3 | 28.5 | 36.6 | 37.3 | 0 | 267.1 | 450.1 | 263.1 | 174.3 | 8.9 | 5 |
 | Flutter | 24.8 | 10.4 | 673 | 760 | 360 | 246.6 | 294.8 | 106 | 729 | 1 | 0.3 | 68.8 | 8 | 99.1 | 3.3 | 158.5 | 175.5 | 203.1 | 0 | 437.4 | 367.3 | 409.9 | 292.6 | 5.2 | 5 |
-| Dioxus Native | 14.9 | 6.4 | 237 | 998 | 504.6 | 171.6 | 237.7 | 56 | 705 | 1 | 0 | 269.2 | 52.6 | 98.2 | 2.3 | 50.1 | 54.3 | 55.7 | 0 | 515.4 | 244.1 | 509.5 | 177.6 | 4.4 | 5 |
+| Dioxus Native | 14.9 | 6.4 | 240 | 934 | 504.7 | 166.5 | 231.4 | 54 | 684 | 1 | 0 | 269.2 | 52.6 | 97.1 | 4.3 | 51.5 | 58 | 58.4 | 0 | 513.6 | 238.1 | 507.2 | 172.6 | 8.2 | 5 |
 | egui | 3.5 | 1.8 | 186 | 301 | 100.7 | 65.9 | 97.5 | 16 | 390 | 1 | 0 | 22.8 | 6.7 | 102.9 | 5.2 | 36.6 | 42.5 | 49.6 | 0 | 144.3 | 137.2 | 143.4 | 103.8 | 4.7 | 5 |
