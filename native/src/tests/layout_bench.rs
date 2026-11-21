@@ -133,6 +133,9 @@ fn layout_memory() {
         list.len()
     );
     drop(list);
+    // As after the first frame: texts far offscreen give their layouts back.
+    tree.evict_offscreen_texts();
+    println!("MEMORY after evicting offscreen texts: {:.2} MB", mb(live() - base));
     for (name, bytes) in tree.text_memory_report() {
         println!("MEMORY text {name}: {:.2} MB", mb(bytes));
     }

@@ -161,6 +161,11 @@ impl MemoryStages {
             }).collect::<Vec<_>>(),
             "current": process_memory().map(|memory| {
                 let mut current = memory.json();
+                // The native heap's live bytes, while TARVE_ALLOC_TRACE counts them.
+                #[cfg(feature = "mimalloc")]
+                if let Some(live) = crate::alloc_trace::live() {
+                    current["nativeLiveMb"] = json!((live as f64 / 1048576.0 * 10.0).round() / 10.0);
+                }
                 if let Some(gpu) = process_video_memory() {
                     current["gpuMb"] = json!((gpu / 1048576.0 * 10.0).round() / 10.0);
                 }
