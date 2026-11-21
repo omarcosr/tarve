@@ -135,3 +135,21 @@ describe("compiled styles", () => {
     expect(style("d")).toEqual(style("e"));
   });
 });
+
+describe("automatic memo inside a memoized item", () => {
+  test("a memoized item's many children keep entries of their own; a few do not need them", () => {
+    const scope = {};
+    const grid = (changed: number, tag: string) => <Window title="g"><Column>{[0, 1].map(row => <Row key={row}>
+      {Array.from({ length: 10 }, (_, i) => <View key={i} style={{ width: row === 0 && i === changed ? 20 : 10 }}><Text>{tag}</Text></View>)}
+    </Row>)}</Column></Window>;
+    compileTree(grid(3, "a"), false, "auto", [], scope);
+    const first = compileTree(grid(3, "a"), false, "auto", [], scope);
+    const next = compileTree(grid(4, "a"), false, "auto", [], scope);
+    const cell = (tree: typeof next, i: number) => [...tree.nodes.values()].find(node => node.id.endsWith(`k:0/children/k:${i}`))!;
+    // Row 0 compiled again, but its unchanged cells (ten of them: more than a few) were reused.
+    expect(cell(next, 7)).toBe(cell(first, 7));
+    expect(cell(next, 4)).not.toBe(cell(first, 4));
+    expect(cell(next, 4).style.width).toBe(20);
+    expect(cell(next, 3).style.width).toBe(10);
+  });
+});

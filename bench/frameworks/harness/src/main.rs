@@ -295,7 +295,13 @@ fn main() {
         if let Some(h) = find_window(root) {
             if first_window.is_none() {
                 first_window = Some(t0.elapsed());
-                unsafe { SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); }
+                // On top, in the work area's top-left corner: out of the way of whoever uses the screen.
+                unsafe {
+                    let mut area: RECT = std::mem::zeroed();
+                    SystemParametersInfoW(SPI_GETWORKAREA, 0, &mut area as *mut RECT as *mut _, 0);
+                    let keep = std::env::var_os("HARNESS_CENTER").is_some();
+                    SetWindowPos(h, HWND_TOPMOST, area.left, area.top, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE | if keep { SWP_NOMOVE } else { 0 });
+                }
             }
             if marker(h) == 'm' { break h; }
             if debug && last.elapsed() > Duration::from_secs(1) && { last = Instant::now(); true } {

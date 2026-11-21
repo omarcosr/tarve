@@ -33,6 +33,9 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const mark = async (stage: string) => { gc(); await sleep(500); console.log("@mark " + stage); await sleep(2500); };
 const keep: unknown[] = [];
 await mark("base");
+const vnodes = view(0);
+await mark("vnodes");
+keep.push(vnodes);
 // MEMO=0: no render scope, so no memo store (what the cache itself costs).
 const g = globalThis as { process?: { env?: Record<string, string | undefined> }; tjs?: { env?: Record<string, string> } };
 const scope = (g.process?.env?.MEMO ?? g.tjs?.env?.MEMO) === "0" ? undefined : {};

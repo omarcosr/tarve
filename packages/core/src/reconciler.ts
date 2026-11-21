@@ -207,6 +207,7 @@ function patchNode(node: NativeNode, replaced: Replaced): NativeNode {
 interface TextPatch { owners: (VNode | undefined)[]; children: unknown[] }
 
 const memoStores = new WeakMap<object, Map<string, MemoEntry>>();
+const unstoredItems = new WeakMap<object, Set<string>>();
 const EMPTY_ENTRIES: readonly [string, unknown][] = Object.freeze([]) as readonly [string, unknown][];
 /** A leaf's children: shared and frozen (nothing writes a compiled node's children in place). */
 const NO_CHILDREN = Object.freeze([]) as unknown as NativeNode[];
@@ -237,6 +238,8 @@ interface AutoMemoState { tries: number; misses: number; off: number }
 const autoMemoStates = new WeakMap<object, AutoMemoState>();
 /** Renders to skip after one where most items changed (an animation of every item), before trying again. */
 const AUTO_MEMO_BACKOFF = 16;
+/** Children inside a memoized item get memo entries of their own only when there are more than this. */
+const NESTED_AUTO_MEMO_MIN = 4;
 
 /** Devtools (devtools/trace.ts): wraps each function component's compile while the inspector traces a render. */
 export type ComponentTrace = (type: Component, props: Record<string, any>, path: string, compile: () => NativeNode[]) => NativeNode[];
@@ -319,6 +322,14 @@ export function compileTree(
   const slotOwners: VNode[] = [];
   const slotNodes: NativeNode[] = [];
   let collecting = 0;
+  /**
+   * The item compiling (an automatic memo's) changed last time too: its few children keep
+   * memo entries of their own after all, so a part that changes every render (a stateful
+   * component) does not recompile its unchanged siblings each time.
+   */
+  let nestedMemo = false;
+  /** Automatic memo items of this scope that could not be kept (`selfContained`), by path. */
+  let unstored = renderScope ? unstoredItems.get(renderScope) : undefined;
   /** The text component being expanded while items collect: the owner of the text it compiles. */
   let textOwner: VNode | undefined;
   let autoMemo: AutoMemoState | undefined;
@@ -438,9 +449,12 @@ export function compileTree(
     let result: NativeNode[];
     let readViewport: boolean;
     const outerCollecting = collecting;
+    const outerNested = nestedMemo;
     const slotStart = slotOwners.length;
     // Plain memos hide their texts: they are compared by their own props, not as part of an item.
     collecting = autoProps ? collecting + 1 : 0;
+    // A known item compiling again changed beyond its texts: its children may change apart from it.
+    nestedMemo = autoProps ? previous !== undefined || unstored?.has(path) === true : false;
     let readExact = false;
     let readPosition = false;
     try {
@@ -455,6 +469,7 @@ export function compileTree(
       }
     } finally {
       collecting = outerCollecting;
+      nestedMemo = outerNested;
       readViewport = usesViewport;
       usesViewport = outerViewport || readViewport;
       readExact = exactViewport;
@@ -473,7 +488,11 @@ export function compileTree(
         ...autoProps && slotOwners.length > slotStart ? { texts: { owners: slotOwners.slice(slotStart), nodes: slotNodes.slice(slotStart) } } : {},
         ...autoProps ? { props: autoProps.vnode } : {},
       });
-    } else store.delete(path);
+    } else {
+      store.delete(path);
+      // Not kept (it reaches outside itself): it compiles every time, so its children keep entries.
+      if (autoProps) (unstored ??= new Set()).add(path);
+    }
     // A plain memo's texts are its own: an enclosing item does not see them.
     if (!autoProps) { slotOwners.length = slotStart; slotNodes.length = slotStart; }
     return result;
@@ -684,7 +703,11 @@ export function compileTree(
             itemPath += "#" + copies;
           }
         }
-        const nodes = element && autoMemo && componentTrace === undefined && !((item as VNode).type as unknown as Record<symbol, unknown>)[MEMO]
+        // Inside an item that is itself memoized, a few children are not memoized again: the
+        // item already reuses or patches them, and an entry each (a list row's text and button)
+        // doubled what a long list keeps. Not when the item keeps changing (`nestedMemo`).
+        const nodes = element && autoMemo && componentTrace === undefined && (collecting === 0 || nestedMemo || elements > NESTED_AUTO_MEMO_MIN)
+          && !((item as VNode).type as unknown as Record<symbol, unknown>)[MEMO]
           ? autoMemoItem(item as VNode, itemPath, group, at)
           : visit(piece, itemPath, group, false, at);
         for (let n = 0; n < nodes.length; n++) out.push(nodes[n]!);
@@ -961,6 +984,11 @@ export function compileTree(
   }
   const roots = withRenderScope(renderScope, () => visit(element, "root"));
   if (memoStore) for (const path of memoStore.keys()) if (!memoSeen.has(path)) memoStore.delete(path);
+  if (unstored && renderScope) {
+    // Kept only while their items are rendered.
+    for (const path of unstored) if (!memoSeen.has(path)) unstored.delete(path);
+    unstoredItems.set(renderScope, unstored);
+  }
   if (autoMemo && autoMemo.tries >= 64 && autoMemo.misses * 2 > autoMemo.tries) autoMemo.off = AUTO_MEMO_BACKOFF;
   for (const [targetId, labelIds] of labelAssociations) {
     const nativeTargetId = labelableTargets.get(targetId);
