@@ -94,8 +94,10 @@ impl Default for TaffyConfig {
 /// Stored in a [`TaffyTree`].
 #[derive(Debug, Clone, PartialEq)]
 struct NodeData {
-    /// The layout strategy used by this node
-    pub(crate) style: Style,
+    /// The layout strategy used by this node.
+    /// Tarve patch: shared, so nodes with equal styles (a long list's rows) hold one copy
+    /// (`TaffyTree::set_style_shared`); a `Style` is about 550 bytes.
+    pub(crate) style: std::sync::Arc<Style>,
 
     /// The always unrounded results of the layout computation. We must store this separately from the rounded
     /// layout to avoid errors from rounding already-rounded values. See <https://github.com/DioxusLabs/taffy/issues/501>.
@@ -119,7 +121,13 @@ struct NodeData {
 impl NodeData {
     /// Create the data for a new node
     #[must_use]
-    pub const fn new(style: Style) -> Self {
+    pub fn new(style: Style) -> Self {
+        Self::new_shared(std::sync::Arc::new(style))
+    }
+
+    /// Tarve patch: the data for a new node with a shared style.
+    #[must_use]
+    pub fn new_shared(style: std::sync::Arc<Style>) -> Self {
         Self {
             style,
             cache: Cache::new(),
@@ -376,7 +384,7 @@ where
 
     #[inline(always)]
     fn get_core_container_style(&self, node_id: NodeId) -> Self::CoreContainerStyle<'_> {
-        &self.taffy.nodes[node_id.into()].style
+        &*self.taffy.nodes[node_id.into()].style
     }
 
     #[inline(always)]
@@ -468,12 +476,12 @@ where
 
     #[inline(always)]
     fn get_flexbox_container_style(&self, node_id: NodeId) -> Self::FlexboxContainerStyle<'_> {
-        &self.taffy.nodes[node_id.into()].style
+        &*self.taffy.nodes[node_id.into()].style
     }
 
     #[inline(always)]
     fn get_flexbox_child_style(&self, child_node_id: NodeId) -> Self::FlexboxItemStyle<'_> {
-        &self.taffy.nodes[child_node_id.into()].style
+        &*self.taffy.nodes[child_node_id.into()].style
     }
 }
 
@@ -493,12 +501,12 @@ where
 
     #[inline(always)]
     fn get_grid_container_style(&self, node_id: NodeId) -> Self::GridContainerStyle<'_> {
-        &self.taffy.nodes[node_id.into()].style
+        &*self.taffy.nodes[node_id.into()].style
     }
 
     #[inline(always)]
     fn get_grid_child_style(&self, child_node_id: NodeId) -> Self::GridItemStyle<'_> {
-        &self.taffy.nodes[child_node_id.into()].style
+        &*self.taffy.nodes[child_node_id.into()].style
     }
 
     #[inline(always)]
@@ -825,15 +833,35 @@ impl<NodeContext> TaffyTree<NodeContext> {
     /// Sets the [`Style`] of the provided `node`
     #[inline]
     pub fn set_style(&mut self, node: NodeId, style: Style) -> TaffyResult<()> {
-        self.nodes[node.into()].style = style;
+        self.nodes[node.into()].style = std::sync::Arc::new(style);
         self.mark_dirty(node)?;
         Ok(())
+    }
+
+    /// Tarve patch: sets a style other nodes may share; nothing is marked dirty when it is the
+    /// same shared style the node has.
+    pub fn set_style_shared(&mut self, node: NodeId, style: std::sync::Arc<Style>) -> TaffyResult<()> {
+        let data = &mut self.nodes[node.into()];
+        if std::sync::Arc::ptr_eq(&data.style, &style) {
+            return Ok(());
+        }
+        let changed = *data.style != *style;
+        data.style = style;
+        if changed {
+            self.mark_dirty(node)?;
+        }
+        Ok(())
+    }
+
+    /// Tarve patch: the shared style of a node.
+    pub fn style_shared(&self, node: NodeId) -> TaffyResult<&std::sync::Arc<Style>> {
+        Ok(&self.nodes[node.into()].style)
     }
 
     /// Gets the [`Style`] of the provided `node`
     #[inline]
     pub fn style(&self, node: NodeId) -> TaffyResult<&Style> {
-        Ok(&self.nodes[node.into()].style)
+        Ok(&*self.nodes[node.into()].style)
     }
 
     /// Return this node layout relative to its parent

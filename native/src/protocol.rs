@@ -189,6 +189,11 @@ impl NodeStyle {
 
     /// Sets top-level keys where the style is (copying it first only when another node shares
     /// it), keeping the key filter exact. For bound signals, which set a colour every frame.
+    /// The interned style itself: equal styles are the same allocation.
+    pub(crate) fn shared(&self) -> &Arc<Value> {
+        &self.0
+    }
+
     pub fn set_keys<'a>(&mut self, values: impl IntoIterator<Item = (&'a String, &'a Value)>) {
         let style = Arc::make_mut(&mut self.0);
         if !style.is_object() {

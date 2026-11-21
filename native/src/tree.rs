@@ -1711,6 +1711,8 @@ pub struct Tree {
     /// Those boundaries, and the texts inside them still to shape and lay out.
     pub(crate) deferred_boundaries: Vec<String>,
     pub(crate) deferred_texts: HashSet<String>,
+    /// Layout styles nodes share (`shared_layout_style`).
+    layout_styles: LayoutStyles,
     /// `TextEngine::shapes` when offscreen layouts were last dropped (`evict_offscreen_texts`).
     shapes_at_eviction: u64,
     /// `width_independent` by id while one layout pass asks it for every row of a list.
@@ -2065,6 +2067,7 @@ impl Tree {
             defer_offscreen: false,
             deferred_boundaries: Vec::new(),
             deferred_texts: HashSet::default(),
+            layout_styles: HashMap::default(),
             shapes_at_eviction: 0,
             width_independent_memo: std::cell::RefCell::new(None),
             images: HashMap::default(),
@@ -4626,26 +4629,34 @@ impl Tree {
         let fullscreen = self.window_fullscreen;
         let entry = self.entries.get_mut(id).unwrap();
         let style = if entry.layout_dirty || entry.layout_id.is_none() || viewport.is_some() {
-            let mut style = layout_style(entry, suppress_root_chrome);
-            if fullscreen && entry.node.kind == "titlebar" {
-                style.display = Display::None;
-            }
-            if let Some((w, h)) = viewport {
-                style.size = Size {
-                    width: length(w),
-                    height: length(h),
-                };
-            }
-            Some(style)
+            // A node's layout style follows from its style, kind and scroll orientation alone
+            // unless it animates, is the viewport or is a title bar: such nodes share one.
+            let shareable = viewport.is_none()
+                && !suppress_root_chrome
+                && entry.motions.is_empty()
+                && entry.node.kind != "titlebar";
+            Some(if shareable {
+                shared_layout_style(&mut self.layout_styles, entry)
+            } else {
+                let mut style = layout_style(entry, suppress_root_chrome);
+                if fullscreen && entry.node.kind == "titlebar" {
+                    style.display = Display::None;
+                }
+                if let Some((w, h)) = viewport {
+                    style.size = Size {
+                        width: length(w),
+                        height: length(h),
+                    };
+                }
+                Arc::new(style)
+            })
         } else {
             None
         };
         let layout_id = if let Some(layout_id) = entry.layout_id {
-            if let Some(style) = style
-                && self.layout.style(layout_id).map_err(|e| e.to_string())? != &style
-            {
+            if let Some(style) = style {
                 self.layout
-                    .set_style(layout_id, style)
+                    .set_style_shared(layout_id, style)
                     .map_err(|e| e.to_string())?;
             }
             if entry.measure_dirty {
@@ -4656,9 +4667,14 @@ impl Tree {
             layout_id
         } else {
             self.layout_nodes_created += 1;
+            let layout_id = self
+                .layout
+                .new_leaf_with_context(Style::default(), id.to_string())
+                .map_err(|e| e.to_string())?;
             self.layout
-                .new_leaf_with_context(style.unwrap(), id.to_string())
-                .map_err(|e| e.to_string())?
+                .set_style_shared(layout_id, style.unwrap())
+                .map_err(|e| e.to_string())?;
+            layout_id
         };
         if entry.structure_dirty || entry.layout_id.is_none() {
             self.layout
@@ -11327,6 +11343,42 @@ fn auto_tracks(value: &Value) -> Vec<taffy::style::TrackSizingFunction> {
             _ => None,
         })
         .collect()
+}
+
+/// Layout styles shared by the nodes they fit (`shared_layout_style`): by the address of the
+/// node's interned style, with that style held so the address stays its own.
+pub(crate) type LayoutStyles = HashMap<
+    (usize, u64),
+    Vec<(Arc<Value>, String, String, Arc<Style>)>,
+>;
+
+/// The layout style of a node that does not animate (see `build_layout`), shared with every
+/// node of the same style, kind and scroll orientation: a list's rows hold one between them.
+fn shared_layout_style(styles: &mut LayoutStyles, entry: &Entry) -> Arc<Style> {
+    use std::hash::{Hash, Hasher};
+    let node = &entry.node;
+    let value = node.style.shared();
+    let mut hasher = rustc_hash::FxHasher::default();
+    node.kind.hash(&mut hasher);
+    node.scroll_orientation.hash(&mut hasher);
+    let key = (Arc::as_ptr(value) as usize, hasher.finish());
+    if styles.len() > 4096 {
+        styles.clear();
+    }
+    let bucket = styles.entry(key).or_default();
+    if let Some((_, _, _, style)) = bucket.iter().find(|(held, kind, orientation, _)| {
+        Arc::ptr_eq(held, value) && *kind == node.kind && *orientation == node.scroll_orientation
+    }) {
+        return style.clone();
+    }
+    let style = Arc::new(layout_style(entry, false));
+    bucket.push((
+        value.clone(),
+        node.kind.clone(),
+        node.scroll_orientation.clone(),
+        style.clone(),
+    ));
+    style
 }
 
 fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
