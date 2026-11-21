@@ -1,0 +1,14 @@
+[package]
+name = "bench-egui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.33"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+opt-level = 3
+panic = "abort"

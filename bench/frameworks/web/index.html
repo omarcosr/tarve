@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>bench</title>
+<style>
+html, body { margin: 0; height: 100%; background: #fff; font: 14px system-ui, sans-serif; overflow: hidden; }
+#root, .app { height: 100%; display: flex; flex-direction: column; }
+.top { height: 48px; flex-shrink: 0; position: relative; }
+.marker { position: absolute; left: 0; top: 0; width: 48px; height: 48px; }
+.update { position: absolute; left: 64px; top: 8px; width: 120px; height: 32px; }
+.list { flex: 1; min-height: 0; overflow: auto; }
+.row { height: 36px; flex-shrink: 0; display: flex; align-items: center; gap: 12px; }
+.label { flex: 1; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="main.js"></script>
+</body>
+</html>

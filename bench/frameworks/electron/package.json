@@ -1,0 +1,8 @@
+{
+  "name": "bench-electron",
+  "private": true,
+  "main": "main.js",
+  "devDependencies": {
+    "electron": "latest"
+  }
+}
