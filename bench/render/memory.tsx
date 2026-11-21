@@ -6,6 +6,7 @@
 import { Button, Column, Row, Scroll, Text, View, Window } from "@tarve/core";
 import { compileTree } from "../../packages/core/src/reconciler";
 import { nativeShadow } from "../../packages/core/src/app/shadow";
+import { documentJson } from "../../packages/core/src/bridge/index";
 
 const rows = 2000;
 const view = (tick: number) => (
@@ -46,7 +47,8 @@ await mark("compiled");
 const shadow = nativeShadow(tree);
 keep.push(shadow);
 await mark("shadow");
-const json = JSON.stringify(tree.document);
+// As the bridge sends the first document (style table).
+const json = documentJson(tree.document);
 keep.push(json);
 await mark("json");
 const bytes = new TextEncoder().encode(json);

@@ -145,3 +145,24 @@ fn texts_far_offscreen_drop_their_layouts_and_paint_the_same_when_back() {
     fresh.compute(400.0, 300.0).unwrap();
     assert_eq!(rects(&tree), rects(&fresh));
 }
+
+#[test]
+fn a_document_style_table_gives_nodes_their_styles() {
+    let json = r##"{"styles":[{"background":"#fff"},{"flex":1,"fontSize":14}],"version":64,
+        "window":{"title":"w","width":100.0,"height":100.0,"minWidth":10.0,"minHeight":10.0,"background":"#fff"},
+        "root":{"id":"root","kind":"window","style":0,"children":[
+          {"id":"a","kind":"text","style":1,"children":[],"text":"a","runs":[{"start":0,"end":1,"style":{"fontWeight":700}}]},
+          {"id":"b","kind":"text","style":{"flex":1,"fontSize":14},"children":[],"text":"b"}]}}"##;
+    let document: crate::protocol::Document = serde_json::from_str(json).unwrap();
+    crate::protocol::clear_style_table();
+    let root = &document.root;
+    assert_eq!(root.style["background"], json!("#fff"));
+    assert_eq!(root.children[0].style["fontSize"], json!(14));
+    // Equal styles are one (interned) whether written by index or inline.
+    assert!(std::sync::Arc::ptr_eq(root.children[0].style.shared(), root.children[1].style.shared()));
+    assert_eq!(root.children[0].runs[0]["style"]["fontWeight"], json!(700));
+    // An index past the table is an error, not a default style.
+    let bad = json.replace(r#""style":1"#, r#""style":7"#);
+    assert!(serde_json::from_str::<crate::protocol::Document>(&bad).is_err());
+    crate::protocol::clear_style_table();
+}

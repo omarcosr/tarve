@@ -22,7 +22,7 @@ import (
 
 // ProtocolVersion is @tarve/protocol PROTOCOL_VERSION; NativeABIVersion is NATIVE_ABI_VERSION.
 const (
-	ProtocolVersion  = 63
+	ProtocolVersion  = 64
 	NativeABIVersion = 10
 )
 

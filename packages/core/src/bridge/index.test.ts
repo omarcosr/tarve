@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { NATIVE_ABI_VERSION, PROTOCOL_VERSION } from "../protocol";
-import { assertNativeAbiVersion, drainNativeEvents, pollNativeEvent } from "./index";
+import { assertNativeAbiVersion, drainNativeEvents, pollNativeEvent , documentJson } from "./index";
 
 describe("native ABI compatibility", () => {
   test("is versioned independently from the JSON protocol", () => {
@@ -41,5 +41,26 @@ describe("native ABI compatibility", () => {
     expect(pollNativeEvent(buffer, () => { polls += 1; return 0; }, () => new Error("poll failed"))).toEqual({ buffer });
     expect(polls).toBe(1);
     expect(() => pollNativeEvent(buffer, () => -1, () => new Error("poll failed"))).toThrow("poll failed");
+  });
+});
+
+describe("documentJson", () => {
+  test("writes each node style once, before the root, and nodes name it by index", () => {
+    const shared = { flex: 1, fontSize: 14 };
+    const document = {
+      version: 1, renderer: "auto", window: { title: "w", width: 10, height: 10 },
+      root: { id: "root", kind: "window", style: { background: "#fff" }, children: [
+        { id: "a", kind: "text", style: shared, children: [], text: "a", runs: [{ start: 0, end: 1, style: { fontWeight: 700 } }] },
+        { id: "b", kind: "text", style: shared, children: [], text: "b" },
+      ] },
+    } as never;
+    const parsed = JSON.parse(documentJson(document));
+    expect(Object.keys(parsed)[0]).toBe("styles");
+    expect(parsed.styles).toEqual([{ background: "#fff" }, shared]);
+    expect(parsed.root.style).toBe(0);
+    expect(parsed.root.children.map((node: { style: number }) => node.style)).toEqual([1, 1]);
+    // A text run's style stays inline.
+    expect(parsed.root.children[0].runs[0].style).toEqual({ fontWeight: 700 });
+    expect(parsed.window).toEqual({ title: "w", width: 10, height: 10 });
   });
 });

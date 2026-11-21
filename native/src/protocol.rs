@@ -12,7 +12,7 @@ pub use errors::{error, fatal_error, nonfatal_error};
 #[allow(unused_imports)]
 pub(crate) use style_validation::*;
 
-pub const VERSION: u32 = 63;
+pub const VERSION: u32 = 64;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -287,8 +287,35 @@ impl Serialize for NodeStyle {
 
 impl<'de> Deserialize<'de> for NodeStyle {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Value::deserialize(deserializer).map(Self::new)
+        let value = Value::deserialize(deserializer)?;
+        // A number is an index into the document's style table (`Document::styles`).
+        if let Some(index) = value.as_u64() {
+            return STYLE_TABLE.with(|table| {
+                table.borrow().get(index as usize).cloned().ok_or_else(|| {
+                    serde::de::Error::custom(format!("style {index} is not in the document's style table"))
+                })
+            });
+        }
+        Ok(Self::new(value))
     }
+}
+
+thread_local! {
+    /// The style table of the document being parsed (`Document::styles`), for its nodes'
+    /// numeric styles. JSON writes it before the root, so it is filled before any node.
+    static STYLE_TABLE: std::cell::RefCell<Vec<NodeStyle>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Fills the style table from a document's `styles` (see `STYLE_TABLE`).
+fn install_style_table<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
+    let styles = Vec::<Value>::deserialize(deserializer)?;
+    STYLE_TABLE.with(|table| *table.borrow_mut() = styles.into_iter().map(NodeStyle::new).collect());
+    Ok(())
+}
+
+/// Lets go of the last document's style table once it is parsed.
+pub(crate) fn clear_style_table() {
+    STYLE_TABLE.with(|table| *table.borrow_mut() = Vec::new());
 }
 
 /// Live styles by content hash. Entries are weak: a style no node uses any
@@ -681,6 +708,11 @@ pub enum WindowLevel {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Document {
     pub version: u32,
+    /// Styles nodes share, written once: a node's `style` may be an index into it. JSON
+    /// writes it before `root` (a list's rows repeat a few styles thousands of times).
+    #[serde(default, rename = "styles", deserialize_with = "install_style_table")]
+    #[allow(dead_code)]
+    styles: (),
     #[serde(default)]
     pub renderer: RendererPreference,
     /// App fonts (CSS `@font-face`): base64 font files, usable by family name.
