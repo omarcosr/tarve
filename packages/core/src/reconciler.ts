@@ -1,6 +1,6 @@
 import { PROTOCOL_VERSION, type NativeNode, type Renderer, type SceneDocument, type WindowOptions } from "./protocol";
 import { Fragment, _isNativeVNode, type Child, type Component, type VNode } from "./jsx-runtime";
-import { lightTheme, resolveStyleString, resolveThemeStyle, theme, type ThemeDefinition } from "./theme";
+import { lightTheme, resolveStyleString, resolveThemeStyle, resolveThemeStyleShared, theme, type ThemeDefinition } from "./theme";
 import { nativeAssetPath } from "#tarve/assets";
 import type { ComponentAdapter } from "./component-adapter";
 import { canonicalizeIntrinsicStyle } from "./intrinsic-style";
@@ -208,6 +208,11 @@ interface TextPatch { owners: (VNode | undefined)[]; children: unknown[] }
 
 const memoStores = new WeakMap<object, Map<string, MemoEntry>>();
 const EMPTY_ENTRIES: readonly [string, unknown][] = Object.freeze([]) as readonly [string, unknown][];
+/** A leaf's children: shared and frozen (nothing writes a compiled node's children in place). */
+const NO_CHILDREN = Object.freeze([]) as unknown as NativeNode[];
+/** A node's final style and the font its children inherit, by resolved style and inherited font. */
+interface FinalStyle { style: NativeNode["style"]; font: Record<string, unknown> }
+const finalStyleCache = new WeakMap<object, WeakMap<object, Map<string, FinalStyle>>>();
 
 /**
  * Automatic memo for list items: an item made only of native kinds and pure components
@@ -366,13 +371,13 @@ export function compileTree(
       const slots = previous.texts;
       const found: (VNode | undefined)[] = new Array(slots.owners.length);
       const children: unknown[] = new Array(slots.owners.length);
-      if (sameVNodeExceptText((previous.props as { vnode: VNode }).vnode, item, pureElement, slots.owners, found, children)) {
+      if (sameVNodeExceptText(previous.props as VNode, item, pureElement, slots.owners, found, children)) {
         let changed = false;
         for (let slot = 0; slot < children.length; slot++) if (children[slot] !== undefined) { changed = true; break; }
         if (changed) patch = { owners: found, children };
         else { same = true; owners = found; }
       }
-    } else if (known) same = sameVNode((previous.props as { vnode: VNode }).vnode, item, pureElement);
+    } else if (known) same = sameVNode(previous.props as VNode, item, pureElement);
     // An item seen for the first time is no evidence either way.
     if (!known) state.tries--;
     else if (!same && !patch) state.misses++;
@@ -410,8 +415,8 @@ export function compileTree(
       for (let index = 0; index < previous.nested.length; index++) seeMemo(previous.nested[index]!);
       // An automatic memo keeps only the item: the next render compares against it.
       // An automatic memo's props are its own object: the item is swapped in place.
-      if (autoProps) (previous.props as { vnode: VNode }).vnode = autoProps.vnode;
-      else previous.props = props;
+      // An automatic memo keeps the item itself as its props.
+      previous.props = autoProps ? autoProps.vnode : props;
       // An enclosing automatic memo's item contains these texts too.
       if (collecting > 0 && previous.texts) {
         for (let slot = 0; slot < previous.texts.owners.length; slot++) {
@@ -466,7 +471,7 @@ export function compileTree(
         ...readViewport ? { breakpoint: currentBreakpoint(readExact) } : {},
         ...readPosition && position ? { position: position.index + "/" + position.count } : {},
         ...autoProps && slotOwners.length > slotStart ? { texts: { owners: slotOwners.slice(slotStart), nodes: slotNodes.slice(slotStart) } } : {},
-        ...autoProps ? { props: { vnode: autoProps.vnode, same: false } } : {},
+        ...autoProps ? { props: autoProps.vnode } : {},
       });
     } else store.delete(path);
     // A plain memo's texts are its own: an enclosing item does not see them.
@@ -569,6 +574,40 @@ export function compileTree(
     }
     return initialFontValues;
   };
+  /**
+   * A node's resolved style with what it inherits written in (CSS inherited font properties,
+   * `text-align: match-parent`), and the inherited font its children get.
+   */
+  function finishStyle(fontStyle: Record<string, unknown>, parentFont: Record<string, unknown>, fontClass: "inherit" | "control" | "none"): Record<string, unknown> {
+    // CSS `text-align: match-parent` computes to the parent's value, with start/end resolved against the
+    // parent's direction (left-to-right: there is no `direction` property), so descendants inherit left/right.
+    if (fontStyle.textAlign === "match-parent") fontStyle.textAlign = matchParentTextAlign(parentFont.textAlign);
+    if (fontClass === "inherit") {
+      const initial = initialFont();
+      for (let index = 0; index < INHERITED_FONT.length; index++) {
+        const key = INHERITED_FONT[index]!;
+        if (fontStyle[key] !== undefined) continue;
+        const value = parentFont[key] ?? initial[key];
+        if (value !== undefined) fontStyle[key] = value;
+      }
+    } else if (fontClass === "control") {
+      for (const key of CONTROL_FONT) {
+        if (fontStyle[key] === undefined && parentFont[key] !== undefined) fontStyle[key] = parentFont[key];
+      }
+      fontStyle.fontFamily ??= theme.font.family;
+    }
+    let ownFont = parentFont;
+    // A style has a few keys; INHERITED_FONT has thirteen.
+    for (const key in fontStyle) {
+      if (!INHERITED_FONT_SET.has(key)) continue;
+      const value = fontStyle[key];
+      if (value !== undefined && value !== parentFont[key]) {
+        if (ownFont === parentFont) ownFont = { ...parentFont };
+        ownFont[key] = value;
+      }
+    }
+    return ownFont;
+  }
   function visitComponent(child: VNode, path: string, group: string | undefined, position: Position | undefined): NativeNode[] {
     const type = child.type as Component;
     const info = (type as unknown as Record<symbol, MemoInfo<object> | undefined>)[MEMO];
@@ -791,56 +830,55 @@ export function compileTree(
       if (control?.role === "otpSlot") rawStyle.focus = { ...rawStyle.focusVisible as object, ...p.style?.focus };
     }
     const variants: VariantContext = { position, viewportWidth: viewportWidth(), viewportHeight: viewportHeight(), usedViewport, usedPosition };
-    const style = resolveThemeStyle(foldVariants(rawStyle, selectedTheme, variants), selectedTheme);
-    if (style.padding && typeof style.padding === "object") style.padding = { ...style.padding };
-    if (style.margin && typeof style.margin === "object") style.margin = { ...style.margin };
+    const folded = foldVariants(rawStyle, selectedTheme, variants);
+    const parentFont = inheritedFont;
+    const uaMargin = p.uaMargin as { block: number; inline?: number } | undefined;
+    // Equal styles under the same inherited font come out equal: nodes share one (a list's
+    // rows hold a handful of styles, not one each). The window's is its own (written below), and
+    // so is a style bound to signals (a flush writes the new values into it).
+    const shared = uaMargin || nativeType === "window" || nodeBindings ? undefined : resolveThemeStyleShared(folded, selectedTheme);
+    const fontClass = INHERITING_TEXT.has(nativeType) ? "inherit" : TEXT_KINDS.has(nativeType) ? "control" : "none";
+    let finalStyles: Map<string, FinalStyle> | undefined;
+    let known: FinalStyle | undefined;
+    if (shared) {
+      let byFont = finalStyleCache.get(shared);
+      if (!byFont) finalStyleCache.set(shared, byFont = new WeakMap());
+      finalStyles = byFont.get(parentFont);
+      if (!finalStyles) byFont.set(parentFont, finalStyles = new Map());
+      known = finalStyles.get(fontClass);
+    }
+    let style: NativeNode["style"];
+    if (known) {
+      style = known.style;
+      inheritedFont = known.font;
+    } else {
+      style = shared ? { ...shared } : resolveThemeStyle(folded, selectedTheme);
+      if (!shared) {
+        // The uncached path holds the caller's own nested objects: copied, so later writes to them show.
+        if (style.padding && typeof style.padding === "object") style.padding = { ...style.padding };
+        if (style.margin && typeof style.margin === "object") style.margin = { ...style.margin };
+      }
+      inheritedFont = finishStyle(style as Record<string, unknown>, parentFont, fontClass);
+      // User-agent margins of HTML block elements (`uaMargin`: em vertically, px inline).
+      if (uaMargin && style.margin === undefined) {
+        const size = Number((style as Record<string, unknown>).fontSize ?? parentFont.fontSize ?? theme.font.size);
+        const vertical = Math.round(uaMargin.block * size * 100) / 100;
+        style.margin = { top: vertical, bottom: vertical, left: uaMargin.inline ?? 0, right: uaMargin.inline ?? 0 };
+      }
+      if (finalStyles) finalStyles.set(fontClass, { style, font: inheritedFont });
+    }
     const imageSource = nativeType === "image" && p.src !== undefined
       ? serializeImageSource(p.src)
       : undefined;
-    const parentFont = inheritedFont;
-    const fontStyle = style as Record<string, unknown>;
-    // CSS `text-align: match-parent` computes to the parent's value, with start/end resolved against the
-    // parent's direction (left-to-right: there is no `direction` property), so descendants inherit left/right.
-    if (fontStyle.textAlign === "match-parent") fontStyle.textAlign = matchParentTextAlign(parentFont.textAlign);
-    if (INHERITING_TEXT.has(nativeType)) {
-      const initial = initialFont();
-      for (let index = 0; index < INHERITED_FONT.length; index++) {
-        const key = INHERITED_FONT[index]!;
-        if (fontStyle[key] !== undefined) continue;
-        const value = parentFont[key] ?? initial[key];
-        if (value !== undefined) fontStyle[key] = value;
-      }
-    } else if (TEXT_KINDS.has(nativeType)) {
-      for (const key of CONTROL_FONT) {
-        if (fontStyle[key] === undefined && parentFont[key] !== undefined) fontStyle[key] = parentFont[key];
-      }
-      fontStyle.fontFamily ??= theme.font.family;
-    }
-    let ownFont = parentFont;
-    // A style has a few keys; INHERITED_FONT has thirteen.
-    for (const key in fontStyle) {
-      if (!INHERITED_FONT_SET.has(key)) continue;
-      const value = fontStyle[key];
-      if (value !== undefined && value !== parentFont[key]) {
-        if (ownFont === parentFont) ownFont = { ...parentFont };
-        ownFont[key] = value;
-      }
-    }
-    inheritedFont = ownFont;
-    // User-agent margins of HTML block elements (`uaMargin`: em vertically, px inline).
-    const uaMargin = p.uaMargin as { block: number; inline?: number } | undefined;
-    if (uaMargin && style.margin === undefined) {
-      const size = Number(fontStyle.fontSize ?? parentFont.fontSize ?? theme.font.size);
-      const vertical = Math.round(uaMargin.block * size * 100) / 100;
-      style.margin = { top: vertical, bottom: vertical, left: uaMargin.inline ?? 0, right: uaMargin.inline ?? 0 };
-    }
     // Plain assignments instead of ~30 conditional object spreads per node:
     // on a 6,000-node first render the spreads alone cost ~10 ms.
     let children: NativeNode[];
     try {
       // Anonymous descendants are named from the nearest node, not the root: short,
       // stable ids that survive the subtree moving (a scrolled list row, a reordered key).
-      children = isText || isRichLeaf ? [] : visit(p.children, `${id}/children`, childGroup);
+      children = isText || isRichLeaf ? NO_CHILDREN : visit(p.children, `${id}/children`, childGroup);
+      // Most nodes are leaves: one shared, frozen empty list instead of one each.
+      if (children.length === 0) children = NO_CHILDREN;
     } finally {
       inheritedFont = parentFont;
     }

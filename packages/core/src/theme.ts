@@ -319,14 +319,23 @@ let resolvedStyleCount = 0;
  * level is a fresh copy callers may extend.
  */
 export function resolveThemeStyle(style: Style, selected: ThemeDefinition): Style {
+  const shared = resolveThemeStyleShared(style, selected);
+  return shared ? { ...shared } : resolveThemeStyleUncached(style, selected);
+}
+
+/**
+ * The cache's own resolved style for `style` (see `resolveThemeStyle`), the same object for
+ * equal styles: callers must not write to it. Undefined for a style the cache cannot key.
+ */
+export function resolveThemeStyleShared(style: Style, selected: ThemeDefinition): Style | undefined {
   let key: string;
   try {
     key = JSON.stringify(style);
   } catch {
-    return resolveThemeStyleUncached(style, selected);
+    return undefined;
   }
   // JSON writes NaN and ±Infinity as null: such a style could share a key with another.
-  if (key.includes("null")) return resolveThemeStyleUncached(style, selected);
+  if (key.includes("null")) return undefined;
   let cache = resolvedStyles.get(selected);
   if (!cache) resolvedStyles.set(selected, cache = new Map());
   let resolved = cache.get(key);
@@ -343,7 +352,7 @@ export function resolveThemeStyle(style: Style, selected: ThemeDefinition): Styl
     }
     cache.set(key, resolved);
   }
-  return { ...resolved };
+  return resolved;
 }
 
 /** Top-level comma split, ignoring commas inside parentheses (`rgb(1, 2, 3)`). */

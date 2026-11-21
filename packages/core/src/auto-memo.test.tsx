@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Button, Column, Row, Scroll, Text, View, Window } from "./index";
+import { Button, Column, Row, Scroll, Text, View, Window, signal } from "./index";
 import { compileTree } from "./reconciler";
 import type { VNode } from "./jsx-runtime";
 
@@ -113,5 +113,25 @@ describe("automatic memo: items whose texts alone changed are patched", () => {
     const next = compileTree(view(2, 2), false, "auto", [], scope);
     const texts = [...next.nodes.values()].filter(node => node.kind === "text");
     expect(texts.map(node => [node.text, node.style.flex])).toEqual([["2", 2], ["2", 2]]);
+  });
+});
+
+describe("compiled styles", () => {
+  test("equal styles under the same inherited font are one object; a signal-bound one is its own", () => {
+    const color = signal("#ff0000");
+    const tree = compileTree(<Window title="s"><Column>
+      <Text id="a" style={{ flex: 1 }}>one</Text>
+      <Text id="b" style={{ flex: 1 }}>two</Text>
+      <Column style={{ fontSize: 20 }}><Text id="c" style={{ flex: 1 }}>three</Text></Column>
+      <Text id="d" style={{ flex: 1, foreground: color }}>four</Text>
+      <Text id="e" style={{ flex: 1, foreground: color }}>five</Text>
+    </Column></Window>);
+    const style = (id: string) => tree.nodes.get(id)!.style;
+    expect(style("a")).toBe(style("b"));
+    // Another inherited font: another style.
+    expect(style("c")).not.toBe(style("a"));
+    expect(style("c").fontSize).toBe(20);
+    expect(style("d")).not.toBe(style("e"));
+    expect(style("d")).toEqual(style("e"));
   });
 });
