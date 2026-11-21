@@ -97,6 +97,12 @@ impl TextEngine {
         for (key, layout) in results.into_iter().flatten() {
             self.preshaped.insert(key, layout);
         }
+        // A worker's shaping buffers are allocated on its own thread, which ends here: kept,
+        // they held ~4.5 MB that no thread would reuse or give back until the next batch.
+        // Fresh ones cost nothing measurable (layout_bench: within noise).
+        for worker in &mut self.workers {
+            worker.1 = LayoutContext::new();
+        }
     }
     /// `text_style_hash` of the node, kept per node while its style is the same object (a text
     /// whose content changes every frame keeps its style). The kept style holds the object, so

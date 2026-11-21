@@ -99,6 +99,14 @@ fn layout_memory() {
     let Ok(dir) = std::env::var("TARVE_LAYOUT_BENCH") else {
         return;
     };
+    println!(
+        "SIZES node={} entry={} taffy_style={} taffy_layout={} taffy_cache={}",
+        std::mem::size_of::<Node>(),
+        std::mem::size_of::<crate::tree::Entry>(),
+        std::mem::size_of::<taffy::Style<String>>(),
+        std::mem::size_of::<taffy::Layout>(),
+        std::mem::size_of::<taffy::Cache>()
+    );
     let mb = |bytes: isize| bytes as f64 / 1048576.0;
     let live = || LIVE.load(Ordering::Relaxed);
     let bytes = std::fs::read(format!("{dir}/root.json")).unwrap();
