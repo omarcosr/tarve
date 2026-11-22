@@ -33,20 +33,6 @@ pub(crate) fn default_app_id(name: &str) -> String {
     }
 }
 
-/// True when this process is a shared script runtime (`bun app.tsx`, `node app.js`) rather than
-/// the app's own executable. A shortcut to such a host would hand its icon to every other
-/// window that host opens, so none is written.
-fn shared_host_executable(exe: &std::path::Path) -> bool {
-    exe.file_stem()
-        .and_then(|stem| stem.to_str())
-        .is_some_and(|stem| {
-            matches!(
-                stem.to_ascii_lowercase().as_str(),
-                "bun" | "node" | "tjs" | "deno" | "qjs"
-            )
-        })
-}
-
 /// Claims `id` as this process's AppUserModelID; must run before the first window is created.
 pub(crate) fn set_process_app_id(id: &str) -> Result<(), String> {
     use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
@@ -70,87 +56,6 @@ fn valid_app_id(id: &str) -> bool {
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(Some(0)).collect()
-}
-
-/// Names the process for the shell (media flyout, notifications): an unpackaged app is
-/// otherwise reported as its host executable or "Unknown app". Registers DisplayName and
-/// IconUri under HKCU\Software\Classes\AppUserModelId\<id>, then claims that id for the
-/// process; must run before the first window is created.
-/// The shell names a media session (and its icon) from a Start menu shortcut that carries the
-/// session's AppUserModelID; the registry entry alone only covers notifications. Writes
-/// %APPDATA%\Microsoft\Windows\Start Menu\Programs\<name>.lnk pointing at this process.
-fn write_start_menu_shortcut(identity: &crate::protocol::AppIdentity) -> Result<(), String> {
-    use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
-    use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
-    use windows::Win32::System::Com::{
-        CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
-        CoUninitialize, IPersistFile,
-    };
-    use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
-    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
-    use windows::core::{HSTRING, Interface};
-    let appdata = std::env::var_os("APPDATA").ok_or("APPDATA is not set")?;
-    let file_name: String = identity
-        .name
-        .trim()
-        .chars()
-        .map(|c| {
-            if "<>:\"/\\|?*".contains(c) || c.is_control() {
-                '_'
-            } else {
-                c
-            }
-        })
-        .collect();
-    let folder = std::path::Path::new(&appdata).join("Microsoft\\Windows\\Start Menu\\Programs");
-    let path = folder.join(format!("{file_name}.lnk"));
-    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
-    if shared_host_executable(&exe) {
-        return Ok(());
-    }
-    let arguments = std::env::args()
-        .skip(1)
-        .map(|arg| {
-            if arg.contains(' ') {
-                format!("\"{arg}\"")
-            } else {
-                arg
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-    let initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok();
-    let result = (|| -> windows::core::Result<()> {
-        unsafe {
-            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
-            link.SetPath(&HSTRING::from(exe.as_os_str()))?;
-            link.SetArguments(&HSTRING::from(arguments.as_str()))?;
-            if let Ok(directory) = std::env::current_dir() {
-                link.SetWorkingDirectory(&HSTRING::from(directory.as_os_str()))?;
-            }
-            if let Some(icon) = identity
-                .icon
-                .as_deref()
-                .filter(|icon| icon.to_ascii_lowercase().ends_with(".ico"))
-            {
-                link.SetIconLocation(&HSTRING::from(icon), 0)?;
-            }
-            let store: IPropertyStore = link.cast()?;
-            let value = PROPVARIANT::from(identity.id.as_str());
-            store.SetValue(&PKEY_AppUserModel_ID, &value)?;
-            store.Commit()?;
-            let file: IPersistFile = link.cast()?;
-            std::fs::create_dir_all(&folder).map_err(|error| {
-                windows::core::Error::new(windows::core::HRESULT(-1), error.to_string())
-            })?;
-            file.Save(&HSTRING::from(path.as_os_str()), true)?;
-        }
-        Ok(())
-    })();
-    if initialized {
-        unsafe { CoUninitialize() };
-    }
-    result.map_err(|error| format!("could not write the Start menu shortcut: {error}"))
 }
 
 /// Registers DisplayName (and IconUri) under HKCU\Software\Classes\AppUserModelId\<id>: all
@@ -220,8 +125,9 @@ pub(crate) fn register_app_identity(identity: &crate::protocol::AppIdentity) -> 
     if identity.name.trim().is_empty() {
         return Err("appIdentity.name must not be empty".into());
     }
+    // No Start menu shortcut here: a build run from dist\ or a temp folder would leave one
+    // behind on every launch. The installer (packages/core/setup) writes it, carrying the id.
     register_app_user_model_id(&identity.id, identity.name.trim(), identity.icon.as_deref())?;
-    write_start_menu_shortcut(identity)?;
     set_process_app_id(&identity.id)
 }
 
@@ -456,19 +362,9 @@ mod tests {
     }
 
     #[test]
-    fn apps_without_identity_get_their_own_id_and_script_hosts_get_no_shortcut() {
+    fn apps_without_identity_get_their_own_id() {
         assert_eq!(default_app_id("Rádio Eterna"), "Tarve.R_dio_Eterna");
         assert_eq!(default_app_id("  "), "Tarve.App");
         assert!(valid_app_id(&default_app_id(&"x".repeat(500))));
-        for host in [
-            "C:\\Users\\a\\.bun\\bin\\bun.exe",
-            "C:\\nodejs\\node.exe",
-            "tjs.exe",
-        ] {
-            assert!(shared_host_executable(std::path::Path::new(host)));
-        }
-        assert!(!shared_host_executable(std::path::Path::new(
-            "C:\\Users\\a\\AppData\\Local\\Programs\\Player\\Player.exe"
-        )));
     }
 }

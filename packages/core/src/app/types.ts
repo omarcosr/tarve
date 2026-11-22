@@ -119,6 +119,8 @@ export interface AppOptions {
   /**
    * Windows app identity (AppUserModelID). Without it, media controls and notifications show
    * the host executable (bun.exe, node.exe) or "Unknown app". `icon` is an .ico/.png path.
+   * The app never writes a Start menu shortcut itself; the installer (`tarve package --format setup`) does,
+   * and the media flyout takes the app's name from that shortcut.
    */
   appIdentity?: { id: string; name: string; icon?: string };
   /**
