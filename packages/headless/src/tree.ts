@@ -8,7 +8,7 @@ export type SceneNode = SceneDocument["root"];
 
 /**
  * The scene tree as the app last sent it to the bridge: the start document with every `update`,
- * `patch` and `mutate` command applied. It is what the native tree holds (ids, kinds, text,
+ * `patch`, `setNodes` and `mutate` command applied. It is what the native tree holds (ids, kinds, text,
  * values, `control` roles and labels, `labelledBy`), without layout.
  */
 export class SceneTreeMirror {
@@ -35,6 +35,18 @@ export class SceneTreeMirror {
         return;
       case "patch":
         for (const node of command.nodes) this.patch(node);
+        break;
+      case "setNodes":
+        // Signal values and texts set in place: new style values and text over the node's own.
+        for (const set of command.nodes) {
+          const node = this.nodes.get(set.id);
+          if (!node) continue;
+          this.nodes.set(set.id, {
+            ...node,
+            ...(set.style ? { style: { ...node.style, ...set.style } as SceneNode["style"] } : {}),
+            ...(set.text !== undefined ? { text: set.text } : {}),
+          });
+        }
         break;
       case "mutate":
         for (const mutation of command.mutations) {
