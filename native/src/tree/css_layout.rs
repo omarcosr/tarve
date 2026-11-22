@@ -203,10 +203,8 @@ pub(crate) fn css_track_list(text: &str) -> Option<Vec<GridTemplateComponent<Str
 
 /// Layout styles shared by the nodes they fit (`shared_layout_style`): by the address of the
 /// node's interned style, with that style held so the address stays its own.
-pub(crate) type LayoutStyles = HashMap<
-    (usize, u64),
-    Vec<(Arc<Value>, String, String, std::rc::Rc<Style>)>,
->;
+pub(crate) type LayoutStyles =
+    HashMap<(usize, u64), Vec<(Arc<Value>, String, String, std::rc::Rc<Style>)>>;
 
 /// The layout style of a node that does not animate (see `build_layout`), shared with every
 /// node of the same style, kind and scroll orientation: a list's rows hold one between them.

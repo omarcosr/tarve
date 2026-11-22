@@ -27,7 +27,10 @@ fn layout_bench() {
     });
     tree.compute(1024.0, 760.0).unwrap();
     tree.scene(1.25);
-    let rounds: usize = std::env::var("TARVE_LAYOUT_ROUNDS").ok().and_then(|v| v.parse().ok()).unwrap_or(40);
+    let rounds: usize = std::env::var("TARVE_LAYOUT_ROUNDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(40);
     let mut times: Vec<(f64, f64, f64, f64)> = Vec::new();
     for round in 0..rounds {
         // Every round shows texts never shaped before, as the app's ticking counter does.
@@ -43,7 +46,10 @@ fn layout_bench() {
             .filter(|node| node.kind == "text")
             .map(|node| serde_json::from_value(json!({"id": node.id, "text": node.text})).unwrap())
             .collect();
-        let rest: Vec<Node> = nodes.into_iter().filter(|node| node.kind != "text").collect();
+        let rest: Vec<Node> = nodes
+            .into_iter()
+            .filter(|node| node.kind != "text")
+            .collect();
         let profile_apply = std::env::var("TARVE_LAYOUT_PROFILE").is_ok_and(|v| v == "apply");
         let start = Instant::now();
         crate::profiler::ACTIVE.store(profile_apply, std::sync::atomic::Ordering::Relaxed);
@@ -86,7 +92,6 @@ fn layout_bench() {
         median(|t| t.3)
     );
 }
-
 
 /// Live native heap of the benchmark's list, stage by stage (no mimalloc: the counting allocator):
 ///   set TARVE_LAYOUT_BENCH=<dir> && cargo test --release --lib --no-default-features --features fxhash layout_memory -- --ignored --nocapture
@@ -135,11 +140,17 @@ fn layout_memory() {
     drop(list);
     // As after the first frame: texts far offscreen give their layouts back.
     tree.evict_offscreen_texts();
-    println!("MEMORY after evicting offscreen texts: {:.2} MB", mb(live() - base));
+    println!(
+        "MEMORY after evicting offscreen texts: {:.2} MB",
+        mb(live() - base)
+    );
     for (name, bytes) in tree.text_memory_report() {
         println!("MEMORY text {name}: {:.2} MB", mb(bytes));
     }
     let before = live();
     drop(tree);
-    println!("MEMORY rest (entries, taffy): {:.2} MB", mb(before - live()));
+    println!(
+        "MEMORY rest (entries, taffy): {:.2} MB",
+        mb(before - live())
+    );
 }

@@ -6,14 +6,20 @@ use super::*;
 pub(super) fn node_style(value: Value) -> Result<NodeStyle, String> {
     match value.as_u64() {
         Some(index) => STYLE_TABLE.with(|table| {
-            table.borrow().get(index as usize).cloned().ok_or_else(|| format!("style {index} is not in the document's style table"))
+            table
+                .borrow()
+                .get(index as usize)
+                .cloned()
+                .ok_or_else(|| format!("style {index} is not in the document's style table"))
         }),
         None => Ok(NodeStyle::new(value)),
     }
 }
 
 /// The document's root, then the style table let go: it serves only this document's nodes.
-pub(super) fn root_then_clear<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Node, D::Error> {
+pub(super) fn root_then_clear<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Node, D::Error> {
     let root = Node::deserialize(deserializer);
     clear_style_table();
     root
@@ -26,9 +32,12 @@ thread_local! {
 }
 
 /// Fills the style table from a document's `styles` (see `STYLE_TABLE`).
-pub(super) fn install_style_table<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
+pub(super) fn install_style_table<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<(), D::Error> {
     let styles = Vec::<Value>::deserialize(deserializer)?;
-    STYLE_TABLE.with(|table| *table.borrow_mut() = styles.into_iter().map(NodeStyle::new).collect());
+    STYLE_TABLE
+        .with(|table| *table.borrow_mut() = styles.into_iter().map(NodeStyle::new).collect());
     Ok(())
 }
 

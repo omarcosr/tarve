@@ -12,7 +12,12 @@ fn list(label: &dyn Fn(usize) -> String) -> Node {
                 vec![],
             );
             text.text = label(i);
-            let mut button = node(&format!("b{i}"), "button", json!({"height":28,"shrink":0}), vec![]);
+            let mut button = node(
+                &format!("b{i}"),
+                "button",
+                json!({"height":28,"shrink":0}),
+                vec![],
+            );
             button.text = "Open".into();
             node(
                 &format!("r{i}"),
@@ -24,13 +29,23 @@ fn list(label: &dyn Fn(usize) -> String) -> Node {
         .collect();
     let column = node("c", "column", json!({"direction":"column"}), rows);
     let scroll = node("s", "scroll", json!({"flex":1,"minHeight":0}), vec![column]);
-    root(vec![node("main", "column", json!({"direction":"column","flex":1}), vec![scroll])])
+    root(vec![node(
+        "main",
+        "column",
+        json!({"direction":"column","flex":1}),
+        vec![scroll],
+    )])
 }
 
 fn texts(label: &dyn Fn(usize) -> String) -> Vec<Node> {
     (0..60)
         .map(|i| {
-            let mut text = node(&format!("t{i}"), "text", json!({"flex":1,"fontSize":14}), vec![]);
+            let mut text = node(
+                &format!("t{i}"),
+                "text",
+                json!({"flex":1,"fontSize":14}),
+                vec![],
+            );
             text.text = label(i);
             text
         })
@@ -43,7 +58,10 @@ fn rects(tree: &Tree) -> Vec<(String, [i64; 4])> {
         .iter()
         .map(|(id, entry)| {
             let r = entry.rect;
-            (id.clone(), [r.x0, r.y0, r.x1, r.y1].map(|v| (v * 100.0).round() as i64))
+            (
+                id.clone(),
+                [r.x0, r.y0, r.x1, r.y1].map(|v| (v * 100.0).round() as i64),
+            )
         })
         .collect();
     out.sort();
@@ -84,7 +102,11 @@ fn offscreen_texts_lay_out_after_the_frame_as_a_whole_layout_would() {
     assert_eq!(rects(&whole), rects(&deferred));
     for i in [0, 7, 49, 56] {
         let id = format!("t{i}");
-        assert_eq!(whole.text.measure(&id, None), deferred.text.measure(&id, None), "{id}");
+        assert_eq!(
+            whole.text.measure(&id, None),
+            deferred.text.measure(&id, None),
+            "{id}"
+        );
     }
     // A scroll after it shows the new texts.
     deferred.scene(1.0);
@@ -127,7 +149,10 @@ fn texts_far_offscreen_drop_their_layouts_and_paint_the_same_when_back() {
     tree.dirty.layout = true;
     tree.compute(400.0, 300.0).unwrap();
     assert_eq!(rects(&tree), rects_before);
-    assert!(!tree.text.layouts.contains_key("t55"), "sizes came from the cache");
+    assert!(
+        !tree.text.layouts.contains_key("t55"),
+        "sizes came from the cache"
+    );
     // Scrolled to the end, the dropped rows shape again and paint like a tree that never dropped them.
     let mut fresh = Tree::new(list(&label));
     fresh.compute(400.0, 300.0).unwrap();
@@ -139,8 +164,23 @@ fn texts_far_offscreen_drop_their_layouts_and_paint_the_same_when_back() {
     assert!(tree.text.layouts.contains_key("t55"));
     assert_eq!(rects(&tree), rects(&fresh));
     // A new text in a dropped row measures right.
-    tree.patch(texts(&|i| if i == 2 { "a much longer label that wraps inside its row ".repeat(3) } else { label(i) })).unwrap();
-    fresh.patch(texts(&|i| if i == 2 { "a much longer label that wraps inside its row ".repeat(3) } else { label(i) })).unwrap();
+    tree.patch(texts(&|i| {
+        if i == 2 {
+            "a much longer label that wraps inside its row ".repeat(3)
+        } else {
+            label(i)
+        }
+    }))
+    .unwrap();
+    fresh
+        .patch(texts(&|i| {
+            if i == 2 {
+                "a much longer label that wraps inside its row ".repeat(3)
+            } else {
+                label(i)
+            }
+        }))
+        .unwrap();
     tree.compute(400.0, 300.0).unwrap();
     fresh.compute(400.0, 300.0).unwrap();
     assert_eq!(rects(&tree), rects(&fresh));
@@ -159,7 +199,10 @@ fn a_document_style_table_gives_nodes_their_styles() {
     assert_eq!(root.style["background"], json!("#fff"));
     assert_eq!(root.children[0].style["fontSize"], json!(14));
     // Equal styles are one (interned) whether written by index or inline.
-    assert!(std::sync::Arc::ptr_eq(root.children[0].style.shared(), root.children[1].style.shared()));
+    assert!(std::sync::Arc::ptr_eq(
+        root.children[0].style.shared(),
+        root.children[1].style.shared()
+    ));
     assert_eq!(root.children[0].runs[0]["style"]["fontWeight"], json!(700));
     // An index past the table is an error, not a default style.
     let bad = json.replace(r#""style":1"#, r#""style":7"#);

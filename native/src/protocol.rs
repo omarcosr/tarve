@@ -9,10 +9,10 @@ pub use requests::FileDialogOptions;
 mod errors;
 mod style_table;
 mod style_validation;
+pub use errors::{error, fatal_error, nonfatal_error};
 #[cfg(test)]
 pub(crate) use style_table::clear_style_table;
 use style_table::{install_style_table, intern_style, root_then_clear};
-pub use errors::{error, fatal_error, nonfatal_error};
 #[allow(unused_imports)]
 pub(crate) use style_validation::*;
 

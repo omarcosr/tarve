@@ -37,7 +37,9 @@ impl TextEngine {
         if let Some(&(content, style)) = self.signatures.get(id) {
             for button in [false, true] {
                 let key = (content, style, button);
-                if self.recent.peek(&key).is_some_and(|recent| Arc::ptr_eq(recent, &layout) && Arc::strong_count(&layout) == 2) {
+                if self.recent.peek(&key).is_some_and(|recent| {
+                    Arc::ptr_eq(recent, &layout) && Arc::strong_count(&layout) == 2
+                }) {
                     self.recent.pop(&key);
                 }
             }

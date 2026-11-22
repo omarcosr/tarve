@@ -3967,8 +3967,7 @@ impl Tree {
             }
             return Ok(());
         }
-        if self.defer_offscreen && !self.dirty.full && self.laid_out_size == Some((width, height))
-        {
+        if self.defer_offscreen && !self.dirty.full && self.laid_out_size == Some((width, height)) {
             self.defer_offscreen_texts(width, height);
         }
         let (text, entries, deferred) = (&mut self.text, &self.entries, &self.deferred_texts);

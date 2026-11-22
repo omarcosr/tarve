@@ -4,7 +4,11 @@ use super::*;
 
 impl App {
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
-    pub(super) fn initialize_accessibility(&mut self, event_loop: &ActiveEventLoop, window: &Window) {
+    pub(super) fn initialize_accessibility(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window: &Window,
+    ) {
         self.accessibility = Some(AccessibilityBridge::new(
             event_loop,
             window,
