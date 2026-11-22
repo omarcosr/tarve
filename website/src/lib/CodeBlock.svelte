@@ -17,7 +17,7 @@
   onDestroy(() => clearTimeout(timer));
 </script>
 
-<figure class="code" class:code-bare={!file}>
+<figure class="code" class:code-bare={!file} data-lang={lang}>
   {#if file}
     <figcaption>{file}</figcaption>
   {/if}

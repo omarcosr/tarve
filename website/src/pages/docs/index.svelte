@@ -98,7 +98,7 @@ createApp(() => (
       <div class="doc-category">
         <h3 id={category.id}>{category.title}</h3>
         <p class="doc-muted">{category.description}</p>
-        <div class="doc-cards">
+        <div class="doc-cards" data-md="list">
           {#each category.items as item (item.name)}
             <a class="doc-card" href="/docs/components/{item.name}">
               {#if item.preview}

@@ -4,3 +4,4 @@ dist-cf
 .wrangler
 scripts/previews/.generated
 src/lib/playground/wasm
+src/lib/generated/agents.json

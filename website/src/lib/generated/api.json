@@ -1299,7 +1299,7 @@
     {
       "name": "Combobox",
       "source": "packages/core/src/popups.ts",
-      "line": 600,
+      "line": 501,
       "generic": false,
       "propsType": "ComboboxProps",
       "props": [
@@ -1396,7 +1396,7 @@
     {
       "name": "Command",
       "source": "packages/core/src/popups.ts",
-      "line": 748,
+      "line": 649,
       "generic": false,
       "propsType": "CommandProps",
       "props": [
@@ -1476,7 +1476,7 @@
     {
       "name": "CommandPalette",
       "source": "packages/core/src/popups.ts",
-      "line": 871,
+      "line": 772,
       "generic": false,
       "propsType": "CommandPaletteProps",
       "props": [
@@ -1590,7 +1590,7 @@
     {
       "name": "ContextMenu",
       "source": "packages/core/src/popups.ts",
-      "line": 520,
+      "line": 421,
       "generic": false,
       "propsType": "ContextMenuProps",
       "props": [
@@ -2253,7 +2253,7 @@
     {
       "name": "DropdownMenu",
       "source": "packages/core/src/popups.ts",
-      "line": 450,
+      "line": 351,
       "generic": false,
       "propsType": "DropdownMenuProps",
       "props": [
@@ -2471,9 +2471,9 @@
     },
     {
       "name": "Flyout",
-      "summary": "Anchored, unstyled popup (a native portal): `Popover` without the card. Pressing the anchor\r\ntoggles it; while open that press is the light-dismiss press outside the flyout, which native\r\nswallows, so it closes it instead of reopening it (no timing involved). Escape on the anchor\r\ncloses it too.",
-      "source": "packages/core/src/popups.ts",
-      "line": 331,
+      "summary": "Anchored, unstyled popup (a native portal): `Popover` without the card. Pressing the anchor\ntoggles it; while open that press is the light-dismiss press outside the flyout, which native\nswallows, so it closes it instead of reopening it (no timing involved). Escape on the anchor\ncloses it too.",
+      "source": "packages/core/src/flyout.ts",
+      "line": 47,
       "generic": false,
       "propsType": "FlyoutProps",
       "props": [
@@ -2925,7 +2925,7 @@
     {
       "name": "Input",
       "source": "packages/core/src/components/input.ts",
-      "line": 28,
+      "line": 33,
       "generic": false,
       "propsType": "InputProps",
       "props": [
@@ -4096,9 +4096,9 @@
     },
     {
       "name": "Overflow",
-      "summary": "A row (or column) that shows the leading items that fit and hands the rest to\n`renderOverflow(hidden)`, like a toolbar or tab strip's \"more\" menu.\n\nNative layout has no \"hide what does not fit and tell me\" rule, so the decision is made in JS\nfrom sizes native reports (`onSize`), with no extra pass: sizes from one layout arrive in one\nbatch, which re-renders once with the new split, computed during that render (no microtask\nre-render). Items keep their last measured size while hidden (`display: none`), so growing back\nneeds no trial render; an item never measured is shown once to be measured. The box clips\n(`overflow: hidden`) so nothing spills meanwhile. Give it a bounded main size (`flex: 1`, a\nwidth): it never grows to fit its items.",
+      "summary": "A row (or column) that shows the leading items that fit and hands the rest to\n`renderOverflow(hidden)`, like a toolbar or tab strip's \"more\" menu.\n\nNative layout has no \"hide what does not fit and tell me\" rule, so the decision is made in JS\nfrom sizes native reports (`onSize`), with no extra pass: sizes from one layout arrive in one\nbatch, which re-renders once with the new split, computed during that render (no microtask\nre-render). Items keep their last measured size while hidden (`display: none`), so growing back\nneeds no trial render; an item never measured is shown once to be measured. The box clips\n(`overflow: hidden`) so nothing spills meanwhile. Give it a bounded main size (`flex: 1`, a\nwidth), or `max` to let it grow with its items up to a limit.",
       "source": "packages/core/src/components/overflow.ts",
-      "line": 62,
+      "line": 70,
       "generic": true,
       "propsType": "OverflowProps<T>",
       "props": [
@@ -4181,6 +4181,12 @@
           "type": "Style[\"justify\"]",
           "optional": true,
           "from": "ViewProps"
+        },
+        {
+          "name": "max",
+          "type": "number",
+          "optional": true,
+          "doc": "Space available on the main axis, in logical px (border box). When set, the box sizes to its\nitems up to `max` (`maxWidth`/`maxHeight`) and decides what fits against `max` instead of\nits measured size, so it works in a container that grows with its content (a dock, a taskbar)."
         },
         {
           "name": "onOutsideClick",
@@ -6234,7 +6240,7 @@
     {
       "name": "TextArea",
       "source": "packages/core/src/components/input.ts",
-      "line": 85,
+      "line": 92,
       "generic": false,
       "propsType": "TextAreaProps",
       "props": [
@@ -7145,10 +7151,16 @@
     {
       "name": "Window",
       "source": "packages/core/src/components/window.ts",
-      "line": 74,
+      "line": 83,
       "generic": false,
       "propsType": "WindowProps",
       "props": [
+        {
+          "name": "activation",
+          "type": "WindowActivation",
+          "optional": true,
+          "doc": "How the window takes the foreground (Windows): `\"normal\"` (default) when shown or clicked;\n`\"never\"`, for a dock, menu or overlay that must not take the keyboard from the app in use;\n`\"whileEditing\"`, like `\"never\"` until a click focuses an editable `Input`/`TextArea`: the\nwindow then activates to receive typing, and when that field blurs it stops being activatable\nand hands the foreground back to the window that had it. Elsewhere the window only opens\nwithout activating. Set when the window opens."
+        },
         {
           "name": "align",
           "type": "Style[\"align\"]",
@@ -7365,6 +7377,7 @@
         "BindableChild",
         "DesktopWidget",
         "Reactive",
+        "WindowActivation",
         "WindowBackdrop",
         "WindowChrome",
         "WindowCloseRequestEvent",
@@ -7614,6 +7627,7 @@
     "Transform": "interface Transform {\n  x?: number; y?: number; xPercent?: number; yPercent?: number; scale?: number; scaleX?: number; scaleY?: number;\n  rotate?: number; skewX?: number; skewY?: number; originX?: number; originY?: number;\n}",
     "TreeNode": "interface TreeNode<T = unknown> {\n  id: string;\n  label: string;\n  children?: readonly TreeNode<T>[];\n  disabled?: boolean;\n  icon?: IconName;\n  data?: T;\n}",
     "TypographyVariant": "type TypographyVariant = \"h1\" | \"h2\" | \"h3\" | \"h4\" | \"p\" | \"lead\" | \"large\" | \"small\" | \"muted\" | \"code\" | \"blockquote\";",
+    "WindowActivation": "type WindowActivation = \"normal\" | \"never\" | \"whileEditing\";",
     "WindowBackdrop": "type WindowBackdrop = \"none\" | \"transparent\" | \"blur\" | \"mica\" | \"acrylic\";",
     "WindowChrome": "type WindowChrome = \"system\" | \"none\";",
     "WindowCloseRequestEvent": "interface WindowCloseRequestEvent {\n  readonly defaultPrevented: boolean;\n  preventDefault(): void;\n}",

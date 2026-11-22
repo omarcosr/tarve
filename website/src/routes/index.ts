@@ -1,10 +1,11 @@
 import { Hono } from "hono";
 import { notFoundHandler, shell } from "hono-svelte";
 import tarve from "../../../package.json";
+import type { HonoSvelteEntries } from "../hono-svelte-entries";
+import { agentFile, agentFileKey, buildAgentFiles, isPage, markdownPath, type AgentFile } from "../lib/agents";
 import { buildComponentDoc, commonProps, docsCatalog } from "../lib/docs/build";
+import { SITE, docsPage, guides, homePage, showcasePage } from "../lib/site";
 import { themeBootScript } from "../lib/theme";
-
-const SITE = "https://tarve.dev";
 
 const head = [
   `<script>${themeBootScript}</script>`,
@@ -16,8 +17,6 @@ const head = [
 ].join("");
 
 const version = tarve.version;
-const description =
-  "Tarve: native desktop UI for Bun + TSX. No browser, no DOM — Taffy layout, Parley text and Vello/D3D11 rendering.";
 
 function meta(path: string, title: string, text: string) {
   const url = SITE + path;
@@ -26,6 +25,7 @@ function meta(path: string, title: string, text: string) {
     canonical: url,
     og: { type: "website", site_name: "Tarve", url, title, description: text },
     twitter: { card: "summary", title, description: text },
+    extra: `<link rel="alternate" type="text/markdown" href="${SITE}${markdownPath(path)}" title="Markdown for agents">`,
   };
 }
 
@@ -41,174 +41,72 @@ app.use("/*", async (c, next) => {
   await next();
 });
 
+// Files for AI agents: `<page>.md` (or the page itself with `Accept: text/markdown`),
+// /llms.txt, /llms-full.txt, /sitemap.xml and /robots.txt. A build serves the copies
+// rendered by `bun run docs:agents`; the dev server renders them on request.
+const generated = Object.values(
+  import.meta.glob<Record<string, AgentFile>>("../lib/generated/agents.json", { eager: true, import: "default" }),
+)[0];
+
+async function renderHtml(path: string, env?: unknown): Promise<string | undefined> {
+  const response = await app.request(path, { headers: { accept: "text/html" } }, env);
+  return response.ok ? response.text() : undefined;
+}
+
+/** Every agent file, for scripts/build-agents.ts. */
+export function renderAgentFiles(): Promise<Record<string, AgentFile>> {
+  return buildAgentFiles(version, (path) => renderHtml(path));
+}
+
+app.use("/*", async (c, next) => {
+  const path = c.req.path;
+  const negotiated = isPage(path) && /\btext\/markdown\b/i.test(c.req.header("accept") ?? "");
+  const wanted = negotiated ? markdownPath(path) : path;
+  const file = import.meta.env.DEV ? await agentFile(wanted, version, (page) => renderHtml(page, c.env)) : generated?.[agentFileKey(wanted)];
+  if (file) {
+    c.header("content-type", `${file.type}; charset=utf-8`);
+    c.header("cache-control", "public, max-age=3600");
+    c.header("access-control-allow-origin", "*");
+    if (file.canonical) c.header("link", `<${SITE}${file.canonical}>; rel="canonical"`);
+    if (negotiated) c.header("vary", "Accept");
+    return c.body(file.body);
+  }
+  await next();
+  if (isPage(path) && c.res.headers.get("content-type")?.includes("text/html")) {
+    c.res.headers.append("link", `<${SITE}${markdownPath(path)}>; rel="alternate"; type="text/markdown"`);
+    c.res.headers.append("vary", "Accept");
+  }
+});
+
 app.use("/*", shell({ title: "Tarve", lang: "en", head }));
 
-app.get("/", (c) => {
-  const title = "Tarve — native interfaces written in TSX";
-  return c.render("index", { title, data: { version, section: "home" }, head: meta("/", title, description) });
-});
+app.get(homePage.path, (c) =>
+  c.render("index", { title: homePage.title, data: { version, section: "home" }, head: meta(homePage.path, homePage.title, homePage.description) }),
+);
 
-app.get("/showcase", (c) => {
-  const title = "Showcase — Tarve";
-  return c.render("showcase", {
-    title,
+app.get(showcasePage.path, (c) =>
+  c.render("showcase", {
+    title: showcasePage.title,
     data: { version, section: "showcase" },
-    head: meta("/showcase", title, "Apps built with Tarve: Termio, a YouTube Music client, Tarve Studio and more, each screenshot painted by Tarve itself."),
-  });
-});
+    head: meta(showcasePage.path, showcasePage.title, showcasePage.description),
+  }),
+);
 
-app.get("/docs", (c) => {
-  const title = "Documentation — Tarve";
-  return c.render("docs/index", {
-    title,
+app.get(docsPage.path, (c) =>
+  c.render("docs/index", {
+    title: docsPage.title,
     data: { version, section: "docs", categories: docsCatalog(), commonProps: commonProps() },
-    head: meta("/docs", title, "Tarve documentation: getting started, rendering model and every built-in component."),
-  });
-});
+    head: meta(docsPage.path, docsPage.title, docsPage.description),
+  }),
+);
 
-app.get("/docs/tailwind", (c) => {
-  const title = "Tailwind classes — Tarve docs";
-  return c.render("docs/tailwind", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/tailwind", title, "Tailwind CSS utility classes on native Tarve elements: class, className, tw(), variants and the supported vocabulary."),
-  });
-});
-
-app.get("/docs/updates", (c) => {
-  const title = "Auto-updates — Tarve docs";
-  return c.render("docs/updates", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/updates", title, "Signed auto-updates for Tarve apps: tarve keygen, tarve release, Authenticode signing and checkForUpdate."),
-  });
-});
-
-app.get("/docs/desktop", (c) => {
-  const title = "Desktop integration — Tarve docs";
-  return c.render("docs/desktop", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/desktop", title, "Translucent windows, several windows, system file drops, single instance and URL links, remembered windows and a themed menu bar in Tarve."),
-  });
-});
-
-app.get("/docs/tooling", (c) => {
-  const title = "Project and dev tools — Tarve docs";
-  return c.render("docs/tooling", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/tooling", title, "create-tarve templates, tarve dev hot reload, the error overlay, the frame-time graph and the visual inspector."),
-  });
-});
-
-app.get("/docs/router", (c) => {
-  const title = "Navigation — Tarve docs";
-  return c.render("docs/router", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/router", title, "@tarve/router: stack and tab navigation with typed params, transitions and back gestures for Tarve apps."),
-  });
-});
-
-app.get("/docs/testing", (c) => {
-  const title = "Testing — Tarve docs";
-  return c.render("docs/testing", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/testing", title, "@tarve/test: Testing Library–style tests, queries, events and image snapshots on the WebAssembly runtime."),
-  });
-});
-
-app.get("/docs/plugins", (c) => {
-  const title = "Plugins — Tarve docs";
-  return c.render("docs/plugins", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/plugins", title, "Tarve plugins: definePlugin, typed commands, lifecycle hooks and native libraries through FFI."),
-  });
-});
-
-app.get("/docs/shipping", (c) => {
-  const title = "Build and package — Tarve docs";
-  return c.render("docs/shipping", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/shipping", title, "tarve build, tarve package (deb, tar.gz, zip, MSIX), Android APK and App Bundle builds, and macOS status."),
-  });
-});
-
-app.get("/docs/runtimes", (c) => {
-  const title = "Runtimes — Tarve docs";
-  return c.render("docs/runtimes", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/runtimes", title, "Bun, Node.js, txiki.js/QuickJS-ng and Go: what each Tarve runtime supports."),
-  });
-});
-
-app.get("/docs/platform", (c) => {
-  const title = "Platform APIs — Tarve docs";
-  return c.render("docs/platform", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/platform", title, "Deep links, file associations, notifications, permissions, share sheet, location and biometrics in Tarve."),
-  });
-});
-
-app.get("/docs/media", (c) => {
-  const title = "Audio and video — Tarve docs";
-  return c.render("docs/media", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/media", title, "<audio> and <video> in Tarve: native decoders, streaming, events, controls, media keys and background playback."),
-  });
-});
-
-app.get("/docs/system", (c) => {
-  const title = "System integration — Tarve docs";
-  return c.render("docs/system", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/system", title, "Tray icons, global hotkeys, file dialogs, desktop widgets, clipboard paste, app icon and metadata, custom title bars and icons in Tarve."),
-  });
-});
-
-app.get("/docs/motion", (c) => {
-  const title = "Motion — Tarve docs";
-  return c.render("docs/motion", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/motion", title, "Native transitions in Tarve: interpolated in Rust, retargetable, with motionFrom, AnimatePresence and onTransitionEnd."),
-  });
-});
-
-app.get("/docs/android", (c) => {
-  const title = "Android — Tarve docs";
-  return c.render("docs/android", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/android", title, "Build a Tarve app into an APK or App Bundle: what works on Android, permissions, engines and the differences from the desktop."),
-  });
-});
-
-app.get("/docs/effects", (c) => {
-  const title = "Visual effects — Tarve docs";
-  return c.render("docs/effects", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/effects", title, "Backdrop blur, filter blur and drop-shadow, mask-image, multiple backgrounds and viewport units in Tarve, on every renderer."),
-  });
-});
-
-app.get("/docs/automation", (c) => {
-  const title = "Automation and errors — Tarve docs";
-  return c.render("docs/automation", {
-    title,
-    data: { version, section: "docs" },
-    head: meta("/docs/automation", title, "TestRenderer on the real renderer, @tarve/headless in WebAssembly, pixel regression helpers and the onError handler in Tarve."),
-  });
-});
+for (const guide of guides) {
+  const path = `/docs/${guide.slug}`;
+  const title = `${guide.name} — Tarve docs`;
+  app.get(path, (c) =>
+    c.render(`docs/${guide.slug}` as HonoSvelteEntries, { title, data: { version, section: "docs" }, head: meta(path, title, guide.description) }),
+  );
+}
 
 app.get("/docs/components/:name", (c) => {
   const doc = buildComponentDoc(c.req.param("name"));

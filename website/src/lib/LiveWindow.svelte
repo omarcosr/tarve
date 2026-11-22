@@ -70,12 +70,12 @@
   <div class="live-stage">
     <canvas bind:this={canvas} class="live-canvas" tabindex="0" aria-label="Counter window rendered by Tarve"></canvas>
     {#if phase !== "live"}
-      <p class="live-note">
+      <p class="live-note" data-md-skip>
         {phase === "error" ? "The WebAssembly runtime could not start in this browser." : "Loading Tarve's runtime (WebAssembly)…"}
       </p>
     {/if}
   </div>
-  <div class="live-meter" aria-live="off">
+  <div class="live-meter" aria-live="off" data-md-skip>
     <span><b>{frames}</b> frames painted</span>
     <span>{frames ? `last ${lastMs.toFixed(1)} ms` : "—"}</span>
     <span class="live-state" class:on={painting}>{painting ? "painting" : "idle, 0 fps"}</span>

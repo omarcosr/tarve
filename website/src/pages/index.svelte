@@ -128,7 +128,7 @@
     <div class="index">
       {#each catalog as group (group.id)}
         <div class="index-group">
-          <h3>{group.title}<span>{group.items.length}</span></h3>
+          <h3>{group.title}<span data-md-skip>{group.items.length}</span></h3>
           <ul>
             {#each group.items as item (item.name)}
               <li><a href="/docs/components/{item.name}">{item.name}</a></li>
