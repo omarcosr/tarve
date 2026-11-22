@@ -2,6 +2,25 @@
 
 All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `@tarve/svelte` and `@tarve/mcp` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
+## 0.13.7 — 2026-11-22
+
+### Changed
+
+- Updating many texts at once is much faster: a list item whose texts alone changed is patched instead of compiled again (`markTextSlot`, used by `Text`), its texts go to native as packed text sets that are set in place, a fixed-height row stretched across a column is a layout boundary, and texts that changed offscreen are laid out after the frame is presented. Changing the label of every row of a 2,000-row list: 66 → 21 ms from click to pixels (Bun), 271 → ~140 ms (txiki.js).
+- Less memory for long lists: texts far offscreen give their shaped layouts back (they shape again before they paint), equal compiled styles are one object in JavaScript and one Taffy style natively, memo entries keep less, and the text shaping workers free their buffers after each batch. A 2,000-row list: ~30% less resident memory (txiki.js `lowPower`: 89.6 → 62 MB).
+- The first document writes each node style once (a `styles` table before the root; protocol 64): a 2,000-row list sends 0.6 MB instead of 1.9 MB, and its first frame comes ~80 ms sooner on txiki.js.
+- A mouse press or release updates the accessibility tree after the next frame instead of before the release is handled, so a click's answer reaches the screen first when a screen reader or other accessibility client is running.
+- Protocol 64 (`PROTOCOL_VERSION`, Go `ProtocolVersion`); the native ABI stays 10.
+
+### Fixed
+
+- `@tarve/headless`: queries after an update see signal values and texts set in place (`setNodes`); the scene mirror ignored them.
+
+### Added
+
+- `bench/frameworks`: the same app in Tarve, Electron, Tauri, Flutter, Dioxus Native and egui, measured from outside the process (first frame, memory, GPU memory, scroll CPU, update latency, disk); results in `bench/frameworks/README.md`.
+- `bench/render` (JavaScript cost and memory of one update on Bun, Node.js and txiki.js) and the native `layout_bench`/`layout_memory` probes.
+
 ## 0.13.6 — 2026-11-20
 
 ### Changed
