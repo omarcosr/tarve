@@ -420,7 +420,8 @@ describe("@tarve/svelte", () => {
     expect(textOf(find(bridge.document!.root, node => node.id === "plain-bar")!)).toContain("Count 0");
     mounted.component.bump();
     await settle();
-    const shown = bridge.commands.flatMap(command => command.type === "patch" ? command.nodes : command.type === "mutate" ? command.mutations.flatMap(mutation => "node" in mutation ? [mutation.node] : []) : []).map(node => node.text);
+    // Texts patched in place go to native as text sets (`setNodes`).
+    const shown = bridge.commands.flatMap(command => command.type === "patch" ? command.nodes.map(node => node.text) : command.type === "setNodes" ? command.nodes.map(set => set.text) : command.type === "mutate" ? command.mutations.flatMap(mutation => "node" in mutation ? [mutation.node.text] : []) : []);
     expect(shown).toContain("Count 1");
     expect(bridge.commands.some(command => command.type === "windowTitle" && command.title === "Count 1")).toBe(true);
   });
@@ -444,7 +445,8 @@ describe("@tarve/svelte", () => {
     expect(textOf(find(bridge.document!.root, node => node.kind === "titlebar")!)).toContain("Plain 0");
     mounted.component.bump();
     await settle();
-    const shown = bridge.commands.flatMap(command => command.type === "patch" ? command.nodes : command.type === "mutate" ? command.mutations.flatMap(mutation => "node" in mutation ? [mutation.node] : []) : []).map(node => node.text);
+    // Texts patched in place go to native as text sets (`setNodes`).
+    const shown = bridge.commands.flatMap(command => command.type === "patch" ? command.nodes.map(node => node.text) : command.type === "setNodes" ? command.nodes.map(set => set.text) : command.type === "mutate" ? command.mutations.flatMap(mutation => "node" in mutation ? [mutation.node.text] : []) : []);
     expect(shown).toContain("Plain 1");
     expect(bridge.commands.some(command => command.type === "windowTitle" && command.title === "Plain 1")).toBe(true);
   });
