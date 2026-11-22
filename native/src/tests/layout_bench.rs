@@ -6,6 +6,14 @@
 use super::*;
 use std::time::Instant;
 
+/// Keeps the profiler's samples (`crate::profiler`, Windows only) while `on`.
+fn profiling(on: bool) {
+    #[cfg(target_os = "windows")]
+    crate::profiler::ACTIVE.store(on, std::sync::atomic::Ordering::Relaxed);
+    #[cfg(not(target_os = "windows"))]
+    let _ = on;
+}
+
 fn load(dir: &str, name: &str) -> serde_json::Value {
     serde_json::from_str(&std::fs::read_to_string(format!("{dir}/{name}")).unwrap()).unwrap()
 }
@@ -20,9 +28,10 @@ fn layout_bench() {
     let command = load(&dir, "command.json");
     let patch: Vec<Node> = serde_json::from_value(command["nodes"].clone()).unwrap();
     let mut tree = Tree::new(root);
-    // TARVE_LAYOUT_PROFILE=1 samples the layouts (needs debug info: see crate::profiler).
+    // TARVE_LAYOUT_PROFILE=1 samples the layouts (Windows; needs debug info: see crate::profiler).
+    #[cfg(target_os = "windows")]
     let sampler = std::env::var_os("TARVE_LAYOUT_PROFILE").map(|_| {
-        crate::profiler::ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        profiling(false);
         crate::profiler::Sampler::start()
     });
     tree.compute(1024.0, 760.0).unwrap();
@@ -52,20 +61,20 @@ fn layout_bench() {
             .collect();
         let profile_apply = std::env::var("TARVE_LAYOUT_PROFILE").is_ok_and(|v| v == "apply");
         let start = Instant::now();
-        crate::profiler::ACTIVE.store(profile_apply, std::sync::atomic::Ordering::Relaxed);
+        profiling(profile_apply);
         tree.set_nodes(sets).unwrap();
         if !rest.is_empty() {
             tree.patch(rest).unwrap();
         }
-        crate::profiler::ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        profiling(false);
         let patched = start.elapsed().as_secs_f64() * 1000.0;
         let start = Instant::now();
-        crate::profiler::ACTIVE.store(!profile_apply, std::sync::atomic::Ordering::Relaxed);
+        profiling(!profile_apply);
         // As the window's frame loop: offscreen rows wait until the frame is presented.
         tree.defer_offscreen = true;
         tree.compute(1024.0, 760.0).unwrap();
         tree.defer_offscreen = false;
-        crate::profiler::ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        profiling(false);
         let laid = start.elapsed().as_secs_f64() * 1000.0;
         let start = Instant::now();
         tree.scene(1.25);
@@ -81,6 +90,7 @@ fn layout_bench() {
         values.sort_by(f64::total_cmp);
         values[values.len() / 2]
     };
+    #[cfg(target_os = "windows")]
     if let Some(sampler) = sampler {
         sampler.report(40);
     }
