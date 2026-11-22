@@ -75,7 +75,8 @@ export function textOnly(old: NativeNode, node: NativeNode): boolean {
     keys++;
     if (key !== "text" && key !== "children" && b[key] !== a[key]) return false;
   }
-  for (const key in a) keys--;
+  // Same key count: no field `a` has that `b` lacks.
+  for (const key in a) if (key !== "") keys--;
   return keys === 0;
 }
 
