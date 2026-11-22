@@ -14,7 +14,7 @@ import { createElementDispatcher } from "./app/element-events";
 import { createMediaSync, mediaController } from "./app/media";
 import { surfaceController, trackSurfaceHandles, type SurfaceController } from "./surface";
 import { createNativeRequests } from "./app/requests";
-import { editShadowNode, nativeShadow, reconciliationCommand, reconciliationCommands } from "./app/shadow";
+import { editShadowNode, nativeShadow, reconciliationCommand, reconciliationCommands, windowOptionCommands } from "./app/shadow";
 import { createTrayController, type TrayHandle, type TrayOptions } from "./app/tray";
 import { createMenuBarController, withMenuBar, type MenuBarItem, type MenuBarOptions } from "./app/menu-bar";
 import { onToastsChange, withToasts } from "./toast";
@@ -544,15 +544,14 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       return;
     }
 
-    let command: NativeCommand | undefined;
-    // Nodes whose text alone changed: set in place, as signals set them (reconciliationCommands).
-    let textSets: ReturnType<typeof reconciliationCommands>["texts"];
+    // Nodes whose text alone changed go first, set in place as signals set them
+    // (reconciliationCommands): a frame native draws between the two never shows the rest without them.
+    let commands: NativeCommand[];
     try {
       const current = observed;
-      command = jsStats.diff.time(() => {
-        const diffed = reconciliationCommands(current, next);
-        textSets = diffed.texts;
-        return diffed.command;
+      commands = jsStats.diff.time(() => {
+        const { command, texts } = reconciliationCommands(current, next);
+        return [texts as unknown as NativeCommand | undefined, command].filter((item): item is NativeCommand => item !== undefined);
       });
     } catch (error) {
       reportError(error, { source: "render", event: "diff" });
@@ -570,35 +569,14 @@ export function createApp(view: () => VNode, options: AppOptions = {}): AppHandl
       return;
     }
 
-    // Texts first: their nodes exist before and after the command, and a frame native draws
-    // between the two never shows the command's half (a moved or recoloured node) without them.
-    if (textSets) {
-      const sets = textSets as unknown as NativeCommand;
-      if (!jsStats.send.time(() => sendInternal(sets, { source: "bridge", event: "setNodes" }))) {
+    for (const command of commands) {
+      if (!jsStats.send.time(() => sendInternal(command, { source: "bridge", event: command.type }))) {
         restoreCommitted();
         return;
       }
     }
-    if (command) {
-      const patch = command;
-      if (!jsStats.send.time(() => sendInternal(patch, { source: "bridge", event: patch.type }))) {
-        restoreCommitted();
-        return;
-      }
-    }
-
-    const level = next.document.window.level ?? "normal";
-    if ((committed.document.window.level ?? "normal") !== level) {
-      sendInternal({ type: "windowLevel", level }, { source: "bridge", event: "windowLevel" });
-    }
-    const opacity = next.document.window.opacity ?? 1;
-    if ((committed.document.window.opacity ?? 1) !== opacity) {
-      sendInternal({ type: "windowOpacity", opacity }, { source: "bridge", event: "windowOpacity" });
-    }
-    // The title is a window option: native sets it at creation, later renders send it.
-    const title = next.document.window.title;
-    if (committed.document.window.title !== title) {
-      sendInternal({ type: "windowTitle", title }, { source: "bridge", event: "windowTitle" });
+    for (const command of windowOptionCommands(committed.document.window, next.document.window)) {
+      sendInternal(command, { source: "bridge", event: command.type });
     }
     committed = next;
     observed = nextObserved;

@@ -541,9 +541,7 @@ pub unsafe extern "C" fn tarve_start(ptr: *const u8, len: u32) -> i32 {
     crate::stats::mark_started();
     crate::text::prewarm();
     guard(|| {
-        let document: Result<Document, String> = unsafe { read_json(ptr, len) };
-        crate::protocol::clear_style_table();
-        let document = document?;
+        let document: Document = unsafe { read_json(ptr, len)? };
         validate_document(&document)?;
         let mut state = host().lock().map_err(|e| e.to_string())?;
         if state.is_some() {

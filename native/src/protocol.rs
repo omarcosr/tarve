@@ -7,7 +7,11 @@ pub(crate) mod notifications;
 pub(crate) mod requests;
 pub use requests::FileDialogOptions;
 mod errors;
+mod style_table;
 mod style_validation;
+#[cfg(test)]
+pub(crate) use style_table::clear_style_table;
+use style_table::{install_style_table, intern_style, root_then_clear};
 pub use errors::{error, fatal_error, nonfatal_error};
 #[allow(unused_imports)]
 pub(crate) use style_validation::*;
@@ -287,83 +291,8 @@ impl Serialize for NodeStyle {
 
 impl<'de> Deserialize<'de> for NodeStyle {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = Value::deserialize(deserializer)?;
-        // A number is an index into the document's style table (`Document::styles`).
-        if let Some(index) = value.as_u64() {
-            return STYLE_TABLE.with(|table| {
-                table.borrow().get(index as usize).cloned().ok_or_else(|| {
-                    serde::de::Error::custom(format!("style {index} is not in the document's style table"))
-                })
-            });
-        }
-        Ok(Self::new(value))
+        style_table::node_style(Value::deserialize(deserializer)?).map_err(serde::de::Error::custom)
     }
-}
-
-thread_local! {
-    /// The style table of the document being parsed (`Document::styles`), for its nodes'
-    /// numeric styles. JSON writes it before the root, so it is filled before any node.
-    static STYLE_TABLE: std::cell::RefCell<Vec<NodeStyle>> = const { std::cell::RefCell::new(Vec::new()) };
-}
-
-/// Fills the style table from a document's `styles` (see `STYLE_TABLE`).
-fn install_style_table<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
-    let styles = Vec::<Value>::deserialize(deserializer)?;
-    STYLE_TABLE.with(|table| *table.borrow_mut() = styles.into_iter().map(NodeStyle::new).collect());
-    Ok(())
-}
-
-/// Lets go of the last document's style table once it is parsed.
-pub(crate) fn clear_style_table() {
-    STYLE_TABLE.with(|table| *table.borrow_mut() = Vec::new());
-}
-
-/// Live styles by content hash. Entries are weak: a style no node uses any
-/// more is freed, and its slot is swept once the table doubles.
-struct StyleInterner {
-    styles: std::collections::HashMap<u64, (std::sync::Weak<Value>, u128)>,
-    sweep_at: usize,
-}
-
-/// The shared style equal to `value`, and the Bloom filter of its keys.
-fn intern_style(value: Value) -> (Arc<Value>, u128) {
-    if !value.as_object().is_some_and(|map| !map.is_empty()) {
-        return (Arc::new(value), 0);
-    }
-    static STYLES: std::sync::Mutex<Option<StyleInterner>> = std::sync::Mutex::new(None);
-    let hash = {
-        let mut hasher = std::hash::DefaultHasher::new();
-        hash_value(&value, &mut hasher);
-        std::hash::Hasher::finish(&hasher)
-    };
-    let Ok(mut guard) = STYLES.lock() else {
-        let bits = style_bits(&value);
-        return (Arc::new(value), bits);
-    };
-    let interner = guard.get_or_insert_with(|| StyleInterner {
-        styles: std::collections::HashMap::new(),
-        sweep_at: 1024,
-    });
-    if let Some((shared, bits)) = interner
-        .styles
-        .get(&hash)
-        .and_then(|(style, bits)| Some((style.upgrade()?, *bits)))
-        && *shared == value
-    {
-        return (shared, bits);
-    }
-    let bits = style_bits(&value);
-    let shared = Arc::new(value);
-    interner
-        .styles
-        .insert(hash, (Arc::downgrade(&shared), bits));
-    if interner.styles.len() >= interner.sweep_at {
-        interner
-            .styles
-            .retain(|_, (style, _)| style.strong_count() > 0);
-        interner.sweep_at = (interner.styles.len() * 2).max(1024);
-    }
-    (shared, bits)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -751,6 +680,7 @@ pub struct Document {
     #[serde(default, rename = "pointerEvents")]
     pub pointer_events: bool,
     pub window: WindowOptions,
+    #[serde(deserialize_with = "root_then_clear")]
     pub root: Node,
 }
 

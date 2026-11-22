@@ -61,7 +61,7 @@ fn offscreen_texts_lay_out_after_the_frame_as_a_whole_layout_would() {
     }
     // Every label changes, some wrapping onto a second line inside their row.
     let second = |i: usize| {
-        if i % 7 == 0 {
+        if i.is_multiple_of(7) {
             "a much longer label that no longer fits on the single line of its row".repeat(2)
         } else {
             format!("Record {i}: changed")

@@ -95,9 +95,9 @@ impl Default for TaffyConfig {
 #[derive(Debug, Clone, PartialEq)]
 struct NodeData {
     /// The layout strategy used by this node.
-    /// Tarve patch: shared, so nodes with equal styles (a long list's rows) hold one copy
+    /// Tarve patch: shared (`Rc`: a `Style` holds tagged pointers and is not `Send` anyway), so nodes with equal styles (a long list's rows) hold one copy
     /// (`TaffyTree::set_style_shared`); a `Style` is about 550 bytes.
-    pub(crate) style: std::sync::Arc<Style>,
+    pub(crate) style: std::rc::Rc<Style>,
 
     /// The always unrounded results of the layout computation. We must store this separately from the rounded
     /// layout to avoid errors from rounding already-rounded values. See <https://github.com/DioxusLabs/taffy/issues/501>.
@@ -122,12 +122,12 @@ impl NodeData {
     /// Create the data for a new node
     #[must_use]
     pub fn new(style: Style) -> Self {
-        Self::new_shared(std::sync::Arc::new(style))
+        Self::new_shared(std::rc::Rc::new(style))
     }
 
     /// Tarve patch: the data for a new node with a shared style.
     #[must_use]
-    pub fn new_shared(style: std::sync::Arc<Style>) -> Self {
+    pub fn new_shared(style: std::rc::Rc<Style>) -> Self {
         Self {
             style,
             cache: Cache::new(),
@@ -833,16 +833,16 @@ impl<NodeContext> TaffyTree<NodeContext> {
     /// Sets the [`Style`] of the provided `node`
     #[inline]
     pub fn set_style(&mut self, node: NodeId, style: Style) -> TaffyResult<()> {
-        self.nodes[node.into()].style = std::sync::Arc::new(style);
+        self.nodes[node.into()].style = std::rc::Rc::new(style);
         self.mark_dirty(node)?;
         Ok(())
     }
 
     /// Tarve patch: sets a style other nodes may share; nothing is marked dirty when it is the
     /// same shared style the node has.
-    pub fn set_style_shared(&mut self, node: NodeId, style: std::sync::Arc<Style>) -> TaffyResult<()> {
+    pub fn set_style_shared(&mut self, node: NodeId, style: std::rc::Rc<Style>) -> TaffyResult<()> {
         let data = &mut self.nodes[node.into()];
-        if std::sync::Arc::ptr_eq(&data.style, &style) {
+        if std::rc::Rc::ptr_eq(&data.style, &style) {
             return Ok(());
         }
         let changed = *data.style != *style;
@@ -854,7 +854,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
     }
 
     /// Tarve patch: the shared style of a node.
-    pub fn style_shared(&self, node: NodeId) -> TaffyResult<&std::sync::Arc<Style>> {
+    pub fn style_shared(&self, node: NodeId) -> TaffyResult<&std::rc::Rc<Style>> {
         Ok(&self.nodes[node.into()].style)
     }
 

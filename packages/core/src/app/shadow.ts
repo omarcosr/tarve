@@ -1,4 +1,4 @@
-import type { NativeCommand, NativeNode, TreeMutation } from "../protocol";
+import type { NativeCommand, NativeNode, TreeMutation, WindowOptions } from "../protocol";
 import { diffTreeMutations, type CompiledTree } from "../reconciler";
 import { NodeSetsCommand } from "./node-sets";
 
@@ -73,4 +73,13 @@ function commandOf(mutations: TreeMutation[]): NativeCommand | undefined {
     return { type: "patch", nodes: mutations.map(mutation => mutation.node) };
   }
   return { type: "mutate", mutations };
+}
+
+/** The window options a render changed that native takes as commands (it set them at creation). */
+export function windowOptionCommands(previous: WindowOptions, next: WindowOptions): NativeCommand[] {
+  const commands: NativeCommand[] = [];
+  if ((previous.level ?? "normal") !== (next.level ?? "normal")) commands.push({ type: "windowLevel", level: next.level ?? "normal" });
+  if ((previous.opacity ?? 1) !== (next.opacity ?? 1)) commands.push({ type: "windowOpacity", opacity: next.opacity ?? 1 });
+  if (previous.title !== next.title) commands.push({ type: "windowTitle", title: next.title });
+  return commands;
 }

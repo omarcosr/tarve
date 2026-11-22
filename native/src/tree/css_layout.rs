@@ -1,4 +1,5 @@
-//! CSS `flex` shorthands and grid lines/templates as Taffy styles.
+//! A node's Taffy style: CSS `flex` shorthands, grid lines and templates, and layout styles
+//! shared between nodes.
 use super::*;
 
 /// CSS's automatic minimum sizes that Taffy cannot take from the content.
@@ -198,4 +199,194 @@ pub(crate) fn css_track_list(text: &str) -> Option<Vec<GridTemplateComponent<Str
     }
     push(&text[start..])?;
     (!tracks.is_empty()).then_some(tracks)
+}
+
+/// Layout styles shared by the nodes they fit (`shared_layout_style`): by the address of the
+/// node's interned style, with that style held so the address stays its own.
+pub(crate) type LayoutStyles = HashMap<
+    (usize, u64),
+    Vec<(Arc<Value>, String, String, std::rc::Rc<Style>)>,
+>;
+
+/// The layout style of a node that does not animate (see `build_layout`), shared with every
+/// node of the same style, kind and scroll orientation: a list's rows hold one between them.
+pub(super) fn shared_layout_style(styles: &mut LayoutStyles, entry: &Entry) -> std::rc::Rc<Style> {
+    use std::hash::{Hash, Hasher};
+    let node = &entry.node;
+    let value = node.style.shared();
+    let mut hasher = rustc_hash::FxHasher::default();
+    node.kind.hash(&mut hasher);
+    node.scroll_orientation.hash(&mut hasher);
+    let key = (Arc::as_ptr(value) as usize, hasher.finish());
+    if styles.len() > 4096 {
+        styles.clear();
+    }
+    let bucket = styles.entry(key).or_default();
+    if let Some((_, _, _, style)) = bucket.iter().find(|(held, kind, orientation, _)| {
+        Arc::ptr_eq(held, value) && *kind == node.kind && *orientation == node.scroll_orientation
+    }) {
+        return style.clone();
+    }
+    let style = std::rc::Rc::new(layout_style(entry, false));
+    bucket.push((
+        value.clone(),
+        node.kind.clone(),
+        node.scroll_orientation.clone(),
+        style.clone(),
+    ));
+    style
+}
+
+pub(super) fn layout_style(entry: &Entry, suppress_border: bool) -> Style {
+    let node = &entry.node;
+    let pad = node.insets("padding");
+    let margin = &node.style["margin"];
+    let border = if suppress_border {
+        [0.0; 4]
+    } else {
+        node.insets("borderWidth").map(|value| value.max(0.0))
+    };
+    let mut style = Style {
+        display: match node.string("display", "flex") {
+            "grid" => Display::Grid,
+            "block" => Display::Block,
+            "none" => Display::None,
+            _ => Display::Flex,
+        },
+        flex_direction: match node.string(
+            "direction",
+            if node.kind == "row" { "row" } else { "column" },
+        ) {
+            "row" => FlexDirection::Row,
+            "row-reverse" => FlexDirection::RowReverse,
+            "column-reverse" => FlexDirection::ColumnReverse,
+            _ => FlexDirection::Column,
+        },
+        // CSS `box-sizing`: Tarve sizes border boxes unless a node asks for content boxes.
+        box_sizing: if node.string("boxSizing", "border-box") == "content-box" {
+            taffy::style::BoxSizing::ContentBox
+        } else {
+            taffy::style::BoxSizing::BorderBox
+        },
+        aspect_ratio: node.style["aspectRatio"]
+            .as_f64()
+            .map(|value| value as f32)
+            .filter(|value| value.is_finite() && *value > 0.0),
+        flex_wrap: if node.style["wrap"].as_bool().unwrap_or(false) {
+            FlexWrap::Wrap
+        } else {
+            FlexWrap::NoWrap
+        },
+        position: if node.string("position", "relative") == "absolute" {
+            Position::Absolute
+        } else {
+            Position::Relative
+        },
+        inset: Rect {
+            top: motion_limit(entry, "top"),
+            right: motion_limit(entry, "right"),
+            bottom: motion_limit(entry, "bottom"),
+            left: motion_limit(entry, "left"),
+        },
+        size: Size {
+            width: motion_dimension(entry, "width"),
+            height: motion_dimension(entry, "height"),
+        },
+        min_size: Size {
+            width: limit(&node.style["minWidth"]),
+            height: limit(&node.style["minHeight"]),
+        },
+        max_size: Size {
+            width: limit(&node.style["maxWidth"]),
+            height: limit(&node.style["maxHeight"]),
+        },
+        // Percentages (CSS `padding: 5%`) are of the container's width, as in CSS.
+        padding: Rect {
+            top: padding_side(node, "top", pad[0]),
+            right: padding_side(node, "right", pad[1]),
+            bottom: padding_side(node, "bottom", pad[2]),
+            left: padding_side(node, "left", pad[3]),
+        },
+        // Margins take `"auto"` (and percentages) per side, as CSS does: `mx-auto` centres.
+        margin: Rect {
+            top: margin_side(margin, "top"),
+            right: margin_side(margin, "right"),
+            bottom: margin_side(margin, "bottom"),
+            left: margin_side(margin, "left"),
+        },
+        border: Rect {
+            top: length(border[0]),
+            right: length(border[1]),
+            bottom: length(border[2]),
+            left: length(border[3]),
+        },
+        // CSS `column-gap` is the horizontal gap and `row-gap` the vertical; both fall back to `gap`.
+        gap: Size {
+            width: length(node.number("columnGap", node.number("gap", 0.0))),
+            height: length(node.number("rowGap", node.number("gap", 0.0))),
+        },
+        flex_grow: node.number("flex", 0.0),
+        // CSS: every flex item may shrink (`flex-shrink: 1`), never below its content.
+        flex_shrink: node.number("shrink", 1.0),
+        align_items: Some(match node.string("align", "stretch") {
+            "start" => AlignItems::START,
+            "center" => AlignItems::CENTER,
+            "end" => AlignItems::END,
+            "baseline" => AlignItems::BASELINE,
+            _ => AlignItems::STRETCH,
+        }),
+        justify_content: Some(match node.string("justify", "start") {
+            "center" => JustifyContent::CENTER,
+            "end" => JustifyContent::END,
+            "between" => JustifyContent::SPACE_BETWEEN,
+            "around" => JustifyContent::SPACE_AROUND,
+            "evenly" => JustifyContent::SPACE_EVENLY,
+            "stretch" => JustifyContent::STRETCH,
+            // CSS `flex-start`: the main start, the right of a `row-reverse` row.
+            _ => JustifyContent::FLEX_START,
+        }),
+        // CSS `align-self`, `align-content`, `justify-items`, `justify-self`: unset means the container decides.
+        align_self: align_keyword(node.string("alignSelf", "")),
+        align_content: content_keyword(node.string("alignContent", "")),
+        justify_items: align_keyword(node.string("justifyItems", "")),
+        justify_self: align_keyword(node.string("justifySelf", "")),
+        ..Default::default()
+    };
+    apply_css_flex(node, &mut style);
+    // `overflow: hidden | clip` clips children and, as in CSS, lets the box
+    // shrink below its content (automatic minimum size 0).
+    if clips_overflow(node) && node.kind != "scroll" {
+        style.overflow.x = taffy::style::Overflow::Hidden;
+        style.overflow.y = taffy::style::Overflow::Hidden;
+    }
+    apply_automatic_minimums(node, &mut style);
+    if node.kind == "scroll" {
+        if matches!(node.scroll_orientation.as_str(), "horizontal" | "both") {
+            style.overflow.x = taffy::style::Overflow::Scroll;
+            style.min_size.width = length(0.0);
+        }
+        if matches!(node.scroll_orientation.as_str(), "vertical" | "both") {
+            style.overflow.y = taffy::style::Overflow::Scroll;
+            style.min_size.height = length(0.0);
+        }
+    }
+    if style.display == Display::Grid {
+        // CSS `justify-content: normal` stretches auto tracks; START would not.
+        if node.style["justify"].is_null() {
+            style.justify_content = None;
+        }
+        style.grid_template_columns = grid_template(&node.style["columns"], 2);
+        style.grid_template_rows = grid_template(&node.style["rows"], 0);
+        // CSS `grid-auto-rows` / `grid-auto-columns`: the size of implicit tracks.
+        style.grid_auto_rows = auto_tracks(&node.style["autoRows"]);
+        style.grid_auto_columns = auto_tracks(&node.style["autoColumns"]);
+    }
+    // CSS `grid-column` / `grid-row`: "span 2", "2", "1 / 3", "2 / span 2".
+    if let Some(line) = grid_line(&node.style["gridColumn"]) {
+        style.grid_column = line;
+    }
+    if let Some(line) = grid_line(&node.style["gridRow"]) {
+        style.grid_row = line;
+    }
+    style
 }

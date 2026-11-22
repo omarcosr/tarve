@@ -131,6 +131,7 @@ fn shortcut_key_name(key: &Key) -> Option<String> {
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
 mod accessibility_actions;
+mod accessibility_sync;
 mod activation;
 mod clipboard;
 mod cursor;
@@ -1579,65 +1580,6 @@ pub(crate) fn close_request_action(intercept: bool, pending: &mut bool) -> Close
     CloseRequestAction::Emit
 }
 impl App {
-    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
-    fn initialize_accessibility(&mut self, event_loop: &ActiveEventLoop, window: &Window) {
-        self.accessibility = Some(AccessibilityBridge::new(
-            event_loop,
-            window,
-            self.event_proxy.clone(),
-        ));
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "android")))]
-    fn initialize_accessibility(&mut self, _: &ActiveEventLoop, _: &Window) {}
-
-    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
-    fn sync_accessibility(&mut self) {
-        self.accessibility_pending = false;
-        self.last_accessibility_sync = Instant::now();
-        let started = Instant::now();
-        self.sync_accessibility_now();
-        // App updates wait at least fifty times what this update cost: assistive technology
-        // on a large animated tree takes at most a fiftieth of the CPU.
-        self.accessibility_interval = (started.elapsed() * 50).max(ACCESSIBILITY_INTERVAL);
-    }
-
-    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "android"))]
-    fn sync_accessibility_now(&mut self) {
-        if !self
-            .accessibility
-            .as_ref()
-            .is_some_and(AccessibilityBridge::is_active)
-        {
-            return;
-        }
-        let Some(window) = self.window.as_ref() else {
-            return;
-        };
-        let scale = window.scale_factor();
-        let size = layout_viewport(window, &mut self.tree);
-        if let Err(message) = self.tree.compute(size.width, size.height) {
-            self.events.push(error(format!(
-                "Accessibility layout update failed: {message}"
-            )));
-            return;
-        }
-        let layout_events = self.tree.take_layout_events();
-        self.emit(layout_events);
-        for message in self.tree.warnings.drain(..) {
-            self.events.push(error(message));
-        }
-        if let Some(accessibility) = self.accessibility.as_mut() {
-            accessibility.sync(&mut self.tree, &self.document.window.title, scale);
-        }
-    }
-
-    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "android")))]
-    fn sync_accessibility(&mut self) {
-        self.accessibility_pending = false;
-        self.last_accessibility_sync = Instant::now();
-    }
-
     fn request_close(&mut self, _event_loop: &ActiveEventLoop) {
         let intercept = self
             .tree
@@ -2944,26 +2886,7 @@ impl App {
             }
             Err(error) => self.handle_render_error(event_loop, error),
         }
-        // What the layout left offscreen (Tree::finish_deferred_layout) lays out now, before
-        // any event reads it; a frame after this one paints it where it shows.
-        self.tree.release_retired_text();
-        match self.tree.finish_deferred_layout() {
-            Ok(true) => {
-                if let Some(window) = &self.window {
-                    window.request_redraw();
-                }
-            }
-            Ok(false) => {}
-            Err(message) => self.events.push(error(message)),
-        }
-        // Texts far offscreen give their shaped layouts back; the idle release returns the pages.
-        if self.tree.evict_offscreen_texts() {
-            self.memory_dirty.set(true);
-        }
-        if self.accessibility_after_frame {
-            self.accessibility_after_frame = false;
-            self.sync_accessibility();
-        }
+        self.after_present();
     }
     fn sync_cursor(&mut self) {
         if let Some(window) = self.window.clone() {
@@ -4196,19 +4119,7 @@ impl ApplicationHandler<Command> for App {
             self.advance_live_motion();
         }
         let gpu_redraw = self.poll_gpu_check();
-        // No frame is coming to tell assistive technology after (redraw_frame): tell it now.
-        if self.accessibility_after_frame
-            && (self.parked
-                || self.minimized()
-                || !matches!(self.graphics, GraphicsState::Ready(_))
-                || !(self.tree.dirty.paint
-                    || self.tree.dirty.layout
-                    || self.tree.dirty.text
-                    || self.input_hold.is_some()))
-        {
-            self.accessibility_after_frame = false;
-            self.sync_accessibility();
-        }
+        self.sync_accessibility_if_no_frame_comes();
         if self.accessibility_pending
             && self.last_accessibility_sync.elapsed() >= self.accessibility_interval
         {

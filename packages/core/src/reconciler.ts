@@ -22,12 +22,16 @@ import { BREAKPOINTS, foldVariants, luminance, type Position, type VariantContex
 const isPrimitive = (child: Child): child is string | number => typeof child === "string" || typeof child === "number";
 /** Children paths whose repeated `key` was already reported (warned once, not every render). */
 const warnedDuplicateKeys = new Set<string>();
-
-
-
-
-
 import { handlersOf, type Handlers } from "./reconciler/handlers";
+import { boundControlValue, boundText, signalParts, type NodeBinding } from "./reconciler/bindings";
+import { finishStyle, INHERITING_TEXT, TEXT_KINDS } from "./reconciler/fonts";
+import {
+  AUTO_MEMO, AUTO_MEMO_BACKOFF, autoMemoStates, componentTrace, EMPTY_ENTRIES, finalStyleCache, memoStores, NESTED_AUTO_MEMO_MIN,
+  NO_CHILDREN, patchNode, pureElement, replacedNode, scratch, unstoredItems, type AutoMemoState, type FinalStyle, type MemoEntry, type TextPatch,
+} from "./reconciler/memo-entries";
+export { boundControlValue, boundText, resolveBoundStyle, type NodeBinding } from "./reconciler/bindings";
+export { matchParentTextAlign } from "./reconciler/fonts";
+export { invalidateMemos, setComponentTrace, type ComponentTrace } from "./reconciler/memo-entries";
 
 export { diffTrees, diffTreeMutations } from "./reconciler/diff";
 export type { Handlers } from "./reconciler/handlers";
@@ -38,60 +42,6 @@ function windowBorder(background: string, selected: ThemeDefinition): string {
   return own < 0.5 ? "#ffffff1f" : "#0000001f";
 }
 
-/**
- * A node's value bound to a signal: a style key (resolved like the rest of the style when the
- * signal changes) or the text, made of the pieces it was written with (`Clicks: {count}`).
- */
-export interface NodeBinding {
-  signal: Signal<unknown>;
-  /** The style key, and the theme and viewport the node compiled with (`resolveBoundStyle`). */
-  style?: { key: string; theme: ThemeDefinition; viewport: [number, number] };
-  text?: unknown[];
-  /** A control field (a slider's `value`), set by a patch of the node. */
-  control?: "value";
-}
-/** A bound control value as the control takes it: a number within its `min` and `max`. */
-export function boundControlValue(value: unknown, control: { min?: number; max?: number }): number {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return control.min ?? 0;
-  return Math.max(control.min ?? -Infinity, Math.min(number, control.max ?? Infinity));
-}
-const noop = () => {};
-/** Writes the style values a bound signal's `value` stands for into `out`, resolved like the rest of the style. */
-export function resolveBoundStyle(binding: NonNullable<NodeBinding["style"]>, value: unknown, out: Map<string, unknown>): void {
-  const { key, theme: bindingTheme } = binding;
-  // Strings and numbers (a colour, an opacity) resolve on their own, as resolveThemeStyle
-  // would; anything else (a gradient, a shadow) goes through the whole resolution.
-  if (typeof value === "string") out.set(key, resolveStyleString(key, value, bindingTheme));
-  else if (typeof value === "number") out.set(key, value);
-  else {
-    const context: VariantContext = { viewportWidth: binding.viewport[0], viewportHeight: binding.viewport[1], usedViewport: noop, usedPosition: noop };
-    const resolved = resolveThemeStyle(foldVariants({ [key]: value } as never, bindingTheme, context), bindingTheme) as Record<string, unknown>;
-    for (const name in resolved) out.set(name, resolved[name]);
-  }
-}
-/** The text of bound pieces now: signals read, the rest as written. */
-export function boundText(parts: readonly unknown[]): string {
-  let text = "";
-  for (let index = 0; index < parts.length; index++) {
-    const part = parts[index];
-    if (part == null || typeof part === "boolean") continue;
-    text += isSignal(part) ? String(part.value ?? "") : String(part);
-  }
-  return text;
-}
-/** Text pieces when they hold a signal: a signal, or a list of strings, numbers and signals. */
-function signalParts(children: unknown): unknown[] | undefined {
-  if (isSignal(children)) return [children];
-  if (!Array.isArray(children)) return undefined;
-  let found = false;
-  for (let index = 0; index < children.length; index++) {
-    const child = children[index];
-    if (isSignal(child)) found = true;
-    else if (child != null && typeof child !== "string" && typeof child !== "number" && typeof child !== "boolean") return undefined;
-  }
-  return found ? children : undefined;
-}
 export interface CompiledTree {
   document: SceneDocument; handlers: Map<string, Handlers>; nodes: Map<string, NativeNode>; media?: Map<string, MediaRequest>;
   /** Signal bindings by node id (`signal.ts`). */
@@ -116,25 +66,6 @@ function focusOutlineOverrides(style: NonNullable<NativeNode["style"]["focus"]> 
       .filter(([, value]) => value !== undefined),
   );
 }
-/**
- * Font properties a node passes to its descendants, as CSS inherits them. The
- * theme font is the initial value at the root; Code, Diff and `<code>` set
- * monospace explicitly, like the user-agent style sheet.
- */
-const INHERITED_FONT = ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "fontVariantNumeric", "fontFeatureSettings", "fontSize", "fontWeight", "lineHeight", "foreground", "textAlign", "textTransform", "whiteSpace", "textShadow"] as const;
-const INHERITED_FONT_SET: ReadonlySet<string> = new Set(INHERITED_FONT);
-/** The computed value of `text-align: match-parent` under a parent whose computed value is `parent`. */
-export function matchParentTextAlign(parent: unknown): string {
-  if (parent === undefined || parent === "start" || parent === "match-parent") return "left";
-  if (parent === "end") return "right";
-  return String(parent);
-}
-/** Inherited font values that controls (buttons, inputs, code) take too. */
-const CONTROL_FONT = ["fontFamily", "fontStyle", "letterSpacing", "wordSpacing", "textTransform"] as const;
-/** Kinds whose text takes every inherited value; controls keep their own size, weight and colour. */
-const INHERITING_TEXT = new Set(["text", "markdown"]);
-const TEXT_KINDS = new Set(["text", "button", "input", "textarea", "markdown", "code", "diff"]);
-
 /** Props copied to the native node unchanged when they are set. */
 const COPIED_PROPS = [
   "value", "placeholder", "inputType", "scrollSpeed", "scrollOrientation", "followTail", "maxLength", "virtualList", "disabled", "modal",
@@ -143,133 +74,6 @@ const COPIED_PROPS = [
 
 const COPIED_PROP_SET: ReadonlySet<string> = new Set(COPIED_PROPS);
 
-/** One memoized subtree: what produced it and everything compiling it registered. */
-interface MemoEntry {
-  render: MemoInfo<object>["render"];
-  props: object;
-  group: string | undefined;
-  theme: ThemeDefinition;
-  font: Record<string, unknown>;
-  form: FormContext | undefined;
-  result: NativeNode[];
-  /** The ids it claimed, when they are not just its nodes' ids in order (`entryIds`). */
-  ids: string[] | undefined;
-  /** Its nodes; each is registered under its own id. */
-  nodes: NativeNode[];
-  handlers: [string, Handlers][];
-  media: [string, MediaRequest][];
-  bindings: [string, NodeBinding[]][];
-  /** Memoized components inside this one, kept alive when it is reused. */
-  nested: string[];
-  idSet?: Set<string>;
-  /** The breakpoint, orientation and environment the subtree was styled for, when it read them (currentBreakpoint). */
-  breakpoint?: string;
-  /** "index/count" of the list position a template's element was styled for (first/last/odd/even). */
-  position?: string;
-  /** Plain texts in the subtree (automatic memos only): what an item whose texts alone changed patches. */
-  texts?: TextSlots;
-}
-
-/** The plain text nodes of a compiled item and the VNodes whose children they show. */
-interface TextSlots {
-  /** The text component VNode in the item, by slot. */
-  owners: VNode[];
-  /** Its compiled text node, by slot. */
-  nodes: NativeNode[];
-}
-/** patchTexts' replaced nodes by id: a list row has a text or two, so two short arrays beat a Map. */
-interface Replaced { ids: string[]; nodes: NativeNode[]; map: Map<string, NativeNode> | undefined }
-const scratch: Replaced = { ids: [], nodes: [], map: undefined };
-function replacedNode(replaced: Replaced, id: string): NativeNode | undefined {
-  if (replaced.map) return replaced.map.get(id);
-  const index = replaced.ids.indexOf(id);
-  return index < 0 ? undefined : replaced.nodes[index];
-}
-/** A node with the replaced descendants swapped in; copied (and itself replaced) only above a change. */
-function patchNode(node: NativeNode, replaced: Replaced): NativeNode {
-  const own = replacedNode(replaced, node.id);
-  if (own) return own;
-  const children = node.children;
-  if (!children || children.length === 0) return node;
-  let next: NativeNode[] | undefined;
-  for (let index = 0; index < children.length; index++) {
-    const child = children[index]!;
-    const patched = patchNode(child, replaced);
-    if (patched !== child) (next ??= children.slice())[index] = patched;
-  }
-  if (!next) return node;
-  const copy: NativeNode = { ...node, children: next };
-  if (replaced.map) replaced.map.set(node.id, copy);
-  else { replaced.ids.push(node.id); replaced.nodes.push(copy); }
-  return copy;
-}
-/** What autoMemoItem found when only some slots' texts changed: the new owners and children by slot. */
-interface TextPatch { owners: (VNode | undefined)[]; children: unknown[] }
-
-const memoStores = new WeakMap<object, Map<string, MemoEntry>>();
-const unstoredItems = new WeakMap<object, Set<string>>();
-const EMPTY_ENTRIES: readonly [string, unknown][] = Object.freeze([]) as readonly [string, unknown][];
-/** A leaf's children: shared and frozen (nothing writes a compiled node's children in place). */
-const NO_CHILDREN = Object.freeze([]) as unknown as NativeNode[];
-/** A node's final style and the font its children inherit, by resolved style and inherited font. */
-interface FinalStyle { style: NativeNode["style"]; font: Record<string, unknown> }
-const finalStyleCache = new WeakMap<object, WeakMap<object, Map<string, FinalStyle>>>();
-
-/**
- * Automatic memo for list items: an item made only of native kinds and pure components
- * (View, Row, Column, Text…) is compiled from its VNode alone, so an item equal to last
- * render's (`sameVNode`) reuses its compiled nodes, as `memo` would. A grid where one cell
- * of thousands changes compiles and diffs one cell.
- */
-const AUTO_MEMO: MemoInfo<{ vnode: VNode; same: boolean; owners?: (VNode | undefined)[]; patch?: TextPatch }> = {
-  render: props => props.vnode,
-  // Compared once, before visitMemo (which counts on it).
-  equal: (_previous, next) => next.same,
-  template: true,
-};
-/** Native kinds and HTML elements that compile to plain boxes, text and pictures from their props alone. */
-const PURE_INTRINSICS = new Set(["view", "row", "column", "text", "image", "svg", "div", "span", "p", "section", "main", "header", "footer", "article", "nav", "aside", "h1", "h2", "h3", "h4", "h5", "h6", "strong", "em", "b", "i", "small"]);
-/** A string-typed element whose compile depends on its props alone: a native kind, or a plain HTML box. */
-/** A media picture: its `<video>`/`<audio>` element registers the media around it, which a reused item would replace with its old request. */
-const MEDIA_KINDS = new Set(["video", "audio", "surface"]);
-const pureElement = (vnode: VNode): boolean => !MEDIA_KINDS.has(vnode.type as string) && (_isNativeVNode(vnode) || PURE_INTRINSICS.has(vnode.type as string));
-/** Per render scope: how the last renders' automatic memos fared, to stop trying when most miss. */
-interface AutoMemoState { tries: number; misses: number; off: number }
-const autoMemoStates = new WeakMap<object, AutoMemoState>();
-/** Renders to skip after one where most items changed (an animation of every item), before trying again. */
-const AUTO_MEMO_BACKOFF = 16;
-/** Children inside a memoized item get memo entries of their own only when there are more than this. */
-const NESTED_AUTO_MEMO_MIN = 4;
-
-/** Devtools (devtools/trace.ts): wraps each function component's compile while the inspector traces a render. */
-export type ComponentTrace = (type: Component, props: Record<string, any>, path: string, compile: () => NativeNode[]) => NativeNode[];
-let componentTrace: ComponentTrace | undefined;
-/** Installs a component trace for the next compiles; returns the previous one to restore. */
-export function setComponentTrace(trace: ComponentTrace | undefined): ComponentTrace | undefined {
-  const previous = componentTrace;
-  componentTrace = trace;
-  return previous;
-}
-
-/**
- * Forgets every memoized subtree containing `id`, so the next render compiles it
- * again. Called when a handler of that node runs: handlers update the state a
- * component reads (VirtualList's measured height, a row's own module state),
- * which its props alone do not show.
- */
-/** The ids a memo entry claimed: its own list, or its nodes' ids (most entries). */
-function entryIds(entry: MemoEntry): string[] {
-  return entry.ids ?? entry.nodes.map(node => node.id);
-}
-
-export function invalidateMemos(renderScope: object, id: string): void {
-  const store = memoStores.get(renderScope);
-  if (!store) return;
-  for (const [path, entry] of store) {
-    entry.idSet ??= new Set(entryIds(entry));
-    if (entry.idSet.has(id)) store.delete(path);
-  }
-}
 
 export function compileTree(
   element: VNode,
@@ -593,40 +397,6 @@ export function compileTree(
     }
     return initialFontValues;
   };
-  /**
-   * A node's resolved style with what it inherits written in (CSS inherited font properties,
-   * `text-align: match-parent`), and the inherited font its children get.
-   */
-  function finishStyle(fontStyle: Record<string, unknown>, parentFont: Record<string, unknown>, fontClass: "inherit" | "control" | "none"): Record<string, unknown> {
-    // CSS `text-align: match-parent` computes to the parent's value, with start/end resolved against the
-    // parent's direction (left-to-right: there is no `direction` property), so descendants inherit left/right.
-    if (fontStyle.textAlign === "match-parent") fontStyle.textAlign = matchParentTextAlign(parentFont.textAlign);
-    if (fontClass === "inherit") {
-      const initial = initialFont();
-      for (let index = 0; index < INHERITED_FONT.length; index++) {
-        const key = INHERITED_FONT[index]!;
-        if (fontStyle[key] !== undefined) continue;
-        const value = parentFont[key] ?? initial[key];
-        if (value !== undefined) fontStyle[key] = value;
-      }
-    } else if (fontClass === "control") {
-      for (const key of CONTROL_FONT) {
-        if (fontStyle[key] === undefined && parentFont[key] !== undefined) fontStyle[key] = parentFont[key];
-      }
-      fontStyle.fontFamily ??= theme.font.family;
-    }
-    let ownFont = parentFont;
-    // A style has a few keys; INHERITED_FONT has thirteen.
-    for (const key in fontStyle) {
-      if (!INHERITED_FONT_SET.has(key)) continue;
-      const value = fontStyle[key];
-      if (value !== undefined && value !== parentFont[key]) {
-        if (ownFont === parentFont) ownFont = { ...parentFont };
-        ownFont[key] = value;
-      }
-    }
-    return ownFont;
-  }
   function visitComponent(child: VNode, path: string, group: string | undefined, position: Position | undefined): NativeNode[] {
     const type = child.type as Component;
     const info = (type as unknown as Record<symbol, MemoInfo<object> | undefined>)[MEMO];
@@ -881,7 +651,7 @@ export function compileTree(
         if (style.padding && typeof style.padding === "object") style.padding = { ...style.padding };
         if (style.margin && typeof style.margin === "object") style.margin = { ...style.margin };
       }
-      inheritedFont = finishStyle(style as Record<string, unknown>, parentFont, fontClass);
+      inheritedFont = finishStyle(style as Record<string, unknown>, parentFont, fontClass, initialFont);
       // User-agent margins of HTML block elements (`uaMargin`: em vertically, px inline).
       if (uaMargin && style.margin === undefined) {
         const size = Number((style as Record<string, unknown>).fontSize ?? parentFont.fontSize ?? theme.font.size);
