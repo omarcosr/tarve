@@ -7,7 +7,7 @@
   },
   "devDependencies": {
     "@tailwindcss/node": "4",
-    "@types/bun": "^1.4.2",
+    "@types/bun": "^1.4.5",
     "postcss": "8",
     "tailwindcss": "4",
     "typescript": "^7.0.2"

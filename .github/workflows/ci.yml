@@ -33,7 +33,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.5"
 
       - name: Cache Bun packages
         uses: actions/cache@v6
@@ -103,7 +103,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.5"
 
       - name: Cache Bun packages
         uses: actions/cache@v6
@@ -154,7 +154,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.5"
 
       - name: Cache Bun packages
         uses: actions/cache@v6
@@ -166,7 +166,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: "26.10.0"
+          node-version: "26.13.1"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -249,7 +249,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.5"
 
       - name: Cache Bun packages
         uses: actions/cache@v6
@@ -261,7 +261,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: "26.10.0"
+          node-version: "26.13.1"
 
       # wasm32 + wasm-bindgen: the release gate's smoke:headless-runtimes builds @tarve/headless.
       - name: Setup Rust
@@ -297,7 +297,7 @@ jobs:
         shell: pwsh
         run: |
           $ProgressPreference = 'SilentlyContinue'
-          Invoke-WebRequest https://github.com/saghul/txiki.js/releases/download/v26.6.0/txiki-windows-x86_64.zip -OutFile "$env:RUNNER_TEMP\txiki.zip"
+          Invoke-WebRequest https://github.com/saghul/txiki.js/releases/download/v26.11.0/txiki-windows-x86_64.zip -OutFile "$env:RUNNER_TEMP\txiki.zip"
           Expand-Archive "$env:RUNNER_TEMP\txiki.zip" -DestinationPath "$env:RUNNER_TEMP\txiki"
           $tjs = "$env:RUNNER_TEMP\txiki\txiki-windows-x86_64\tjs.exe"
           & $tjs --version
@@ -349,7 +349,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.5"
 
       - name: Cache Bun packages
         uses: actions/cache@v6
@@ -361,7 +361,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: "26.10.0"
+          node-version: "26.13.1"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -393,7 +393,7 @@ jobs:
         shell: pwsh
         run: |
           $ProgressPreference = 'SilentlyContinue'
-          Invoke-WebRequest https://github.com/saghul/txiki.js/releases/download/v26.6.0/txiki-windows-x86_64.zip -OutFile "$env:RUNNER_TEMP\txiki.zip"
+          Invoke-WebRequest https://github.com/saghul/txiki.js/releases/download/v26.11.0/txiki-windows-x86_64.zip -OutFile "$env:RUNNER_TEMP\txiki.zip"
           Expand-Archive "$env:RUNNER_TEMP\txiki.zip" -DestinationPath "$env:RUNNER_TEMP\txiki"
           $tjs = "$env:RUNNER_TEMP\txiki\txiki-windows-x86_64\tjs.exe"
           & $tjs --version
@@ -437,7 +437,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.5"
 
       - name: Cache Bun packages
         uses: actions/cache@v6
@@ -449,7 +449,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: "26.10.0"
+          node-version: "26.13.1"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -536,7 +536,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.5"
 
       - name: Cache Bun packages
         uses: actions/cache@v6
@@ -598,7 +598,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.5"
 
       - name: Cache Bun packages
         uses: actions/cache@v6

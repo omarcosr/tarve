@@ -125,7 +125,7 @@ test("counts", async () => {
 |---|---|---|
 | Bun 1.4+ | `bun test` | Everything |
 | Node.js 26.10+ | `tarve run --runtime node app.test.tsx` (bundles the TSX and the WebAssembly/font files, then runs `node`, which runs the `node:test` tests and exits non-zero on a failure) | Everything |
-| txiki.js 26.6 | `tarve build --runtime txiki app.test.tsx`, run the executable | Everything, but no test runner and no `node:assert`: call your tests from a plain script and throw on failure |
+| txiki.js 26.11 | `tarve build --runtime txiki app.test.tsx`, run the executable | Everything, but no test runner and no `node:assert`: call your tests from a plain script and throw on failure |
 
 See [@tarve/headless](../headless#runtimes). In this repository `bun run smoke:headless-runtimes`
 runs the scenarios in `smoke/scenarios.tsx` on all three runtimes (`node --test` for Node.js).

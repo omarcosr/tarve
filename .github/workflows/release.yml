@@ -72,7 +72,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.5"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -121,7 +121,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.5"
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -345,7 +345,7 @@ jobs:
         if: steps.credentials.outputs.deploy == 'true'
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.4.2"
+          bun-version: "1.4.5"
 
       - name: Setup Rust
         if: steps.credentials.outputs.deploy == 'true'

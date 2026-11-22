@@ -97,7 +97,7 @@ resolves on every runtime.
 |---|---|---|
 | Bun 1.4+ | `bun app.tsx`, `bun test` | Everything |
 | Node.js 26.10+ | `tarve run --runtime node app.tsx` (bundles the TSX and its files) | Everything |
-| txiki.js 26.6 | `tarve build --runtime txiki app.tsx`, then run the executable | Everything |
+| txiki.js 26.11 | `tarve build --runtime txiki app.tsx`, then run the executable | Everything |
 
 The WebAssembly runtime comes in two builds, chosen by feature detection: `simd` (wasm simd128,
 about twice as fast to paint) and `baseline`, for engines without WebAssembly SIMD such as

@@ -165,7 +165,7 @@ export function packageJson(template, name, title, runtime) {
     tarve: { name: title, ...(template.tarve ?? {}) },
     dependencies: { "@tarve/core": `^${VERSION}`, ...Object.fromEntries(Object.entries(template.dependencies ?? {}).map(([name, range]) => [name, range.replaceAll("__TARVE_VERSION__", VERSION)])) },
     devDependencies: {
-      ...(runtime === "bun" ? { "@types/bun": "^1.4.2" } : { "@types/node": ">=24" }),
+      ...(runtime === "bun" ? { "@types/bun": "^1.4.5" } : { "@types/node": ">=24" }),
       typescript: "^7.0.2",
     },
     engines: runtime === "bun" ? { bun: ">=1.4.0" } : { node: ">=26.10.0" },
