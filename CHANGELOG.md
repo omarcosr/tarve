@@ -2,6 +2,17 @@
 
 All notable changes to `@tarve/core`, `@tarve/react-icons`, `@tarve/headless`, `@tarve/svelte` and `@tarve/mcp` are documented here. Versions follow [Semantic Versioning](https://semver.org/); before 1.0, minor versions may contain breaking changes.
 
+## 0.13.8 — 2026-11-23
+
+### Changed
+
+- txiki.js builds are tested and released with txiki.js 26.11.0 (QuickJS-ng 0.17): FFI symbols keep their library loaded, Windows command-line arguments arrive as UTF-16 (non-ASCII paths from file associations), and subprocess stdin, Windows connects, 64-bit `stat` and worker teardown are fixed upstream. Executables grow by ~0.3 MB.
+- CI and releases run on Bun 1.4.5 and Node.js 26.13.1; `create-tarve` writes `@types/bun` `^1.4.5`. The minimum Node.js stays 26.10.
+
+### Fixed
+
+- Windows: an app no longer writes or rewrites a Start menu shortcut when it starts; only the installer creates it, so executables run from `dist` or a temporary folder leave nothing behind.
+
 ## 0.13.7 — 2026-11-22
 
 ### Changed

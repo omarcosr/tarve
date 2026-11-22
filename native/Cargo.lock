@@ -4026,7 +4026,7 @@ dependencies = [
 
 [[package]]
 name = "tarve_native"
-version = "0.13.7"
+version = "0.13.8"
 dependencies = [
  "accesskit",
  "accesskit_android",
